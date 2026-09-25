@@ -31,6 +31,7 @@ pub mod regex_groups;
 pub mod registry;
 pub mod restricted_symbols;
 pub mod rule;
+pub mod sql_reflection_column;
 pub mod sql_reflection_config;
 pub mod sql_reflection_reflector;
 pub mod sql_reflection_schema;

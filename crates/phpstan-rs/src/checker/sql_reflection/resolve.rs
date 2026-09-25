@@ -43,7 +43,7 @@ use sqlparser::parser::Parser;
 
 use crate::registry::Registry;
 use crate::sql_reflection_config::SqlDriver;
-use crate::sql_reflection_schema::{SchemaCatalog, SchemaColumn};
+use crate::sql_reflection_schema::SchemaCatalog;
 use types::union_types;
 use types::{Shape, ShapeField, Type};
 
@@ -65,6 +65,7 @@ pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Typ
             .sql_reflector
             .get(registry.sql_reflection_config.as_ref())
             .and_then(|r| r.reflect(sql))
+            .map(|columns| super::row_type(&columns))
     };
     let result = row_type
         .map(|ty| refine_count_columns(sql, ty))
@@ -408,7 +409,7 @@ fn resolve_from_static_schema(schema: &SchemaCatalog, sql: &str) -> Option<Type>
 fn resolve_ctes_from_static_schema(
     schema: &SchemaCatalog,
     query: &sqlparser::ast::Query,
-) -> Option<FxHashMap<String, Vec<SchemaColumn>>> {
+) -> Option<FxHashMap<String, Vec<TypedColumn>>> {
     let mut ctes = FxHashMap::default();
     if let Some(with) = &query.with {
         if with.recursive {
@@ -421,7 +422,7 @@ fn resolve_ctes_from_static_schema(
             let fields = resolve_select_from_static_schema(schema, inner, &ctes)?;
             let columns = fields
                 .into_iter()
-                .map(|(name, ty, _)| SchemaColumn {
+                .map(|(name, ty, _)| TypedColumn {
                     name,
                     ty,
                     nullable: false,
@@ -433,10 +434,28 @@ fn resolve_ctes_from_static_schema(
     Some(ctes)
 }
 
-/// What fetching `col` returns - its declared type, or `null` too when
-/// the column is nullable. A derived table's/CTE's columns carry their
-/// nullability in `ty` already.
-fn column_value_type(col: &SchemaColumn) -> Type {
+/// A table's, derived table's or CTE's column, typed. A derived table's
+/// or CTE's columns carry their nullability in `ty` already.
+#[derive(Clone)]
+struct TypedColumn {
+    name: String,
+    ty: Type,
+    nullable: bool,
+}
+
+impl TypedColumn {
+    fn from_column(column: &crate::sql_reflection_column::Column) -> TypedColumn {
+        TypedColumn {
+            name: column.name.clone(),
+            ty: super::column_php_type(&column.ty),
+            nullable: column.nullable,
+        }
+    }
+}
+
+/// What fetching `col` returns - its type, or `null` too when the column
+/// is nullable.
+fn column_value_type(col: &TypedColumn) -> Type {
     if col.nullable {
         union_types(col.ty.clone(), Type::Null)
     } else {
@@ -447,12 +466,12 @@ fn column_value_type(col: &SchemaColumn) -> Type {
 fn resolve_select_from_static_schema(
     schema: &SchemaCatalog,
     select: &Select,
-    ctes: &FxHashMap<String, Vec<SchemaColumn>>,
+    ctes: &FxHashMap<String, Vec<TypedColumn>>,
 ) -> Option<Vec<(String, Type, bool)>> {
     if select.from.len() != 1 || !select.from[0].joins.is_empty() {
         return None;
     }
-    let columns: Vec<SchemaColumn> = match &select.from[0].relation {
+    let columns: Vec<TypedColumn> = match &select.from[0].relation {
         TableFactor::Table { name, .. } => {
             let table_name = name.0.last().and_then(|part| match part {
                 ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
@@ -460,7 +479,11 @@ fn resolve_select_from_static_schema(
             })?;
             match ctes.get(table_name) {
                 Some(cte_columns) => cte_columns.clone(),
-                None => schema.table(table_name)?.to_vec(),
+                None => schema
+                    .table(table_name)?
+                    .iter()
+                    .map(TypedColumn::from_column)
+                    .collect(),
             }
         }
         // `SELECT ... FROM (<subquery>) AS t` - resolved via the exact
@@ -477,7 +500,7 @@ fn resolve_select_from_static_schema(
             merged.extend(inner_ctes);
             resolve_select_from_static_schema(schema, inner, &merged)?
                 .into_iter()
-                .map(|(name, ty, _)| SchemaColumn {
+                .map(|(name, ty, _)| TypedColumn {
                     name,
                     ty,
                     nullable: false,

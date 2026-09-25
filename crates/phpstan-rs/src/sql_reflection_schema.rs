@@ -53,15 +53,8 @@ use sqlparser::dialect::{Dialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Token, Tokenizer};
 
+use crate::sql_reflection_column::{Column, ColumnType};
 use crate::sql_reflection_config::SqlDriver;
-use types::Type;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SchemaColumn {
-    pub name: String,
-    pub ty: Type,
-    pub nullable: bool,
-}
 
 /// `table name -> its own columns, in declared order`. Table/column
 /// names are kept exactly as declared (MySQL/Postgres/SQLite table
@@ -69,15 +62,15 @@ pub struct SchemaColumn {
 /// platforms) - no case-folding.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct SchemaCatalog {
-    tables: FxHashMap<String, Vec<SchemaColumn>>,
+    tables: FxHashMap<String, Vec<Column>>,
 }
 
 impl SchemaCatalog {
-    pub fn table(&self, name: &str) -> Option<&[SchemaColumn]> {
+    pub fn table(&self, name: &str) -> Option<&[Column]> {
         self.tables.get(name).map(Vec::as_slice)
     }
 
-    pub fn column(&self, table: &str, column: &str) -> Option<&SchemaColumn> {
+    pub fn column(&self, table: &str, column: &str) -> Option<&Column> {
         self.table(table)?.iter().find(|c| c.name == column)
     }
 
@@ -206,15 +199,12 @@ fn column_is_not_null(options: &[ColumnOptionDef]) -> bool {
     })
 }
 
-fn schema_column(
-    col: &ColumnDef,
-    primary_key_columns: &rustc_hash::FxHashSet<String>,
-) -> SchemaColumn {
+fn schema_column(col: &ColumnDef, primary_key_columns: &rustc_hash::FxHashSet<String>) -> Column {
     let nullable =
         !(column_is_not_null(&col.options) || primary_key_columns.contains(&col.name.value));
-    SchemaColumn {
+    Column {
         name: col.name.value.clone(),
-        ty: data_type_to_type(&col.data_type),
+        ty: column_type(&col.data_type),
         nullable,
     }
 }
@@ -227,18 +217,18 @@ fn schema_column(
 /// returned as its declared label) or a driver-level fetch-format fact
 /// (confirmed live against real MySQL/PDO where noted) - never a guess
 /// dressed up as either. A declared type this table has no confident
-/// answer for degrades to `Type::Mixed(false)`, matching this project's own
+/// answer for degrades to `ColumnType::Unknown`, matching this project's own
 /// established "honest, not invented" precedent elsewhere (see
-/// `array_keys()`'s own `Type::Mixed(false)` fallback,
+/// `array_keys()`'s own `mixed` fallback,
 /// `checker/expr/builtin_calls.rs`).
-fn data_type_to_type(data_type: &DataType) -> Type {
+fn column_type(data_type: &DataType) -> ColumnType {
     match data_type {
-        DataType::Enum(members, _) => enum_member_union(members),
+        DataType::Enum(members, _) => enum_labels(members),
         // A raw DBAL fetch never decodes JSON - confirmed against
         // MySQL's own wire protocol, which returns a JSON column as its
         // raw string content, not a value `json_decode()` already ran
         // on.
-        DataType::JSON | DataType::JSONB => Type::String,
+        DataType::JSON | DataType::JSONB => ColumnType::String,
         // Date/time family: a raw fetch always returns PHP's own
         // textual representation, never a `DateTime` object - that
         // conversion is a `Doctrine\DBAL\Types::DATETIME_*`-level
@@ -250,7 +240,7 @@ fn data_type_to_type(data_type: &DataType) -> Type {
         | DataType::Datetime(..)
         | DataType::Datetime64(..)
         | DataType::Timestamp(..)
-        | DataType::TimestampNtz(..) => Type::String,
+        | DataType::TimestampNtz(..) => ColumnType::String,
         // mysqlnd returns DECIMAL/NUMERIC as a string unconditionally -
         // confirmed live against a real MySQL instance across every
         // `PDO::ATTR_EMULATE_PREPARES` setting, so this is decidable
@@ -261,7 +251,7 @@ fn data_type_to_type(data_type: &DataType) -> Type {
         | DataType::BigNumeric(_)
         | DataType::BigDecimal(_)
         | DataType::Dec(_)
-        | DataType::DecUnsigned(_) => Type::String,
+        | DataType::DecUnsigned(_) => ColumnType::String,
         // FLOAT/DOUBLE (and, below, Postgres `boolean`) switch on
         // `PDO::ATTR_STRINGIFY_FETCHES` (string when true, native type
         // when false) - **correction, verified live**: PDO's own real
@@ -289,8 +279,8 @@ fn data_type_to_type(data_type: &DataType) -> Type {
         | DataType::Double(_)
         | DataType::DoubleUnsigned(_)
         | DataType::DoublePrecision
-        | DataType::DoublePrecisionUnsigned => Type::Float,
-        DataType::Bool | DataType::Boolean => Type::Bool,
+        | DataType::DoublePrecisionUnsigned => ColumnType::Float,
+        DataType::Bool | DataType::Boolean => ColumnType::Bool,
         DataType::TinyInt(_)
         | DataType::TinyIntUnsigned(_)
         | DataType::UTinyInt
@@ -324,7 +314,7 @@ fn data_type_to_type(data_type: &DataType) -> Type {
         | DataType::BigInt(_)
         | DataType::BigIntUnsigned(_)
         | DataType::UBigInt
-        | DataType::Int8Unsigned(_) => Type::Int,
+        | DataType::Int8Unsigned(_) => ColumnType::Int,
         // `TINYINT(1)` is deliberately here, not treated as `Bool` -
         // confirmed live against real PDO in both
         // `PDO::ATTR_EMULATE_PREPARES` settings: it always comes back
@@ -356,34 +346,30 @@ fn data_type_to_type(data_type: &DataType) -> Type {
         | DataType::Bytea
         | DataType::Bit(_)
         | DataType::BitVarying(_)
-        | DataType::VarBit(_) => Type::String,
+        | DataType::VarBit(_) => ColumnType::String,
         // A dialect-specific type this table has no first-class
         // translation for (native arrays, geometric types, tuples,
         // custom/domain types, ...) - genuinely undecidable from a
         // static definition alone.
-        _ => Type::Mixed(false),
+        _ => ColumnType::Unknown,
     }
 }
 
 /// MySQL returns an `ENUM` column's value as its declared string label,
-/// so the honest answer is a literal string union of the exact declared
-/// values, not bare `Type::String` - this project's own literal-string-
-/// union support already makes that precision possible. `EnumMember`
-/// has two real shapes (`Name(String)` and ClickHouse's own
-/// `NamedValue(String, Expr)`), confirmed directly against `sqlparser`
-/// 0.63.0's real AST rather than assumed to be a flat `Vec<String>`;
-/// both carry a real label string, so both map the same way here.
-fn enum_member_union(members: &[EnumMember]) -> Type {
-    let literals: Vec<Type> = members
+/// so the column holds exactly its declared labels. `EnumMember` has two
+/// shapes (`Name(String)` and ClickHouse's `NamedValue(String, Expr)`),
+/// both carrying a label. An enum declaring no labels is a plain string.
+fn enum_labels(members: &[EnumMember]) -> ColumnType {
+    let labels: Vec<String> = members
         .iter()
         .map(|m| match m {
-            EnumMember::Name(s) | EnumMember::NamedValue(s, _) => Type::StringLiteral(s.clone()),
+            EnumMember::Name(s) | EnumMember::NamedValue(s, _) => s.clone(),
         })
         .collect();
-    if literals.is_empty() {
-        Type::String
+    if labels.is_empty() {
+        ColumnType::String
     } else {
-        Type::Union(literals)
+        ColumnType::Enum(labels)
     }
 }
 

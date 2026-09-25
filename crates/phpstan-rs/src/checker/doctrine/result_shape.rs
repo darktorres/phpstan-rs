@@ -310,7 +310,10 @@ fn raw_field_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
         && let Some(column_name) = de.column_names.get(field.as_str())
         && let Some(column) = schema.column(table, column_name)
     {
-        return Some((column.ty.clone(), column.nullable || join_nullable));
+        return Some((
+            column_php_type(&column.ty),
+            column.nullable || join_nullable,
+        ));
     }
     let ty = de.fields.get(field.as_str())?;
     if contains_object(ty) {
@@ -319,6 +322,26 @@ fn raw_field_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
     let non_null = crate::checker::narrow_type_excluding(ty, &Type::Null);
     let nullable = non_null != *ty || join_nullable;
     Some((non_null, nullable))
+}
+
+/// The PHP type of the value a raw fetch of a schema column returns.
+fn column_php_type(ty: &crate::sql_reflection_column::ColumnType) -> Type {
+    use crate::sql_reflection_column::ColumnType;
+    match ty {
+        ColumnType::Int => Type::Int,
+        ColumnType::Float => Type::Float,
+        ColumnType::Bool => Type::Bool,
+        ColumnType::String => Type::String,
+        ColumnType::Number => Type::Union(vec![Type::Int, Type::Float]),
+        ColumnType::Enum(labels) => Type::Union(
+            labels
+                .iter()
+                .map(|label| Type::StringLiteral(label.clone()))
+                .collect(),
+        ),
+        ColumnType::Null => Type::Null,
+        ColumnType::Unknown => Type::Mixed(false),
+    }
 }
 
 fn nullable_if(ty: Type, nullable: bool) -> Type {

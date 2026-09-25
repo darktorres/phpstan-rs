@@ -1,7 +1,7 @@
 use super::*;
 
-fn col(name: &str, ty: Type, nullable: bool) -> SchemaColumn {
-    SchemaColumn {
+fn col(name: &str, ty: ColumnType, nullable: bool) -> Column {
+    Column {
         name: name.to_string(),
         ty,
         nullable,
@@ -10,62 +10,62 @@ fn col(name: &str, ty: Type, nullable: bool) -> SchemaColumn {
 
 #[test]
 fn identical_column_lists_are_compatible_regardless_of_order() {
-    let a = vec![col("id", Type::Int, false), col("name", Type::String, true)];
-    let b = vec![col("name", Type::String, true), col("id", Type::Int, false)];
+    let a = vec![
+        col("id", ColumnType::Int, false),
+        col("name", ColumnType::String, true),
+    ];
+    let b = vec![
+        col("name", ColumnType::String, true),
+        col("id", ColumnType::Int, false),
+    ];
     assert!(columns_are_compatible(&a, &b));
 }
 
 #[test]
 fn a_missing_column_is_not_compatible() {
-    let a = vec![col("id", Type::Int, false), col("name", Type::String, true)];
-    let b = vec![col("id", Type::Int, false)];
+    let a = vec![
+        col("id", ColumnType::Int, false),
+        col("name", ColumnType::String, true),
+    ];
+    let b = vec![col("id", ColumnType::Int, false)];
     assert!(!columns_are_compatible(&a, &b));
 }
 
 #[test]
 fn a_different_nullable_flag_is_not_compatible() {
-    let a = vec![col("id", Type::Int, false)];
-    let b = vec![col("id", Type::Int, true)];
+    let a = vec![col("id", ColumnType::Int, false)];
+    let b = vec![col("id", ColumnType::Int, true)];
     assert!(!columns_are_compatible(&a, &b));
 }
 
 #[test]
 fn a_different_type_is_not_compatible() {
-    let a = vec![col("id", Type::Int, false)];
-    let b = vec![col("id", Type::String, false)];
+    let a = vec![col("id", ColumnType::Int, false)];
+    let b = vec![col("id", ColumnType::String, false)];
     assert!(!columns_are_compatible(&a, &b));
 }
 
 #[test]
-fn a_plain_string_against_a_literal_enum_union_is_compatible() {
+fn a_plain_string_against_an_enum_is_compatible() {
     // The live path's own `reflect()` never cross-references a static
-    // catalog for an ENUM's real literal-value union (that only
-    // happens through `reflect_with_schema`, not exposed on the trait
-    // this check consults) - so a bare `String` there against the
-    // static side's real literal union must not be flagged as drift.
+    // catalog for an ENUM's labels (that only happens through
+    // `reflect_with_schema`, not exposed on the trait this check
+    // consults) - so a plain string there against the static side's
+    // enum must not be flagged as drift.
     let static_side = vec![col(
         "status",
-        Type::Union(vec![
-            Type::StringLiteral("admin".to_string()),
-            Type::StringLiteral("normal".to_string()),
-        ]),
+        ColumnType::Enum(vec!["admin".to_string(), "normal".to_string()]),
         false,
     )];
-    let live_side = vec![col("status", Type::String, false)];
+    let live_side = vec![col("status", ColumnType::String, false)];
     assert!(columns_are_compatible(&static_side, &live_side));
 }
 
 #[test]
-fn a_string_against_a_non_string_literal_union_is_still_incompatible() {
-    // The leniency is scoped specifically to a plain `String` against a
-    // union whose *every* member is a `StringLiteral` (the ENUM shape)
-    // - a union that isn't that shape must still be flagged.
-    let static_side = vec![col(
-        "kind",
-        Type::Union(vec![Type::StringLiteral("a".to_string()), Type::Int]),
-        false,
-    )];
-    let live_side = vec![col("kind", Type::String, false)];
+fn a_string_against_a_number_column_is_still_incompatible() {
+    // The leniency covers only a plain string against an enum.
+    let static_side = vec![col("kind", ColumnType::Number, false)];
+    let live_side = vec![col("kind", ColumnType::String, false)];
     assert!(!columns_are_compatible(&static_side, &live_side));
 }
 

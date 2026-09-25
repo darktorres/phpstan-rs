@@ -17,3 +17,48 @@
 pub(crate) mod parameter_validation;
 pub(crate) mod query_builder;
 pub(crate) mod resolve;
+
+use crate::sql_reflection_column::{Column, ColumnType};
+use types::{Shape, Type, union_types};
+
+/// The PHP type of the value a raw fetch of a column returns.
+pub(crate) fn column_php_type(ty: &ColumnType) -> Type {
+    match ty {
+        ColumnType::Int => Type::Int,
+        ColumnType::Float => Type::Float,
+        ColumnType::Bool => Type::Bool,
+        ColumnType::String => Type::String,
+        ColumnType::Number => Type::Union(vec![Type::Int, Type::Float]),
+        ColumnType::Enum(labels) => Type::Union(
+            labels
+                .iter()
+                .map(|label| Type::StringLiteral(label.clone()))
+                .collect(),
+        ),
+        ColumnType::Null => Type::Null,
+        ColumnType::Unknown => Type::Mixed(false),
+    }
+}
+
+/// What fetching `column` returns: its type, or `null` too when the
+/// column is nullable.
+pub(crate) fn column_value_type(column: &Column) -> Type {
+    let ty = column_php_type(&column.ty);
+    if column.nullable {
+        union_types(ty, Type::Null)
+    } else {
+        ty
+    }
+}
+
+/// The row a result set with these columns fetches as.
+pub(crate) fn row_type(columns: &[Column]) -> Type {
+    Type::ArrayShape(Shape::from_named(
+        columns
+            .iter()
+            .map(|c| (c.name.as_str(), column_value_type(c), false)),
+    ))
+}
+
+#[cfg(test)]
+mod tests;

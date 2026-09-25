@@ -14,13 +14,13 @@ fn parses_column_names_types_and_nullability() {
     let columns = catalog.table("categories").expect("table present");
     assert_eq!(columns.len(), 3);
     assert_eq!(columns[0].name, "id");
-    assert_eq!(columns[0].ty, Type::Int);
+    assert_eq!(columns[0].ty, ColumnType::Int);
     assert!(!columns[0].nullable, "primary key implies NOT NULL");
     assert_eq!(columns[1].name, "name");
-    assert_eq!(columns[1].ty, Type::String);
+    assert_eq!(columns[1].ty, ColumnType::String);
     assert!(!columns[1].nullable);
     assert_eq!(columns[2].name, "comment");
-    assert_eq!(columns[2].ty, Type::String);
+    assert_eq!(columns[2].ty, ColumnType::String);
     assert!(columns[2].nullable, "no NOT NULL/PK given");
 }
 
@@ -42,12 +42,12 @@ fn enum_columns_become_a_literal_string_union_not_bare_string() {
     let column = catalog.column("users", "status").expect("column present");
     assert_eq!(
         column.ty,
-        Type::Union(vec![
-            Type::StringLiteral("webmaster".to_string()),
-            Type::StringLiteral("admin".to_string()),
-            Type::StringLiteral("normal".to_string()),
-            Type::StringLiteral("generic".to_string()),
-            Type::StringLiteral("guest".to_string()),
+        ColumnType::Enum(vec![
+            "webmaster".to_string(),
+            "admin".to_string(),
+            "normal".to_string(),
+            "generic".to_string(),
+            "guest".to_string(),
         ])
     );
 }
@@ -55,7 +55,10 @@ fn enum_columns_become_a_literal_string_union_not_bare_string() {
 #[test]
 fn json_columns_are_string_not_a_decoded_shape() {
     let catalog = parse_ddl("CREATE TABLE t (payload json);", SqlDriver::Mysql);
-    assert_eq!(catalog.column("t", "payload").unwrap().ty, Type::String);
+    assert_eq!(
+        catalog.column("t", "payload").unwrap().ty,
+        ColumnType::String
+    );
 }
 
 #[test]
@@ -64,8 +67,14 @@ fn timestamp_and_datetime_columns_are_string_not_a_datetime_object() {
         "CREATE TABLE t (created_on timestamp, updated_on datetime);",
         SqlDriver::Mysql,
     );
-    assert_eq!(catalog.column("t", "created_on").unwrap().ty, Type::String);
-    assert_eq!(catalog.column("t", "updated_on").unwrap().ty, Type::String);
+    assert_eq!(
+        catalog.column("t", "created_on").unwrap().ty,
+        ColumnType::String
+    );
+    assert_eq!(
+        catalog.column("t", "updated_on").unwrap().ty,
+        ColumnType::String
+    );
 }
 
 #[test]
@@ -74,14 +83,17 @@ fn decimal_columns_are_string_but_float_columns_are_the_native_type() {
         "CREATE TABLE t (price decimal(10,2), ratio float);",
         SqlDriver::Mysql,
     );
-    assert_eq!(catalog.column("t", "price").unwrap().ty, Type::String);
-    assert_eq!(catalog.column("t", "ratio").unwrap().ty, Type::Float);
+    assert_eq!(catalog.column("t", "price").unwrap().ty, ColumnType::String);
+    assert_eq!(catalog.column("t", "ratio").unwrap().ty, ColumnType::Float);
 }
 
 #[test]
 fn tinyint_one_is_int_not_bool() {
     let catalog = parse_ddl("CREATE TABLE t (is_public tinyint(1));", SqlDriver::Mysql);
-    assert_eq!(catalog.column("t", "is_public").unwrap().ty, Type::Int);
+    assert_eq!(
+        catalog.column("t", "is_public").unwrap().ty,
+        ColumnType::Int
+    );
 }
 
 #[test]
@@ -125,7 +137,7 @@ fn a_postgres_statement_this_project_does_not_need_failing_does_not_lose_its_cre
     let columns = catalog.table("activity").expect("table present");
     assert_eq!(columns.len(), 2);
     assert_eq!(columns[0].name, "activity_id");
-    assert_eq!(columns[0].ty, Type::Int);
+    assert_eq!(columns[0].ty, ColumnType::Int);
 }
 
 #[test]

@@ -2,7 +2,7 @@
 //! `PREPARE`s (never executes) a resolved SQL string against a live
 //! connection and reads
 //! the prepared statement's own real result-set column metadata,
-//! translating each column into this project's `Type` the way a raw
+//! translating each column into a `ColumnType` the way a raw
 //! `Doctrine\DBAL\Connection::fetch*` call actually hands it to PHP -
 //! the same real-world shape `staabm/phpstan-dba` uses.
 //!
@@ -21,22 +21,22 @@
 
 use std::sync::OnceLock;
 
-use mysql::consts::{ColumnFlags, ColumnType};
+use mysql::consts::{ColumnFlags, ColumnType as MysqlType};
 use mysql::prelude::Queryable;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::tokenizer::{Location, Token, Tokenizer};
 
+use crate::sql_reflection_column::{Column, ColumnType};
 use crate::sql_reflection_config::{SqlDriver, SqlReflectionConfig};
 use crate::sql_reflection_schema::SchemaCatalog;
-use types::Type;
 
-/// One live-or-cached connection's own answer to "what row type does
+/// One live-or-cached connection's own answer to "what columns does
 /// this SQL string's own result set have?" - `None` when it can't be
 /// answered (a real SQL/connection error, or a statement with no
 /// result-set columns at all, e.g. `INSERT`/`UPDATE`/`DELETE`).
 /// Implementations must never execute `sql`, only prepare it.
 pub trait QueryReflector: Send + Sync {
-    fn reflect(&self, sql: &str) -> Option<Type>;
+    fn reflect(&self, sql: &str) -> Option<Vec<Column>>;
 }
 
 /// Sub-phase B's own `DbalQueryBuilderChain::render()` (and a direct
@@ -199,7 +199,7 @@ impl MysqlReflector {
 }
 
 impl QueryReflector for MysqlReflector {
-    fn reflect(&self, sql: &str) -> Option<Type> {
+    fn reflect(&self, sql: &str) -> Option<Vec<Column>> {
         self.reflect_with_schema(sql, None)
     }
 }
@@ -210,7 +210,11 @@ impl MysqlReflector {
     /// union - kept as a separate entry point from the trait method so
     /// unit tests can exercise the enum cross-reference directly
     /// without needing a full `QueryReflector`-consuming call site.
-    fn reflect_with_schema(&self, sql: &str, schema: Option<&SchemaCatalog>) -> Option<Type> {
+    fn reflect_with_schema(
+        &self,
+        sql: &str,
+        schema: Option<&SchemaCatalog>,
+    ) -> Option<Vec<Column>> {
         let sql = normalize_placeholders_for_driver(sql, SqlDriver::Mysql)?;
         let mut conn = self.pool.get_conn().ok()?;
         let stmt = conn.prep(&sql).ok()?;
@@ -218,32 +222,36 @@ impl MysqlReflector {
         if columns.is_empty() {
             return None;
         }
-        let fields = columns
-            .iter()
-            .map(|col| {
-                let name = col.name_str().into_owned();
-                let ty = mysql_column_to_type(col, schema);
-                (name, ty, false)
-            })
-            .collect();
-        Some(Type::ArrayShape(fields))
+        Some(
+            columns
+                .iter()
+                .map(|col| mysql_column(col, schema))
+                .collect(),
+        )
     }
 }
 
-fn mysql_column_to_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> Type {
-    let nullable = !col.flags().contains(ColumnFlags::NOT_NULL_FLAG);
-    let base = match col.column_type() {
-        ColumnType::MYSQL_TYPE_ENUM => enum_literal_union(col, schema),
-        ColumnType::MYSQL_TYPE_JSON => Type::String,
-        ColumnType::MYSQL_TYPE_DATE
-        | ColumnType::MYSQL_TYPE_TIME
-        | ColumnType::MYSQL_TYPE_TIME2
-        | ColumnType::MYSQL_TYPE_DATETIME
-        | ColumnType::MYSQL_TYPE_DATETIME2
-        | ColumnType::MYSQL_TYPE_TIMESTAMP
-        | ColumnType::MYSQL_TYPE_TIMESTAMP2
-        | ColumnType::MYSQL_TYPE_YEAR
-        | ColumnType::MYSQL_TYPE_NEWDATE => Type::String,
+fn mysql_column(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> Column {
+    Column {
+        name: col.name_str().into_owned(),
+        ty: mysql_column_type(col, schema),
+        nullable: !col.flags().contains(ColumnFlags::NOT_NULL_FLAG),
+    }
+}
+
+fn mysql_column_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> ColumnType {
+    match col.column_type() {
+        MysqlType::MYSQL_TYPE_ENUM => enum_labels(col, schema),
+        MysqlType::MYSQL_TYPE_JSON => ColumnType::String,
+        MysqlType::MYSQL_TYPE_DATE
+        | MysqlType::MYSQL_TYPE_TIME
+        | MysqlType::MYSQL_TYPE_TIME2
+        | MysqlType::MYSQL_TYPE_DATETIME
+        | MysqlType::MYSQL_TYPE_DATETIME2
+        | MysqlType::MYSQL_TYPE_TIMESTAMP
+        | MysqlType::MYSQL_TYPE_TIMESTAMP2
+        | MysqlType::MYSQL_TYPE_YEAR
+        | MysqlType::MYSQL_TYPE_NEWDATE => ColumnType::String,
         // mysqlnd returns DECIMAL/NEWDECIMAL as a string unconditionally
         // - confirmed live, see `sql_reflection_schema`'s own doc
         // comment for the full verification note. FLOAT/DOUBLE are the
@@ -251,40 +259,35 @@ fn mysql_column_to_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> 
         // is `false`, and neither Doctrine DBAL nor this corpus's own
         // code ever sets it (see `sql_reflection_schema`'s own doc
         // comment for the full correction/verification note).
-        ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL => Type::String,
-        ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => Type::Float,
+        MysqlType::MYSQL_TYPE_DECIMAL | MysqlType::MYSQL_TYPE_NEWDECIMAL => ColumnType::String,
+        MysqlType::MYSQL_TYPE_FLOAT | MysqlType::MYSQL_TYPE_DOUBLE => ColumnType::Float,
         // `TINYINT(1)` is deliberately still `Int`, not `Bool` -
         // confirmed live against real PDO in both
         // `PDO::ATTR_EMULATE_PREPARES` settings (see
         // `sql_reflection_schema`'s own doc comment) - there is no
         // driver ground truth for a `Bool` mapping at all, for any
         // integer width.
-        ColumnType::MYSQL_TYPE_TINY
-        | ColumnType::MYSQL_TYPE_SHORT
-        | ColumnType::MYSQL_TYPE_INT24
-        | ColumnType::MYSQL_TYPE_LONG
-        | ColumnType::MYSQL_TYPE_LONGLONG => Type::Int,
-        ColumnType::MYSQL_TYPE_VARCHAR
-        | ColumnType::MYSQL_TYPE_VAR_STRING
-        | ColumnType::MYSQL_TYPE_STRING
-        | ColumnType::MYSQL_TYPE_BIT
-        | ColumnType::MYSQL_TYPE_TINY_BLOB
-        | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
-        | ColumnType::MYSQL_TYPE_LONG_BLOB
-        | ColumnType::MYSQL_TYPE_BLOB
-        | ColumnType::MYSQL_TYPE_SET
-        | ColumnType::MYSQL_TYPE_GEOMETRY => Type::String,
-        ColumnType::MYSQL_TYPE_NULL => Type::Null,
+        MysqlType::MYSQL_TYPE_TINY
+        | MysqlType::MYSQL_TYPE_SHORT
+        | MysqlType::MYSQL_TYPE_INT24
+        | MysqlType::MYSQL_TYPE_LONG
+        | MysqlType::MYSQL_TYPE_LONGLONG => ColumnType::Int,
+        MysqlType::MYSQL_TYPE_VARCHAR
+        | MysqlType::MYSQL_TYPE_VAR_STRING
+        | MysqlType::MYSQL_TYPE_STRING
+        | MysqlType::MYSQL_TYPE_BIT
+        | MysqlType::MYSQL_TYPE_TINY_BLOB
+        | MysqlType::MYSQL_TYPE_MEDIUM_BLOB
+        | MysqlType::MYSQL_TYPE_LONG_BLOB
+        | MysqlType::MYSQL_TYPE_BLOB
+        | MysqlType::MYSQL_TYPE_SET
+        | MysqlType::MYSQL_TYPE_GEOMETRY => ColumnType::String,
+        MysqlType::MYSQL_TYPE_NULL => ColumnType::Null,
         // A wire-protocol type this table has no first-class
         // translation for - genuinely undecidable, matching this
         // project's own "honest, not invented" precedent (see
         // `sql_reflection_schema`'s own doc comment).
-        _ => Type::Mixed(false),
-    };
-    if nullable && base != Type::Null {
-        Type::Union(vec![base, Type::Null])
-    } else {
-        base
+        _ => ColumnType::Unknown,
     }
 }
 
@@ -292,15 +295,15 @@ fn mysql_column_to_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> 
 /// column's real declared literal values, via the column's own
 /// `org_table`/`org_name` (the *original* table/column, which survives
 /// an alias - unlike `table`/`name`, which reflect the aliased query
-/// text) - falls back to `Type::String` when no schema is configured or
+/// text) - falls back to `ColumnType::String` when no schema is configured or
 /// the table/column isn't found in it (a real, honest degrade, not a
 /// guess at the permitted values).
-fn enum_literal_union(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> Type {
+fn enum_labels(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> ColumnType {
     let table = col.org_table_str();
     let name = col.org_name_str();
     match schema.and_then(|s| s.column(&table, &name)) {
         Some(column) => column.ty.clone(),
-        None => Type::String,
+        None => ColumnType::String,
     }
 }
 
@@ -348,7 +351,7 @@ impl PostgresReflector {
 }
 
 impl QueryReflector for PostgresReflector {
-    fn reflect(&self, sql: &str) -> Option<Type> {
+    fn reflect(&self, sql: &str) -> Option<Vec<Column>> {
         let sql = normalize_placeholders_for_driver(sql, SqlDriver::Pgsql)?;
         let mut conn = self.pool.get().ok()?;
         if let Some(init_sql) = &self.session_init_sql {
@@ -373,11 +376,14 @@ impl QueryReflector for PostgresReflector {
                     .zip(col.column_id())
                     .and_then(|key| nullability.get(&key).copied())
                     .unwrap_or(true);
-                let ty = postgres_column_to_type(col.type_(), nullable);
-                (name, ty, false)
+                Column {
+                    name,
+                    ty: postgres_column_type(col.type_()),
+                    nullable,
+                }
             })
             .collect();
-        Some(Type::ArrayShape(fields))
+        Some(fields)
     }
 }
 
@@ -432,7 +438,7 @@ fn postgres_nullability(
 /// pattern-matchable variants, so a `match` on the type value itself
 /// isn't available the way `mysql::consts::ColumnType` allows.
 ///
-/// `nullable` folds in real, live-verified `PDO::ATTR_STRINGIFY_FETCHES`
+/// Folds in real, live-verified `PDO::ATTR_STRINGIFY_FETCHES`
 /// behavior (see `sql_reflection_schema`'s own doc comment for the full
 /// MySQL-side verification note this mirrors) - confirmed directly
 /// against real `pdo_pgsql`, across all 4 `ATTR_EMULATE_PREPARES`/
@@ -442,25 +448,20 @@ fn postgres_nullability(
 /// DBAL or this corpus), while `numeric` is a string unconditionally,
 /// independent of either setting - the identical shape MySQL's own
 /// DECIMAL/FLOAT/DOUBLE split already established.
-fn postgres_column_to_type(pg_type: &postgres::types::Type, nullable: bool) -> Type {
-    let base = match pg_type.name() {
-        "bool" => Type::Bool,
-        "int2" | "int4" | "int8" | "oid" => Type::Int,
-        "float4" | "float8" => Type::Float,
-        "numeric" => Type::String,
-        "json" | "jsonb" => Type::String,
-        "date" | "time" | "timetz" | "timestamp" | "timestamptz" => Type::String,
-        "text" | "varchar" | "bpchar" | "bytea" | "uuid" => Type::String,
+fn postgres_column_type(pg_type: &postgres::types::Type) -> ColumnType {
+    match pg_type.name() {
+        "bool" => ColumnType::Bool,
+        "int2" | "int4" | "int8" | "oid" => ColumnType::Int,
+        "float4" | "float8" => ColumnType::Float,
+        "numeric" => ColumnType::String,
+        "json" | "jsonb" => ColumnType::String,
+        "date" | "time" | "timetz" | "timestamp" | "timestamptz" => ColumnType::String,
+        "text" | "varchar" | "bpchar" | "bytea" | "uuid" => ColumnType::String,
         // A dialect-specific type this table has no first-class
         // translation for (native arrays, ranges, geometric types,
         // custom/domain types, ...) - genuinely undecidable, matching
         // this project's own "honest, not invented" precedent.
-        _ => Type::Mixed(false),
-    };
-    if nullable && base != Type::Null {
-        Type::Union(vec![base, Type::Null])
-    } else {
-        base
+        _ => ColumnType::Unknown,
     }
 }
 
@@ -492,21 +493,25 @@ impl SqliteReflector {
 }
 
 impl QueryReflector for SqliteReflector {
-    fn reflect(&self, sql: &str) -> Option<Type> {
+    fn reflect(&self, sql: &str) -> Option<Vec<Column>> {
         let conn = self.pool.get().ok()?;
         let stmt = conn.prepare(sql).ok()?;
         let count = stmt.column_count();
         if count == 0 {
             return None;
         }
-        let fields = (0..count)
-            .map(|i| {
-                let name = stmt.column_name(i).unwrap_or_default().to_string();
-                let ty = sqlite_column_to_type(&stmt, i);
-                (name, ty, false)
-            })
-            .collect();
-        Some(Type::ArrayShape(fields))
+        Some(
+            (0..count)
+                .map(|i| {
+                    let (ty, nullable) = sqlite_column_type(&stmt, i);
+                    Column {
+                        name: stmt.column_name(i).unwrap_or_default().to_string(),
+                        ty,
+                        nullable,
+                    }
+                })
+                .collect(),
+        )
     }
 }
 
@@ -542,52 +547,40 @@ fn sqlite_affinity(decl_type: &str) -> SqliteAffinity {
     }
 }
 
-/// `nullable` folds in the identical real, live-verified
-/// `PDO::ATTR_STRINGIFY_FETCHES` default this file's MySQL/Postgres
-/// translators already establish (confirmed directly against real
-/// `pdo_sqlite` too: `INTEGER`/`REAL`-affinity columns are native-typed
-/// at PDO's real default). `Numeric` affinity maps to `Union([Int,
-/// Float])` for a genuinely different reason than MySQL/Postgres's own
-/// FLOAT/DOUBLE union correction: this isn't hedging against an
-/// unknowable app setting, it's the honest answer to a real semantic
-/// fact - SQLite's own NUMERIC affinity tries INTEGER storage first and
-/// falls back to REAL, so the *same declared column* can genuinely hold
-/// either type from one row to the next (confirmed live: `NUMERIC`-
-/// declared `3.14` stored and fetched back as PHP `float`).
-fn sqlite_affinity_to_type(affinity: SqliteAffinity, nullable: bool) -> Type {
-    let base = match affinity {
-        SqliteAffinity::Integer => Type::Int,
-        SqliteAffinity::Real => Type::Float,
-        SqliteAffinity::Text | SqliteAffinity::Blob => Type::String,
-        SqliteAffinity::Numeric => Type::Union(vec![Type::Int, Type::Float]),
-    };
-    if nullable {
-        match base {
-            Type::Union(mut members) => {
-                members.push(Type::Null);
-                Type::Union(members)
-            }
-            other => Type::Union(vec![other, Type::Null]),
-        }
-    } else {
-        base
+/// INTEGER/REAL-affinity columns are native-typed at PDO's real
+/// `ATTR_STRINGIFY_FETCHES` default (confirmed against `pdo_sqlite`, as
+/// for MySQL/Postgres). NUMERIC affinity is `ColumnType::Number` for a
+/// different reason than hedging against an app setting: SQLite's
+/// NUMERIC affinity tries INTEGER storage first and falls back to REAL,
+/// so the same declared column can hold either type from one row to the
+/// next (confirmed live: `NUMERIC`-declared `3.14` fetched back as PHP
+/// `float`).
+fn sqlite_affinity_type(affinity: SqliteAffinity) -> ColumnType {
+    match affinity {
+        SqliteAffinity::Integer => ColumnType::Int,
+        SqliteAffinity::Real => ColumnType::Float,
+        SqliteAffinity::Text | SqliteAffinity::Blob => ColumnType::String,
+        SqliteAffinity::Numeric => ColumnType::Number,
     }
 }
 
-/// A computed/expression select item (no real backing table column) has
-/// no `column_metadata()` entry at all - degrades to a bare declared
-/// type from `columns()`/`column_decltype()` when SQLite's own query
-/// planner still infers one (real for e.g. `CAST(x AS INTEGER)`), or all
-/// the way to `Type::Mixed(false)` when it can't, rather than guessing.
-fn sqlite_column_to_type(stmt: &rusqlite::Statement<'_>, idx: usize) -> Type {
+/// A column's type and nullability. A computed/expression select item (no
+/// real backing table column) has no `column_metadata()` entry at all -
+/// degrades to a bare declared type from `columns()`/`column_decltype()`
+/// when SQLite's own query planner still infers one (real for e.g.
+/// `CAST(x AS INTEGER)`), or all the way to `ColumnType::Unknown` when it
+/// can't, rather than guessing.
+fn sqlite_column_type(stmt: &rusqlite::Statement<'_>, idx: usize) -> (ColumnType, bool) {
     if let Ok(Some((_, _, _, data_type, _, not_null, primary_key, _))) = stmt.column_metadata(idx) {
         let decl = data_type.and_then(|s| s.to_str().ok()).unwrap_or("");
-        let nullable = !(not_null || primary_key);
-        return sqlite_affinity_to_type(sqlite_affinity(decl), nullable);
+        return (
+            sqlite_affinity_type(sqlite_affinity(decl)),
+            !(not_null || primary_key),
+        );
     }
     match stmt.columns().get(idx).and_then(|c| c.decl_type()) {
-        Some(decl) => sqlite_affinity_to_type(sqlite_affinity(decl), true),
-        None => Type::Mixed(false),
+        Some(decl) => (sqlite_affinity_type(sqlite_affinity(decl)), true),
+        None => (ColumnType::Unknown, false),
     }
 }
 

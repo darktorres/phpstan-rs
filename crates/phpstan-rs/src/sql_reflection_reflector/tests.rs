@@ -1,7 +1,15 @@
 use super::*;
 
+/// Each column as `(name, type, nullable)`.
+fn named_fields(columns: Vec<Column>) -> Vec<(String, ColumnType, bool)> {
+    columns
+        .into_iter()
+        .map(|c| (c.name, c.ty, c.nullable))
+        .collect()
+}
+
 fn column(
-    column_type: ColumnType,
+    column_type: MysqlType,
     flags: ColumnFlags,
     org_table: &str,
     org_name: &str,
@@ -14,73 +22,73 @@ fn column(
         .with_org_table(org_table.as_bytes())
 }
 
-fn not_null(column_type: ColumnType) -> mysql::Column {
+fn not_null(column_type: MysqlType) -> mysql::Column {
     column(column_type, ColumnFlags::NOT_NULL_FLAG, "t", "c")
 }
 
-fn nullable(column_type: ColumnType) -> mysql::Column {
+fn nullable(column_type: MysqlType) -> mysql::Column {
     column(column_type, ColumnFlags::empty(), "t", "c")
 }
 
 #[test]
 fn integer_family_is_always_int_never_bool_even_for_tinyint_one() {
     for ty in [
-        ColumnType::MYSQL_TYPE_TINY,
-        ColumnType::MYSQL_TYPE_SHORT,
-        ColumnType::MYSQL_TYPE_INT24,
-        ColumnType::MYSQL_TYPE_LONG,
-        ColumnType::MYSQL_TYPE_LONGLONG,
+        MysqlType::MYSQL_TYPE_TINY,
+        MysqlType::MYSQL_TYPE_SHORT,
+        MysqlType::MYSQL_TYPE_INT24,
+        MysqlType::MYSQL_TYPE_LONG,
+        MysqlType::MYSQL_TYPE_LONGLONG,
     ] {
-        assert_eq!(mysql_column_to_type(&not_null(ty), None), Type::Int);
+        assert_eq!(mysql_column(&not_null(ty), None).ty, ColumnType::Int);
     }
 }
 
 #[test]
 fn decimal_is_string_but_float_double_are_the_native_type() {
     assert_eq!(
-        mysql_column_to_type(&not_null(ColumnType::MYSQL_TYPE_NEWDECIMAL), None),
-        Type::String
+        mysql_column(&not_null(MysqlType::MYSQL_TYPE_NEWDECIMAL), None).ty,
+        ColumnType::String
     );
     assert_eq!(
-        mysql_column_to_type(&not_null(ColumnType::MYSQL_TYPE_FLOAT), None),
-        Type::Float
+        mysql_column(&not_null(MysqlType::MYSQL_TYPE_FLOAT), None).ty,
+        ColumnType::Float
     );
     assert_eq!(
-        mysql_column_to_type(&not_null(ColumnType::MYSQL_TYPE_DOUBLE), None),
-        Type::Float
+        mysql_column(&not_null(MysqlType::MYSQL_TYPE_DOUBLE), None).ty,
+        ColumnType::Float
     );
 }
 
 #[test]
 fn json_and_date_time_family_are_string() {
     assert_eq!(
-        mysql_column_to_type(&not_null(ColumnType::MYSQL_TYPE_JSON), None),
-        Type::String
+        mysql_column(&not_null(MysqlType::MYSQL_TYPE_JSON), None).ty,
+        ColumnType::String
     );
     for ty in [
-        ColumnType::MYSQL_TYPE_DATE,
-        ColumnType::MYSQL_TYPE_DATETIME,
-        ColumnType::MYSQL_TYPE_TIMESTAMP,
-        ColumnType::MYSQL_TYPE_TIME,
-        ColumnType::MYSQL_TYPE_YEAR,
+        MysqlType::MYSQL_TYPE_DATE,
+        MysqlType::MYSQL_TYPE_DATETIME,
+        MysqlType::MYSQL_TYPE_TIMESTAMP,
+        MysqlType::MYSQL_TYPE_TIME,
+        MysqlType::MYSQL_TYPE_YEAR,
     ] {
-        assert_eq!(mysql_column_to_type(&not_null(ty), None), Type::String);
+        assert_eq!(mysql_column(&not_null(ty), None).ty, ColumnType::String);
     }
 }
 
 #[test]
-fn a_nullable_column_wraps_the_base_type_in_a_union_with_null() {
-    assert_eq!(
-        mysql_column_to_type(&nullable(ColumnType::MYSQL_TYPE_LONG), None),
-        Type::Union(vec![Type::Int, Type::Null])
-    );
+fn a_nullable_column_is_reported_nullable() {
+    let column = mysql_column(&nullable(MysqlType::MYSQL_TYPE_LONG), None);
+    assert_eq!(column.ty, ColumnType::Int);
+    assert!(column.nullable);
+    assert!(!mysql_column(&not_null(MysqlType::MYSQL_TYPE_LONG), None).nullable);
 }
 
 #[test]
 fn an_enum_column_falls_back_to_string_with_no_schema_configured() {
     assert_eq!(
-        mysql_column_to_type(&not_null(ColumnType::MYSQL_TYPE_ENUM), None),
-        Type::String
+        mysql_column(&not_null(MysqlType::MYSQL_TYPE_ENUM), None).ty,
+        ColumnType::String
     );
 }
 
@@ -91,17 +99,17 @@ fn an_enum_column_resolves_its_real_literal_union_from_the_static_schema_catalog
         SqlDriver::Mysql,
     );
     let col = column(
-        ColumnType::MYSQL_TYPE_ENUM,
+        MysqlType::MYSQL_TYPE_ENUM,
         ColumnFlags::NOT_NULL_FLAG,
         "users",
         "status",
     );
     assert_eq!(
-        mysql_column_to_type(&col, Some(&schema)),
-        Type::Union(vec![
-            Type::StringLiteral("webmaster".to_string()),
-            Type::StringLiteral("admin".to_string()),
-            Type::StringLiteral("normal".to_string()),
+        mysql_column(&col, Some(&schema)).ty,
+        ColumnType::Enum(vec![
+            "webmaster".to_string(),
+            "admin".to_string(),
+            "normal".to_string(),
         ])
     );
 }
@@ -113,12 +121,12 @@ fn an_enum_column_not_found_in_the_schema_catalog_falls_back_to_string() {
         SqlDriver::Mysql,
     );
     let col = column(
-        ColumnType::MYSQL_TYPE_ENUM,
+        MysqlType::MYSQL_TYPE_ENUM,
         ColumnFlags::NOT_NULL_FLAG,
         "some_other_table",
         "status",
     );
-    assert_eq!(mysql_column_to_type(&col, Some(&schema)), Type::String);
+    assert_eq!(mysql_column(&col, Some(&schema)).ty, ColumnType::String);
 }
 
 #[test]
@@ -179,18 +187,15 @@ fn a_real_live_query_against_piwigo_test_reflects_the_real_column_types() {
     let row_type = reflector
         .reflect("SELECT id, name FROM categories WHERE id = ?")
         .expect("reflect a real SELECT");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape, got {row_type:?}");
-    };
-    let fields = fields.named_fields();
+    let fields = named_fields(row_type);
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].0, "id");
     assert_eq!(fields[1].0, "name");
     // `categories.id` is a real NOT NULL primary key int, `name` a real
     // NOT NULL varchar - both confirmed against the live schema, not
     // assumed.
-    assert_eq!(fields[0].1, Type::Int);
-    assert_eq!(fields[1].1, Type::String);
+    assert_eq!(fields[0].1, ColumnType::Int);
+    assert_eq!(fields[1].1, ColumnType::String);
 }
 
 #[test]
@@ -221,22 +226,19 @@ fn a_reflector_handle_lazily_builds_a_real_live_reflector_end_to_end() {
 #[test]
 fn postgres_bool_int_float_are_native_but_numeric_is_string() {
     use postgres::types::Type as PgType;
-    assert_eq!(postgres_column_to_type(&PgType::BOOL, false), Type::Bool);
-    assert_eq!(postgres_column_to_type(&PgType::INT4, false), Type::Int);
-    assert_eq!(postgres_column_to_type(&PgType::INT8, false), Type::Int);
-    assert_eq!(postgres_column_to_type(&PgType::FLOAT4, false), Type::Float);
-    assert_eq!(postgres_column_to_type(&PgType::FLOAT8, false), Type::Float);
-    assert_eq!(
-        postgres_column_to_type(&PgType::NUMERIC, false),
-        Type::String
-    );
+    assert_eq!(postgres_column_type(&PgType::BOOL), ColumnType::Bool);
+    assert_eq!(postgres_column_type(&PgType::INT4), ColumnType::Int);
+    assert_eq!(postgres_column_type(&PgType::INT8), ColumnType::Int);
+    assert_eq!(postgres_column_type(&PgType::FLOAT4), ColumnType::Float);
+    assert_eq!(postgres_column_type(&PgType::FLOAT8), ColumnType::Float);
+    assert_eq!(postgres_column_type(&PgType::NUMERIC), ColumnType::String);
 }
 
 #[test]
 fn postgres_json_and_date_time_family_are_string() {
     use postgres::types::Type as PgType;
     for ty in [PgType::JSON, PgType::JSONB] {
-        assert_eq!(postgres_column_to_type(&ty, false), Type::String);
+        assert_eq!(postgres_column_type(&ty), ColumnType::String);
     }
     for ty in [
         PgType::DATE,
@@ -245,23 +247,15 @@ fn postgres_json_and_date_time_family_are_string() {
         PgType::TIMESTAMP,
         PgType::TIMESTAMPTZ,
     ] {
-        assert_eq!(postgres_column_to_type(&ty, false), Type::String);
+        assert_eq!(postgres_column_type(&ty), ColumnType::String);
     }
-}
-
-#[test]
-fn postgres_a_nullable_column_wraps_the_base_type_in_a_union_with_null() {
-    assert_eq!(
-        postgres_column_to_type(&postgres::types::Type::INT4, true),
-        Type::Union(vec![Type::Int, Type::Null])
-    );
 }
 
 #[test]
 fn postgres_an_unrecognized_type_degrades_to_mixed() {
     assert_eq!(
-        postgres_column_to_type(&postgres::types::Type::INT4_ARRAY, false),
-        Type::Mixed(false)
+        postgres_column_type(&postgres::types::Type::INT4_ARRAY),
+        ColumnType::Unknown
     );
 }
 
@@ -308,21 +302,11 @@ fn a_real_live_postgres_query_reflects_the_real_column_types_and_nullability() {
     let row_type = reflector
         .reflect("SELECT id, name, price FROM sql_reflection_probe WHERE id = $1")
         .expect("reflect a real SELECT");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape, got {row_type:?}");
-    };
-    let fields = fields.named_fields();
+    let fields = named_fields(row_type);
     assert_eq!(fields.len(), 3);
-    assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
-    assert_eq!(
-        fields[1],
-        (
-            "name".to_string(),
-            Type::Union(vec![Type::String, Type::Null]),
-            false
-        )
-    );
-    assert_eq!(fields[2], ("price".to_string(), Type::String, false));
+    assert_eq!(fields[0], ("id".to_string(), ColumnType::Int, false));
+    assert_eq!(fields[1], ("name".to_string(), ColumnType::String, true));
+    assert_eq!(fields[2], ("price".to_string(), ColumnType::String, false));
 }
 
 #[test]
@@ -361,41 +345,29 @@ fn sqlite_affinity_matches_the_real_documented_algorithm() {
 }
 
 #[test]
-fn sqlite_affinity_to_type_maps_integer_real_text_and_numeric() {
+fn sqlite_affinity_type_maps_integer_real_text_and_numeric() {
     assert_eq!(
-        sqlite_affinity_to_type(SqliteAffinity::Integer, false),
-        Type::Int
+        sqlite_affinity_type(SqliteAffinity::Integer),
+        ColumnType::Int
     );
     assert_eq!(
-        sqlite_affinity_to_type(SqliteAffinity::Real, false),
-        Type::Float
+        sqlite_affinity_type(SqliteAffinity::Real),
+        ColumnType::Float
     );
     assert_eq!(
-        sqlite_affinity_to_type(SqliteAffinity::Text, false),
-        Type::String
+        sqlite_affinity_type(SqliteAffinity::Text),
+        ColumnType::String
     );
     assert_eq!(
-        sqlite_affinity_to_type(SqliteAffinity::Blob, false),
-        Type::String
+        sqlite_affinity_type(SqliteAffinity::Blob),
+        ColumnType::String
     );
     // Numeric affinity is a genuine semantic union (SQLite tries
     // INTEGER storage first, falls back to REAL) - not hedging against
     // an unknowable app setting.
     assert_eq!(
-        sqlite_affinity_to_type(SqliteAffinity::Numeric, false),
-        Type::Union(vec![Type::Int, Type::Float])
-    );
-}
-
-#[test]
-fn sqlite_affinity_to_type_wraps_nullable_correctly_even_for_an_existing_union() {
-    assert_eq!(
-        sqlite_affinity_to_type(SqliteAffinity::Integer, true),
-        Type::Union(vec![Type::Int, Type::Null])
-    );
-    assert_eq!(
-        sqlite_affinity_to_type(SqliteAffinity::Numeric, true),
-        Type::Union(vec![Type::Int, Type::Float, Type::Null])
+        sqlite_affinity_type(SqliteAffinity::Numeric),
+        ColumnType::Number
     );
 }
 
@@ -438,28 +410,11 @@ fn a_real_sqlite_query_reflects_real_column_types_and_nullability() {
     let row_type = reflector
         .reflect("SELECT id, name, price FROM sql_reflection_probe WHERE id = ?1")
         .expect("reflect a real SELECT");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape, got {row_type:?}");
-    };
-    let fields = fields.named_fields();
+    let fields = named_fields(row_type);
     assert_eq!(fields.len(), 3);
-    assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
-    assert_eq!(
-        fields[1],
-        (
-            "name".to_string(),
-            Type::Union(vec![Type::String, Type::Null]),
-            false
-        )
-    );
-    assert_eq!(
-        fields[2],
-        (
-            "price".to_string(),
-            Type::Union(vec![Type::Int, Type::Float]),
-            false
-        )
-    );
+    assert_eq!(fields[0], ("id".to_string(), ColumnType::Int, false));
+    assert_eq!(fields[1], ("name".to_string(), ColumnType::String, true));
+    assert_eq!(fields[2], ("price".to_string(), ColumnType::Number, false));
     let _ = std::fs::remove_file(&path);
 }
 
@@ -488,18 +443,15 @@ fn a_real_sqlite_computed_column_with_no_backing_table_degrades_honestly() {
     let row_type = reflector
         .reflect("SELECT id, id + 1 AS next_id FROM t")
         .expect("reflect a real SELECT");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape, got {row_type:?}");
-    };
-    let fields = fields.named_fields();
-    assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
+    let fields = named_fields(row_type);
+    assert_eq!(fields[0], ("id".to_string(), ColumnType::Int, false));
     // `id + 1` has no real backing column - `column_metadata()` returns
     // `None` for it, and SQLite's own query planner gives a computed
     // arithmetic expression no declared type either, so this degrades
-    // all the way to `Type::Mixed(false)`, not a guess.
+    // all the way to `ColumnType::Unknown`, not a guess.
     assert_eq!(
         fields[1],
-        ("next_id".to_string(), Type::Mixed(false), false)
+        ("next_id".to_string(), ColumnType::Unknown, false)
     );
     let _ = std::fs::remove_file(&path);
 }
@@ -664,10 +616,7 @@ fn a_real_live_window_function_query_prepares_successfully_and_reflects_column_t
     let row_type = reflector
         .reflect("SELECT id, COUNT(*) OVER() AS total FROM categories")
         .expect("reflect a real window-function SELECT");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape, got {row_type:?}");
-    };
-    let fields = fields.named_fields();
+    let fields = named_fields(row_type);
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].0, "id");
     assert_eq!(fields[1].0, "total");
@@ -791,7 +740,7 @@ fn postgres_session_init_sql_runs_before_every_reflect_call() {
 /// same real column metadata comes back whether the query is a plain
 /// `SELECT` or a view/CTE/derived-table/UNION wrapped around one.
 /// `UNION`'s own per-branch coercion (`int UNION varchar` -> the whole
-/// column reported as `string`, not a PHP-level `Type::Union`) is a
+/// column reported as `string`, not a PHP-level union) is a
 /// real engine behavior these tests confirm directly, not a rule this
 /// project computes itself. Only the *static*-schema-only path
 /// (`checker::sql_reflection::resolve`, no live connection at all)
@@ -807,11 +756,8 @@ fn a_real_live_derived_table_prepares_and_reflects_via_mysql() {
     let row_type = reflector
         .reflect("SELECT t.id FROM (SELECT id FROM categories) AS t")
         .expect("reflect a derived table");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape");
-    };
-    let fields = fields.named_fields();
-    assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
+    let fields = named_fields(row_type);
+    assert_eq!(fields, vec![("id".to_string(), ColumnType::Int, false)]);
 }
 
 #[test]
@@ -824,11 +770,8 @@ fn a_real_live_non_recursive_cte_prepares_and_reflects_via_mysql() {
     let row_type = reflector
         .reflect("WITH t AS (SELECT id FROM categories) SELECT id FROM t")
         .expect("reflect a CTE");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape");
-    };
-    let fields = fields.named_fields();
-    assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
+    let fields = named_fields(row_type);
+    assert_eq!(fields, vec![("id".to_string(), ColumnType::Int, false)]);
 }
 
 #[test]
@@ -841,11 +784,8 @@ fn a_real_live_union_of_matching_types_stays_that_type_via_mysql() {
     let row_type = reflector
         .reflect("SELECT id FROM categories UNION SELECT id FROM images")
         .expect("reflect a UNION");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape");
-    };
-    let fields = fields.named_fields();
-    assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
+    let fields = named_fields(row_type);
+    assert_eq!(fields, vec![("id".to_string(), ColumnType::Int, false)]);
 }
 
 #[test]
@@ -858,14 +798,11 @@ fn a_real_live_union_of_mismatched_types_coerces_to_a_single_string_column_via_m
     let row_type = reflector
         .reflect("SELECT id FROM categories UNION SELECT name FROM categories")
         .expect("reflect a UNION of mismatched types");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape");
-    };
-    let fields = fields.named_fields();
+    let fields = named_fields(row_type);
     // Real MySQL: a UNION's result set has one column definition, not
     // one per branch - `int UNION varchar` reports the whole column as
-    // `string`, never a per-row `Type::Union`.
-    assert_eq!(fields, vec![("id".to_string(), Type::String, false)]);
+    // `string`, never a per-row union.
+    assert_eq!(fields, vec![("id".to_string(), ColumnType::String, false)]);
 }
 
 #[test]
@@ -886,15 +823,12 @@ fn a_real_live_view_prepares_and_reflects_the_underlying_columns_via_mysql() {
     let row_type = reflector
         .reflect("SELECT id, name FROM sql_reflection_virtual_relation_probe")
         .expect("reflect a view");
-    let Type::ArrayShape(fields) = row_type else {
-        panic!("expected an ArrayShape");
-    };
-    let fields = fields.named_fields();
+    let fields = named_fields(row_type);
     assert_eq!(
         fields,
         vec![
-            ("id".to_string(), Type::Int, false),
-            ("name".to_string(), Type::String, false),
+            ("id".to_string(), ColumnType::Int, false),
+            ("name".to_string(), ColumnType::String, false),
         ]
     );
 }
