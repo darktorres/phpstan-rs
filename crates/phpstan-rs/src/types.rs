@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub use syntax::ast::ClassKind;
@@ -212,12 +213,11 @@ pub enum Type {
     },
 }
 
-/// Deliberately not derived - see `Type::Mixed`'s own doc comment: every
-/// arm below mirrors exactly what `#[derive(PartialEq)]` would generate,
-/// except `Mixed`, whose own `bool` this comparison ignores entirely
-/// (matching real PHPStan's own `MixedType::equals()`), so every one of
-/// this codebase's pre-existing `== Type::Mixed`-shaped comparisons keeps
-/// its exact old meaning regardless of which side's `Mixed` is explicit.
+/// Deliberately not derived: `Mixed`'s own `bool` is ignored entirely
+/// (matching real PHPStan's own `MixedType::equals()`, see `Type::Mixed`'s
+/// doc comment), and two NaN float literals are equal (PHPStan's
+/// `ConstantFloatType::equals()`), which makes the relation an `Eq`.
+/// `Hash` below agrees with it.
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -255,7 +255,7 @@ impl PartialEq for Type {
             (Type::IntRange(amin, amax), Type::IntRange(bmin, bmax)) => {
                 amin == bmin && amax == bmax
             }
-            (Type::FloatLiteral(a), Type::FloatLiteral(b)) => a == b,
+            (Type::FloatLiteral(a), Type::FloatLiteral(b)) => a == b || (a.is_nan() && b.is_nan()),
             (Type::Accessory(a), Type::Accessory(b)) => a == b,
             (Type::HasOffsetValue(ak, av), Type::HasOffsetValue(bk, bv)) => ak == bk && av == bv,
             (Type::ReflectedMember(ao, an), Type::ReflectedMember(bo, bn)) => ao == bo && an == bn,
@@ -297,7 +297,147 @@ impl PartialEq for Type {
                     && a_if_false == b_if_false
                     && a_negated == b_negated
             }
-            _ => false,
+            (
+                Type::Mixed(_)
+                | Type::Never
+                | Type::Void
+                | Type::Null
+                | Type::Bool
+                | Type::True
+                | Type::False
+                | Type::Int
+                | Type::IntLiteral(_)
+                | Type::Float
+                | Type::String
+                | Type::StringLiteral(_)
+                | Type::Array(..)
+                | Type::ClassString(_)
+                | Type::ClassKindString(_)
+                | Type::ArrayShape(_)
+                | Type::ObjectShape(_)
+                | Type::Object(..)
+                | Type::ObjectWithoutClass
+                | Type::Resource { .. }
+                | Type::EnumCase(..)
+                | Type::Callable(_)
+                | Type::SelfRef(_)
+                | Type::ParentRef
+                | Type::StaticRef(_)
+                | Type::This
+                | Type::TemplateParam(_)
+                | Type::VarianceArg(..)
+                | Type::Union(_)
+                | Type::BenevolentUnion(_)
+                | Type::Intersection(_)
+                | Type::IntRange(..)
+                | Type::FloatLiteral(_)
+                | Type::Accessory(_)
+                | Type::HasOffsetValue(..)
+                | Type::ReflectedMember(..)
+                | Type::ValueOf(_)
+                | Type::KeyOf(_)
+                | Type::OffsetAccess(..)
+                | Type::ClassConstant { .. }
+                | Type::Conditional { .. },
+                _,
+            ) => false,
+        }
+    }
+}
+
+impl Eq for Type {}
+
+impl Hash for Type {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Type::Mixed(_)
+            | Type::Never
+            | Type::Void
+            | Type::Null
+            | Type::Bool
+            | Type::True
+            | Type::False
+            | Type::Int
+            | Type::Float
+            | Type::String
+            | Type::ObjectWithoutClass
+            | Type::ParentRef
+            | Type::This => {}
+            Type::IntLiteral(n) => n.hash(state),
+            Type::StringLiteral(s) => s.hash(state),
+            Type::Array(k, v) | Type::OffsetAccess(k, v) => {
+                k.hash(state);
+                v.hash(state);
+            }
+            Type::ClassString(inner) | Type::ValueOf(inner) | Type::KeyOf(inner) => {
+                inner.hash(state)
+            }
+            Type::ClassKindString(kind) => kind.hash(state),
+            Type::ArrayShape(shape) | Type::ObjectShape(shape) => shape.hash(state),
+            Type::Object(name, args) => {
+                name.hash(state);
+                args.hash(state);
+            }
+            Type::Resource { closed } => closed.hash(state),
+            Type::EnumCase(class, case) => {
+                class.hash(state);
+                case.hash(state);
+            }
+            Type::Callable(sig) => sig.hash(state),
+            Type::SelfRef(args)
+            | Type::StaticRef(args)
+            | Type::Union(args)
+            | Type::BenevolentUnion(args)
+            | Type::Intersection(args) => args.hash(state),
+            Type::TemplateParam(tp) => tp.hash(state),
+            Type::VarianceArg(variance, inner) => {
+                variance.hash(state);
+                inner.hash(state);
+            }
+            Type::IntRange(min, max) => {
+                min.hash(state);
+                max.hash(state);
+            }
+            // Equal floats hash alike: both zeros, and every NaN.
+            Type::FloatLiteral(f) => {
+                let bits = if *f == 0.0 {
+                    0
+                } else if f.is_nan() {
+                    f64::NAN.to_bits()
+                } else {
+                    f.to_bits()
+                };
+                bits.hash(state)
+            }
+            Type::Accessory(kind) => kind.hash(state),
+            Type::HasOffsetValue(key, value) => {
+                key.hash(state);
+                value.hash(state);
+            }
+            Type::ReflectedMember(owner, member) => {
+                owner.hash(state);
+                member.hash(state);
+            }
+            Type::ClassConstant { class, pattern } => {
+                class.hash(state);
+                pattern.hash(state);
+            }
+            Type::Conditional {
+                subject,
+                target,
+                if_true,
+                if_false,
+                negated,
+                template_subject,
+            } => {
+                subject.hash(state);
+                target.hash(state);
+                if_true.hash(state);
+                if_false.hash(state);
+                negated.hash(state);
+                template_subject.hash(state);
+            }
         }
     }
 }
@@ -306,7 +446,7 @@ impl PartialEq for Type {
 // subclass relationship, or must stay exactly fixed (`Invariant`, the
 // default). `checker::generics::check_variance` composes this through
 // nested generics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Variance {
     #[default]
     Invariant,
@@ -316,7 +456,7 @@ pub enum Variance {
 
 /// The variance a generic type argument is annotated with at its use
 /// site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CallSiteVariance {
     Covariant,
     Contravariant,
@@ -325,7 +465,7 @@ pub enum CallSiteVariance {
 }
 
 /// A `@template` parameter's own metadata.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TemplateParam {
     pub name: String,
     // `@template T of Bound` - `Mixed` when no `of` clause was written.
@@ -368,7 +508,7 @@ impl TemplateParam {
 /// One parameter of a parsed `Closure(...)`/`callable(...)` PHPDoc shape.
 /// A dedicated struct rather than `registry::ParamSig`, whose sibling
 /// `FunctionSig` can't cheaply derive `PartialEq`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallableParam {
     pub ty: Type,
     pub variadic: bool,
@@ -382,7 +522,7 @@ pub struct CallableParam {
 /// return-type slice, with its own templates (`callable<T>(T): T`) -
 /// deliberately not the rest of what real PHPStan's `CallableType`
 /// tracks (purity, assertions).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallableSig {
     pub params: Vec<CallableParam>,
     pub return_type: Box<Type>,
@@ -682,7 +822,7 @@ impl Type {
 // Mirrors real PHPStan's `Accessory*Type` family
 // (`vendor/phpstan-src/src/Type/Accessory/*.php`) - each kind only ever
 // appears wrapped in a `Type::Intersection` alongside its base type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccessoryKind {
     NonEmptyString,
     NonFalsyString,

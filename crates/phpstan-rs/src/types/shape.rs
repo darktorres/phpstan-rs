@@ -55,7 +55,7 @@ impl fmt::Display for ShapeKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ShapeField {
     pub key: ShapeKey,
     pub ty: Type,
@@ -71,7 +71,7 @@ impl ShapeField {
 /// A shape's fields, in order, and - when the shape is unsealed
 /// (`array{a: int, ...}`: other keys may exist too) - the key and value
 /// types those other entries have.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Shape {
     pub fields: Vec<ShapeField>,
     pub unsealed: Option<Box<(Type, Type)>>,

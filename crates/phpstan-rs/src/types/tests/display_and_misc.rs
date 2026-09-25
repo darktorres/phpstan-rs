@@ -62,3 +62,23 @@ fn int_range_and_float_literal_display() {
     );
     assert_eq!(parse_type_string("1.5").to_string(), "1.5");
 }
+
+#[test]
+fn equal_types_hash_alike() {
+    use std::hash::{BuildHasher, BuildHasherDefault};
+    let hash = |ty: &Type| BuildHasherDefault::<rustc_hash::FxHasher>::default().hash_one(ty);
+    let pairs = [
+        (Type::Mixed(true), Type::Mixed(false)),
+        (Type::FloatLiteral(0.0), Type::FloatLiteral(-0.0)),
+        (Type::FloatLiteral(f64::NAN), Type::FloatLiteral(-f64::NAN)),
+        (
+            Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(true))),
+            Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(false))),
+        ),
+    ];
+    for (a, b) in pairs {
+        assert_eq!(a, b);
+        assert_eq!(hash(&a), hash(&b), "{a:?} and {b:?}");
+    }
+    assert_ne!(Type::IntLiteral(1), Type::IntLiteral(2));
+}
