@@ -996,7 +996,10 @@ Gate: the union of all lazily resolved symbols equals today's
 - assertion tables compiled to overlays (`apply_assertion_table` deleted).
 
 **C7. TypeNodeResolver** with `TypeNodeResolverExtension`;
-`parse_type_string` is deleted.
+`parse_type_string` is deleted. It replaces the B5 adapter
+(`registry::type_node`: `parse_type_node` and `mentions_mixed`, both still
+going through the node's printed text) and the checker's
+`resolve_type_node`.
 
 **C8. Reflection extension points** (§3.5), with the built-in implementors.
 Reflection implements ClassHierarchy. The adapter and the duplicate
