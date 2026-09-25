@@ -31,7 +31,7 @@
 //! contains further statements*, not the need to look at a statement's own
 //! non-statement fields.
 
-use crate::ast::{Expr, ExprKind, InstanceofTarget, StaticTarget, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, GlobalVar, InstanceofTarget, StaticTarget, Stmt, StmtKind};
 
 /// This `Expr`'s direct child expressions - see the module doc comment for
 /// the three variants (`Closure`/`ArrowFn`/`NewAnonymousClass`) that
@@ -245,6 +245,13 @@ pub fn stmt_own_exprs(stmt: &Stmt) -> Vec<&Expr> {
         }
         StmtKind::GlobalConst(consts) => consts.iter().map(|c| &c.value).collect(),
         StmtKind::StaticVar(vars) => vars.iter().filter_map(|(_, d)| d.as_ref()).collect(),
+        StmtKind::Global(vars) => vars
+            .iter()
+            .filter_map(|v| match v {
+                GlobalVar::Name(_) => None,
+                GlobalVar::Dynamic(e) => Some(e),
+            })
+            .collect(),
         _ => vec![],
     }
 }

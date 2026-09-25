@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::ast::{BinOp, Expr, ExprKind, Literal, StaticTarget, Stmt, StmtKind};
+use crate::ast::{BinOp, Expr, ExprKind, GlobalVar, Literal, StaticTarget, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::checker::union_types;
 use crate::registry::{NameContext, infer_const_type};
@@ -355,8 +355,8 @@ fn collect_global_names(stmts: &[&Stmt]) -> FxHashSet<Arc<str>> {
 fn collect_global_names_rec(stmts: &[&Stmt], out: &mut FxHashSet<Arc<str>>) {
     for stmt in stmts {
         if let StmtKind::Global(names) = &stmt.kind {
-            for name in names {
-                out.insert(Arc::from(name.as_str()));
+            for name in names.iter().filter_map(GlobalVar::name) {
+                out.insert(Arc::from(name));
             }
         }
         // Don't descend into a nested scope boundary - a nested function/

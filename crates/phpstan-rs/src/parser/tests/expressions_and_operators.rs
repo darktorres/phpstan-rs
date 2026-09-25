@@ -1001,7 +1001,13 @@ fn dynamic_class_expr_after_new_and_instanceof_parses() {
 #[test]
 fn brace_less_double_dollar_variable_variable_parses() {
     let program = parse(r#"<?php global $a, $$b;"#);
-    assert!(matches!(&program[0].kind, StmtKind::Global(names) if names == &["a", "{dynamic}"]));
+    let StmtKind::Global(vars) = &program[0].kind else {
+        panic!("expected a global statement");
+    };
+    assert_eq!(vars[0].name(), Some("a"));
+    assert!(
+        matches!(&vars[1], GlobalVar::Dynamic(Expr { kind: ExprKind::Variable(b), .. }) if &**b == "b")
+    );
 }
 
 #[test]

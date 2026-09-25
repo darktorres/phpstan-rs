@@ -108,7 +108,7 @@ pub enum StmtKind {
     },
     Break(Option<i64>),
     Continue(Option<i64>),
-    Global(Vec<String>),
+    Global(Vec<GlobalVar>),
     FunctionDecl(FunctionDecl),
     ClassDecl(ClassDecl),
     Namespace(String),
@@ -741,6 +741,25 @@ impl StaticTarget {
         match self {
             StaticTarget::Name(..) => None,
             StaticTarget::Expr(e) => Some(e),
+        }
+    }
+}
+
+/// One variable a `global` statement imports.
+#[derive(Debug, Clone)]
+pub enum GlobalVar {
+    /// `global $name;` (the name is without its `$`).
+    Name(Arc<str>),
+    /// `global ${expr};` / `global $$name;`: the name is computed.
+    Dynamic(Expr),
+}
+
+impl GlobalVar {
+    /// The variable's name, when it is written out.
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            GlobalVar::Name(name) => Some(name),
+            GlobalVar::Dynamic(_) => None,
         }
     }
 }

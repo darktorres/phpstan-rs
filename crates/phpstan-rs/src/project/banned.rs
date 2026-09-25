@@ -229,7 +229,12 @@ impl<'a> Walker<'a> {
                             "global {}",
                             names
                                 .iter()
-                                .map(|n| format!("${n}"))
+                                .map(|v| match v {
+                                    GlobalVar::Name(n) => format!("${n}"),
+                                    GlobalVar::Dynamic(e) => {
+                                        format!("${{{}}}", crate::printer::print_expr(e))
+                                    }
+                                })
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ),

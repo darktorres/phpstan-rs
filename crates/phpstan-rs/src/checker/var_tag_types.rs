@@ -536,7 +536,12 @@ impl<'a> Checker<'a> {
                 }
                 own = vars.iter().map(|(n, _)| n.to_string()).collect();
             }
-            StmtKind::Global(names) => own = names.clone(),
+            StmtKind::Global(vars) => {
+                own = vars
+                    .iter()
+                    .filter_map(|v| v.name().map(str::to_string))
+                    .collect();
+            }
             StmtKind::Return(Some(e)) | StmtKind::Throw(e) => {
                 if let [tag] = unnamed.as_slice() {
                     checks.push((

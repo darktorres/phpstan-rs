@@ -57,7 +57,10 @@ fn declare_simple_and_block_forms_parse() {
 #[test]
 fn global_with_dynamic_target_parses() {
     let program = parse(r#"<?php global ${sf("a")};"#);
-    assert!(matches!(&program[0].kind, StmtKind::Global(names) if names == &["{dynamic}"]));
+    assert!(matches!(
+        &program[0].kind,
+        StmtKind::Global(vars) if matches!(vars.as_slice(), [GlobalVar::Dynamic(_)])
+    ));
 }
 
 // Locks in AST-level coverage for parse_switch, parse_do_while,

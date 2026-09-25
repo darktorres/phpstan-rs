@@ -455,21 +455,18 @@ impl Parser {
     }
 
     /// A `global` statement's target - almost always a plain `$name`, but
-    /// PHP also allows `${expr}` there (`global ${sf("a")};`) for a
-    /// runtime-computed variable name. Not modeled beyond parsing past it
-    /// (the checker just gets a placeholder "always defined" entry, which
-    /// is harmless since nothing else can reference this exact name).
-    pub(crate) fn parse_global_target(&mut self) -> Result<String, ParseError> {
+    /// PHP also allows `${expr}` / `$$name` there (`global ${sf("a")};`)
+    /// for a runtime-computed variable name.
+    pub(crate) fn parse_global_target(&mut self) -> Result<GlobalVar, ParseError> {
         if self.eat(&Token::DollarBrace) {
-            self.parse_expression()?;
+            let name = self.parse_expression()?;
             self.expect(&Token::RBrace)?;
-            return Ok("{dynamic}".to_string());
+            return Ok(GlobalVar::Dynamic(name));
         }
         if self.eat(&Token::Dollar) {
-            self.parse_primary()?;
-            return Ok("{dynamic}".to_string());
+            return Ok(GlobalVar::Dynamic(self.parse_primary()?));
         }
-        self.expect_variable().map(|s| s.to_string())
+        self.expect_variable().map(GlobalVar::Name)
     }
 }
 

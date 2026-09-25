@@ -291,7 +291,10 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::Global(vars) => {
-                let names: Vec<String> = vars.clone();
+                let names: Vec<String> = vars
+                    .iter()
+                    .filter_map(|v| v.name().map(str::to_string))
+                    .collect();
                 for tag in &tags {
                     match tag {
                         None if names.len() == 1 => {}
@@ -783,13 +786,22 @@ impl<'a> Checker<'a> {
             // which this checker doesn't track - Mixed is the honest
             // answer, but the important part is that it's bound at all, so
             // using it afterward isn't flagged as undefined.
-            StmtKind::Global(names) => {
-                for name in names {
+            StmtKind::Global(vars) => {
+                for var in vars {
+                    let name = match var {
+                        GlobalVar::Name(name) => name,
+                        // `global ${expr};` imports a variable whose name
+                        // is only known at runtime.
+                        GlobalVar::Dynamic(e) => {
+                            self.check_expr(e, locals, label);
+                            continue;
+                        }
+                    };
                     // `$this` is real PHP's own implicitly-bound
                     // reference, not a real global - "Cannot use $this
                     // as global variable." is a real, unconditional
                     // fatal error.
-                    if name == "this" {
+                    if &**name == "this" {
                         self.report(
                             label.to_string(),
                             "cannot use $this as global variable".to_string(),
@@ -811,11 +823,11 @@ impl<'a> Checker<'a> {
                         let ty = self
                             .registry
                             .global_variables
-                            .get(name.as_str())
+                            .get(&**name)
                             .cloned()
                             .unwrap_or(Type::Mixed(false));
                         self.probe_hit_at(stmt.span, &ty);
-                        locals.declare(name.clone(), ty, stmt.span);
+                        locals.declare(name.to_string(), ty, stmt.span);
                     }
                 }
             }

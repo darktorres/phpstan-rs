@@ -507,9 +507,14 @@ impl<'a> Walker<'a> {
             // their own (only the whole statement's) - the same
             // imprecision `Checker::declare`'s own instrumentation for
             // these two shapes accepts (`checker/stmt.rs`).
-            StmtKind::Global(names) => {
-                for name in names {
-                    self.record_var_self(out, stmt.span, current_class, &Arc::from(name.as_str()));
+            StmtKind::Global(vars) => {
+                for var in vars {
+                    match var {
+                        GlobalVar::Name(name) => {
+                            self.record_var_self(out, stmt.span, current_class, name);
+                        }
+                        GlobalVar::Dynamic(e) => self.expr(e, ctx, current_class, out),
+                    }
                 }
             }
             StmtKind::StaticVar(vars) => {
