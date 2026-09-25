@@ -475,6 +475,15 @@ impl Type {
         }
     }
 
+    /// A union of `members` of the same kind as `self`: benevolent when
+    /// `self` is a benevolent union, plain otherwise.
+    pub(crate) fn with_members(&self, members: Vec<Type>) -> Type {
+        match self {
+            Type::BenevolentUnion(_) => Type::BenevolentUnion(members),
+            _ => Type::Union(members),
+        }
+    }
+
     /// A closure/arrow-fn literal's own value: a real `Closure` instance
     /// (so `->bindTo()`/`->call()`/`instanceof Closure` keep resolving
     /// against the `Closure` class) that also carries the literal's own

@@ -96,7 +96,7 @@ fn is_object_like(ty: &Type) -> bool {
 /// strictly more genuinely-compatible members than before, never fewer.
 pub(crate) fn narrow_type_to(registry: &Registry, original: &Type, target: &Type) -> Type {
     match original {
-        Type::Union(members) => {
+        Type::Union(members) | Type::BenevolentUnion(members) => {
             let kept: Vec<Type> = members
                 .iter()
                 .filter(|m| registry.is_assignable(m, target))
@@ -105,7 +105,7 @@ pub(crate) fn narrow_type_to(registry: &Registry, original: &Type, target: &Type
             match kept.len() {
                 0 => target.clone(),
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => original.with_members(kept),
             }
         }
         // Blindly returning `target` would discard
@@ -189,7 +189,7 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // bare one does below - a member that doesn't hit a new arm
         // still falls through to the same `other.clone()` it reached
         // directly before.
-        Type::Union(members) => {
+        Type::Union(members) | Type::BenevolentUnion(members) => {
             let kept: Vec<Type> = members
                 .iter()
                 .filter(|m| !is_subtype(m, excluded))
@@ -198,7 +198,7 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
             match kept.len() {
                 0 => Type::Never,
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => original.with_members(kept),
             }
         }
         // `$x !== ''` on a plain `string`. Deliberately not extended to an
