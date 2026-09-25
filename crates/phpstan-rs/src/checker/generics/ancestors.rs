@@ -534,7 +534,7 @@ impl<'a> Checker<'a> {
                 let PhpDocTagValue::ExtendsLike { ty: node } = &t.value else {
                     continue;
                 };
-                let ty = types::parse_type_string(&node.to_source_string());
+                let ty = registry::parse_type_node(node);
                 let ty = registry::mark_template_params(ty, class_templates);
                 let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
                 let ty = registry::substitute_type_aliases(ty, &aliases);

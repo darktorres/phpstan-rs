@@ -100,22 +100,34 @@ impl<'a> Checker<'a> {
         hint: Option<&str>,
     ) -> (Type, Vec<(std::sync::Arc<str>, std::sync::Arc<str>)>) {
         match hint {
-            Some(h) => {
-                let ty = types::parse_type_string(h);
-                let mut params = self.current_class_template_params();
-                params.extend(self.current_function_template_params());
-                let ty = if params.is_empty() {
-                    ty
-                } else {
-                    registry::mark_template_params(ty, &params)
-                };
-                let mut case_refs = Vec::new();
-                registry::collect_class_name_case_refs(&ty, &self.name_ctx, &mut case_refs);
-                let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
-                (self.registry.resolve_deferred_value_of_now(ty), case_refs)
-            }
+            Some(h) => self.resolve_written_type(types::parse_type_string(h)),
             None => (Type::Mixed(false), Vec::new()),
         }
+    }
+
+    /// `resolve_type_hint` for a parsed PHPDoc type.
+    pub(crate) fn resolve_type_node(&self, node: &crate::phpdoc_grammar::TypeNode) -> Type {
+        self.resolve_written_type(registry::parse_type_node(node)).0
+    }
+
+    /// Resolves a type as written in the current scope: its templates
+    /// marked, its class names resolved, with the case refs of those names.
+    #[allow(clippy::type_complexity)]
+    fn resolve_written_type(
+        &self,
+        ty: Type,
+    ) -> (Type, Vec<(std::sync::Arc<str>, std::sync::Arc<str>)>) {
+        let mut params = self.current_class_template_params();
+        params.extend(self.current_function_template_params());
+        let ty = if params.is_empty() {
+            ty
+        } else {
+            registry::mark_template_params(ty, &params)
+        };
+        let mut case_refs = Vec::new();
+        registry::collect_class_name_case_refs(&ty, &self.name_ctx, &mut case_refs);
+        let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
+        (self.registry.resolve_deferred_value_of_now(ty), case_refs)
     }
 
     /// Rebuilds the same `HashMap<String, TemplateParam>` `registry::

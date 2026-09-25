@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
         super::phpdoc_unresolvable::var_tag_nodes(doc)
             .into_iter()
             .map(|(name, node)| {
-                let ty = self.resolve_type_hint(Some(&node.to_source_string()));
+                let ty = self.resolve_type_node(&node);
                 let ty = match &self.current_class {
                     Some(class) => match self.registry.classes.get(class.as_str()) {
                         Some(info) if !info.type_aliases.is_empty() => {
