@@ -1,4 +1,4 @@
-use crate::registry::Registry;
+use crate::types::relation::Relation;
 use crate::types::{self, ShapeKey, Type, Variance};
 use syntax::ast::ClassKind;
 
@@ -13,11 +13,11 @@ const NULLABLES_CHECK_LEVEL: u8 = 8;
 const EXPLICIT_MIXED_CHECK_LEVEL: u8 = 9;
 const IMPLICIT_MIXED_CHECK_LEVEL: u8 = 10;
 
-impl Registry {
+impl Relation<'_> {
     /// Type-compatibility check that consults the class hierarchy for
     /// `Object` types; every other case defers to `types::is_subtype`,
     /// which has no notion of class context.
-    pub fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
+    pub(crate) fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
             // A `key-of<T>`/`T[K]` still over a template is what `T`'s
             // bound makes it.
@@ -47,7 +47,7 @@ impl Registry {
             // false-positive" leniency elsewhere (e.g. the `Array(Mixed)`
             // leniency just below).
             (Type::Object(class, _), Type::Callable(_)) => {
-                self.lookup_method(class, "__invoke").is_some()
+                self.hierarchy.has_method(class, "__invoke")
             }
             (Type::String | Type::StringLiteral(_), Type::Callable(_)) => true,
             (Type::Array(_, _) | Type::ArrayShape(_), Type::Callable(_)) => true,
@@ -63,10 +63,10 @@ impl Registry {
             // comparison - the one deliberate leniency left in this
             // design.
             (Type::Object(a, args_a), Type::Object(b, args_b)) => {
-                if a != b && !self.is_subclass_of(a, b) {
+                if a != b && !self.hierarchy.is_subclass_of(a, b) {
                     return false;
                 }
-                let Some(info_b) = self.classes.get(b.as_str()) else {
+                let Some(info_b) = self.hierarchy.class_exactly(b) else {
                     return true;
                 };
                 // `b` isn't generic at all, so the whole template-binding
@@ -108,7 +108,7 @@ impl Registry {
                 let effective_args_a: Vec<Type> = if a == b {
                     args_a.clone()
                 } else {
-                    let bindings = self.class_template_bindings(a, args_a, b);
+                    let bindings = self.hierarchy.ancestor_template_bindings(a, args_a, b);
                     info_b
                         .templates
                         .iter()
@@ -134,7 +134,8 @@ impl Registry {
                     // `vendor/phpstan-src` - `None` here means a `*`
                     // annotation, real PHPStan's own "don't check this
                     // argument at all."
-                    let Some(variance) = self.effective_slot_variance(b, i, &b_i) else {
+                    let Some(variance) = types::effective_slot_variance(self.hierarchy, b, i, &b_i)
+                    else {
                         continue;
                     };
                     let a_i = types::strip_call_site_variance(&a_i)
@@ -204,7 +205,9 @@ impl Registry {
             // `UnitEnum`/`BackedEnum` (both synthesized `implements`
             // entries every enum gets, see `ClassInfo::from_enum_decl`)
             // and any interface the enum itself declares.
-            (Type::EnumCase(fqn, _), Type::Object(b, _)) => fqn == b || self.is_subclass_of(fqn, b),
+            (Type::EnumCase(fqn, _), Type::Object(b, _)) => {
+                fqn == b || self.hierarchy.is_subclass_of(fqn, b)
+            }
             // A case is only ever itself; no hierarchy to widen through.
             (Type::EnumCase(class_a, case_a), Type::EnumCase(class_b, case_b)) => {
                 class_a == class_b && case_a == case_b
@@ -224,8 +227,9 @@ impl Registry {
                 let Type::Object(name, _) = &**a else {
                     return false;
                 };
-                self.lookup_class(name)
-                    .is_some_and(|(_, info)| info.kind == *kind)
+                self.hierarchy
+                    .find_class(name)
+                    .is_some_and(|class| class.kind == *kind)
             }
             (Type::ClassString(a), Type::ClassString(b)) => self.is_assignable(a, b),
             // Mirrors `types::is_subtype`'s own bound-aware `TemplateParam`
@@ -424,12 +428,12 @@ impl Registry {
             (Type::ObjectWithoutClass, Type::ObjectShape(_)) => true,
             // A class the registry never saw can't be checked either way.
             (Type::Object(class, _), Type::HasMethod(method)) => {
-                !self.classes.contains_key(class.as_str())
-                    || self.lookup_method(class, method).is_some()
+                self.hierarchy.class_exactly(class).is_none()
+                    || self.hierarchy.has_method(class, method)
             }
             (Type::Object(class, _), Type::HasProperty(property)) => {
-                !self.classes.contains_key(class.as_str())
-                    || self.lookup_property(class, property).is_some()
+                self.hierarchy.class_exactly(class).is_none()
+                    || self.hierarchy.property_type(class, property).is_some()
             }
             (Type::ObjectShape(shape), Type::HasProperty(property)) => shape
                 .field(&ShapeKey::from_name(property))
@@ -437,8 +441,8 @@ impl Registry {
             (Type::Object(class, _), Type::ObjectShape(shape)) => {
                 class == "stdClass"
                     || shape.fields.iter().all(|f| {
-                        match self.lookup_property(class, &f.key.to_string()) {
-                            Some(p) => self.is_assignable(&p.ty, &f.ty),
+                        match self.hierarchy.property_type(class, &f.key.to_string()) {
+                            Some(property_ty) => self.is_assignable(&property_ty, &f.ty),
                             None => f.optional,
                         }
                     })
@@ -457,7 +461,7 @@ impl Registry {
             // never an actual `Params`-named object - only the
             // Object-vs-Object arm's leniency would leave those failing
             // just the same way.
-            (_, Type::Object(name, _)) if !self.classes.contains_key(name.as_str()) => true,
+            (_, Type::Object(name, _)) if self.hierarchy.class_exactly(name).is_none() => true,
             // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
             (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => true,
             _ => types::is_subtype(sub, sup),
@@ -493,7 +497,7 @@ impl Registry {
     /// unchanged), but doesn't get its own separate `.all()`-vs-`.any()`
     /// switch the way `NULLABLES_CHECK_LEVEL` gets its own null-stripping
     /// switch.
-    pub fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
+    pub(crate) fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
         // Never configured means "assume the strictest threshold for
         // `checkNullables`/`checkUnionTypes`" (`NULLABLES_CHECK_LEVEL`,
         // matching this method's own pre-existing behavior exactly - the
@@ -652,7 +656,7 @@ impl Registry {
     /// that threshold. An unconfigured level never triggers it, the same
     /// "`checkExplicitMixed`/`checkImplicitMixed` stay off unless opted
     /// into" default `accepts_at_configured_level` documents.
-    pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
+    pub(crate) fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
         let Type::Mixed(is_explicit) = ty else {
             return None;
         };
@@ -734,7 +738,10 @@ impl Registry {
                         let (Some(ca), Some(cb)) = (class_a, class_b) else {
                             return false;
                         };
-                        if ca == cb || self.is_subclass_of(ca, cb) || self.is_subclass_of(cb, ca) {
+                        if ca == cb
+                            || self.hierarchy.is_subclass_of(ca, cb)
+                            || self.hierarchy.is_subclass_of(cb, ca)
+                        {
                             return false;
                         }
                         self.is_closed_class_kind(ca) && self.is_closed_class_kind(cb)
@@ -750,9 +757,9 @@ impl Registry {
     /// (freely, multiply implementable) or an unregistered name (unknown
     /// hierarchy, don't guess).
     fn is_closed_class_kind(&self, name: &str) -> bool {
-        self.classes
-            .get(name)
-            .is_some_and(|info| matches!(info.kind, ClassKind::Class | ClassKind::Enum))
+        self.hierarchy
+            .class_exactly(name)
+            .is_some_and(|class| matches!(class.kind, ClassKind::Class | ClassKind::Enum))
     }
 
     /// Real PHPStan's own `InitializerExprTypeResolver::

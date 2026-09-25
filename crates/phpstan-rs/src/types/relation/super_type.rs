@@ -1,8 +1,8 @@
-use crate::registry::Registry;
+use crate::types::relation::Relation;
 use crate::types::{self, AccessoryKind, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
 
-impl Registry {
+impl Relation<'_> {
     /// Whether every value of `sub` is a `sup` (`Yes`), none is (`No`),
     /// or some are (`Maybe`) - real PHPStan's `isSuperTypeOf`, as the
     /// PHPDoc-vs-native rules read it. `Yes` follows `is_assignable`, so it
@@ -11,7 +11,7 @@ impl Registry {
     /// neither of which can be extended into the other), and anything
     /// unprovable is `Maybe`, including any comparison with a class the
     /// registry doesn't know.
-    pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
+    pub(crate) fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         match (sup, sub) {
             (Type::Mixed(_), _) | (_, Type::Never) => TrinaryLogic::Yes,
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
@@ -89,7 +89,9 @@ impl Registry {
                 TrinaryLogic::Yes
             }
             (Type::Object(a, _), Type::Object(b, _))
-                if [a, b].iter().any(|n| self.lookup_class(n).is_none()) =>
+                if [a, b]
+                    .iter()
+                    .any(|n| self.hierarchy.find_class(n).is_none()) =>
             {
                 TrinaryLogic::Maybe
             }
@@ -186,7 +188,7 @@ impl Registry {
     /// `TypeCombinator::union`'s absorption for display: a member some
     /// other member strictly contains is dropped (`object|Foo` is
     /// `object`, `int|1` is `int`).
-    pub fn absorb_union_subtypes(&self, ty: &Type) -> Type {
+    pub(crate) fn absorb_union_subtypes(&self, ty: &Type) -> Type {
         let Type::Union(members) = ty else {
             return ty.clone();
         };
@@ -210,20 +212,22 @@ impl Registry {
         if sup == sub {
             return TrinaryLogic::Maybe;
         }
-        let (Some((_, sup_info)), Some((_, sub_info))) =
-            (self.lookup_class(sup), self.lookup_class(sub))
-        else {
+        let (Some(sup_info), Some(sub_info)) = (
+            self.hierarchy.find_class(sup),
+            self.hierarchy.find_class(sub),
+        ) else {
             return TrinaryLogic::Maybe;
         };
-        if self.is_subclass_of(sup, sub) {
+        if self.hierarchy.is_subclass_of(sup, sub) {
             return TrinaryLogic::Maybe;
         }
         // A `No` needs the whole hierarchy of both sides: an ancestor the
         // registry never indexed could still connect them.
         let hierarchy_known = |class: &str| {
-            self.all_ancestor_names(class)
+            self.hierarchy
+                .ancestor_names(class)
                 .iter()
-                .all(|a| self.lookup_class(a).is_some())
+                .all(|a| self.hierarchy.find_class(a).is_some())
         };
         if !hierarchy_known(sup) || !hierarchy_known(sub) {
             return TrinaryLogic::Maybe;

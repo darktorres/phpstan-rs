@@ -6,8 +6,10 @@ pub use syntax::name::Name;
 
 mod conditional;
 mod display;
+mod hierarchy;
 mod late;
 mod parse;
+pub(crate) mod relation;
 mod shape;
 mod subtype;
 mod templates;
@@ -16,11 +18,13 @@ mod union;
 
 pub use conditional::resolve_conditional;
 pub(crate) use conditional::{conditional_branch, union_of_branches};
+pub use hierarchy::{ClassFacts, ClassHierarchy, effective_slot_variance};
 pub(crate) use late::{contains_late, resolve_late_to_bounds, settle};
 pub use parse::parse_type_string;
 pub(crate) use parse::{
     canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance,
 };
+pub use relation::Relation;
 pub use shape::{Shape, ShapeField, ShapeKey};
 pub use subtype::is_subtype;
 pub(crate) use subtype::types_definitely_disjoint;

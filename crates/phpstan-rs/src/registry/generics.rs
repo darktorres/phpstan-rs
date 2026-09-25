@@ -2,7 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::registry::Registry;
-use crate::types::{self, CallSiteVariance, Type, Variance};
+use crate::types::{self, Type, Variance};
 
 impl Registry {
     /// This class's own declared variance for the `index`-th `@template`
@@ -30,35 +30,14 @@ impl Registry {
         })
     }
 
-    /// The variance that actually governs one generic argument slot - a
-    /// call-site variance annotation written directly on `arg`
-    /// (`Type::VarianceArg`) always wins
-    /// when present; otherwise falls back to `class`'s own declared
-    /// variance for that slot (`slot_variance`, `Invariant` by default
-    /// when the class declares no variance for it, `None`/"don't know"
-    /// when `class` or the slot itself isn't registered at all). Both
-    /// assignability (`is_assignable` below) and declaration-soundness
-    /// composition (`checker::generics::walk_variance`) resolve a slot's
-    /// variance with this same two-step rule. `None` here (as opposed to
-    /// `Invariant`) means
-    /// "no real basis to say anything about this slot at all," the same
-    /// "don't know, don't guess" case `slot_variance` itself already
-    /// returns `None` for.
+    /// `types::effective_slot_variance` against this registry.
     pub(crate) fn effective_slot_variance(
         &self,
         class: &str,
         index: usize,
         arg: &Type,
     ) -> Option<Variance> {
-        match arg {
-            Type::VarianceArg(CallSiteVariance::Covariant, _) => Some(Variance::Covariant),
-            Type::VarianceArg(CallSiteVariance::Contravariant, _) => Some(Variance::Contravariant),
-            // `*`: always compatible, never recursed into - every
-            // consumer treats that as its own terminal case rather than a
-            // fourth composable variance kind.
-            Type::VarianceArg(CallSiteVariance::Bivariant, _) => None,
-            _ => self.slot_variance(class, index),
-        }
+        types::effective_slot_variance(self, class, index, arg)
     }
 
     /// Binds a generic-typed receiver's own carried type arguments

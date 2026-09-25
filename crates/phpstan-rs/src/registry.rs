@@ -7,7 +7,6 @@ use syntax::ast::Stmt;
 pub mod access_attributes;
 mod anonymous_class;
 mod assertion_table;
-mod assignability;
 mod class_info;
 mod dynamic_constants;
 mod function_sig;
@@ -17,8 +16,8 @@ mod hierarchy;
 mod index;
 mod name_context;
 mod purity;
+mod relation;
 mod resolve;
-mod super_type;
 
 pub(crate) use anonymous_class::collect_anonymous_classes;
 pub(crate) use class_info::hook_body_references_property;

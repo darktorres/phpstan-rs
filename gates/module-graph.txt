@@ -75,7 +75,6 @@ module pcre_validate builtins
 module php_stubs reflection
 module stub_attributes reflection
 module registry reflection
-module registry::assignability types
 module registry::assertion_table reflection
 module assertion_tables reflection
 module registry::dynamic_constants analyser
@@ -223,7 +222,6 @@ allow config sql_reflection_config C1
 
 allow registry doctrine_functions C2
 allow registry restricted_symbols C2
-allow registry::assignability registry C2
 
 allow registry registry::global_vars C9
 allow registry registry::purity C9
