@@ -685,6 +685,9 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
             return;
         }
     };
+    for warning in &analysis.lex_warnings {
+        eprintln!("{warning}");
+    }
     report(
         analysis,
         args.generate_baseline.as_deref(),
@@ -712,6 +715,7 @@ fn report(
         skipped_context,
         context_loaded,
         check_panics,
+        lex_warnings: _,
     } = analysis;
     if let Some(generate_baseline_path) = generate_baseline_path {
         let generated = if baseline_per_identifier {

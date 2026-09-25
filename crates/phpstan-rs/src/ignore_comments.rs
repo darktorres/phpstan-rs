@@ -27,7 +27,7 @@ pub(crate) struct IgnoreComments {
 /// Lexes `source` and scans its comments.
 #[cfg(test)]
 pub(crate) fn scan(source: &str) -> IgnoreComments {
-    let (tokens, comments) = crate::lexer::Lexer::new(source).tokenize_with_comments();
+    let (tokens, comments, _) = crate::lexer::Lexer::new(source).tokenize_with_comments();
     scan_tokens(&tokens, &comments)
 }
 

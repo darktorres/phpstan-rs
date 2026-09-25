@@ -8,7 +8,7 @@ use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::diagnostic::{self, Diagnostic};
 use crate::ignore_comments;
-use crate::lexer::Lexer;
+use crate::lexer::{LexWarning, Lexer};
 use crate::name_resolution::NameContext;
 use crate::parser::{ParseError, Parser};
 use crate::pest_config::PestConfig;
@@ -920,6 +920,7 @@ impl Project {
     ) {
         let ParsedFile {
             ast,
+            lex_warnings: _,
             functions,
             classes,
             references,
@@ -1199,7 +1200,7 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let (ast, ignores) = parse_with_ignores(new_source)?;
+        let (ast, ignores, _) = parse_with_ignores(new_source)?;
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
@@ -2271,12 +2272,12 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
 
 /// Parses `source`, reading its inline ignore comments from the same
 /// lexing.
-fn parse_with_ignores(
-    source: &str,
-) -> Result<(Vec<Stmt>, ignore_comments::IgnoreComments), ParseError> {
-    let (tokens, comments) = Lexer::new(source).tokenize_with_comments();
+type Parsed = (Vec<Stmt>, ignore_comments::IgnoreComments, Vec<LexWarning>);
+
+fn parse_with_ignores(source: &str) -> Result<Parsed, ParseError> {
+    let (tokens, comments, warnings) = Lexer::new(source).tokenize_with_comments();
     let ignores = ignore_comments::scan_tokens(&tokens, &comments);
-    Ok((Parser::new(tokens).parse_program()?, ignores))
+    Ok((Parser::new(tokens).parse_program()?, ignores, warnings))
 }
 
 /// Everything about loading one file that's pure - parsing, plus every
@@ -2288,6 +2289,8 @@ fn parse_with_ignores(
 /// collision-resolution policy needs (see that method's own doc comment).
 pub struct ParsedFile {
     ast: Vec<Stmt>,
+    // What the lexer skipped over (see `ParsedFile::lex_warnings`).
+    lex_warnings: Vec<LexWarning>,
     functions: Vec<String>,
     classes: Vec<String>,
     references: FxHashSet<String>,
@@ -2347,7 +2350,7 @@ pub struct ParsedFile {
 /// `path` to each call with no coordination needed between them.
 #[hotpath::measure]
 pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile, ParseError> {
-    let (ast, ignores) = parse_with_ignores(source)?;
+    let (ast, ignores, lex_warnings) = parse_with_ignores(source)?;
     let (functions, classes) = declared_names(&ast);
     let references = deps::referenced_names(&ast);
     let built_decls = crate::registry::build_declarations(&ast);
@@ -2359,6 +2362,7 @@ pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile
     duplicate_class_sites.index(&ast, &mut NameContext::default(), path, false, is_stub);
     Ok(ParsedFile {
         ast,
+        lex_warnings,
         functions,
         classes,
         references,
@@ -2369,6 +2373,13 @@ pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile
         duplicate_class_sites,
         ignores,
     })
+}
+
+impl ParsedFile {
+    /// What the lexer skipped over rather than failing on.
+    pub fn lex_warnings(&self) -> &[LexWarning] {
+        &self.lex_warnings
+    }
 }
 
 /// Recursively collects every `.php` file under `path` - shared by the CLI

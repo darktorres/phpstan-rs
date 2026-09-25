@@ -85,6 +85,8 @@ pub struct Loaded {
     skipped_analyze: usize,
     skipped_context: usize,
     context_loaded: usize,
+    /// What the lexer skipped over in the loaded files, one line each.
+    pub lex_warnings: Vec<String>,
 }
 
 /// What one run produced, after the full post-processing chain.
@@ -98,6 +100,8 @@ pub struct Analysis {
     pub context_loaded: usize,
     /// Files whose check panicked, with the panic message, sorted.
     pub check_panics: Vec<(PathBuf, String)>,
+    /// What the lexer skipped over in the loaded files, one line each.
+    pub lex_warnings: Vec<String>,
 }
 
 /// The directory a composer project containing `dirs` is rooted at: the
@@ -569,10 +573,23 @@ impl Session {
 
         // Context files first, so an analysed file's declaration wins a
         // name collision.
+        let mut lex_warnings = Vec::new();
+        let mut note_lex_warnings = |path: &Path, parsed: &ParsedFile| {
+            lex_warnings.extend(parsed.lex_warnings().iter().map(|w| {
+                format!(
+                    "warning: {}:{}:{}: {}",
+                    path.display(),
+                    w.span.start.line,
+                    w.span.start.col,
+                    w.message
+                )
+            }));
+        };
         let mut skipped_context = 0usize;
         for (path, parsed) in context_files.iter().zip(context_parsed) {
             match parsed {
                 Some((source, parsed)) => {
+                    note_lex_warnings(path, &parsed);
                     project.insert_parsed_file(path.clone(), parsed, source, false)
                 }
                 None => skipped_context += 1,
@@ -584,6 +601,7 @@ impl Session {
         for (path, parsed) in analyze_files.iter().zip(analyze_parsed) {
             match parsed {
                 Some((source, parsed)) => {
+                    note_lex_warnings(path, &parsed);
                     analyze_sizes.insert(path.clone(), source.len());
                     project.insert_parsed_file(path.clone(), parsed, source, true)
                 }
@@ -603,6 +621,7 @@ impl Session {
             skipped_analyze,
             skipped_context,
             context_loaded: context_files.len() - skipped_context,
+            lex_warnings,
         })
     }
 
@@ -616,6 +635,7 @@ impl Session {
             skipped_analyze,
             skipped_context,
             context_loaded,
+            lex_warnings,
         } = loaded;
 
         // `Project` has no interior mutability a panic could leave
@@ -764,6 +784,7 @@ impl Session {
             skipped_context,
             context_loaded,
             check_panics,
+            lex_warnings,
         }
     }
 }

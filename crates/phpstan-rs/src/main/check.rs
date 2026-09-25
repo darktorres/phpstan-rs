@@ -85,7 +85,16 @@ pub(crate) fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
         // guards against the lexer's own, separate, still-panic-based
         // error handling (out of scope for this parser-only conversion).
         let result = std::panic::catch_unwind(|| {
-            let tokens = Lexer::new(&source).tokenize_with_spans();
+            let (tokens, _, warnings) = Lexer::new(&source).tokenize_with_comments();
+            for w in &warnings {
+                eprintln!(
+                    "warning: {}:{}:{}: {}",
+                    path.display(),
+                    w.span.start.line,
+                    w.span.start.col,
+                    w.message
+                );
+            }
             Parser::new(tokens).parse_program()
         });
         match result {

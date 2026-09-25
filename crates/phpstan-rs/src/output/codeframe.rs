@@ -47,7 +47,7 @@ fn add_range(highlights: &mut Highlights, start: Position, end: Position, colour
 
 fn highlights_for(source: &str) -> Highlights {
     let mut highlights = Highlights::default();
-    let (tokens, comments) = Lexer::new(source).tokenize_with_comments();
+    let (tokens, comments, _) = Lexer::new(source).tokenize_with_comments();
     for (token, span, _) in &tokens {
         if let Some(colour) = token_colour(token) {
             add_range(&mut highlights, span.start, span.end, colour);

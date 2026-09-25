@@ -9,6 +9,13 @@ use stub_attrs::{
     append_param_type_override, append_return_type_override, skip_trailing_attribute_groups,
 };
 
+/// Something the lexer skipped over rather than failing on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LexWarning {
+    pub span: Span,
+    pub message: String,
+}
+
 pub struct Lexer<'a> {
     src: &'a [u8],
     pos: usize,
@@ -91,6 +98,7 @@ pub struct Lexer<'a> {
     // Byte ranges of every `//`, `#` and `/* */` comment skipped so far
     // (doc comments are tokens of their own).
     comments: Vec<(usize, usize)>,
+    warnings: Vec<LexWarning>,
     // `#[Alias(` prefixes this file imports for the two stub attributes
     // (`use JetBrains\PhpStorm\Internal\PhpStormStubsElementAvailable
     // as Alias;`): (prefix, is the availability attribute).
@@ -180,6 +188,7 @@ impl<'a> Lexer<'a> {
             pending_param_doc_override: None,
             pending_keyword_raw: None,
             comments: Vec::new(),
+            warnings: Vec::new(),
             stub_attribute_aliases: stub_attribute_aliases(src),
         }
     }
@@ -202,6 +211,7 @@ impl<'a> Lexer<'a> {
             pending_param_doc_override: None,
             pending_keyword_raw: None,
             comments: Vec::new(),
+            warnings: Vec::new(),
             stub_attribute_aliases: stub_attribute_aliases(src),
         }
     }
@@ -291,8 +301,10 @@ impl<'a> Lexer<'a> {
     }
 
     /// `tokenize_with_spans`, plus every non-doc comment as its start
-    /// position and source text.
-    pub fn tokenize_with_comments(mut self) -> (Vec<SpannedToken>, Vec<(Position, String)>) {
+    /// position and source text, and the warnings for what was skipped.
+    pub fn tokenize_with_comments(
+        mut self,
+    ) -> (Vec<SpannedToken>, Vec<(Position, String)>, Vec<LexWarning>) {
         let tokens = self.run();
         let comments = std::mem::take(&mut self.comments)
             .into_iter()
@@ -301,7 +313,7 @@ impl<'a> Lexer<'a> {
                 (self.line_col_at(start), text)
             })
             .collect();
-        (tokens, comments)
+        (tokens, comments, self.warnings)
     }
 
     fn run(&mut self) -> Vec<(Token, Span, Option<String>)> {
@@ -990,10 +1002,14 @@ impl<'a> Lexer<'a> {
             b'\\' => Token::Backslash,
             0 => Token::Eof,
             other => {
-                eprintln!(
-                    "warning: unexpected byte 0x{:02x} in PHP source, skipping",
-                    other
-                );
+                let span = Span {
+                    start: self.line_col_at(self.pos - 1),
+                    end: self.line_col_at(self.pos),
+                };
+                self.warnings.push(LexWarning {
+                    span,
+                    message: format!("unexpected byte 0x{other:02x} in PHP source, skipping"),
+                });
                 self.next_token()
             }
         }

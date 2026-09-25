@@ -170,3 +170,23 @@ fn a_short_echo_tag_after_inline_html_still_echoes() {
         "{toks:?}"
     );
 }
+
+#[test]
+fn an_unexpected_byte_is_a_warning_at_its_position_not_output() {
+    let (tokens, _, warnings) = Lexer::new("<?php\n$a = 1;\x01 $b;").tokenize_with_comments();
+    assert_eq!(
+        warnings,
+        vec![LexWarning {
+            span: Span {
+                start: Position { line: 2, col: 8 },
+                end: Position { line: 2, col: 9 },
+            },
+            message: "unexpected byte 0x01 in PHP source, skipping".to_string(),
+        }]
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|(t, _, _)| matches!(t, Token::Variable(v) if &**v == "b"))
+    );
+}
