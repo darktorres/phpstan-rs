@@ -6,7 +6,7 @@
 //! `Doctrine\DBAL\Connection::fetch*` call actually hands it to PHP -
 //! the same real-world shape `staabm/phpstan-dba` uses.
 //!
-//! Every rule here mirrors `sql_reflection_schema`'s own static-catalog
+//! Every rule here mirrors `schema`'s own static-catalog
 //! translation table (A2) in *outcome*, not in code: the two inputs are
 //! fundamentally different shapes (a parsed DDL `ColumnDef` there, a
 //! live wire-protocol `Column`/`ColumnType` here), so this is a
@@ -26,9 +26,9 @@ use mysql::prelude::Queryable;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::tokenizer::{Location, Token, Tokenizer};
 
-use crate::sql_reflection_column::{Column, ColumnType};
-use crate::sql_reflection_config::{SqlDriver, SqlReflectionConfig};
-use crate::sql_reflection_schema::SchemaCatalog;
+use crate::column::{Column, ColumnType};
+use crate::config::{SqlDriver, SqlReflectionConfig};
+use crate::schema::SchemaCatalog;
 
 /// One live-or-cached connection's own answer to "what columns does
 /// this SQL string's own result set have?" - `None` when it can't be
@@ -253,18 +253,18 @@ fn mysql_column_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> Col
         | MysqlType::MYSQL_TYPE_YEAR
         | MysqlType::MYSQL_TYPE_NEWDATE => ColumnType::String,
         // mysqlnd returns DECIMAL/NEWDECIMAL as a string unconditionally
-        // - confirmed live, see `sql_reflection_schema`'s own doc
+        // - confirmed live, see `schema`'s own doc
         // comment for the full verification note. FLOAT/DOUBLE are the
         // native type - PDO's own real `ATTR_STRINGIFY_FETCHES` default
         // is `false`, and neither Doctrine DBAL nor this corpus's own
-        // code ever sets it (see `sql_reflection_schema`'s own doc
+        // code ever sets it (see `schema`'s own doc
         // comment for the full correction/verification note).
         MysqlType::MYSQL_TYPE_DECIMAL | MysqlType::MYSQL_TYPE_NEWDECIMAL => ColumnType::String,
         MysqlType::MYSQL_TYPE_FLOAT | MysqlType::MYSQL_TYPE_DOUBLE => ColumnType::Float,
         // `TINYINT(1)` is deliberately still `Int`, not `Bool` -
         // confirmed live against real PDO in both
         // `PDO::ATTR_EMULATE_PREPARES` settings (see
-        // `sql_reflection_schema`'s own doc comment) - there is no
+        // `schema`'s own doc comment) - there is no
         // driver ground truth for a `Bool` mapping at all, for any
         // integer width.
         MysqlType::MYSQL_TYPE_TINY
@@ -286,7 +286,7 @@ fn mysql_column_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> Col
         // A wire-protocol type this table has no first-class
         // translation for - genuinely undecidable, matching this
         // project's own "honest, not invented" precedent (see
-        // `sql_reflection_schema`'s own doc comment).
+        // `schema`'s own doc comment).
         _ => ColumnType::Unknown,
     }
 }
@@ -439,7 +439,7 @@ fn postgres_nullability(
 /// isn't available the way `mysql::consts::ColumnType` allows.
 ///
 /// Folds in real, live-verified `PDO::ATTR_STRINGIFY_FETCHES`
-/// behavior (see `sql_reflection_schema`'s own doc comment for the full
+/// behavior (see `schema`'s own doc comment for the full
 /// MySQL-side verification note this mirrors) - confirmed directly
 /// against real `pdo_pgsql`, across all 4 `ATTR_EMULATE_PREPARES`/
 /// `ATTR_STRINGIFY_FETCHES` combinations: `boolean`/`real`/`double
@@ -593,7 +593,7 @@ type BoxedReflector = Box<dyn QueryReflector>;
 /// `par_iter()` calls), so a `Mutex` here would silently serialize
 /// every reflection call across every worker thread. Deliberately does
 /// *not* validate reachability eagerly at startup, unlike a configured
-/// `schema_file` (`sql_reflection_schema`'s own eager, fail-fast
+/// `schema_file` (`schema`'s own eager, fail-fast
 /// validation) - a temporarily-down DB should never block a run that
 /// might not even need it, and (once wired into a real call site) a
 /// failed `reflect()` degrades that one query to today's `Mixed`

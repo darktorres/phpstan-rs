@@ -53,8 +53,8 @@ use sqlparser::dialect::{Dialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect
 use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Token, Tokenizer};
 
-use crate::sql_reflection_column::{Column, ColumnType};
-use crate::sql_reflection_config::SqlDriver;
+use crate::column::{Column, ColumnType};
+use crate::config::SqlDriver;
 
 /// `table name -> its own columns, in declared order`. Table/column
 /// names are kept exactly as declared (MySQL/Postgres/SQLite table
@@ -75,7 +75,7 @@ impl SchemaCatalog {
     }
 
     /// Every declared table's own name - the schema drift check's own
-    /// iteration surface (`sql_reflection_schema_drift`).
+    /// iteration surface (`drift`).
     pub fn table_names(&self) -> impl Iterator<Item = &str> {
         self.tables.keys().map(String::as_str)
     }

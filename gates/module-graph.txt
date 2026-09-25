@@ -51,12 +51,12 @@ crate root syntax types phpdoc stub-sources sql composer config diagnostics refl
 module crate root
 module main bin
 
-module sql_reflection_column sql
-module sql_reflection_config sql
-module sql_reflection_context sql
-module sql_reflection_schema sql
-module sql_reflection_reflector sql
-module sql_reflection_schema_drift sql
+# extern <library> <crate>: crates already extracted from the package.
+extern syntax syntax
+extern types types
+extern phpdoc phpdoc
+extern sql sql
+
 module output app
 module diagnostic diagnostics
 module fix diagnostics
@@ -206,7 +206,7 @@ allow config doctrine_functions C1
 allow config ignore_errors C1
 allow config parent_calls C1
 allow config restricted_symbols C1
-allow config sql_reflection_config C1
+allow config @sql C1
 
 allow registry doctrine_functions C2
 allow registry restricted_symbols C2
@@ -388,7 +388,7 @@ allow checker::expr checker::doctrine E4
 allow checker::expr checker::magic_numbers E4
 allow checker::expr checker::psr3 E4
 allow checker::expr checker::risky_tests E4
-allow checker sql_reflection_context E4
+allow checker @sql E4
 allow checker::expr checker::sql_reflection E4
 allow checker::expr checker::strict_idioms E4
 allow checker::expr checker::strict_rules E4
@@ -424,17 +424,12 @@ allow checker::restricted_symbol_usage ignore_errors F1
 allow lsp banned F1
 allow lsp doctrine_functions F1
 allow lsp restricted_symbols F1
-allow lsp sql_reflection_config F1
-allow lsp sql_reflection_schema F1
+allow lsp @sql F1
 allow project architecture F1
 allow project banned F1
 allow project doctrine_functions F1
 allow project parent_calls F1
 allow project pest_config F1
 allow project restricted_symbols F1
-allow project sql_reflection_config F1
-allow project sql_reflection_context F1
-allow project sql_reflection_reflector F1
-allow project sql_reflection_schema F1
-allow project sql_reflection_schema_drift F1
+allow project @sql F1
 allow restricted_symbols ignore_errors F1

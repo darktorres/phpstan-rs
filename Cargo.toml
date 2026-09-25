@@ -13,6 +13,7 @@ publish = false
 syntax = { package = "phpstan-rs-syntax", path = "crates/syntax" }
 types = { package = "phpstan-rs-types", path = "crates/types" }
 phpdoc = { package = "phpstan-rs-phpdoc", path = "crates/phpdoc" }
+sql = { package = "phpstan-rs-sql", path = "crates/sql" }
 
 # Thin LTO with one codegen unit: about 5% faster on the scoped Piwigo
 # run (26.7 s vs 28.0 s) for a ~3x longer release build, and it keeps

@@ -325,8 +325,8 @@ fn raw_field_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
 }
 
 /// The PHP type of the value a raw fetch of a schema column returns.
-fn column_php_type(ty: &crate::sql_reflection_column::ColumnType) -> Type {
-    use crate::sql_reflection_column::ColumnType;
+fn column_php_type(ty: &sql::column::ColumnType) -> Type {
+    use sql::column::ColumnType;
     match ty {
         ColumnType::Int => Type::Int,
         ColumnType::Float => Type::Float,

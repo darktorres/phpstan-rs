@@ -8,7 +8,7 @@
 //! under this module (this file's own `query_builder`) - both A2's
 //! static schema catalog and C's live reflector are compiled/lazily-
 //! built state stored directly on `Registry`, so they live top-level
-//! instead, in `crate::sql_reflection_schema`/`crate::
+//! instead, in `sql::schema`/`crate::
 //! sql_reflection_reflector` (see either module's own doc comment for
 //! why: `Registry` has zero existing references to `checker::` types,
 //! and this project's `restricted_symbols`/`doctrine_functions` already
@@ -18,7 +18,7 @@ pub(crate) mod parameter_validation;
 pub(crate) mod query_builder;
 pub(crate) mod resolve;
 
-use crate::sql_reflection_column::{Column, ColumnType};
+use sql::column::{Column, ColumnType};
 use types::{Shape, Type, union_types};
 
 /// The PHP type of the value a raw fetch of a column returns.

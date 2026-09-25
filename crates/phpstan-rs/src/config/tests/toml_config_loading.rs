@@ -132,10 +132,7 @@ fn loads_a_live_connection_sql_reflection_block() {
 
     let config = Config::load(&path).unwrap();
     let sql_reflection = config.sql_reflection.expect("sql_reflection present");
-    assert_eq!(
-        sql_reflection.driver,
-        crate::sql_reflection_config::SqlDriver::Mysql
-    );
+    assert_eq!(sql_reflection.driver, sql::config::SqlDriver::Mysql);
     assert_eq!(sql_reflection.host.as_deref(), Some("127.0.0.1"));
     assert_eq!(sql_reflection.port, Some(3306));
     assert_eq!(sql_reflection.user.as_deref(), Some("piwigo_test"));
@@ -166,10 +163,7 @@ fn loads_a_static_schema_only_sql_reflection_block() {
 
     let config = Config::load(&path).unwrap();
     let sql_reflection = config.sql_reflection.expect("sql_reflection present");
-    assert_eq!(
-        sql_reflection.driver,
-        crate::sql_reflection_config::SqlDriver::Sqlite
-    );
+    assert_eq!(sql_reflection.driver, sql::config::SqlDriver::Sqlite);
     assert_eq!(
         sql_reflection.schema_file,
         Some(PathBuf::from("install/piwigo_structure-sqlite.sql"))

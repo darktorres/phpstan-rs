@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 phpdoc.workspace = true
+sql.workspace = true
 syntax.workspace = true
 types.workspace = true
 clap = { version = "4", features = ["derive"] }
@@ -26,12 +27,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 sqlparser = "0.63.0"
-mysql = { version = "28.0.2", default-features = false, features = ["rustls-tls", "minimal-rust"] }
-postgres = "0.19.14"
-rusqlite = { version = "0.40.2", features = ["bundled", "column_decltype", "column_metadata"] }
-r2d2 = "0.8.10"
-r2d2_postgres = "0.18.2"
-r2d2_sqlite = { version = "0.35.0", features = ["bundled"] }
 
 [features]
 default = ["pcre-validate"]

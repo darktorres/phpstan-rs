@@ -12,10 +12,10 @@
 //! column list every other live call site gets, via
 //! the same `PREPARE`-only, never-executed mechanism.
 
-use crate::sql_reflection_column::{Column, ColumnType};
-use crate::sql_reflection_config::SqlDriver;
-use crate::sql_reflection_reflector::QueryReflector;
-use crate::sql_reflection_schema::SchemaCatalog;
+use crate::column::{Column, ColumnType};
+use crate::config::SqlDriver;
+use crate::reflector::QueryReflector;
+use crate::schema::SchemaCatalog;
 
 /// One human-readable warning per table whose static and live column
 /// lists disagree. A table the live connection can't reach at all

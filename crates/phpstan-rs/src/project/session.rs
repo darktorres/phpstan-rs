@@ -16,8 +16,7 @@ use rayon::prelude::*;
 use crate::config::{self, Config};
 use crate::{
     architecture, assertion_tables, banned, composer, doctrine_functions, ignore_errors,
-    parent_calls, restricted_symbols, sql_reflection_config, sql_reflection_reflector,
-    sql_reflection_schema, sql_reflection_schema_drift,
+    parent_calls, restricted_symbols,
 };
 use syntax::token::Span;
 
@@ -71,8 +70,8 @@ pub struct Session {
     class_argument_returns: Vec<assertion_tables::ClassArgumentReturn>,
     dynamic_constant_names: Vec<(String, Option<String>)>,
     doctrine_custom_function_entries: Vec<doctrine_functions::DoctrineCustomFunctionEntry>,
-    sql_reflection_config: Option<sql_reflection_config::SqlReflectionConfig>,
-    sql_reflection_schema: Option<sql_reflection_schema::SchemaCatalog>,
+    sql_reflection_config: Option<sql::config::SqlReflectionConfig>,
+    sql_reflection_schema: Option<sql::schema::SchemaCatalog>,
     composer_manifests: Vec<composer::manifest::ComposerManifest>,
     phpstan_api_check_enabled: bool,
     /// Non-fatal problems found while resolving (e.g. SQL schema drift).
@@ -221,10 +220,7 @@ impl Session {
         {
             Some((path, driver)) => {
                 let path = resolve_against_config(path);
-                Some(sql_reflection_schema::parse_ddl_file(
-                    &root.join(path),
-                    driver,
-                )?)
+                Some(sql::schema::parse_ddl_file(&root.join(path), driver)?)
             }
             None => None,
         };
@@ -232,9 +228,9 @@ impl Session {
         if let Some(schema) = &sql_reflection_schema
             && let Some(sql_config) = &sql_reflection_config
         {
-            let handle = sql_reflection_reflector::SqlReflectorHandle::default();
+            let handle = sql::reflector::SqlReflectorHandle::default();
             if let Some(reflector) = handle.get(Some(sql_config)) {
-                warnings.extend(sql_reflection_schema_drift::schema_drift_warnings(
+                warnings.extend(sql::drift::schema_drift_warnings(
                     schema,
                     reflector,
                     sql_config.driver,

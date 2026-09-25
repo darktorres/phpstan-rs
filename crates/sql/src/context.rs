@@ -6,10 +6,10 @@ use std::sync::Mutex;
 
 use rustc_hash::FxHashMap;
 
-use crate::sql_reflection_column::Column;
-use crate::sql_reflection_config::{SqlDriver, SqlReflectionConfig};
-use crate::sql_reflection_reflector::SqlReflectorHandle;
-use crate::sql_reflection_schema::SchemaCatalog;
+use crate::column::Column;
+use crate::config::{SqlDriver, SqlReflectionConfig};
+use crate::reflector::SqlReflectorHandle;
+use crate::schema::SchemaCatalog;
 
 #[derive(Debug, Default)]
 pub struct SqlContext {

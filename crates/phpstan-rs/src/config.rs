@@ -286,7 +286,7 @@ pub struct Config {
     /// password_env = "PIWIGO_DB_PASSWORD"
     /// database = "piwigo_test"
     /// ```
-    pub sql_reflection: Option<crate::sql_reflection_config::SqlReflectionConfig>,
+    pub sql_reflection: Option<sql::config::SqlReflectionConfig>,
     /// Extra directories/files whose class-like declarations are
     /// designated overrides (e.g. a vendored `Imagick.stub.php`) rather
     /// than a genuine accidental duplicate - mirrors `scan_paths`'s

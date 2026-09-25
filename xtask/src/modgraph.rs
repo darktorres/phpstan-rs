@@ -9,11 +9,15 @@
 //! ```text
 //! crate <name> [<dependency> ...]
 //! module <module::path> <crate>
+//! extern <library> <crate>
 //! allow <from::module> <to::module> <phase>
 //! ```
 //!
 //! A module belongs to the longest `module` entry that is a prefix of its
-//! path, and an `allow` line names two such entries. Every module must be
+//! path, and an `allow` line names two such entries. An `extern` line
+//! names a workspace crate already extracted from the package: paths into
+//! that library count as references to the module `@<library>`, assigned
+//! to its crate. Every module must be
 //! assigned, and every `allow` line must still match an edge, so the list
 //! only shrinks.
 
@@ -35,6 +39,8 @@ struct Spec {
     modules: BTreeMap<ModPath, String>,
     /// (from row, to row) -> phase.
     allowed: BTreeMap<(ModPath, ModPath), String>,
+    /// Extracted workspace libraries the package refers to by name.
+    externs: BTreeSet<String>,
 }
 
 struct SourceFile {
@@ -61,7 +67,7 @@ pub fn modgraph(root: &Path, args: &[String]) -> Result<(), String> {
         collect_inline_modules(&file.module, &file.ast.items, &mut known);
     }
 
-    let resolver = Resolver::new(&known, &files);
+    let resolver = Resolver::new(&known, &spec.externs, &files);
     let mut edges = Vec::new();
     for file in &files {
         let mut walker = Walker {
@@ -168,6 +174,7 @@ fn read_spec(path: &Path) -> Result<Spec, String> {
         deps: BTreeMap::new(),
         modules: BTreeMap::new(),
         allowed: BTreeMap::new(),
+        externs: BTreeSet::new(),
     };
     let mut allows = Vec::new();
     for (i, line) in text.lines().enumerate() {
@@ -194,6 +201,16 @@ fn read_spec(path: &Path) -> Result<Spec, String> {
                         i + 1
                     ));
                 }
+            }
+            ["extern", library, krate] => {
+                if !spec.externs.insert(library.to_string()) {
+                    return Err(format!(
+                        "{}:{}: extern {library} twice",
+                        path.display(),
+                        i + 1
+                    ));
+                }
+                spec.modules.insert(vec![format!("@{library}")], krate.to_string());
             }
             ["allow", from, to, phase] => allows.push((i + 1, *from, *to, *phase)),
             _ => return Err(bad()),
@@ -329,6 +346,7 @@ impl Methods {
 /// Resolves paths as written in one module to package module paths.
 struct Resolver<'a> {
     known: &'a BTreeSet<ModPath>,
+    externs: &'a BTreeSet<String>,
     scopes: BTreeMap<ModPath, BTreeMap<String, ModPath>>,
     methods: Methods,
     /// Types whose inherent methods are defined in more than one module.
@@ -336,9 +354,10 @@ struct Resolver<'a> {
 }
 
 impl<'a> Resolver<'a> {
-    fn new(known: &'a BTreeSet<ModPath>, files: &[SourceFile]) -> Self {
+    fn new(known: &'a BTreeSet<ModPath>, externs: &'a BTreeSet<String>, files: &[SourceFile]) -> Self {
         let mut resolver = Resolver {
             known,
+            externs,
             scopes: BTreeMap::new(),
             methods: Methods::default(),
             spread: BTreeSet::new(),
@@ -444,14 +463,28 @@ impl<'a> Resolver<'a> {
                 let mut path = module.to_vec();
                 path.push(name.to_string());
                 if !self.known.contains(&path) {
-                    return None;
+                    return self.external(name, rest);
                 }
                 path
             }
-            name => self.scopes.get(module)?.get(name)?.clone(),
+            name => match self.scopes.get(module).and_then(|s| s.get(name)) {
+                Some(path) => path.clone(),
+                None => return self.external(name, rest),
+            },
         };
         path.extend(rest.iter().cloned());
         Some(self.canonical(path))
+    }
+
+    /// A path into an extracted workspace library, as its `@<library>`
+    /// module.
+    fn external(&self, name: &str, rest: &[String]) -> Option<ModPath> {
+        if !self.externs.contains(name) {
+            return None;
+        }
+        let mut path = vec![format!("@{name}")];
+        path.extend(rest.iter().cloned());
+        Some(path)
     }
 
     /// Follows re-exports: `crate::Checker` is `crate::checker::Checker`

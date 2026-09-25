@@ -93,7 +93,7 @@ pub struct Project {
     interner: Arc<Interner>,
     dependents: FxHashMap<String, FxHashSet<PathBuf>>,
     registry: Registry,
-    sql: crate::sql_reflection_context::SqlContext,
+    sql: sql::context::SqlContext,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
     // currently-loaded `Pest.php` file whenever the loaded file set could
     // have changed (`finish_loading`/`update_file`) - see `pest_config`'s
@@ -219,7 +219,7 @@ impl Project {
             interner: Arc::new(Interner::new()),
             dependents: FxHashMap::default(),
             registry,
-            sql: crate::sql_reflection_context::SqlContext::default(),
+            sql: sql::context::SqlContext::default(),
             pest_config: PestConfig::default(),
             working_dir: None,
             phpstan_api_check_enabled: false,
@@ -321,24 +321,18 @@ impl Project {
 
     /// Sets the project's `[sql_reflection]` block. `None` (no block
     /// configured) keeps every raw-SQL call site on its fallback.
-    pub fn set_sql_reflection_config(
-        &mut self,
-        config: Option<crate::sql_reflection_config::SqlReflectionConfig>,
-    ) {
+    pub fn set_sql_reflection_config(&mut self, config: Option<sql::config::SqlReflectionConfig>) {
         self.sql.set_config(config);
     }
 
     /// Sets the project's parsed `schema_file` catalog - `None` when no
     /// `schema_file` is configured.
-    pub fn set_sql_reflection_schema(
-        &mut self,
-        schema: Option<crate::sql_reflection_schema::SchemaCatalog>,
-    ) {
+    pub fn set_sql_reflection_schema(&mut self, schema: Option<sql::schema::SchemaCatalog>) {
         self.sql.set_schema(schema);
     }
 
     /// The project's SQL reflection service.
-    pub fn sql(&self) -> &crate::sql_reflection_context::SqlContext {
+    pub fn sql(&self) -> &sql::context::SqlContext {
         &self.sql
     }
 

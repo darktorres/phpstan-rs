@@ -94,7 +94,7 @@ fn an_enum_column_falls_back_to_string_with_no_schema_configured() {
 
 #[test]
 fn an_enum_column_resolves_its_real_literal_union_from_the_static_schema_catalog() {
-    let schema = crate::sql_reflection_schema::parse_ddl(
+    let schema = crate::schema::parse_ddl(
         "CREATE TABLE users (status enum('webmaster','admin','normal') NOT NULL);",
         SqlDriver::Mysql,
     );
@@ -116,7 +116,7 @@ fn an_enum_column_resolves_its_real_literal_union_from_the_static_schema_catalog
 
 #[test]
 fn an_enum_column_not_found_in_the_schema_catalog_falls_back_to_string() {
-    let schema = crate::sql_reflection_schema::parse_ddl(
+    let schema = crate::schema::parse_ddl(
         "CREATE TABLE users (status enum('a','b') NOT NULL);",
         SqlDriver::Mysql,
     );

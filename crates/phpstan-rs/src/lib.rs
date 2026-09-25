@@ -31,12 +31,6 @@ pub mod regex_groups;
 pub mod registry;
 pub mod restricted_symbols;
 pub mod rule;
-pub mod sql_reflection_column;
-pub mod sql_reflection_config;
-pub mod sql_reflection_context;
-pub mod sql_reflection_reflector;
-pub mod sql_reflection_schema;
-pub mod sql_reflection_schema_drift;
 pub(crate) mod stub_attributes;
 
 pub use checker::Checker;

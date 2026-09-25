@@ -42,9 +42,9 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use crate::registry::Registry;
-use crate::sql_reflection_config::SqlDriver;
-use crate::sql_reflection_context::SqlContext;
-use crate::sql_reflection_schema::SchemaCatalog;
+use sql::config::SqlDriver;
+use sql::context::SqlContext;
+use sql::schema::SchemaCatalog;
 use types::union_types;
 use types::{Shape, ShapeField, Type};
 
@@ -437,7 +437,7 @@ struct TypedColumn {
 }
 
 impl TypedColumn {
-    fn from_column(column: &crate::sql_reflection_column::Column) -> TypedColumn {
+    fn from_column(column: &sql::column::Column) -> TypedColumn {
         TypedColumn {
             name: column.name.clone(),
             ty: super::column_php_type(&column.ty),

@@ -76,8 +76,8 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) dynamic_constant_names: Vec<(String, Option<String>)>,
     pub(crate) doctrine_custom_function_entries:
         Vec<crate::doctrine_functions::DoctrineCustomFunctionEntry>,
-    pub(crate) sql_reflection_config: Option<crate::sql_reflection_config::SqlReflectionConfig>,
-    pub(crate) sql_reflection_schema: Option<crate::sql_reflection_schema::SchemaCatalog>,
+    pub(crate) sql_reflection_config: Option<sql::config::SqlReflectionConfig>,
+    pub(crate) sql_reflection_schema: Option<sql::schema::SchemaCatalog>,
     pub(crate) phpstan_api_check_enabled: bool,
     pub(crate) vendor_context: ComposerContext,
     pub(crate) extra_context_dirs: Vec<PathBuf>,
@@ -146,7 +146,7 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
     {
         Some((path, driver)) => {
             let path = resolve_against_root(path);
-            match crate::sql_reflection_schema::parse_ddl_file(&path, driver) {
+            match sql::schema::parse_ddl_file(&path, driver) {
                 Ok(catalog) => Some(catalog),
                 Err(e) => {
                     eprintln!("phpstan-rs lsp: {e}");

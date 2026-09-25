@@ -69,8 +69,8 @@ fn a_string_against_a_number_column_is_still_incompatible() {
     assert!(!columns_are_compatible(&static_side, &live_side));
 }
 
-fn live_mysql_config() -> Option<crate::sql_reflection_config::SqlReflectionConfig> {
-    Some(crate::sql_reflection_config::SqlReflectionConfig {
+fn live_mysql_config() -> Option<crate::config::SqlReflectionConfig> {
+    Some(crate::config::SqlReflectionConfig {
         driver: SqlDriver::Mysql,
         host: Some(std::env::var("PIWIGO_DB_HOST").ok()?),
         port: std::env::var("PIWIGO_DB_PORT").ok()?.parse().ok(),
@@ -103,10 +103,10 @@ fn a_real_live_matching_schema_produces_no_drift_warnings() {
         eprintln!("skipping: {} not found", ddl_path.display());
         return;
     }
-    let handle = crate::sql_reflection_reflector::SqlReflectorHandle::default();
+    let handle = crate::reflector::SqlReflectorHandle::default();
     let reflector = handle.get(Some(&config)).expect("a live reflector");
-    let schema = crate::sql_reflection_schema::parse_ddl_file(ddl_path, SqlDriver::Mysql)
-        .expect("parse the real DDL dump");
+    let schema =
+        crate::schema::parse_ddl_file(ddl_path, SqlDriver::Mysql).expect("parse the real DDL dump");
     let warnings = schema_drift_warnings(&schema, reflector, SqlDriver::Mysql);
     assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
 }
@@ -117,11 +117,11 @@ fn a_real_live_schema_mismatch_produces_a_drift_warning() {
         eprintln!("skipping: PIWIGO_DB_* env vars not set");
         return;
     };
-    let handle = crate::sql_reflection_reflector::SqlReflectorHandle::default();
+    let handle = crate::reflector::SqlReflectorHandle::default();
     let reflector = handle.get(Some(&config)).expect("a live reflector");
     // `categories` has no real `made_up_column` - a deliberate mismatch
     // against the real live table.
-    let schema = crate::sql_reflection_schema::parse_ddl(
+    let schema = crate::schema::parse_ddl(
         "CREATE TABLE categories (id int NOT NULL, made_up_column int NOT NULL);",
         SqlDriver::Mysql,
     );

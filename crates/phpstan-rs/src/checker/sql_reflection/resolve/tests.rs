@@ -1,14 +1,14 @@
 use super::*;
-use crate::sql_reflection_context::SqlContext;
+use sql::context::SqlContext;
 
 fn fixture_schema() -> SchemaCatalog {
-    crate::sql_reflection_schema::parse_ddl(
+    sql::schema::parse_ddl(
         "CREATE TABLE categories (
             id int NOT NULL,
             name varchar(255) NOT NULL,
             comment text
         );",
-        crate::sql_reflection_config::SqlDriver::Mysql,
+        sql::config::SqlDriver::Mysql,
     )
 }
 
@@ -378,9 +378,9 @@ fn a_derived_table_over_an_unresolvable_inner_query_falls_through() {
 
 #[test]
 fn a_nullable_static_schema_column_reads_as_nullable() {
-    let schema = crate::sql_reflection_schema::parse_ddl(
+    let schema = sql::schema::parse_ddl(
         "CREATE TABLE t (id int NOT NULL, a datetime DEFAULT NULL, b varchar(10) NULL, PRIMARY KEY (id));",
-        crate::sql_reflection_config::SqlDriver::Mysql,
+        sql::config::SqlDriver::Mysql,
     );
     let row = resolve_from_static_schema(&schema, "SELECT id, a, b FROM t").expect("resolves");
     assert_eq!(

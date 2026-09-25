@@ -284,7 +284,7 @@ fn reload_configuration_rereads_an_on_disk_config_change() {
 
 #[test]
 fn resolved_config_equality_is_not_fooled_by_sql_reflection_password_redaction() {
-    use crate::sql_reflection_config::{SqlDriver, SqlReflectionConfig};
+    use sql::config::{SqlDriver, SqlReflectionConfig};
 
     let base = SqlReflectionConfig {
         driver: SqlDriver::Pgsql,
