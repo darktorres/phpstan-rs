@@ -144,6 +144,9 @@ impl fmt::Display for Type {
             Type::HasOffsetValue(key, value) => {
                 write!(f, "hasOffsetValue('{key}', {value})")
             }
+            Type::HasOffset(key) => write!(f, "hasOffset('{key}')"),
+            Type::HasMethod(name) => write!(f, "hasMethod({name})"),
+            Type::HasProperty(name) => write!(f, "hasProperty({name})"),
             // No real PHPStan equivalent to mirror (this variant is a
             // this-project-only synthesis, see its own doc comment) -
             // a plain, self-describing debug format.

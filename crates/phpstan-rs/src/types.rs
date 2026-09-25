@@ -157,6 +157,13 @@ pub enum Type {
     // generalizes away before the merge that produces the loop's own
     // exit type.
     HasOffsetValue(ShapeKey, Box<Type>),
+    // PHPStan's `HasOffsetType`/`HasMethodType`/`HasPropertyType`: only
+    // ever an `Intersection` member, refining its base with an offset,
+    // method or property it's proven to have (`array_key_exists()`,
+    // `method_exists()`, `property_exists()`).
+    HasOffset(ShapeKey),
+    HasMethod(Name),
+    HasProperty(Name),
     // A `ReflectionMethod`/`ReflectionProperty` bound to one specific,
     // literally-named member (owner type, member name) of a
     // `ReflectionClass<T>`'s own reflected `T` - Phase 77's "binding a
@@ -258,6 +265,9 @@ impl PartialEq for Type {
             (Type::FloatLiteral(a), Type::FloatLiteral(b)) => a == b || (a.is_nan() && b.is_nan()),
             (Type::Accessory(a), Type::Accessory(b)) => a == b,
             (Type::HasOffsetValue(ak, av), Type::HasOffsetValue(bk, bv)) => ak == bk && av == bv,
+            (Type::HasOffset(a), Type::HasOffset(b)) => a == b,
+            (Type::HasMethod(a), Type::HasMethod(b))
+            | (Type::HasProperty(a), Type::HasProperty(b)) => a.eq_ignore_case(b),
             (Type::ReflectedMember(ao, an), Type::ReflectedMember(bo, bn)) => ao == bo && an == bn,
             (Type::ValueOf(a), Type::ValueOf(b)) => a == b,
             (Type::KeyOf(a), Type::KeyOf(b)) => a == b,
@@ -333,6 +343,9 @@ impl PartialEq for Type {
                 | Type::FloatLiteral(_)
                 | Type::Accessory(_)
                 | Type::HasOffsetValue(..)
+                | Type::HasOffset(_)
+                | Type::HasMethod(_)
+                | Type::HasProperty(_)
                 | Type::ReflectedMember(..)
                 | Type::ValueOf(_)
                 | Type::KeyOf(_)
@@ -415,6 +428,8 @@ impl Hash for Type {
                 key.hash(state);
                 value.hash(state);
             }
+            Type::HasOffset(key) => key.hash(state),
+            Type::HasMethod(name) | Type::HasProperty(name) => name.lower().hash(state),
             Type::ReflectedMember(owner, member) => {
                 owner.hash(state);
                 member.hash(state);
@@ -598,7 +613,7 @@ impl Type {
             Type::Object(class, _) | Type::EnumCase(class, _) => class.to_string(),
             Type::Intersection(members) => members
                 .iter()
-                .find(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
+                .find(|m| !m.is_accessory())
                 .map_or_else(|| self.to_string(), Type::describe_type_only),
             Type::Union(members) => {
                 let mut parts: Vec<String> = Vec::new();
@@ -730,6 +745,19 @@ impl Type {
         let mut found = false;
         self.for_each_child(&mut |t| found = found || f(t));
         found
+    }
+
+    /// Whether this is an accessory refinement - only ever an
+    /// `Intersection` member alongside the base type it refines.
+    pub(crate) fn is_accessory(&self) -> bool {
+        matches!(
+            self,
+            Type::Accessory(_)
+                | Type::HasOffsetValue(..)
+                | Type::HasOffset(_)
+                | Type::HasMethod(_)
+                | Type::HasProperty(_)
+        )
     }
 
     /// A union of `members` of the same kind as `self`: benevolent when

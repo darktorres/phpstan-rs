@@ -1,5 +1,5 @@
 use crate::registry::Registry;
-use crate::types::{self, Type, Variance};
+use crate::types::{self, ShapeKey, Type, Variance};
 use syntax::ast::ClassKind;
 
 // Real PHPStan's own level-gated `RuleLevelHelper` behaviors
@@ -422,6 +422,18 @@ impl Registry {
             // matching `Array(Mixed)`'s own established leniency for the
             // identical "can't verify, don't guess wrong" situation.
             (Type::ObjectWithoutClass, Type::ObjectShape(_)) => true,
+            // A class the registry never saw can't be checked either way.
+            (Type::Object(class, _), Type::HasMethod(method)) => {
+                !self.classes.contains_key(class.as_str())
+                    || self.lookup_method(class, method).is_some()
+            }
+            (Type::Object(class, _), Type::HasProperty(property)) => {
+                !self.classes.contains_key(class.as_str())
+                    || self.lookup_property(class, property).is_some()
+            }
+            (Type::ObjectShape(shape), Type::HasProperty(property)) => shape
+                .field(&ShapeKey::from_name(property))
+                .is_some_and(|f| !f.optional),
             (Type::Object(class, _), Type::ObjectShape(shape)) => {
                 class == "stdClass"
                     || shape.fields.iter().all(|f| {

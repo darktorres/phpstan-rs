@@ -213,6 +213,9 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
                 | AccessoryKind::NonEmptyString,
             ),
         ) => true,
+        (Type::ArrayShape(shape), Type::HasOffset(key)) => {
+            shape.field(key).is_some_and(|f| !f.optional)
+        }
         (Type::ArrayShape(shape), Type::Accessory(AccessoryKind::NonEmptyArray)) => {
             !shape.fields.is_empty()
         }

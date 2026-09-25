@@ -161,7 +161,7 @@ impl Registry {
             (_, Type::Intersection(members)) => {
                 let refused = members
                     .iter()
-                    .filter(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
+                    .filter(|m| !m.is_accessory())
                     .any(|m| self.is_super_type_of(sup, m) == Trinary::No);
                 if refused { Trinary::No } else { Trinary::Maybe }
             }

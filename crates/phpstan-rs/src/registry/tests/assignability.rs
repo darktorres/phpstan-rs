@@ -563,3 +563,24 @@ fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() 
         &r.classes["ProbeTb\\Generic"].template_bounds["T"]
     ));
 }
+
+#[test]
+fn has_method_and_has_property_are_read_off_the_class() {
+    let r = build_registry("<?php class Foo { public int $x = 0; public function bar(): void {} }");
+    let foo = Type::Object("Foo".into(), vec![]);
+    assert!(r.is_assignable(&foo, &Type::HasMethod("bar".into())));
+    assert!(r.is_assignable(&foo, &Type::HasMethod("BAR".into())));
+    assert!(!r.is_assignable(&foo, &Type::HasMethod("baz".into())));
+    assert!(r.is_assignable(&foo, &Type::HasProperty("x".into())));
+    assert!(!r.is_assignable(&foo, &Type::HasProperty("y".into())));
+}
+
+#[test]
+fn a_shape_has_the_offsets_it_requires() {
+    let r = build_registry("<?php");
+    let shape = crate::types::parse_type_string("array{a: int, b?: string}");
+    let has = |key: &str| Type::HasOffset(crate::types::ShapeKey::from_name(key));
+    assert!(r.is_assignable(&shape, &has("a")));
+    assert!(!r.is_assignable(&shape, &has("b")));
+    assert!(!r.is_assignable(&shape, &has("c")));
+}

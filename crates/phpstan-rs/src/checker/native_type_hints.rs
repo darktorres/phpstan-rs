@@ -74,10 +74,7 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
             return members.iter().all(|m| collect(m, position, out));
         }
         Type::Intersection(members) => {
-            let bases: Vec<&Type> = members
-                .iter()
-                .filter(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
-                .collect();
+            let bases: Vec<&Type> = members.iter().filter(|m| !m.is_accessory()).collect();
             if bases.len() == 1 {
                 return bases.iter().all(|b| collect(b, position, out));
             }

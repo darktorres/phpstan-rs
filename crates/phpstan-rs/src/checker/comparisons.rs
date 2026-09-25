@@ -210,10 +210,7 @@ fn loose_kinds(ty: &Type, out: &mut Vec<LooseKind>) -> bool {
                 .any(|m| matches!(m, Type::Accessory(AccessoryKind::NumericString)))
             {
                 LooseKind::NumericString
-            } else if let Some(base) = members
-                .iter()
-                .find(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
-            {
+            } else if let Some(base) = members.iter().find(|m| !m.is_accessory()) {
                 return loose_kinds(base, out);
             } else {
                 return false;

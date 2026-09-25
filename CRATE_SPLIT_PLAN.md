@@ -1015,7 +1015,10 @@ ExprKey; persistent maps. Benchmarked on the merge/clone hot path.
 
 **D2. Convergence onto PHPStan semantics**, one approved-delta commit each,
 with a fixture per transition and trigger:
-- guards (each kind);
+- guards (each kind), `method_exists()`/`property_exists()`/
+  `array_key_exists()` producing B4's `HasMethod`/`HasProperty`/`HasOffset`
+  intersection members instead of the `guarded_methods`/
+  `guarded_properties` side sets;
 - `container_field_facts` folding;
 - conditional holders with `mergeWith`;
 - frozen condition aliases;
