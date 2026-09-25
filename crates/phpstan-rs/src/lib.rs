@@ -48,6 +48,7 @@ pub mod sql_reflection_schema;
 pub mod sql_reflection_schema_drift;
 pub mod token;
 pub mod types;
+pub mod visit;
 
 pub use checker::Checker;
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, DiagnosticFix};

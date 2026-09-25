@@ -59,6 +59,7 @@ module printer syntax
 module intern syntax
 module name_resolution syntax
 module ast_walk syntax
+module visit syntax
 module types types
 module php_version types
 module php_float_format types
