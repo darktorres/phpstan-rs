@@ -42,6 +42,10 @@ pub struct Lexer<'a> {
     // or one on a different line, still gets a fully correct (just not
     // delta-accelerated) recomputation.
     pos_cache: (usize, Position),
+    // Where the source starts in its file: line 1, column 1 for a whole
+    // file; a string interpolation fragment's own position when one is
+    // lexed on its own, so its tokens get their real positions.
+    base: Position,
     // Set by `skip_language_level_type_aware_attribute` when it finds a
     // return-type-gating `#[LanguageLevelTypeAware(...)]` -
     // `tokenize_with_spans` checks this right after the `next_token()`
@@ -170,6 +174,7 @@ impl<'a> Lexer<'a> {
             line_starts: compute_line_starts(bytes),
             last_token_start: 0,
             pos_cache: (0, Position { line: 1, col: 1 }),
+            base: Position { line: 1, col: 1 },
             pending_return_type_override: None,
             pending_param_type_tokens: None,
             pending_param_doc_override: None,
@@ -191,12 +196,38 @@ impl<'a> Lexer<'a> {
             line_starts: compute_line_starts(bytes),
             last_token_start: 0,
             pos_cache: (0, Position { line: 1, col: 1 }),
+            base: Position { line: 1, col: 1 },
             pending_return_type_override: None,
             pending_param_type_tokens: None,
             pending_param_doc_override: None,
             pending_keyword_raw: None,
             comments: Vec::new(),
             stub_attribute_aliases: stub_attribute_aliases(src),
+        }
+    }
+
+    /// `new_in_php` for a fragment that starts at `base` in its file:
+    /// every position is reported where it is in the file.
+    pub fn new_in_php_at(src: &'a str, base: Position) -> Self {
+        Lexer {
+            base,
+            ..Lexer::new_in_php(src)
+        }
+    }
+
+    /// The position of a byte offset in the file (see `base`).
+    fn line_col_at(&mut self, byte_pos: usize) -> Position {
+        let pos = self.relative_line_col_at(byte_pos);
+        if pos.line == 1 {
+            Position {
+                line: self.base.line,
+                col: self.base.col.saturating_add(pos.col - 1),
+            }
+        } else {
+            Position {
+                line: self.base.line.saturating_add(pos.line - 1),
+                col: pos.col,
+            }
         }
     }
 
@@ -214,7 +245,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn line_col_at(&mut self, byte_pos: usize) -> Position {
+    fn relative_line_col_at(&mut self, byte_pos: usize) -> Position {
         let byte_pos = byte_pos.min(self.src.len());
         let (cached_pos, cached) = self.pos_cache;
         if byte_pos == cached_pos {
@@ -225,9 +256,9 @@ impl<'a> Lexer<'a> {
         // moving forward - only count the *new* characters since then,
         // not the whole line from its own start again. Falls back to a
         // full (still correct) recompute for a backward jump or a
-        // different line - both real but comparatively rare (the
-        // interpolation base-position bias below is the only caller that
-        // can jump backward at all).
+        // different line - both real but comparatively rare (a nested
+        // string interpolation is the only caller that can jump backward
+        // at all).
         let position = if byte_pos > cached_pos && line_idx == self.line_idx_at(cached_pos) {
             let delta = String::from_utf8_lossy(&self.src[cached_pos..byte_pos])
                 .chars()

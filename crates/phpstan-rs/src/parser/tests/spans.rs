@@ -211,3 +211,21 @@ fn an_interpolated_property_name_has_its_own_span() {
         .expect("a property access part");
     assert_eq!(text_at(src, access.span), "prop");
 }
+
+#[test]
+fn spans_inside_an_interpolated_expression_are_real_even_in_a_closure() {
+    let src = "<?php\necho \"x {$f(function () { return $inner; })} y\";";
+    let program = parse(src);
+    struct Find(Option<Span>);
+    impl<'ast> crate::visit::Visitor<'ast> for Find {
+        fn visit_expr(&mut self, e: &'ast Expr) {
+            if matches!(&e.kind, ExprKind::Variable(v) if &**v == "inner") {
+                self.0 = Some(e.span);
+            }
+            crate::visit::walk_expr(self, e);
+        }
+    }
+    let mut find = Find(None);
+    crate::visit::walk_stmts(&mut find, &program);
+    assert_eq!(text_at(src, find.0.expect("found $inner")), "$inner");
+}

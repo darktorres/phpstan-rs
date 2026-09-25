@@ -296,12 +296,9 @@ pub enum StringPart {
     Literal(Arc<str>),
     SimpleVar(Arc<str>),
     // The fragment's own source text, plus the real file position it
-    // starts at - `parser::build_interpolated` re-lexes the fragment in
-    // isolation (its own byte offsets have no connection to the real
-    // file), then biases the fragment-relative spans it gets back using
-    // this as the base, so an error inside `"{$obj->prop}"` still points
-    // at its real position instead of somewhere relative to a throwaway
-    // re-lex. Deliberately kept as plain `String`, not interned: this
+    // starts at - `parser::build_interpolated` re-lexes the fragment on
+    // its own, starting at this position, so an error inside
+    // `"{$obj->prop}"` still points at its real position. Deliberately kept as plain `String`, not interned: this
     // text is re-lexed by a throwaway sub-`Lexer`/`Parser` and then
     // immediately discarded (`Parser::build_interpolated`'s own
     // `ComplexExpr` arm is its only consumer) - interning it would pay a

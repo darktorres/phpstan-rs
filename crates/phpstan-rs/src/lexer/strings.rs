@@ -53,7 +53,7 @@ enum SimpleInterpolationShape {
 /// per-occurrence one - harmless there since a string's bare `$var`
 /// parts don't need finer-grained positions for any existing diagnostic),
 /// but `{$var}` today gets a real per-occurrence position via the
-/// `ComplexExpr` + `bias_expr_spans` path - fast-pathing it into a
+/// `ComplexExpr` path (lexed at its real position) - fast-pathing it into a
 /// position-less `SimpleVar` would collapse every bare-braced-var
 /// diagnostic in a string with more than one onto the same (wrong)
 /// column, confirmed as a real regression via corpus diff before this
