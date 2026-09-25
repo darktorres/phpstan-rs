@@ -667,7 +667,8 @@ impl<'a> Checker<'a> {
                 "function.impossibleType",
             );
         } else if !is_exempt_last_condition
-            && self.registry.is_super_type_of(&target_ty, &arg_ty) == crate::registry::Trinary::Yes
+            && self.registry.is_super_type_of(&target_ty, &arg_ty)
+                == crate::types::TrinaryLogic::Yes
         {
             self.report(
                 label.to_string(),

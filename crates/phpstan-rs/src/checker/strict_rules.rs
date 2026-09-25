@@ -49,7 +49,8 @@
 
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::registry::{FunctionSig, Trinary};
+use crate::registry::FunctionSig;
+use crate::types::TrinaryLogic;
 use crate::types::{AccessoryKind, Type, is_numeric_string_literal};
 use syntax::ast::*;
 
@@ -311,7 +312,7 @@ impl<'a> Checker<'a> {
         } else {
             Type::Union(allowed.to_vec())
         };
-        self.registry.is_super_type_of(&allowed, ty) == Trinary::Yes
+        self.registry.is_super_type_of(&allowed, ty) == TrinaryLogic::Yes
     }
 
     fn is_comparable(&self, ty: &Type) -> bool {
@@ -538,7 +539,8 @@ impl<'a> Checker<'a> {
         span: syntax::token::Span,
         label: &str,
     ) {
-        if matches!(expr, Type::Never) || self.registry.is_super_type_of(cast, expr) != Trinary::Yes
+        if matches!(expr, Type::Never)
+            || self.registry.is_super_type_of(cast, expr) != TrinaryLogic::Yes
         {
             return;
         }
@@ -678,7 +680,7 @@ impl<'a> Checker<'a> {
                     continue;
                 };
                 let case_ty = self.infer_expr(test, locals);
-                if self.registry.is_super_type_of(&subject_ty, &case_ty) != Trinary::No {
+                if self.registry.is_super_type_of(&subject_ty, &case_ty) != TrinaryLogic::No {
                     continue;
                 }
                 self.report(

@@ -11,6 +11,7 @@ mod parse;
 mod shape;
 mod subtype;
 mod templates;
+mod trinary;
 
 pub use conditional::resolve_conditional;
 pub(crate) use conditional::{conditional_branch, union_of_branches};
@@ -30,6 +31,7 @@ pub use templates::{
     bind_template_param, promote_class_string_literals, substitute_template,
     substitute_template_resolving_to_bounds,
 };
+pub use trinary::TrinaryLogic;
 
 // A slice of PHPStan's type system covering what the parser captures as
 // type-hint strings, plus self/parent/static and `@template` generics.

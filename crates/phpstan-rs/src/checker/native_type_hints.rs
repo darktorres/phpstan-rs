@@ -20,7 +20,8 @@
 
 use crate::checker::Checker;
 use crate::php_version::PhpVersion;
-use crate::registry::{FunctionSig, Trinary};
+use crate::registry::FunctionSig;
+use crate::types::TrinaryLogic;
 use crate::types::Type;
 use syntax::ast::*;
 
@@ -237,7 +238,7 @@ impl<'a> Checker<'a> {
                 if self
                     .registry
                     .is_super_type_of(&suggested_ty, &overridden.ty_native)
-                    != Trinary::Yes
+                    != TrinaryLogic::Yes
                     || matches!(overridden.ty_native, Type::Mixed(false)) && suggested != "mixed"
                 {
                     continue;
@@ -270,7 +271,7 @@ impl<'a> Checker<'a> {
             && self
                 .registry
                 .is_super_type_of(&ancestor.return_type_native, &suggested_ty)
-                != Trinary::Yes
+                != TrinaryLogic::Yes
         {
             return;
         }
@@ -354,7 +355,7 @@ impl<'a> Checker<'a> {
                         .is_some_and(|child| {
                             child.native_ty.as_ref().is_none_or(|child_ty| {
                                 self.registry.is_super_type_of(&suggested_ty, child_ty)
-                                    != Trinary::Yes
+                                    != TrinaryLogic::Yes
                             })
                         })
             });
@@ -398,7 +399,7 @@ impl<'a> Checker<'a> {
                                 || self
                                     .registry
                                     .is_super_type_of(suggested, &overriding.return_type_native)
-                                    != Trinary::Yes)
+                                    != TrinaryLogic::Yes)
                     })
         })
     }

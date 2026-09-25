@@ -1653,11 +1653,11 @@ impl Registry {
         for m in &members {
             let bound = bind(m);
             let keep = match self.is_super_type_of(&native, &bound) {
-                super::Trinary::Yes => true,
-                super::Trinary::No => false,
+                crate::types::TrinaryLogic::Yes => true,
+                crate::types::TrinaryLogic::No => false,
                 // Two fully known class names only partly overlapping: the
                 // hint is what's guaranteed.
-                super::Trinary::Maybe => {
+                crate::types::TrinaryLogic::Maybe => {
                     !(self.is_fully_known_class_type(&bound)
                         && self.is_fully_known_class_type(&native))
                 }
@@ -1670,7 +1670,7 @@ impl Registry {
             // A wider doc member (`Node` on a `?Class_` hint) still covers
             // the native alternatives it contains.
             for n in &native_members {
-                if self.is_super_type_of(&bound, &bind(n)) == super::Trinary::Yes
+                if self.is_super_type_of(&bound, &bind(n)) == crate::types::TrinaryLogic::Yes
                     && !kept.contains(n)
                 {
                     kept.push((*n).clone());
@@ -1684,8 +1684,9 @@ impl Registry {
         // alternative the result doesn't cover at all is added back
         // (`?self` documented as `Schema|null` keeps its `self`).
         let covered = |kept: &[Type], n: &Type| {
-            kept.iter()
-                .any(|k| self.is_super_type_of(&bind(n), &bind(k)) != super::Trinary::No)
+            kept.iter().any(|k| {
+                self.is_super_type_of(&bind(n), &bind(k)) != crate::types::TrinaryLogic::No
+            })
         };
         for n in &native_members {
             if !covered(&kept, n) {

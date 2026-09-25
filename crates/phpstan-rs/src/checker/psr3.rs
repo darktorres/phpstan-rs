@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
     fn is_psr3_logger(&self, ty: &Type) -> bool {
         let logger = Type::Object(("Psr\\Log\\LoggerInterface".to_string()).into(), Vec::new());
         !matches!(ty, Type::Mixed(_))
-            && self.registry.is_super_type_of(&logger, ty) == crate::registry::Trinary::Yes
+            && self.registry.is_super_type_of(&logger, ty) == crate::types::TrinaryLogic::Yes
     }
 
     pub(crate) fn check_psr3_call(&mut self, e: &Expr, locals: &Locals, label: &str) {
@@ -190,7 +190,7 @@ impl<'a> Checker<'a> {
                     .filter(|(_, ty)| {
                         self.registry
                             .is_super_type_of(&Type::Object("Throwable".into(), Vec::new()), ty)
-                            == crate::registry::Trinary::Yes
+                            == crate::types::TrinaryLogic::Yes
                     })
                     .map(|(name, _)| name.clone())
                     .min()
@@ -368,7 +368,7 @@ impl<'a> Checker<'a> {
                 let throwable = Type::Object("Throwable".into(), Vec::new());
                 if !matches!(value, Type::Mixed(_))
                     && self.registry.is_super_type_of(&throwable, value)
-                        != crate::registry::Trinary::Yes
+                        != crate::types::TrinaryLogic::Yes
                 {
                     self.report(
                         label.to_string(),

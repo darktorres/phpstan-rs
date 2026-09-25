@@ -4,7 +4,8 @@
 //! tag's type against the value it describes.
 
 use super::*;
-use crate::registry::{self, Trinary};
+use crate::registry;
+use crate::types::TrinaryLogic;
 use syntax::ast::literal_string_value;
 
 /// How the described value was written, for the literal leniency of
@@ -184,7 +185,7 @@ impl<'a> Checker<'a> {
                 // A by-reference write can leave a value the recorded
                 // native type no longer describes.
                 (Some(native), Some(current))
-                    if self.registry.is_super_type_of(native, current) != Trinary::No =>
+                    if self.registry.is_super_type_of(native, current) != TrinaryLogic::No =>
                 {
                     native.clone()
                 }
@@ -703,8 +704,8 @@ impl<'a> Checker<'a> {
         }
         // A tag may refine the inferred type or widen it; only one with no
         // value in common with it describes some other value.
-        if self.registry.is_super_type_of(&value.doc, tag) == Trinary::No
-            && self.registry.is_super_type_of(tag, &value.doc) == Trinary::No
+        if self.registry.is_super_type_of(&value.doc, tag) == TrinaryLogic::No
+            && self.registry.is_super_type_of(tag, &value.doc) == TrinaryLogic::No
         {
             self.report(
                 label.to_string(),
@@ -762,11 +763,11 @@ impl<'a> Checker<'a> {
         if depth == 0 && is_constant_value(ty) {
             return self.at_least_maybe_super_type(ty, tag);
         }
-        self.registry.is_super_type_of(ty, tag) == Trinary::Yes
+        self.registry.is_super_type_of(ty, tag) == TrinaryLogic::Yes
     }
 
     fn at_least_maybe_super_type(&self, ty: &Type, tag: &Type) -> bool {
-        self.registry.is_super_type_of(ty, tag) != Trinary::No
+        self.registry.is_super_type_of(ty, tag) != TrinaryLogic::No
     }
 
     /// Whether `ty` names a subclass of `PHPStan\Type\Type`.

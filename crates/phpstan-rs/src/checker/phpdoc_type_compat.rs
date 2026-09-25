@@ -12,7 +12,8 @@
 
 use super::*;
 use crate::docblock;
-use crate::registry::{FunctionSig, Trinary};
+use crate::registry::FunctionSig;
+use crate::types::TrinaryLogic;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_phpdoc_types_against_native(
@@ -523,9 +524,9 @@ impl<'a> Checker<'a> {
                 None => subject_ty,
             };
             let holds = match self.registry.is_super_type_of(target, &subject_ty) {
-                Trinary::Maybe => continue,
-                Trinary::Yes => true,
-                Trinary::No => false,
+                TrinaryLogic::Maybe => continue,
+                TrinaryLogic::Yes => true,
+                TrinaryLogic::No => false,
             };
             let always = holds != *negated;
             let word = if *negated { "is not" } else { "is" };
@@ -571,7 +572,9 @@ impl<'a> Checker<'a> {
         let resolved = self.resolve_pseudo(out, class);
         // An unresolvable type is reported as such, not also as a
         // mismatch against the class.
-        if !unresolvable && self.registry.is_super_type_of(&class_ty, &resolved) != Trinary::Yes {
+        if !unresolvable
+            && self.registry.is_super_type_of(&class_ty, &resolved) != TrinaryLogic::Yes
+        {
             self.report(
                 label.to_string(),
                 format!(
@@ -665,9 +668,9 @@ impl<'a> Checker<'a> {
     ) {
         let doc_ty = &self.registry.absorb_union_subtypes(doc_ty);
         let verdict = match self.registry.is_super_type_of(native, doc_ty) {
-            Trinary::Yes => return,
-            Trinary::No => "is incompatible with",
-            Trinary::Maybe => "is not subtype of",
+            TrinaryLogic::Yes => return,
+            TrinaryLogic::No => "is incompatible with",
+            TrinaryLogic::Maybe => "is not subtype of",
         };
         self.report(
             label.to_string(),

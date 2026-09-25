@@ -1,51 +1,6 @@
 use crate::registry::Registry;
-use crate::types::{self, AccessoryKind, Shape, Type};
+use crate::types::{self, AccessoryKind, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
-
-/// Real PHPStan's `TrinaryLogic` result of a `Type::isSuperTypeOf` query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Trinary {
-    Yes,
-    Maybe,
-    No,
-}
-
-impl Trinary {
-    /// `TrinaryLogic::extremeIdentity`: every member agreeing decides,
-    /// anything mixed is `Maybe` - a union on the sub-type side.
-    fn all(results: impl Iterator<Item = Trinary>) -> Trinary {
-        let mut seen_yes = false;
-        let mut seen_no = false;
-        let mut seen_maybe = false;
-        for r in results {
-            match r {
-                Trinary::Yes => seen_yes = true,
-                Trinary::No => seen_no = true,
-                Trinary::Maybe => seen_maybe = true,
-            }
-        }
-        match (seen_yes, seen_no, seen_maybe) {
-            (true, false, false) => Trinary::Yes,
-            (false, true, false) => Trinary::No,
-            (false, false, false) => Trinary::Yes,
-            _ => Trinary::Maybe,
-        }
-    }
-
-    /// `TrinaryLogic::lazyMaxMin` over a union on the super-type side:
-    /// any member accepting decides `Yes`, all refusing is `No`.
-    fn any(results: impl Iterator<Item = Trinary>) -> Trinary {
-        let mut best = Trinary::No;
-        for r in results {
-            match r {
-                Trinary::Yes => return Trinary::Yes,
-                Trinary::Maybe => best = Trinary::Maybe,
-                Trinary::No => {}
-            }
-        }
-        best
-    }
-}
 
 impl Registry {
     /// Whether every value of `sub` is a `sup` (`Yes`), none is (`No`),
@@ -56,9 +11,9 @@ impl Registry {
     /// neither of which can be extended into the other), and anything
     /// unprovable is `Maybe`, including any comparison with a class the
     /// registry doesn't know.
-    pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> Trinary {
+    pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         match (sup, sub) {
-            (Type::Mixed(_), _) | (_, Type::Never) => Trinary::Yes,
+            (Type::Mixed(_), _) | (_, Type::Never) => TrinaryLogic::Yes,
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
                 self.is_super_type_of(&types::resolve_late_to_bounds(sup), sub)
             }
@@ -68,7 +23,9 @@ impl Registry {
             // A benevolent union (`(int|string)`) is its members for
             // `isSuperTypeOf`; only `accepts` is lenient about it.
             (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
-                Trinary::all(members.iter().map(|m| self.is_super_type_of(sup, m)))
+                TrinaryLogic::extreme_identity(
+                    members.iter().map(|m| self.is_super_type_of(sup, m)),
+                )
             }
             (_, Type::TemplateParam(tp)) => self.is_super_type_of(sup, &tp.bound),
             (
@@ -76,45 +33,45 @@ impl Registry {
                 Type::Conditional {
                     if_true, if_false, ..
                 },
-            ) => Trinary::all(
+            ) => TrinaryLogic::extreme_identity(
                 [if_true, if_false]
                     .into_iter()
                     .map(|branch| self.is_super_type_of(sup, branch)),
             ),
             (Type::Union(members) | Type::BenevolentUnion(members), _) => {
-                Trinary::any(members.iter().map(|m| self.is_super_type_of(m, sub)))
+                TrinaryLogic::max_min(members.iter().map(|m| self.is_super_type_of(m, sub)))
             }
-            (_, Type::Mixed(_)) | (Type::TemplateParam(_), _) => Trinary::Maybe,
-            (Type::Void, Type::Void) => Trinary::Yes,
-            (Type::Void, _) | (_, Type::Void) => Trinary::No,
+            (_, Type::Mixed(_)) | (Type::TemplateParam(_), _) => TrinaryLogic::Maybe,
+            (Type::Void, Type::Void) => TrinaryLogic::Yes,
+            (Type::Void, _) | (_, Type::Void) => TrinaryLogic::No,
             (Type::Intersection(members), _) => {
-                let results: Vec<Trinary> = members
+                let results: Vec<TrinaryLogic> = members
                     .iter()
                     .map(|m| self.is_super_type_of(m, sub))
                     .collect();
-                if results.contains(&Trinary::No) {
-                    Trinary::No
-                } else if results.iter().all(|r| *r == Trinary::Yes) {
-                    Trinary::Yes
+                if results.contains(&TrinaryLogic::No) {
+                    TrinaryLogic::No
+                } else if results.iter().all(|r| *r == TrinaryLogic::Yes) {
+                    TrinaryLogic::Yes
                 } else {
-                    Trinary::Maybe
+                    TrinaryLogic::Maybe
                 }
             }
             (
                 Type::Float | Type::FloatLiteral(_),
                 Type::Int | Type::IntLiteral(_) | Type::IntRange(..),
-            ) => Trinary::No,
+            ) => TrinaryLogic::No,
             // A plain string may or may not name a class.
             (
                 Type::ClassString(_) | Type::ClassKindString(_),
                 Type::String | Type::StringLiteral(_),
-            ) => Trinary::Maybe,
+            ) => TrinaryLogic::Maybe,
             (Type::ClassString(_) | Type::ClassKindString(_), Type::Intersection(ms))
                 if !ms
                     .iter()
                     .any(|m| matches!(m, Type::ClassString(_) | Type::ClassKindString(_))) =>
             {
-                Trinary::Maybe
+                TrinaryLogic::Maybe
             }
             // A class name the registry never saw (or an unresolved
             // constant reference) proves nothing; `is_assignable` would
@@ -122,19 +79,19 @@ impl Registry {
             (Type::Object(name, _), _) | (_, Type::Object(name, _))
                 if is_unresolved_reference(name) =>
             {
-                Trinary::Maybe
+                TrinaryLogic::Maybe
             }
             (Type::ValueOf(_) | Type::ClassConstant { .. }, _)
-            | (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => Trinary::Maybe,
+            | (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => TrinaryLogic::Maybe,
             (Type::Object(a, a_args), Type::Object(b, b_args))
                 if a == b && a_args.is_empty() && b_args.is_empty() =>
             {
-                Trinary::Yes
+                TrinaryLogic::Yes
             }
             (Type::Object(a, _), Type::Object(b, _))
                 if [a, b].iter().any(|n| self.lookup_class(n).is_none()) =>
             {
-                Trinary::Maybe
+                TrinaryLogic::Maybe
             }
             (Type::ArrayShape(sup_shape), Type::ArrayShape(sub_shape)) => {
                 self.shape_super_type_of(sup_shape, sub_shape)
@@ -145,30 +102,37 @@ impl Registry {
             // empty array fits every array type, so this is never `No`.
             (Type::Array(sk, sv), Type::Array(k, v)) => {
                 // Every PHP array key is an `int|string`.
-                let key = if self.is_super_type_of(sk, &Type::unknown_array_key()) == Trinary::Yes {
-                    Trinary::Yes
-                } else {
-                    self.is_super_type_of(sk, k)
-                };
-                match Trinary::all([key, self.is_super_type_of(sv, v)].into_iter()) {
-                    Trinary::Yes => Trinary::Yes,
-                    _ => Trinary::Maybe,
+                let key =
+                    if self.is_super_type_of(sk, &Type::unknown_array_key()) == TrinaryLogic::Yes {
+                        TrinaryLogic::Yes
+                    } else {
+                        self.is_super_type_of(sk, k)
+                    };
+                match TrinaryLogic::extreme_identity(
+                    [key, self.is_super_type_of(sv, v)].into_iter(),
+                ) {
+                    TrinaryLogic::Yes => TrinaryLogic::Yes,
+                    _ => TrinaryLogic::Maybe,
                 }
             }
             // A general array may or may not carry a shape's keys.
-            (Type::ArrayShape(_), Type::Array(..)) => Trinary::Maybe,
-            _ if self.is_assignable(sub, sup) => Trinary::Yes,
+            (Type::ArrayShape(_), Type::Array(..)) => TrinaryLogic::Maybe,
+            _ if self.is_assignable(sub, sup) => TrinaryLogic::Yes,
             (_, Type::Intersection(members)) => {
                 let refused = members
                     .iter()
                     .filter(|m| !m.is_accessory())
-                    .any(|m| self.is_super_type_of(sup, m) == Trinary::No);
-                if refused { Trinary::No } else { Trinary::Maybe }
+                    .any(|m| self.is_super_type_of(sup, m) == TrinaryLogic::No);
+                if refused {
+                    TrinaryLogic::No
+                } else {
+                    TrinaryLogic::Maybe
+                }
             }
             (Type::Object(a, _), Type::Object(b, _)) => self.object_super_type_of(a, b),
-            _ if types::types_definitely_disjoint(sup, sub) => Trinary::No,
-            (Type::Accessory(kind), _) if accessory_refuses(kind, sub) => Trinary::No,
-            _ => Trinary::Maybe,
+            _ if types::types_definitely_disjoint(sup, sub) => TrinaryLogic::No,
+            (Type::Accessory(kind), _) if accessory_refuses(kind, sub) => TrinaryLogic::No,
+            _ => TrinaryLogic::Maybe,
         }
     }
 
@@ -176,7 +140,7 @@ impl Registry {
     /// `sup` requires must be one `sub` always has, with a value `sup`
     /// accepts; a key `sup` doesn't declare is fine only when `sup` is
     /// unsealed.
-    fn shape_super_type_of(&self, sup: &Shape, sub: &Shape) -> Trinary {
+    fn shape_super_type_of(&self, sup: &Shape, sub: &Shape) -> TrinaryLogic {
         let mut results = Vec::new();
         for sup_field in &sup.fields {
             match sub.field(&sup_field.key) {
@@ -185,35 +149,35 @@ impl Registry {
                     results.push(if sub_field.optional && !sup_field.optional {
                         // Present only sometimes: never always.
                         match value {
-                            Trinary::No => Trinary::No,
-                            _ => Trinary::Maybe,
+                            TrinaryLogic::No => TrinaryLogic::No,
+                            _ => TrinaryLogic::Maybe,
                         }
                     } else {
                         value
                     });
                 }
                 None if sup_field.optional => {}
-                None if sub.is_sealed() => results.push(Trinary::No),
-                None => results.push(Trinary::Maybe),
+                None if sub.is_sealed() => results.push(TrinaryLogic::No),
+                None => results.push(TrinaryLogic::Maybe),
             }
         }
         if sup.is_sealed() {
             for sub_field in &sub.fields {
                 if sup.field(&sub_field.key).is_none() {
                     results.push(if sub_field.optional {
-                        Trinary::Maybe
+                        TrinaryLogic::Maybe
                     } else {
-                        Trinary::No
+                        TrinaryLogic::No
                     });
                 }
             }
         }
-        if results.contains(&Trinary::No) {
-            Trinary::No
-        } else if results.contains(&Trinary::Maybe) {
-            Trinary::Maybe
+        if results.contains(&TrinaryLogic::No) {
+            TrinaryLogic::No
+        } else if results.contains(&TrinaryLogic::Maybe) {
+            TrinaryLogic::Maybe
         } else {
-            Trinary::Yes
+            TrinaryLogic::Yes
         }
     }
 
@@ -228,8 +192,8 @@ impl Registry {
         };
         let strictly_within = |m: &Type, n: &Type| {
             m != n
-                && self.is_super_type_of(n, m) == Trinary::Yes
-                && self.is_super_type_of(m, n) != Trinary::Yes
+                && self.is_super_type_of(n, m) == TrinaryLogic::Yes
+                && self.is_super_type_of(m, n) != TrinaryLogic::Yes
         };
         let kept: Vec<Type> = members
             .iter()
@@ -242,17 +206,17 @@ impl Registry {
         }
     }
 
-    fn object_super_type_of(&self, sup: &str, sub: &str) -> Trinary {
+    fn object_super_type_of(&self, sup: &str, sub: &str) -> TrinaryLogic {
         if sup == sub {
-            return Trinary::Maybe;
+            return TrinaryLogic::Maybe;
         }
         let (Some((_, sup_info)), Some((_, sub_info))) =
             (self.lookup_class(sup), self.lookup_class(sub))
         else {
-            return Trinary::Maybe;
+            return TrinaryLogic::Maybe;
         };
         if self.is_subclass_of(sup, sub) {
-            return Trinary::Maybe;
+            return TrinaryLogic::Maybe;
         }
         // A `No` needs the whole hierarchy of both sides: an ancestor the
         // registry never indexed could still connect them.
@@ -262,15 +226,15 @@ impl Registry {
                 .all(|a| self.lookup_class(a).is_some())
         };
         if !hierarchy_known(sup) || !hierarchy_known(sub) {
-            return Trinary::Maybe;
+            return TrinaryLogic::Maybe;
         }
         let is_interface = |k: &ClassKind| matches!(k, ClassKind::Interface);
         if (is_interface(&sup_info.kind) && !sub_info.is_final)
             || (is_interface(&sub_info.kind) && !sup_info.is_final)
         {
-            return Trinary::Maybe;
+            return TrinaryLogic::Maybe;
         }
-        Trinary::No
+        TrinaryLogic::No
     }
 }
 
