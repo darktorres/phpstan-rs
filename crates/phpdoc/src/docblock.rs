@@ -1,6 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::phpdoc_grammar::{
+use crate::grammar::{
     self, CallableTemplate, MethodTagParam, PhpDocParseError, PhpDocTagValue, TypeNode,
 };
 
@@ -178,7 +178,7 @@ pub struct DocBlock {
     // the same mechanism `Closure::bind`/`->bindTo()` use - see
     // `registry::function_sig::ParamSig::closure_this_type`.
     pub param_closure_this: FxHashMap<String, TypeNode>,
-    // Every recoverable parse error `phpdoc_grammar` produced while
+    // Every recoverable parse error `grammar` produced while
     // parsing this docblock's type expressions - real PHPStan's
     // `phpDoc.parseError`.
     pub parse_errors: Vec<PhpDocParseError>,
@@ -258,7 +258,7 @@ fn parse_assert_tag(rest: &str) -> (Option<AssertTag>, Vec<PhpDocParseError>) {
         Some(after) => (true, after),
         None => (false, rest),
     };
-    let (ty, target, errors) = phpdoc_grammar::parse_type_prefix(rest);
+    let (ty, target, errors) = grammar::parse_type_prefix(rest);
     let Some(ty) = ty else {
         return (None, errors);
     };
@@ -306,7 +306,7 @@ pub fn parse(raw: &str) -> DocBlock {
         // Continuation lines join with a real newline, not a space: a
         // wrapped array-shape field's own trailing `// description`
         // (`@var array{v?: string, // null, ...`) is a comment only up to
-        // the end of its own line, which `phpdoc_grammar`'s lexer skips
+        // the end of its own line, which `grammar`'s lexer skips
         // the same way phpdoc-parser's `TOKEN_COMMENT` does. Stripping
         // `//`-onward here instead would also cut `http://...` out of a
         // description or a `@see` URL.
@@ -433,7 +433,7 @@ fn apply_tag_recording_errors(block: &mut DocBlock, written: &str, tag: &str, re
     let has_dedicated_parser = PLAIN_TAGS_PHPSTAN_PARSES.contains(&tag)
         || (is_prefixed && PREFIXED_ONLY_TAGS_PHPSTAN_PARSES.contains(&tag));
     if !has_dedicated_parser && rest.starts_with('(') {
-        let errors = phpdoc_grammar::doctrine_argument_errors(rest);
+        let errors = grammar::doctrine_argument_errors(rest);
         if let Some(first) = errors.first() {
             block.invalid_tag_values.push(InvalidTagValue {
                 tag: written.to_string(),
@@ -693,7 +693,7 @@ fn foreign_tag_has_invalid_type(canonical: &str, rest: &str) -> bool {
         | "template"
         | "template-covariant"
         | "template-contravariant"
-        | "extends" => !phpdoc_grammar::parse_tag_rest(canonical, rest).1.is_empty(),
+        | "extends" => !grammar::parse_tag_rest(canonical, rest).1.is_empty(),
         "type" | "require-extends" | "require-implements" | "sealed" => {
             let remainder = if canonical == "type" {
                 rest.split_once(char::is_whitespace)
@@ -703,7 +703,7 @@ fn foreign_tag_has_invalid_type(canonical: &str, rest: &str) -> bool {
             } else {
                 rest
             };
-            let (ty, _, errors) = phpdoc_grammar::parse_type_prefix(remainder);
+            let (ty, _, errors) = grammar::parse_type_prefix(remainder);
             ty.is_none() || !errors.is_empty()
         }
         "assert" | "assert-if-true" | "assert-if-false" => {
@@ -744,14 +744,14 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
     {
         match tag {
             // Every type-bearing tag below takes its type from
-            // `phpdoc_grammar`'s parse. Any tag whose name `phpdoc_grammar`
+            // `grammar`'s parse. Any tag whose name `grammar`
             // gives a dedicated structured shape to (`PhpDocTagValue::
             // TypedVar`/`Type`/`Template`/`ExtendsLike`/`Method`) also
             // sources its variable name/by-ref/variadic/bound/default
             // from that same structure, not from a second, independent
             // re-derivation of the surrounding text.
             "param" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("param", rest);
+                let (value, errors) = grammar::parse_tag_rest("param", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::TypedVar {
                     ty,
@@ -777,7 +777,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             "param-out" => {
                 // Identical shape to `"param"` above (minus its own
                 // `[optional]` marker, meaningless for an output type).
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("param-out", rest);
+                let (value, errors) = grammar::parse_tag_rest("param-out", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::TypedVar {
                     ty: Some(ty),
@@ -800,19 +800,19 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 // it unset. Now that `Type::Conditional`/
                 // `resolve_conditional` exist and do real per-call-site
                 // resolution, that exclusion is gone -
-                // `phpdoc_grammar`'s own `parse_paren_or_conditional`
+                // `grammar`'s own `parse_paren_or_conditional`
                 // parses the whole `(...)` shape as a real `TypeNode::
                 // Conditional`, and `to_source_string` re-emits it in
                 // exactly the `" is "`/`"?"`/`":"` shape `types::
                 // parse_type_string`'s own conditional parser expects.
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("return", rest);
+                let (value, errors) = grammar::parse_tag_rest("return", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::Type { ty: Some(ty), .. } = value {
                     block.return_type = Some(ty);
                 }
             }
             "var" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("var", rest);
+                let (value, errors) = grammar::parse_tag_rest("var", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::TypedVar { ty, variable, .. } = value {
                     if let Some(ty) = ty {
@@ -838,11 +838,11 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "param-closure-this" => {
-                // Not one of `phpdoc_grammar`'s own dedicated tag shapes
+                // Not one of `grammar`'s own dedicated tag shapes
                 // (`TYPED_VAR_TAGS`) - just one leading type expression
                 // followed by `$name`, same shape `parse_type_prefix`
                 // exists for.
-                let (ty, remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                let (ty, remainder, errors) = grammar::parse_type_prefix(rest);
                 block.parse_errors.extend(errors);
                 if let Some(ty) = ty
                     && let Some(name) = remainder
@@ -854,7 +854,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "property" | "property-read" | "property-write" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest(tag, rest);
+                let (value, errors) = grammar::parse_tag_rest(tag, rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::TypedVar {
                     ty: Some(ty),
@@ -871,7 +871,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "template" | "template-covariant" | "template-contravariant" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest(tag, rest);
+                let (value, errors) = grammar::parse_tag_rest(tag, rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::Template {
                     name,
@@ -914,7 +914,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     .strip_prefix('=')
                     .unwrap_or(remainder)
                     .trim_start();
-                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(remainder);
+                let (ty, _remainder, errors) = grammar::parse_type_prefix(remainder);
                 block.parse_errors.extend(errors);
                 if let Some(ty) = ty
                     && !name.is_empty()
@@ -955,12 +955,12 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // `implements_args["Iterator"]` would be silently empty, and
             // `Registry::class_template_bindings(_, _, "Iterator")` on
             // any `Generator<...>`-typed value would zip its real type
-            // arguments against nothing. `phpdoc_grammar` only knows the
+            // arguments against nothing. `grammar` only knows the
             // plain names, so the synonym is mapped onto its bare
             // counterpart right here rather than taught to the grammar
             // itself.
             "extends" | "template-extends" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("extends", rest);
+                let (value, errors) = grammar::parse_tag_rest("extends", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::ExtendsLike { ty } = value
                     && !is_blank(&ty)
@@ -969,7 +969,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "implements" | "template-implements" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("implements", rest);
+                let (value, errors) = grammar::parse_tag_rest("implements", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::ExtendsLike { ty } = value
                     && !is_blank(&ty)
@@ -983,7 +983,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // separate arm: `parse`'s own two-pass loop already strips a
             // leading `phpstan-` off every tag.
             "use" | "template-use" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("use", rest);
+                let (value, errors) = grammar::parse_tag_rest("use", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::ExtendsLike { ty } = value
                     && !is_blank(&ty)
@@ -992,7 +992,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "require-extends" => {
-                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                let (ty, _remainder, errors) = grammar::parse_type_prefix(rest);
                 block.parse_errors.extend(errors);
                 if let Some(ty) = ty
                     && !is_blank(&ty)
@@ -1001,7 +1001,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "require-implements" => {
-                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                let (ty, _remainder, errors) = grammar::parse_type_prefix(rest);
                 block.parse_errors.extend(errors);
                 if let Some(ty) = ty
                     && !is_blank(&ty)
@@ -1010,7 +1010,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "sealed" => {
-                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                let (ty, _remainder, errors) = grammar::parse_type_prefix(rest);
                 block.parse_errors.extend(errors);
                 if let Some(ty) = ty
                     && !is_blank(&ty)
@@ -1019,7 +1019,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "method" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("method", rest);
+                let (value, errors) = grammar::parse_tag_rest("method", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::Method {
                     is_static,
@@ -1040,14 +1040,14 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "self-out" | "this-out" => {
-                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                let (ty, _remainder, errors) = grammar::parse_type_prefix(rest);
                 block.parse_errors.extend(errors);
                 if let Some(ty) = ty {
                     block.self_out = Some(ty);
                 }
             }
             "mixin" => {
-                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                let (ty, _remainder, errors) = grammar::parse_type_prefix(rest);
                 block.parse_errors.extend(errors);
                 if let Some(ty) = ty
                     && !is_blank(&ty)
@@ -1104,13 +1104,13 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 block.deprecated = Some(rest.trim().to_string());
             }
             "throws" => {
-                let (value, errors) = phpdoc_grammar::parse_tag_rest("throws", rest);
+                let (value, errors) = grammar::parse_tag_rest("throws", rest);
                 block.parse_errors.extend(errors);
                 if let PhpDocTagValue::Type { ty: Some(ty), .. } = value {
                     block.throws.push(ty);
                 }
             }
-            // Not routed through `phpdoc_grammar` at all - a `@see`
+            // Not routed through `grammar` at all - a `@see`
             // target is a plain symbol reference, a URL, or free text,
             // never a real type expression (real PHPStan's own
             // `phpstan/phpdoc-parser` has no `SeeTagValueNode` either -
@@ -1288,7 +1288,7 @@ const KNOWN_PHPSTAN_TAGS: &[&str] = &[
 /// practice (a docblock talking *about* a tag almost always still writes
 /// it at the start of its own line, the position that matters for this
 /// scan too, just not enforced separately here).
-pub(crate) fn unknown_phpstan_tags(raw: &str) -> Vec<String> {
+pub fn unknown_phpstan_tags(raw: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut rest = raw;
     while let Some(idx) = rest.find("@phpstan-") {

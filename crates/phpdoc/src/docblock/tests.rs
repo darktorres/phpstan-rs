@@ -9,8 +9,6 @@ mod type_aliases;
 mod unknown_tags;
 
 /// The node a type written as `source` parses to.
-fn node(source: &str) -> crate::phpdoc_grammar::TypeNode {
-    crate::phpdoc_grammar::parse_type_prefix(source)
-        .0
-        .expect("a type")
+fn node(source: &str) -> crate::grammar::TypeNode {
+    crate::grammar::parse_type_prefix(source).0.expect("a type")
 }

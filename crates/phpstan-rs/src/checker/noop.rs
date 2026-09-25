@@ -16,8 +16,8 @@
 
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::docblock;
 use crate::registry::{FunctionSig, collect_impure_points};
+use phpdoc::docblock;
 use syntax::ast::TypeHint;
 use syntax::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
 use syntax::visit::child_exprs;

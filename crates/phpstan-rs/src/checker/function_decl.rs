@@ -5,11 +5,11 @@ use crate::checker::{
     type_allows_generator_return,
 };
 use crate::diagnostic::DiagnosticBuilder;
-use crate::docblock;
 use crate::registry::{
     ClassInfo, FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
     resolve_names_in_type, resolve_type,
 };
+use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::body_contains_yield;
@@ -403,7 +403,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
                     .collect();
-                let resolve = |node: &crate::phpdoc_grammar::TypeNode| -> Type {
+                let resolve = |node: &phpdoc::grammar::TypeNode| -> Type {
                     let ty = crate::registry::parse_type_node(node);
                     let ty = mark_template_params(ty, &shallow);
                     resolve_names_in_type(ty, &self.name_ctx)
@@ -594,7 +594,7 @@ impl<'a> Checker<'a> {
                 for (i, p) in f.params.iter().enumerate() {
                     // Same inline-`@var`-on-a-promoted-property fallback
                     // as `FunctionSig::from_decl`'s param loop.
-                    let doc_ty: Option<crate::phpdoc_grammar::TypeNode> = doc
+                    let doc_ty: Option<phpdoc::grammar::TypeNode> = doc
                         .as_ref()
                         .and_then(|d| d.params.get(p.name.as_ref()))
                         .cloned()
@@ -968,7 +968,7 @@ impl<'a> Checker<'a> {
         self.current_method = Some(f.name.to_string());
         let own_templates = match f.doc_comment.as_deref() {
             Some(doc) if doc.contains("template") => crate::registry::build_template_params(
-                &crate::docblock::parse(doc),
+                &phpdoc::docblock::parse(doc),
                 &f.name,
                 &self.name_ctx,
             ),

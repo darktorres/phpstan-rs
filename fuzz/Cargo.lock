@@ -1220,6 +1220,7 @@ dependencies = [
  "md5",
  "mysql",
  "pcre2-sys",
+ "phpstan-rs-phpdoc",
  "phpstan-rs-syntax",
  "phpstan-rs-types",
  "postgres",
@@ -1244,8 +1245,17 @@ dependencies = [
  "arbitrary",
  "libfuzzer-sys",
  "phpstan-rs",
+ "phpstan-rs-phpdoc",
  "phpstan-rs-syntax",
- "phpstan-rs-types",
+]
+
+[[package]]
+name = "phpstan-rs-phpdoc"
+version = "0.1.0"
+dependencies = [
+ "hotpath",
+ "phpstan-rs-syntax",
+ "rustc-hash",
 ]
 
 [[package]]

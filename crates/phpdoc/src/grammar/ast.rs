@@ -20,7 +20,7 @@ pub struct PhpDocParseError {
 }
 
 /// One `@tag ...` line (already joined with any of its own wrapped
-/// continuation lines - see `phpdoc_grammar::parser`'s own doc comment).
+/// continuation lines - see `grammar::parser`'s own doc comment).
 /// `name` is exactly as written, including a `phpstan-` prefix if
 /// present - unlike `docblock::parse`'s own two-pass plain-then-
 /// `phpstan-`-prefixed precedence resolution, that's a consumer
@@ -105,7 +105,7 @@ pub enum TypeNode {
     /// scalar/class/pseudo-type keyword this grammar doesn't otherwise
     /// give its own variant to. Hyphenated compound keywords
     /// (`class-string`, `positive-int`, ...) lex as one identifier - see
-    /// `phpdoc_grammar::lexer`'s own doc comment.
+    /// `grammar::lexer`'s own doc comment.
     Identifier(String),
     /// `?Type`
     Nullable(Box<TypeNode>),
@@ -201,7 +201,7 @@ impl TypeNode {
     /// produced it (whitespace is normalized, a string literal's own
     /// internal quotes aren't re-escaped), but always something `types::
     /// parse_type_string` parses into the same underlying `Type`.
-    pub(crate) fn to_source_string(&self) -> String {
+    pub fn to_source_string(&self) -> String {
         match self {
             TypeNode::Identifier(s) => s.clone(),
             TypeNode::Nullable(inner) => format!("?{}", inner.to_source_string()),

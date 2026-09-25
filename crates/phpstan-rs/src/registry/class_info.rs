@@ -2,8 +2,6 @@ use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-use crate::docblock::{self, DocBlock};
-use crate::phpdoc_grammar::TypeNode;
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
     build_type_aliases, infer_class_const_type, mark_template_params,
@@ -11,6 +9,8 @@ use crate::registry::function_sig::{
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
+use phpdoc::docblock::{self, DocBlock};
+use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use syntax::intern::intern;

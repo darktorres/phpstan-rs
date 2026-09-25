@@ -1,7 +1,7 @@
 # Guiding the fuzzer
 
 Four targets now: `lex_parse`/`token_stream_parse` (from the original
-`master`-side Phase 19 work) plus `structured_php`/`parse_type_string`
+`master`-side Phase 19 work) plus `structured_php`/`phpdoc_type`
 (merged in alongside them - see ROADMAP.md's Phase 19 entry for how the
 two efforts relate). This doc covers ways to make mutations land on more
 syntactically-interesting input for the two byte/token-level targets, and
@@ -50,7 +50,7 @@ Recommended combined invocation for a longer session:
 
 ## 4. The two structured targets already do this differently
 
-`structured_php` and `parse_type_string` don't need any of the above -
+`structured_php` and `phpdoc_type` don't need any of the above -
 they generate syntactically-plausible input directly via a hand-written
 `Arbitrary` impl instead of relying on byte-level mutation to stumble
 onto valid syntax. `structured_php`'s own generator
@@ -67,10 +67,10 @@ a single `"<?php\n"`-prefixed source string. `token_stream_parse`
 `structured_php`'s own source-text rendering) entirely.
 
     cargo fuzz run structured_php -- -max_total_time=120
-    cargo fuzz run parse_type_string -- -max_total_time=120
+    cargo fuzz run phpdoc_type -- -max_total_time=120
 
 Both share `fuzz/src/lib.rs`'s panic-handling/64MiB-worker-stack guard
-(`guarded_parse`/`guarded_parse_type`) - see that file's own doc comment
+(`guarded_parse`/`guarded_parse_phpdoc`) - see that file's own doc comment
 for why `structured_php` needs it (its generator reaches real recursive
 depth on purpose, unlike `lex_parse`/`token_stream_parse`, which don't
 swallow any panic message at all - see their own doc comments for why

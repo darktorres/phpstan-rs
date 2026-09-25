@@ -1,6 +1,6 @@
 use crate::checker::Checker;
-use crate::docblock;
 use crate::registry::FunctionSig;
+use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::{self, Type};

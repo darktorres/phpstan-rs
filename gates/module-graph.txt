@@ -51,8 +51,6 @@ crate root syntax types phpdoc stub-sources sql composer config diagnostics refl
 module crate root
 module main bin
 
-module phpdoc_grammar phpdoc
-module docblock phpdoc
 module sql_reflection_config sql
 module sql_reflection_schema sql
 module sql_reflection_reflector sql

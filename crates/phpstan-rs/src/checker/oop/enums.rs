@@ -2,8 +2,8 @@ use rustc_hash::FxHashMap;
 
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::docblock;
 use crate::registry::{self};
+use phpdoc::docblock;
 use syntax::ast::*;
 use types::Type;
 

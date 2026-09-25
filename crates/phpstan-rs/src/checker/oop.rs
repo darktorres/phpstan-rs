@@ -2,11 +2,11 @@ use rustc_hash::FxHashMap;
 
 use crate::checker::{Checker, Locals, class_kind_identifier};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::docblock;
 use crate::registry::{
     FunctionSig, PropertySig, collect_class_name_case_refs, object_class_names,
     resolve_names_in_type,
 };
+use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::any_child_stmt;
@@ -320,7 +320,7 @@ impl<'a> Checker<'a> {
                     types::TemplateParam::unbounded(t.name.clone()),
                 );
             }
-            let resolve = |node: &crate::phpdoc_grammar::TypeNode| {
+            let resolve = |node: &phpdoc::grammar::TypeNode| {
                 let ty = crate::registry::mark_template_params(
                     crate::registry::parse_type_node(node),
                     &scope,

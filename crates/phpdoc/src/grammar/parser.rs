@@ -1221,7 +1221,7 @@ pub(crate) fn doctrine_argument_errors(rest: &str) -> Vec<PhpDocParseError> {
 /// tags real PHPStan gives no dedicated tag-value shape to (`@mixin`,
 /// `@sealed`, `@phpstan-type`, ...) that are nonetheless, in practice, one
 /// leading type expression followed by trailing free text.
-pub(crate) fn parse_type_prefix(rest: &str) -> (Option<TypeNode>, &str, Vec<PhpDocParseError>) {
+pub fn parse_type_prefix(rest: &str) -> (Option<TypeNode>, &str, Vec<PhpDocParseError>) {
     let tokens = Lexer::new(rest).tokenize();
     let mut parser = TagParser::new(tokens);
     let ty = parser.try_parse_type();

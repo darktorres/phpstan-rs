@@ -22,9 +22,9 @@
 //! false-positive-prone behavior with no real rule to model it on.
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::docblock;
-use crate::phpdoc_grammar::TypeNode;
 use crate::registry::FunctionSig;
+use phpdoc::docblock;
+use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use syntax::token::Span;

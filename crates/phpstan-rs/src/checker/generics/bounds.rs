@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 use crate::checker::{
     Checker, ITERABLE_GENERIC_CLASS_NAMES, TemplateBindings, class_kind_identifier,
 };
-use crate::docblock;
+use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::{self, Type};

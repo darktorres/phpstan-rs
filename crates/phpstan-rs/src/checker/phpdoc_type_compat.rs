@@ -11,8 +11,8 @@
 //! (`property.phpDocType`).
 
 use super::*;
-use crate::docblock;
 use crate::registry::FunctionSig;
+use phpdoc::docblock;
 use types::TrinaryLogic;
 
 impl<'a> Checker<'a> {
@@ -36,12 +36,11 @@ impl<'a> Checker<'a> {
             None => ty.clone(),
         };
         // Reported in the order the tags are written.
-        let in_doc_order =
-            |map: &rustc_hash::FxHashMap<String, crate::phpdoc_grammar::TypeNode>| {
-                let mut names: Vec<String> = map.keys().cloned().collect();
-                names.sort_by_key(|n| doc.find(&format!("${n}")).unwrap_or(usize::MAX));
-                names
-            };
+        let in_doc_order = |map: &rustc_hash::FxHashMap<String, phpdoc::grammar::TypeNode>| {
+            let mut names: Vec<String> = map.keys().cloned().collect();
+            names.sort_by_key(|n| doc.find(&format!("${n}")).unwrap_or(usize::MAX));
+            names
+        };
         for (tag, names) in [
             ("@param", in_doc_order(&block.params)),
             ("@param-out", in_doc_order(&block.param_out)),

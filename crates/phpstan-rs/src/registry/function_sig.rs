@@ -1,10 +1,10 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::docblock::{self, DocBlock};
-use crate::phpdoc_grammar::TypeNode;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::{mentions_mixed, parse_type_node};
+use phpdoc::docblock::{self, DocBlock};
+use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
 use syntax::name_resolution::NameContext;

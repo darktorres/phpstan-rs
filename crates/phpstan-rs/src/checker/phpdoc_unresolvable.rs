@@ -1,7 +1,7 @@
 //! Real PHPStan's `UnresolvableTypeHelper`: a PHPDoc type that its
 //! `TypeNodeResolver` turns into an `ErrorType` or an implicit `never`
 //! "contains unresolvable type". Decided on the tag's parsed
-//! `phpdoc_grammar` node, against the name scope and registry, so the
+//! `phpdoc::grammar` node, against the name scope and registry, so the
 //! lenient type the registry keeps for such a tag doesn't mask it.
 //!
 //! Stricter than PHPStan in one place: an unimported `Closure(...)` in a
@@ -10,7 +10,7 @@
 //! still types the value as the global `Closure` the author meant.
 
 use super::*;
-use crate::phpdoc_grammar::{self, PhpDocTagValue, TypeNode};
+use phpdoc::grammar::{self, PhpDocTagValue, TypeNode};
 
 /// The winning type node of each tag real PHPStan resolves: plain,
 /// `@phan-`, `@psalm-`, then `@phpstan-`, a later spelling replacing an
@@ -24,7 +24,7 @@ pub(crate) struct TagTypeNodes {
 }
 
 pub(crate) fn tag_type_nodes(doc: &str) -> TagTypeNodes {
-    let node = phpdoc_grammar::parse(doc);
+    let node = grammar::parse(doc);
     let mut out = TagTypeNodes::default();
     for prefix in ["", "phan-", "psalm-", "phpstan-"] {
         for tag in &node.tags {
@@ -64,7 +64,7 @@ pub(crate) fn tag_type_nodes(doc: &str) -> TagTypeNodes {
 /// (`None` for a bare `@var Type`), in first-appearance order - the same
 /// prefix precedence as `tag_type_nodes`.
 pub(crate) fn var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
-    let node = phpdoc_grammar::parse(doc);
+    let node = grammar::parse(doc);
     let mut named: Vec<(Option<String>, TypeNode)> = Vec::new();
     // When any tag is unnamed, only the unnamed tags of the last tag kind
     // (`@var` < `@phan-var` < `@psalm-var` < `@phpstan-var`) that has one

@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use crate::checker::{Checker, class_kind_identifier};
-use crate::phpdoc_grammar::{self, PhpDocTagValue};
 use crate::registry;
+use phpdoc::grammar::{self, PhpDocTagValue};
 use syntax::ast::{ClassDecl, ClassKind, EnumDecl, QualifiedName};
 use syntax::token::Span;
 use types::{self, Type};
@@ -267,7 +267,7 @@ impl<'a> Checker<'a> {
     fn declared_templates(&self, fqn: &str, doc: Option<&str>) -> Templates {
         match doc {
             Some(doc) if doc.contains("template") => {
-                registry::build_template_params(&crate::docblock::parse(doc), fqn, &self.name_ctx)
+                registry::build_template_params(&phpdoc::docblock::parse(doc), fqn, &self.name_ctx)
             }
             _ => Templates::default(),
         }
@@ -517,15 +517,15 @@ impl<'a> Checker<'a> {
         class_templates: &Templates,
         doc: &str,
         tag: AncestorTag,
-    ) -> Vec<(phpdoc_grammar::TypeNode, Type)> {
-        let parsed = phpdoc_grammar::parse(doc);
+    ) -> Vec<(grammar::TypeNode, Type)> {
+        let parsed = grammar::parse(doc);
         let aliases = self
             .registry
             .classes
             .get(fqn)
             .map(|info| info.type_aliases.clone())
             .unwrap_or_default();
-        let mut out: Vec<(String, phpdoc_grammar::TypeNode, Type)> = Vec::new();
+        let mut out: Vec<(String, grammar::TypeNode, Type)> = Vec::new();
         for spelling in tag.spellings() {
             for t in &parsed.tags {
                 if t.name != *spelling {

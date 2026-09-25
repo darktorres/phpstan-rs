@@ -540,7 +540,7 @@ fn a_covariant_call_site_variance_marker_parses_and_round_trips() {
     let ty = type_of("/** @return Collection<covariant Cat> */");
     match &ty {
         TypeNode::Generic(outer, args) if outer == "Collection" => match &args[0] {
-            TypeNode::VarianceArg(crate::phpdoc_grammar::ast::ArgVariance::Covariant, inner) => {
+            TypeNode::VarianceArg(crate::grammar::ast::ArgVariance::Covariant, inner) => {
                 assert_eq!(**inner, TypeNode::Identifier("Cat".to_string()));
             }
             other => panic!("got: {other:?}"),

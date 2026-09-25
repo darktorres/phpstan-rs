@@ -31,7 +31,7 @@ pub(crate) use parser::doctrine_argument_errors;
 /// See `parser::parse_tag_rest`'s own doc comment.
 pub(crate) use parser::parse_tag_rest;
 /// See `parser::parse_type_prefix`'s own doc comment.
-pub(crate) use parser::parse_type_prefix;
+pub use parser::parse_type_prefix;
 
 #[cfg(test)]
 mod tests;

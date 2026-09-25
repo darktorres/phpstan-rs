@@ -6,7 +6,7 @@
 
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::docblock;
+use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::php_version::PhpFeature;

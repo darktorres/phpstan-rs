@@ -8,7 +8,7 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-# "derive" needed for structured_php's/parse_type_string's own local
+# "derive" needed for structured_php's/phpdoc_type's own local
 # Arbitrary-derived generator types (Fragment/Expr/Ident/...) - lex_parse
 # and token_stream_parse don't need it themselves (Vec<Token>'s Arbitrary
 # impl is a blanket one, and Token's own derive lives behind the syntax
@@ -19,9 +19,9 @@ libfuzzer-sys = "0.4"
 [dependencies.phpstan-rs]
 path = "../crates/phpstan-rs"
 
-[dependencies.types]
-package = "phpstan-rs-types"
-path = "../crates/types"
+[dependencies.phpdoc]
+package = "phpstan-rs-phpdoc"
+path = "../crates/phpdoc"
 
 [dependencies.syntax]
 package = "phpstan-rs-syntax"
@@ -54,8 +54,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "parse_type_string"
-path = "fuzz_targets/parse_type_string.rs"
+name = "phpdoc_type"
+path = "fuzz_targets/phpdoc_type.rs"
 test = false
 doc = false
 bench = false

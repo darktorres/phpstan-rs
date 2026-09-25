@@ -1,4 +1,4 @@
-//! Shared harness logic for `structured_php` and `parse_type_string` -
+//! Shared harness logic for `structured_php` and `phpdoc_type` -
 //! `lex_parse`/`token_stream_parse` intentionally stay self-contained
 //! (see their own doc comments for why no `catch_unwind` is needed
 //! there: a worker-thread panic already reaches `libfuzzer-sys`'s own
@@ -43,7 +43,7 @@ const KNOWN_DEPTH_GUARD_MESSAGE: &str = "expression nested too deeply";
 
 // Matches `check.rs`'s own `WORKER_STACK_SIZE`: a default thread stack
 // (~2-8MiB) overflows - uncatchably - well before `MAX_EXPR_DEPTH` (1000)
-// or an unbounded-recursion bug in `parse_type_string` (see below) ever
+// or an unbounded-recursion bug in the PHPDoc grammar (see below) ever
 // gets a chance to trip its own guard or reveal itself as a real,
 // interesting finding.
 const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
@@ -88,23 +88,20 @@ fn run_one(source: &str) {
     }
 }
 
-/// Runs `types::parse_type_string` (the PHPDoc type-string parser,
-/// `src/types/parse.rs`) on `source` on the same 64MiB worker stack as
-/// `guarded_parse` - a PHPDoc type string can nest arbitrarily deep
-/// (`array<array<array<...>>>`), and this parser has no `MAX_EXPR_DEPTH`-
-/// style guard of its own (confirmed: no `panic!`/depth guard anywhere in
-/// `src/types/parse.rs`, `conditional.rs`, or `templates.rs`), so an
-/// ordinary default thread stack would report "just ran out of stack"
-/// long before any real, interesting unbounded-recursion bug. Unlike
-/// `guarded_parse`, nothing is swallowed here: there's no deliberate/
-/// known panic to allowlist, so any panic caught is a genuine bug -
-/// `Thread::join`'s own `Result` already reports one without needing a
-/// manual `catch_unwind` here too.
-pub fn guarded_parse_type(source: String) {
+/// Runs the PHPDoc grammar (`phpdoc::grammar`) on `source`, both as a
+/// bare type expression and as a whole doc comment reduced to a
+/// `DocBlock`, on the same 64MiB worker stack as `guarded_parse` - a
+/// PHPDoc type can nest arbitrarily deep (`array<array<array<...>>>`) and
+/// the grammar has no depth guard of its own, so an ordinary thread stack
+/// would run out long before an unbounded-recursion bug showed. Nothing
+/// is swallowed here: there's no known panic to allowlist, so any panic
+/// is a genuine bug, reported through `Thread::join`'s `Result`.
+pub fn guarded_parse_phpdoc(source: String) {
     let result = std::thread::Builder::new()
         .stack_size(WORKER_STACK_SIZE)
         .spawn(move || {
-            let _ = types::parse_type_string(&source);
+            let _ = phpdoc::grammar::parse_type_prefix(&source);
+            let _ = phpdoc::docblock::parse(&source);
         })
         .expect("failed to spawn fuzz worker thread")
         .join();

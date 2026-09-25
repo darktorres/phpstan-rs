@@ -8,9 +8,9 @@ use crate::assertion_tables::{
     AssertWhen, AssertionEntry, ClassArgumentReturn, default_assertions,
     default_class_argument_returns,
 };
-use crate::phpdoc_grammar::{self, TypeNode};
 use crate::registry::function_sig::{AssertInfo, AssertTarget};
 use crate::registry::{Registry, resolve_names_in_type};
+use phpdoc::grammar::{self, TypeNode};
 use syntax::name_resolution::NameContext;
 
 static DEFAULT_ASSERTIONS: LazyLock<Vec<AssertionEntry>> = LazyLock::new(default_assertions);
@@ -93,7 +93,7 @@ impl Registry {
                 ),
                 target: AssertTarget::Param(Arc::from(parameter)),
                 case_refs: Vec::new(),
-                written_ty: phpdoc_grammar::parse_type_prefix(written)
+                written_ty: grammar::parse_type_prefix(written)
                     .0
                     .unwrap_or(TypeNode::Error),
             };

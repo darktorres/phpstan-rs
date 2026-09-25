@@ -1,6 +1,6 @@
-use crate::phpdoc_grammar::TypeNode;
 use crate::registry::resolve::type_contains_deferred_value_of;
 use crate::registry::type_node::parse_type_node;
+use phpdoc::grammar::TypeNode;
 use syntax::ast::{Expr, ExprKind, Literal};
 use types::{self, Type};
 
