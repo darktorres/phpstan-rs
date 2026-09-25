@@ -174,7 +174,7 @@ pub(super) fn discriminant_canonical_key(subject_key: &str, value: &Type) -> Str
 /// Variable` - `record_branch_implied_facts`'s own guard against recording
 /// a variable whose narrowing this exact branch's own condition already
 /// explains (see its call site's doc comment). A generic recursive walk
-/// via `expr_children` rather than a hand-enumerated set of `ExprKind`
+/// via `child_exprs` rather than a hand-enumerated set of `ExprKind`
 /// arms - `cond` can be arbitrarily shaped (a call, a chained method,
 /// `instanceof`, a compound `&&`/`||`), and this only needs to answer
 /// "is this name referenced anywhere in it," not narrow/instanceof-specific
@@ -184,7 +184,7 @@ fn cond_references_variable(e: &Expr, name: &str) -> bool {
     if matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name) {
         return true;
     }
-    crate::ast_walk::expr_children(e)
+    crate::visit::child_exprs(e)
         .into_iter()
         .any(|child| cond_references_variable(child, name))
 }

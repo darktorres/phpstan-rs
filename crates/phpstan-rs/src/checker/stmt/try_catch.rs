@@ -361,7 +361,7 @@ fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Spa
         if let ExprKind::Throw(inner) = &e.kind {
             out.push((inner, e.span, false));
         }
-        for child in crate::ast_walk::expr_children(e) {
+        for child in crate::visit::child_exprs(e) {
             in_expr(child, out);
         }
     }
@@ -379,10 +379,10 @@ fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Spa
                 }
             }
             _ => {
-                for e in crate::ast_walk::stmt_own_exprs(stmt) {
+                for e in crate::visit::stmt_exprs(stmt) {
                     in_expr(e, out);
                 }
-                for child in crate::ast_walk::stmt_children(stmt) {
+                for child in crate::visit::child_stmts(stmt) {
                     collect_throws(std::slice::from_ref(child), false, out);
                 }
             }
@@ -392,7 +392,7 @@ fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Spa
 
 fn mentions_variable(e: &Expr, name: &str) -> bool {
     matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name)
-        || crate::ast_walk::expr_children(e)
+        || crate::visit::child_exprs(e)
             .into_iter()
             .any(|child| mentions_variable(child, name))
 }

@@ -13,10 +13,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::*;
-use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
 use crate::checker::{Checker, Locals};
 use crate::token::Span;
 use crate::types::Type;
+use crate::visit::{any_child_expr, child_stmts, stmt_exprs};
 
 const GUARD_FUNCTIONS: [&str; 6] = [
     "file_exists",
@@ -72,7 +72,7 @@ pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, 
             }
             StmtKind::FunctionDecl(_) => {}
             _ => {
-                for e in stmt_own_exprs(stmt) {
+                for e in stmt_exprs(stmt) {
                     if let ExprKind::Call(callee, args) = &e.kind
                         && callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
                         && let [name, value, ..] = args.as_slice()
@@ -81,7 +81,7 @@ pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, 
                         add(short_name(name).to_string(), &value.value);
                     }
                 }
-                stack.extend(stmt_children(stmt).into_iter().rev());
+                stack.extend(child_stmts(stmt).into_iter().rev());
             }
         }
     }
@@ -364,10 +364,10 @@ fn visit_guard_args_in_stmt(stmt: &Stmt, out: &mut dyn FnMut(IncludeCall)) {
             }
         }
         _ => {
-            for e in stmt_own_exprs(stmt) {
+            for e in stmt_exprs(stmt) {
                 visit_guard_args_in_expr(e, out);
             }
-            for child in stmt_children(stmt) {
+            for child in child_stmts(stmt) {
                 visit_guard_args_in_stmt(child, out);
             }
         }
@@ -391,7 +391,7 @@ fn visit_guard_args_in_expr(e: &Expr, out: &mut dyn FnMut(IncludeCall)) {
     if let ExprKind::Closure { body, .. } = &e.kind {
         body.iter().for_each(|s| visit_guard_args_in_stmt(s, out));
     }
-    any_expr_child(e, &mut |child| {
+    any_child_expr(e, &mut |child| {
         visit_guard_args_in_expr(child, out);
         false
     });

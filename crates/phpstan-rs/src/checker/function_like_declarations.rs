@@ -11,7 +11,6 @@
 //! there, which would repeat each diagnostic per host.
 
 use crate::ast::*;
-use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
 use crate::checker::calls::contains_nullsafe_access;
 use crate::checker::type_declarations::TypePosition;
 use crate::checker::{Checker, Locals};
@@ -19,6 +18,7 @@ use crate::diagnostic::DiagnosticBuilder;
 use crate::php_version::PhpFeature;
 use crate::token::Span;
 use crate::types::Type;
+use crate::visit::{any_child_expr, child_stmts, stmt_exprs};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PromotionSite {
@@ -45,7 +45,7 @@ fn collect_return_exprs<'s>(body: &'s [Stmt], out: &mut Vec<&'s Expr>) {
         if let StmtKind::Return(Some(e)) = &stmt.kind {
             out.push(e);
         }
-        for child in stmt_children(stmt) {
+        for child in child_stmts(stmt) {
             collect_return_exprs(std::slice::from_ref(child), out);
         }
     }
@@ -88,10 +88,10 @@ impl<'a> Checker<'a> {
                 self.current_class = previous_class;
             }
             _ => {
-                for e in stmt_own_exprs(stmt) {
+                for e in stmt_exprs(stmt) {
                     self.walk_promoted_in_expr(e, label);
                 }
-                for child in stmt_children(stmt) {
+                for child in child_stmts(stmt) {
                     self.check_function_like_declarations_in_stmt(child, label);
                 }
             }
@@ -160,7 +160,7 @@ impl<'a> Checker<'a> {
                 self.current_class = previous_class;
             }
             _ => {
-                any_expr_child(e, &mut |child| {
+                any_child_expr(e, &mut |child| {
                     self.walk_promoted_in_expr(child, label);
                     false
                 });

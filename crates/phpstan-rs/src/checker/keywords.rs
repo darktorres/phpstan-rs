@@ -11,10 +11,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::ast_walk::stmt_children;
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
+use crate::visit::child_stmts;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FrameKind {
@@ -137,7 +137,7 @@ impl Scope {
                 self.gotos.push((name.clone(), placement));
             }
             _ => {
-                for child in stmt_children(stmt) {
+                for child in child_stmts(stmt) {
                     self.walk_stmt(child);
                 }
             }
@@ -333,7 +333,7 @@ fn collect_declares<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Stmt, b
             }
             _ => {
                 let first_child_is_file_start = top && i == 0;
-                for (j, child) in stmt_children(stmt).into_iter().enumerate() {
+                for (j, child) in child_stmts(stmt).into_iter().enumerate() {
                     collect_declares(
                         std::slice::from_ref(child),
                         first_child_is_file_start

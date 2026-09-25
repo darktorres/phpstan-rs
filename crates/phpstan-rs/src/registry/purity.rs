@@ -39,11 +39,11 @@ use rayon::prelude::*;
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::intern::intern;
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;
 use crate::types::Type;
+use crate::visit::{child_exprs, child_stmts};
 
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base
@@ -358,7 +358,7 @@ fn stmt_disqualifies(
             .any(|c| expr_disqualifies(&c.value, declaring_class, registry, deps)),
         _ => false,
     };
-    own || stmt_children(stmt)
+    own || child_stmts(stmt)
         .into_iter()
         .any(|s| stmt_disqualifies(s, declaring_class, registry, deps))
 }
@@ -487,7 +487,7 @@ fn expr_disqualifies(
             };
             resolve_new(&target_class, registry, deps)
         }
-        _ => expr_children(e)
+        _ => child_exprs(e)
             .into_iter()
             .any(|c| expr_disqualifies(c, declaring_class, registry, deps)),
     }
@@ -794,7 +794,7 @@ fn collect_stmt_impure_points(
         }
         _ => {}
     }
-    for child in stmt_children(stmt) {
+    for child in child_stmts(stmt) {
         collect_stmt_impure_points(child, declaring_class, registry, out);
     }
 }
@@ -1009,13 +1009,13 @@ fn collect_expr_impure_points(
         // children` unconditionally after the match, the way `stmt_
         // children` safely does in `collect_stmt_impure_points` just
         // above, would double-visit (and so double-report) every one of
-        // those same children here, since `expr_children` returns a
+        // those same children here, since `child_exprs` returns a
         // matched arm's own sub-expressions too, not just an unhandled
         // arm's. Only reachable for anything *not* explicitly matched
         // above (`BinaryOp`, `Ternary`, ...), exactly like `expr_
         // disqualifies`'s own `_` arm.
         _ => {
-            for child in expr_children(e) {
+            for child in child_exprs(e) {
                 collect_expr_impure_points(child, declaring_class, registry, out);
             }
         }

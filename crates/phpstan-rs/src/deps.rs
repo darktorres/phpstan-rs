@@ -1,7 +1,10 @@
 use rustc_hash::FxHashSet;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
+use crate::visit::{
+    Visitor, walk_attribute, walk_catch_clause, walk_class_decl, walk_enum_decl, walk_expr,
+    walk_stmts,
+};
 
 /// Best-effort, deliberately over-approximating set of every function/class
 /// name one file's parse tree could reference externally - used purely to
@@ -24,291 +27,71 @@ use crate::ast_walk::{expr_children, stmt_children};
 /// leading backslash, so the names pulled out of them are stripped the
 /// same way to stay consistent with that.
 pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
-    let mut names = FxHashSet::default();
-    for stmt in stmts {
-        collect_stmt(stmt, &mut names);
-    }
-    names
+    let mut collector = Collector {
+        names: FxHashSet::default(),
+    };
+    walk_stmts(&mut collector, stmts);
+    collector.names
 }
 
-/// Pulls candidate class names out of a type-hint string (`"?Foo"`,
-/// `"Foo|Bar"`, `"array<Baz>"`, `"(A&B)|C"`, ...) by splitting on anything
-/// that isn't part of a bare/qualified identifier and discarding the
-/// primitive type keywords - good enough for "does this file mention that
-/// name anywhere", which is all this is used for.
-fn collect_type_hint(hint: &TypeHint, names: &mut FxHashSet<String>) {
-    for (name, _) in hint.class_names() {
-        names.insert(name.trim_start_matches('\\').to_string());
-    }
+/// Collects every name a file mentions: class-shaped references in
+/// expressions, declarations, catch clauses, attributes and type
+/// declarations, anywhere in the file (nested scopes included).
+struct Collector {
+    names: FxHashSet<String>,
 }
 
-/// `#[Name(args), ...]` - a class used only as an attribute target
-/// (`#[MyAttribute]` on some other declaration) has no `Name`/`New`/
-/// `ClassConstFetch`/`StaticPropertyFetch` node anywhere pointing at it, so without this it would
-/// look identically unreferenced to a genuinely dead class.
-fn collect_attrs(attrs: &[Attribute], names: &mut FxHashSet<String>) {
-    for a in attrs {
-        names.insert(a.name.clone());
-        for arg in &a.args {
-            collect_expr(&arg.value, names);
+impl<'ast> Visitor<'ast> for Collector {
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        match &expr.kind {
+            ExprKind::ClassConstFetch(StaticTarget::Name(class, _), _)
+            | ExprKind::ClassNameFetch(StaticTarget::Name(class, _))
+            | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, _), _)
+            | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, _), _)
+            | ExprKind::DynamicClassConstFetch(StaticTarget::Name(class, _), _)
+            | ExprKind::StaticCall(StaticTarget::Name(class, _), _, _)
+            | ExprKind::DynamicStaticCall(StaticTarget::Name(class, _), _, _)
+            | ExprKind::Name(class)
+            | ExprKind::Instanceof(_, InstanceofTarget::Name(class, _)) => {
+                self.names.insert(class.clone());
+            }
+            _ => {}
         }
+        walk_expr(self, expr);
     }
-}
 
-fn collect_param(p: &Param, names: &mut FxHashSet<String>) {
-    collect_attrs(&p.attrs, names);
-    if let Some(h) = &p.type_hint {
-        collect_type_hint(h, names);
+    fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
+        self.names.extend(class.extends.iter().cloned());
+        self.names.extend(class.implements.iter().cloned());
+        self.names.extend(class.uses.iter().cloned());
+        walk_class_decl(self, class);
     }
-    if let Some(d) = &p.default {
-        collect_expr(d, names);
-    }
-    if let Some(hooks) = &p.hooks {
-        collect_property_hooks(hooks, names);
-    }
-}
 
-fn collect_property_hooks(hooks: &PropertyHooks, names: &mut FxHashSet<String>) {
-    collect_attrs(&hooks.get_attrs, names);
-    collect_attrs(&hooks.set_attrs, names);
-    if let Some(body) = &hooks.get {
-        collect_hook_body(body, names);
+    fn visit_enum_decl(&mut self, decl: &'ast EnumDecl) {
+        self.names.extend(decl.implements.iter().cloned());
+        self.names.extend(decl.uses.iter().cloned());
+        walk_enum_decl(self, decl);
     }
-    if let Some((param, body)) = &hooks.set {
-        if let Some(p) = param {
-            collect_param(p, names);
-        }
-        collect_hook_body(body, names);
-    }
-}
 
-fn collect_hook_body(body: &PropertyHookBody, names: &mut FxHashSet<String>) {
-    match body {
-        PropertyHookBody::Arrow(e) => collect_expr(e, names),
-        PropertyHookBody::Block(stmts) => {
-            for s in stmts {
-                collect_stmt(s, names);
-            }
-        }
-        // No real body at all - nothing to collect from.
-        PropertyHookBody::Abstract => {}
+    fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
+        self.names.extend(clause.types.iter().cloned());
+        walk_catch_clause(self, clause);
     }
-}
 
-fn collect_function(f: &FunctionDecl, names: &mut FxHashSet<String>) {
-    collect_attrs(&f.attrs, names);
-    for p in &f.params {
-        collect_param(p, names);
+    /// A class used only as an attribute (`#[MyAttribute]` on some other
+    /// declaration) has no other node pointing at it, so without this it
+    /// would look identically unreferenced to a genuinely dead class.
+    fn visit_attribute(&mut self, attribute: &'ast Attribute) {
+        self.names.insert(attribute.name.clone());
+        walk_attribute(self, attribute);
     }
-    if let Some(rt) = &f.return_type {
-        collect_type_hint(rt, names);
-    }
-    for s in f.body.iter() {
-        collect_stmt(s, names);
-    }
-}
 
-fn collect_class(c: &ClassDecl, names: &mut FxHashSet<String>) {
-    collect_attrs(&c.attrs, names);
-    names.extend(c.extends.iter().cloned());
-    names.extend(c.implements.iter().cloned());
-    names.extend(c.uses.iter().cloned());
-    for p in &c.properties {
-        collect_attrs(&p.attrs, names);
-        if let Some(h) = &p.type_hint {
-            collect_type_hint(h, names);
+    /// Type declarations name classes without the leading `\`, the way
+    /// type resolution spells them.
+    fn visit_type_hint(&mut self, hint: &'ast TypeHint) {
+        for (name, _) in hint.class_names() {
+            self.names.insert(name.trim_start_matches('\\').to_string());
         }
-        if let Some(d) = &p.default {
-            collect_expr(d, names);
-        }
-        if let Some(hooks) = &p.hooks {
-            collect_property_hooks(hooks, names);
-        }
-    }
-    for m in &c.methods {
-        collect_function(&m.function, names);
-    }
-    for cst in &c.consts {
-        collect_attrs(&cst.attrs, names);
-        collect_expr(&cst.value, names);
-    }
-}
-
-fn collect_enum(e: &EnumDecl, names: &mut FxHashSet<String>) {
-    collect_attrs(&e.attrs, names);
-    names.extend(e.implements.iter().cloned());
-    names.extend(e.uses.iter().cloned());
-    for m in &e.methods {
-        collect_function(&m.function, names);
-    }
-    for cst in &e.consts {
-        collect_attrs(&cst.attrs, names);
-        collect_expr(&cst.value, names);
-    }
-    for case in &e.cases {
-        collect_attrs(&case.attrs, names);
-        if let Some(v) = &case.value {
-            collect_expr(v, names);
-        }
-    }
-}
-
-// Delegates the "walk into nested statements" recursion to
-// `ast_walk::stmt_children` - this match only needs to handle each
-// variant's own non-statement fields (a condition, a subject, a case's
-// test, a catch's exception types, ...), which `stmt_children`'s
-// `Vec<&Stmt>` return type can't expose. `FunctionDecl`/`ClassDecl`/
-// `EnumDecl` are the one case where both are needed: `stmt_children`
-// deliberately returns none for them (they already have their own
-// dedicated declaration-walker), so this calls
-// `collect_function`/`collect_class`/`collect_enum` directly instead of
-// relying on the trailing loop.
-fn collect_stmt(stmt: &Stmt, names: &mut FxHashSet<String>) {
-    match &stmt.kind {
-        StmtKind::Block(_)
-        | StmtKind::InlineHtml(_)
-        | StmtKind::Break(_)
-        | StmtKind::Continue(_)
-        | StmtKind::Namespace(_)
-        | StmtKind::Use(_)
-        | StmtKind::Global(_)
-        | StmtKind::Goto(_)
-        | StmtKind::Label(_)
-        | StmtKind::Declare { .. } => {}
-        StmtKind::Expression(e) | StmtKind::Throw(e) => collect_expr(e, names),
-        StmtKind::Return(e) => {
-            if let Some(e) = e {
-                collect_expr(e, names);
-            }
-        }
-        StmtKind::Echo(exprs) => {
-            for e in exprs {
-                collect_expr(e, names);
-            }
-        }
-        StmtKind::If { cond, .. }
-        | StmtKind::While { cond, .. }
-        | StmtKind::DoWhile { cond, .. } => {
-            collect_expr(cond, names);
-        }
-        StmtKind::For {
-            init, cond, step, ..
-        } => {
-            for e in init.iter().chain(cond).chain(step) {
-                collect_expr(e, names);
-            }
-        }
-        StmtKind::Foreach {
-            subject,
-            key,
-            value,
-            ..
-        } => {
-            collect_expr(subject, names);
-            if let Some(k) = key {
-                collect_expr(k, names);
-            }
-            collect_expr(value, names);
-        }
-        StmtKind::FunctionDecl(f) => collect_function(f, names),
-        StmtKind::ClassDecl(c) => collect_class(c, names),
-        StmtKind::EnumDecl(e) => collect_enum(e, names),
-        StmtKind::GlobalConst(consts) => {
-            for c in consts {
-                collect_expr(&c.value, names);
-            }
-        }
-        StmtKind::StaticVar(vars) => {
-            for (_, d) in vars {
-                if let Some(e) = d {
-                    collect_expr(e, names);
-                }
-            }
-        }
-        StmtKind::Switch { subject, cases } => {
-            collect_expr(subject, names);
-            for case in cases {
-                if let Some(t) = &case.test {
-                    collect_expr(t, names);
-                }
-            }
-        }
-        StmtKind::Try { catches, .. } => {
-            for c in catches {
-                names.extend(c.types.iter().cloned());
-            }
-        }
-    }
-    for child in stmt_children(stmt) {
-        collect_stmt(child, names);
-    }
-}
-
-// Delegates the "walk into child expressions" recursion to
-// `ast_walk::expr_children` - this match only needs to handle each
-// variant's own name-bearing fields (a `ClassConstFetch`/`StaticPropertyFetch`/`StaticCall`
-// class name, a bare `Name`, an `instanceof` target's class name) and
-// the three variants `expr_children` deliberately returns no children
-// for (`Closure`/`ArrowFn`/`NewAnonymousClass`, each needing its own
-// non-`Vec<&Expr>`-shaped walk - see `ast_walk`'s own module doc
-// comment for why).
-fn collect_expr(expr: &Expr, names: &mut FxHashSet<String>) {
-    match &expr.kind {
-        ExprKind::ClassConstFetch(StaticTarget::Name(class, _), _)
-        | ExprKind::ClassNameFetch(StaticTarget::Name(class, _))
-        | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, _), _)
-        | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, _), _) => {
-            names.insert(class.clone());
-        }
-        // A dynamic receiver's own name references (if any) are picked
-        // up by the generic `expr_children` recursion below, the same
-        // way `Instanceof`'s own `Expr` target already is.
-        ExprKind::StaticCall(StaticTarget::Name(n, _), _, _) => {
-            names.insert(n.clone());
-        }
-        ExprKind::Name(n) => {
-            names.insert(n.clone());
-        }
-        ExprKind::Instanceof(_, InstanceofTarget::Name(n, _)) => {
-            names.insert(n.clone());
-        }
-        ExprKind::NewAnonymousClass(decl, _) => {
-            collect_class(decl, names);
-        }
-        ExprKind::Closure {
-            params,
-            body,
-            return_type,
-            ..
-        } => {
-            for p in params {
-                collect_param(p, names);
-            }
-            if let Some(rt) = return_type {
-                collect_type_hint(rt, names);
-            }
-            for s in body {
-                collect_stmt(s, names);
-            }
-        }
-        ExprKind::ArrowFn {
-            params,
-            body,
-            return_type,
-            ..
-        } => {
-            for p in params {
-                collect_param(p, names);
-            }
-            if let Some(rt) = return_type {
-                collect_type_hint(rt, names);
-            }
-            collect_expr(body, names);
-        }
-        _ => {}
-    }
-    for child in expr_children(expr) {
-        collect_expr(child, names);
     }
 }
 

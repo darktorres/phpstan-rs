@@ -2,8 +2,8 @@ use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::name_resolution::NameContext;
+use crate::visit::{child_exprs, child_stmts};
 
 // ---------------------------------------------------------------------
 // Private-member usage (consts / methods / properties)
@@ -170,7 +170,7 @@ fn walk_stmt_for_members(stmt: &Stmt, fqn: &str, ctx: &NameContext, usage: &mut 
         }
         _ => {}
     }
-    for child in stmt_children(stmt) {
+    for child in child_stmts(stmt) {
         walk_stmt_for_members(child, fqn, ctx, usage);
     }
 }
@@ -183,7 +183,7 @@ pub(crate) fn walk_expr_for_members(
 ) {
     match &expr.kind {
         // Handled explicitly (and `return`s below, skipping the generic
-        // `expr_children` recursion at the bottom of this function)
+        // `child_exprs` recursion at the bottom of this function)
         // specifically so a pure write target - `$this->x = ...` - is
         // recorded as a write only, not *also* as a read the way falling
         // through to the generic `PropertyAccess`/`ClassConstFetch`/`StaticPropertyFetch` arms
@@ -281,8 +281,8 @@ pub(crate) fn walk_expr_for_members(
                 usage.methods.insert(name.clone());
             }
         }
-        // `expr_children` deliberately returns no children for these
-        // three (see `ast_walk`'s own module doc comment - each consumer
+        // `child_exprs` deliberately returns no children for these
+        // three (see `visit`'s own module doc comment - each consumer
         // needs its own explicit handling since they don't fit the
         // generic `Vec<&Expr>` shape). Without these arms, a private
         // member referenced only from inside a closure/arrow function
@@ -325,7 +325,7 @@ pub(crate) fn walk_expr_for_members(
         }
         _ => {}
     }
-    for child in expr_children(expr) {
+    for child in child_exprs(expr) {
         walk_expr_for_members(child, fqn, ctx, usage);
     }
 }

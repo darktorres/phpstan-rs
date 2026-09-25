@@ -32,9 +32,9 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::name_resolution::NameContext;
 use crate::token::Span;
+use crate::visit::{child_exprs, child_stmts};
 
 /// What a reference site points at - no local-variable variant (see
 /// this item's own edge-case notes: local-variable rename/references is
@@ -290,7 +290,7 @@ impl<'a> ClassFnRefWalker<'a> {
             }
             _ => {}
         }
-        for child in stmt_children(stmt) {
+        for child in child_stmts(stmt) {
             self.stmt(child, ctx, current_class, out);
         }
     }
@@ -354,7 +354,7 @@ impl<'a> ClassFnRefWalker<'a> {
             // A genuinely dynamic receiver has no class-name text to
             // record a reference for here at all - any name reference
             // buried inside it is still picked up by the generic
-            // `expr_children` walk below (it's a real child of this
+            // `child_exprs` walk below (it's a real child of this
             // node now, not a discarded `"?"` sentinel).
             ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
                 if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
@@ -394,7 +394,7 @@ impl<'a> ClassFnRefWalker<'a> {
             }
             _ => {}
         }
-        for child in expr_children(expr) {
+        for child in child_exprs(expr) {
             self.expr(child, ctx, current_class, out);
         }
     }

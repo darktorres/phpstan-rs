@@ -1,5 +1,4 @@
 use crate::ast::*;
-use crate::ast_walk::{body_contains_yield, expr_contains_yield};
 use crate::checker::calls::parameters::Callee;
 use crate::checker::resolve::receiver_class;
 use crate::checker::suggest;
@@ -18,6 +17,7 @@ use crate::regex_groups;
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
+use crate::visit::{body_contains_yield, expr_contains_yield};
 
 mod array_ops;
 mod builtin_calls;
@@ -5206,7 +5206,7 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        for child in crate::ast_walk::stmt_children(stmt) {
+        for child in crate::visit::child_stmts(stmt) {
             self.collect_member_ref_defaults_stmt(child);
         }
     }
@@ -6129,7 +6129,7 @@ impl<'a> Checker<'a> {
                 }
                 _ => {}
             }
-            stack.extend(crate::ast_walk::stmt_children(s));
+            stack.extend(crate::visit::child_stmts(s));
         }
         let falls_off_end = !body
             .last()

@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use crate::ast::TypeHint;
 use crate::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::name_resolution::NameContext;
 use crate::registry::function_sig::{mark_template_params, resolve_type};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::{TemplateParam, Type};
+use crate::visit::{child_exprs, child_stmts};
 
 /// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can
 /// accept a wider type than the property's own backing/read type -
@@ -75,16 +75,16 @@ pub(crate) fn hook_body_references_property(body: &PropertyHookBody, prop_name: 
 /// target - uniformly, since real PHP's virtual-property algorithm
 /// doesn't distinguish between them either (a bare `$this->x;` statement
 /// with no use at all still makes the property non-virtual).
-/// `expr_children`/`stmt_children` already stop at a nested closure/
-/// arrow-fn/anonymous-class boundary (see their module doc comment in
-/// `ast_walk.rs`) - exactly the scope boundary real PHP's algorithm
+/// `child_exprs`/`child_stmts` already stop at a nested closure/
+/// arrow-fn/anonymous-class boundary (see `visit::opens_scope`) -
+/// exactly the scope boundary real PHP's algorithm
 /// respects too (a `$this->propName` read inside a nested closure/
 /// arrow-fn does NOT count).
 fn stmt_references_property(stmt: &Stmt, prop_name: &str) -> bool {
     stmt_expr_fields(stmt)
         .into_iter()
         .any(|e| expr_references_property(e, prop_name))
-        || stmt_children(stmt)
+        || child_stmts(stmt)
             .into_iter()
             .any(|s| stmt_references_property(s, prop_name))
 }
@@ -97,13 +97,13 @@ fn expr_references_property(e: &Expr, prop_name: &str) -> bool {
         return true;
     }
 
-    expr_children(e)
+    child_exprs(e)
         .into_iter()
         .any(|c| expr_references_property(c, prop_name))
 }
 
 /// This statement's own direct `Expr` fields (not nested statements -
-/// `stmt_children` already covers those) - mirrors `checker::unused::
+/// `child_stmts` already covers those) - mirrors `checker::unused::
 /// walk_stmt_for_members`'s identical enumeration, kept as its own copy
 /// here since that one is coupled to a different walk's own accumulator/
 /// context parameters.

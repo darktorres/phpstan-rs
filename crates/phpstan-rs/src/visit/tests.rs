@@ -1,3 +1,6 @@
+mod children_by_node_kind;
+mod helpers;
+
 use super::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;

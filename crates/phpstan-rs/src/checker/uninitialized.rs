@@ -23,8 +23,8 @@
 use rustc_hash::FxHashSet;
 
 use crate::ast::*;
-use crate::ast_walk::stmt_children;
 use crate::checker::Checker;
+use crate::visit::child_stmts;
 
 impl<'a> Checker<'a> {
     /// Flags `property.uninitialized` for a concrete class's own typed,
@@ -147,12 +147,12 @@ fn body_ever_assigns_property(stmts: &[Stmt], prop: &str, self_vars: &FxHashSet<
 /// class) anywhere at all, however deeply nested and however
 /// conditional - deliberately permissive, unlike a real dataflow
 /// guarantee. Doesn't descend into a closure/arrow-fn's own body
-/// (`stmt_children`'s documented boundary); a property assigned only
+/// (`child_stmts`'s documented boundary); a property assigned only
 /// inside one is an accepted gap.
 fn stmt_ever_assigns_property(stmt: &Stmt, prop: &str, self_vars: &FxHashSet<String>) -> bool {
     let own =
         matches!(&stmt.kind, StmtKind::Expression(e) if initializes_property(e, prop, self_vars));
-    own || stmt_children(stmt)
+    own || child_stmts(stmt)
         .into_iter()
         .any(|s| stmt_ever_assigns_property(s, prop, self_vars))
 }
@@ -206,7 +206,7 @@ fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut 
         {
             vars.insert(v.to_string());
         }
-        for child in stmt_children(s) {
+        for child in child_stmts(s) {
             collect_self_instance_vars_into(std::slice::from_ref(child), class_name, vars);
         }
     }

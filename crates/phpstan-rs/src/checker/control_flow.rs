@@ -1,7 +1,7 @@
 use crate::ast::*;
-use crate::ast_walk::{any_stmt_child, stmt_children};
 use crate::checker::{Checker, Locals, union_types};
 use crate::types::{self, Type};
+use crate::visit::any_stmt_in_body;
 
 mod boolean_conditions;
 mod generators;
@@ -680,8 +680,7 @@ pub(crate) fn exit_point_description(stmt: &Stmt) -> &'static str {
 /// `WhileLoopAlwaysTrueConditionRule`/`DoWhileLoopConstantConditionRule`
 /// breakless-detection.
 pub(crate) fn stmt_contains_break(stmt: &Stmt) -> bool {
-    matches!(stmt.kind, StmtKind::Break(_))
-        || stmt_children(stmt).into_iter().any(stmt_contains_break)
+    any_stmt_in_body(stmt, |s| matches!(s.kind, StmtKind::Break(_)))
 }
 
 /// `while`/`do-while`'s own "always true" breakless detection needs more
@@ -701,13 +700,12 @@ pub(crate) fn stmt_contains_break(stmt: &Stmt) -> bool {
 /// `getExitPoints()`'s own set of possible exits regardless of how deep
 /// the conditional nesting is.
 pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
-    matches!(
-        stmt.kind,
-        StmtKind::Continue(Some(n)) if n > 1
-    ) || matches!(stmt.kind, StmtKind::Return(_) | StmtKind::Throw(_))
-        || stmt_children(stmt)
-            .into_iter()
-            .any(stmt_contains_escaping_exit)
+    any_stmt_in_body(stmt, |s| {
+        matches!(
+            s.kind,
+            StmtKind::Continue(Some(2..)) | StmtKind::Return(_) | StmtKind::Throw(_)
+        )
+    })
 }
 
 /// Every label name targeted by a `goto` anywhere in `stmts`' own
@@ -727,25 +725,14 @@ pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
 /// isn't unreachable at all if some earlier `goto` in the same function
 /// can jump straight to it.
 pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> rustc_hash::FxHashSet<std::sync::Arc<str>> {
-    // `any_stmt_child` (non-allocating - see its own doc comment) instead
-    // of `stmt_children`/a `for` loop: this runs on every function/
-    // method/closure body checked, a real, measured cost at that call
-    // volume. The closure always returns `false`, so `any_stmt_child`
-    // never short-circuits - every child gets visited, matching the
-    // original unconditional `for child in stmt_children(stmt) { ... }`
-    // loop exactly.
-    fn walk(stmt: &Stmt, targets: &mut rustc_hash::FxHashSet<std::sync::Arc<str>>) {
-        if let StmtKind::Goto(name) = &stmt.kind {
-            targets.insert(name.clone());
-        }
-        any_stmt_child(stmt, &mut |child| {
-            walk(child, targets);
-            false
-        });
-    }
     let mut targets = rustc_hash::FxHashSet::default();
     for stmt in stmts {
-        walk(stmt, &mut targets);
+        any_stmt_in_body(stmt, |s| {
+            if let StmtKind::Goto(name) = &s.kind {
+                targets.insert(name.clone());
+            }
+            false
+        });
     }
     targets
 }

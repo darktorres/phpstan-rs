@@ -15,9 +15,9 @@
 //! own corpus exclusively uses.
 
 use crate::ast::*;
-use crate::ast_walk::{any_expr_child, any_stmt_child};
 use crate::checker::Checker;
 use crate::token::Span;
+use crate::visit::{any_child_expr, any_child_stmt};
 
 impl<'a> Checker<'a> {
     /// `fqn`'s own test methods, each checked independently - only fires
@@ -113,19 +113,19 @@ fn expr_has_assertion(e: &Expr) -> bool {
         }
         _ => false,
     };
-    own || any_expr_child(e, &mut expr_has_assertion)
+    own || any_child_expr(e, &mut expr_has_assertion)
 }
 
 /// Mirrors `control_flow::generators::stmt_contains_yield`'s own
 /// exhaustive per-`StmtKind`-variant shape (that function's own doc
 /// comment has the full reasoning) - each variant's own `Expr`-bearing
-/// field(s), checked via `expr_has_assertion`, plus `any_stmt_child` for
-/// nested statements. Both `any_stmt_child`/`any_expr_child` stop at a
+/// field(s), checked via `expr_has_assertion`, plus `any_child_stmt` for
+/// nested statements. Both `any_child_stmt`/`any_child_expr` stop at a
 /// nested `Closure`/`ArrowFn` boundary by design - correct here too: an
 /// assertion inside a nested callback (`array_map(fn ($x) => $this->
 /// assertTrue($x), $items)` is a real, if unusual, exception) still
 /// needs to count for *this* test, so nested-closure bodies are walked
-/// by `any_expr_child` exactly like any other child expression - the
+/// by `any_child_expr` exactly like any other child expression - the
 /// boundary only matters for `body_contains_yield`'s different question
 /// ("is the *enclosing* function itself a generator"), not this one.
 fn stmt_has_assertion(stmt: &Stmt) -> bool {
@@ -162,7 +162,7 @@ fn stmt_has_assertion(stmt: &Stmt) -> bool {
         }
         _ => false,
     };
-    own || any_stmt_child(stmt, &mut stmt_has_assertion)
+    own || any_child_stmt(stmt, &mut stmt_has_assertion)
 }
 
 fn body_has_assertion(stmts: &[Stmt]) -> bool {

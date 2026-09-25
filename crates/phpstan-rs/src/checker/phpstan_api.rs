@@ -68,13 +68,13 @@ use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::{Checker, class_type_word};
 use crate::composer;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 use crate::name_resolution::NameContext;
 use crate::registry::{FunctionSig, Registry, is_phpstan_namespace};
 use crate::token::Span;
+use crate::visit::{child_exprs, child_stmts};
 
 /// `$variable-name -> resolved fully-qualified class name` for whichever
 /// of the enclosing function/method/closure/arrow-fn's own parameters (or
@@ -1190,7 +1190,7 @@ impl<'a> Walker<'a> {
 
     /// Mirrors `deps::collect_stmt`'s exact shape - see that function's
     /// own doc comment for why the recursion is split this way
-    /// (`stmt_children` for nested *statements*, this match for a
+    /// (`child_stmts` for nested *statements*, this match for a
     /// variant's own non-statement fields, with `FunctionDecl`/
     /// `ClassDecl`/`EnumDecl` needing both since they have their own
     /// dedicated declaration-walker instead of being flattened into an
@@ -1275,7 +1275,7 @@ impl<'a> Walker<'a> {
             }
             StmtKind::Try { .. } => {}
         }
-        for child in stmt_children(stmt) {
+        for child in child_stmts(stmt) {
             self.check_stmt(child, ctx, param_types, label);
         }
     }
@@ -1283,9 +1283,9 @@ impl<'a> Walker<'a> {
     /// Mirrors `deps::collect_expr`'s exact shape - see that function's
     /// own doc comment. Each name-bearing reference kind is checked
     /// directly against `self.registry`'s `@api`/`@api-do-not-implement`
-    /// state (never generically recursed into via `expr_children` a
+    /// state (never generically recursed into via `child_exprs` a
     /// second time for the same span - every arm below either fully
-    /// covers its own children by hand, matching what `expr_children`
+    /// covers its own children by hand, matching what `child_exprs`
     /// would otherwise return, or falls through to the catch-all).
     fn check_expr(&mut self, e: &Expr, ctx: &NameContext, param_types: &ParamTypes, label: &str) {
         match &e.kind {
@@ -1471,7 +1471,7 @@ impl<'a> Walker<'a> {
                 self.check_expr(body, ctx, &nested, label);
             }
             _ => {
-                for child in expr_children(e) {
+                for child in child_exprs(e) {
                     self.check_expr(child, ctx, param_types, label);
                 }
             }

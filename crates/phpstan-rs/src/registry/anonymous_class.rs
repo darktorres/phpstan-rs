@@ -26,10 +26,10 @@
 use rustc_hash::FxHashMap;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::name_resolution::NameContext;
 use crate::registry::{BuiltDecl, ClassInfo};
 use crate::token::Span;
+use crate::visit::{child_exprs, child_stmts};
 
 pub(crate) fn synthetic_name(
     relative_file: &str,
@@ -149,7 +149,7 @@ fn walk_stmt<'a>(stmt: &'a Stmt, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
         }
         _ => {}
     }
-    for child in stmt_children(stmt) {
+    for child in child_stmts(stmt) {
         walk_stmt(child, found);
     }
 }
@@ -247,7 +247,7 @@ fn walk_expr<'a>(expr: &'a Expr, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
         ExprKind::ArrowFn { body, .. } => walk_expr(body, found),
         _ => {}
     }
-    for child in expr_children(expr) {
+    for child in child_exprs(expr) {
         walk_expr(child, found);
     }
 }

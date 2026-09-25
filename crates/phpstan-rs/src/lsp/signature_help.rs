@@ -2,9 +2,9 @@
 //! typing inside a call's parens. Structured after (not sharing code
 //! with) `navigation::Walker`: the same exhaustive per-`StmtKind` field
 //! extraction is unavoidable here too (a call can appear inside any
-//! statement's own condition/subject/return-value/... - `stmt_children`
+//! statement's own condition/subject/return-value/... - `child_stmts`
 //! alone only reaches nested *statements*, never a statement's own
-//! `Expr` fields - see `ast_walk`'s own doc comment), but the payload at
+//! `Expr` fields - see `visit`'s own doc comment), but the payload at
 //! each call-shaped `Expr` is different: not "what does this resolve
 //! to", but "is the cursor inside this call's own argument list, and if
 //! so, which argument".
@@ -42,10 +42,10 @@ use std::path::Path;
 use crate::ast::{
     Arg, ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
 };
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::project::Project;
 use crate::registry::Registry;
 use crate::token::{Position, Span};
+use crate::visit::{child_exprs, child_stmts};
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
 use crate::name_resolution::NameContext;
@@ -207,7 +207,7 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        for child in stmt_children(stmt) {
+        for child in child_stmts(stmt) {
             self.stmt(child, ctx, current_class, best);
         }
     }
@@ -455,7 +455,7 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        for child in expr_children(expr) {
+        for child in child_exprs(expr) {
             self.expr(child, ctx, current_class, best);
         }
     }

@@ -11,9 +11,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::ast::*;
-use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
 use crate::parent_calls::{HasContent, Invocation, ParentCallRule};
 use crate::token::Span;
+use crate::visit::{any_child_expr, child_stmts, stmt_exprs};
 
 use super::Project;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
@@ -76,10 +76,10 @@ fn contains_parent_call(stmts: &[Stmt], method: &str) -> bool {
 
 fn stmt_contains_parent_call(stmt: &Stmt, method: &str) -> bool {
     fn in_expr(e: &Expr, method: &str) -> bool {
-        is_parent_call(e, method) || any_expr_child(e, &mut |child| in_expr(child, method))
+        is_parent_call(e, method) || any_child_expr(e, &mut |child| in_expr(child, method))
     }
-    stmt_own_exprs(stmt).into_iter().any(|e| in_expr(e, method))
-        || stmt_children(stmt)
+    stmt_exprs(stmt).into_iter().any(|e| in_expr(e, method))
+        || child_stmts(stmt)
             .into_iter()
             .any(|child| stmt_contains_parent_call(child, method))
 }

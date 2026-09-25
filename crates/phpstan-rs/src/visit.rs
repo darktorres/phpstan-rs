@@ -517,6 +517,190 @@ pub fn walk_switch_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Swi
     walk_stmts(v, &c.body);
 }
 
+/// Whether an expression starts a scope of its own: a closure, an arrow
+/// function or an anonymous class (its constructor arguments included).
+pub fn opens_scope(expr: &Expr) -> bool {
+    matches!(
+        expr.kind,
+        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } | ExprKind::NewAnonymousClass(..)
+    )
+}
+
+/// Whether `pred` holds for `stmt` or a statement nested in it within the
+/// same function body: expressions (so closures) and nested function,
+/// class and enum declarations are not entered. Stops at the first match.
+pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> bool) -> bool {
+    struct Search<F> {
+        pred: F,
+        found: bool,
+    }
+    impl<'ast, F: FnMut(&'ast Stmt) -> bool> Visitor<'ast> for Search<F> {
+        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            if self.found {
+                return;
+            }
+            if (self.pred)(stmt) {
+                self.found = true;
+                return;
+            }
+            walk_stmt(self, stmt);
+        }
+        fn visit_expr(&mut self, _: &'ast Expr) {}
+        fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+        fn visit_enum_decl(&mut self, _: &'ast EnumDecl) {}
+    }
+    let mut search = Search { pred, found: false };
+    search.visit_stmt(stmt);
+    search.found
+}
+
+/// Whether `pred` holds for `expr` or an expression nested in it within
+/// the same scope: closures, arrow functions and anonymous classes are
+/// not entered (though `pred` sees the expression that starts one). Stops
+/// at the first match.
+pub fn any_expr_in_scope<'ast>(expr: &'ast Expr, pred: impl FnMut(&'ast Expr) -> bool) -> bool {
+    struct Search<F> {
+        pred: F,
+        found: bool,
+    }
+    impl<'ast, F: FnMut(&'ast Expr) -> bool> Visitor<'ast> for Search<F> {
+        fn visit_expr(&mut self, expr: &'ast Expr) {
+            if self.found {
+                return;
+            }
+            if (self.pred)(expr) {
+                self.found = true;
+                return;
+            }
+            if !opens_scope(expr) {
+                walk_expr(self, expr);
+            }
+        }
+    }
+    let mut search = Search { pred, found: false };
+    search.visit_expr(expr);
+    search.found
+}
+
+/// Calls `f` on each expression directly inside `expr` (its children,
+/// not their descendants), in order, until `f` returns true. An
+/// expression that opens a scope has none.
+pub fn any_child_expr<'ast>(expr: &'ast Expr, f: impl FnMut(&'ast Expr) -> bool) -> bool {
+    struct Children<F> {
+        f: F,
+        found: bool,
+    }
+    impl<'ast, F: FnMut(&'ast Expr) -> bool> Visitor<'ast> for Children<F> {
+        fn visit_expr(&mut self, expr: &'ast Expr) {
+            if !self.found && (self.f)(expr) {
+                self.found = true;
+            }
+        }
+    }
+    if opens_scope(expr) {
+        return false;
+    }
+    let mut children = Children { f, found: false };
+    walk_expr(&mut children, expr);
+    children.found
+}
+
+/// The expressions directly inside `expr`; see [`any_child_expr`].
+pub fn child_exprs(expr: &Expr) -> Vec<&Expr> {
+    let mut out = Vec::new();
+    any_child_expr(expr, |e| {
+        out.push(e);
+        false
+    });
+    out
+}
+
+/// Calls `f` on each statement directly inside `stmt` in the same function
+/// body, in order, until `f` returns true. A function, class or enum
+/// declaration has none, and statements inside expressions (closure
+/// bodies) are not reached.
+pub fn any_child_stmt<'ast>(stmt: &'ast Stmt, f: impl FnMut(&'ast Stmt) -> bool) -> bool {
+    struct Children<F> {
+        f: F,
+        found: bool,
+    }
+    impl<'ast, F: FnMut(&'ast Stmt) -> bool> Visitor<'ast> for Children<F> {
+        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            if !self.found && (self.f)(stmt) {
+                self.found = true;
+            }
+        }
+        fn visit_expr(&mut self, _: &'ast Expr) {}
+        fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+        fn visit_enum_decl(&mut self, _: &'ast EnumDecl) {}
+        fn visit_class_const(&mut self, _: &'ast ClassConst) {}
+    }
+    let mut children = Children { f, found: false };
+    walk_stmt(&mut children, stmt);
+    children.found
+}
+
+/// The statements directly inside `stmt`; see [`any_child_stmt`].
+pub fn child_stmts(stmt: &Stmt) -> Vec<&Stmt> {
+    let mut out = Vec::new();
+    any_child_stmt(stmt, |s| {
+        out.push(s);
+        false
+    });
+    out
+}
+
+/// The expressions a statement holds itself (a condition, a subject, a
+/// returned value, constant and static-variable initializers), not those
+/// of its nested statements, nor a declaration's.
+pub fn stmt_exprs(stmt: &Stmt) -> Vec<&Expr> {
+    struct Own<'ast> {
+        out: Vec<&'ast Expr>,
+    }
+    impl<'ast> Visitor<'ast> for Own<'ast> {
+        fn visit_stmt(&mut self, _: &'ast Stmt) {}
+        fn visit_expr(&mut self, expr: &'ast Expr) {
+            self.out.push(expr);
+        }
+        fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+        fn visit_enum_decl(&mut self, _: &'ast EnumDecl) {}
+        fn visit_switch_case(&mut self, case: &'ast SwitchCase) {
+            if let Some(test) = &case.test {
+                self.out.push(test);
+            }
+        }
+        fn visit_catch_clause(&mut self, _: &'ast CatchClause) {}
+        fn visit_class_const(&mut self, constant: &'ast ClassConst) {
+            self.out.push(&constant.value);
+        }
+    }
+    if matches!(stmt.kind, StmtKind::Declare { .. }) {
+        return Vec::new();
+    }
+    let mut own = Own { out: Vec::new() };
+    walk_stmt(&mut own, stmt);
+    own.out
+}
+
+/// Whether a function, method or closure body contains a `yield` or
+/// `yield from`, making it a generator. A `yield` inside a nested
+/// closure, arrow function, class or function belongs to that scope.
+pub fn body_contains_yield(stmts: &[Stmt]) -> bool {
+    stmts
+        .iter()
+        .any(|stmt| any_stmt_in_body(stmt, |s| stmt_exprs(s).into_iter().any(expr_contains_yield)))
+}
+
+/// `body_contains_yield` for an arrow function's expression body.
+pub fn expr_contains_yield(expr: &Expr) -> bool {
+    any_expr_in_scope(expr, |e| {
+        matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
+    })
+}
+
 /// A mutating traversal, the counterpart of [`Visitor`]. Override the `visit_*` methods for the nodes of
 /// interest and call the matching `walk_*` function to continue into the
 /// node's children.

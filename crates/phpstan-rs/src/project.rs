@@ -2263,7 +2263,7 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
                 ranges.push((stmt.span.start.line, stmt.span.end.line));
             }
             StmtKind::ClassDecl(_) | StmtKind::FunctionDecl(_) | StmtKind::EnumDecl(_) => {}
-            _ => stack.extend(crate::ast_walk::stmt_children(stmt)),
+            _ => stack.extend(crate::visit::child_stmts(stmt)),
         }
     }
     ranges

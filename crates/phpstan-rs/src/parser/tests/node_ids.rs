@@ -2,21 +2,21 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
+use crate::visit::{child_exprs, child_stmts, stmt_exprs};
 
 fn collect_stmt(stmt: &Stmt, ids: &mut Vec<NodeId>) {
     ids.push(stmt.id);
-    for e in stmt_own_exprs(stmt) {
+    for e in stmt_exprs(stmt) {
         collect_expr(e, ids);
     }
-    for s in stmt_children(stmt) {
+    for s in child_stmts(stmt) {
         collect_stmt(s, ids);
     }
 }
 
 fn collect_expr(e: &Expr, ids: &mut Vec<NodeId>) {
     ids.push(e.id);
-    for child in expr_children(e) {
+    for child in child_exprs(e) {
         collect_expr(child, ids);
     }
 }

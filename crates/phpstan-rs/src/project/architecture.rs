@@ -10,10 +10,10 @@ use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::php_stubs;
 use crate::token::Span;
 use crate::types::Type;
+use crate::visit::{child_exprs, child_stmts, stmt_exprs};
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
@@ -112,10 +112,10 @@ fn new_class_spans_in_stmt(stmt: &Stmt, out: &mut FxHashSet<Span>) {
             }
         }
         _ => {
-            for e in stmt_own_exprs(stmt) {
+            for e in stmt_exprs(stmt) {
                 new_class_spans_in_expr(e, out);
             }
-            for child in stmt_children(stmt) {
+            for child in child_stmts(stmt) {
                 new_class_spans_in_stmt(child, out);
             }
         }
@@ -139,7 +139,7 @@ fn new_class_spans_in_expr(e: &Expr, out: &mut FxHashSet<Span>) {
         }
         _ => {}
     }
-    for child in expr_children(e) {
+    for child in child_exprs(e) {
         new_class_spans_in_expr(child, out);
     }
 }

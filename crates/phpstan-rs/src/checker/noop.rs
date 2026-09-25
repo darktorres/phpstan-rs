@@ -16,12 +16,12 @@
 
 use crate::ast::TypeHint;
 use crate::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
-use crate::ast_walk::expr_children;
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{FunctionSig, collect_impure_points};
 use crate::types::Type;
+use crate::visit::child_exprs;
 
 const PRECEDENCE_TIP: &str =
     "This operator has unexpected precedence, try disambiguating the logic with parentheses ().";
@@ -93,7 +93,7 @@ fn expr_side_effects(e: &Expr) -> Effects {
     if own == Effects::Some {
         return own;
     }
-    expr_children(e)
+    child_exprs(e)
         .into_iter()
         .map(expr_side_effects)
         .fold(own, std::cmp::max)
@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
                 .any(|part| self.may_be_stringable_object(&self.infer_expr(part, locals))),
             _ => false,
         };
-        own || expr_children(e)
+        own || child_exprs(e)
             .into_iter()
             .any(|child| self.expr_has_hidden_effects(child, locals))
     }

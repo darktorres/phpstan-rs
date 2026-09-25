@@ -9,10 +9,10 @@
 use rustc_hash::FxHashSet;
 
 use crate::ast::*;
-use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
+use crate::visit::{any_child_expr, child_stmts, stmt_exprs};
 
 const MAGIC_CONSTANTS: [&str; 10] = [
     "__LINE__",
@@ -57,10 +57,10 @@ fn collect_in_stmt(stmt: &Stmt, in_closure: bool, out: &mut ConstantFacts) {
             }
         }
         _ => {
-            for e in stmt_own_exprs(stmt) {
+            for e in stmt_exprs(stmt) {
                 collect_in_expr(e, in_closure, out);
             }
-            for child in stmt_children(stmt) {
+            for child in child_stmts(stmt) {
                 collect_in_stmt(child, in_closure, out);
             }
         }
@@ -100,7 +100,7 @@ fn collect_in_expr(e: &Expr, in_closure: bool, out: &mut ConstantFacts) {
             }
         }
         _ => {
-            any_expr_child(e, &mut |child| {
+            any_child_expr(e, &mut |child| {
                 collect_in_expr(child, in_closure, out);
                 false
             });

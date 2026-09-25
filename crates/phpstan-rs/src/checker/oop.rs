@@ -1,7 +1,6 @@
 use rustc_hash::FxHashMap;
 
 use crate::ast::*;
-use crate::ast_walk::any_stmt_child;
 use crate::checker::{Checker, Locals, class_kind_identifier};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
@@ -11,6 +10,7 @@ use crate::registry::{
 };
 use crate::token::Span;
 use crate::types::{self, Type};
+use crate::visit::any_child_stmt;
 
 mod attributes;
 mod enums;
@@ -2019,7 +2019,7 @@ impl<'a> Checker<'a> {
 
 /// Whether `stmts` contains a `parent::__construct(...)` call as a
 /// direct statement anywhere in the body, recursing into nested blocks
-/// (`if`/`else`/`try`/`switch`/loops) the same way `any_stmt_child`'s
+/// (`if`/`else`/`try`/`switch`/loops) the same way `any_child_stmt`'s
 /// other consumers do - real PHP call resolution is case-insensitive,
 /// so the class/method names are compared that way too.
 fn body_calls_parent_construct(stmts: &[Stmt]) -> bool {
@@ -2036,7 +2036,7 @@ fn stmt_calls_parent_construct(stmt: &Stmt) -> bool {
     {
         return true;
     }
-    any_stmt_child(stmt, &mut stmt_calls_parent_construct)
+    any_child_stmt(stmt, &mut stmt_calls_parent_construct)
 }
 
 fn is_php_identifier(s: &str) -> bool {

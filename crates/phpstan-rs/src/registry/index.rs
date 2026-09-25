@@ -698,10 +698,10 @@ fn collect_nested_defines(stmts: &[Stmt], out: &mut Vec<BuiltDecl>) {
                 }
             }
             _ => {
-                for e in crate::ast_walk::stmt_own_exprs(stmt) {
+                for e in crate::visit::stmt_exprs(stmt) {
                     collect_defines_in_expr(e, out);
                 }
-                for child in crate::ast_walk::stmt_children(stmt) {
+                for child in crate::visit::child_stmts(stmt) {
                     collect_nested_defines(std::slice::from_ref(child), out);
                 }
             }
@@ -715,7 +715,7 @@ fn collect_defines_in_expr(e: &Expr, out: &mut Vec<BuiltDecl>) {
     if let Some((name, ty)) = define_call_constant(e) {
         out.push(BuiltDecl::GlobalConst { name, ty });
     }
-    crate::ast_walk::any_expr_child(e, &mut |child| {
+    crate::visit::any_child_expr(e, &mut |child| {
         collect_defines_in_expr(child, out);
         false
     });

@@ -19,11 +19,11 @@
 //! wide implicit-throw model exists to build it on.
 
 use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::Checker;
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;
 use crate::types::Type;
+use crate::visit::{child_exprs, child_stmts};
 
 mod dynamic;
 mod missing;
@@ -31,7 +31,7 @@ mod too_wide;
 
 /// Whether `stmts` contains a real, direct `throw` anywhere in its own
 /// body - `Some(span)` of the first one found. Mirrors
-/// `ast_walk`'s `body_contains_yield` trio, including their
+/// `visit`'s `body_contains_yield` trio, including their
 /// "stops at a nested `Closure`/`ArrowFn`/`NewAnonymousClass`/
 /// `FunctionDecl`/`ClassDecl`/`EnumDecl` boundary" semantics - a `throw`
 /// inside a nested closure belongs to that closure, not the outer one.
@@ -82,7 +82,7 @@ fn stmt_contains_explicit_throw(stmt: &Stmt) -> Option<Span> {
         _ => None,
     };
     own.or_else(|| {
-        stmt_children(stmt)
+        child_stmts(stmt)
             .into_iter()
             .find_map(stmt_contains_explicit_throw)
     })
@@ -94,7 +94,7 @@ pub(crate) fn expr_contains_explicit_throw(e: &Expr) -> Option<Span> {
     if let ExprKind::Throw(_) = &e.kind {
         return Some(e.span);
     }
-    expr_children(e)
+    child_exprs(e)
         .into_iter()
         .find_map(expr_contains_explicit_throw)
 }

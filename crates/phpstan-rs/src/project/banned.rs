@@ -8,11 +8,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::banned::BannedConstruct;
 use crate::registry::Registry;
 use crate::token::{Position, Span};
 use crate::types::Type;
+use crate::visit::{child_exprs, child_stmts, stmt_exprs};
 
 use super::Project;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
@@ -245,10 +245,10 @@ impl<'a> Walker<'a> {
                     ),
                     _ => {}
                 }
-                for e in stmt_own_exprs(stmt) {
+                for e in stmt_exprs(stmt) {
                     self.expr(e);
                 }
-                for child in stmt_children(stmt) {
+                for child in child_stmts(stmt) {
                     self.stmt(child, ctx);
                 }
             }
@@ -413,7 +413,7 @@ impl<'a> Walker<'a> {
                 "A dynamic member name".to_string(),
             );
         }
-        for child in expr_children(e) {
+        for child in child_exprs(e) {
             self.expr(child);
         }
     }

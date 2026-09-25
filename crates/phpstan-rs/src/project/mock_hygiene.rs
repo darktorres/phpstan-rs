@@ -22,8 +22,8 @@ use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::token::Span;
+use crate::visit::{Visitor, opens_scope, walk_expr, walk_stmt, walk_stmts};
 
 use super::Project;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
@@ -122,61 +122,31 @@ fn origin_key(e: &Expr) -> Option<String> {
 }
 
 fn collect_origins(stmts: &[Stmt], out: &mut FxHashMap<String, bool>) {
-    fn in_expr(e: &Expr, out: &mut FxHashMap<String, bool>) {
-        if let ExprKind::Assign(target, value) = &e.kind
-            && let (Some(key), Some(is_mock)) = (origin_key(target), mock_origin(value))
-        {
-            out.insert(key, is_mock);
-        }
-        for child in expr_children(e) {
-            in_expr(child, out);
-        }
+    struct Origins<'o> {
+        out: &'o mut FxHashMap<String, bool>,
     }
-    for stmt in stmts {
-        for e in stmt_own_exprs(stmt) {
-            in_expr(e, out);
+    impl<'ast> Visitor<'ast> for Origins<'_> {
+        fn visit_expr(&mut self, e: &'ast Expr) {
+            if let ExprKind::Assign(target, value) = &e.kind
+                && let (Some(key), Some(is_mock)) = (origin_key(target), mock_origin(value))
+            {
+                self.out.insert(key, is_mock);
+            }
+            if !opens_scope(e) {
+                walk_expr(self, e);
+            }
         }
-        for child in stmt_children(stmt) {
-            collect_origins(std::slice::from_ref(child), out);
-        }
+        fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+        fn visit_enum_decl(&mut self, _: &'ast EnumDecl) {}
     }
+    walk_stmts(&mut Origins { out }, stmts);
 }
 
 impl<'a> Walker<'a> {
     fn report(&mut self, span: Span, message: String, id: &str) {
         self.out
             .push(DiagnosticBuilder::new("<main>".to_string(), message, span, 2, id).build());
-    }
-
-    fn stmts(&mut self, stmts: &[Stmt]) {
-        for stmt in stmts {
-            self.stmt(stmt);
-        }
-    }
-
-    fn stmt(&mut self, stmt: &Stmt) {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
-            StmtKind::Use(imports) => self.ctx.add_uses(imports),
-            StmtKind::FunctionDecl(f) => self.stmts(&f.body),
-            StmtKind::ClassDecl(c) => self.class(c),
-            StmtKind::EnumDecl(e) => {
-                for m in &e.methods {
-                    self.stmts(&m.function.body);
-                }
-            }
-            _ => {
-                if let StmtKind::Expression(e) = &stmt.kind {
-                    self.configuration_chain(e);
-                }
-                for e in stmt_own_exprs(stmt) {
-                    self.expr(e);
-                }
-                for child in stmt_children(stmt) {
-                    self.stmt(child);
-                }
-            }
-        }
     }
 
     fn class(&mut self, c: &ClassDecl) {
@@ -252,7 +222,7 @@ impl<'a> Walker<'a> {
             let mut origins = class_origins.clone();
             collect_origins(&m.function.body, &mut origins);
             let previous = std::mem::replace(&mut self.origins, origins);
-            self.stmts(&m.function.body);
+            walk_stmts(self, &m.function.body);
             self.origins = previous;
         }
     }
@@ -301,8 +271,34 @@ impl<'a> Walker<'a> {
             );
         }
     }
+}
 
-    fn expr(&mut self, e: &Expr) {
+impl<'ast> Visitor<'ast> for Walker<'_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
+            StmtKind::Use(imports) => self.ctx.add_uses(imports),
+            StmtKind::Expression(e) => self.configuration_chain(e),
+            _ => {}
+        }
+        walk_stmt(self, stmt);
+    }
+
+    fn visit_function_decl(&mut self, f: &'ast FunctionDecl) {
+        walk_stmts(self, &f.body);
+    }
+
+    fn visit_class_decl(&mut self, c: &'ast ClassDecl) {
+        self.class(c);
+    }
+
+    fn visit_enum_decl(&mut self, e: &'ast EnumDecl) {
+        for m in &e.methods {
+            walk_stmts(self, &m.function.body);
+        }
+    }
+
+    fn visit_expr(&mut self, e: &'ast Expr) {
         if let ExprKind::MethodCall(_, method, args, _) = &e.kind
             && method.eq_ignore_ascii_case("expects")
             && let Some(arg) = args.first()
@@ -349,20 +345,7 @@ impl<'a> Walker<'a> {
                 }
             }
         }
-        match &e.kind {
-            ExprKind::Closure { body, .. } => self.stmts(body),
-            ExprKind::ArrowFn { body, .. } => self.expr(body),
-            ExprKind::NewAnonymousClass(decl, args) => {
-                for a in args {
-                    self.expr(&a.value);
-                }
-                self.class(decl);
-            }
-            _ => {}
-        }
-        for child in expr_children(e) {
-            self.expr(child);
-        }
+        walk_expr(self, e);
     }
 }
 
@@ -381,7 +364,7 @@ impl Project {
                 out: Vec::new(),
                 origins: FxHashMap::default(),
             };
-            walker.stmts(&file.ast);
+            walk_stmts(&mut walker, &file.ast);
             if !walker.out.is_empty() {
                 let mut found = walker.out;
                 found.sort_by_key(|d| (d.span.start.line, d.span.start.col));

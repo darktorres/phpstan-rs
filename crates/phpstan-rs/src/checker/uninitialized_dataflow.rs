@@ -57,12 +57,12 @@ use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::ast_walk::expr_children;
 use crate::checker::Checker;
 use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
 use crate::registry::FunctionSig;
 use crate::token::Span;
 use crate::types::Type;
+use crate::visit::child_exprs;
 
 /// Bare property names known-initialized on every path reaching a given
 /// point. Mirrors `checker.rs`'s `ProvenanceSet` type alias (same
@@ -545,7 +545,7 @@ fn walk_expr(
             absorb_resolved(target, name, state, ctx)
         }
         _ => {
-            for child in expr_children(e) {
+            for child in child_exprs(e) {
                 state = walk_expr(child, state, ctx, declaring_class);
             }
             state

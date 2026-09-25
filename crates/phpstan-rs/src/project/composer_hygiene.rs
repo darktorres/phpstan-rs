@@ -26,11 +26,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::composer::constraint;
 use crate::composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use crate::php_stubs;
 use crate::token::{Position, Span};
+use crate::visit::{child_exprs, child_stmts, stmt_exprs};
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
@@ -180,10 +180,10 @@ fn collect_facts_in_stmt(stmt: &Stmt, facts: &mut FileFacts) {
             }
         }
         _ => {
-            for e in stmt_own_exprs(stmt) {
+            for e in stmt_exprs(stmt) {
                 collect_facts_in_expr(e, facts);
             }
-            for child in stmt_children(stmt) {
+            for child in child_stmts(stmt) {
                 collect_facts_in_stmt(child, facts);
             }
         }
@@ -236,7 +236,7 @@ fn collect_facts_in_expr(e: &Expr, facts: &mut FileFacts) {
         }
         _ => {}
     }
-    for child in expr_children(e) {
+    for child in child_exprs(e) {
         collect_facts_in_expr(child, facts);
     }
 }

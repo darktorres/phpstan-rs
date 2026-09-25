@@ -26,10 +26,10 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::{BinOp, Expr, ExprKind, GlobalVar, Literal, StaticTarget, Stmt, StmtKind};
-use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::checker::union_types;
 use crate::registry::infer_const_type;
 use crate::types::Type;
+use crate::visit::{child_exprs, child_stmts, stmt_exprs};
 
 use super::Registry;
 use crate::ast::unwrap_grouping;
@@ -373,7 +373,7 @@ fn collect_global_names_rec(stmts: &[&Stmt], out: &mut FxHashSet<Arc<str>>) {
         ) {
             continue;
         }
-        collect_global_names_rec(&stmt_children(stmt), out);
+        collect_global_names_rec(&child_stmts(stmt), out);
     }
 }
 
@@ -410,12 +410,12 @@ fn walk_scope<'a>(
             _ => {}
         }
 
-        for e in stmt_own_exprs(stmt) {
+        for e in stmt_exprs(stmt) {
             walk_expr_for_includes_and_scopes(e, ctx, file_ctx, top_level, out);
         }
 
         walk_scope(
-            &stmt_children(stmt),
+            &child_stmts(stmt),
             ctx,
             file_ctx,
             top_level,
@@ -598,7 +598,7 @@ fn literal_string_key(expr: &Expr) -> Option<String> {
 
 /// Walks an expression looking only for two things: an `include`-shaped
 /// call site, and a nested `Closure`/`NewAnonymousClass` scope boundary -
-/// everything else just recurses via `expr_children`. Not the same as
+/// everything else just recurses via `child_exprs`. Not the same as
 /// `resolve_static_expr_type` below, which answers a completely different
 /// question ("what type is this expression") for a very different,
 /// narrower set of callers.
@@ -639,7 +639,7 @@ fn walk_expr_for_includes_and_scopes<'a>(
         }
         _ => {}
     }
-    for child in expr_children(expr) {
+    for child in child_exprs(expr) {
         walk_expr_for_includes_and_scopes(child, ctx, file_ctx, top_level, out);
     }
 }

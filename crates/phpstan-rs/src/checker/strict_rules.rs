@@ -1086,10 +1086,10 @@ fn walk_stmt(stmt: &Stmt, loops: &mut Vec<crate::token::Span>, out: &mut Vec<Ass
         }
         _ => {}
     }
-    for expr in crate::ast_walk::stmt_own_exprs(stmt) {
+    for expr in crate::visit::stmt_exprs(stmt) {
         walk_expr(expr, loops, out);
     }
-    for child in crate::ast_walk::stmt_children(stmt) {
+    for child in crate::visit::child_stmts(stmt) {
         walk_stmt(child, loops, out);
     }
     if matches!(
@@ -1115,7 +1115,7 @@ fn walk_expr(e: &Expr, loops: &mut Vec<crate::token::Span>, out: &mut Vec<Assign
         }
         _ => {}
     }
-    for child in crate::ast_walk::expr_children(e) {
+    for child in crate::visit::child_exprs(e) {
         walk_expr(child, loops, out);
     }
 }

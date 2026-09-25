@@ -2,8 +2,8 @@ use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::name_resolution::NameContext;
+use crate::visit::{child_exprs, child_stmts};
 
 // ---------------------------------------------------------------------
 // `Closure::bind`/`->bindTo` rebind targets (see `Checker::
@@ -128,7 +128,7 @@ fn scan_stmt_for_rebinds(
         }
         _ => {}
     }
-    for child in stmt_children(stmt) {
+    for child in child_stmts(stmt) {
         scan_stmt_for_rebinds(child, ctx, targets, escape_all);
     }
 }
@@ -154,8 +154,8 @@ fn scan_expr_for_rebinds(
         ExprKind::MethodCall(_, method, args, _) if **method == *"bindTo" => {
             record_rebind_scope(args.get(1), ctx, targets, escape_all);
         }
-        // `expr_children` deliberately excludes these three (see
-        // `ast_walk`'s own module doc comment) - walked explicitly here
+        // `child_exprs` deliberately excludes these three (see
+        // `visit`'s own module doc comment) - walked explicitly here
         // since, unlike this module's other walkers, a rebind call can
         // legitimately live inside any one of them.
         ExprKind::Closure { body, .. } => scan_stmts_for_rebinds(body, ctx, targets, escape_all),
@@ -170,7 +170,7 @@ fn scan_expr_for_rebinds(
         }
         _ => {}
     }
-    for child in expr_children(expr) {
+    for child in child_exprs(expr) {
         scan_expr_for_rebinds(child, ctx, targets, escape_all);
     }
 }

@@ -1,5 +1,4 @@
 use crate::ast::*;
-use crate::ast_walk::body_contains_yield;
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
     ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, body_contains_explicit_throw, collect_goto_targets,
@@ -15,6 +14,7 @@ use crate::registry::{
 };
 use crate::token::Span;
 use crate::types::{self, Type};
+use crate::visit::body_contains_yield;
 
 impl<'a> Checker<'a> {
     /// A trait's method bodies are checked once per class that `use`s

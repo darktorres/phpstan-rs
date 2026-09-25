@@ -21,7 +21,7 @@
 //! Structured after (not sharing code with) `deps.rs`'s own
 //! `collect_stmt`/`collect_expr`/`collect_function`/`collect_class`/
 //! `collect_enum` - the same proven-exhaustive traversal shape (including
-//! `ast_walk`'s own documented `stmt_children`/`expr_children`
+//! `visit`'s own documented `child_stmts`/`child_exprs`
 //! exclusions: `FunctionDecl`/`ClassDecl`/`EnumDecl` bodies and
 //! `Closure`/`ArrowFn`/`NewAnonymousClass`), reused here for a different
 //! purpose (checking spans against a cursor, not collecting names into a
@@ -43,11 +43,11 @@
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::ast_walk::{expr_children, stmt_children};
 use crate::name_resolution::NameContext;
 use crate::project::Project;
 use crate::registry::Registry;
 use crate::token::{Position, Span};
+use crate::visit::{child_exprs, child_stmts};
 use rustc_hash::FxHashSet;
 use std::path::Path;
 
@@ -529,7 +529,7 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        for child in stmt_children(stmt) {
+        for child in child_stmts(stmt) {
             self.stmt(child, ctx, current_class, out);
         }
     }
@@ -739,7 +739,7 @@ impl<'a> Walker<'a> {
                         ));
                     }
                 }
-                for a in expr_children(expr) {
+                for a in child_exprs(expr) {
                     if !std::ptr::eq(a, recv.as_ref()) {
                         self.expr(a, ctx, current_class, out);
                     }
@@ -810,7 +810,7 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        for child in expr_children(expr) {
+        for child in child_exprs(expr) {
             self.expr(child, ctx, current_class, out);
         }
     }
