@@ -17,12 +17,95 @@
 //! project's stand-in: one variant per such check, each carrying the
 //! exact version threshold.
 
-/// A target PHP version as a (major, minor) pair, e.g. `(8, 1)` for PHP
-/// 8.1. Patch versions never affect PHPStan's own version gates (every
-/// `PhpVersion::supportsX`/`deprecatesX` check in
-/// `vendor/phpstan-src/src/Php/PhpVersion.php` compares whole minor
-/// releases, e.g. `>= 80100`), so there's no third field to carry.
-pub type PhpVersion = (u8, u8);
+/// A target PHP version, major and minor. Patch versions never affect
+/// PHPStan's own version gates (every `PhpVersion::supportsX`/
+/// `deprecatesX` check in `vendor/phpstan-src/src/Php/PhpVersion.php`
+/// compares whole minor releases, e.g. `>= 80100`), so there's no third
+/// field to carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PhpVersion {
+    pub major: u8,
+    pub minor: u8,
+}
+
+impl PhpVersion {
+    pub const fn new(major: u8, minor: u8) -> PhpVersion {
+        PhpVersion { major, minor }
+    }
+
+    /// `PHP_VERSION_ID` at this version's first release (`80100`).
+    pub fn id(self) -> u32 {
+        u32::from(self.major) * 10_000 + u32::from(self.minor) * 100
+    }
+
+    /// The version `PHP_VERSION_ID` `id` is part of.
+    pub fn from_id(id: u32) -> PhpVersion {
+        PhpVersion::new(
+            u8::try_from(id / 10_000).unwrap_or(u8::MAX),
+            u8::try_from(id / 100 % 100).unwrap_or(u8::MAX),
+        )
+    }
+}
+
+impl std::fmt::Display for PhpVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
+/// The PHP versions code may run on, `min..=max` (PHPStan's
+/// `PhpVersions`): a `PHP_VERSION_ID` comparison narrows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PhpVersions {
+    pub min: PhpVersion,
+    pub max: PhpVersion,
+}
+
+impl PhpVersions {
+    pub const fn new(min: PhpVersion, max: PhpVersion) -> PhpVersions {
+        PhpVersions { min, max }
+    }
+
+    /// Exactly one version.
+    pub const fn exactly(version: PhpVersion) -> PhpVersions {
+        PhpVersions::new(version, version)
+    }
+
+    pub fn contains(self, version: PhpVersion) -> bool {
+        self.min <= version && version <= self.max
+    }
+
+    /// Whether `feature` is available on every version in the range
+    /// (`Yes`), on none (`No`), or on some.
+    pub fn supports(self, feature: PhpFeature) -> crate::types::TrinaryLogic {
+        use crate::types::TrinaryLogic;
+        match (
+            feature.is_available(self.min),
+            feature.is_available(self.max),
+        ) {
+            (true, true) => TrinaryLogic::Yes,
+            (false, false) => TrinaryLogic::No,
+            _ => TrinaryLogic::Maybe,
+        }
+    }
+
+    /// The range where `PHP_VERSION_ID >= id` holds (`holds`) or fails,
+    /// `None` when no version in it is left.
+    pub fn narrow_at_least(self, id: u32, holds: bool) -> Option<PhpVersions> {
+        let at = PhpVersion::from_id(id);
+        let narrowed = if holds {
+            PhpVersions::new(self.min.max(at), self.max)
+        } else {
+            let below = if at.minor > 0 {
+                PhpVersion::new(at.major, at.minor - 1)
+            } else {
+                PhpVersion::new(at.major.saturating_sub(1), u8::MAX)
+            };
+            PhpVersions::new(self.min, self.max.min(below))
+        };
+        (narrowed.min <= narrowed.max).then_some(narrowed)
+    }
+}
 
 /// Parses the `"X.Y"` string format used by both the `--php-version` CLI
 /// flag and `config.rs`'s `php_version` TOML key (e.g. `"8.1"`) into a
@@ -41,7 +124,7 @@ pub fn parse_php_version(s: &str) -> Result<PhpVersion, String> {
     }
     let major: u8 = major.parse().map_err(|_| invalid())?;
     let minor: u8 = minor.parse().map_err(|_| invalid())?;
-    Ok((major, minor))
+    Ok(PhpVersion::new(major, minor))
 }
 
 /// One PHP language feature whose availability depends on the configured
@@ -248,7 +331,7 @@ impl PhpFeature {
             | NamedArguments
             | NativeUnionTypes
             | RequiredParameterAfterOptionalDeprecated
-            | AbstractTraitMethods => (8, 0),
+            | AbstractTraitMethods => PhpVersion::new(8, 0),
             FinalClassConstants
             | ArrayUnpackingWithStringKeys
             | DeprecatesFloatArrayKey
@@ -257,19 +340,19 @@ impl PhpFeature {
             | FirstClassCallables
             | TentativeReturnTypes
             | NamedArgumentAfterUnpackedArgument
-            | ReadOnlyProperties => (8, 1),
+            | ReadOnlyProperties => PhpVersion::new(8, 1),
             ReadOnlyClasses
             | ConstantsInTraits
             | StandaloneNullFalseTrueTypes
-            | DisjunctiveNormalFormTypes => (8, 2),
+            | DisjunctiveNormalFormTypes => PhpVersion::new(8, 2),
             NativeTypedClassConstants
             | DynamicClassConstantFetch
             | ReadOnlyAnonymousClasses
-            | ReadonlyPropertyReinitializationOnClone => (8, 3),
+            | ReadonlyPropertyReinitializationOnClone => PhpVersion::new(8, 3),
             ImplicitlyNullableParameterDeprecated
             | PropertyHooks
             | FinalProperties
-            | AsymmetricVisibility => (8, 4),
+            | AsymmetricVisibility => PhpVersion::new(8, 4),
             FinalPromotedProperties
             | VoidCast
             | DeprecatedNonStandardCasts
@@ -279,7 +362,7 @@ impl PhpFeature {
             | DeprecatesNullArrayOffset
             | DeprecatedAttributeOnTraits
             | OverrideAttributeOnProperty
-            | AsymmetricVisibilityForStaticProperties => (8, 5),
+            | AsymmetricVisibilityForStaticProperties => PhpVersion::new(8, 5),
         }
     }
 

@@ -474,9 +474,9 @@ pub struct Registry {
     doctrine_entity_table_index: std::sync::OnceLock<FxHashMap<Arc<str>, Arc<str>>>,
     // The project's configured target PHP version, if any - `None`
     // means "not configured," which every version-gated rule should
-    // treat as "nothing to check yet." See `crate::php_version::PhpFeature`
+    // treat as "nothing to check yet." See `crate::types::php_version::PhpFeature`
     // for the feature-availability lookup table this unlocks.
-    pub php_version: Option<crate::php_version::PhpVersion>,
+    pub php_version: Option<crate::types::php_version::PhpVersion>,
     // Class names with at least one *unconditional* declaration indexed
     // so far - lets `insert_built_decl` tell "this name's entry is
     // itself unconditional, so a second one should merge onto it"

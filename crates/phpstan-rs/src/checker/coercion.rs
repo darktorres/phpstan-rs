@@ -47,7 +47,7 @@ impl<'a> Checker<'a> {
         let Some(version) = self.registry.php_version else {
             return;
         };
-        if crate::php_version::PhpFeature::UnsetCastRemoved.is_available(version) {
+        if crate::types::php_version::PhpFeature::UnsetCastRemoved.is_available(version) {
             return;
         }
         self.report_builder(
@@ -70,7 +70,7 @@ impl<'a> Checker<'a> {
     /// same occurrence.
     pub(crate) fn check_void_cast(&mut self, span: Span, label: &str, is_bare_statement: bool) {
         if let Some(version) = self.registry.php_version
-            && !crate::php_version::PhpFeature::VoidCast.is_available(version)
+            && !crate::types::php_version::PhpFeature::VoidCast.is_available(version)
         {
             self.report_builder(
                 DiagnosticBuilder::new(
@@ -121,7 +121,8 @@ impl<'a> Checker<'a> {
         let Some(version) = self.registry.php_version else {
             return;
         };
-        if !crate::php_version::PhpFeature::DeprecatedNonStandardCasts.is_available(version) {
+        if !crate::types::php_version::PhpFeature::DeprecatedNonStandardCasts.is_available(version)
+        {
             return;
         }
         let (spelling, canonical) = (cast.keyword(), cast.kind().keyword());
@@ -143,7 +144,8 @@ impl<'a> Checker<'a> {
         let Some(version) = self.registry.php_version else {
             return;
         };
-        if !crate::php_version::PhpFeature::DeprecatedBacktickOperator.is_available(version) {
+        if !crate::types::php_version::PhpFeature::DeprecatedBacktickOperator.is_available(version)
+        {
             return;
         }
         self.report(

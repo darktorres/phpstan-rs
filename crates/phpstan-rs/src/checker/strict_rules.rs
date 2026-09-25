@@ -291,7 +291,11 @@ impl<'a> Checker<'a> {
                 0,
                 "comparison.nonComparable",
             );
-            if self.registry.php_version.is_some_and(|v| v >= (8, 4)) {
+            if self
+                .registry
+                .php_version
+                .is_some_and(|v| v >= crate::types::PhpVersion::new(8, 4))
+            {
                 builder = builder.tip("Also BcMath\\Number is allowed.");
             }
             self.report_builder(builder);

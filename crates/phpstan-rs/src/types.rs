@@ -10,6 +10,7 @@ mod display;
 mod hierarchy;
 mod late;
 mod parse;
+pub mod php_version;
 pub(crate) mod relation;
 mod shape;
 mod subtype;
@@ -25,6 +26,7 @@ pub use parse::parse_type_string;
 pub(crate) use parse::{
     canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance,
 };
+pub use php_version::{PhpFeature, PhpVersion, PhpVersions, parse_php_version};
 pub use relation::Relation;
 pub use shape::{Shape, ShapeField, ShapeKey};
 pub use subtype::is_subtype;

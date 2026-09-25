@@ -258,7 +258,7 @@ impl<'a> Checker<'a> {
     ) {
         use crate::types::Type;
         if self.registry.php_version.is_some_and(|v| {
-            !crate::php_version::PhpFeature::DynamicClassConstantFetch.is_available(v)
+            !crate::types::php_version::PhpFeature::DynamicClassConstantFetch.is_available(v)
         }) {
             self.report_builder(
                 DiagnosticBuilder::new(

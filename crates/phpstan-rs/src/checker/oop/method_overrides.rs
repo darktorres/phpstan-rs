@@ -645,7 +645,7 @@ impl<'a> Checker<'a> {
         let tentative = ancestor_sig.is_stub
             && has_attr(&ancestor_sig.attrs, "TentativeType")
             && self.registry.php_version.is_none_or(|v| {
-                crate::php_version::PhpFeature::TentativeReturnTypes.is_available(v)
+                crate::types::php_version::PhpFeature::TentativeReturnTypes.is_available(v)
             });
         if tentative {
             let will_change = has_attr(&own_sig.attrs, "ReturnTypeWillChange")

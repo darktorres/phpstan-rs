@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::checker::{Checker, Locals};
-use crate::php_version::{PhpFeature, PhpVersion};
+use crate::types::php_version::{PhpFeature, PhpVersion};
 use crate::types::{AccessoryKind, Type};
 use syntax::ast::*;
 

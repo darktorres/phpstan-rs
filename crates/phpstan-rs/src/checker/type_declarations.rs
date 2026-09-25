@@ -9,7 +9,7 @@
 
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::php_version::PhpFeature;
+use crate::types::php_version::PhpFeature;
 use syntax::token::Span;
 
 const ONLY_STANDALONE: [&str; 3] = ["mixed", "never", "void"];

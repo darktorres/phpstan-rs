@@ -6,7 +6,7 @@
 //! Trusting those literals makes platform checks like `PHP_SAPI !==
 //! 'cli'` look constant.
 
-use crate::php_version::PhpVersion;
+use crate::types::php_version::PhpVersion;
 use crate::types::{Type, parse_type_string};
 
 /// `ConstantResolver::PHP_MIN_ANALYZABLE_VERSION_ID`.
@@ -39,18 +39,18 @@ pub(crate) fn predefined_constant_type(
         | "LIBXML_DOTTED_VERSION"
         | "PCRE_VERSION" => non_falsy_string(),
         "PHP_VERSION_ID" => match php_version {
-            Some((major, minor)) => {
-                let base = i64::from(major) * 10000 + i64::from(minor) * 100;
+            Some(version) => {
+                let base = i64::from(version.id());
                 Type::IntRange(Some(base), Some(base + 99))
             }
             None => Type::IntRange(Some(PHP_MIN_ANALYZABLE_VERSION_ID), None),
         },
         "PHP_MAJOR_VERSION" => match php_version {
-            Some((major, _)) => Type::IntLiteral(i64::from(major)),
+            Some(version) => Type::IntLiteral(i64::from(version.major)),
             None => Type::IntRange(Some(5), None),
         },
         "PHP_MINOR_VERSION" => match php_version {
-            Some((_, minor)) => Type::IntLiteral(i64::from(minor)),
+            Some(version) => Type::IntLiteral(i64::from(version.minor)),
             None => Type::IntRange(Some(0), None),
         },
         // A configured version has no patch component.

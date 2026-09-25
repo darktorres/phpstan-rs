@@ -51,7 +51,7 @@ impl<'a> Checker<'a> {
     fn mysqli_throws_exceptions(&self) -> bool {
         self.registry
             .php_version
-            .is_none_or(|version| version >= (8, 1))
+            .is_none_or(|version| version >= crate::types::PhpVersion::new(8, 1))
     }
 
     /// `mysqli::query($sql)`/`mysqli_query($link, $sql)`.

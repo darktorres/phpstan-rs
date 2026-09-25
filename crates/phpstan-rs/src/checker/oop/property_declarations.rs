@@ -7,7 +7,7 @@
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
-use crate::php_version::PhpFeature;
+use crate::types::php_version::PhpFeature;
 use syntax::ast::*;
 use syntax::token::Span;
 

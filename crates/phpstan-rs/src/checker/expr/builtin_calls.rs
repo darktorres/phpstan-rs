@@ -1857,7 +1857,9 @@ impl<'a> Checker<'a> {
         let Some(version) = self.registry.php_version else {
             return;
         };
-        if !crate::php_version::PhpFeature::FilterThrowOnFailureConstant.is_available(version) {
+        if !crate::types::php_version::PhpFeature::FilterThrowOnFailureConstant
+            .is_available(version)
+        {
             return;
         }
         let Some(flags_arg) = args.get(2) else {

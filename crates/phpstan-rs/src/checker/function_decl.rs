@@ -6,11 +6,11 @@ use crate::checker::{
 };
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
-use crate::php_version::PhpFeature;
 use crate::registry::{
     ClassInfo, FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
     resolve_names_in_type, resolve_type,
 };
+use crate::types::php_version::PhpFeature;
 use crate::types::{self, Type};
 use syntax::ast::*;
 use syntax::token::Span;

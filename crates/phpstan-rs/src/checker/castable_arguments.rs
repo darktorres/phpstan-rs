@@ -261,7 +261,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         if !self.registry.php_version.is_some_and(|v| {
-            !crate::php_version::PhpFeature::ArrayUnpackingWithStringKeys.is_available(v)
+            !crate::types::php_version::PhpFeature::ArrayUnpackingWithStringKeys.is_available(v)
         }) {
             return;
         }

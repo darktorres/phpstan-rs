@@ -19,8 +19,8 @@
 //! parameter (unless that type is only `mixed`).
 
 use crate::checker::Checker;
-use crate::php_version::PhpVersion;
 use crate::registry::FunctionSig;
+use crate::types::PhpVersion;
 use crate::types::TrinaryLogic;
 use crate::types::Type;
 use syntax::ast::*;
@@ -99,7 +99,7 @@ fn render(mut native: Native, version: Option<PhpVersion>) -> Option<String> {
     let at_least = |v: PhpVersion| version.is_some_and(|configured| configured >= v);
     let atoms = &mut native.atoms;
     if atoms.iter().any(|a| a == "mixed") {
-        return at_least((8, 0)).then(|| "mixed".to_string());
+        return at_least(PhpVersion::new(8, 0)).then(|| "mixed".to_string());
     }
     if atoms.len() > 1 && atoms.iter().any(|a| a == "void" || a == "never") {
         return None;
@@ -138,21 +138,21 @@ fn render(mut native: Native, version: Option<PhpVersion>) -> Option<String> {
     let has_intersection = others.iter().any(|a| a.contains('&'));
     let needs = |feature: PhpVersion| at_least(feature);
     match others.as_slice() {
-        [] => needs((8, 2)).then(|| "null".to_string()),
+        [] => needs(PhpVersion::new(8, 2)).then(|| "null".to_string()),
         [only] => {
             let standalone_literal = matches!(only.as_str(), "true" | "false");
             if has_intersection {
                 if nullable {
-                    return needs((8, 2)).then(|| format!("({only})|null"));
+                    return needs(PhpVersion::new(8, 2)).then(|| format!("({only})|null"));
                 }
-                return needs((8, 1)).then(|| only.to_string());
+                return needs(PhpVersion::new(8, 1)).then(|| only.to_string());
             }
-            if (standalone_literal && !needs((8, 2)))
-                || (only.as_str() == "static" && !needs((8, 0)))
-                || (only.as_str() == "never" && !needs((8, 1)))
-                || (only.as_str() == "object" && !needs((7, 2)))
+            if (standalone_literal && !needs(PhpVersion::new(8, 2)))
+                || (only.as_str() == "static" && !needs(PhpVersion::new(8, 0)))
+                || (only.as_str() == "never" && !needs(PhpVersion::new(8, 1)))
+                || (only.as_str() == "object" && !needs(PhpVersion::new(7, 2)))
             {
-                if standalone_literal && nullable && needs((8, 0)) {
+                if standalone_literal && nullable && needs(PhpVersion::new(8, 0)) {
                     return Some(format!("{only}|null"));
                 }
                 return None;
@@ -164,10 +164,11 @@ fn render(mut native: Native, version: Option<PhpVersion>) -> Option<String> {
             })
         }
         many => {
-            if !needs((8, 0)) || (has_intersection && !needs((8, 2))) {
+            if !needs(PhpVersion::new(8, 0)) || (has_intersection && !needs(PhpVersion::new(8, 2)))
+            {
                 return None;
             }
-            if many.iter().any(|a| a.as_str() == "true") && !needs((8, 2)) {
+            if many.iter().any(|a| a.as_str() == "true") && !needs(PhpVersion::new(8, 2)) {
                 return None;
             }
             let mut parts: Vec<String> = many
@@ -320,7 +321,11 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_native_class_constant_types(&mut self, fqn: &str, consts: &[ClassConst]) {
-        if self.registry.php_version.is_none_or(|v| v < (8, 3)) {
+        if self
+            .registry
+            .php_version
+            .is_none_or(|v| v < PhpVersion::new(8, 3))
+        {
             return;
         }
         for constant in consts {

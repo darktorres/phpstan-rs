@@ -2,8 +2,8 @@ use rustc_hash::FxHashSet;
 
 use crate::checker::{CheckArgsCall, Checker, Locals, class_type_word};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::php_version::PhpFeature;
 use crate::registry::{is_allow_dynamic_properties_attribute_name, is_deprecated_attribute_name};
+use crate::types::php_version::PhpFeature;
 use syntax::ast::*;
 use syntax::token::Span;
 
@@ -249,7 +249,8 @@ impl<'a> Checker<'a> {
             return;
         }
         if let Some(version) = self.registry.php_version
-            && !crate::php_version::PhpFeature::AttributesOnGlobalConstants.is_available(version)
+            && !crate::types::php_version::PhpFeature::AttributesOnGlobalConstants
+                .is_available(version)
         {
             self.report_builder(
                 DiagnosticBuilder::new(

@@ -139,7 +139,9 @@ impl<'a> Checker<'a> {
         let Some(version) = self.registry.php_version else {
             return;
         };
-        if crate::php_version::PhpFeature::CaseInsensitiveConstantsRemoved.is_available(version) {
+        if crate::types::php_version::PhpFeature::CaseInsensitiveConstantsRemoved
+            .is_available(version)
+        {
             return;
         }
         if args.len() < 3 {

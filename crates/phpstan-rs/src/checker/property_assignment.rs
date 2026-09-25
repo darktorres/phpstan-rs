@@ -1,6 +1,6 @@
 use crate::checker::{Checker, Locals, MemberVisibilityCheck, UsageTokenKind};
-use crate::php_version::PhpFeature;
 use crate::types;
+use crate::types::php_version::PhpFeature;
 use syntax::ast::*;
 
 impl<'a> Checker<'a> {
@@ -309,10 +309,9 @@ impl<'a> Checker<'a> {
         let write_visibility = self.write_visibility(&sig);
         let can_write = self.is_member_access_visible(&owner, &write_visibility, &prop, "property");
         if !can_write {
-            let asymmetric_supported = self
-                .registry
-                .php_version
-                .is_none_or(|v| crate::php_version::PhpFeature::PropertyHooks.is_available(v));
+            let asymmetric_supported = self.registry.php_version.is_none_or(|v| {
+                crate::types::php_version::PhpFeature::PropertyHooks.is_available(v)
+            });
             if asymmetric_supported && !is_static_fetch {
                 let description = if write_visibility != sig.visibility {
                     match write_visibility {

@@ -229,7 +229,10 @@ impl<'a> Checker<'a> {
     /// `===`.
     fn loose_comparison_differs(&self, a: &LooseKind, b: &LooseKind) -> bool {
         use LooseKind::*;
-        let before_php8 = self.registry.php_version.is_none_or(|v| v < (8, 0));
+        let before_php8 = self
+            .registry
+            .php_version
+            .is_none_or(|v| v < crate::types::PhpVersion::new(8, 0));
         let numeric = |k: &LooseKind| matches!(k, Int | Float);
         let possibly_numeric_string = |k: &LooseKind| matches!(k, NumericString | String);
         match (a, b) {

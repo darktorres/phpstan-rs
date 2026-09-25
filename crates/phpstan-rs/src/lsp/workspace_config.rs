@@ -69,7 +69,7 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_null_coercion: bool,
     pub(crate) check_new_exception_discarded: bool,
     pub(crate) check_risky_tests: bool,
-    pub(crate) php_version: Option<crate::php_version::PhpVersion>,
+    pub(crate) php_version: Option<crate::types::php_version::PhpVersion>,
     pub(crate) assertion_entries: Vec<crate::assertion_tables::AssertionEntry>,
     pub(crate) class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
     pub(crate) restricted_symbol_entries: Vec<crate::restricted_symbols::RestrictedSymbolEntry>,
@@ -129,7 +129,7 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
     let resolve_against_root = |p: PathBuf| root.join(p);
 
     let php_version = match config.php_version {
-        Some(s) => match crate::php_version::parse_php_version(&s) {
+        Some(s) => match crate::types::php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
             Err(e) => {
                 eprintln!("phpstan-rs lsp: {e}");

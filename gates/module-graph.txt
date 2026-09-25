@@ -52,7 +52,6 @@ module crate root
 module main bin
 
 module types types
-module php_version types
 module php_float_format types
 module phpdoc_grammar phpdoc
 module docblock phpdoc

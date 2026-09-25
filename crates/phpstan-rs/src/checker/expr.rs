@@ -4148,7 +4148,7 @@ impl<'a> Checker<'a> {
             ExprKind::FirstClassCallable(inner) => {
                 if !matches!(inner.kind, ExprKind::New(..))
                     && self.registry.php_version.is_some_and(|v| {
-                        !crate::php_version::PhpFeature::FirstClassCallables.is_available(v)
+                        !crate::types::php_version::PhpFeature::FirstClassCallables.is_available(v)
                     })
                 {
                     self.report_builder(
@@ -5888,21 +5888,21 @@ pub(crate) fn is_confidently_array(ty: &Type) -> bool {
 /// whose `float`/`null` legality depends on the target `PhpVersion`.
 pub(crate) fn invalid_array_key_description(
     ty: &Type,
-    php_version: Option<crate::php_version::PhpVersion>,
+    php_version: Option<crate::types::php_version::PhpVersion>,
 ) -> Option<String> {
     match ty {
         Type::Array(..) | Type::ArrayShape(_) => Some("array".to_string()),
         Type::Object(name, _) => Some(name.clone().to_string()),
         Type::Float
             if php_version.is_some_and(|v| {
-                crate::php_version::PhpFeature::DeprecatesFloatArrayKey.is_available(v)
+                crate::types::php_version::PhpFeature::DeprecatesFloatArrayKey.is_available(v)
             }) =>
         {
             Some("float".to_string())
         }
         Type::Null
             if php_version.is_some_and(|v| {
-                crate::php_version::PhpFeature::DeprecatesNullArrayOffset.is_available(v)
+                crate::types::php_version::PhpFeature::DeprecatesNullArrayOffset.is_available(v)
             }) =>
         {
             Some("null".to_string())

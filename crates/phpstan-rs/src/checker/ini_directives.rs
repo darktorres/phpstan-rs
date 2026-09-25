@@ -5,25 +5,25 @@
 //! directives are deprecated only to change, so reading them is fine.
 
 use crate::checker::{Checker, Locals};
-use crate::php_version::PhpVersion;
+use crate::types::PhpVersion;
 use crate::types::Type;
 use syntax::ast::Arg;
 
 /// Directives removed from PHP, with the version that removed them.
 const REMOVED: &[(&str, PhpVersion)] = &[
-    ("sql.safe_mode", (7, 2)),
-    ("opcache.fast_shutdown", (7, 2)),
-    ("birdstep.max_links", (7, 3)),
-    ("opcache.inherited_hack", (7, 3)),
-    ("track_errors", (8, 0)),
-    ("mbstring.func_overload", (8, 0)),
-    ("pdo_odbc.db2_instance_name", (8, 0)),
-    ("assert.quiet_eval", (8, 0)),
-    ("mysqlnd.fetch_data_copy", (8, 1)),
-    ("log_errors_max_len", (8, 1)),
-    ("mysqli.reconnect", (8, 2)),
-    ("opcache.consistency_checks", (8, 3)),
-    ("disable_classes", (8, 5)),
+    ("sql.safe_mode", PhpVersion::new(7, 2)),
+    ("opcache.fast_shutdown", PhpVersion::new(7, 2)),
+    ("birdstep.max_links", PhpVersion::new(7, 3)),
+    ("opcache.inherited_hack", PhpVersion::new(7, 3)),
+    ("track_errors", PhpVersion::new(8, 0)),
+    ("mbstring.func_overload", PhpVersion::new(8, 0)),
+    ("pdo_odbc.db2_instance_name", PhpVersion::new(8, 0)),
+    ("assert.quiet_eval", PhpVersion::new(8, 0)),
+    ("mysqlnd.fetch_data_copy", PhpVersion::new(8, 1)),
+    ("log_errors_max_len", PhpVersion::new(8, 1)),
+    ("mysqli.reconnect", PhpVersion::new(8, 2)),
+    ("opcache.consistency_checks", PhpVersion::new(8, 3)),
+    ("disable_classes", PhpVersion::new(8, 5)),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -36,35 +36,107 @@ enum Deprecation {
 
 /// Deprecated directives, with the version that deprecated them.
 const DEPRECATED: &[(&str, PhpVersion, Deprecation)] = &[
-    ("track_errors", (7, 2), Deprecation::Directive),
-    ("mbstring.func_overload", (7, 2), Deprecation::Directive),
-    ("pdo_odbc.db2_instance_name", (7, 3), Deprecation::Directive),
-    ("allow_url_include", (7, 4), Deprecation::Directive),
-    ("filter.default", (8, 1), Deprecation::Directive),
     (
-        "oci8.old_oci_close_semantics",
-        (8, 1),
+        "track_errors",
+        PhpVersion::new(7, 2),
         Deprecation::Directive,
     ),
-    ("auto_detect_line_endings", (8, 1), Deprecation::Directive),
-    ("assert.active", (8, 3), Deprecation::Changing),
-    ("assert.bail", (8, 3), Deprecation::Changing),
-    ("assert.callback", (8, 3), Deprecation::Changing),
-    ("assert.exception", (8, 3), Deprecation::Changing),
-    ("assert.warning", (8, 3), Deprecation::Changing),
-    ("session.sid_length", (8, 4), Deprecation::Changing),
     (
-        "session.sid_bits_per_character",
-        (8, 4),
+        "mbstring.func_overload",
+        PhpVersion::new(7, 2),
+        Deprecation::Directive,
+    ),
+    (
+        "pdo_odbc.db2_instance_name",
+        PhpVersion::new(7, 3),
+        Deprecation::Directive,
+    ),
+    (
+        "allow_url_include",
+        PhpVersion::new(7, 4),
+        Deprecation::Directive,
+    ),
+    (
+        "filter.default",
+        PhpVersion::new(8, 1),
+        Deprecation::Directive,
+    ),
+    (
+        "oci8.old_oci_close_semantics",
+        PhpVersion::new(8, 1),
+        Deprecation::Directive,
+    ),
+    (
+        "auto_detect_line_endings",
+        PhpVersion::new(8, 1),
+        Deprecation::Directive,
+    ),
+    (
+        "assert.active",
+        PhpVersion::new(8, 3),
         Deprecation::Changing,
     ),
-    ("session.use_only_cookies", (8, 4), Deprecation::Changing),
-    ("session.use_trans_sid", (8, 4), Deprecation::Changing),
-    ("session.trans_sid_tags", (8, 4), Deprecation::Changing),
-    ("session.trans_sid_hosts", (8, 4), Deprecation::Changing),
-    ("session.referer_check", (8, 4), Deprecation::Changing),
-    ("report_memleaks", (8, 5), Deprecation::Directive),
-    ("intl.error_level", (8, 5), Deprecation::Directive),
+    ("assert.bail", PhpVersion::new(8, 3), Deprecation::Changing),
+    (
+        "assert.callback",
+        PhpVersion::new(8, 3),
+        Deprecation::Changing,
+    ),
+    (
+        "assert.exception",
+        PhpVersion::new(8, 3),
+        Deprecation::Changing,
+    ),
+    (
+        "assert.warning",
+        PhpVersion::new(8, 3),
+        Deprecation::Changing,
+    ),
+    (
+        "session.sid_length",
+        PhpVersion::new(8, 4),
+        Deprecation::Changing,
+    ),
+    (
+        "session.sid_bits_per_character",
+        PhpVersion::new(8, 4),
+        Deprecation::Changing,
+    ),
+    (
+        "session.use_only_cookies",
+        PhpVersion::new(8, 4),
+        Deprecation::Changing,
+    ),
+    (
+        "session.use_trans_sid",
+        PhpVersion::new(8, 4),
+        Deprecation::Changing,
+    ),
+    (
+        "session.trans_sid_tags",
+        PhpVersion::new(8, 4),
+        Deprecation::Changing,
+    ),
+    (
+        "session.trans_sid_hosts",
+        PhpVersion::new(8, 4),
+        Deprecation::Changing,
+    ),
+    (
+        "session.referer_check",
+        PhpVersion::new(8, 4),
+        Deprecation::Changing,
+    ),
+    (
+        "report_memleaks",
+        PhpVersion::new(8, 5),
+        Deprecation::Directive,
+    ),
+    (
+        "intl.error_level",
+        PhpVersion::new(8, 5),
+        Deprecation::Directive,
+    ),
 ];
 
 fn directive_names(ty: &Type) -> Vec<&str> {
@@ -115,8 +187,7 @@ impl<'a> Checker<'a> {
                 self.report(
                     label.to_string(),
                     format!(
-                        "Call to {function}() with ini directive {directive}, removed in PHP {}.{}; {outcome}.",
-                        removed.0, removed.1
+                        "Call to {function}() with ini directive {directive}, removed in PHP {removed}; {outcome}."
                     ),
                     arg.value.span,
                     0,
@@ -140,8 +211,7 @@ impl<'a> Checker<'a> {
                 self.report(
                     label.to_string(),
                     format!(
-                        "Call to {function}(): {what} {directive} is deprecated since PHP {}.{}.",
-                        since.0, since.1
+                        "Call to {function}(): {what} {directive} is deprecated since PHP {since}."
                     ),
                     arg.value.span,
                     0,
