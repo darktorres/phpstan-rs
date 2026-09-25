@@ -1,7 +1,6 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
 
-use crate::types::{CallableParam, CallableSig, Type};
+use crate::types::Type;
 
 /// Resolves every `Type::Conditional` node in `ty` against `param_bindings`
 /// (parameter *name* -> the actual, already-inferred type bound to it at
@@ -69,58 +68,7 @@ pub fn resolve_conditional(ty: &Type, param_bindings: &FxHashMap<String, Type>) 
                 resolve_conditional(if_false, param_bindings),
             ),
         },
-        Type::Array(key, inner) => Type::Array(
-            Box::new(resolve_conditional(key, param_bindings)),
-            Box::new(resolve_conditional(inner, param_bindings)),
-        ),
-        Type::ClassString(inner) => {
-            Type::ClassString(Box::new(resolve_conditional(inner, param_bindings)))
-        }
-        Type::Union(members) => Type::Union(
-            members
-                .iter()
-                .map(|m| resolve_conditional(m, param_bindings))
-                .collect(),
-        ),
-        Type::Intersection(members) => Type::Intersection(
-            members
-                .iter()
-                .map(|m| resolve_conditional(m, param_bindings))
-                .collect(),
-        ),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .iter()
-                .map(|(k, t, opt)| (k.clone(), resolve_conditional(t, param_bindings), *opt))
-                .collect(),
-        ),
-        Type::ObjectShape(fields) => Type::ObjectShape(
-            fields
-                .iter()
-                .map(|(k, t, opt)| (k.clone(), resolve_conditional(t, param_bindings), *opt))
-                .collect(),
-        ),
-        Type::Object(name, args) => Type::Object(
-            name.clone(),
-            args.iter()
-                .map(|a| resolve_conditional(a, param_bindings))
-                .collect(),
-        ),
-        Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
-            params: sig
-                .params
-                .iter()
-                .map(|p| CallableParam {
-                    ty: resolve_conditional(&p.ty, param_bindings),
-                    variadic: p.variadic,
-                    optional: p.optional,
-                    by_ref: p.by_ref,
-                })
-                .collect(),
-            return_type: Box::new(resolve_conditional(&sig.return_type, param_bindings)),
-            templates: sig.templates.clone(),
-        }))),
-        other => other.clone(),
+        _ => ty.map_children(&mut |t| resolve_conditional(t, param_bindings)),
     }
 }
 

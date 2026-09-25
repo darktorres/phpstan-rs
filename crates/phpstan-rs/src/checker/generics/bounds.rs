@@ -143,29 +143,7 @@ impl<'a> Checker<'a> {
                     self.check_generic_bounds(arg, location, label, span);
                 }
             }
-            Type::Array(key, inner) => {
-                self.check_generic_bounds(key, location, label, span);
-                self.check_generic_bounds(inner, location, label, span);
-            }
-            Type::ClassString(inner) => self.check_generic_bounds(inner, location, label, span),
-            Type::Union(members) | Type::Intersection(members) => {
-                for m in members {
-                    self.check_generic_bounds(m, location, label, span);
-                }
-            }
-            Type::ArrayShape(fields) => {
-                for (_, t, _) in fields {
-                    self.check_generic_bounds(t, location, label, span);
-                }
-            }
-            // `object{...}`'s own field types also need recursing into
-            // for bound-checking.
-            Type::ObjectShape(fields) => {
-                for (_, t, _) in fields {
-                    self.check_generic_bounds(t, location, label, span);
-                }
-            }
-            _ => {}
+            _ => ty.for_each_child(&mut |t| self.check_generic_bounds(t, location, label, span)),
         }
     }
 
@@ -177,20 +155,11 @@ impl<'a> Checker<'a> {
     /// bound it has no way to actually verify, rather than guess wrong.
     pub(crate) fn is_type_fully_known(&self, ty: &Type) -> bool {
         match ty {
-            // A call-site variance sentinel's own name is
-            // never a real class to look up - defer to whatever it
-            // wraps (`"$$bivariant"` wraps nothing at all, trivially
-            // "known" the same way this function's own catch-all
-            // treats anything it doesn't otherwise recognize).
-            Type::Object(name, _)
-                if matches!(
-                    name.as_str(),
-                    "$$covariant" | "$$contravariant" | "$$bivariant"
-                ) =>
-            {
-                types::strip_call_site_variance(ty)
-                    .is_none_or(|inner| self.is_type_fully_known(inner))
-            }
+            // Defers to the annotated type (`*` has none, trivially
+            // "known" the same way this function's own catch-all treats
+            // anything it doesn't otherwise recognize).
+            Type::VarianceArg(..) => types::strip_call_site_variance(ty)
+                .is_none_or(|inner| self.is_type_fully_known(inner)),
             Type::Object(name, args) => {
                 self.registry.classes.contains_key(name.as_str())
                     && args.iter().all(|a| self.is_type_fully_known(a))
@@ -535,8 +504,10 @@ impl<'a> Checker<'a> {
         let ty = Type::Object(class.to_string(), args.to_vec());
         for (i, arg) in args.iter().enumerate() {
             let call_site = match arg {
-                Type::Object(name, _) if name == "$$covariant" => types::Variance::Covariant,
-                Type::Object(name, _) if name == "$$contravariant" => {
+                Type::VarianceArg(types::CallSiteVariance::Covariant, _) => {
+                    types::Variance::Covariant
+                }
+                Type::VarianceArg(types::CallSiteVariance::Contravariant, _) => {
                     types::Variance::Contravariant
                 }
                 // `*` (bivariant) is never flagged - see this function's

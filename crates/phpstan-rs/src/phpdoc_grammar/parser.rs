@@ -1,6 +1,6 @@
 use super::ast::{
-    ArrayShapeField, CallableParam, CallableTemplate, MethodTagParam, PhpDocNode, PhpDocParseError,
-    PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
+    ArgVariance, ArrayShapeField, CallableParam, CallableTemplate, MethodTagParam, PhpDocNode,
+    PhpDocParseError, PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
 };
 use super::lexer::{Lexer, PhpDocToken};
 use syntax::token::{Position, Span};
@@ -711,20 +711,12 @@ impl TagParser {
     }
 
     /// One generic-argument position, checked first for real PHPStan's
-    /// own call-site variance marker syntax (`Collection<covariant
-    /// Foo>`/`Collection<contravariant Foo>`/a bare `Collection<*>`)
-    /// before falling through to an ordinary type - encoded the same
-    /// "sentinel name, guarded impossible" way `types::parse::
-    /// parse_generic_arg` already encodes it at the `Type` level
-    /// (`"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`, see its own
-    /// doc comment), so `TypeNode::to_source_string` can re-emit the
-    /// exact literal `"covariant "`/`"contravariant "`/`"*"` surface
-    /// syntax that consumer's own `strip_prefix` checks match against
-    /// textually - not this grammar's own `Name<Args>` bracket shape.
-    /// Case-sensitive and only when a real type token follows, mirroring
-    /// that same consumer exactly: a bare `Collection<covariant>` (no
+    /// own call-site variance syntax (`Collection<covariant Foo>`/
+    /// `Collection<contravariant Foo>`/a bare `Collection<*>`) before
+    /// falling through to an ordinary type. Case-sensitive and only when
+    /// a real type token follows: a bare `Collection<covariant>` (no
     /// following type at all) is a plain type literally named
-    /// `covariant`, not a variance marker with nothing to wrap.
+    /// `covariant`, not a variance annotation with nothing to wrap.
     fn parse_generic_arg(&mut self) -> TypeNode {
         if matches!(self.peek(), PhpDocToken::Star)
             && matches!(
@@ -733,11 +725,11 @@ impl TagParser {
             )
         {
             self.advance();
-            return TypeNode::Generic("$$bivariant".to_string(), Vec::new());
+            return TypeNode::Wildcard;
         }
-        for (keyword, sentinel) in [
-            ("covariant", "$$covariant"),
-            ("contravariant", "$$contravariant"),
+        for (keyword, variance) in [
+            ("covariant", ArgVariance::Covariant),
+            ("contravariant", ArgVariance::Contravariant),
         ] {
             if let PhpDocToken::Identifier(s) = self.peek()
                 && s == keyword
@@ -747,7 +739,7 @@ impl TagParser {
                 )
             {
                 self.advance();
-                return TypeNode::Generic(sentinel.to_string(), vec![self.parse_type()]);
+                return TypeNode::VarianceArg(variance, Box::new(self.parse_type()));
             }
         }
         self.parse_type()

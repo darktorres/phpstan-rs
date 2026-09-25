@@ -540,8 +540,8 @@ fn a_covariant_call_site_variance_marker_parses_and_round_trips() {
     let ty = type_of("/** @return Collection<covariant Cat> */");
     match &ty {
         TypeNode::Generic(outer, args) if outer == "Collection" => match &args[0] {
-            TypeNode::Generic(name, inner) if name == "$$covariant" => {
-                assert_eq!(inner[0], TypeNode::Identifier("Cat".to_string()));
+            TypeNode::VarianceArg(crate::phpdoc_grammar::ast::ArgVariance::Covariant, inner) => {
+                assert_eq!(**inner, TypeNode::Identifier("Cat".to_string()));
             }
             other => panic!("got: {other:?}"),
         },
@@ -561,7 +561,7 @@ fn a_bivariant_call_site_marker_parses_and_round_trips() {
     let ty = type_of("/** @return Collection<*> */");
     match &ty {
         TypeNode::Generic(outer, args) if outer == "Collection" => match &args[0] {
-            TypeNode::Generic(name, inner) if name == "$$bivariant" => assert!(inner.is_empty()),
+            TypeNode::Wildcard => {}
             other => panic!("got: {other:?}"),
         },
         other => panic!("got: {other:?}"),

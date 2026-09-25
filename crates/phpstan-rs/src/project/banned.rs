@@ -38,18 +38,7 @@ fn type_mentions(ty: &Type, name: &str) -> bool {
         (class, Type::Object(n, _)) => n.trim_start_matches('\\').eq_ignore_ascii_case(class),
         _ => false,
     };
-    direct
-        || match ty {
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().any(|m| type_mentions(m, name))
-            }
-            Type::Array(k, v) => type_mentions(k, name) || type_mentions(v, name),
-            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-                fields.iter().any(|(_, t, _)| type_mentions(t, name))
-            }
-            Type::Object(_, args) => args.iter().any(|a| type_mentions(a, name)),
-            _ => false,
-        }
+    direct || ty.any_child(|t| type_mentions(t, name))
 }
 
 struct Walker<'a> {

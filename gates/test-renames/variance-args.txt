@@ -1,0 +1,4 @@
+types::tests::parsing::generic_arg_with_covariant_marker_parses_to_the_sentinel -> types::tests::parsing::generic_arg_with_covariant_marker_parses_to_a_variance_arg
+types::tests::parsing::generic_arg_with_contravariant_marker_parses_to_the_sentinel -> types::tests::parsing::generic_arg_with_contravariant_marker_parses_to_a_variance_arg
+types::tests::parsing::generic_arg_with_bivariant_marker_parses_to_the_sentinel -> types::tests::parsing::generic_arg_with_bivariant_marker_parses_to_a_variance_arg
+registry::tests::name_context::recurses_through_the_dollar_dollar_variance_sentinels_without_collecting_them -> registry::tests::name_context::recurses_through_a_variance_annotation

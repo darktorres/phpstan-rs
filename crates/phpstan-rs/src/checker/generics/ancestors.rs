@@ -104,6 +104,14 @@ impl Position {
         }
     }
 
+    fn from_call_site(v: types::CallSiteVariance) -> Position {
+        match v {
+            types::CallSiteVariance::Covariant => Position::Covariant,
+            types::CallSiteVariance::Contravariant => Position::Contravariant,
+            types::CallSiteVariance::Bivariant => Position::Bivariant,
+        }
+    }
+
     fn valid_for(self, declared: types::Variance) -> bool {
         declared == types::Variance::Invariant
             || matches!(self, Position::Bivariant | Position::Static)
@@ -129,14 +137,11 @@ fn variance_word(v: types::Variance) -> &'static str {
     }
 }
 
-/// `TypeProjectionHelper::describe` for a call-site variance sentinel;
-/// `None` for an ordinary (invariant) argument.
+/// `TypeProjectionHelper::describe` for a call-site variance
+/// annotation; `None` for an ordinary (invariant) argument.
 fn call_site_projection(arg: &Type) -> Option<String> {
     match arg {
-        Type::Object(name, args) if name == "$$covariant" || name == "$$contravariant" => {
-            (!args.is_empty()).then(|| arg.to_string())
-        }
-        Type::Object(name, _) if name == "$$bivariant" => Some("*".to_string()),
+        Type::VarianceArg(..) => Some(arg.to_string()),
         _ => None,
     }
 }
@@ -565,14 +570,18 @@ impl<'a> Checker<'a> {
                     out.push((tp.name.clone(), tp.variance, position));
                 }
             }
+            Type::VarianceArg(variance, inner) => {
+                let inner_position = position.compose(Position::from_call_site(*variance));
+                self.collect_ancestor_variance(inner, inner_position, fqn, out);
+            }
             Type::Object(name, args) if name.starts_with("$$") => {
-                let inner_position = match name.as_str() {
-                    "$$covariant" => position.compose(Position::Covariant),
-                    "$$contravariant" => position.compose(Position::Contravariant),
-                    _ => position.compose(Position::Bivariant),
-                };
                 for a in args {
-                    self.collect_ancestor_variance(a, inner_position, fqn, out);
+                    self.collect_ancestor_variance(
+                        a,
+                        position.compose(Position::Bivariant),
+                        fqn,
+                        out,
+                    );
                 }
             }
             Type::Object(class, args) => {
@@ -582,12 +591,11 @@ impl<'a> Checker<'a> {
                         .slot_variance(class, i)
                         .unwrap_or(types::Variance::Invariant);
                     let effective = match arg {
-                        Type::Object(n, _) if n == "$$covariant" => Position::Covariant,
-                        Type::Object(n, _) if n == "$$contravariant" => Position::Contravariant,
-                        Type::Object(n, _) if n == "$$bivariant" => Position::Bivariant,
+                        Type::VarianceArg(variance, _) => Position::from_call_site(*variance),
                         _ => Position::from_variance(slot),
                     };
                     let inner = match arg {
+                        Type::VarianceArg(_, inner) => inner,
                         Type::Object(n, inner_args) if n.starts_with("$$") => {
                             inner_args.first().unwrap_or(arg)
                         }

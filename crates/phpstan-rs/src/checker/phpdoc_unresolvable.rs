@@ -122,9 +122,10 @@ fn contains_error(node: &TypeNode) -> bool {
 fn walk(node: &TypeNode, f: &mut dyn FnMut(&TypeNode)) {
     f(node);
     match node {
-        TypeNode::Nullable(inner) | TypeNode::ArrayOf(inner) | TypeNode::Paren(inner) => {
-            walk(inner, f)
-        }
+        TypeNode::Nullable(inner)
+        | TypeNode::ArrayOf(inner)
+        | TypeNode::Paren(inner)
+        | TypeNode::VarianceArg(_, inner) => walk(inner, f),
         TypeNode::Union(ms) | TypeNode::Intersection(ms) => ms.iter().for_each(|m| walk(m, f)),
         TypeNode::Generic(_, args) => args.iter().for_each(|a| walk(a, f)),
         TypeNode::OffsetAccess(base, offset) => {

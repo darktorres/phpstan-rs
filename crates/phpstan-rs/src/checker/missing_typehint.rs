@@ -238,6 +238,9 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                 collect_iterable_missing_value_types(a, explicit_mixed, out);
             }
         }
+        Type::VarianceArg(_, inner) => {
+            collect_iterable_missing_value_types(inner, explicit_mixed, out)
+        }
         Type::ClassString(inner) => {
             collect_iterable_missing_value_types(inner, explicit_mixed, out)
         }
@@ -282,7 +285,9 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
             collect_callables_with_missing_signature(key, out);
             collect_callables_with_missing_signature(inner, out);
         }
-        Type::ClassString(inner) => collect_callables_with_missing_signature(inner, out),
+        Type::ClassString(inner) | Type::VarianceArg(_, inner) => {
+            collect_callables_with_missing_signature(inner, out)
+        }
         // A `Closure(...)` shape (`Closure&callable(...)`) carries its
         // signature; only that signature's own types are walked.
         Type::Intersection(members) if ty.callable_sig().is_some() => {
@@ -326,6 +331,7 @@ impl<'a> Checker<'a> {
     ) {
         match ty {
             Type::TemplateParam(_) => {}
+            Type::VarianceArg(_, inner) => self.collect_non_generic_generic_class(inner, out),
             Type::Object(name, args) => {
                 if !args.is_empty() {
                     for a in args {

@@ -2,7 +2,7 @@
 //! sibling of `resolve_names_in_type`.
 
 use super::super::*;
-use crate::types::{self, Type};
+use crate::types::{self, CallSiteVariance, Type};
 use syntax::ast::Stmt;
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
@@ -62,11 +62,11 @@ fn recurses_into_a_traversables_own_generic_argument_without_collecting_traversa
 }
 
 #[test]
-fn recurses_through_the_dollar_dollar_variance_sentinels_without_collecting_them() {
+fn recurses_through_a_variance_annotation() {
     let ctx = ctx_for("App");
-    let ty = Type::Object(
-        "$$covariant".to_string(),
-        vec![Type::Object("Foo".to_string(), Vec::new())],
+    let ty = Type::VarianceArg(
+        CallSiteVariance::Covariant,
+        Box::new(Type::Object("Foo".to_string(), Vec::new())),
     );
     let mut out = Vec::new();
     collect_class_name_case_refs(&ty, &ctx, &mut out);

@@ -103,6 +103,11 @@ pub enum Type {
     // `@template`. Carries its own bound/variance/scope/default (see
     // `TemplateParam` below) rather than being a bare name.
     TemplateParam(TemplateParam),
+    // A generic type argument written with a call-site variance
+    // annotation (`Collection<covariant Foo>`, `Collection<*>`); `*` is
+    // bivariant over `mixed`. Overrides the class's declared variance
+    // for that slot in one comparison.
+    VarianceArg(CallSiteVariance, Box<Type>),
     Union(Vec<Type>),
     // Real PHPStan's `BenevolentUnionType`: a union for subtyping, but
     // one an argument check accepts when *any* member fits (see
@@ -210,6 +215,7 @@ impl PartialEq for Type {
             (Type::ParentRef, Type::ParentRef) => true,
             (Type::StaticRef, Type::StaticRef) => true,
             (Type::TemplateParam(a), Type::TemplateParam(b)) => a == b,
+            (Type::VarianceArg(av, a), Type::VarianceArg(bv, b)) => av == bv && a == b,
             (Type::Union(a), Type::Union(b)) => a == b,
             (Type::BenevolentUnion(a), Type::BenevolentUnion(b)) => a == b,
             (Type::Intersection(a), Type::Intersection(b)) => a == b,
@@ -260,6 +266,16 @@ pub enum Variance {
     Invariant,
     Covariant,
     Contravariant,
+}
+
+/// The variance a generic type argument is annotated with at its use
+/// site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallSiteVariance {
+    Covariant,
+    Contravariant,
+    /// `*`: any type, never checked.
+    Bivariant,
 }
 
 /// A `@template` parameter's own metadata.
@@ -447,6 +463,7 @@ impl Type {
                 return_type: Box::new(f(&sig.return_type)),
                 templates: sig.templates.clone(),
             }))),
+            Type::VarianceArg(variance, inner) => Type::VarianceArg(*variance, Box::new(f(inner))),
             Type::Union(ms) => Type::Union(ms.iter().map(&mut *f).collect()),
             Type::BenevolentUnion(ms) => Type::BenevolentUnion(ms.iter().map(&mut *f).collect()),
             Type::Intersection(ms) => Type::Intersection(ms.iter().map(&mut *f).collect()),
@@ -473,6 +490,54 @@ impl Type {
             },
             leaf => leaf.clone(),
         }
+    }
+
+    /// Calls `f` on each directly nested type - the children
+    /// `map_children` rebuilds, in the same order.
+    pub(crate) fn for_each_child<'t>(&'t self, f: &mut impl FnMut(&'t Type)) {
+        match self {
+            Type::Array(k, v) => {
+                f(k);
+                f(v);
+            }
+            Type::ClassString(inner)
+            | Type::VarianceArg(_, inner)
+            | Type::HasOffsetValue(_, inner)
+            | Type::ReflectedMember(inner, _) => f(inner),
+            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
+                for (_, t, _) in fields {
+                    f(t);
+                }
+            }
+            Type::Object(_, args) => args.iter().for_each(f),
+            Type::Callable(Some(sig)) => {
+                for p in &sig.params {
+                    f(&p.ty);
+                }
+                f(&sig.return_type);
+            }
+            Type::Union(ms) | Type::BenevolentUnion(ms) | Type::Intersection(ms) => {
+                ms.iter().for_each(f)
+            }
+            Type::Conditional {
+                target,
+                if_true,
+                if_false,
+                ..
+            } => {
+                f(target);
+                f(if_true);
+                f(if_false);
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether `f` holds for some directly nested type.
+    pub(crate) fn any_child(&self, mut f: impl FnMut(&Type) -> bool) -> bool {
+        let mut found = false;
+        self.for_each_child(&mut |t| found = found || f(t));
+        found
     }
 
     /// A union of `members` of the same kind as `self`: benevolent when

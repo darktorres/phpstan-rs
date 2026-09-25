@@ -145,30 +145,10 @@ fn new_class_spans_in_expr(e: &Expr, out: &mut FxHashSet<Span>) {
 }
 
 fn type_class_names(ty: &Type, out: &mut Vec<String>) {
-    match ty {
-        Type::Object(name, args) => {
-            out.push(name.clone());
-            for a in args {
-                type_class_names(a, out);
-            }
-        }
-        Type::ClassString(inner) => type_class_names(inner, out),
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                type_class_names(m, out);
-            }
-        }
-        Type::Array(k, v) => {
-            type_class_names(k, out);
-            type_class_names(v, out);
-        }
-        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-            for (_, t, _) in fields {
-                type_class_names(t, out);
-            }
-        }
-        _ => {}
+    if let Type::Object(name, _) = ty {
+        out.push(name.clone());
     }
+    ty.for_each_child(&mut |t| type_class_names(t, out));
 }
 
 /// `(selectors, the class's related classes, whether one must match,

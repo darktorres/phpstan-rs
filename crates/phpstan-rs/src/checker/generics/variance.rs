@@ -290,23 +290,9 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
-            // A call-site variance sentinel isn't a real nested class
-            // with its own slot to look up - the enclosing call (the arm
-            // just below, one level up) already read the override and
-            // composed `pos` accordingly before ever recursing into this
-            // node. Without this dedicated arm, the generic
-            // `Object(class, args)` case below would instead try
-            // `effective_slot_variance("$$covariant", 0, ...)`, which
-            // always returns `None` (`"$$covariant"` is never a
-            // registered class) - silently stopping the walk right here,
-            // so a real violation nested inside the wrapped type would
-            // never be found, for the wrong reason.
-            Type::Object(class, _)
-                if matches!(
-                    class.as_str(),
-                    "$$covariant" | "$$contravariant" | "$$bivariant"
-                ) =>
-            {
+            // The enclosing class's arm already read the annotation and
+            // composed `pos` accordingly before recursing into it.
+            Type::VarianceArg(..) => {
                 if let Some(inner) = types::strip_call_site_variance(ty) {
                     self.walk_variance(inner, pos, class_name, violations);
                 }

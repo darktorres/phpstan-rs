@@ -628,18 +628,10 @@ impl<'a> Checker<'a> {
 /// `Object`/`Union`/`Intersection` (no `Array`/`ClassString`/`ArrayShape`/
 /// `ObjectShape` - those are PHPDoc-only constructs `resolve_type_hint`
 /// never emits from a bare native hint string), so the walk only needs
-/// those two arms. The `$$covariant`/`$$contravariant`/`$$bivariant`
-/// call-site-variance sentinels (`Type::Object`-shaped but not real class
-/// names) are excluded too, matching every other consumer of a resolved
-/// `Type::Object` name in this codebase.
+/// those two arms.
 pub(crate) fn collect_referenced_class_names(ty: &Type, out: &mut Vec<String>) {
     match ty {
-        Type::Object(name, _)
-            if !matches!(
-                name.as_str(),
-                "$$covariant" | "$$contravariant" | "$$bivariant"
-            ) =>
-        {
+        Type::Object(name, _) => {
             if !out.iter().any(|n| n == name) {
                 out.push(name.clone());
             }

@@ -823,25 +823,9 @@ impl Registry {
                 tp.scope.as_deref(),
                 Some(s) if s == method_name || s == crate::types::CALLABLE_TEMPLATE_SCOPE
             ),
-            Type::Object(_, args) => args
-                .iter()
-                .any(|a| Registry::type_mentions_foreign_scoped_template_param(a, method_name)),
-            Type::Array(key, inner) => {
-                Registry::type_mentions_foreign_scoped_template_param(key, method_name)
-                    || Registry::type_mentions_foreign_scoped_template_param(inner, method_name)
-            }
-            Type::ClassString(inner) => {
-                Registry::type_mentions_foreign_scoped_template_param(inner, method_name)
-            }
-            Type::Union(members) | Type::Intersection(members) => members
-                .iter()
-                .any(|m| Registry::type_mentions_foreign_scoped_template_param(m, method_name)),
-            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-                fields.iter().any(|(_, t, _)| {
-                    Registry::type_mentions_foreign_scoped_template_param(t, method_name)
-                })
-            }
-            _ => false,
+            _ => ty.any_child(|t| {
+                Registry::type_mentions_foreign_scoped_template_param(t, method_name)
+            }),
         }
     }
 
@@ -878,77 +862,13 @@ impl Registry {
                         .as_deref()
                         .is_some_and(|s| ancestor_bindings.get(s).is_some_and(|b| !b.is_empty()))
             }
-            Type::Object(_, args) => args.iter().all(|a| {
-                Registry::template_param_scopes_all_safe_to_backfill(
-                    a,
-                    method_name,
-                    ancestor_bindings,
-                )
-            }),
-            Type::Array(key, inner) => {
-                Registry::template_param_scopes_all_safe_to_backfill(
-                    key,
-                    method_name,
-                    ancestor_bindings,
-                ) && Registry::template_param_scopes_all_safe_to_backfill(
-                    inner,
-                    method_name,
-                    ancestor_bindings,
-                )
-            }
-            Type::ClassString(inner) => Registry::template_param_scopes_all_safe_to_backfill(
-                inner,
-                method_name,
-                ancestor_bindings,
-            ),
-            Type::Union(members) | Type::Intersection(members) => members.iter().all(|m| {
-                Registry::template_param_scopes_all_safe_to_backfill(
-                    m,
-                    method_name,
-                    ancestor_bindings,
-                )
-            }),
-            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-                fields.iter().all(|(_, t, _)| {
-                    Registry::template_param_scopes_all_safe_to_backfill(
-                        t,
-                        method_name,
-                        ancestor_bindings,
-                    )
-                })
-            }
-            Type::Callable(Some(sig)) => sig
-                .params
-                .iter()
-                .map(|p| &p.ty)
-                .chain([&*sig.return_type])
-                .all(|t| {
-                    Registry::template_param_scopes_all_safe_to_backfill(
-                        t,
-                        method_name,
-                        ancestor_bindings,
-                    )
-                }),
-            Type::Conditional {
-                target,
-                if_true,
-                if_false,
-                ..
-            } => [target, if_true, if_false].into_iter().all(|t| {
-                Registry::template_param_scopes_all_safe_to_backfill(
+            _ => !ty.any_child(|t| {
+                !Registry::template_param_scopes_all_safe_to_backfill(
                     t,
                     method_name,
                     ancestor_bindings,
                 )
             }),
-            Type::HasOffsetValue(_, inner) | Type::ReflectedMember(inner, _) => {
-                Registry::template_param_scopes_all_safe_to_backfill(
-                    inner,
-                    method_name,
-                    ancestor_bindings,
-                )
-            }
-            _ => true,
         }
     }
 
@@ -1291,29 +1211,13 @@ fn declared_name_in_namespace(namespace: &str, bare: &str) -> String {
 /// of types, which never contain it.
 pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
     match ty {
-        Type::Object(name, args) => {
-            name == "$$valueof"
-                || name == "$$classconst"
-                || args.iter().any(type_contains_deferred_value_of)
-        }
-        Type::Array(key, inner) => {
-            type_contains_deferred_value_of(key) || type_contains_deferred_value_of(inner)
-        }
-        Type::ClassString(inner) => type_contains_deferred_value_of(inner),
-        Type::Union(members) | Type::Intersection(members) => {
-            members.iter().any(type_contains_deferred_value_of)
-        }
-        Type::ArrayShape(fields) | Type::ObjectShape(fields) => fields
-            .iter()
-            .any(|(_, t, _)| type_contains_deferred_value_of(t)),
-        _ => false,
+        Type::Object(name, _) if name == "$$valueof" || name == "$$classconst" => true,
+        _ => ty.any_child(type_contains_deferred_value_of),
     }
 }
 
-/// The actual substitution - mirrors
-/// `function_sig::substitute_type_aliases`'s recursive-rebuild shape
-/// exactly, with one extra case (checked first) for the `"$$valueof"`
-/// sentinel itself. See `Registry::resolve_deferred_value_of`'s doc
+/// The actual substitution: every `"$$valueof"`/`"$$classconst"`
+/// sentinel in `ty`, at any depth. See `Registry::resolve_deferred_value_of`'s doc
 /// comment for why this exists, and
 /// `types::parse_type_keyword_or_class`'s `"value-of"` arm for where the
 /// sentinel is produced.
@@ -1329,44 +1233,7 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
         Type::Object(name, args) if name == "$$classconst" => {
             resolve_class_const_type(&args, classes)
         }
-        Type::Object(name, args) => Type::Object(
-            name,
-            args.into_iter()
-                .map(|a| resolve_deferred_value_of_in_type(a, classes))
-                .collect(),
-        ),
-        Type::Array(key, inner) => Type::Array(
-            Box::new(resolve_deferred_value_of_in_type(*key, classes)),
-            Box::new(resolve_deferred_value_of_in_type(*inner, classes)),
-        ),
-        Type::ClassString(inner) => {
-            Type::ClassString(Box::new(resolve_deferred_value_of_in_type(*inner, classes)))
-        }
-        Type::Union(members) => Type::Union(
-            members
-                .into_iter()
-                .map(|m| resolve_deferred_value_of_in_type(m, classes))
-                .collect(),
-        ),
-        Type::Intersection(members) => Type::Intersection(
-            members
-                .into_iter()
-                .map(|m| resolve_deferred_value_of_in_type(m, classes))
-                .collect(),
-        ),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, resolve_deferred_value_of_in_type(t, classes), opt))
-                .collect(),
-        ),
-        Type::ObjectShape(fields) => Type::ObjectShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, resolve_deferred_value_of_in_type(t, classes), opt))
-                .collect(),
-        ),
-        other => other,
+        other => other.map_children(&mut |t| resolve_deferred_value_of_in_type(t.clone(), classes)),
     }
 }
 
@@ -1574,25 +1441,7 @@ fn bind_class_const_self_at(
                 _ => Type::Object(name, args),
             }
         }
-        Type::Object(name, args) => Type::Object(name, args.into_iter().map(recurse).collect()),
-        Type::Array(key, inner) => Type::Array(Box::new(recurse(*key)), Box::new(recurse(*inner))),
-        Type::Union(members) => Type::Union(members.into_iter().map(recurse).collect()),
-        Type::Intersection(members) => {
-            Type::Intersection(members.into_iter().map(recurse).collect())
-        }
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, recurse(t), opt))
-                .collect(),
-        ),
-        Type::ObjectShape(fields) => Type::ObjectShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, recurse(t), opt))
-                .collect(),
-        ),
-        other => other,
+        other => other.map_children(&mut |t| recurse(t.clone())),
     }
 }
 
@@ -1601,35 +1450,7 @@ fn bind_class_const_self_at(
 fn unresolved_class_const_to_mixed(ty: Type) -> Type {
     match ty {
         Type::Object(name, _) if name == "$$classconst" => Type::Mixed(false),
-        Type::Object(name, args) => Type::Object(
-            name,
-            args.into_iter()
-                .map(unresolved_class_const_to_mixed)
-                .collect(),
-        ),
-        Type::Array(key, inner) => Type::Array(
-            Box::new(unresolved_class_const_to_mixed(*key)),
-            Box::new(unresolved_class_const_to_mixed(*inner)),
-        ),
-        Type::Union(members) => Type::Union(
-            members
-                .into_iter()
-                .map(unresolved_class_const_to_mixed)
-                .collect(),
-        ),
-        Type::Intersection(members) => Type::Intersection(
-            members
-                .into_iter()
-                .map(unresolved_class_const_to_mixed)
-                .collect(),
-        ),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, unresolved_class_const_to_mixed(t), opt))
-                .collect(),
-        ),
-        other => other,
+        other => other.map_children(&mut |t| unresolved_class_const_to_mixed(t.clone())),
     }
 }
 

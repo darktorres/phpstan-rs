@@ -123,9 +123,9 @@ impl Registry {
                     // declared slot variance for this one comparison,
                     // exactly matching `GenericObjectType::isSuperTypeOf`/
                     // `getReferencedTemplateTypes` read directly from
-                    // `vendor/phpstan-src` - `None` here means a
-                    // `"$$bivariant"` (`*`) marker, real PHPStan's own
-                    // "don't check this argument at all."
+                    // `vendor/phpstan-src` - `None` here means a `*`
+                    // annotation, real PHPStan's own "don't check this
+                    // argument at all."
                     let Some(variance) = self.effective_slot_variance(b, i, &b_i) else {
                         continue;
                     };

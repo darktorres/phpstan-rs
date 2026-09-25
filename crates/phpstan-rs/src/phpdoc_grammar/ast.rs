@@ -97,6 +97,13 @@ pub struct MethodTagParam {
 /// a type is parsed into real structure right here, with the same
 /// recoverable-error handling every other tag gets, rather than treated
 /// as an opaque string until some later, separate pass touches it.
+/// A generic argument's written call-site variance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgVariance {
+    Covariant,
+    Contravariant,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeNode {
     /// A bare name - `int`, `string`, `Foo\Bar`, `self`, `static`,
@@ -116,6 +123,10 @@ pub enum TypeNode {
     /// `key-of<T>`, `value-of<T>`) uniformly; `Name` is whatever
     /// `Identifier` would have lexed.
     Generic(String, Vec<TypeNode>),
+    /// `*` as a generic argument: any type, never checked.
+    Wildcard,
+    /// `covariant Type`/`contravariant Type` as a generic argument.
+    VarianceArg(ArgVariance, Box<TypeNode>),
     /// `Type[]` - repeatable (`Type[][]`), tracked one level of nesting
     /// per node, same as real PHPStan's own `ArrayShapeType`-adjacent
     /// sugar.
@@ -214,19 +225,12 @@ impl TypeNode {
                 .map(TypeNode::to_source_string)
                 .collect::<Vec<_>>()
                 .join("&"),
-            // The three call-site-variance sentinel names `parser::
-            // parse_generic_arg` produces - see its own doc comment -
-            // re-emit real PHPStan's own literal surface syntax instead
-            // of this arm's ordinary `Name<Args>` bracket shape, since
-            // that's the exact text `types::parse::parse_generic_arg`
-            // matches back against once Stage B feeds this string into
-            // it.
-            TypeNode::Generic(name, args) if name == "$$bivariant" => "*".to_string(),
-            TypeNode::Generic(name, args) if name == "$$covariant" => {
-                format!("covariant {}", args[0].to_source_string())
+            TypeNode::Wildcard => "*".to_string(),
+            TypeNode::VarianceArg(ArgVariance::Covariant, inner) => {
+                format!("covariant {}", inner.to_source_string())
             }
-            TypeNode::Generic(name, args) if name == "$$contravariant" => {
-                format!("contravariant {}", args[0].to_source_string())
+            TypeNode::VarianceArg(ArgVariance::Contravariant, inner) => {
+                format!("contravariant {}", inner.to_source_string())
             }
             TypeNode::Generic(name, args) => format!(
                 "{name}<{}>",

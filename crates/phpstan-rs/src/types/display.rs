@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::types::parse::display_shape_key;
-use crate::types::{AccessoryKind, CallableSig, Type};
+use crate::types::{AccessoryKind, CallSiteVariance, CallableSig, Type};
 
 /// `keyword(params): return` - shared by a shaped `callable(...)`/
 /// `Closure(...)` PHPDoc type and a closure literal's own
@@ -97,14 +97,12 @@ impl fmt::Display for Type {
                     .collect();
                 write!(f, "object{{{}}}", parts.join(", "))
             }
-            // Call-site variance sentinels print in real PHPStan's own
-            // `GenericTypeNode::__toString()` format (`covariant Foo`/
-            // `contravariant Foo`/`*`) rather than leaking the internal
-            // `"$$covariant"<Foo>`-shaped sentinel name into a real
-            // diagnostic message - unlike `"$$valueof"`, which is always
-            // resolved away before display, these persist in the type
-            // tree as a permanent annotation.
-            Type::Object(name, args) if name == "$$bivariant" => write!(f, "*"),
+            // Real PHPStan's own `GenericTypeNode::__toString()` format.
+            Type::VarianceArg(CallSiteVariance::Bivariant, _) => write!(f, "*"),
+            Type::VarianceArg(CallSiteVariance::Covariant, inner) => write!(f, "covariant {inner}"),
+            Type::VarianceArg(CallSiteVariance::Contravariant, inner) => {
+                write!(f, "contravariant {inner}")
+            }
             // Normally resolved away before display; shown in its source
             // form if it ever isn't (an unknown class).
             Type::Object(name, args) if name == "$$classconst" && args.len() == 2 => {
@@ -113,12 +111,6 @@ impl fmt::Display for Type {
                     _ => "*",
                 };
                 write!(f, "{}::{pattern}", args[0])
-            }
-            Type::Object(name, args) if name == "$$covariant" => {
-                write!(f, "covariant {}", args[0])
-            }
-            Type::Object(name, args) if name == "$$contravariant" => {
-                write!(f, "contravariant {}", args[0])
             }
             Type::Object(name, args) => {
                 let name = match name.as_str() {

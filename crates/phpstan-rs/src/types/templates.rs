@@ -1,7 +1,6 @@
 use rustc_hash::FxHashMap;
-use std::sync::Arc;
 
-use crate::types::{CallableParam, CallableSig, TemplateParam, Type};
+use crate::types::{CallableSig, TemplateParam, Type};
 
 /// Unifies a template-bearing param type against an actual argument type,
 /// recording the binding it implies. Only the two shapes that come up in
@@ -243,80 +242,6 @@ fn substitute(
             guarded.insert(tp.name.clone(), Type::Mixed(false));
             substitute(fallback, &guarded, to_bound)
         }),
-        // Substitutes through the key type too (not just reset to
-        // "unknown" every time) - a real, if rare, `array<TKey, TValue>`
-        // bound key shouldn't be lost on every substitution pass.
-        Type::Array(key, inner) => Type::Array(
-            Box::new(substitute(key, bindings, to_bound)),
-            Box::new(substitute(inner, bindings, to_bound)),
-        ),
-        Type::ClassString(inner) => {
-            Type::ClassString(Box::new(substitute(inner, bindings, to_bound)))
-        }
-        Type::Union(members) => Type::Union(
-            members
-                .iter()
-                .map(|m| substitute(m, bindings, to_bound))
-                .collect(),
-        ),
-        Type::Intersection(members) => Type::Intersection(
-            members
-                .iter()
-                .map(|m| substitute(m, bindings, to_bound))
-                .collect(),
-        ),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .iter()
-                .map(|(k, t, opt)| (k.clone(), substitute(t, bindings, to_bound), *opt))
-                .collect(),
-        ),
-        // `object{...}`'s own field types need substituting too.
-        Type::ObjectShape(fields) => Type::ObjectShape(
-            fields
-                .iter()
-                .map(|(k, t, opt)| (k.clone(), substitute(t, bindings, to_bound), *opt))
-                .collect(),
-        ),
-        // `Object`'s own generic argument list must be recursed into
-        // like every other structural wrapper above, so substituting
-        // `T -> int` through e.g. `Box<T>` produces `Box<int>` rather
-        // than leaving it unchanged. Also correctly carries a call-site
-        // variance sentinel's own wrapped inner type through
-        // substitution (`"$$covariant"`/`"$$contravariant"`/
-        // `"$$bivariant"` are all just `Object`s with this same shape -
-        // no separate arm needed for them).
-        Type::Object(name, args) => Type::Object(
-            name.clone(),
-            args.iter()
-                .map(|a| substitute(a, bindings, to_bound))
-                .collect(),
-        ),
-        // Mirrors the other three walkers' own equivalent arms - a
-        // template param inside a `Closure(...)` shape's own param/return
-        // types (e.g. `Closure(T): U`) needs the same substitution as
-        // anywhere else.
-        Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
-            params: sig
-                .params
-                .iter()
-                .map(|p| CallableParam {
-                    ty: substitute(&p.ty, bindings, to_bound),
-                    variadic: p.variadic,
-                    optional: p.optional,
-                    by_ref: p.by_ref,
-                })
-                .collect(),
-            return_type: Box::new(substitute(&sig.return_type, bindings, to_bound)),
-            templates: sig.templates.clone(),
-        }))),
-        // Recurses into `target`/`if_true`/`if_false` -
-        // `subject` is a raw parameter name, not a `Type`, so there's
-        // nothing to substitute there. Without this arm, a template
-        // param used inside one of a conditional return type's own
-        // branches (`@return ($x is T ? T : null)`, a real, if narrower,
-        // shape) would silently keep reading as the bare, unsubstituted
-        // template instead of the caller's actual bound type.
         // A template-subject conditional (`(T is int ? A : B)`) resolves
         // once `T` is bound, the way real PHPStan's `ConditionalType`
         // does; otherwise both branches stay.
@@ -341,21 +266,11 @@ fn substitute(
                 ),
             }
         }
-        Type::Conditional {
-            subject,
-            target,
-            if_true,
-            if_false,
-            negated,
-            template_subject,
-        } => Type::Conditional {
-            subject: subject.clone(),
-            target: Box::new(substitute(target, bindings, to_bound)),
-            if_true: Box::new(substitute(if_true, bindings, to_bound)),
-            if_false: Box::new(substitute(if_false, bindings, to_bound)),
-            negated: *negated,
-            template_subject: *template_subject,
-        },
-        other => other.clone(),
+        // Every nested position - a generic argument (`Box<T>` becomes
+        // `Box<int>`), a shape field, a `Closure(T): U` shape, a
+        // conditional return type's branches (`subject` is a raw
+        // parameter name, not a `Type`, so there's nothing to substitute
+        // there).
+        _ => ty.map_children(&mut |t| substitute(t, bindings, to_bound)),
     }
 }

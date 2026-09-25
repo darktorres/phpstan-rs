@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::docblock::DocBlock;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
-use crate::types::{self, CallableParam, CallableSig, TemplateParam, Type};
+use crate::types::{self, TemplateParam, Type};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 
@@ -26,84 +26,11 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Arc<str>, Ty
         Type::Object(name, _) if aliases.contains_key(name.as_str()) => {
             aliases[name.as_str()].clone()
         }
-        Type::Object(name, args) => Type::Object(
-            name,
-            args.into_iter()
-                .map(|a| substitute_type_aliases(a, aliases))
-                .collect(),
-        ),
-        Type::Array(key, inner) => Type::Array(
-            Box::new(substitute_type_aliases(*key, aliases)),
-            Box::new(substitute_type_aliases(*inner, aliases)),
-        ),
-        Type::ClassString(inner) => {
-            Type::ClassString(Box::new(substitute_type_aliases(*inner, aliases)))
-        }
-        Type::Union(members) => Type::Union(
-            members
-                .into_iter()
-                .map(|m| substitute_type_aliases(m, aliases))
-                .collect(),
-        ),
-        Type::Intersection(members) => Type::Intersection(
-            members
-                .into_iter()
-                .map(|m| substitute_type_aliases(m, aliases))
-                .collect(),
-        ),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, substitute_type_aliases(t, aliases), opt))
-                .collect(),
-        ),
-        // `object{...}`'s own field types need recursing into as well,
-        // the one structural wrapper this function otherwise handles
-        // identically to `ArrayShape` above - a `@phpstan-type` alias
-        // referenced inside e.g. `object{key: T}` (`T` itself a sibling
-        // alias, not just a template) must still be substituted.
-        Type::ObjectShape(fields) => Type::ObjectShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, substitute_type_aliases(t, aliases), opt))
-                .collect(),
-        ),
-        // Mirrors `mark_template_params`'s own new arm above.
-        Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
-            params: sig
-                .params
-                .iter()
-                .map(|p| CallableParam {
-                    ty: substitute_type_aliases(p.ty.clone(), aliases),
-                    variadic: p.variadic,
-                    optional: p.optional,
-                    by_ref: p.by_ref,
-                })
-                .collect(),
-            return_type: Box::new(substitute_type_aliases((*sig.return_type).clone(), aliases)),
-            templates: sig.templates.clone(),
-        }))),
-        // Recurses into `target`/`if_true`/`if_false`, same as
-        // `mark_template_params`/`resolve_names_in_type`'s own identical
-        // arms - a `@phpstan-type` alias referenced inside
-        // one of a conditional return type's own branches needs the same
+        // Every nested position - a `@phpstan-type` alias referenced
+        // inside a generic argument, a shape field, a `Closure(...)`
+        // shape or a conditional return type's branches needs the same
         // substitution as anywhere else.
-        Type::Conditional {
-            subject,
-            target,
-            if_true,
-            if_false,
-            negated,
-            template_subject,
-        } => Type::Conditional {
-            subject,
-            target: Box::new(substitute_type_aliases(*target, aliases)),
-            if_true: Box::new(substitute_type_aliases(*if_true, aliases)),
-            if_false: Box::new(substitute_type_aliases(*if_false, aliases)),
-            negated,
-            template_subject,
-        },
-        other => other,
+        other => other.map_children(&mut |t| substitute_type_aliases(t.clone(), aliases)),
     }
 }
 
@@ -189,93 +116,13 @@ pub(crate) fn mark_template_params(ty: Type, params: &FxHashMap<String, Template
         Type::Object(name, _) if params.contains_key(&name) => {
             Type::TemplateParam(params[&name].clone())
         }
-        Type::Object(name, args) => Type::Object(
-            name,
-            args.into_iter()
-                .map(|a| mark_template_params(a, params))
-                .collect(),
-        ),
-        Type::Array(key, inner) => Type::Array(
-            Box::new(mark_template_params(*key, params)),
-            Box::new(mark_template_params(*inner, params)),
-        ),
-        Type::ClassString(inner) => {
-            Type::ClassString(Box::new(mark_template_params(*inner, params)))
-        }
-        Type::Union(members) => Type::Union(
-            members
-                .into_iter()
-                .map(|m| mark_template_params(m, params))
-                .collect(),
-        ),
-        Type::Intersection(members) => Type::Intersection(
-            members
-                .into_iter()
-                .map(|m| mark_template_params(m, params))
-                .collect(),
-        ),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, mark_template_params(t, params), opt))
-                .collect(),
-        ),
-        // `object{...}`'s own field types need recursing into too, since
-        // real PHPStan's own object-shape syntax is commonly combined
-        // with generics (e.g. `@var array<int, object{key: T, priority:
-        // int}>`): without this, a class-level `@template T` used inside
-        // one would stay a plain, unrecognized `Object("T", [])` instead
-        // of becoming `Type::TemplateParam`, which `resolve_names_in_type`
-        // would then (correctly, given what it was handed) treat as a
-        // genuine, as-written class reference.
-        Type::ObjectShape(fields) => Type::ObjectShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, mark_template_params(t, params), opt))
-                .collect(),
-        ),
-        // A template param inside a `Closure(...)` shape (e.g.
-        // `@param Closure(self):T $func`) - without this, `T` inside the
-        // shape stays an unresolved `Object("T", [])` instead of becoming
-        // a real `TemplateParam`.
-        Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
-            params: sig
-                .params
-                .iter()
-                .map(|p| CallableParam {
-                    ty: mark_template_params(p.ty.clone(), params),
-                    variadic: p.variadic,
-                    optional: p.optional,
-                    by_ref: p.by_ref,
-                })
-                .collect(),
-            return_type: Box::new(mark_template_params((*sig.return_type).clone(), params)),
-            templates: sig.templates.clone(),
-        }))),
-        // Recurses into `target`/`if_true`/`if_false` - e.g.
-        // `@phpstan-return ($params is array{wrapperClass:
-        // class-string<T>} ? T : Connection)`: without this, a
-        // class-level/function-own `@template T` referenced inside a
-        // conditional return type's own branches would stay an
+        // Every nested position - without this, a template written
+        // inside a generic argument, `object{key: T}`, `Closure(self): T`
+        // or a conditional return type's branches would stay an
         // unrecognized `Object("T", [])` instead of becoming a real
-        // `TemplateParam`, the same gap this function's own `ObjectShape`/
-        // `Callable` arms above each close.
-        Type::Conditional {
-            subject,
-            target,
-            if_true,
-            if_false,
-            negated,
-            template_subject,
-        } => Type::Conditional {
-            subject,
-            target: Box::new(mark_template_params(*target, params)),
-            if_true: Box::new(mark_template_params(*if_true, params)),
-            if_false: Box::new(mark_template_params(*if_false, params)),
-            negated,
-            template_subject,
-        },
-        other => other,
+        // `TemplateParam`, which `resolve_names_in_type` would then treat
+        // as a genuine, as-written class reference.
+        other => other.map_children(&mut |t| mark_template_params(t.clone(), params)),
     }
 }
 

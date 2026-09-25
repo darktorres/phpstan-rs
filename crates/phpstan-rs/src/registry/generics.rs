@@ -2,7 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::registry::Registry;
-use crate::types::{self, Type, Variance};
+use crate::types::{self, CallSiteVariance, Type, Variance};
 
 impl Registry {
     /// This class's own declared variance for the `index`-th `@template`
@@ -31,9 +31,8 @@ impl Registry {
     }
 
     /// The variance that actually governs one generic argument slot - a
-    /// call-site variance marker written directly on `arg`
-    /// (`types::strip_call_site_variance`'s own sentinels,
-    /// `"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`) always wins
+    /// call-site variance annotation written directly on `arg`
+    /// (`Type::VarianceArg`) always wins
     /// when present; otherwise falls back to `class`'s own declared
     /// variance for that slot (`slot_variance`, `Invariant` by default
     /// when the class declares no variance for it, `None`/"don't know"
@@ -52,21 +51,12 @@ impl Registry {
         arg: &Type,
     ) -> Option<Variance> {
         match arg {
-            Type::Object(name, _) if name == "$$covariant" => Some(Variance::Covariant),
-            Type::Object(name, _) if name == "$$contravariant" => Some(Variance::Contravariant),
-            // Real PHPStan has no separate "bivariant" `Variance` value
-            // reachable through ordinary composition (`Bivariant` only
-            // ever comes from a call-site `*`, never a class's own
-            // declared variance) - this project doesn't need one either,
-            // since every consumer already treats "always compatible,
-            // don't recurse further" as its own terminal case rather
-            // than a fourth composable variance kind. `is_assignable`
-            // checks for the `"$$bivariant"` sentinel directly for this
-            // reason; `walk_variance` recursing into a bivariant slot's
-            // own (never meaningfully variance-checkable) argument is
-            // harmless - there's no real type there to find a
-            // `TemplateParam` inside in the first place.
-            Type::Object(name, _) if name == "$$bivariant" => None,
+            Type::VarianceArg(CallSiteVariance::Covariant, _) => Some(Variance::Covariant),
+            Type::VarianceArg(CallSiteVariance::Contravariant, _) => Some(Variance::Contravariant),
+            // `*`: always compatible, never recursed into - every
+            // consumer treats that as its own terminal case rather than a
+            // fourth composable variance kind.
+            Type::VarianceArg(CallSiteVariance::Bivariant, _) => None,
             _ => self.slot_variance(class, index),
         }
     }
@@ -216,125 +206,9 @@ impl Registry {
                 .and_then(|b| b.get(&tp.name))
                 .cloned()
                 .unwrap_or_else(|| ty.clone()),
-            Type::Array(key, inner) => Type::Array(
-                Box::new(Registry::substitute_class_scoped_ancestor_templates(
-                    key,
-                    ancestor_bindings,
-                )),
-                Box::new(Registry::substitute_class_scoped_ancestor_templates(
-                    inner,
-                    ancestor_bindings,
-                )),
-            ),
-            Type::ClassString(inner) => Type::ClassString(Box::new(
-                Registry::substitute_class_scoped_ancestor_templates(inner, ancestor_bindings),
-            )),
-            Type::Union(members) => Type::Union(
-                members
-                    .iter()
-                    .map(|m| {
-                        Registry::substitute_class_scoped_ancestor_templates(m, ancestor_bindings)
-                    })
-                    .collect(),
-            ),
-            Type::Intersection(members) => Type::Intersection(
-                members
-                    .iter()
-                    .map(|m| {
-                        Registry::substitute_class_scoped_ancestor_templates(m, ancestor_bindings)
-                    })
-                    .collect(),
-            ),
-            Type::ArrayShape(fields) => Type::ArrayShape(
-                fields
-                    .iter()
-                    .map(|(k, t, opt)| {
-                        (
-                            k.clone(),
-                            Registry::substitute_class_scoped_ancestor_templates(
-                                t,
-                                ancestor_bindings,
-                            ),
-                            *opt,
-                        )
-                    })
-                    .collect(),
-            ),
-            Type::ObjectShape(fields) => Type::ObjectShape(
-                fields
-                    .iter()
-                    .map(|(k, t, opt)| {
-                        (
-                            k.clone(),
-                            Registry::substitute_class_scoped_ancestor_templates(
-                                t,
-                                ancestor_bindings,
-                            ),
-                            *opt,
-                        )
-                    })
-                    .collect(),
-            ),
-            Type::Object(name, args) => Type::Object(
-                name.clone(),
-                args.iter()
-                    .map(|a| {
-                        Registry::substitute_class_scoped_ancestor_templates(a, ancestor_bindings)
-                    })
-                    .collect(),
-            ),
-            Type::Callable(Some(sig)) => {
-                let sub = |t: &Type| {
-                    Registry::substitute_class_scoped_ancestor_templates(t, ancestor_bindings)
-                };
-                Type::Callable(Some(Arc::new(types::CallableSig {
-                    params: sig
-                        .params
-                        .iter()
-                        .map(|p| types::CallableParam {
-                            ty: sub(&p.ty),
-                            ..p.clone()
-                        })
-                        .collect(),
-                    return_type: Box::new(sub(&sig.return_type)),
-                    templates: sig.templates.clone(),
-                })))
-            }
-            Type::Conditional {
-                subject,
-                target,
-                if_true,
-                if_false,
-                negated,
-                template_subject,
-            } => {
-                let sub = |t: &Type| {
-                    Registry::substitute_class_scoped_ancestor_templates(t, ancestor_bindings)
-                };
-                Type::Conditional {
-                    subject: subject.clone(),
-                    target: Box::new(sub(target)),
-                    if_true: Box::new(sub(if_true)),
-                    if_false: Box::new(sub(if_false)),
-                    negated: *negated,
-                    template_subject: *template_subject,
-                }
-            }
-            Type::HasOffsetValue(key, inner) => Type::HasOffsetValue(
-                key.clone(),
-                Box::new(Registry::substitute_class_scoped_ancestor_templates(
-                    inner,
-                    ancestor_bindings,
-                )),
-            ),
-            Type::ReflectedMember(owner, member) => Type::ReflectedMember(
-                Box::new(Registry::substitute_class_scoped_ancestor_templates(
-                    owner,
-                    ancestor_bindings,
-                )),
-                member.clone(),
-            ),
-            other => other.clone(),
+            _ => ty.map_children(&mut |t| {
+                Registry::substitute_class_scoped_ancestor_templates(t, ancestor_bindings)
+            }),
         }
     }
 }

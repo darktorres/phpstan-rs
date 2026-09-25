@@ -57,20 +57,7 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // this special case, the generic arm just below would instead try
         // to resolve `"$$valueof"` itself as if it were a genuine (and
         // nonsensical) class reference.
-        //
-        // `"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`
-        // (`types::parse_generic_arg`'s own call-site variance sentinels)
-        // need the exact same treatment, for the exact same reason: a
-        // fixture inside any `namespace` block would otherwise mangle
-        // e.g. `"$$covariant"` into `App\$$covariant` before
-        // `Registry::effective_slot_variance` ever gets a chance to
-        // recognize it.
-        Type::Object(name, args)
-            if matches!(
-                name.as_str(),
-                "$$valueof" | "$$classconst" | "$$covariant" | "$$contravariant" | "$$bivariant"
-            ) =>
-        {
+        Type::Object(name, args) if matches!(name.as_str(), "$$valueof" | "$$classconst") => {
             Type::Object(
                 name,
                 args.into_iter()
@@ -82,17 +69,6 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
             ctx.resolve(&name),
             args.into_iter()
                 .map(|a| resolve_names_in_type(a, ctx))
-                .collect(),
-        ),
-        Type::Array(key, inner) => Type::Array(
-            Box::new(resolve_names_in_type(*key, ctx)),
-            Box::new(resolve_names_in_type(*inner, ctx)),
-        ),
-        Type::ClassString(inner) => Type::ClassString(Box::new(resolve_names_in_type(*inner, ctx))),
-        Type::Union(members) => Type::Union(
-            members
-                .into_iter()
-                .map(|m| resolve_names_in_type(m, ctx))
                 .collect(),
         ),
         // A `Closure(...)` shape names PHP's own global `Closure`, never
@@ -109,28 +85,6 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
             members.push(resolve_names_in_type(sig, ctx));
             Type::Intersection(members)
         }
-        Type::Intersection(members) => Type::Intersection(
-            members
-                .into_iter()
-                .map(|m| resolve_names_in_type(m, ctx))
-                .collect(),
-        ),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, resolve_names_in_type(t, ctx), opt))
-                .collect(),
-        ),
-        // `object{...}`'s own field types need resolving too - a genuine
-        // class reference nested inside one
-        // (`object{repo: SomeRepository}`) must not stay unqualified
-        // inside a namespaced file.
-        Type::ObjectShape(fields) => Type::ObjectShape(
-            fields
-                .into_iter()
-                .map(|(k, t, opt)| (k, resolve_names_in_type(t, ctx), opt))
-                .collect(),
-        ),
         // Mirrors `mark_template_params`/`substitute_type_aliases`'s own
         // equivalent arms - a class reference inside a `Closure(...)`
         // shape's own param/return types needs the same namespace
@@ -163,27 +117,10 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
             }
             .rebind_templates(),
         ))),
-        // Mirrors `mark_template_params`/`substitute_type_aliases`'s own
-        // identical arms - a real class reference inside one of a
-        // conditional return type's own branches (e.g. `Connection` in
-        // `@phpstan-return (... ? T : Connection)`) needs the same
+        // Every other nested position - a generic argument, a shape
+        // field, a conditional return type's branches - needs the same
         // namespace resolution as anywhere else.
-        Type::Conditional {
-            subject,
-            target,
-            if_true,
-            if_false,
-            negated,
-            template_subject,
-        } => Type::Conditional {
-            subject,
-            target: Box::new(resolve_names_in_type(*target, ctx)),
-            if_true: Box::new(resolve_names_in_type(*if_true, ctx)),
-            if_false: Box::new(resolve_names_in_type(*if_false, ctx)),
-            negated,
-            template_subject,
-        },
-        other => other,
+        other => other.map_children(&mut |t| resolve_names_in_type(t.clone(), ctx)),
     }
 }
 
@@ -213,26 +150,18 @@ pub(crate) fn collect_class_name_case_refs(
 ) {
     match ty {
         // Mirrors `resolve_names_in_type`'s own sentinel arms exactly:
-        // `$$interface`/`$$trait` are never a real
-        // class reference to check the case of, and (unlike the
-        // `$$valueof`/variance sentinels just below) their own argument
-        // list isn't recursed into there either, so this doesn't either -
-        // both are always argument-less in practice regardless.
+        // `$$interface`/`$$trait` are never a real class reference to
+        // check the case of, and (unlike the `$$valueof` sentinels just
+        // below) their own argument list isn't recursed into there
+        // either, so this doesn't either - both are always
+        // argument-less in practice regardless.
         Type::Object(name, _)
             if matches!(
                 name.as_str(),
                 "$$interface" | "$$trait" | "$$self" | "$$static"
             ) => {}
         Type::Object(name, args)
-            if matches!(
-                name.as_str(),
-                "$$valueof"
-                    | "$$classconst"
-                    | "$$covariant"
-                    | "$$contravariant"
-                    | "$$bivariant"
-                    | "Traversable"
-            ) =>
+            if matches!(name.as_str(), "$$valueof" | "$$classconst" | "Traversable") =>
         {
             for a in args {
                 collect_class_name_case_refs(a, ctx, out);
@@ -244,37 +173,6 @@ pub(crate) fn collect_class_name_case_refs(
                 collect_class_name_case_refs(a, ctx, out);
             }
         }
-        Type::Array(key, inner) => {
-            collect_class_name_case_refs(key, ctx, out);
-            collect_class_name_case_refs(inner, ctx, out);
-        }
-        Type::ClassString(inner) => collect_class_name_case_refs(inner, ctx, out),
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                collect_class_name_case_refs(m, ctx, out);
-            }
-        }
-        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-            for (_, t, _) in fields {
-                collect_class_name_case_refs(t, ctx, out);
-            }
-        }
-        Type::Callable(Some(sig)) => {
-            for p in &sig.params {
-                collect_class_name_case_refs(&p.ty, ctx, out);
-            }
-            collect_class_name_case_refs(&sig.return_type, ctx, out);
-        }
-        Type::Conditional {
-            target,
-            if_true,
-            if_false,
-            ..
-        } => {
-            collect_class_name_case_refs(target, ctx, out);
-            collect_class_name_case_refs(if_true, ctx, out);
-            collect_class_name_case_refs(if_false, ctx, out);
-        }
-        _ => {}
+        _ => ty.for_each_child(&mut |t| collect_class_name_case_refs(t, ctx, out)),
     }
 }

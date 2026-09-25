@@ -247,6 +247,17 @@ impl<'a> Checker<'a> {
         for p in &sig.params {
             collect_scoped_template_params(&p.ty, bare_name, &mut in_params);
         }
+        // A non-negated conditional return type on a parameter
+        // (`($params is array{wrapperClass: class-string<T>} ? T : X)`)
+        // references its templates through that parameter.
+        if let Type::Conditional {
+            negated: false,
+            template_subject: false,
+            ..
+        } = &sig.return_type
+        {
+            collect_scoped_template_params(&sig.return_type, bare_name, &mut in_params);
+        }
         let mut in_signature = in_params.clone();
         collect_scoped_template_params(&sig.return_type, bare_name, &mut in_signature);
         if in_signature.len() == in_params.len() {
@@ -365,88 +376,10 @@ impl<'a> Checker<'a> {
                 .and_then(|info| info.extends.first())
                 .map(|p| Type::Object(p.to_string(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
-            Type::Array(key, inner) => Type::Array(
-                Box::new(self.resolve_pseudo(key, defining_class)),
-                Box::new(self.resolve_pseudo(inner, defining_class)),
-            ),
-            Type::ClassString(inner) => {
-                Type::ClassString(Box::new(self.resolve_pseudo(inner, defining_class)))
-            }
-            Type::Union(members) => Type::Union(
-                members
-                    .iter()
-                    .map(|m| self.resolve_pseudo(m, defining_class))
-                    .collect(),
-            ),
-            Type::Intersection(members) => Type::Intersection(
-                members
-                    .iter()
-                    .map(|m| self.resolve_pseudo(m, defining_class))
-                    .collect(),
-            ),
-            Type::ArrayShape(fields) => Type::ArrayShape(
-                fields
-                    .iter()
-                    .map(|(k, t, opt)| (k.clone(), self.resolve_pseudo(t, defining_class), *opt))
-                    .collect(),
-            ),
-            // `object{...}`'s own field types also need
-            // `self`/`static`/`parent` resolved.
-            Type::ObjectShape(fields) => Type::ObjectShape(
-                fields
-                    .iter()
-                    .map(|(k, t, opt)| (k.clone(), self.resolve_pseudo(t, defining_class), *opt))
-                    .collect(),
-            ),
-            // A generic class's own template arguments
-            // (`SortEntry<self, string>` - `Object("SortEntry",
-            // [SelfRef, String])`) need `self`/`static`/`parent`
-            // resolved inside the argument list too, not just at the top
-            // level - otherwise a `list<SortEntry<self, string>>`
-            // declared return type's `self` would never match the
-            // concrete class an actual returned
-            // `SortEntry<UserSortField, string>` carries.
-            Type::Object(name, args) => Type::Object(
-                name.clone(),
-                args.iter()
-                    .map(|a| self.resolve_pseudo(a, defining_class))
-                    .collect(),
-            ),
-            // PHPDoc conditional return types (`@return ($x is Foo ? A :
-            // B)`) can carry `self`/`static`/`parent` inside any of their
-            // three type positions too.
-            Type::Conditional {
-                subject,
-                target,
-                if_true,
-                if_false,
-                negated,
-                template_subject,
-            } => Type::Conditional {
-                subject: subject.clone(),
-                target: Box::new(self.resolve_pseudo(target, defining_class)),
-                if_true: Box::new(self.resolve_pseudo(if_true, defining_class)),
-                if_false: Box::new(self.resolve_pseudo(if_false, defining_class)),
-                negated: *negated,
-                template_subject: *template_subject,
-            },
-            // `Closure(self): static` - a callable shape's own parameter
-            // and return types.
-            Type::Callable(Some(sig)) => {
-                Type::Callable(Some(std::sync::Arc::new(types::CallableSig {
-                    params: sig
-                        .params
-                        .iter()
-                        .map(|p| types::CallableParam {
-                            ty: self.resolve_pseudo(&p.ty, defining_class),
-                            ..p.clone()
-                        })
-                        .collect(),
-                    return_type: Box::new(self.resolve_pseudo(&sig.return_type, defining_class)),
-                    templates: sig.templates.clone(),
-                })))
-            }
-            _ => ty.clone(),
+            // Every nested position too: a generic class's own template
+            // arguments (`SortEntry<self, string>`), a conditional return
+            // type's branches, a `Closure(self): static` shape.
+            _ => ty.map_children(&mut |t| self.resolve_pseudo(t, defining_class)),
         }
     }
 
@@ -636,19 +569,11 @@ impl<'a> Checker<'a> {
     /// ordinary case.
     pub(crate) fn collect_unknown_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         match ty {
-            // A call-site variance sentinel's own name is never a real
-            // class reference to flag, matching this function's leniency
-            // of not recursing into a generic argument list at all - the
-            // wrapped inner type isn't recursed into here either.
             // `$$interface`/`$$trait` (`interface-string`/`trait-string`'s
-            // internal bound) need the same exclusion, checked by
-            // `ClassKind` directly at `registry::is_assignable`'s
+            // internal bound) are never a real class reference to flag,
+            // checked by `ClassKind` directly at `registry::is_assignable`'s
             // `ClassString` arm instead.
-            Type::Object(name, _)
-                if matches!(
-                    name.as_str(),
-                    "$$covariant" | "$$contravariant" | "$$bivariant" | "$$interface" | "$$trait"
-                ) => {}
+            Type::Object(name, _) if matches!(name.as_str(), "$$interface" | "$$trait") => {}
             Type::Object(name, _args) => {
                 if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
                     out.push(name.clone());
@@ -691,11 +616,6 @@ impl<'a> Checker<'a> {
     /// name, so no name is ever double-reported under both identifiers.
     pub(crate) fn collect_trait_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         match ty {
-            Type::Object(name, _)
-                if matches!(
-                    name.as_str(),
-                    "$$covariant" | "$$contravariant" | "$$bivariant"
-                ) => {}
             Type::Object(name, _args) => {
                 if self
                     .registry
@@ -923,40 +843,13 @@ fn collect_scoped_template_params(
         Type::TemplateParam(tp) if tp.scope.as_deref() == Some(scope) => {
             out.entry(tp.name.clone()).or_insert_with(|| tp.clone());
         }
-        Type::Object(_, args) => {
-            for a in args {
-                collect_scoped_template_params(a, scope, out);
-            }
-        }
-        Type::Array(key, inner) => {
-            collect_scoped_template_params(key, scope, out);
-            collect_scoped_template_params(inner, scope, out);
-        }
-        Type::ClassString(inner) => collect_scoped_template_params(inner, scope, out),
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                collect_scoped_template_params(m, scope, out);
-            }
-        }
-        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-            for (_, t, _) in fields {
-                collect_scoped_template_params(t, scope, out);
-            }
-        }
-        // A template only reachable inside a `Closure(...)`-shaped
-        // parameter's return-type slot (real shape:
+        // Every nested position - a template only reachable inside a
+        // `Closure(...)`-shaped parameter's return-type slot (real shape:
         // `php-standard-library`'s own `Psl\Dict\group_by()`,
-        // `@template Tk of array-key`/`@param (Closure(Tv): ?Tk) $keyFunc`
-        // - `Tk` never appears as that parameter's own bare top-level
-        // type) is exactly as real an inference source as one reachable
-        // through an ordinary class's generic argument list above.
-        Type::Callable(Some(sig)) => {
-            for p in &sig.params {
-                collect_scoped_template_params(&p.ty, scope, out);
-            }
-            collect_scoped_template_params(&sig.return_type, scope, out);
-        }
-        _ => {}
+        // `@template Tk of array-key`/`@param (Closure(Tv): ?Tk) $keyFunc`)
+        // is exactly as real an inference source as one reachable through
+        // an ordinary class's generic argument list.
+        _ => ty.for_each_child(&mut |t| collect_scoped_template_params(t, scope, out)),
     }
 }
 

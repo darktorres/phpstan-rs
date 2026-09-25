@@ -441,40 +441,43 @@ fn generic_user_class_keeps_base_name_and_type_args() {
 // for an entirely different (and wrong) reason.
 
 #[test]
-fn generic_arg_with_covariant_marker_parses_to_the_sentinel() {
+fn generic_arg_with_covariant_marker_parses_to_a_variance_arg() {
     assert_eq!(
         parse_type_string("Collection<covariant Foo>"),
         Type::Object(
             "Collection".to_string(),
-            vec![Type::Object(
-                "$$covariant".to_string(),
-                vec![Type::Object("Foo".to_string(), Vec::new())]
+            vec![Type::VarianceArg(
+                CallSiteVariance::Covariant,
+                Box::new(Type::Object("Foo".to_string(), Vec::new()))
             )]
         )
     );
 }
 
 #[test]
-fn generic_arg_with_contravariant_marker_parses_to_the_sentinel() {
+fn generic_arg_with_contravariant_marker_parses_to_a_variance_arg() {
     assert_eq!(
         parse_type_string("Collection<contravariant Foo>"),
         Type::Object(
             "Collection".to_string(),
-            vec![Type::Object(
-                "$$contravariant".to_string(),
-                vec![Type::Object("Foo".to_string(), Vec::new())]
+            vec![Type::VarianceArg(
+                CallSiteVariance::Contravariant,
+                Box::new(Type::Object("Foo".to_string(), Vec::new()))
             )]
         )
     );
 }
 
 #[test]
-fn generic_arg_with_bivariant_marker_parses_to_the_sentinel() {
+fn generic_arg_with_bivariant_marker_parses_to_a_variance_arg() {
     assert_eq!(
         parse_type_string("Collection<*>"),
         Type::Object(
             "Collection".to_string(),
-            vec![Type::Object("$$bivariant".to_string(), Vec::new())]
+            vec![Type::VarianceArg(
+                CallSiteVariance::Bivariant,
+                Box::new(Type::Mixed(false))
+            )]
         )
     );
 }
@@ -488,9 +491,9 @@ fn a_call_site_variance_marker_survives_nested_inside_the_wrapped_type() {
         parse_type_string("Collection<covariant Box<int>>"),
         Type::Object(
             "Collection".to_string(),
-            vec![Type::Object(
-                "$$covariant".to_string(),
-                vec![Type::Object("Box".to_string(), vec![Type::Int])]
+            vec![Type::VarianceArg(
+                CallSiteVariance::Covariant,
+                Box::new(Type::Object("Box".to_string(), vec![Type::Int]))
             )]
         )
     );

@@ -27,7 +27,7 @@ fn object_names(ty: &Type, out: &mut Vec<String>) {
                 object_names(m, out);
             }
         }
-        Type::Array(_, value) => object_names(value, out),
+        Type::Array(_, value) | Type::VarianceArg(_, value) => object_names(value, out),
         Type::ArrayShape(fields) => {
             for (_, t, _) in fields {
                 object_names(t, out);

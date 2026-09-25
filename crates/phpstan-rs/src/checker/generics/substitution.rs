@@ -267,58 +267,6 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
                 ty.clone()
             }
         }
-        // Substitute through the key type too, not reset
-        // to "unknown" every time (matches types::substitute_template's
-        // own Array-arm handling).
-        Type::Array(key, inner) => Type::Array(
-            Box::new(substitute_scoped(key, bindings, scope)),
-            Box::new(substitute_scoped(inner, bindings, scope)),
-        ),
-        Type::ClassString(inner) => {
-            Type::ClassString(Box::new(substitute_scoped(inner, bindings, scope)))
-        }
-        Type::Union(members) => Type::Union(
-            members
-                .iter()
-                .map(|m| substitute_scoped(m, bindings, scope))
-                .collect(),
-        ),
-        Type::Intersection(members) => Type::Intersection(
-            members
-                .iter()
-                .map(|m| substitute_scoped(m, bindings, scope))
-                .collect(),
-        ),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .iter()
-                .map(|(k, t, opt)| (k.clone(), substitute_scoped(t, bindings, scope), *opt))
-                .collect(),
-        ),
-        // `object{...}`'s own field types must be substituted too
-        // (e.g. `ContainerType<Tk as array-key, Tv>` whose own `Tk`/`Tv`
-        // reach a caller's return type nested inside `object{...}` by
-        // way of an interface's own template), mirroring
-        // `types::substitute_template`'s own identical handling.
-        Type::ObjectShape(fields) => Type::ObjectShape(
-            fields
-                .iter()
-                .map(|(k, t, opt)| (k.clone(), substitute_scoped(t, bindings, scope), *opt))
-                .collect(),
-        ),
-        // Mirrors `types::substitute_template`'s own handling -
-        // `Object`'s own generic argument list must be recursed into, or
-        // a class-level template used inside e.g. `Box<T>` never
-        // actually gets substituted.
-        Type::Object(name, args) => Type::Object(
-            name.clone(),
-            args.iter()
-                .map(|a| substitute_scoped(a, bindings, scope))
-                .collect(),
-        ),
-        Type::Callable(Some(_)) | Type::HasOffsetValue(..) | Type::ReflectedMember(..) => {
-            ty.map_children(&mut |t| substitute_scoped(t, bindings, scope))
-        }
         // A conditional on one of this class's templates resolves once
         // that template is bound, like `types::substitute_template`'s.
         Type::Conditional {
@@ -342,8 +290,7 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
                 ),
             }
         }
-        Type::Conditional { .. } => ty.map_children(&mut |t| substitute_scoped(t, bindings, scope)),
-        other => other.clone(),
+        _ => ty.map_children(&mut |t| substitute_scoped(t, bindings, scope)),
     }
 }
 
@@ -358,36 +305,13 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
 fn type_references_template(ty: &Type) -> bool {
     match ty {
         Type::TemplateParam(_) => true,
-        Type::Array(key, inner) => type_references_template(key) || type_references_template(inner),
-        Type::ClassString(inner) => type_references_template(inner),
-        Type::Union(members) | Type::Intersection(members) => {
-            members.iter().any(type_references_template)
-        }
-        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-            fields.iter().any(|(_, t, _)| type_references_template(t))
-        }
-        Type::Object(_, args) => args.iter().any(type_references_template),
-        Type::Callable(Some(_))
-        | Type::Conditional { .. }
-        | Type::HasOffsetValue(..)
-        | Type::ReflectedMember(..) => {
-            let mut found = false;
-            let _ = ty.map_children(&mut |t| {
-                found |= type_references_template(t);
-                t.clone()
-            });
-            // A template-subject conditional names its template by
-            // `subject` alone.
-            found
-                || matches!(
-                    ty,
-                    Type::Conditional {
-                        template_subject: true,
-                        ..
-                    }
-                )
-        }
-        _ => false,
+        // A template-subject conditional names its template by
+        // `subject` alone.
+        Type::Conditional {
+            template_subject: true,
+            ..
+        } => true,
+        _ => ty.any_child(type_references_template),
     }
 }
 

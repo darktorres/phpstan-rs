@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::types::{AccessoryKind, CallableParam, CallableSig, Type};
+use crate::types::{AccessoryKind, CallSiteVariance, CallableParam, CallableSig, Type};
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,
 /// `"int|string"`, `"\App\Foo"`, `"Countable&Iterator"`, or a PHPDoc type
@@ -979,8 +979,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `ClassInfo` already tracks the distinction needed
         // (`ClassKind::Interface`/`ClassKind::Trait`), so these route
         // through `Type::ClassString` bound to an internal `$$`-prefixed
-        // sentinel marker (same convention as `$$valueof`/`$$covariant`/
-        // etc.) - `registry::is_assignable`'s `ClassString` arm
+        // sentinel marker (same convention as `$$valueof`) -
+        // `registry::is_assignable`'s `ClassString` arm
         // special-cases these two sentinel names to check the
         // candidate's real `ClassKind` instead of walking class
         // hierarchy. No generic `<T>` form: real PHPStan has none for
@@ -1234,50 +1234,49 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
     }
 }
 
-/// Real PHPStan's own call-site variance annotation syntax on one
-/// generic type argument - `Collection<covariant Foo>`,
-/// `Collection<contravariant Foo>`, or `Collection<*>` ("don't check
-/// this argument at all"), parsed on every generic type position
-/// (`@param`/`@return`/`@var`/`@extends`/`@implements` alike). Encoded
-/// with the same "sentinel via an existing `Type::Object` variant,
-/// guarded by an impossible name" idiom `value-of<T>` uses for
-/// `"$$valueof"` - `"$$covariant"`/`"$$contravariant"` each wrap the
-/// real argument type; `"$$bivariant"` (`*`) has no real argument to
-/// wrap. Consulted by `Registry::effective_slot_variance`, which lets a
-/// marker here override a class's declared slot variance for one
-/// comparison, matching `GenericObjectType::isSuperTypeOf`'s "call-site
-/// variance wins when
-/// present" rule.
+/// One generic type argument, with its call-site variance annotation
+/// if written - `Collection<covariant Foo>`, `Collection<contravariant
+/// Foo>`, or `Collection<*>` ("don't check this argument at all"),
+/// parsed on every generic type position (`@param`/`@return`/`@var`/
+/// `@extends`/`@implements` alike). Consulted by
+/// `Registry::effective_slot_variance`, which lets a marker here
+/// override a class's declared slot variance for one comparison,
+/// matching `GenericObjectType::isSuperTypeOf`'s "call-site variance
+/// wins when present" rule.
 fn parse_generic_arg(a: &str) -> Type {
     let trimmed = a.trim();
     if trimmed == "*" {
-        return Type::Object("$$bivariant".to_string(), Vec::new());
+        return Type::VarianceArg(CallSiteVariance::Bivariant, Box::new(Type::Mixed(false)));
     }
     if let Some(rest) = trimmed.strip_prefix("covariant ") {
-        return Type::Object("$$covariant".to_string(), vec![parse_type_string(rest)]);
+        return Type::VarianceArg(
+            CallSiteVariance::Covariant,
+            Box::new(parse_type_string(rest)),
+        );
     }
     if let Some(rest) = trimmed.strip_prefix("contravariant ") {
-        return Type::Object("$$contravariant".to_string(), vec![parse_type_string(rest)]);
+        return Type::VarianceArg(
+            CallSiteVariance::Contravariant,
+            Box::new(parse_type_string(rest)),
+        );
     }
     parse_type_string(trimmed)
 }
 
-/// Strips a `parse_generic_arg` call-site variance sentinel down to the
-/// real type it wraps, for every consumer that only cares "what type is
-/// really being referenced here," not the variance override itself
+/// Strips a call-site variance annotation down to the real type it
+/// wraps, for every consumer that only cares "what type is really being
+/// referenced here," not the variance override itself
 /// (existence-checking, bound-checking, substitution's own recursive
 /// rebuild, ...). `Registry::effective_slot_variance`/`is_assignable`
-/// are the two places that DO care about the marker itself and read it
-/// directly rather than through this helper. `"$$bivariant"` (`*`) has
-/// no real type to unwrap to at all - `None` here means "nothing to
-/// verify," the same as this project already treats any other
-/// unresolvable/erased generic argument elsewhere.
+/// are the two places that DO care about the annotation itself and read
+/// it directly rather than through this helper. `*` has no real type to
+/// unwrap to at all - `None` here means "nothing to verify," the same as
+/// this project already treats any other unresolvable/erased generic
+/// argument elsewhere.
 pub(crate) fn strip_call_site_variance(ty: &Type) -> Option<&Type> {
     match ty {
-        Type::Object(name, args) if name == "$$covariant" || name == "$$contravariant" => {
-            Some(&args[0])
-        }
-        Type::Object(name, _) if name == "$$bivariant" => None,
+        Type::VarianceArg(CallSiteVariance::Bivariant, _) => None,
+        Type::VarianceArg(_, inner) => Some(inner),
         other => Some(other),
     }
 }
