@@ -10,7 +10,7 @@
 //! Confidently scoped, not a full port of real PHPStan's own operator
 //! type resolver: every check here answers "is this operand type ever
 //! legal for this operator," reusing `coercion.rs`'s existing cast-
-//! legality surface (`type_to_string` for concat) and a new, analogous
+//! legality surface (`Type::to_string_type` for concat) and a new, analogous
 //! `is_number_operand` (mirrors real PHPStan's own `Type::toNumber()`
 //! legality) - not "does resolving this exact operator expression
 //! produce `ErrorType`," which for a handful of real PHPStan cases
@@ -427,9 +427,10 @@ impl<'a> Checker<'a> {
     /// an arbitrary callable.
     fn binary_operand_validity(&self, op: &BinOp, l_ty: &Type, r_ty: &Type) -> Option<bool> {
         match op {
-            BinOp::Concat => {
-                Some(self.type_to_string(l_ty).is_some() && self.type_to_string(r_ty).is_some())
-            }
+            BinOp::Concat => Some(
+                l_ty.to_string_type(self.registry).is_some()
+                    && r_ty.to_string_type(self.registry).is_some(),
+            ),
             // `+` is PHP's array-union operator when both sides are
             // arrays, ordinary arithmetic otherwise - one array and one
             // non-array is a hard runtime error (the caller's own

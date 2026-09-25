@@ -1202,7 +1202,6 @@ pub(crate) use crate::types::generalize_by_key_set;
 pub(crate) use crate::types::union_types;
 pub(crate) use assignment::{literal_string_key, superglobal_default_type};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
-pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{
     LoopZeroIterations, collect_exit_point_statements, collect_goto_targets,
     exit_point_description, generator_missing_return_type, generator_template_param,

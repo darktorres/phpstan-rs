@@ -31,6 +31,9 @@ pub trait ClassHierarchy {
 
     fn has_method(&self, class: &str, method: &str) -> bool;
 
+    /// The declared return type of `class`'s method `method`.
+    fn method_return_type(&self, class: &str, method: &str) -> Option<Type>;
+
     /// The declared type of `class`'s property `property`.
     fn property_type(&self, class: &str, property: &str) -> Option<Type>;
 

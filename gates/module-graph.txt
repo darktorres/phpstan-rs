@@ -109,7 +109,7 @@ module checker::calls::format_string rules
 module checker::calls::misc_rules rules
 module checker::calls::parameters rules
 module checker::castable_arguments rules
-module checker::coercion types
+module checker::coercion rules
 module checker::comparisons rules
 module checker::control_flow analyser
 module checker::control_flow::boolean_conditions rules
@@ -201,9 +201,6 @@ module checker::access_attributes ext-language-extensions
 
 # allow <from> <to> <phase that removes the edge>
 
-allow checker::coercion checker B4
-allow checker::coercion diagnostic B4
-allow checker::coercion registry B4
 
 allow registry sql_reflection_config B6
 allow registry sql_reflection_reflector B6
@@ -276,12 +273,14 @@ allow checker::expr checker::includes E3a
 
 allow checker checker::global_constants E3b
 allow checker checker::operators E3b
+allow checker::expr checker::coercion E3b
 allow checker::expr checker::comparisons E3b
 allow checker::expr checker::global_constants E3b
 allow checker::expr checker::impossible_instanceof E3b
 allow checker::expr checker::ini_directives E3b
 allow checker::expr checker::operators E3b
 allow checker::expr checker::pipe_operator E3b
+allow checker::stmt checker::coercion E3b
 allow checker::function_decl checker::noop E3b
 allow checker::oop checker::global_constants E3b
 allow checker::stmt checker::global_constants E3b

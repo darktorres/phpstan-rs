@@ -199,11 +199,14 @@ impl<'a> Checker<'a> {
             return;
         };
         let castable = match cast {
-            Cast::String | Cast::ImplodeString => self.type_to_string(&element_ty).is_some(),
+            Cast::String | Cast::ImplodeString => {
+                element_ty.to_string_type(self.registry).is_some()
+            }
             Cast::Number => self.type_to_number(&element_ty),
             Cast::Float => self.type_to_float_strict(&element_ty),
             Cast::StringAndFloat => {
-                self.type_to_float_strict(&element_ty) && self.type_to_string(&element_ty).is_some()
+                self.type_to_float_strict(&element_ty)
+                    && element_ty.to_string_type(self.registry).is_some()
             }
         };
         if castable {
@@ -233,7 +236,7 @@ impl<'a> Checker<'a> {
                 false
             }
             Type::Object(..) | Type::ObjectWithoutClass | Type::Resource { .. } => {
-                self.type_to_float(ty).is_some()
+                ty.to_float(self.registry).is_some()
             }
             Type::Union(members) | Type::Intersection(members) => {
                 members.iter().any(|m| self.type_to_number(m))
@@ -245,7 +248,7 @@ impl<'a> Checker<'a> {
     /// `type_to_float`, with an array also illegal (`ArrayType::
     /// toFloat()` is an error for sorting).
     fn type_to_float_strict(&self, ty: &Type) -> bool {
-        self.type_to_number(ty) && self.type_to_float(ty).is_some()
+        self.type_to_number(ty) && ty.to_float(self.registry).is_some()
     }
 
     /// `ArrayUnpackingRule` (`arrayUnpacking.stringOffset`): below PHP

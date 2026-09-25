@@ -37,6 +37,11 @@ impl ClassHierarchy for Registry {
         self.lookup_method(class, method).is_some()
     }
 
+    fn method_return_type(&self, class: &str, method: &str) -> Option<Type> {
+        self.lookup_method(class, method)
+            .map(|sig| sig.return_type.clone())
+    }
+
     fn property_type(&self, class: &str, property: &str) -> Option<Type> {
         self.lookup_property(class, property).map(|p| p.ty.clone())
     }

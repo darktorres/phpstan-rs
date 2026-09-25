@@ -8,7 +8,7 @@ use crate::checker::{
     is_known_single_value, is_language_construct, is_real_variable_key, literal_string_key,
     merge_scopes, narrow_type_excluding, narrowing_key, propagate_container_field_facts,
     purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
-    superglobal_default_type, to_bitwise_not,
+    superglobal_default_type,
 };
 use crate::diagnostic::DiagnosticBuilder;
 use crate::pest_config;
@@ -1797,7 +1797,7 @@ impl<'a> Checker<'a> {
             ExprKind::Unary(op @ UnaryOp::BitNot, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_unary_operand_validity(op, &inner_ty, inner.span, label);
-                to_bitwise_not(&inner_ty).unwrap_or(inner_ty)
+                inner_ty.to_bitwise_not().unwrap_or(inner_ty)
             }
             ExprKind::Grouping(inner) => self.check_expr(inner, locals, label),
             ExprKind::Cast(cast, inner) => {
@@ -3183,7 +3183,7 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     self.check_implicit_tostring_usage(&part_ty, p.span, label);
-                    if self.type_to_string(&part_ty).is_none() {
+                    if part_ty.to_string_type(self.registry).is_none() {
                         self.report(
                             label.to_string(),
                             format!(
@@ -4564,7 +4564,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Unary(UnaryOp::BitNot, inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
-                to_bitwise_not(&inner_ty).unwrap_or(inner_ty)
+                inner_ty.to_bitwise_not().unwrap_or(inner_ty)
             }
             ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
             ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),

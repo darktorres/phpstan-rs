@@ -4,6 +4,7 @@ use std::sync::Arc;
 pub use syntax::ast::ClassKind;
 pub use syntax::name::Name;
 
+mod coercion;
 mod conditional;
 mod display;
 mod hierarchy;

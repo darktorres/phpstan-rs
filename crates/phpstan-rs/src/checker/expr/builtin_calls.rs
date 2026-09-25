@@ -1,7 +1,7 @@
 use crate::checker::{
     Checker, Locals, is_real_variable_key, literal_string_key, narrow_type_excluding,
     narrow_type_excluding_falsy, narrow_type_to, narrowing_type_for_predicate, resolve_call_args,
-    string_type_has_accessory, to_absolute_number,
+    string_type_has_accessory,
 };
 use crate::registry::{FunctionSig, Registry};
 use crate::types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
@@ -37,7 +37,7 @@ impl<'a> Checker<'a> {
             // Mirrors real PHPStan's `AbsFunctionDynamicReturnTypeExtension` -
             // delegates entirely to `Type::toAbsoluteNumber()`.
             "abs" if args.len() == 1 => {
-                return to_absolute_number(&self.infer_expr(&args[0].value, locals));
+                return self.infer_expr(&args[0].value, locals).to_absolute_number();
             }
             // Narrowed to the one part that's always true regardless of
             // the argument: `strlen()` can never be negative. Real
