@@ -103,9 +103,13 @@ pub enum Type {
     // string`/`callable(int): string` signature. `Arc` since `Type` is
     // cloned pervasively and a parsed shape can be non-trivially sized.
     Callable(Option<Arc<CallableSig>>),
-    SelfRef,
+    // `self`/`static` as written (with `self<T>`/`static<T>`'s own
+    // arguments), and `$this`: resolved against the class a signature is
+    // read for (`Checker::resolve_pseudo`).
+    SelfRef(Vec<Type>),
     ParentRef,
-    StaticRef,
+    StaticRef(Vec<Type>),
+    This,
     // An unbound `@template T` placeholder, produced for both a
     // function/method's own declared templates and a class's own
     // `@template`. Carries its own bound/variance/scope/default (see
@@ -237,9 +241,10 @@ impl PartialEq for Type {
             (Type::Resource { closed: a }, Type::Resource { closed: b }) => a == b,
             (Type::EnumCase(ae, ac), Type::EnumCase(be, bc)) => ae == be && ac == bc,
             (Type::Callable(a), Type::Callable(b)) => a == b,
-            (Type::SelfRef, Type::SelfRef) => true,
+            (Type::SelfRef(a), Type::SelfRef(b)) => a == b,
             (Type::ParentRef, Type::ParentRef) => true,
-            (Type::StaticRef, Type::StaticRef) => true,
+            (Type::StaticRef(a), Type::StaticRef(b)) => a == b,
+            (Type::This, Type::This) => true,
             (Type::TemplateParam(a), Type::TemplateParam(b)) => a == b,
             (Type::VarianceArg(av, a), Type::VarianceArg(bv, b)) => av == bv && a == b,
             (Type::Union(a), Type::Union(b)) => a == b,
@@ -490,6 +495,8 @@ impl Type {
             Type::Object(name, args) => {
                 Type::Object(name.clone(), args.iter().map(&mut *f).collect())
             }
+            Type::SelfRef(args) => Type::SelfRef(args.iter().map(&mut *f).collect()),
+            Type::StaticRef(args) => Type::StaticRef(args.iter().map(&mut *f).collect()),
             Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
                 params: sig
                     .params
@@ -564,7 +571,9 @@ impl Type {
                     f(t);
                 }
             }
-            Type::Object(_, args) => args.iter().for_each(f),
+            Type::Object(_, args) | Type::SelfRef(args) | Type::StaticRef(args) => {
+                args.iter().for_each(f)
+            }
             Type::Callable(Some(sig)) => {
                 for p in &sig.params {
                     f(&p.ty);

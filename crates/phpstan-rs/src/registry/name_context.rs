@@ -29,14 +29,6 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .map(|a| resolve_names_in_type(a, ctx))
                 .collect(),
         ),
-        // `self<T>`/`static<T>` sentinels: only their arguments name
-        // classes.
-        Type::Object(name, args) if name == "$$self" || name == "$$static" => Type::Object(
-            name,
-            args.into_iter()
-                .map(|a| resolve_names_in_type(a, ctx))
-                .collect(),
-        ),
         Type::Object(name, args) => Type::Object(
             ctx.resolve(&name),
             args.into_iter()
@@ -121,10 +113,6 @@ pub(crate) fn collect_class_name_case_refs(
     out: &mut Vec<(Arc<str>, Arc<str>)>,
 ) {
     match ty {
-        // Mirrors `resolve_names_in_type`'s own sentinel arms: `$$self`/
-        // `$$static` are never a real class reference to check the case
-        // of.
-        Type::Object(name, _) if name == "$$self" || name == "$$static" => {}
         Type::Object(name, args) if name == "Traversable" => {
             for a in args {
                 collect_class_name_case_refs(a, ctx, out);

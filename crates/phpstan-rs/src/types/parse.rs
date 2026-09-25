@@ -1137,23 +1137,17 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::Object("\\Closure".to_string(), Vec::new())
         }
         "callable" => Type::Callable(None),
-        // `self<T>`/`static<T>`: the current class with those arguments
-        // (a sentinel `resolve_pseudo` turns into the class itself).
-        "self" if !generic_args.is_empty() => Type::Object(
-            "$$self".to_string(),
-            generic_args.iter().map(|a| parse_type_string(a)).collect(),
-        ),
-        "static" | "$this" if !generic_args.is_empty() => Type::Object(
-            "$$static".to_string(),
-            generic_args.iter().map(|a| parse_type_string(a)).collect(),
-        ),
-        "self" => Type::SelfRef,
+        // `self<T>`/`static<T>`: the current class with those arguments.
+        "self" => Type::SelfRef(generic_args.iter().map(|a| parse_type_string(a)).collect()),
         "parent" => Type::ParentRef,
         // `@return $this` is a real, PHPStan-documented PHPDoc
-        // convention, identical in meaning to `@return static` - not a
-        // variable reference despite the `$` sigil (real shape: amphp/amp's
-        // `@return $this` on several fluent methods).
-        "static" | "$this" => Type::StaticRef,
+        // convention - not a variable reference despite the `$` sigil
+        // (real shape: amphp/amp's `@return $this` on several fluent
+        // methods).
+        "$this" if generic_args.is_empty() => Type::This,
+        "static" | "$this" => {
+            Type::StaticRef(generic_args.iter().map(|a| parse_type_string(a)).collect())
+        }
         "object" => Type::ObjectWithoutClass,
         // A user-defined generic class (`Collection<User>`): each type
         // argument is a full type string, re-run through

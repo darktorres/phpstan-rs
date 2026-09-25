@@ -121,7 +121,7 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// `Type::TemplateParam`'s own bound, an unresolved `Type::Conditional`
 /// (folded to `Union([if_true, if_false])`, its own doc comment's stated
 /// fallback), `Type::ObjectShape` (a structural bag with no class name to
-/// rule anything out), `Type::SelfRef`/`ParentRef`/`StaticRef` (resolved
+/// rule anything out), `Type::SelfRef`/`ParentRef`/`StaticRef`/`This` (resolved
 /// away by `Checker::resolve_pseudo` well before reaching a real
 /// expression's type in valid code), and `Type::Mixed(false)`/`Never` are all
 /// left unflagged - matching real PHPStan's own permissive default for
@@ -4572,9 +4572,9 @@ impl<'a> Checker<'a> {
                 ExprKind::Name(name) => match name.written.as_ref() {
                     "self" | "parent" | "static" => {
                         let raw = match name.written.as_ref() {
-                            "self" => Type::SelfRef,
+                            "self" => Type::SelfRef(Vec::new()),
                             "parent" => Type::ParentRef,
-                            _ => Type::StaticRef,
+                            _ => Type::StaticRef(Vec::new()),
                         };
                         match &self.current_class {
                             Some(c) => self.resolve_pseudo(&raw, c),
@@ -6872,7 +6872,11 @@ fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
 /// `static` as `class`, everywhere in `ty`.
 fn bind_static_ref(ty: &Type, class: &str) -> Type {
     match ty {
-        Type::StaticRef => Type::Object(class.to_string(), Vec::new()),
+        Type::StaticRef(args) => Type::Object(
+            class.to_string(),
+            args.iter().map(|a| bind_static_ref(a, class)).collect(),
+        ),
+        Type::This => Type::Object(class.to_string(), Vec::new()),
         other => other.map_children(&mut |t| bind_static_ref(t, class)),
     }
 }

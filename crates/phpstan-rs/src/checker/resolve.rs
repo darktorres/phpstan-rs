@@ -20,9 +20,9 @@ impl<'a> Checker<'a> {
         match name {
             "self" | "parent" | "static" => {
                 let raw = match name {
-                    "self" => Type::SelfRef,
+                    "self" => Type::SelfRef(Vec::new()),
                     "parent" => Type::ParentRef,
-                    _ => Type::StaticRef,
+                    _ => Type::StaticRef(Vec::new()),
                 };
                 match &self.current_class {
                     Some(c) => self.resolve_pseudo(&raw, c),
@@ -362,13 +362,13 @@ impl<'a> Checker<'a> {
     /// wrapped in any union must be resolved here first.
     pub(crate) fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
         match ty {
-            Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string(), Vec::new()),
-            Type::Object(name, args) if name == "$$self" || name == "$$static" => Type::Object(
+            Type::SelfRef(args) | Type::StaticRef(args) => Type::Object(
                 defining_class.to_string(),
                 args.iter()
                     .map(|a| self.resolve_pseudo(a, defining_class))
                     .collect(),
             ),
+            Type::This => Type::Object(defining_class.to_string(), Vec::new()),
             Type::ParentRef => self
                 .registry
                 .classes
@@ -394,10 +394,8 @@ impl<'a> Checker<'a> {
     /// return inside an anonymous class's own body would always read as
     /// an unresolvable class.
     pub(crate) fn class_name_exists(&self, name: &str) -> bool {
-        matches!(
-            name,
-            "Traversable" | "class@anonymous" | "$$self" | "$$static"
-        ) || self.registry.lookup_class(name).is_some()
+        matches!(name, "Traversable" | "class@anonymous")
+            || self.registry.lookup_class(name).is_some()
     }
 
     /// `ClassCaseSensitivityCheck`'s equivalent, covering every

@@ -218,8 +218,9 @@ fn native_member_addable(native_member: &Type) -> bool {
         native_member,
         Type::Object(_, _)
             | Type::ObjectWithoutClass
-            | Type::SelfRef
-            | Type::StaticRef
+            | Type::SelfRef(_)
+            | Type::StaticRef(_)
+            | Type::This
             | Type::ParentRef
     )
 }
@@ -338,7 +339,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         | Type::ClassConstant { .. } => true,
         // `@return static` under a native `self`/`static`/class hint: the
         // late-bound class is always an instance of the declaring one.
-        Type::StaticRef | Type::SelfRef => !matches!(
+        Type::StaticRef(_) | Type::This | Type::SelfRef(_) => !matches!(
             native_ty,
             Type::Int | Type::Float | Type::String | Type::Bool | Type::Array(..) | Type::Null
         ),

@@ -115,28 +115,17 @@ impl fmt::Display for Type {
             Type::ValueOf(inner) => write!(f, "value-of<{inner}>"),
             Type::KeyOf(inner) => write!(f, "key-of<{inner}>"),
             Type::OffsetAccess(base, key) => write!(f, "{base}[{key}]"),
-            Type::Object(name, args) => {
-                let name = match name.as_str() {
-                    "$$self" => "self",
-                    "$$static" => "static",
-                    other => other,
-                };
-                write!(f, "{name}")?;
-                if !args.is_empty() {
-                    let parts: Vec<String> = args.iter().map(Type::to_string).collect();
-                    write!(f, "<{}>", parts.join(", "))?;
-                }
-                Ok(())
-            }
+            Type::Object(name, args) => write_generic(f, name, args),
             Type::ObjectWithoutClass => write!(f, "object"),
             Type::Resource { closed: false } => write!(f, "resource"),
             Type::Resource { closed: true } => write!(f, "closed-resource"),
             Type::EnumCase(fqn, case) => write!(f, "{fqn}::{case}"),
             Type::Callable(None) => write!(f, "callable"),
             Type::Callable(Some(sig)) => write_callable_sig(f, "callable", sig),
-            Type::SelfRef => write!(f, "self"),
+            Type::SelfRef(args) => write_generic(f, "self", args),
             Type::ParentRef => write!(f, "parent"),
-            Type::StaticRef => write!(f, "static"),
+            Type::StaticRef(args) => write_generic(f, "static", args),
+            Type::This => write!(f, "$this"),
             Type::TemplateParam(tp) => write!(f, "{}", tp.name),
             // Parenthesized, as PHPStan describes a benevolent union, so
             // a message tells it apart from a plain one.
@@ -299,4 +288,14 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         };
     }
     None
+}
+
+/// `name`, with `<args>` when there are any.
+fn write_generic(f: &mut fmt::Formatter<'_>, name: &str, args: &[Type]) -> fmt::Result {
+    write!(f, "{name}")?;
+    if !args.is_empty() {
+        let parts: Vec<String> = args.iter().map(Type::to_string).collect();
+        write!(f, "<{}>", parts.join(", "))?;
+    }
+    Ok(())
 }

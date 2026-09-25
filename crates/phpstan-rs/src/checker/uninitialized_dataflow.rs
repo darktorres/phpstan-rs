@@ -184,7 +184,12 @@ fn resolves_to_this(e: &Expr, ctx: &PropertyInitCtx) -> bool {
             .checker
             .registry
             .lookup_method(&ctx.checked_class, name)
-            .is_some_and(|sig| matches!(sig.return_type_native, Type::SelfRef | Type::StaticRef)),
+            .is_some_and(|sig| {
+                matches!(
+                    sig.return_type_native,
+                    Type::SelfRef(_) | Type::StaticRef(_) | Type::This
+                )
+            }),
         _ => false,
     }
 }

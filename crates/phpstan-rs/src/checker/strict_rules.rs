@@ -913,9 +913,10 @@ fn not_convertible_to_number(ty: &Type) -> bool {
         | Type::ObjectShape(_)
         | Type::EnumCase(..)
         | Type::Callable(_)
-        | Type::SelfRef
+        | Type::SelfRef(_)
         | Type::ParentRef
-        | Type::StaticRef => true,
+        | Type::StaticRef(_)
+        | Type::This => true,
         Type::Intersection(members) => members.iter().any(not_convertible_to_number),
         _ => false,
     }

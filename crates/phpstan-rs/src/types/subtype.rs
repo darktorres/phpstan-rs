@@ -391,7 +391,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::Object(..) | Type::EnumCase(..), Type::ObjectWithoutClass) => true,
 
         (
-            Type::SelfRef | Type::ParentRef | Type::StaticRef,
+            Type::SelfRef(_) | Type::ParentRef | Type::StaticRef(_) | Type::This,
             Type::Object(..) | Type::ObjectWithoutClass,
         ) => true,
 

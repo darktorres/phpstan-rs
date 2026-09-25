@@ -99,11 +99,11 @@ fn native_iterable_key(ty: &Type) -> Type {
 /// `ty` with `static` bound to `class`.
 fn bind_static(ty: &Type, class: &str) -> Type {
     match ty {
-        Type::StaticRef => Type::Object(class.to_string(), Vec::new()),
-        Type::Object(name, args) if name == "$$static" => Type::Object(
+        Type::StaticRef(args) => Type::Object(
             class.to_string(),
             args.iter().map(|a| bind_static(a, class)).collect(),
         ),
+        Type::This => Type::Object(class.to_string(), Vec::new()),
         other => other.map_children(&mut |c| bind_static(c, class)),
     }
 }

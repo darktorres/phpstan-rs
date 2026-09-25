@@ -728,11 +728,13 @@ fn has_attr(attrs: &[std::sync::Arc<str>], name: &str) -> bool {
 /// return-type check - either bare (`copy(): static`) or nullable
 /// (`tryFrom(): ?static`). `resolve_type` builds `?static` as a plain
 /// two-member `Union` with `StaticRef`, never its own dedicated type, so
-/// a bare `!= Type::StaticRef` check misses it entirely.
+/// a bare `StaticRef` check misses it entirely.
 fn ancestor_return_uses_static(ty: &Type) -> bool {
     match ty {
-        Type::StaticRef => true,
-        Type::Union(members) => members.contains(&Type::StaticRef),
+        Type::StaticRef(_) | Type::This => true,
+        Type::Union(members) => members
+            .iter()
+            .any(|m| matches!(m, Type::StaticRef(_) | Type::This)),
         _ => false,
     }
 }

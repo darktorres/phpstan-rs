@@ -1437,7 +1437,7 @@ fn bind_class_const_self_at(
             pattern,
         } => {
             let names_self = match &*owner {
-                Type::SelfRef | Type::StaticRef => true,
+                Type::SelfRef(_) | Type::StaticRef(_) | Type::This => true,
                 Type::Object(fqn, _) => fqn.trim_start_matches('\\') == class,
                 _ => false,
             };
@@ -1554,7 +1554,10 @@ impl ClassInfo {
 /// its late binding.
 fn bind_self_ref(ty: &Type, owner: &str) -> Type {
     match ty {
-        Type::SelfRef => Type::Object(owner.to_string(), Vec::new()),
+        Type::SelfRef(args) => Type::Object(
+            owner.to_string(),
+            args.iter().map(|a| bind_self_ref(a, owner)).collect(),
+        ),
         other => other.map_children(&mut |t| bind_self_ref(t, owner)),
     }
 }
@@ -1721,7 +1724,11 @@ impl Registry {
 /// the stored type keeps its late-bound `static`.
 fn bind_pseudo_refs(ty: &Type, class: &str) -> Type {
     match ty {
-        Type::SelfRef | Type::StaticRef => Type::Object(class.to_string(), Vec::new()),
+        Type::SelfRef(args) | Type::StaticRef(args) => Type::Object(
+            class.to_string(),
+            args.iter().map(|a| bind_pseudo_refs(a, class)).collect(),
+        ),
+        Type::This => Type::Object(class.to_string(), Vec::new()),
         other => other.map_children(&mut |t| bind_pseudo_refs(t, class)),
     }
 }

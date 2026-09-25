@@ -354,7 +354,7 @@ fn dollar_this_phpdoc_pseudo_type_is_treated_as_static() {
     // generic-user-class branch and became a literal class named
     // "$this", then got nonsensically namespace-qualified once that
     // existed (`Amp\$this`).
-    assert_eq!(parse_type_string("$this"), Type::StaticRef);
+    assert_eq!(parse_type_string("$this"), Type::This);
 }
 
 #[test]
@@ -372,7 +372,7 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
     };
     assert_eq!(
         parse_type_string("self::RFC_*"),
-        sentinel(Type::SelfRef, "RFC_*")
+        sentinel(Type::SelfRef(Vec::new()), "RFC_*")
     );
     assert_eq!(
         parse_type_string("Foo::BAR"),
@@ -388,7 +388,7 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
         parse_type_string("self::RFC_*[]"),
         Type::Array(
             Box::new(Type::benevolent_array_key()),
-            Box::new(sentinel(Type::SelfRef, "RFC_*"))
+            Box::new(sentinel(Type::SelfRef(Vec::new()), "RFC_*"))
         )
     );
 }
