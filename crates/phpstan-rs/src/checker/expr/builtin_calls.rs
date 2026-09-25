@@ -1302,26 +1302,32 @@ impl<'a> Checker<'a> {
             // The real stub declares `microtime(bool $as_float = false):
             // string|float` unconditionally; a literal `true` argument
             // narrows to plain `float`, a literal `false` (or no
-            // argument) to a string. `is_subtype`, not `==`, since a
+            // argument) to a string. `subtype`, not `==`, since a
             // `Union` that happens to be all-`True` or all-`False` (e.g.
             // narrowed from a wider type) should narrow the same way a
             // bare `True`/`False` would.
             "microtime" => match args.first().map(|a| self.infer_expr(&a.value, locals)) {
                 None => return Type::String,
-                Some(ty) if types::is_subtype(&ty, &Type::True) => return Type::Float,
-                Some(ty) if types::is_subtype(&ty, &Type::False) => return Type::String,
+                Some(ty) if types::Relation::structural().subtype(&ty, &Type::True) => {
+                    return Type::Float;
+                }
+                Some(ty) if types::Relation::structural().subtype(&ty, &Type::False) => {
+                    return Type::String;
+                }
                 _ => {}
             },
             // The real stubs declare these unconditionally unioned with
             // `array` (`str_replace(...): array|string`), even though the
             // function only ever returns an array when `$subject` itself
             // is one. Scoped to "subject is string-like"
-            // (`types::is_subtype` against `Type::String`, not a bare
+            // (`Relation::subtype` against `Type::String`, not a bare
             // `==`) - an accessory-refined subject (`non-empty-string`
             // parses to `Intersection([String, Accessory(_)])`) would
             // silently fail to match a bare `== Type::String`.
             "str_replace" | "str_ireplace" if args.len() == 3 || args.len() == 4 => {
-                if types::is_subtype(&self.infer_expr(&args[2].value, locals), &Type::String) {
+                if types::Relation::structural()
+                    .subtype(&self.infer_expr(&args[2].value, locals), &Type::String)
+                {
                     return Type::String;
                 }
             }
@@ -1333,10 +1339,8 @@ impl<'a> Checker<'a> {
             // project doesn't otherwise know for certain.
             "preg_replace" | "preg_replace_callback" | "preg_filter"
                 if args.len() >= 3
-                    && types::is_subtype(
-                        &self.infer_expr(&args[2].value, locals),
-                        &Type::String,
-                    ) =>
+                    && types::Relation::structural()
+                        .subtype(&self.infer_expr(&args[2].value, locals), &Type::String) =>
             {
                 let resolved = resolve_call_args(args, &sig.params);
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
@@ -1348,7 +1352,9 @@ impl<'a> Checker<'a> {
             // subject at index 2, `substr_replace`'s subject is index 0.
             // Never returns `null`, so a plain early return suffices.
             "substr_replace" if args.len() == 3 || args.len() == 4 => {
-                if types::is_subtype(&self.infer_expr(&args[0].value, locals), &Type::String) {
+                if types::Relation::structural()
+                    .subtype(&self.infer_expr(&args[0].value, locals), &Type::String)
+                {
                     return Type::String;
                 }
             }
@@ -1374,7 +1380,7 @@ impl<'a> Checker<'a> {
                     .copied()
                     .flatten()
                     .map(|e| self.infer_expr(e, locals))
-                    && types::is_subtype(&name_ty, &Type::String)
+                    && types::Relation::structural().subtype(&name_ty, &Type::String)
                 {
                     return Type::Union(vec![Type::String, Type::False]);
                 }
@@ -1517,10 +1523,8 @@ impl<'a> Checker<'a> {
             // provably a string.
             "preg_replace_callback_array"
                 if args.len() >= 2
-                    && types::is_subtype(
-                        &self.infer_expr(&args[1].value, locals),
-                        &Type::String,
-                    ) =>
+                    && types::Relation::structural()
+                        .subtype(&self.infer_expr(&args[1].value, locals), &Type::String) =>
             {
                 let resolved = resolve_call_args(args, &sig.params);
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
@@ -1532,10 +1536,8 @@ impl<'a> Checker<'a> {
             // only the array-stripping half is implemented here.
             "mb_convert_encoding"
                 if args.len() >= 2
-                    && types::is_subtype(
-                        &self.infer_expr(&args[0].value, locals),
-                        &Type::String,
-                    ) =>
+                    && types::Relation::structural()
+                        .subtype(&self.infer_expr(&args[0].value, locals), &Type::String) =>
             {
                 let resolved = resolve_call_args(args, &sig.params);
                 let generic = self.infer_call_return_type(sig, &resolved, locals);

@@ -71,7 +71,7 @@ fn is_assignable_treats_unknown_array_element_type_as_compatible() {
         Box::new(Type::Mixed(false)),
     );
     let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
-    // The lenient direction that types::is_subtype deliberately does
+    // The lenient direction that Relation::subtype deliberately does
     // NOT take (see its own array-covariance test) - accepts is
     // the practical, checker-facing layer where "we don't know" must
     // not read as "definitely incompatible".

@@ -56,7 +56,7 @@ pub(crate) fn upgrade_string_with_accessory(ty: &Type, kind: AccessoryKind) -> T
 /// a reusable predicate for any accessory kind
 /// (`is_non_falsy_string` is a one-line delegate to this).
 pub(crate) fn string_type_has_accessory(ty: &Type, kind: AccessoryKind) -> bool {
-    types::is_subtype(
+    types::Relation::structural().subtype(
         ty,
         &Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
     )
@@ -429,7 +429,7 @@ pub(crate) fn comparison_narrowed_bounds(
 /// would be redundant) rather than encoding it twice. A docblock-parsed
 /// `list<T>` still uses a literal `Type::Int` key instead (needed
 /// elsewhere - see `parse_type_string`'s own `"list"` arm), so `types::
-/// is_subtype`'s dedicated list-vs-list `Intersection` arm and `types::
+/// subtype`'s dedicated list-vs-list `Intersection` arm and `types::
 /// types_equal_for_union` both compare the two representations ignoring
 /// key entirely, rather than this project settling on one encoding
 /// everywhere.

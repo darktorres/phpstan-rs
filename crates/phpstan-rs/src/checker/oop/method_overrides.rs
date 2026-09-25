@@ -585,7 +585,7 @@ impl<'a> Checker<'a> {
             // some shared, comparable-by-name sentinel - `self` in
             // `fqn`'s override and `self` in `ancestor_owner`'s
             // declaration usually name two different concrete classes.
-            // `accepts`/`is_subtype` have no rule for a concrete
+            // `accepts`/`subtype` have no rule for a concrete
             // `Object` satisfying a still-bare `SelfRef` (only the
             // reverse - `self` satisfying a concrete class - is
             // handled), so resolving both sides first, same as any other

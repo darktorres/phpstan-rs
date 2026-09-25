@@ -68,3 +68,45 @@ pub fn effective_slot_variance(
         _ => hierarchy.slot_variance(class, index),
     }
 }
+
+/// A hierarchy that knows no classes: a class is only itself. The
+/// relations over it compare classes by name alone.
+pub struct NoClasses;
+
+impl ClassHierarchy for NoClasses {
+    fn is_subclass_of(&self, class: &str, of: &str) -> bool {
+        class == of
+    }
+
+    fn find_class(&self, _: &str) -> Option<ClassFacts<'_>> {
+        None
+    }
+
+    fn class_exactly(&self, _: &str) -> Option<ClassFacts<'_>> {
+        None
+    }
+
+    fn ancestor_names(&self, _: &str) -> Vec<Arc<str>> {
+        Vec::new()
+    }
+
+    fn has_method(&self, _: &str, _: &str) -> bool {
+        false
+    }
+
+    fn method_return_type(&self, _: &str, _: &str) -> Option<Type> {
+        None
+    }
+
+    fn property_type(&self, _: &str, _: &str) -> Option<Type> {
+        None
+    }
+
+    fn slot_variance(&self, _: &str, _: usize) -> Option<Variance> {
+        None
+    }
+
+    fn ancestor_template_bindings(&self, _: &str, _: &[Type], _: &str) -> FxHashMap<String, Type> {
+        FxHashMap::default()
+    }
+}

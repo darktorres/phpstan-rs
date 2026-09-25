@@ -49,7 +49,7 @@ fn union_types_collapses_a_mixed_member_reached_only_via_flattening() {
     );
 }
 
-// The float-widening pitfall this fix deliberately avoids: `is_subtype
+// The float-widening pitfall this fix deliberately avoids: `subtype
 // (IntLiteral(0), Float)` is `true` (PHP's int-to-float argument
 // coercion), but that's an *assignability* fact, not a "this value's
 // representation is already covered" one - an `IntLiteral` sitting

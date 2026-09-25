@@ -83,7 +83,7 @@ pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Typ
 /// column that's also a mapped scalar field - the entity's own mapped
 /// type can be strictly more precise (a narrower non-null guarantee the
 /// app enforces above the DB's own nullability, a value-object wrapper,
-/// ...). Only ever *narrows*: `is_subtype(entity_ty, column_ty)` must
+/// ...). Only ever *narrows*: `subtype(entity_ty, column_ty)` must
 /// hold, so a genuine disagreement (the entity's own type is wider, or
 /// simply incompatible) keeps the column-derived answer rather than
 /// silently trusting possibly-stale entity metadata over a live/static
@@ -111,7 +111,7 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
                 .map(|(property, _)| property);
             let entity_ty = property.and_then(|p| entity.fields.get(p));
             match entity_ty {
-                Some(entity_ty) if types::is_subtype(entity_ty, &f.ty) => {
+                Some(entity_ty) if types::Relation::structural().subtype(entity_ty, &f.ty) => {
                     ShapeField::new(f.key.clone(), entity_ty.clone(), f.optional)
                 }
                 _ => f.clone(),

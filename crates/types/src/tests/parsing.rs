@@ -1,5 +1,6 @@
 //! Parsing PHPDoc type strings into `Type` values.
 use super::super::*;
+use super::is_subtype;
 
 #[test]
 fn nullable_parses_as_union_with_null() {
@@ -626,9 +627,9 @@ fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() 
 // `unknown_array_key()` sentinel for that same position instead
 // (deliberately - a list's key is always int by definition, so encoding
 // it twice would be redundant). Both print identically as `list<int>`
-// but aren't structurally `==`-equal, and `is_subtype`'s generic `Array`
+// but aren't structurally `==`-equal, and `subtype`'s generic `Array`
 // key check is directionally asymmetric between the two representations
-// (`is_subtype(unknown_array_key(), Int)` is false, the reverse true),
+// (`subtype(unknown_array_key(), Int)` is false, the reverse true),
 // so a genuine runtime `list<int>` would otherwise fail to satisfy an
 // identical docblock-declared `list<int>` parameter/return type -
 // `union_types`'s dedup (via `types_equal_for_union`) must collapse them

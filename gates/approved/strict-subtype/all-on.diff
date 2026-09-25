@@ -1,0 +1,10 @@
+--- old
++++ new
+@@ -425,7 +425,6 @@
+ src/Piwigo/Admin/Image/ImageExtImagick.php	200	19	2	throws.missing	Piwigo\\Admin\\Image\\ImageExtImagick::compose	Method Piwigo\\Admin\\Image\\ImageExtImagick::compose() throws Exception but it's not covered by any @throws tag.	
+ src/Piwigo/Admin/Image/ImageExtImagick.php	227	65	0	magicNumber.argument	Piwigo\\Admin\\Image\\ImageExtImagick::write	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/Image/ImageExtImagick.php	243	62	0	argument.booleanTrap	Piwigo\\Admin\\Image\\ImageExtImagick::write	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/Image/ImageExtImagick.php	244	32	0	cast.useless	Piwigo\\Admin\\Image\\ImageExtImagick::write	Casting to string something that's already string.	
+ src/Piwigo/Admin/Image/ImageExtImagick.php	249	19	5	throw.baseClass	Piwigo\\Admin\\Image\\ImageExtImagick::write	Throwing the base Exception class is not recommended, use a specific subclass instead.	
+ src/Piwigo/Admin/Image/ImageExtImagick.php	249	19	2	throws.missing	Piwigo\\Admin\\Image\\ImageExtImagick::write	Method Piwigo\\Admin\\Image\\ImageExtImagick::write() throws Exception but it's not covered by any @throws tag.	
+ src/Piwigo/Admin/Image/ImageExtImagick.php	253	19	5	throw.baseClass	Piwigo\\Admin\\Image\\ImageExtImagick::write	Throwing the base Exception class is not recommended, use a specific subclass instead.	

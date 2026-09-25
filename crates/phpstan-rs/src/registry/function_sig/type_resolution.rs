@@ -93,17 +93,17 @@ pub(crate) fn resolve_type_with_parsed_native(
     // whatever a stale comment claims. `resource` and `false` aren't the
     // only members that can go stale this way, so rather than
     // hardcoding a check per member, `reconcile_with_native` tests
-    // "incompatible" precisely via `is_subtype`.
+    // "incompatible" precisely via `subtype`.
     //
     // Excludes `object` specifically - real code (this project's own
     // `Logger::$fileHandle`, Symfony `Process::setInput`) deliberately
     // types something `mixed`/`object` *because* PHP has no native
     // `resource` type to declare, leaning on the docblock to carry the
     // only real type information. A `mixed` native doesn't need its own
-    // exclusion here: `is_subtype(_, Type::Mixed(false))` is unconditionally
+    // exclusion here: `subtype(_, Type::Mixed(false))` is unconditionally
     // `true`, so `reconcile_with_native` already keeps every doc member
     // when native is `mixed`, for free. `object`'s own subtyping is
-    // name-equality-only (see `types::is_subtype`'s own doc comment), so
+    // name-equality-only (see `Relation::subtype`'s own doc comment), so
     // it doesn't get the same automatic fallout and still needs the
     // explicit guard.
     match (native_hint, native_ty) {
@@ -171,7 +171,11 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
         && !kept.iter().any(|k| matches!(k, Type::Conditional { .. }))
     {
         for nm in native_members {
-            if native_member_addable(nm) && !kept.iter().any(|k| types::is_subtype(k, nm)) {
+            if native_member_addable(nm)
+                && !kept
+                    .iter()
+                    .any(|k| types::Relation::structural().subtype(k, nm))
+            {
                 kept.push(nm.clone());
             }
         }
@@ -195,7 +199,7 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
 /// `refine_callable_member` above deliberately leaves as a bare
 /// `Type::Callable` rather than the native `Object("Closure", _)` itself,
 /// all genuinely *did* address that native alternative - but
-/// `types::is_subtype`'s own Object handling is name-equality only, with
+/// `Relation::subtype`'s own Object handling is name-equality only, with
 /// none of those leniencies (this function has no `&Registry` to check
 /// real hierarchy or any of `Registry::accepts`'s own object-
 /// specific rules with - see `member_possible_given_native`'s own
@@ -272,9 +276,9 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 }
 
 /// Whether a docblock-derived member `m` could still be real given
-/// `native_ty`. A bare `is_subtype(m, native_ty)` call is reliable for
+/// `native_ty`. A bare `subtype(m, native_ty)` call is reliable for
 /// anything except a named class/interface (`Type::Object`), where
-/// `is_subtype`'s own Object handling is name-equality only: this
+/// `subtype`'s own Object handling is name-equality only: this
 /// project has no class hierarchy to consult at the point `resolve_type`
 /// runs (`FunctionSig::from_decl` is still building the very registry a
 /// real lookup would need, long before one exists), so treating a
@@ -349,7 +353,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // per-parameter/return signature is tracked) - the same
         // information loss `Object`'s own case just above already has to
         // work around, just one layer earlier. Without this,
-        // `is_subtype(Callable, Closure)` (correctly `false` in general -
+        // `subtype(Callable, Closure)` (correctly `false` in general -
         // not every callable is a `Closure` instance) would wrongly read
         // as "the doc member can't be right," discarding it even when
         // the native hint is exactly `Closure` (e.g. a `null|Closure
@@ -362,7 +366,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // Checked branch-wise through this same function, so a branch
         // naming a still-unmarked `@template` (a bare `Object("T")` this
         // early, see the `Array` arm below) is trusted the same way a
-        // plain one is, instead of failing `is_subtype`'s name-equality
+        // plain one is, instead of failing `subtype`'s name-equality
         // object check against the native class.
         Type::Conditional {
             if_true, if_false, ..
@@ -377,7 +381,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // `mark_template_params` ever gets a chance to substitute a
         // `@template`-bound key placeholder (`array<TKey, TValue>`,
         // `TKey` still a bare, unresolved `Object("TKey", [])` at this
-        // point) - `is_subtype(Object("TKey", []), int|string)` is
+        // point) - `subtype(Object("TKey", []), int|string)` is
         // correctly `false` for an arbitrary class, so checking the key
         // would discard the entire array member in favor of the bare
         // native `array`, silently losing `TValue` too even though it
@@ -388,7 +392,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // native's own - the key is always trusted as-is.
         Type::Array(_, elem) => match native_ty {
             Type::Array(_, native_elem) => member_possible_given_native(elem, native_elem),
-            _ => types::is_subtype(m, native_ty),
+            _ => types::Relation::structural().subtype(m, native_ty),
         },
         // Same reasoning as the plain `Type::Array` arm just above, for
         // `list<T>`/`non-empty-array<T>`/`non-empty-list<T>`'s own real
@@ -408,13 +412,13 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
             (Some(elem), Type::Array(_, native_elem)) => {
                 member_possible_given_native(elem, native_elem)
             }
-            (Some(_), _) => types::is_subtype(m, native_ty),
+            (Some(_), _) => types::Relation::structural().subtype(m, native_ty),
             // A `Closure(...)` shape (`\Closure&callable(...)`) or any
             // other object intersection: possible whenever one member is.
             (None, _) => members
                 .iter()
                 .any(|inner| member_possible_given_native(inner, native_ty)),
         },
-        _ => types::is_subtype(m, native_ty),
+        _ => types::Relation::structural().subtype(m, native_ty),
     }
 }

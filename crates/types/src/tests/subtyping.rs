@@ -1,12 +1,15 @@
 //! Subtype relation checks between `Type` values.
 use super::super::*;
+use super::{accepts, is_subtype};
 
 #[test]
 fn class_string_is_interchangeable_with_plain_string_both_ways() {
     let cs = Type::ClassString(Box::new(Type::Object("Foo".into(), Vec::new())));
     assert!(is_subtype(&cs, &Type::String));
-    assert!(is_subtype(&Type::String, &cs));
-    assert!(is_subtype(&Type::StringLiteral("Foo".to_string()), &cs));
+    // A plain string may name a class: accepted, never provably one.
+    assert!(!is_subtype(&Type::String, &cs));
+    assert!(accepts(&cs, &Type::String));
+    assert!(accepts(&cs, &Type::StringLiteral("Foo".to_string())));
     assert!(is_subtype(&cs, &cs));
     let cs_other = Type::ClassString(Box::new(Type::Object("Bar".into(), Vec::new())));
     assert!(!is_subtype(&cs, &cs_other));
@@ -72,24 +75,23 @@ fn everything_is_subtype_of_mixed() {
 
 #[test]
 fn an_unbounded_template_param_is_still_unconditionally_compatible_either_way() {
-    // The extremely common bound-free `@template T` must keep
-    // `is_subtype`'s blanket leniency - an undeclared bound is `Mixed`,
-    // and `is_subtype(Mixed, sup)` is only ever true when `sup` is
-    // `Mixed` too, so without this the bound-aware `sub` arm would turn
-    // every one of these into a false positive.
+    // The extremely common bound-free `@template T` is accepted either
+    // way, though it's provably neither: its bound is `mixed`.
     let t = Type::TemplateParam(TemplateParam::unbounded("T".to_string()));
-    assert!(is_subtype(&t, &Type::String));
-    assert!(is_subtype(&t, &Type::Object("Foo".into(), Vec::new())));
-    assert!(is_subtype(&Type::String, &t));
-    assert!(is_subtype(&Type::Object("Foo".into(), Vec::new()), &t));
+    assert!(accepts(&Type::String, &t));
+    assert!(accepts(&Type::Object("Foo".into(), Vec::new()), &t));
+    assert!(accepts(&t, &Type::String));
+    assert!(accepts(&t, &Type::Object("Foo".into(), Vec::new())));
+    assert!(!is_subtype(&t, &Type::String));
+    assert!(!is_subtype(&Type::String, &t));
 }
 
 #[test]
 fn a_bounded_template_param_is_a_subtype_of_whatever_its_bound_satisfies() {
     // A `T of int` is guaranteed to be an `int` (or narrower) however
     // it's eventually instantiated, so it's a subtype of anything `int`
-    // itself is a subtype of - `float`, in particular, via real PHP's
-    // own int-to-float widening rule.
+    // itself is a subtype of; a `float` slot also accepts it, via real
+    // PHP's own int-to-float widening rule.
     let t = Type::TemplateParam(TemplateParam {
         name: "T".to_string(),
         bound: Box::new(Type::Int),
@@ -98,15 +100,16 @@ fn a_bounded_template_param_is_a_subtype_of_whatever_its_bound_satisfies() {
         default: None,
     });
     assert!(is_subtype(&t, &Type::Int));
-    assert!(is_subtype(&t, &Type::Float));
+    assert!(!is_subtype(&t, &Type::Float));
+    assert!(accepts(&Type::Float, &t));
     assert!(!is_subtype(&t, &Type::String));
 }
 
 // A `@template TKey of array-key` (bound `int|string`, a Union) must be
 // compared via the dedicated `TemplateParam` arm, not the generic `(_,
-// Union(members)) => any(is_subtype(sub, m))` arm - the latter splits
-// the target union member-by-member (`is_subtype(TKey, Int)` and
-// `is_subtype(TKey, String)`, each correctly false on its own) instead
+// Union(members)) => any(subtype(sub, m))` arm - the latter splits
+// the target union member-by-member (`subtype(TKey, Int)` and
+// `subtype(TKey, String)`, each correctly false on its own) instead
 // of comparing `TKey`'s union bound against the target as a whole.
 #[test]
 fn a_template_param_whose_own_bound_is_a_union_is_a_subtype_of_that_same_union() {
@@ -125,9 +128,9 @@ fn a_template_param_whose_own_bound_is_a_union_is_a_subtype_of_that_same_union()
 #[test]
 fn a_bounded_template_param_still_accepts_anything_as_a_sink() {
     // The reverse direction (T used as `sup`, the assignment target)
-    // stays maximally lenient regardless of any declared bound: knowing
-    // a value satisfies T's *upper* bound doesn't prove it satisfies
-    // whatever T is actually instantiated to.
+    // is accepted regardless of any declared bound, but never provable:
+    // knowing a value satisfies T's *upper* bound doesn't prove it
+    // satisfies whatever T is actually instantiated to.
     let t = Type::TemplateParam(TemplateParam {
         name: "T".to_string(),
         bound: Box::new(Type::Int),
@@ -135,7 +138,8 @@ fn a_bounded_template_param_still_accepts_anything_as_a_sink() {
         scope: None,
         default: None,
     });
-    assert!(is_subtype(&Type::String, &t));
+    assert!(accepts(&t, &Type::String));
+    assert!(!is_subtype(&Type::String, &t));
 }
 
 #[test]
@@ -155,7 +159,7 @@ fn union_subtype_rules() {
 
 #[test]
 fn intersection_subtype_rules() {
-    // Coverage measurement found both Intersection arms of is_subtype
+    // Coverage measurement found both Intersection arms of subtype
     // had zero executions (registry::accepts's own, separate
     // Intersection handling was covered independently).
     let both = Type::Intersection(vec![Type::Int, Type::String]);
@@ -181,7 +185,8 @@ fn int_range_subtype_rules() {
     assert!(!is_subtype(&Type::IntLiteral(0), &positive));
     assert!(!is_subtype(&Type::IntLiteral(-1), &positive));
     assert!(is_subtype(&positive, &Type::Int));
-    assert!(is_subtype(&positive, &Type::Float));
+    assert!(!is_subtype(&positive, &Type::Float));
+    assert!(accepts(&Type::Float, &positive));
     assert!(!is_subtype(&Type::Int, &positive));
 
     let narrow = Type::IntRange(Some(1), Some(10));
@@ -256,11 +261,11 @@ fn string_accessory_subtype_rules() {
 #[test]
 fn array_accessory_subtype_rules() {
     // Scoped to `Array(Mixed)` as the intersection's own base member
-    // deliberately: `is_subtype`'s own pre-existing, unrelated
+    // deliberately: `subtype`'s own pre-existing, unrelated
     // `(ArrayShape(_), Array(b)) => matches!(**b, Mixed)` rule is
     // already conservative about a *specific*-element `Array(b)`
     // (that per-field check is `accepts`'s own job, not
-    // `is_subtype`'s) - using `Array(Mixed)` here isolates the new
+    // `subtype`'s) - using `Array(Mixed)` here isolates the new
     // accessory logic from that pre-existing, unrelated asymmetry.
     let list_ty = Type::Intersection(vec![
         Type::Array(

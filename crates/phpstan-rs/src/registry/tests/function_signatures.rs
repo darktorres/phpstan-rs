@@ -287,7 +287,7 @@ fn an_override_is_not_spliced_onto_an_unrelated_earlier_declaration_s_docblock()
 }
 
 // `resolve_type`'s docblock-vs-native reconciliation applies one general
-// rule via `is_subtype`: a present, non-`object` native hint is
+// rule via `subtype`: a present, non-`object` native hint is
 // authoritative about what's possible, so any docblock member
 // incompatible with it can never actually happen and is dropped.
 #[test]
@@ -361,7 +361,7 @@ fn an_explicit_never_doc_survives_reconciliation_against_a_native_void_hint() {
 // (`registry/function_sig/type_resolution.rs`) must not touch an
 // already-shaped member, since it's already a genuine refinement in its
 // own right, strictly more precise than degrading it to a signature-less
-// `Closure` object type would be. `is_subtype`'s `(Callable(Some(_)),
+// `Closure` object type would be. `subtype`'s `(Callable(Some(_)),
 // Callable(None))` leniency (`types/subtype.rs`) keeps this compatible
 // with the native `Closure` hint.
 #[test]
@@ -423,7 +423,7 @@ fn a_doc_union_refining_one_native_union_member_keeps_the_others_untouched() {
 // the native `array` hint the way any other member is - a `@template`-
 // bound key placeholder (`array<TKey, TValue>`) is still a bare,
 // unresolved `Object("TKey", [])` when `reconcile_with_native` runs
-// (before `mark_template_params` substitutes it), so `is_subtype`
+// (before `mark_template_params` substitutes it), so `subtype`
 // against it is correctly `false` for an arbitrary class and would
 // discard the entire array member, including a `TValue` that would have
 // resolved fine. A native `array` hint carries no key information to
@@ -489,7 +489,7 @@ fn an_array_doc_member_with_a_plain_class_key_is_also_kept() {
 }
 
 // A `mixed`-native case must still trust the doc fully, now via the
-// general `is_subtype(_, Type::Mixed(false))` rule falling out for free
+// general `subtype(_, Type::Mixed(false))` rule falling out for free
 // rather than a dedicated `mixed`/`object` branch.
 #[test]
 fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
@@ -505,7 +505,7 @@ fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
     );
 }
 
-// `is_subtype`'s `Object` handling is name-equality only (no class
+// `subtype`'s `Object` handling is name-equality only (no class
 // hierarchy), so a doc type naming a real subclass of a more generic
 // native return hint must not be treated as "incompatible" and
 // discarded in favor of the generic native type - any class name doc

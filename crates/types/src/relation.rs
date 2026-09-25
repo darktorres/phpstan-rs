@@ -19,6 +19,19 @@ pub struct Relation<'h> {
     pub check_benevolent_union_types: bool,
 }
 
+impl Relation<'static> {
+    /// The relations with no class knowledge (`NoClasses`), for code
+    /// with no hierarchy at hand.
+    pub fn structural() -> Relation<'static> {
+        Relation {
+            hierarchy: &crate::NoClasses,
+            strict_mixed_arrays: false,
+            configured_level: None,
+            check_benevolent_union_types: false,
+        }
+    }
+}
+
 /// PHPStan's `AcceptsResult`: whether a value is accepted, and why not
 /// when it isn't.
 #[derive(Debug, Clone, PartialEq, Eq)]

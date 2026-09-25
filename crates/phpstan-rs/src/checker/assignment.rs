@@ -1,7 +1,7 @@
 use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
 use crate::diagnostic::DiagnosticBuilder;
 use syntax::ast::*;
-use types::{AccessoryKind, Shape, ShapeField, ShapeKey, Type, is_subtype};
+use types::{AccessoryKind, Shape, ShapeField, ShapeKey, Type};
 
 /// Real PHPStan's `NullsafeCheck::containsNullSafe` - whether an
 /// assignment target's own access chain contains a nullsafe `?->`
@@ -1094,9 +1094,9 @@ fn literal_keys_from_type(ty: &Type) -> Vec<String> {
 /// key" question, just asked about a fetched column's own value instead
 /// of a write's own index expression.
 pub(crate) fn dynamic_write_key_type(idx_ty: &Type) -> Type {
-    if is_subtype(idx_ty, &Type::Int) {
+    if types::Relation::structural().subtype(idx_ty, &Type::Int) {
         Type::Int
-    } else if is_subtype(idx_ty, &Type::String) {
+    } else if types::Relation::structural().subtype(idx_ty, &Type::String) {
         Type::String
     } else {
         // Mirrors real PHPStan's own `MixedType::toArrayKey()`/

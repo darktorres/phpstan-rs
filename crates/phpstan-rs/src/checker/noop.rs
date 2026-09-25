@@ -629,10 +629,10 @@ impl<'a> Checker<'a> {
     /// direct `self.registry.accepts(target, ty).yes()` call. `Type::Mixed(false)`
     /// (an untyped parameter) must satisfy anything (real PHPStan's own
     /// `mixed.isCallable()`/`isSuperTypeOf()` is always `maybe`, never
-    /// `no`) - `is_subtype(Mixed, _)` has no such arm and would wrongly
+    /// `no`) - `subtype(Mixed, _)` has no such arm and would wrongly
     /// flag every untyped parameter. A `Union` (e.g. `callable|null`) must
     /// satisfy when *any* member does, not when *all* do -
-    /// `is_subtype(Union, _)` requires all members, the right rule for
+    /// `subtype(Union, _)` requires all members, the right rule for
     /// soundly narrowing a type but the wrong one for this "could this
     /// ever be `target`" query; without this, a real, legal `?callable`
     /// parameter would be wrongly flagged since `Null` alone isn't a

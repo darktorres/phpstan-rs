@@ -33,7 +33,7 @@ use crate::Type;
 /// `types_definitely_disjoint`'s conservative answer; anything it can't
 /// prove disjoint stays "maybe" rather than guessing a branch.
 pub fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<bool> {
-    let matches = if crate::is_subtype(bound, target) {
+    let matches = if crate::Relation::structural().subtype(bound, target) {
         Some(true)
     } else if crate::types_definitely_disjoint(bound, target) {
         Some(false)

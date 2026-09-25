@@ -23,7 +23,7 @@ mod union;
 pub use conditional::resolve_conditional;
 pub use conditional::{conditional_branch, union_of_branches};
 pub use extension::ExtensionTypeData;
-pub use hierarchy::{ClassFacts, ClassHierarchy, effective_slot_variance};
+pub use hierarchy::{ClassFacts, ClassHierarchy, NoClasses, effective_slot_variance};
 pub use late::{contains_late, resolve_late_to_bounds, settle};
 pub use parse::parse_type_string;
 pub use parse::{canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance};
@@ -31,7 +31,6 @@ pub use php_float_format::format_php_float;
 pub use php_version::{PhpFeature, PhpVersion, PhpVersions, parse_php_version};
 pub use relation::{AcceptsResult, Relation};
 pub use shape::{Shape, ShapeField, ShapeKey};
-pub use subtype::is_subtype;
 pub use subtype::types_definitely_disjoint;
 pub use subtype::{
     callable_sig_is_subtype, is_numeric_string_literal, shape_fields_are_list_like, shape_key_type,
@@ -113,7 +112,7 @@ pub enum Type {
     },
     // A single enum case's singleton type (enum fqn, case name), distinct
     // from the coarser `Object(Suit, [])`. Not a subtype target in
-    // `crate::is_subtype`'s class-hierarchy sense; `registry::accepts`
+    // `Relation::subtype`'s class-hierarchy sense; `registry::accepts`
     // handles `EnumCase -> Object(enum_fqn)` assignability instead.
     EnumCase(Name, Name),
     // `None` = unknown shape; `Some(sig)` = a parsed `Closure(int):

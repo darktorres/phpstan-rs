@@ -296,9 +296,9 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
 /// fix - an `IntLiteral`/`StringLiteral`/`True`/`False` member is
 /// redundant once its own *exact* base type is already present in the
 /// same union (an `Int` member already includes every possible
-/// `IntLiteral`'s value, etc.), mirroring `is_subtype`'s own first four
+/// `IntLiteral`'s value, etc.), mirroring `subtype`'s own first four
 /// match arms specifically (`types.rs` lines 498-500) rather than
-/// calling `is_subtype` itself - `is_subtype`'s int-to-float widening
+/// calling `subtype` itself - `subtype`'s int-to-float widening
 /// rule is a real, load-bearing *assignability* fact (an int argument is
 /// accepted wherever a float is declared), not a "this value's
 /// representation is a subset of that value's representation" one, so

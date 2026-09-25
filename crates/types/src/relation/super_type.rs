@@ -128,7 +128,7 @@ impl Relation<'_> {
             }
             // A general array may or may not carry a shape's keys.
             (Type::ArrayShape(_), Type::Array(..)) => TrinaryLogic::Maybe,
-            _ if self.accepts_type(sub, sup) => TrinaryLogic::Yes,
+            _ if self.subtype(sub, sup) => TrinaryLogic::Yes,
             (_, Type::Intersection(members)) => {
                 let refused = members
                     .iter()
