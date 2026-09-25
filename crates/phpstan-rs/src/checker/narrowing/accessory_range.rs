@@ -1,6 +1,6 @@
 use crate::checker::int_range_bounds;
 use crate::checker::narrowing::predicates::narrowing_key;
-use crate::php_float_format::format_php_float;
+use crate::types::format_php_float;
 use crate::types::{self, AccessoryKind, Type};
 use syntax::ast::*;
 

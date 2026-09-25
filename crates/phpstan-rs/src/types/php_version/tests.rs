@@ -141,11 +141,17 @@ fn a_php_version_id_comparison_narrows_the_range() {
     let range = PhpVersions::new(PhpVersion::new(7, 4), PhpVersion::new(8, 4));
     assert_eq!(
         range.narrow_at_least(80000, true),
-        Some(PhpVersions::new(PhpVersion::new(8, 0), PhpVersion::new(8, 4)))
+        Some(PhpVersions::new(
+            PhpVersion::new(8, 0),
+            PhpVersion::new(8, 4)
+        ))
     );
     assert_eq!(
         range.narrow_at_least(80000, false),
-        Some(PhpVersions::new(PhpVersion::new(7, 4), PhpVersion::new(7, 255)))
+        Some(PhpVersions::new(
+            PhpVersion::new(7, 4),
+            PhpVersion::new(7, 255)
+        ))
     );
     assert_eq!(range.narrow_at_least(90000, true), None);
     assert!(range.contains(PhpVersion::new(8, 1)));
@@ -156,7 +162,10 @@ fn a_php_version_id_comparison_narrows_the_range() {
 fn a_range_supports_a_feature_on_all_some_or_none_of_its_versions() {
     use crate::types::TrinaryLogic;
     let range = PhpVersions::new(PhpVersion::new(7, 4), PhpVersion::new(8, 4));
-    assert_eq!(range.supports(PhpFeature::NamedArguments), TrinaryLogic::Maybe);
+    assert_eq!(
+        range.supports(PhpFeature::NamedArguments),
+        TrinaryLogic::Maybe
+    );
     assert_eq!(
         PhpVersions::exactly(PhpVersion::new(8, 1)).supports(PhpFeature::NamedArguments),
         TrinaryLogic::Yes

@@ -25,7 +25,6 @@ pub mod parent_calls;
 pub(crate) mod pcre_validate;
 pub mod pest_config;
 pub(crate) mod php_date_parser;
-pub(crate) mod php_float_format;
 pub mod php_stubs;
 pub mod phpdoc_grammar;
 pub mod project;
