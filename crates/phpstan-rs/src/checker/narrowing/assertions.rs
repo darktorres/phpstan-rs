@@ -83,7 +83,8 @@ impl<'a> Checker<'a> {
         if let ExprKind::ArrayLiteral(items) = &unwrap_grouping(haystack).kind
             && let Some(target) = self.in_array_target_type(items, locals)
         {
-            return Some((target.clone(), Some(target)));
+            let excluded = single_values_of(&target);
+            return Some((target, excluded));
         }
         let haystack_ty = self.infer_expr(haystack, locals);
         if let Type::ArrayShape(shape) = &haystack_ty
@@ -460,5 +461,26 @@ impl<'a> Checker<'a> {
                 Some((key, current))
             }
         }
+    }
+}
+
+/// The members of a haystack's value union that are each one exact value:
+/// only those can be ruled out when the needle is not found, since a
+/// member like `float` (the type of `0.0`) stands for more values than the
+/// one the haystack holds.
+fn single_values_of(target: &Type) -> Option<Type> {
+    let members: Vec<Type> = match target {
+        Type::Union(members) => members
+            .iter()
+            .filter(|m| is_known_single_value(m))
+            .cloned()
+            .collect(),
+        single if is_known_single_value(single) => return Some(single.clone()),
+        _ => return None,
+    };
+    match members.len() {
+        0 => None,
+        1 => members.into_iter().next(),
+        _ => Some(Type::Union(members)),
     }
 }
