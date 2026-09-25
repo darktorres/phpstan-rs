@@ -64,7 +64,7 @@ fn mirror_comparison(op: &BinOp) -> BinOp {
         BinOp::Gt => BinOp::Lt,
         BinOp::LtEq => BinOp::GtEq,
         BinOp::GtEq => BinOp::LtEq,
-        other => other.clone(),
+        other => *other,
     }
 }
 
@@ -753,7 +753,7 @@ impl<'a> Checker<'a> {
                     && let Some(key) = narrowing_key(count_arg)
                     && let bound_expr = if count_on_left { r } else { l }
                     && let effective_op = if count_on_left {
-                        op.clone()
+                        *op
                     } else {
                         mirror_comparison(op)
                     }
