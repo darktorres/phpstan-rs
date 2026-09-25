@@ -8,6 +8,7 @@ use crate::assertion_tables::{
     AssertWhen, AssertionEntry, ClassArgumentReturn, default_assertions,
     default_class_argument_returns,
 };
+use crate::phpdoc_grammar::{self, TypeNode};
 use crate::registry::function_sig::{AssertInfo, AssertTarget};
 use crate::registry::{Registry, resolve_names_in_type};
 use syntax::name_resolution::NameContext;
@@ -92,7 +93,9 @@ impl Registry {
                 ),
                 target: AssertTarget::Param(Arc::from(parameter)),
                 case_refs: Vec::new(),
-                raw_ty: Arc::from(written),
+                written_ty: phpdoc_grammar::parse_type_prefix(written)
+                    .0
+                    .unwrap_or(TypeNode::Error),
             };
             let list = match entry.when {
                 AssertWhen::Always => &mut sig.assert,
@@ -102,7 +105,7 @@ impl Registry {
             let already = list.iter().any(|existing| {
                 existing.negated == info.negated
                     && existing.target == info.target
-                    && existing.raw_ty == info.raw_ty
+                    && existing.written_ty == info.written_ty
             });
             if !already {
                 list.push(info);

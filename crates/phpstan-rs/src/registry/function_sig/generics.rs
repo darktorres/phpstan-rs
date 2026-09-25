@@ -2,7 +2,9 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::docblock::DocBlock;
+use crate::phpdoc_grammar::TypeNode;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::type_node::parse_type_node;
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
@@ -79,8 +81,8 @@ pub(crate) fn build_type_aliases(
     let raw: FxHashMap<Arc<str>, Type> = class_doc
         .type_aliases
         .iter()
-        .map(|(name, ty_text)| {
-            let ty = types::parse_type_string(ty_text);
+        .map(|(name, node)| {
+            let ty = parse_type_node(node);
             let ty = mark_template_params(ty, template_params);
             let mut refs = Vec::new();
             collect_class_name_case_refs(&ty, ctx, &mut refs);
@@ -155,8 +157,8 @@ pub(crate) fn build_template_params(
         .iter()
         .map(|n| (n.clone(), TemplateParam::unbounded(n.clone())))
         .collect();
-    let resolve = |raw: &str| -> Type {
-        let ty = types::parse_type_string(raw);
+    let resolve = |node: &TypeNode| -> Type {
+        let ty = parse_type_node(node);
         let ty = mark_template_params(ty, &shallow);
         resolve_names_in_type(ty, ctx)
     };
@@ -168,9 +170,9 @@ pub(crate) fn build_template_params(
             let bound = doc
                 .template_bounds
                 .get(name)
-                .map(|raw| resolve(raw))
+                .map(resolve)
                 .unwrap_or(Type::Mixed(true));
-            let default = doc.template_defaults.get(name).map(|raw| resolve(raw));
+            let default = doc.template_defaults.get(name).map(resolve);
             let variance = if doc.covariant_templates.contains(name) {
                 types::Variance::Covariant
             } else if doc.contravariant_templates.contains(name) {

@@ -1,6 +1,6 @@
 use syntax::token::Span;
 
-/// The whole parsed doc comment - every tag this Stage A grammar
+/// The whole parsed doc comment - every tag this grammar
 /// recognized, plus every recoverable parse failure encountered along
 /// the way. Never fails outright: a malformed tag/type produces
 /// `TypeNode::Error`/`PhpDocTagValue::Generic` plus a matching
@@ -23,7 +23,7 @@ pub struct PhpDocParseError {
 /// continuation lines - see `phpdoc_grammar::parser`'s own doc comment).
 /// `name` is exactly as written, including a `phpstan-` prefix if
 /// present - unlike `docblock::parse`'s own two-pass plain-then-
-/// `phpstan-`-prefixed precedence resolution, that's a Stage-B/consumer
+/// `phpstan-`-prefixed precedence resolution, that's a consumer
 /// concern, not a parsing one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhpDocTag {
@@ -74,7 +74,7 @@ pub enum PhpDocTagValue {
         templates: Vec<CallableTemplate>,
         params: Vec<MethodTagParam>,
     },
-    /// Any tag this Stage A grammar doesn't specifically model
+    /// Any tag this grammar doesn't specifically model
     /// (`@deprecated`, `@internal`, `@api`, `@phpstan-pure`, ...) - the
     /// remaining text after the tag name, entirely unparsed. Real PHPStan
     /// itself only defines a type-value grammar for the tags this file
@@ -91,12 +91,6 @@ pub struct MethodTagParam {
     pub has_default: bool,
 }
 
-/// The real type-expression grammar - Stage A's own headline addition
-/// over the previous `take_type_token`-then-defer-to-`types::parse_
-/// type_string`-later pipeline (`docblock.rs`'s own module doc comment):
-/// a type is parsed into real structure right here, with the same
-/// recoverable-error handling every other tag gets, rather than treated
-/// as an opaque string until some later, separate pass touches it.
 /// A generic argument's written call-site variance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArgVariance {
@@ -202,15 +196,11 @@ impl TypeNode {
         }
     }
 
-    /// Re-stringifies a parsed node back into real PHPStan type-expression
+    /// Re-stringifies a parsed node back into PHPStan type-expression
     /// syntax - not necessarily byte-identical to whatever text originally
     /// produced it (whitespace is normalized, a string literal's own
     /// internal quotes aren't re-escaped), but always something `types::
-    /// parse_type_string` parses into the same underlying `Type` - the
-    /// mechanism `docblock::DocBlock`'s Stage B migration uses to stay
-    /// populated from this AST while keeping its own fields `Option<
-    /// String>` for every existing consumer (see `docblock.rs`'s own
-    /// module doc comment).
+    /// parse_type_string` parses into the same underlying `Type`.
     pub(crate) fn to_source_string(&self) -> String {
         match self {
             TypeNode::Identifier(s) => s.clone(),

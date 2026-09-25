@@ -23,6 +23,7 @@
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
+use crate::phpdoc_grammar::TypeNode;
 use crate::registry::FunctionSig;
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
@@ -122,21 +123,35 @@ pub(crate) fn class_kind_word(kind: ClassKind) -> &'static str {
 /// the two at the type level (`types::parse_type_string` doesn't carry
 /// that bit through, see its own doc comments on why), so the distinction
 /// is recovered here instead, straight from the original source text.
-fn is_explicit_mixed_text(native_hint: Option<&str>, doc_type: Option<&str>) -> bool {
+fn is_explicit_mixed_text(native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> bool {
     let is_word_mixed = |s: &str| {
         s.trim()
             .trim_start_matches('?')
             .trim()
             .eq_ignore_ascii_case("mixed")
     };
-    doc_type.is_some_and(is_word_mixed) || native_hint.is_some_and(is_word_mixed)
+    let is_mixed_node = |node: &TypeNode| {
+        let node = match node {
+            TypeNode::Nullable(inner) => inner.as_ref(),
+            other => other,
+        };
+        matches!(node, TypeNode::Identifier(name) if name.eq_ignore_ascii_case("mixed"))
+    };
+    doc_type.is_some_and(is_mixed_node) || native_hint.is_some_and(is_word_mixed)
+}
+
+/// Whether the native hint or the PHPDoc type spells out `mixed` anywhere,
+/// nested included.
+fn mentions_mixed(native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> bool {
+    has_explicit_mixed_nested_somewhere(native_hint, None)
+        || doc_type.is_some_and(crate::registry::mentions_mixed)
 }
 
 /// The "no type specified at all" case each of the six rules below leads
 /// with - `ty` resolved to plain `Mixed` (this project's stand-in for
 /// both "no hint at all" and "explicit `mixed`" alike) where the source
 /// itself didn't actually spell out `mixed`.
-fn is_implicit_mixed(ty: &Type, native_hint: Option<&str>, doc_type: Option<&str>) -> bool {
+fn is_implicit_mixed(ty: &Type, native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> bool {
     *ty == Type::Mixed(false) && !is_explicit_mixed_text(native_hint, doc_type)
 }
 
@@ -479,7 +494,7 @@ impl<'a> Checker<'a> {
             if is_implicit_mixed(
                 &ty,
                 p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                doc_var_type.as_deref(),
+                doc_var_type.as_ref(),
             ) {
                 self.report(
                     fqn.to_string(),
@@ -501,7 +516,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                has_explicit_mixed_nested_somewhere(p.type_hint.as_ref().map(TypeHint::to_string).as_deref(), doc_var_type.as_deref()),
+                mentions_mixed(p.type_hint.as_ref().map(TypeHint::to_string).as_deref(), doc_var_type.as_ref()),
             );
         }
     }
@@ -553,7 +568,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                has_explicit_mixed_nested_somewhere(c.type_hint.as_ref().map(TypeHint::to_string).as_deref(), doc_var_type.as_deref()),
+                mentions_mixed(c.type_hint.as_ref().map(TypeHint::to_string).as_deref(), doc_var_type.as_ref()),
             );
         }
     }
@@ -630,13 +645,10 @@ impl<'a> Checker<'a> {
                 .and_then(|p| p.type_hint.as_ref())
                 .map(TypeHint::to_string);
             let native_hint = native_hint_text.as_deref();
-            let doc_ty = doc
-                .as_ref()
-                .and_then(|d| d.params.get(name))
-                .map(String::as_str);
+            let doc_ty = doc.as_ref().and_then(|d| d.params.get(name));
             let explicit_mixed = match sig.and_then(|s| s.params.get(i)) {
                 Some(param_sig) => param_sig.explicit_mixed_hint,
-                None => has_explicit_mixed_nested_somewhere(native_hint, doc_ty),
+                None => mentions_mixed(native_hint, doc_ty),
             };
             if *ty == Type::Mixed(false) && !explicit_mixed {
                 self.report(
@@ -669,7 +681,7 @@ impl<'a> Checker<'a> {
         let native_return_text = f.return_type.as_ref().map(TypeHint::to_string);
 
         let native_return = native_return_text.as_deref();
-        let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
+        let doc_return = doc.as_ref().and_then(|d| d.return_type.as_ref());
 
         // Real PHPStan's own reflection layer only substitutes a magic
         // method's own implicit return type (void/string/bool/...) when
@@ -715,7 +727,7 @@ impl<'a> Checker<'a> {
 
         let return_explicit_mixed = match sig {
             Some(s) => s.return_explicit_mixed_hint,
-            None => has_explicit_mixed_nested_somewhere(native_return, doc_return),
+            None => mentions_mixed(native_return, doc_return),
         };
         let return_ty = declared_return.cloned().unwrap_or(Type::Mixed(false));
         if return_ty == Type::Mixed(false) && !return_explicit_mixed {

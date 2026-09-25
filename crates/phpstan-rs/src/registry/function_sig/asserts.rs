@@ -2,7 +2,9 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::docblock;
+use crate::phpdoc_grammar::TypeNode;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::type_node::parse_type_node;
 use syntax::intern::intern;
 use types::{self, TemplateParam, Type};
 
@@ -55,9 +57,9 @@ pub struct AssertInfo {
     // declared type on this same declaration, which already collects
     // `case_refs`.
     pub case_refs: Vec<(Arc<str>, Arc<str>)>,
-    // The tag's type exactly as written, for checks that need its parsed
-    // form rather than the resolved `ty`.
-    pub raw_ty: Arc<str>,
+    // The tag's type as written, for checks that need its parsed form
+    // rather than the resolved `ty`.
+    pub written_ty: TypeNode,
 }
 
 /// Classifies `tag.target`'s own raw text into a real `AssertTarget` -
@@ -110,7 +112,7 @@ pub(crate) fn resolve_assert_tags(
     tags.iter()
         .map(|tag| {
             let target = classify_assert_target(&tag.target, param_names);
-            let ty = types::parse_type_string(&tag.ty);
+            let ty = parse_type_node(&tag.ty);
             let ty = mark_template_params(ty, template_params);
             let mut case_refs = Vec::new();
             collect_class_name_case_refs(&ty, ctx, &mut case_refs);
@@ -120,7 +122,7 @@ pub(crate) fn resolve_assert_tags(
                 ty,
                 target,
                 case_refs,
-                raw_ty: Arc::from(tag.ty.as_str()),
+                written_ty: tag.ty.clone(),
             }
         })
         .collect()

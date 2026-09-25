@@ -1,6 +1,7 @@
 //! `@param-immediately-invoked-callable`/`@param-later-invoked-callable`/
 //! `@param-closure-this` tags.
 use super::super::*;
+use super::node;
 
 #[test]
 fn parses_an_immediately_invoked_callable_tag() {
@@ -43,5 +44,5 @@ fn the_phpstan_prefixed_spelling_is_recognized_identically() {
 #[test]
 fn parses_a_param_closure_this_tag() {
     let block = parse("/** @param-closure-this Foo $cb */");
-    assert_eq!(block.param_closure_this.get("cb"), Some(&"Foo".to_string()));
+    assert_eq!(block.param_closure_this.get("cb"), Some(&node("Foo")));
 }

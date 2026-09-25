@@ -1,4 +1,6 @@
+use crate::phpdoc_grammar::TypeNode;
 use crate::registry::resolve::type_contains_deferred_value_of;
+use crate::registry::type_node::parse_type_node;
 use syntax::ast::{Expr, ExprKind, Literal};
 use types::{self, Type};
 
@@ -34,7 +36,7 @@ pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) 
     }
 }
 
-pub(crate) fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
+pub(crate) fn resolve_type(doc_type: Option<&TypeNode>, native_hint: Option<&str>) -> Type {
     let native_ty = native_hint.map(types::parse_type_string);
     resolve_type_with_parsed_native(doc_type, native_hint, native_ty.as_ref())
 }
@@ -49,14 +51,14 @@ pub(crate) fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) ->
 /// the two checks below that read it as text (nullability prefix, the
 /// `object` exclusion) rather than as a parsed `Type`.
 pub(crate) fn resolve_type_with_parsed_native(
-    doc_type: Option<&str>,
+    doc_type: Option<&TypeNode>,
     native_hint: Option<&str>,
     native_ty: Option<&Type>,
 ) -> Type {
     let Some(doc) = doc_type else {
         return native_ty.cloned().unwrap_or(Type::Mixed(false));
     };
-    let ty = types::parse_type_string(doc);
+    let ty = parse_type_node(doc);
     // A docblock type is trusted as the complete picture and otherwise
     // fully replaces the native hint (deliberate - it's usually more
     // precise) - but real docblocks very commonly aren't fully redundant

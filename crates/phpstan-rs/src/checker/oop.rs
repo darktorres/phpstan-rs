@@ -314,28 +314,33 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let mut scope = class_templates.clone();
-            for (name, _, _) in &tag.templates {
-                scope.insert(name.clone(), types::TemplateParam::unbounded(name.clone()));
+            for t in &tag.templates {
+                scope.insert(
+                    t.name.clone(),
+                    types::TemplateParam::unbounded(t.name.clone()),
+                );
             }
-            let resolve = |text: &str| {
-                let ty =
-                    crate::registry::mark_template_params(types::parse_type_string(text), &scope);
+            let resolve = |node: &crate::phpdoc_grammar::TypeNode| {
+                let ty = crate::registry::mark_template_params(
+                    crate::registry::parse_type_node(node),
+                    &scope,
+                );
                 crate::registry::resolve_names_in_type(ty, &self.name_ctx)
             };
             let names: Vec<std::sync::Arc<str>> = tag
                 .templates
                 .iter()
-                .map(|(n, _, _)| n.as_str().into())
+                .map(|t| t.name.as_str().into())
                 .collect();
             let bounds = tag
                 .templates
                 .iter()
-                .filter_map(|(n, b, _)| Some((n.as_str().into(), resolve(b.as_deref()?))))
+                .filter_map(|t| Some((t.name.as_str().into(), resolve(t.bound.as_ref()?))))
                 .collect();
             let defaults = tag
                 .templates
                 .iter()
-                .filter_map(|(n, _, d)| Some((n.as_str().into(), resolve(d.as_deref()?))))
+                .filter_map(|t| Some((t.name.as_str().into(), resolve(t.default.as_ref()?))))
                 .collect();
             self.check_template_declaration_validity(
                 &names,
@@ -349,7 +354,7 @@ impl<'a> Checker<'a> {
                 fqn,
                 span,
             );
-            for (name, _, _) in &tag.templates {
+            for name in tag.templates.iter().map(|t| &t.name) {
                 if class_templates.contains_key(name) {
                     self.report(
                         fqn.to_string(),
@@ -425,7 +430,7 @@ impl<'a> Checker<'a> {
             );
         }
         for raw in &doc.require_extends {
-            let parsed = types::parse_type_string(raw);
+            let parsed = crate::registry::parse_type_node(raw);
             let mut case_refs = Vec::new();
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, fqn, c.span);
@@ -499,7 +504,7 @@ impl<'a> Checker<'a> {
             }
         }
         for raw in &doc.require_implements {
-            let parsed = types::parse_type_string(raw);
+            let parsed = crate::registry::parse_type_node(raw);
             let mut case_refs = Vec::new();
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, fqn, c.span);
@@ -582,7 +587,7 @@ impl<'a> Checker<'a> {
             return;
         }
         for raw in &doc.sealed {
-            let parsed = types::parse_type_string(raw);
+            let parsed = crate::registry::parse_type_node(raw);
             let mut case_refs = Vec::new();
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, fqn, span);

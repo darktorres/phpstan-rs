@@ -156,8 +156,8 @@ impl<'a> Checker<'a> {
     /// cache it on.
     fn resolve_hook_throws(&self, doc: Option<&str>) -> Option<Type> {
         let block = docblock::parse(doc?);
-        block.throws.iter().fold(None::<Type>, |acc, raw| {
-            let ty = types::parse_type_string(raw);
+        block.throws.iter().fold(None::<Type>, |acc, node| {
+            let ty = crate::registry::parse_type_node(node);
             let ty = resolve_names_in_type(ty, &self.name_ctx);
             Some(match acc {
                 Some(prev) => union_types(prev, ty),

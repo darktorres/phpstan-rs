@@ -2,7 +2,9 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::docblock::{self, DocBlock};
+use crate::phpdoc_grammar::TypeNode;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::type_node::{mentions_mixed, parse_type_node};
 use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
 use syntax::name_resolution::NameContext;
@@ -414,8 +416,8 @@ impl FunctionSig {
                 .or_insert_with(|| tp.clone());
         }
 
-        let resolve_doc_type = |raw: &String| {
-            let ty = types::parse_type_string(raw);
+        let resolve_doc_type = |node: &TypeNode| {
+            let ty = parse_type_node(node);
             let ty = mark_template_params(ty, &template_params);
             let ty = resolve_names_in_type(ty, ctx);
             substitute_type_aliases(ty, class_type_aliases)
@@ -428,7 +430,7 @@ impl FunctionSig {
                 // `/** @var T */` doubles as its docblock - only
                 // consulted when the outer method-level `@param` tag is
                 // absent.
-                let doc_ty: Option<String> = doc
+                let doc_ty: Option<TypeNode> = doc
                     .as_ref()
                     .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()
@@ -446,7 +448,7 @@ impl FunctionSig {
                 let native_hint = native_hint_text.as_deref();
                 let native_parsed = native_hint.map(types::parse_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
-                    doc_ty.as_deref(),
+                    doc_ty.as_ref(),
                     native_hint,
                     native_parsed.as_ref(),
                 );
@@ -494,22 +496,11 @@ impl FunctionSig {
                 let closure_this_type = doc
                     .as_ref()
                     .and_then(|d| d.param_closure_this.get(p.name.as_ref()))
-                    .map(|raw| {
-                        let ty = types::parse_type_string(raw);
-                        let ty = mark_template_params(ty, &template_params);
-                        let ty = resolve_names_in_type(ty, ctx);
-                        substitute_type_aliases(ty, class_type_aliases)
-                    });
-                // Mirrors `closure_this_type`'s resolution pipeline.
+                    .map(&resolve_doc_type);
                 let out_ty = doc
                     .as_ref()
                     .and_then(|d| d.param_out.get(p.name.as_ref()))
-                    .map(|raw| {
-                        let ty = types::parse_type_string(raw);
-                        let ty = mark_template_params(ty, &template_params);
-                        let ty = resolve_names_in_type(ty, ctx);
-                        substitute_type_aliases(ty, class_type_aliases)
-                    });
+                    .map(&resolve_doc_type);
                 ParamSig {
                     name: p.name.clone(),
                     ty,
@@ -525,8 +516,8 @@ impl FunctionSig {
                     has_own_doc: doc_ty.is_some(),
                     explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
                         p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
-                        doc_ty.as_deref(),
-                    ),
+                        None,
+                    ) || doc_ty.as_ref().is_some_and(mentions_mixed),
                     case_refs,
                     closure_this_type,
                     out_ty,
@@ -535,7 +526,7 @@ impl FunctionSig {
             .collect();
         let params = dedup_versioned_params(params);
 
-        let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
+        let doc_return = doc.as_ref().and_then(|d| d.return_type.as_ref());
         let native_return_hint_text = f.return_type.as_ref().map(TypeHint::to_string);
         let native_return_hint = native_return_hint_text.as_deref();
         let native_return_parsed = native_return_hint.map(types::parse_type_string);
@@ -578,8 +569,8 @@ impl FunctionSig {
             doc.as_ref()
                 .into_iter()
                 .flat_map(|d| &d.throws)
-                .fold(None::<Type>, |acc, raw| {
-                    let ty = types::parse_type_string(raw);
+                .fold(None::<Type>, |acc, node| {
+                    let ty = parse_type_node(node);
                     let ty = mark_template_params(ty, &template_params);
                     let ty = resolve_names_in_type(ty, ctx);
                     Some(match acc {
@@ -616,8 +607,8 @@ impl FunctionSig {
             return_case_refs,
             return_explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
                 f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
-                doc_return,
-            ),
+                None,
+            ) || doc_return.is_some_and(mentions_mixed),
             no_discard,
             visibility,
             is_internal,

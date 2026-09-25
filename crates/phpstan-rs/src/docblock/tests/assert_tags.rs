@@ -1,6 +1,7 @@
 //! `@phpstan-assert`/`-if-true`/`-if-false` tags - real PHPStan's
 //! custom-assertion-function convention.
 use super::super::*;
+use super::node;
 
 #[test]
 fn parses_an_assert_if_true_tag_naming_a_this_property() {
@@ -9,7 +10,7 @@ fn parses_an_assert_if_true_tag_naming_a_this_property() {
         block.assert_if_true,
         vec![AssertTag {
             negated: true,
-            ty: "null".to_string(),
+            ty: node("null"),
             target: "$this->testFilesFile".to_string(),
         }]
     );
@@ -22,7 +23,7 @@ fn parses_an_assert_if_false_tag() {
         block.assert_if_false,
         vec![AssertTag {
             negated: true,
-            ty: "null".to_string(),
+            ty: node("null"),
             target: "$this->parseError()".to_string(),
         }]
     );
@@ -35,7 +36,7 @@ fn parses_an_unconditional_assert_tag_naming_a_parameter() {
         block.assert,
         vec![AssertTag {
             negated: false,
-            ty: "string".to_string(),
+            ty: node("string"),
             target: "$actual".to_string(),
         }]
     );
@@ -48,7 +49,7 @@ fn parses_a_bare_this_target() {
         block.assert_if_true,
         vec![AssertTag {
             negated: false,
-            ty: "After".to_string(),
+            ty: node("After"),
             target: "$this".to_string(),
         }]
     );
@@ -73,7 +74,7 @@ fn a_generic_type_argument_is_kept_as_part_of_the_type_text() {
         block.assert_if_true,
         vec![AssertTag {
             negated: false,
-            ty: "Collection<TKey, T>".to_string(),
+            ty: node("Collection<TKey, T>"),
             target: "$this->collection".to_string(),
         }]
     );

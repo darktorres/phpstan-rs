@@ -2,8 +2,10 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::docblock;
+use crate::phpdoc_grammar::TypeNode;
 use crate::registry::function_sig::{FunctionSig, ParamSig, mark_template_params};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::type_node::parse_type_node;
 use syntax::ast::Visibility;
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
@@ -49,31 +51,31 @@ pub(crate) fn method_tag_sig(
     // bound or default may name a sibling or a class template.
     let mut template_params = template_params.clone();
     if !tag.templates.is_empty() {
-        for (name, _, _) in &tag.templates {
-            template_params.insert(name.clone(), TemplateParam::unbounded(name.clone()));
+        for t in &tag.templates {
+            template_params.insert(t.name.clone(), TemplateParam::unbounded(t.name.clone()));
         }
         let shallow = template_params.clone();
-        let resolve_bound = |text: &str| {
-            let ty = mark_template_params(types::parse_type_string(text), &shallow);
+        let resolve_bound = |node: &TypeNode| {
+            let ty = mark_template_params(parse_type_node(node), &shallow);
             resolve_names_in_type(ty, ctx)
         };
-        for (name, bound, default) in &tag.templates {
+        for t in &tag.templates {
             template_params.insert(
-                name.clone(),
+                t.name.clone(),
                 TemplateParam {
-                    name: name.clone(),
-                    bound: Box::new(bound.as_deref().map_or(Type::Mixed(false), resolve_bound)),
+                    name: t.name.clone(),
+                    bound: Box::new(t.bound.as_ref().map_or(Type::Mixed(false), resolve_bound)),
                     variance: types::Variance::Invariant,
                     scope: Some(tag.name.clone()),
-                    default: default.as_deref().map(|d| Box::new(resolve_bound(d))),
+                    default: t.default.as_ref().map(|d| Box::new(resolve_bound(d))),
                 },
             );
         }
     }
     let template_params = &template_params;
     #[allow(clippy::type_complexity)]
-    let resolve = |text: &str| -> (Type, Vec<(Arc<str>, Arc<str>)>) {
-        let ty = types::parse_type_string(text);
+    let resolve = |node: &TypeNode| -> (Type, Vec<(Arc<str>, Arc<str>)>) {
+        let ty = parse_type_node(node);
         let ty = mark_template_params(ty, template_params);
         let mut case_refs = Vec::new();
         collect_class_name_case_refs(&ty, ctx, &mut case_refs);
@@ -81,7 +83,7 @@ pub(crate) fn method_tag_sig(
     };
     let (return_type, return_case_refs) = tag
         .return_type
-        .as_deref()
+        .as_ref()
         .map(resolve)
         .unwrap_or((Type::Mixed(false), Vec::new()));
     let params = tag
@@ -89,7 +91,7 @@ pub(crate) fn method_tag_sig(
         .iter()
         .map(|p| {
             let (ty, case_refs) =
-                p.ty.as_deref()
+                p.ty.as_ref()
                     .map(resolve)
                     .unwrap_or((Type::Mixed(false), Vec::new()));
             ParamSig {

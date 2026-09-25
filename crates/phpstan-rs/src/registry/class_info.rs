@@ -3,12 +3,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::docblock::{self, DocBlock};
+use crate::phpdoc_grammar::TypeNode;
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
     build_type_aliases, infer_class_const_type, mark_template_params,
     resolve_type_with_parsed_native, substitute_type_aliases,
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::type_node::parse_type_node;
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use syntax::intern::intern;
@@ -647,7 +649,7 @@ impl ClassInfo {
                 let native_hint = native_hint_text.as_deref();
                 let native_parsed = native_hint.map(types::parse_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
-                    doc_ty.as_ref().and_then(|d| d.var_type.as_deref()),
+                    doc_ty.as_ref().and_then(|d| d.var_type.as_ref()),
                     native_hint,
                     native_parsed.as_ref(),
                 );
@@ -668,10 +670,9 @@ impl ClassInfo {
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let own_doc_ty = doc_ty
                     .as_ref()
-                    .and_then(|d| d.var_type.as_deref())
+                    .and_then(|d| d.var_type.as_ref())
                     .map(|raw| {
-                        let t =
-                            mark_template_params(types::parse_type_string(raw), &template_params);
+                        let t = mark_template_params(parse_type_node(raw), &template_params);
                         substitute_type_aliases(resolve_names_in_type(t, ctx), &type_aliases)
                     });
                 let (set_ty, set_case_refs) =
@@ -746,7 +747,7 @@ impl ClassInfo {
                 // elsewhere in the class), a completely different
                 // construction from the `ParamSig` `FunctionSig::from_decl`
                 // builds for the same parameter.
-                let doc_ty: Option<String> = ctor_doc
+                let doc_ty: Option<TypeNode> = ctor_doc
                     .as_ref()
                     .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()
@@ -760,7 +761,7 @@ impl ClassInfo {
                 let native_hint = native_hint_text.as_deref();
                 let native_parsed = native_hint.map(types::parse_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
-                    doc_ty.as_deref(),
+                    doc_ty.as_ref(),
                     native_hint,
                     native_parsed.as_ref(),
                 );
@@ -779,8 +780,8 @@ impl ClassInfo {
                     resolve_names_in_type(t, ctx)
                 };
                 let ty = substitute_type_aliases(ty, &type_aliases);
-                let own_doc_ty = doc_ty.as_deref().map(|raw| {
-                    let t = mark_template_params(types::parse_type_string(raw), &template_params);
+                let own_doc_ty = doc_ty.as_ref().map(|raw| {
+                    let t = mark_template_params(parse_type_node(raw), &template_params);
                     substitute_type_aliases(resolve_names_in_type(t, ctx), &type_aliases)
                 });
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
@@ -855,7 +856,7 @@ impl ClassInfo {
         if let Some(doc) = &class_doc {
             for tag in &doc.properties {
                 properties.entry(intern(&tag.name)).or_insert_with(|| {
-                    let ty = types::parse_type_string(&tag.ty);
+                    let ty = parse_type_node(&tag.ty);
                     let ty = mark_template_params(ty, &template_params);
                     let mut case_refs = Vec::new();
                     collect_class_name_case_refs(&ty, ctx, &mut case_refs);
@@ -942,7 +943,7 @@ impl ClassInfo {
                 let has_phpdoc_type = doc_ty.is_some();
                 let ty = match doc_ty {
                     Some(doc_ty) => {
-                        let ty = types::parse_type_string(&doc_ty);
+                        let ty = parse_type_node(&doc_ty);
                         let ty = mark_template_params(ty, &template_params);
                         let ty = resolve_names_in_type(ty, ctx);
                         substitute_type_aliases(ty, &type_aliases)
@@ -983,15 +984,15 @@ impl ClassInfo {
         // making `check_cross_path_interface_conflicts`'s exact-equality
         // comparison see two "different" types where real PHPStan (which
         // always compares the expanded shape) sees an equivalent one.
-        let resolve_generic_tag = |raw: &str| -> Type {
-            let ty = types::parse_type_string(raw);
+        let resolve_generic_tag = |raw: &TypeNode| -> Type {
+            let ty = parse_type_node(raw);
             let ty = mark_template_params(ty, &template_params);
             let ty = resolve_names_in_type(ty, ctx);
             substitute_type_aliases(ty, &type_aliases)
         };
         let extends_args: Vec<Type> = class_doc
             .as_ref()
-            .and_then(|d| d.extends.as_deref())
+            .and_then(|d| d.extends.as_ref())
             .map(|raw| match resolve_generic_tag(raw) {
                 Type::Object(_, args) => args,
                 _ => Vec::new(),
@@ -1107,10 +1108,10 @@ impl ClassInfo {
         // flattened to the class names it names (`object_class_names`),
         // mirroring real PHPStan's `getObjectClassNames()` call sites
         // for these same three tags.
-        let resolve_tag_types = |raw: &[String]| -> Vec<Arc<str>> {
+        let resolve_tag_types = |raw: &[TypeNode]| -> Vec<Arc<str>> {
             raw.iter()
                 .flat_map(|text| {
-                    object_class_names(resolve_names_in_type(types::parse_type_string(text), ctx))
+                    object_class_names(resolve_names_in_type(parse_type_node(text), ctx))
                 })
                 .map(|s| intern(&s))
                 .collect()
@@ -1150,7 +1151,7 @@ impl ClassInfo {
                 d.mixins
                     .iter()
                     .flat_map(|text| {
-                        let ty = types::parse_type_string(text);
+                        let ty = parse_type_node(text);
                         let mut refs = Vec::new();
                         collect_class_name_case_refs(&ty, ctx, &mut refs);
                         refs
@@ -1237,7 +1238,7 @@ impl ClassInfo {
             .iter()
             .flat_map(|d| &d.implements)
             .filter_map(
-                |raw| match resolve_names_in_type(types::parse_type_string(raw), ctx) {
+                |raw| match resolve_names_in_type(parse_type_node(raw), ctx) {
                     Type::Object(name, args) => Some((intern(&name), args)),
                     _ => None,
                 },
@@ -1256,7 +1257,7 @@ impl ClassInfo {
             .map(docblock::parse)
             .flat_map(|d| d.uses)
             .filter_map(
-                |raw| match resolve_names_in_type(types::parse_type_string(&raw), ctx) {
+                |raw| match resolve_names_in_type(parse_type_node(&raw), ctx) {
                     Type::Object(name, args) => Some((intern(&name), args)),
                     _ => None,
                 },

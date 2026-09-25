@@ -18,6 +18,7 @@ mod name_context;
 mod purity;
 mod relation;
 mod resolve;
+mod type_node;
 
 pub(crate) use anonymous_class::collect_anonymous_classes;
 pub(crate) use class_info::hook_body_references_property;
@@ -39,6 +40,7 @@ pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
+pub(crate) use type_node::{mentions_mixed, parse_type_node};
 
 /// Real PHPStan's own `ApiRuleHelper::isPhpStanName()` - whether
 /// `fqn` is under the `PHPStan\` namespace itself (excluding the two

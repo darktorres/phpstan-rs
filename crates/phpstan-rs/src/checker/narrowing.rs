@@ -6,7 +6,6 @@ use crate::regex_groups;
 use crate::registry::{AssertTarget, FunctionSig};
 use syntax::ast::*;
 use syntax::token::Span;
-use types::has_explicit_mixed_nested_somewhere;
 use types::{AccessoryKind, Type};
 mod accessory_range;
 mod array_shape;
@@ -1520,8 +1519,7 @@ impl<'a> Checker<'a> {
         };
         let subject = format!("PHPDoc tag {tag_name} for {target_desc}");
         let class = self.current_class.clone();
-        let (node, _, _) = crate::phpdoc_grammar::parse_type_prefix(&info.raw_ty);
-        if node.is_some_and(|n| self.type_node_unresolvable(&n, class.as_deref())) {
+        if self.type_node_unresolvable(&info.written_ty, class.as_deref()) {
             self.report(
                 label.to_string(),
                 format!("{subject} contains unresolvable type."),
@@ -1533,7 +1531,7 @@ impl<'a> Checker<'a> {
         }
         // `AssertRuleHelper`'s missing-typehint checks on the asserted
         // type itself.
-        let explicit_mixed = has_explicit_mixed_nested_somewhere(None, Some(&info.raw_ty));
+        let explicit_mixed = crate::registry::mentions_mixed(&info.written_ty);
         self.report_missing_typehint_findings(
             label,
             span,

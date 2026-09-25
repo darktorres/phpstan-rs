@@ -234,7 +234,7 @@ fn substitute_assert_infos(
             ty: subst(&info.ty),
             target: info.target.clone(),
             case_refs: info.case_refs.clone(),
-            raw_ty: info.raw_ty.clone(),
+            written_ty: info.written_ty.clone(),
         })
         .collect()
 }

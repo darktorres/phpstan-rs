@@ -403,8 +403,8 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
                     .collect();
-                let resolve = |raw: &str| -> Type {
-                    let ty = types::parse_type_string(raw);
+                let resolve = |node: &crate::phpdoc_grammar::TypeNode| -> Type {
+                    let ty = crate::registry::parse_type_node(node);
                     let ty = mark_template_params(ty, &shallow);
                     resolve_names_in_type(ty, &self.name_ctx)
                 };
@@ -594,7 +594,7 @@ impl<'a> Checker<'a> {
                 for (i, p) in f.params.iter().enumerate() {
                     // Same inline-`@var`-on-a-promoted-property fallback
                     // as `FunctionSig::from_decl`'s param loop.
-                    let doc_ty: Option<String> = doc
+                    let doc_ty: Option<crate::phpdoc_grammar::TypeNode> = doc
                         .as_ref()
                         .and_then(|d| d.params.get(p.name.as_ref()))
                         .cloned()
@@ -605,7 +605,7 @@ impl<'a> Checker<'a> {
                                 .and_then(|d| d.var_type)
                         });
                     let ty = resolve_type(
-                        doc_ty.as_deref(),
+                        doc_ty.as_ref(),
                         p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                     );
                     // This anonymous-class fallback path builds `ty`
@@ -717,7 +717,7 @@ impl<'a> Checker<'a> {
                 .map(docblock::parse)
                 .and_then(|d| d.return_type);
             let ty = resolve_type(
-                doc_return.as_deref(),
+                doc_return.as_ref(),
                 f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
             );
             // Same "checker builds a Type straight from raw text,

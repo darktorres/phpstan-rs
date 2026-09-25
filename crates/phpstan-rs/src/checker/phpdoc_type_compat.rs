@@ -36,11 +36,12 @@ impl<'a> Checker<'a> {
             None => ty.clone(),
         };
         // Reported in the order the tags are written.
-        let in_doc_order = |map: &rustc_hash::FxHashMap<String, String>| {
-            let mut names: Vec<String> = map.keys().cloned().collect();
-            names.sort_by_key(|n| doc.find(&format!("${n}")).unwrap_or(usize::MAX));
-            names
-        };
+        let in_doc_order =
+            |map: &rustc_hash::FxHashMap<String, crate::phpdoc_grammar::TypeNode>| {
+                let mut names: Vec<String> = map.keys().cloned().collect();
+                names.sort_by_key(|n| doc.find(&format!("${n}")).unwrap_or(usize::MAX));
+                names
+            };
         for (tag, names) in [
             ("@param", in_doc_order(&block.params)),
             ("@param-out", in_doc_order(&block.param_out)),
@@ -564,10 +565,7 @@ impl<'a> Checker<'a> {
             .doc_comment
             .as_deref()
             .and_then(|d| docblock::parse(d).self_out);
-        let unresolvable = raw.is_some_and(|raw| {
-            matches!(crate::phpdoc_grammar::parse_type_prefix(&raw),
-                (Some(node), _, _) if self.type_node_unresolvable(&node, Some(class)))
-        });
+        let unresolvable = raw.is_some_and(|node| self.type_node_unresolvable(&node, Some(class)));
         let class_ty = Type::Object(class.into(), Vec::new());
         let resolved = self.resolve_pseudo(out, class);
         // An unresolvable type is reported as such, not also as a

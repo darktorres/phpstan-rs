@@ -1,5 +1,6 @@
 //! Tests for parsing `@param`, `@return`, `@var`, and `@property*` docblock tags.
 use super::super::*;
+use super::node;
 
 #[test]
 fn parses_param_and_return() {
@@ -11,8 +12,8 @@ fn parses_param_and_return() {
          * @return int
          */"#,
     );
-    assert_eq!(block.params.get("x"), Some(&"int".to_string()));
-    assert_eq!(block.return_type, Some("int".to_string()));
+    assert_eq!(block.params.get("x"), Some(&node("int")));
+    assert_eq!(block.return_type, Some(node("int")));
 }
 
 #[test]
@@ -35,14 +36,14 @@ fn a_by_ref_param_s_ampersand_prefixed_name_is_still_recognized() {
          * @param string[] &$matches [optional] <p>Set on match.</p>
          */"#,
     );
-    assert_eq!(block.params.get("matches"), Some(&"string[]".to_string()));
+    assert_eq!(block.params.get("matches"), Some(&node("string[]")));
     assert!(block.optional_params.contains("matches"));
 }
 
 #[test]
 fn a_documented_variadic_param_s_ellipsis_prefixed_name_is_still_recognized() {
     let block = parse("/** @param int ...$nums */");
-    assert_eq!(block.params.get("nums"), Some(&"int".to_string()));
+    assert_eq!(block.params.get("nums"), Some(&node("int")));
 }
 
 // A Piwigo docblock running its own description text straight into the
@@ -62,7 +63,7 @@ fn a_param_tag_whose_description_runs_into_the_name_with_a_colon_is_still_recogn
     );
     assert_eq!(
         block.params.get("post"),
-        Some(&"array<int|string, mixed>".to_string())
+        Some(&node("array<int|string, mixed>"))
     );
 }
 
@@ -80,19 +81,19 @@ fn parses_property_property_read_and_property_write_tags() {
         vec![
             PropertyTag {
                 name: "magic".to_string(),
-                ty: "int".to_string(),
+                ty: node("int"),
                 readable: true,
                 writable: true,
             },
             PropertyTag {
                 name: "ro".to_string(),
-                ty: "string".to_string(),
+                ty: node("string"),
                 readable: true,
                 writable: false,
             },
             PropertyTag {
                 name: "wo".to_string(),
-                ty: "bool".to_string(),
+                ty: node("bool"),
                 readable: false,
                 writable: true,
             },
@@ -107,7 +108,7 @@ fn a_property_tag_whose_description_runs_into_the_name_with_a_colon_is_still_rec
         block.properties,
         vec![PropertyTag {
             name: "magic".to_string(),
-            ty: "int".to_string(),
+            ty: node("int"),
             readable: true,
             writable: true,
         }]
@@ -123,21 +124,21 @@ fn a_malformed_property_tag_with_no_name_is_skipped() {
 #[test]
 fn parses_var() {
     let block = parse("/** @var string|null */");
-    assert_eq!(block.var_type, Some("string|null".to_string()));
+    assert_eq!(block.var_type, Some(node("string|null")));
     assert_eq!(block.var_name, None);
 }
 
 #[test]
 fn parses_var_with_a_name() {
     let block = parse("/** @var SplFileInfo $file */");
-    assert_eq!(block.var_type, Some("SplFileInfo".to_string()));
+    assert_eq!(block.var_type, Some(node("SplFileInfo")));
     assert_eq!(block.var_name, Some("file".to_string()));
 }
 
 #[test]
 fn a_var_tag_whose_description_runs_into_the_name_with_a_colon_is_still_recognized() {
     let block = parse("/** @var SplFileInfo $file: some description text */");
-    assert_eq!(block.var_type, Some("SplFileInfo".to_string()));
+    assert_eq!(block.var_type, Some(node("SplFileInfo")));
     assert_eq!(block.var_name, Some("file".to_string()));
 }
 
@@ -149,8 +150,8 @@ fn parses_multiple_params() {
          * @param string $b
          */"#,
     );
-    assert_eq!(block.params.get("a"), Some(&"int".to_string()));
-    assert_eq!(block.params.get("b"), Some(&"string".to_string()));
+    assert_eq!(block.params.get("a"), Some(&node("int")));
+    assert_eq!(block.params.get("b"), Some(&node("string")));
 }
 
 #[test]
@@ -171,7 +172,7 @@ fn ignores_unknown_tags_and_prose() {
 #[test]
 fn single_line_doc_comment() {
     let block = parse("/** @return bool */");
-    assert_eq!(block.return_type, Some("bool".to_string()));
+    assert_eq!(block.return_type, Some(node("bool")));
 }
 
 #[test]
@@ -179,7 +180,7 @@ fn return_type_with_internal_spaces_is_not_truncated() {
     let block = parse("/** @return array{count: int, first: string} */");
     assert_eq!(
         block.return_type,
-        Some("array{count: int, first: string}".to_string())
+        Some(node("array{count: int, first: string}"))
     );
 }
 
@@ -188,7 +189,7 @@ fn param_type_with_internal_spaces_still_finds_the_variable_name() {
     let block = parse("/** @param array{count: int, first: string} $x the input */");
     assert_eq!(
         block.params.get("x"),
-        Some(&"array{count: int, first: string}".to_string())
+        Some(&node("array{count: int, first: string}"))
     );
 }
 
@@ -206,10 +207,9 @@ fn a_return_type_wrapped_across_multiple_lines_is_not_truncated() {
     );
     assert_eq!(
         block.return_type,
-        Some(
+        Some(node(
             "array{id: int, file: string, date_available: ?string, name: ?string, comment: ?string, hit: int}"
-                .to_string()
-        )
+        ))
     );
 }
 
@@ -228,10 +228,7 @@ fn a_var_type_wrapped_across_multiple_lines_with_trailing_line_comments_strips_t
          *  } $value
          */"#,
     );
-    assert_eq!(
-        block.var_type,
-        Some("array{v?: string, b?: bool}".to_string())
-    );
+    assert_eq!(block.var_type, Some(node("array{v?: string, b?: bool}")));
 }
 
 #[test]
@@ -244,7 +241,7 @@ fn a_param_type_wrapped_across_multiple_lines_still_finds_the_variable_name() {
     );
     assert_eq!(
         block.params.get("row"),
-        Some(&"array{id: int, name: string}".to_string())
+        Some(&node("array{id: int, name: string}"))
     );
 }
 
@@ -261,8 +258,8 @@ fn phpstan_prefixed_return_and_param_win_over_the_plain_tag_regardless_of_order(
          * @param string $count
          */"#,
     );
-    assert_eq!(block.return_type, Some("list<string>".to_string()));
-    assert_eq!(block.params.get("count"), Some(&"int".to_string()));
+    assert_eq!(block.return_type, Some(node("list<string>")));
+    assert_eq!(block.params.get("count"), Some(&node("int")));
 }
 
 #[test]
@@ -275,9 +272,9 @@ fn phpstan_template_extends_and_implements_are_recognized() {
          */"#,
     );
     assert_eq!(block.templates, vec!["T".to_string()]);
-    assert_eq!(block.template_bounds.get("T"), Some(&"object".to_string()));
-    assert_eq!(block.extends, Some("Collection<T>".to_string()));
-    assert_eq!(block.implements, vec!["Iterable<T>".to_string()]);
+    assert_eq!(block.template_bounds.get("T"), Some(&node("object")));
+    assert_eq!(block.extends, Some(node("Collection<T>")));
+    assert_eq!(block.implements, vec![node("Iterable<T>")]);
 }
 
 #[test]
@@ -296,7 +293,9 @@ fn a_real_phpstan_conditional_return_type_is_captured_as_its_own_raw_token() {
     );
     assert_eq!(
         block.return_type,
-        Some("($params is array{wrapperClass: class-string<T>} ? T : Connection)".to_string())
+        Some(node(
+            "($params is array{wrapperClass: class-string<T>} ? T : Connection)"
+        ))
     );
 }
 
@@ -313,11 +312,8 @@ fn a_trailing_line_comment_inside_a_wrapped_shape_is_skipped_but_a_url_is_kept()
          * @see https://example.com/page
          */"#,
     );
-    assert_eq!(
-        block.var_type,
-        Some("array{v?: string, b?: bool}".to_string())
-    );
-    assert_eq!(block.params.get("url"), Some(&"string".to_string()));
+    assert_eq!(block.var_type, Some(node("array{v?: string, b?: bool}")));
+    assert_eq!(block.params.get("url"), Some(&node("string")));
     assert_eq!(block.see, vec!["https://example.com/page".to_string()]);
     assert!(
         block.parse_errors.is_empty(),
@@ -346,6 +342,6 @@ fn a_param_closure_this_type_wrapped_across_lines_keeps_its_variable_name() {
     );
     assert_eq!(
         block.param_closure_this.get("fn"),
-        Some(&"array{a: int, b: int}".to_string())
+        Some(&node("array{a: int, b: int}"))
     );
 }
