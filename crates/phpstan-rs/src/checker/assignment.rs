@@ -1335,6 +1335,7 @@ fn write_literal_key_aware(
         .or_else(|| literal_key_from_type(idx_ty));
     match literal_key {
         Some(key) if !in_loop => {
+            let key = ShapeKey::from_name(&key);
             let mut members: Vec<Type> = existing_has_offset_values
                 .iter()
                 .filter(|m| !matches!(m, Type::HasOffsetValue(k, _) if *k == key))

@@ -106,7 +106,7 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
             Some(key) => Type::Intersection(vec![
                 ty.clone(),
                 Type::HasOffsetValue(
-                    key.to_string(),
+                    ShapeKey::from_name(key),
                     Box::new(crate::checker::narrow_type_excluding(value, &Type::Null)),
                 ),
             ]),
@@ -122,7 +122,7 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
                 (Some(key), Some(value)) => {
                     let mut members = members.clone();
                     members.push(Type::HasOffsetValue(
-                        key.to_string(),
+                        ShapeKey::from_name(key),
                         Box::new(crate::checker::narrow_type_excluding(value, &Type::Null)),
                     ));
                     Type::Intersection(members)

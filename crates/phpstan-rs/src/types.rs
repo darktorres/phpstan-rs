@@ -154,7 +154,7 @@ pub enum Type {
     // variable narrowed to a literal during one simulated pass still
     // generalizes away before the merge that produces the loop's own
     // exit type.
-    HasOffsetValue(String, Box<Type>),
+    HasOffsetValue(ShapeKey, Box<Type>),
     // A `ReflectionMethod`/`ReflectionProperty` bound to one specific,
     // literally-named member (owner type, member name) of a
     // `ReflectionClass<T>`'s own reflected `T` - Phase 77's "binding a

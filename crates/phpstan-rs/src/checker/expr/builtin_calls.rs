@@ -992,7 +992,7 @@ impl<'a> Checker<'a> {
                                         Self::merge_shape_field(
                                             &mut merged,
                                             &mut next_index,
-                                            &ShapeKey::from_name(&k),
+                                            &k,
                                             v,
                                             false,
                                         );

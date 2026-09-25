@@ -5828,7 +5828,7 @@ pub(crate) fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
         Type::Intersection(members) => {
             let has_offset_value = key.and_then(|k| {
                 members.iter().find_map(|m| match m {
-                    Type::HasOffsetValue(mk, v) if mk == k => Some((**v).clone()),
+                    Type::HasOffsetValue(mk, v) if mk.is(k) => Some((**v).clone()),
                     _ => None,
                 })
             });

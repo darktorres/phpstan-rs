@@ -304,7 +304,7 @@ fn literal_base_type(t: &Type) -> Option<Type> {
 /// to promote a `hasOffsetValue`-carrying argument's own tracked keys
 /// into real merged-shape fields, not just this module's own pairwise
 /// union merge below.
-pub(crate) fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(String, Type)>)> {
+pub(crate) fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(ShapeKey, Type)>)> {
     match t {
         Type::Array(..) => Some((t.clone(), Vec::new())),
         Type::Intersection(members)
@@ -370,7 +370,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
         // fallback rather than an `unreachable!()`.
         (base_a, _) => base_a,
     };
-    let mut merged_pairs: Vec<(String, Type)> = Vec::new();
+    let mut merged_pairs: Vec<(ShapeKey, Type)> = Vec::new();
     for (k, va) in &pairs_a {
         if let Some((_, vb)) = pairs_b.iter().find(|(kb, _)| kb == k) {
             merged_pairs.push((k.clone(), union_types(va.clone(), vb.clone())));
