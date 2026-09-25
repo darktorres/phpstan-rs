@@ -17,7 +17,7 @@ const TEST_BASE_CLASSES: [&str; 2] = ["PHPUnit\\Framework\\TestCase", "Codecepti
 fn object_names(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Object(name, args) => {
-            out.push(name.clone());
+            out.push(name.clone().to_string());
             for a in args {
                 object_names(a, out);
             }

@@ -922,7 +922,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // class-hierarchy walk in `registry::is_assignable` - no new
         // type-system machinery needed.
         "enum-string" => {
-            let unit_enum = Type::Object("UnitEnum".to_string(), Vec::new());
+            let unit_enum = Type::Object("UnitEnum".into(), Vec::new());
             match generic_args {
                 [single] => Type::ClassString(Box::new(Type::Intersection(vec![
                     parse_type_string(single),
@@ -1097,7 +1097,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             };
             Type::Union(vec![
                 Type::Array(Box::new(Type::unknown_array_key()), Box::new(element_ty)),
-                Type::Object("Traversable".to_string(), Vec::new()),
+                Type::Object("Traversable".into(), Vec::new()),
             ])
         }
         // `Closure` is a concrete class only a real closure object
@@ -1121,7 +1121,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // class-reference resolution below instead, deferring to a real
         // `use` import when one exists.
         "closure" if original.starts_with('\\') => {
-            Type::Object("\\Closure".to_string(), Vec::new())
+            Type::Object(("\\Closure".to_string()).into(), Vec::new())
         }
         "callable" => Type::Callable(None),
         // `self<T>`/`static<T>`: the current class with those arguments.
@@ -1145,7 +1145,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // substitution treats an unbound parameter as `Mixed` either
         // way.
         _ => Type::Object(
-            original.to_string(),
+            original.into(),
             generic_args.iter().map(|a| parse_generic_arg(a)).collect(),
         ),
     }

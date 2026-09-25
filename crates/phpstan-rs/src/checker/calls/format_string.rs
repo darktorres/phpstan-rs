@@ -659,7 +659,7 @@ impl<'a> Checker<'a> {
                         ty,
                         &Type::Union(vec![
                             Type::String,
-                            Type::Object("Stringable".to_string(), Vec::new()),
+                            Type::Object("Stringable".into(), Vec::new()),
                             Type::Float,
                             Type::Int,
                             Type::Null,
@@ -693,7 +693,7 @@ impl<'a> Checker<'a> {
 fn format_value_type() -> Type {
     Type::Union(vec![
         Type::String,
-        Type::Object("Stringable".to_string(), Vec::new()),
+        Type::Object("Stringable".into(), Vec::new()),
         Type::Int,
         Type::Float,
         Type::Bool,

@@ -81,7 +81,7 @@ impl<'a> Checker<'a> {
 
     fn resolve_class_name_for_hint(&self, name: &str) -> String {
         match self.resolve_type_hint(Some(name)) {
-            crate::types::Type::Object(resolved, _) => resolved,
+            crate::types::Type::Object(resolved, _) => resolved.to_string(),
             _ => name.trim_start_matches('\\').to_string(),
         }
     }

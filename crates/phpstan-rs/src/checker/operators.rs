@@ -187,7 +187,7 @@ impl<'a> Checker<'a> {
             }
             let other = if l_is { r_ty } else { l_ty };
             return if self.is_valid_overload_operand(other, class) {
-                Some(Type::Object(class.to_string(), Vec::new()))
+                Some(Type::Object(class.into(), Vec::new()))
             } else {
                 None
             };

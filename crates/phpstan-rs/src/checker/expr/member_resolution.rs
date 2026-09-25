@@ -88,9 +88,12 @@ impl<'a> Checker<'a> {
         match base_ty {
             Type::Object(class, _) => (
                 self.registry.lookup_method(class, method),
-                Some(class.clone()),
+                Some(class.clone().to_string()),
             ),
-            Type::EnumCase(fqn, _) => (self.registry.lookup_method(fqn, method), Some(fqn.clone())),
+            Type::EnumCase(fqn, _) => (
+                self.registry.lookup_method(fqn, method),
+                Some(fqn.clone().to_string()),
+            ),
             Type::Union(members) => members
                 .iter()
                 .map(|m| self.find_method_receiver_class(m, method))
@@ -141,7 +144,7 @@ impl<'a> Checker<'a> {
         match ty {
             Type::Object(class, _) => (self.class_name_exists(class)
                 && !self.registry.is_subclass_of(class, "Throwable"))
-            .then(|| class.clone()),
+            .then(|| class.to_string()),
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.thrown_value_not_throwable(m)),
@@ -177,11 +180,11 @@ impl<'a> Checker<'a> {
             Type::Object(class, type_args) => self
                 .registry
                 .lookup_property_with_owner(class, prop)
-                .map(|(owner, sig)| (class.clone(), type_args.clone(), owner, sig.clone())),
+                .map(|(owner, sig)| (class.to_string(), type_args.clone(), owner, sig.clone())),
             Type::EnumCase(fqn, _) => self
                 .registry
                 .lookup_property_with_owner(fqn, prop)
-                .map(|(owner, sig)| (fqn.clone(), Vec::new(), owner, sig.clone())),
+                .map(|(owner, sig)| (fqn.to_string(), Vec::new(), owner, sig.clone())),
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.find_property_receiver(m, prop)),
@@ -239,14 +242,14 @@ impl<'a> Checker<'a> {
                 .lookup_method_with_owner(class, method)
                 .map(|(owner, sig)| {
                     let sig = self.substitute_class_templates(sig, class, type_args, &owner);
-                    (class.clone(), type_args.clone(), owner, sig)
+                    (class.to_string(), type_args.clone(), owner, sig)
                 }),
             Type::EnumCase(fqn, _) => {
                 self.registry
                     .lookup_method_with_owner(fqn, method)
                     .map(|(owner, sig)| {
                         let sig = self.substitute_class_templates(sig, fqn, &[], &owner);
-                        (fqn.clone(), Vec::new(), owner, sig)
+                        (fqn.to_string(), Vec::new(), owner, sig)
                     })
             }
             Type::Union(members) => members
@@ -299,7 +302,9 @@ impl<'a> Checker<'a> {
                         Type::Mixed(false)
                     }
                 }),
-            Type::EnumCase(_, case) if prop == "name" => Type::StringLiteral(case.clone()),
+            Type::EnumCase(_, case) if prop == "name" => {
+                Type::StringLiteral(case.clone().to_string())
+            }
             Type::EnumCase(fqn, case) if prop == "value" => self
                 .registry
                 .enum_case_value(fqn, case)
@@ -399,14 +404,14 @@ impl<'a> Checker<'a> {
         let arg = args.get(entry.argument.checked_sub(1)?)?;
         let named = match self.infer_expr(&arg.value, locals) {
             Type::ClassString(inner) => match *inner {
-                Type::Object(name, _) => name,
+                Type::Object(name, _) => name.to_string(),
                 _ => return None,
             },
             Type::StringLiteral(name) => name.trim_start_matches('\\').to_string(),
             _ => return None,
         };
         let (canonical, _) = self.registry.lookup_class(&named)?;
-        let object = Type::Object(canonical.to_string(), Vec::new());
+        let object = Type::Object(canonical.into(), Vec::new());
         if entry.intersect.is_empty() {
             return Some(object);
         }
@@ -415,7 +420,7 @@ impl<'a> Checker<'a> {
             entry
                 .intersect
                 .iter()
-                .map(|t| Type::Object(t.trim_start_matches('\\').to_string(), Vec::new())),
+                .map(|t| Type::Object((t.trim_start_matches('\\').to_string()).into(), Vec::new())),
         );
         Some(Type::Intersection(members))
     }
@@ -532,7 +537,7 @@ impl<'a> Checker<'a> {
                 if method == "diff" && self.registry.is_subclass_of(class, "DateTimeInterface") =>
             {
                 Type::Intersection(vec![
-                    Type::Object("DateInterval".to_string(), Vec::new()),
+                    Type::Object("DateInterval".into(), Vec::new()),
                     Type::ObjectShape(Shape::from_named([("days", Type::Int, false)])),
                 ])
             }
@@ -749,10 +754,11 @@ impl<'a> Checker<'a> {
                         )
                     });
                 match row_type {
-                    Some(row_type) => {
-                        Type::Object("Doctrine\\DBAL\\Result".to_string(), vec![row_type])
-                    }
-                    None => Type::Object("Doctrine\\DBAL\\Result".to_string(), Vec::new()),
+                    Some(row_type) => Type::Object(
+                        ("Doctrine\\DBAL\\Result".to_string()).into(),
+                        vec![row_type],
+                    ),
+                    None => Type::Object(("Doctrine\\DBAL\\Result".to_string()).into(), Vec::new()),
                 }
             }
             Type::Object(class, _)
@@ -921,7 +927,7 @@ fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<T
         ))
     };
     let traversable_of =
-        |key: Type, value: Type| Type::Object("Traversable".to_string(), vec![key, value]);
+        |key: Type, value: Type| Type::Object("Traversable".into(), vec![key, value]);
     match method {
         "fetchAssociative" => Some(Type::Union(vec![
             Type::ArrayShape(shape.clone()),
@@ -1073,7 +1079,7 @@ impl<'a> Checker<'a> {
     fn doctrine_query_type(&self, source: Option<DoctrineQuerySource>) -> Type {
         let query = "Doctrine\\ORM\\Query".to_string();
         let Some((chain, items)) = source else {
-            return Type::Object(query, Vec::new());
+            return Type::Object(query.into(), Vec::new());
         };
         let key = crate::checker::doctrine::result_shape::index_key_type(self, &chain)
             .unwrap_or(Type::Null);
@@ -1083,8 +1089,8 @@ impl<'a> Checker<'a> {
             crate::checker::doctrine::result_shape::build_result_row_type(self, &chain, &items)
         };
         match row {
-            Some(row) => Type::Object(query, vec![key, row]),
-            None => Type::Object(query, Vec::new()),
+            Some(row) => Type::Object(query.into(), vec![key, row]),
+            None => Type::Object(query.into(), Vec::new()),
         }
     }
 
@@ -1192,7 +1198,7 @@ impl<'a> Checker<'a> {
                     ),
                     Box::new(element_or_mixed),
                 ),
-                Type::Object("Traversable".to_string(), Vec::new()),
+                Type::Object("Traversable".into(), Vec::new()),
             ]),
             // `getResult(HYDRATE_SINGLE_SCALAR)` hands back the scalar
             // itself, not a collection.

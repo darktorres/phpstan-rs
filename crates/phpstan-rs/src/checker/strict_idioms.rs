@@ -68,7 +68,7 @@ impl<'a> Checker<'a> {
             .classes
             .get(class.as_str())
             .is_some_and(|i| i.kind == ClassKind::Enum)
-            .then_some(class)
+            .then_some(class.to_string())
     }
 
     /// The class of `ty`, when it declares a public instance `equals()`
@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
                 self.registry.is_subclass_of(c, owner.as_ref())
                     || self.registry.is_subclass_of(owner.as_ref(), c)
             });
-        (!inside_equals).then(|| class.clone())
+        (!inside_equals).then(|| class.to_string())
     }
 
     fn nullable_operand(

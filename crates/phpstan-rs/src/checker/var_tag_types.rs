@@ -97,10 +97,10 @@ fn native_iterable_key(ty: &Type) -> Type {
 fn bind_static(ty: &Type, class: &str) -> Type {
     match ty {
         Type::StaticRef(args) => Type::Object(
-            class.to_string(),
+            class.into(),
             args.iter().map(|a| bind_static(a, class)).collect(),
         ),
-        Type::This => Type::Object(class.to_string(), Vec::new()),
+        Type::This => Type::Object(class.into(), Vec::new()),
         other => other.map_children(&mut |c| bind_static(c, class)),
     }
 }
@@ -207,7 +207,7 @@ impl<'a> Checker<'a> {
                 _ => Type::Mixed(false),
             },
             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {
-                Type::Object("Closure".to_string(), Vec::new())
+                Type::Object("Closure".into(), Vec::new())
             }
             ExprKind::Instanceof(..) | ExprKind::Unary(UnaryOp::Not, _) => Type::Bool,
             ExprKind::Binary(op, lhs, rhs) => match op {
@@ -276,7 +276,7 @@ impl<'a> Checker<'a> {
                 let class = match target {
                     StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
                     StaticTarget::Expr(receiver) => match self.native_expr_type(receiver, locals) {
-                        Type::Object(class, _) => Some(class),
+                        Type::Object(class, _) => Some(class.to_string()),
                         _ => None,
                     },
                 };

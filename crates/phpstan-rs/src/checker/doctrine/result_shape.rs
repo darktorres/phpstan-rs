@@ -143,11 +143,11 @@ fn entity_row_type(checker: &Checker, entity: &str) -> Type {
             subclasses.sort();
             subclasses
                 .into_iter()
-                .map(|class| Type::Object(class.to_string(), Vec::new()))
+                .map(|class| Type::Object(class.into(), Vec::new()))
                 .reduce(union_types)
-                .unwrap_or_else(|| Type::Object(entity.to_string(), Vec::new()))
+                .unwrap_or_else(|| Type::Object(entity.into(), Vec::new()))
         }
-        _ => Type::Object(entity.to_string(), Vec::new()),
+        _ => Type::Object(entity.into(), Vec::new()),
     }
 }
 
@@ -230,7 +230,9 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
         // regardless of whether this project can otherwise resolve it
         // (the same leniency an ordinary `new UnknownClass()` expression
         // already gets elsewhere in this project's own type system).
-        SelectItemKind::New(class) => Type::Object(checker.name_ctx.resolve(class), Vec::new()),
+        SelectItemKind::New(class) => {
+            Type::Object(checker.name_ctx.resolve(class).into(), Vec::new())
+        }
         // A custom, project-registered DQL function (ROADMAP
         // Phase 168 168h) - `Mixed` when this project's own
         // `[[doctrine_custom_functions]]` config doesn't declare it,

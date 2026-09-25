@@ -54,9 +54,9 @@ impl<'a> Checker<'a> {
                 }
                 let target = &first.ty;
                 let class = match target {
-                    Type::Object(class, _) => class.clone(),
+                    Type::Object(class, _) => class.to_string(),
                     Type::ClassString(inner) => match inner.as_ref() {
-                        Type::Object(class, _) => class.clone(),
+                        Type::Object(class, _) => class.to_string(),
                         _ => return None,
                     },
                     Type::StringLiteral(class) => class.clone(),
@@ -70,7 +70,7 @@ impl<'a> Checker<'a> {
                     description: format!("callable {ty}"),
                     sig,
                     method: Some((owner.to_string(), "__invoke".to_string())),
-                    defining_class: Some(class.clone()),
+                    defining_class: Some(class.clone().to_string()),
                 })
             }
             _ => None,

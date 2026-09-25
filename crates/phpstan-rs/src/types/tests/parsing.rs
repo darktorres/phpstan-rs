@@ -72,8 +72,8 @@ fn intersection_parses_flat() {
     assert_eq!(
         parse_type_string("Countable&Iterator"),
         Type::Intersection(vec![
-            Type::Object("Countable".to_string(), Vec::new()),
-            Type::Object("Iterator".to_string(), Vec::new())
+            Type::Object("Countable".into(), Vec::new()),
+            Type::Object("Iterator".into(), Vec::new())
         ])
     );
 }
@@ -89,7 +89,7 @@ fn a_leading_backslash_is_preserved_by_the_bare_parser() {
     // `a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced`.
     assert_eq!(
         parse_type_string("\\App\\Foo"),
-        Type::Object("\\App\\Foo".to_string(), Vec::new())
+        Type::Object(("\\App\\Foo".to_string()).into(), Vec::new())
     );
 }
 
@@ -133,8 +133,8 @@ fn phpdoc_array_shorthand_with_a_parenthesized_intersection_element_type_parses(
         Type::Array(
             Box::new(Type::benevolent_array_key()),
             Box::new(Type::Intersection(vec![
-                Type::Object("Foo".to_string(), Vec::new()),
-                Type::Object("Bar".to_string(), Vec::new())
+                Type::Object("Foo".into(), Vec::new()),
+                Type::Object("Bar".into(), Vec::new())
             ]))
         )
     );
@@ -228,7 +228,7 @@ fn a_non_empty_array_shape_and_a_non_empty_list_shape_both_parse() {
 fn a_class_name_merely_starting_with_list_is_not_mistaken_for_a_list_shape() {
     assert_eq!(
         parse_type_string("ListNode"),
-        Type::Object("ListNode".to_string(), Vec::new())
+        Type::Object("ListNode".into(), Vec::new())
     );
 }
 
@@ -400,12 +400,12 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
     );
     assert_eq!(
         parse_type_string("Foo::BAR"),
-        sentinel(Type::Object("Foo".to_string(), vec![]), "BAR")
+        sentinel(Type::Object("Foo".into(), vec![]), "BAR")
     );
     // `Foo::class` is a class-string, not a constant reference.
     assert_eq!(
         parse_type_string("Foo::class"),
-        Type::ClassString(Box::new(Type::Object("Foo".to_string(), vec![])))
+        Type::ClassString(Box::new(Type::Object("Foo".into(), vec![])))
     );
     // The array-wrapping machinery still applies around it.
     assert_eq!(
@@ -446,8 +446,8 @@ fn generic_user_class_keeps_base_name_and_type_args() {
     assert_eq!(
         parse_type_string("Collection<User>"),
         Type::Object(
-            "Collection".to_string(),
-            vec![Type::Object("User".to_string(), Vec::new())]
+            "Collection".into(),
+            vec![Type::Object("User".into(), Vec::new())]
         )
     );
 }
@@ -467,10 +467,10 @@ fn generic_arg_with_covariant_marker_parses_to_a_variance_arg() {
     assert_eq!(
         parse_type_string("Collection<covariant Foo>"),
         Type::Object(
-            "Collection".to_string(),
+            "Collection".into(),
             vec![Type::VarianceArg(
                 CallSiteVariance::Covariant,
-                Box::new(Type::Object("Foo".to_string(), Vec::new()))
+                Box::new(Type::Object("Foo".into(), Vec::new()))
             )]
         )
     );
@@ -481,10 +481,10 @@ fn generic_arg_with_contravariant_marker_parses_to_a_variance_arg() {
     assert_eq!(
         parse_type_string("Collection<contravariant Foo>"),
         Type::Object(
-            "Collection".to_string(),
+            "Collection".into(),
             vec![Type::VarianceArg(
                 CallSiteVariance::Contravariant,
-                Box::new(Type::Object("Foo".to_string(), Vec::new()))
+                Box::new(Type::Object("Foo".into(), Vec::new()))
             )]
         )
     );
@@ -495,7 +495,7 @@ fn generic_arg_with_bivariant_marker_parses_to_a_variance_arg() {
     assert_eq!(
         parse_type_string("Collection<*>"),
         Type::Object(
-            "Collection".to_string(),
+            "Collection".into(),
             vec![Type::VarianceArg(
                 CallSiteVariance::Bivariant,
                 Box::new(Type::Mixed(false))
@@ -512,10 +512,10 @@ fn a_call_site_variance_marker_survives_nested_inside_the_wrapped_type() {
     assert_eq!(
         parse_type_string("Collection<covariant Box<int>>"),
         Type::Object(
-            "Collection".to_string(),
+            "Collection".into(),
             vec![Type::VarianceArg(
                 CallSiteVariance::Covariant,
-                Box::new(Type::Object("Box".to_string(), vec![Type::Int]))
+                Box::new(Type::Object("Box".into(), vec![Type::Int]))
             )]
         )
     );
@@ -528,7 +528,7 @@ fn union_inside_generic_args_is_not_a_top_level_union() {
     assert_eq!(
         parse_type_string("Collection<int|string>"),
         Type::Object(
-            "Collection".to_string(),
+            "Collection".into(),
             vec![Type::Union(vec![Type::Int, Type::String])]
         )
     );
@@ -539,7 +539,7 @@ fn top_level_union_around_a_generic_still_splits_correctly() {
     assert_eq!(
         parse_type_string("Collection<int>|null"),
         Type::Union(vec![
-            Type::Object("Collection".to_string(), vec![Type::Int]),
+            Type::Object("Collection".into(), vec![Type::Int]),
             Type::Null
         ])
     );
@@ -718,7 +718,7 @@ fn a_class_name_merely_starting_with_closure_is_not_mistaken_for_the_callable_sh
     // after `closure`/`callable` (ignoring case) counts.
     assert_eq!(
         parse_type_string("ClosureFactory"),
-        Type::Object("ClosureFactory".to_string(), Vec::new())
+        Type::Object("ClosureFactory".into(), Vec::new())
     );
 }
 

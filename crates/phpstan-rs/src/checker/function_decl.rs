@@ -691,7 +691,7 @@ impl<'a> Checker<'a> {
         if let Some(c) = class_name
             && !is_static
         {
-            locals.insert("this".to_string(), Type::Object(c.to_string(), Vec::new()));
+            locals.insert("this".to_string(), Type::Object(c.into(), Vec::new()));
         }
 
         // A signature's return type already defaults to Mixed when nothing
@@ -1465,7 +1465,7 @@ impl<'a> Checker<'a> {
             let Type::Object(name, _) = m else {
                 return;
             };
-            names.push(name.clone());
+            names.push(name.to_string());
         }
         if self.registry.is_intersection_possible(&names) {
             return;

@@ -146,7 +146,7 @@ fn new_class_spans_in_expr(e: &Expr, out: &mut FxHashSet<Span>) {
 
 fn type_class_names(ty: &Type, out: &mut Vec<String>) {
     if let Type::Object(name, _) = ty {
-        out.push(name.clone());
+        out.push(name.clone().to_string());
     }
     ty.for_each_child(&mut |t| type_class_names(t, out));
 }

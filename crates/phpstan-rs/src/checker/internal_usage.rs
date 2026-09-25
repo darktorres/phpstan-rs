@@ -633,7 +633,7 @@ pub(crate) fn collect_referenced_class_names(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Object(name, _) => {
             if !out.iter().any(|n| n == name) {
-                out.push(name.clone());
+                out.push(name.clone().to_string());
             }
         }
         Type::Union(members) | Type::Intersection(members) => {

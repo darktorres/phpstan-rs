@@ -16,7 +16,7 @@ fn a_case_constant_s_type_is_its_own_singleton() {
     );
     assert_eq!(
         r.lookup_const("Suit", "Hearts").map(|cs| &cs.ty),
-        Some(&Type::EnumCase("Suit".to_string(), "Hearts".to_string()))
+        Some(&Type::EnumCase("Suit".into(), "Hearts".into()))
     );
 }
 

@@ -1587,7 +1587,7 @@ impl<'a> Checker<'a> {
             "get_called_class" if args.is_empty() => {
                 return match &self.current_class {
                     Some(class) => {
-                        Type::ClassString(Box::new(Type::Object(class.clone(), Vec::new())))
+                        Type::ClassString(Box::new(Type::Object(class.clone().into(), Vec::new())))
                     }
                     None => Type::False,
                 };
@@ -1771,9 +1771,7 @@ impl<'a> Checker<'a> {
     fn find_declared_parent_class(&self, class: &str) -> Option<Type> {
         let info = self.registry.classes.get(class)?;
         Some(match info.extends.first() {
-            Some(parent) => {
-                Type::ClassString(Box::new(Type::Object(parent.to_string(), Vec::new())))
-            }
+            Some(parent) => Type::ClassString(Box::new(Type::Object(parent.into(), Vec::new()))),
             None => Type::False,
         })
     }
@@ -2679,7 +2677,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
                 .get(class.as_str())
                 .is_some_and(|info| info.is_final)
             {
-                Type::StringLiteral(class.clone())
+                Type::StringLiteral(class.clone().to_string())
             } else {
                 Type::String
             },
@@ -2688,7 +2686,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
         // on one entirely), so a specific case's class name is always the
         // exact runtime answer - same rule as the `Object` arm's
         // `is_final` branch above, just unconditional.
-        Type::EnumCase(fqn, _) => Some(Type::StringLiteral(fqn.clone())),
+        Type::EnumCase(fqn, _) => Some(Type::StringLiteral(fqn.clone().to_string())),
         Type::Intersection(members) => members.iter().find_map(|m| get_debug_type_for(m, registry)),
         Type::Union(members) => {
             let mut iter = members.iter();

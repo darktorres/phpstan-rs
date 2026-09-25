@@ -82,6 +82,36 @@ impl PartialEq<&str> for Name {
     }
 }
 
+impl PartialEq<String> for Name {
+    fn eq(&self, other: &String) -> bool {
+        *self.0.text == **other
+    }
+}
+
+impl PartialEq<Name> for str {
+    fn eq(&self, other: &Name) -> bool {
+        *self == *other.0.text
+    }
+}
+
+impl PartialEq<Name> for &str {
+    fn eq(&self, other: &Name) -> bool {
+        **self == *other.0.text
+    }
+}
+
+impl PartialEq<Name> for String {
+    fn eq(&self, other: &Name) -> bool {
+        **self == *other.0.text
+    }
+}
+
+impl AsRef<str> for Name {
+    fn as_ref(&self) -> &str {
+        &self.0.text
+    }
+}
+
 impl Hash for Name {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.text.hash(state);
@@ -110,6 +140,33 @@ impl From<&str> for Name {
     /// Interns into the global interner.
     fn from(text: &str) -> Name {
         Interner::global().name(text)
+    }
+}
+
+impl From<String> for Name {
+    /// Interns into the global interner.
+    fn from(text: String) -> Name {
+        Interner::global().name(&text)
+    }
+}
+
+impl From<&String> for Name {
+    /// Interns into the global interner.
+    fn from(text: &String) -> Name {
+        Interner::global().name(text)
+    }
+}
+
+impl From<&Arc<str>> for Name {
+    /// Interns into the global interner.
+    fn from(text: &Arc<str>) -> Name {
+        Interner::global().name(text)
+    }
+}
+
+impl From<Name> for String {
+    fn from(name: Name) -> String {
+        name.as_str().to_string()
     }
 }
 

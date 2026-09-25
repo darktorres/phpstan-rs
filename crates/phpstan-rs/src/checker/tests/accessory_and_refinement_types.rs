@@ -114,16 +114,16 @@ fn union_types_does_not_collapse_a_real_class_intersection() {
     // sitting next to bare Countable in the same union are both real,
     // independent possibilities.
     let intersection = Type::Intersection(vec![
-        Type::Object("Countable".to_string(), Vec::new()),
-        Type::Object("Iterator".to_string(), Vec::new()),
+        Type::Object("Countable".into(), Vec::new()),
+        Type::Object("Iterator".into(), Vec::new()),
     ]);
     assert_eq!(
         union_types(
-            Type::Object("Countable".to_string(), Vec::new()),
+            Type::Object("Countable".into(), Vec::new()),
             intersection.clone()
         ),
         Type::Union(vec![
-            Type::Object("Countable".to_string(), Vec::new()),
+            Type::Object("Countable".into(), Vec::new()),
             intersection
         ])
     );

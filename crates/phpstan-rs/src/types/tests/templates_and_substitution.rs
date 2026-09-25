@@ -23,13 +23,13 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
 
     let intersection_with_t = Type::Intersection(vec![
         Type::TemplateParam(TemplateParam::unbounded("T".to_string())),
-        Type::Object("Countable".to_string(), Vec::new()),
+        Type::Object("Countable".into(), Vec::new()),
     ]);
     assert_eq!(
         substitute_template(&intersection_with_t, &bindings),
         Type::Intersection(vec![
             Type::String,
-            Type::Object("Countable".to_string(), Vec::new())
+            Type::Object("Countable".into(), Vec::new())
         ])
     );
 }
@@ -43,14 +43,14 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
     bindings.insert("T".to_string(), Type::Int);
 
     let box_of_t = Type::Object(
-        "Box".to_string(),
+        "Box".into(),
         vec![Type::TemplateParam(TemplateParam::unbounded(
             "T".to_string(),
         ))],
     );
     assert_eq!(
         substitute_template(&box_of_t, &bindings),
-        Type::Object("Box".to_string(), vec![Type::Int])
+        Type::Object("Box".into(), vec![Type::Int])
     );
 }
 

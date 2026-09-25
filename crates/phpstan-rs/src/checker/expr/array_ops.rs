@@ -648,7 +648,7 @@ impl<'a> Checker<'a> {
         }
         let arg_ty = self.infer_expr(&args[0].value, locals);
         match self.registry.enum_case_for_value(class, &arg_ty) {
-            Some(case) => Type::EnumCase(class.to_string(), case.to_string()),
+            Some(case) => Type::EnumCase(class.into(), case.into()),
             None => fallback,
         }
     }

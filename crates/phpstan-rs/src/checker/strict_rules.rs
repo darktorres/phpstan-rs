@@ -321,8 +321,8 @@ impl<'a> Checker<'a> {
                 Type::Int,
                 Type::Float,
                 Type::String,
-                Type::Object("DateTimeInterface".to_string(), Vec::new()),
-                Type::Object("BcMath\\Number".to_string(), Vec::new()),
+                Type::Object("DateTimeInterface".into(), Vec::new()),
+                Type::Object(("BcMath\\Number".to_string()).into(), Vec::new()),
             ],
         ) {
             return true;
@@ -337,8 +337,8 @@ impl<'a> Checker<'a> {
     }
 
     fn is_comparable_together(&self, left: &Type, right: &Type) -> bool {
-        let number = Type::Object("BcMath\\Number".to_string(), Vec::new());
-        let date = Type::Object("DateTimeInterface".to_string(), Vec::new());
+        let number = Type::Object(("BcMath\\Number".to_string()).into(), Vec::new());
+        let date = Type::Object("DateTimeInterface".into(), Vec::new());
         if self.contains_only(left, &[number.clone(), Type::Int])
             && self.contains_only(right, &[number, Type::Int])
         {

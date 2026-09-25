@@ -57,7 +57,10 @@ fn a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced() {
     let sig = r.lookup_method("App\\Foo", "bar").unwrap();
     assert_eq!(
         sig.params[0].ty,
-        Type::Object("Doctrine\\ORM\\QueryBuilder".to_string(), Vec::new())
+        Type::Object(
+            ("Doctrine\\ORM\\QueryBuilder".to_string()).into(),
+            Vec::new()
+        )
     );
 }
 
@@ -75,10 +78,7 @@ fn a_root_anchored_native_closure_type_hint_is_not_namespace_qualified() {
             }"#,
     );
     let sig = r.lookup_method("App\\Foo", "bar").unwrap();
-    assert_eq!(
-        sig.params[0].ty,
-        Type::Object("Closure".to_string(), Vec::new())
-    );
+    assert_eq!(sig.params[0].ty, Type::Object("Closure".into(), Vec::new()));
 }
 
 #[test]
@@ -100,7 +100,10 @@ fn a_bare_unqualified_closure_type_hint_defers_to_a_real_use_import() {
     let sig = r.lookup_method("App\\Foo", "bar").unwrap();
     assert_eq!(
         sig.params[0].ty,
-        Type::Object("Some\\Other\\Namespace_\\Closure".to_string(), Vec::new())
+        Type::Object(
+            ("Some\\Other\\Namespace_\\Closure".to_string()).into(),
+            Vec::new()
+        )
     );
 }
 
@@ -141,7 +144,7 @@ fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
     assert_eq!(sig.params[0].name, "connection".into());
     assert_eq!(
         sig.params[0].ty,
-        Type::Object("PgSql\\Connection".to_string(), Vec::new()),
+        Type::Object(("PgSql\\Connection".to_string()).into(), Vec::new()),
         "the surviving type must be the modern (second) occurrence's, not the legacy (first, untyped) one"
     );
     assert_eq!(sig.params[1].name, "query".into());
@@ -253,7 +256,7 @@ fn a_language_level_type_aware_override_wins_even_when_the_stale_doc_type_is_res
     );
     assert_eq!(
         r.functions["finfo_file"].params[0].ty,
-        Type::Object("finfo".to_string(), Vec::new())
+        Type::Object("finfo".into(), Vec::new())
     );
 }
 
@@ -278,7 +281,7 @@ fn an_override_is_not_spliced_onto_an_unrelated_earlier_declaration_s_docblock()
     );
     assert_eq!(
         r.functions["later"].params[0].ty,
-        Type::Object("finfo".to_string(), Vec::new()),
+        Type::Object("finfo".into(), Vec::new()),
         "later's override must still win via the native-hint-only path"
     );
 }
@@ -479,7 +482,7 @@ fn an_array_doc_member_with_a_plain_class_key_is_also_kept() {
     assert_eq!(
         sig.params[0].ty,
         Type::Array(
-            Box::new(Type::Object("Bar".to_string(), Vec::new())),
+            Box::new(Type::Object("Bar".into(), Vec::new())),
             Box::new(Type::String)
         )
     );
@@ -525,7 +528,7 @@ fn a_doc_type_naming_a_real_subclass_of_the_native_hint_is_not_discarded() {
     );
     assert_eq!(
         r.classes["ActivityService"].methods["getRepository"].return_type,
-        Type::Object("ActivityRepository".to_string(), Vec::new())
+        Type::Object("ActivityRepository".into(), Vec::new())
     );
 }
 

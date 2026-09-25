@@ -19,7 +19,7 @@ use syntax::name_resolution::NameContext;
 /// type-bearing tag, not a new gap.
 pub(crate) fn object_class_names(ty: Type) -> Vec<String> {
     match ty {
-        Type::Object(name, _) => vec![name],
+        Type::Object(name, _) => vec![name.to_string()],
         Type::Union(members) => members.into_iter().flat_map(object_class_names).collect(),
         _ => Vec::new(),
     }

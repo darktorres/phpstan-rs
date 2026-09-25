@@ -238,13 +238,13 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
             if name == "Traversable"
                 && matches!(excluded, Type::Object(excl, _) if excl == "IteratorAggregate") =>
         {
-            Type::Object("Iterator".to_string(), Vec::new())
+            Type::Object("Iterator".into(), Vec::new())
         }
         Type::Object(name, _)
             if name == "Traversable"
                 && matches!(excluded, Type::Object(excl, _) if excl == "Iterator") =>
         {
-            Type::Object("IteratorAggregate".to_string(), Vec::new())
+            Type::Object("IteratorAggregate".into(), Vec::new())
         }
         // Plain `bool` is exactly the two-element set `{true, false}` -
         // unlike the general "a type covering multiple distinct values

@@ -113,8 +113,8 @@ pub(crate) fn build_type_aliases(
 /// written, not a fresh one per site.
 pub(crate) fn mark_template_params(ty: Type, params: &FxHashMap<String, TemplateParam>) -> Type {
     match ty {
-        Type::Object(name, _) if params.contains_key(&name) => {
-            Type::TemplateParam(params[&name].clone())
+        Type::Object(name, _) if params.contains_key(name.as_str()) => {
+            Type::TemplateParam(params[name.as_str()].clone())
         }
         // Every nested position - without this, a template written
         // inside a generic argument, `object{key: T}`, `Closure(self): T`

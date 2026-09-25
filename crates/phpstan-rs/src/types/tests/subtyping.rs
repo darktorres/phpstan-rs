@@ -3,12 +3,12 @@ use super::super::*;
 
 #[test]
 fn class_string_is_interchangeable_with_plain_string_both_ways() {
-    let cs = Type::ClassString(Box::new(Type::Object("Foo".to_string(), Vec::new())));
+    let cs = Type::ClassString(Box::new(Type::Object("Foo".into(), Vec::new())));
     assert!(is_subtype(&cs, &Type::String));
     assert!(is_subtype(&Type::String, &cs));
     assert!(is_subtype(&Type::StringLiteral("Foo".to_string()), &cs));
     assert!(is_subtype(&cs, &cs));
-    let cs_other = Type::ClassString(Box::new(Type::Object("Bar".to_string(), Vec::new())));
+    let cs_other = Type::ClassString(Box::new(Type::Object("Bar".into(), Vec::new())));
     assert!(!is_subtype(&cs, &cs_other));
 }
 
@@ -65,7 +65,7 @@ fn literal_is_subtype_of_its_general_type() {
 fn everything_is_subtype_of_mixed() {
     assert!(is_subtype(&Type::String, &Type::Mixed(false)));
     assert!(is_subtype(
-        &Type::Object("Foo".to_string(), Vec::new()),
+        &Type::Object("Foo".into(), Vec::new()),
         &Type::Mixed(false)
     ));
 }
@@ -79,9 +79,9 @@ fn an_unbounded_template_param_is_still_unconditionally_compatible_either_way() 
     // every one of these into a false positive.
     let t = Type::TemplateParam(TemplateParam::unbounded("T".to_string()));
     assert!(is_subtype(&t, &Type::String));
-    assert!(is_subtype(&t, &Type::Object("Foo".to_string(), Vec::new())));
+    assert!(is_subtype(&t, &Type::Object("Foo".into(), Vec::new())));
     assert!(is_subtype(&Type::String, &t));
-    assert!(is_subtype(&Type::Object("Foo".to_string(), Vec::new()), &t));
+    assert!(is_subtype(&Type::Object("Foo".into(), Vec::new()), &t));
 }
 
 #[test]

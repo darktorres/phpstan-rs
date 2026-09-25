@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 pub use syntax::ast::ClassKind;
+pub use syntax::name::Name;
 
 mod conditional;
 mod display;
@@ -87,7 +88,7 @@ pub enum Type {
     // (unspecified/erased, as real PHPStan treats it). Deliberately
     // invariant, call-site-only substitution - no variance checking or
     // template bound enforcement.
-    Object(String, Vec<Type>),
+    Object(Name, Vec<Type>),
     // The native `object` type: an instance of no particular class.
     ObjectWithoutClass,
     // A `resource` (file/curl/... handle); `closed` for PHPDoc's
@@ -99,7 +100,7 @@ pub enum Type {
     // from the coarser `Object(Suit, [])`. Not a subtype target in
     // `types::is_subtype`'s class-hierarchy sense; `registry::is_assignable`
     // handles `EnumCase -> Object(enum_fqn)` assignability instead.
-    EnumCase(String, String),
+    EnumCase(Name, Name),
     // `None` = unknown shape; `Some(sig)` = a parsed `Closure(int):
     // string`/`callable(int): string` signature. `Arc` since `Type` is
     // cloned pervasively and a parsed shape can be non-trivially sized.
@@ -454,7 +455,7 @@ impl Type {
             Type::StringLiteral(_) => "string".to_string(),
             Type::True | Type::False => "bool".to_string(),
             Type::Array(..) | Type::ArrayShape(_) => "array".to_string(),
-            Type::Object(class, _) | Type::EnumCase(class, _) => class.clone(),
+            Type::Object(class, _) | Type::EnumCase(class, _) => class.to_string(),
             Type::Intersection(members) => members
                 .iter()
                 .find(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
@@ -607,7 +608,7 @@ impl Type {
     /// `Display` renders this exact pair as `Closure(params): return`.
     pub(crate) fn closure_literal(sig: CallableSig) -> Type {
         Type::Intersection(vec![
-            Type::Object("Closure".to_string(), Vec::new()),
+            Type::Object("Closure".into(), Vec::new()),
             Type::Callable(Some(Arc::new(sig))),
         ])
     }

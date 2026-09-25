@@ -41,13 +41,13 @@ fn enum_string_is_a_class_string_bound_to_unit_enum() {
     // own registry sees already synthesizes `implements UnitEnum`.
     assert_eq!(
         parse_type_string("enum-string"),
-        Type::ClassString(Box::new(Type::Object("UnitEnum".to_string(), vec![])))
+        Type::ClassString(Box::new(Type::Object("UnitEnum".into(), vec![])))
     );
     assert_eq!(
         parse_type_string("enum-string<Suit>"),
         Type::ClassString(Box::new(Type::Intersection(vec![
-            Type::Object("Suit".to_string(), vec![]),
-            Type::Object("UnitEnum".to_string(), vec![]),
+            Type::Object("Suit".into(), vec![]),
+            Type::Object("UnitEnum".into(), vec![]),
         ])))
     );
 }
@@ -190,7 +190,7 @@ fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_typ
 fn class_string_with_a_generic_argument_is_tracked_precisely() {
     assert_eq!(
         parse_type_string("class-string<Foo>"),
-        Type::ClassString(Box::new(Type::Object("Foo".to_string(), Vec::new())))
+        Type::ClassString(Box::new(Type::Object("Foo".into(), Vec::new())))
     );
     // Two or more args isn't real PHPStan syntax - falls back to plain
     // string rather than guessing which one is meant.
@@ -323,7 +323,7 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
         parse_type_string("class-string-map<Foo, int>"),
         Type::Array(
             Box::new(Type::ClassString(Box::new(Type::Object(
-                "Foo".to_string(),
+                "Foo".into(),
                 Vec::new()
             )))),
             Box::new(Type::Int)

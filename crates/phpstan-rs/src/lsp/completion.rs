@@ -706,7 +706,7 @@ pub(super) fn build_member_probe(
         let resolved =
             super::navigation::resolve_class_ref(name, class_name.as_deref(), &ctx, registry)?;
         return Some(MemberProbe::Resolved {
-            ty: Type::Object(resolved, Vec::new()),
+            ty: Type::Object(resolved.into(), Vec::new()),
             is_static,
             class: class_name,
         });

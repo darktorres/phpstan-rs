@@ -123,7 +123,9 @@ pub fn promote_class_string_literals(
 ) -> Type {
     match (param_ty, arg_ty) {
         (Type::ClassString(_), Type::StringLiteral(s)) => match resolve_class(s) {
-            Some(canonical) => Type::ClassString(Box::new(Type::Object(canonical, Vec::new()))),
+            Some(canonical) => {
+                Type::ClassString(Box::new(Type::Object(canonical.into(), Vec::new())))
+            }
             None => arg_ty.clone(),
         },
         (Type::Array(_, inner_p), Type::Array(key, inner_a)) => Type::Array(

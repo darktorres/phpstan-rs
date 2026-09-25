@@ -193,7 +193,7 @@ fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> FxHashMap<Strin
 /// the target class directly (every real corpus association does).
 fn association_target_from_native_type(ty: &Type) -> Option<String> {
     match ty {
-        Type::Object(class, _) => Some(class.clone()),
+        Type::Object(class, _) => Some(class.clone().to_string()),
         Type::Union(members) => members.iter().find_map(association_target_from_native_type),
         _ => None,
     }

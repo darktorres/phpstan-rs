@@ -81,7 +81,7 @@ impl<'a> Checker<'a> {
                     let class = match &unwrap_grouping(&recv_item.value).kind {
                         ExprKind::Literal(Literal::String(name)) => name.to_string(),
                         _ => match self.infer_expr(&recv_item.value, locals) {
-                            Type::Object(class, _) => class,
+                            Type::Object(class, _) => class.to_string(),
                             _ => return None,
                         },
                     };

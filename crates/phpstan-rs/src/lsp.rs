@@ -84,7 +84,7 @@ use protocol::{
 /// receiver resolves to nothing, never a guess.
 fn type_to_classes(ty: &Type, out: &mut Vec<String>) {
     match ty {
-        Type::Object(class, _) => out.push(class.clone()),
+        Type::Object(class, _) => out.push(class.clone().to_string()),
         Type::Union(members) | Type::Intersection(members) => {
             for m in members {
                 type_to_classes(m, out);

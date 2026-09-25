@@ -1555,7 +1555,7 @@ impl ClassInfo {
 fn bind_self_ref(ty: &Type, owner: &str) -> Type {
     match ty {
         Type::SelfRef(args) => Type::Object(
-            owner.to_string(),
+            owner.into(),
             args.iter().map(|a| bind_self_ref(a, owner)).collect(),
         ),
         other => other.map_children(&mut |t| bind_self_ref(t, owner)),
@@ -1725,10 +1725,10 @@ impl Registry {
 fn bind_pseudo_refs(ty: &Type, class: &str) -> Type {
     match ty {
         Type::SelfRef(args) | Type::StaticRef(args) => Type::Object(
-            class.to_string(),
+            class.into(),
             args.iter().map(|a| bind_pseudo_refs(a, class)).collect(),
         ),
-        Type::This => Type::Object(class.to_string(), Vec::new()),
+        Type::This => Type::Object(class.into(), Vec::new()),
         other => other.map_children(&mut |t| bind_pseudo_refs(t, class)),
     }
 }

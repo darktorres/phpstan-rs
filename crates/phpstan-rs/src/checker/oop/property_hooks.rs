@@ -258,10 +258,7 @@ impl<'a> Checker<'a> {
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
         let mut locals = Locals::default();
-        locals.insert(
-            "this".to_string(),
-            Type::Object(fqn.to_string(), Vec::new()),
-        );
+        locals.insert("this".to_string(), Type::Object(fqn.into(), Vec::new()));
         let declared_return = Some(prop_sig.ty.clone());
         let previous_generator_flag = self.current_function_is_generator;
         let previous_declared_return_type = std::mem::replace(
@@ -564,10 +561,7 @@ impl<'a> Checker<'a> {
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
         let mut locals = Locals::default();
-        locals.insert(
-            "this".to_string(),
-            Type::Object(fqn.to_string(), Vec::new()),
-        );
+        locals.insert("this".to_string(), Type::Object(fqn.into(), Vec::new()));
         let param_name = param
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "value".to_string().into());

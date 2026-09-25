@@ -314,7 +314,7 @@ fn an_ancestors_template_parameterized_type_is_inherited_when_a_concrete_binding
     let sig = &r.classes["ConcreteContainer11"].methods["get"];
     assert_eq!(
         sig.return_type,
-        Type::Object("Widget11".to_string(), Vec::new()),
+        Type::Object("Widget11".into(), Vec::new()),
         "expected the ancestor's own scoped TemplateParam to resolve to the concrete bound type immediately, got {:?}",
         sig.return_type
     );
@@ -396,7 +396,7 @@ fn an_ancestors_object_type_naming_a_different_class_than_the_native_hint_is_nev
     let sig = &r.classes["Concrete11"].methods["getFactory"];
     assert_eq!(
         sig.return_type,
-        Type::Object("SpecificFactory11".to_string(), Vec::new())
+        Type::Object("SpecificFactory11".into(), Vec::new())
     );
 }
 

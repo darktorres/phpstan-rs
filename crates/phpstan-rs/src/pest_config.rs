@@ -70,13 +70,13 @@ fn this_type_from_class_names(names: Vec<String>) -> Option<Type> {
     let first = iter.next()?;
     let rest: Vec<String> = iter.collect();
     if rest.is_empty() {
-        Some(Type::Object(first, Vec::new()))
+        Some(Type::Object(first.into(), Vec::new()))
     } else {
         let mut all = vec![first];
         all.extend(rest);
         Some(Type::Intersection(
             all.into_iter()
-                .map(|n| Type::Object(n, Vec::new()))
+                .map(|n| Type::Object(n.into(), Vec::new()))
                 .collect(),
         ))
     }
@@ -304,7 +304,7 @@ impl PestConfig {
         }
         const DEFAULT: &str = "PHPUnit\\Framework\\TestCase";
         if registry.classes.contains_key(DEFAULT) {
-            Type::Object(DEFAULT.to_string(), Vec::new())
+            Type::Object(DEFAULT.into(), Vec::new())
         } else {
             Type::Mixed(false)
         }

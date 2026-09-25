@@ -67,13 +67,13 @@ impl<'a> Checker<'a> {
                 match row {
                     Some(Type::ArrayShape(shape)) => {
                         let widened = shape.map_types(&mut widen_for_text_protocol);
-                        Type::Object("mysqli_result".to_string(), vec![Type::ArrayShape(widened)])
+                        Type::Object("mysqli_result".into(), vec![Type::ArrayShape(widened)])
                     }
-                    _ => Type::Object("mysqli_result".to_string(), Vec::new()),
+                    _ => Type::Object("mysqli_result".into(), Vec::new()),
                 }
             }
             None => Type::Union(vec![
-                Type::Object("mysqli_result".to_string(), Vec::new()),
+                Type::Object("mysqli_result".into(), Vec::new()),
                 Type::True,
             ]),
         };

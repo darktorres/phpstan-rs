@@ -9,7 +9,7 @@ use crate::registry::function_sig::{
     resolve_type_with_parsed_native, substitute_type_aliases,
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
-use crate::types::{self, AccessoryKind, TemplateParam, Type};
+use crate::types::{self, AccessoryKind, Name, TemplateParam, Type};
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use syntax::intern::intern;
@@ -1281,7 +1281,7 @@ impl ClassInfo {
         // (`BackedEnum`) likewise - none declared in source. Without
         // these, undefined-static-method detection would flag every real
         // `Enum::cases()`/`::tryFrom()` call.
-        let self_ty = Type::Object(fqn.clone(), Vec::new());
+        let self_ty = Type::Object(fqn.clone().into(), Vec::new());
         // Real PHPStan's own `functionMap.php` declares
         // `UnitEnum::cases()` as `list<static>` outright - a bare,
         // unmarked `Array` here would leave every caller's result
@@ -1373,7 +1373,7 @@ impl ClassInfo {
                     // `from()` throws a real `ValueError` when no case
                     // matches - unlike `tryFrom()`, which returns `null`
                     // instead.
-                    throws: Some(Type::Object("ValueError".to_string(), Vec::new())),
+                    throws: Some(Type::Object("ValueError".into(), Vec::new())),
                     assert_if_true: Vec::new(),
                     assert_if_false: Vec::new(),
                     assert: Vec::new(),
@@ -1445,12 +1445,12 @@ impl ClassInfo {
             consts.insert(
                 case.name.clone(),
                 ConstSig {
-                    ty: Type::EnumCase(fqn.clone(), case.name.to_string()),
+                    ty: Type::EnumCase(Name::from(&*fqn), Name::from(&*case.name)),
                     visibility: Visibility::Public,
                     is_final: true,
                     native_ty: None,
                     has_phpdoc_type: false,
-                    value_ty: Type::EnumCase(fqn.clone(), case.name.to_string()),
+                    value_ty: Type::EnumCase(Name::from(&*fqn), Name::from(&*case.name)),
                     // A case has no doc-comment/`@internal`/`@deprecated`
                     // convention of its own in real PHP either - same
                     // reasoning as its always-`Visibility::Public` above.

@@ -78,7 +78,7 @@ fn a_bare_entity_select_is_the_entity_object_directly() {
     };
     let items = parse_select_items(&["t".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
-    assert_eq!(ty, Type::Object("TagEntity".to_string(), Vec::new()));
+    assert_eq!(ty, Type::Object("TagEntity".into(), Vec::new()));
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn count_never_needs_its_operand_to_resolve() {
         Type::ArrayShape(Shape::from_named(vec![
             (
                 "0".to_string(),
-                Type::Object("TagEntity".to_string(), Vec::new()),
+                Type::Object("TagEntity".into(), Vec::new()),
                 false
             ),
             ("counter".to_string(), Type::IntRange(Some(0), None), false),
@@ -174,7 +174,7 @@ fn an_entity_plus_scalar_field_from_a_real_join_alias() {
         Type::ArrayShape(Shape::from_named(vec![
             (
                 "0".to_string(),
-                Type::Object("TagEntity".to_string(), Vec::new()),
+                Type::Object("TagEntity".into(), Vec::new()),
                 false
             ),
             ("counter".to_string(), Type::IntRange(Some(0), None), false),
@@ -546,8 +546,8 @@ fn a_polymorphic_from_produces_a_union_across_every_mapped_subclass() {
     assert_eq!(
         ty,
         Type::Union(vec![
-            Type::Object("CatEntity".to_string(), Vec::new()),
-            Type::Object("DogEntity".to_string(), Vec::new()),
+            Type::Object("CatEntity".into(), Vec::new()),
+            Type::Object("DogEntity".into(), Vec::new()),
         ])
     );
 }
@@ -566,7 +566,7 @@ fn an_ordinary_from_never_produces_a_union() {
     };
     let items = parse_select_items(&["t".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
-    assert_eq!(ty, Type::Object("TagEntity".to_string(), Vec::new()));
+    assert_eq!(ty, Type::Object("TagEntity".into(), Vec::new()));
 }
 
 #[test]
@@ -583,7 +583,7 @@ fn a_scalar_subquery_select_item_resolves_its_own_single_column_type() {
         Type::ArrayShape(Shape::from_named(vec![
             (
                 "0".to_string(),
-                Type::Object("TagEntity".to_string(), Vec::new()),
+                Type::Object("TagEntity".into(), Vec::new()),
                 false
             ),
             ("firstImageId".to_string(), Type::Int, false),

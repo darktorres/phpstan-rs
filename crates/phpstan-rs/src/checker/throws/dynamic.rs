@@ -31,7 +31,7 @@ use syntax::ast::unwrap_grouping;
 use syntax::ast::{Arg, ExprKind, Literal, UnaryOp};
 
 fn throwable(class: &str) -> Type {
-    Type::Object(class.to_string(), Vec::new())
+    Type::Object(class.into(), Vec::new())
 }
 
 /// A literal integer argument's value, or `None` for anything else (a

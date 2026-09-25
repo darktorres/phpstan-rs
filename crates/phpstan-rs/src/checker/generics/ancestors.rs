@@ -655,7 +655,7 @@ fn collect_class_names(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Object(name, args) => {
             if !name.starts_with("$$") {
-                out.push(name.clone());
+                out.push(name.clone().to_string());
             }
             for a in args {
                 collect_class_names(a, out);

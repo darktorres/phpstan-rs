@@ -610,7 +610,7 @@ impl<'a> Checker<'a> {
             };
             let native_ty = self
                 .resolve_type_hint(param.type_hint.as_ref().map(TypeHint::to_string).as_deref());
-            let closure_ty = Type::Object("Closure".to_string(), Vec::new());
+            let closure_ty = Type::Object("Closure".into(), Vec::new());
             if !self.param_type_could_satisfy(&native_ty, &closure_ty) {
                 self.report(
                     label.to_string(),

@@ -656,7 +656,7 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
     match &expr.kind {
         ExprKind::New(callee, _args) => {
             if let ExprKind::Name(name) = &unwrap_grouping(callee).kind {
-                return Type::Object(ctx.resolve(name), vec![]);
+                return Type::Object(ctx.resolve(name).into(), vec![]);
             }
             Type::Mixed(false)
         }

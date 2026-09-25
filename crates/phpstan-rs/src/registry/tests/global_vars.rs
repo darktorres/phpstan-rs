@@ -50,7 +50,7 @@ fn a_single_class_object_global_resolves_to_that_class() {
     )]);
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 
@@ -68,8 +68,8 @@ fn multiple_distinct_classes_across_sites_resolve_to_a_union() {
     match global_type(&registry, "template") {
         Some(Type::Union(members)) => {
             assert_eq!(members.len(), 2, "got: {members:?}");
-            assert!(members.contains(&Type::Object("Foo".to_string(), vec![])));
-            assert!(members.contains(&Type::Object("Bar".to_string(), vec![])));
+            assert!(members.contains(&Type::Object("Foo".into(), vec![])));
+            assert!(members.contains(&Type::Object("Bar".into(), vec![])));
         }
         other => panic!("expected a Union of Foo/Bar, got: {other:?}"),
     }
@@ -119,7 +119,7 @@ fn a_function_body_site_requires_its_own_global_declaration() {
     )]);
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 
@@ -144,7 +144,7 @@ fn a_closures_own_global_does_not_leak_to_the_outer_scope() {
     // still found (it's its own valid scope), not that it leaks anywhere.
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 
@@ -168,7 +168,7 @@ fn a_closure_that_does_not_redeclare_global_does_not_see_the_outer_scope_site() 
     )]);
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 
@@ -190,7 +190,7 @@ fn new_anonymous_class_methods_get_the_same_scope_boundary_treatment() {
     )]);
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 
@@ -211,7 +211,7 @@ fn a_shape_field_picks_up_a_helpers_registry_resolved_return_type() {
                 .iter()
                 .find(|(k, _, _)| k == "key")
                 .expect("key field");
-            assert_eq!(ty, &Type::Object("Foo".to_string(), vec![]));
+            assert_eq!(ty, &Type::Object("Foo".into(), vec![]));
         }
         other => panic!("expected an ArrayShape, got: {other:?}"),
     }
@@ -232,7 +232,7 @@ fn a_static_factory_call_and_a_class_constant_both_resolve() {
     )]);
     assert_eq!(
         global_type(&registry, "g1"),
-        Some(&Type::Object("Foo".to_string(), vec![]))
+        Some(&Type::Object("Foo".into(), vec![]))
     );
     assert_eq!(global_type(&registry, "g2"), Some(&Type::IntLiteral(1)));
 }
@@ -296,7 +296,7 @@ fn a_genuine_object_and_array_conflict_resolves_to_a_union_not_mixed() {
     )]);
     match global_type(&registry, "g") {
         Some(Type::Union(members)) => {
-            assert!(members.contains(&Type::Object("Foo".to_string(), vec![])));
+            assert!(members.contains(&Type::Object("Foo".into(), vec![])));
             assert!(members.iter().any(|m| matches!(m, Type::ArrayShape(_))));
         }
         other => panic!("expected a Union of Object/ArrayShape, got: {other:?}"),
@@ -372,7 +372,7 @@ fn a_top_level_assignment_reachable_via_at_least_one_genuine_path_is_included() 
     // top-level include of `a.php` - that one real path is enough.
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 
@@ -387,7 +387,7 @@ fn a_file_with_no_incoming_include_edges_defaults_to_included() {
     )]);
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 
@@ -413,7 +413,7 @@ fn a_dynamic_include_target_is_a_dead_end_not_a_false_resolution() {
     // way, so it still defaults to included (unaffected by `b.php`).
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 
@@ -437,7 +437,7 @@ fn a_constant_then_literal_suffix_include_target_resolves_by_suffix_match() {
     ]);
     assert_eq!(
         global_type(&registry, "template"),
-        Some(&Type::Object("Template".to_string(), vec![]))
+        Some(&Type::Object("Template".into(), vec![]))
     );
 }
 

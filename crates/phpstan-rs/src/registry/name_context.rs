@@ -30,7 +30,7 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .collect(),
         ),
         Type::Object(name, args) => Type::Object(
-            ctx.resolve(&name),
+            ctx.resolve(&name).into(),
             args.into_iter()
                 .map(|a| resolve_names_in_type(a, ctx))
                 .collect(),

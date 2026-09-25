@@ -116,7 +116,7 @@ fn string_literals(ty: &Type) -> Option<Vec<&str>> {
 
 impl<'a> Checker<'a> {
     fn is_psr3_logger(&self, ty: &Type) -> bool {
-        let logger = Type::Object("Psr\\Log\\LoggerInterface".to_string(), Vec::new());
+        let logger = Type::Object(("Psr\\Log\\LoggerInterface".to_string()).into(), Vec::new());
         !matches!(ty, Type::Mixed(_))
             && self.registry.is_super_type_of(&logger, ty) == crate::registry::Trinary::Yes
     }
@@ -188,10 +188,9 @@ impl<'a> Checker<'a> {
                     .iter()
                     .filter(|(key, _)| crate::checker::narrowing::is_real_variable_key(key))
                     .filter(|(_, ty)| {
-                        self.registry.is_super_type_of(
-                            &Type::Object("Throwable".to_string(), Vec::new()),
-                            ty,
-                        ) == crate::registry::Trinary::Yes
+                        self.registry
+                            .is_super_type_of(&Type::Object("Throwable".into(), Vec::new()), ty)
+                            == crate::registry::Trinary::Yes
                     })
                     .map(|(name, _)| name.clone())
                     .min()
@@ -366,7 +365,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if key == "exception" {
-                let throwable = Type::Object("Throwable".to_string(), Vec::new());
+                let throwable = Type::Object("Throwable".into(), Vec::new());
                 if !matches!(value, Type::Mixed(_))
                     && self.registry.is_super_type_of(&throwable, value)
                         != crate::registry::Trinary::Yes

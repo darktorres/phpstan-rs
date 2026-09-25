@@ -567,7 +567,7 @@ impl<'a> Checker<'a> {
             matches!(crate::phpdoc_grammar::parse_type_prefix(&raw),
                 (Some(node), _, _) if self.type_node_unresolvable(&node, Some(class)))
         });
-        let class_ty = Type::Object(class.to_string(), Vec::new());
+        let class_ty = Type::Object(class.into(), Vec::new());
         let resolved = self.resolve_pseudo(out, class);
         // An unresolvable type is reported as such, not also as a
         // mismatch against the class.

@@ -355,7 +355,7 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
                 Box::new(Type::unknown_array_key()),
                 Box::new(Type::Mixed(false)),
             ),
-            Type::Object("Countable".to_string(), Vec::new()),
+            Type::Object("Countable".into(), Vec::new()),
         ])),
         // Real PHP's own native `iterable` type hint, defined
         // as exactly `array|Traversable` - the same target `types::
@@ -367,7 +367,7 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
                 Box::new(Type::unknown_array_key()),
                 Box::new(Type::Mixed(false)),
             ),
-            Type::Object("Traversable".to_string(), Vec::new()),
+            Type::Object("Traversable".into(), Vec::new()),
         ])),
         "is_null" => Some(Type::Null),
         "is_object" => Some(Type::ObjectWithoutClass),

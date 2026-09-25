@@ -223,7 +223,7 @@ impl<'a> Checker<'a> {
     fn anonymous_class_type(&self, span: Span) -> Type {
         self.anonymous_class_names
             .get(&span)
-            .map(|name| Type::Object(name.clone(), Vec::new()))
+            .map(|name| Type::Object(name.clone().into(), Vec::new()))
             .unwrap_or(Type::Mixed(false))
     }
 
@@ -634,7 +634,7 @@ impl<'a> Checker<'a> {
                         // since `current_class` has no other way to
                         // reflect Pest's file-scoped binding.
                         let scope_class = match &this_ty {
-                            Type::Object(name, _) => Some(name.clone()),
+                            Type::Object(name, _) => Some(name.to_string()),
                             _ => None,
                         };
                         self.check_closure_literal_with_this_and_scope(
@@ -2302,7 +2302,7 @@ impl<'a> Checker<'a> {
                     self.registry
                         .lookup_class(&class)
                         .map(|(canonical, _)| canonical.to_string())
-                        .unwrap_or(class)
+                        .unwrap_or(class.to_string())
                 });
                 // A dynamic target (`new $className()`) or an unresolved
                 // pseudo-type (`new parent()` with no parent class) has no
@@ -2862,7 +2862,10 @@ impl<'a> Checker<'a> {
                         .into_iter()
                         .map(|n| {
                             if n == "class" {
-                                Type::ClassString(Box::new(Type::Object(class.clone(), Vec::new())))
+                                Type::ClassString(Box::new(Type::Object(
+                                    class.clone().into(),
+                                    Vec::new(),
+                                )))
                             } else {
                                 self.static_member_of_class(e, &class, None, &n, false, label)
                             }
@@ -2885,7 +2888,9 @@ impl<'a> Checker<'a> {
                 // `Foo::class` / `$obj::class` is a string naming the
                 // class, not a member.
                 match self.resolve_static_target_class(target, locals, label) {
-                    Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
+                    Some(class) => {
+                        Type::ClassString(Box::new(Type::Object(class.into(), Vec::new())))
+                    }
                     None => Type::String,
                 }
             }
@@ -4413,7 +4418,7 @@ impl<'a> Checker<'a> {
                         self.check_expr(inner, locals, label);
                     }
                 }
-                Type::Object("Closure".to_string(), Vec::new())
+                Type::Object("Closure".into(), Vec::new())
             }
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::IntLiteral(*n),
@@ -4460,7 +4465,7 @@ impl<'a> Checker<'a> {
             // `Closure`-typed parameter correctly accepts it. A closure/
             // arrow-fn literal additionally carries its own signature
             // (`closure_literal_type`).
-            ExprKind::FirstClassCallable(_) => Type::Object("Closure".to_string(), Vec::new()),
+            ExprKind::FirstClassCallable(_) => Type::Object("Closure".into(), Vec::new()),
             ExprKind::Closure {
                 params,
                 uses,
@@ -4605,7 +4610,7 @@ impl<'a> Checker<'a> {
                             .map(|info| info.templates.as_slice())
                             .unwrap_or(&[]);
                         if templates.is_empty() {
-                            Type::Object(canonical, Vec::new())
+                            Type::Object(canonical.into(), Vec::new())
                         } else {
                             let mut bindings: TemplateBindings = TemplateBindings::default();
                             if let Some(sig) =
@@ -4662,7 +4667,7 @@ impl<'a> Checker<'a> {
                                         .unwrap_or(Type::Mixed(false))
                                 })
                                 .collect();
-                            Type::Object(canonical, bound_args)
+                            Type::Object(canonical.into(), bound_args)
                         }
                     }
                 },
@@ -4783,7 +4788,9 @@ impl<'a> Checker<'a> {
             }
             ExprKind::ClassNameFetch(target) => {
                 match self.infer_static_target_class(target, locals) {
-                    Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
+                    Some(class) => {
+                        Type::ClassString(Box::new(Type::Object(class.into(), Vec::new())))
+                    }
                     None => Type::String,
                 }
             }
@@ -5885,7 +5892,7 @@ pub(crate) fn invalid_array_key_description(
 ) -> Option<String> {
     match ty {
         Type::Array(..) | Type::ArrayShape(_) => Some("array".to_string()),
-        Type::Object(name, _) => Some(name.clone()),
+        Type::Object(name, _) => Some(name.clone().to_string()),
         Type::Float
             if php_version.is_some_and(|v| {
                 crate::php_version::PhpFeature::DeprecatesFloatArrayKey.is_available(v)
@@ -6597,7 +6604,7 @@ impl<'a> Checker<'a> {
     /// containing either - counts too, not just the exact
     /// `UnhandledMatchError` class name.
     fn match_unhandled_error_is_exempted(&self) -> bool {
-        let unhandled_match_error = Type::Object("UnhandledMatchError".to_string(), Vec::new());
+        let unhandled_match_error = Type::Object("UnhandledMatchError".into(), Vec::new());
         self.current_catch_types
             .iter()
             .any(|caught| self.registry.is_assignable(&unhandled_match_error, caught))
@@ -6873,10 +6880,10 @@ fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
 fn bind_static_ref(ty: &Type, class: &str) -> Type {
     match ty {
         Type::StaticRef(args) => Type::Object(
-            class.to_string(),
+            class.into(),
             args.iter().map(|a| bind_static_ref(a, class)).collect(),
         ),
-        Type::This => Type::Object(class.to_string(), Vec::new()),
+        Type::This => Type::Object(class.into(), Vec::new()),
         other => other.map_children(&mut |t| bind_static_ref(t, class)),
     }
 }

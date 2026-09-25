@@ -29,7 +29,7 @@ impl<'a> Checker<'a> {
                     None => raw,
                 }
             }
-            _ => Type::Object(self.name_ctx.resolve(name), Vec::new()),
+            _ => Type::Object(self.name_ctx.resolve(name).into(), Vec::new()),
         }
     }
 
@@ -296,7 +296,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         match self.resolve_name_expr(class_name) {
-            Type::Object(class, _) => Some(class),
+            Type::Object(class, _) => Some(class.to_string()),
             _ => None,
         }
     }
@@ -376,20 +376,19 @@ impl<'a> Checker<'a> {
     ) -> Type {
         let recurse = |t: &Type| self.resolve_pseudo_at(t, declaring_class, called_class);
         match ty {
-            Type::SelfRef(args) => Type::Object(
-                declaring_class.to_string(),
-                args.iter().map(recurse).collect(),
-            ),
-            Type::StaticRef(args) => {
-                Type::Object(called_class.to_string(), args.iter().map(recurse).collect())
+            Type::SelfRef(args) => {
+                Type::Object(declaring_class.into(), args.iter().map(recurse).collect())
             }
-            Type::This => Type::Object(called_class.to_string(), Vec::new()),
+            Type::StaticRef(args) => {
+                Type::Object(called_class.into(), args.iter().map(recurse).collect())
+            }
+            Type::This => Type::Object(called_class.into(), Vec::new()),
             Type::ParentRef => self
                 .registry
                 .classes
                 .get(declaring_class)
                 .and_then(|info| info.extends.first())
-                .map(|p| Type::Object(p.to_string(), Vec::new()))
+                .map(|p| Type::Object(p.into(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
             // Every nested position too: a generic class's own template
             // arguments (`SortEntry<self, string>`), a conditional return
@@ -584,7 +583,7 @@ impl<'a> Checker<'a> {
         match ty {
             Type::Object(name, _args) => {
                 if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
-                    out.push(name.clone());
+                    out.push(name.clone().to_string());
                 }
             }
             Type::Array(key, inner) => {
@@ -631,7 +630,7 @@ impl<'a> Checker<'a> {
                     .is_some_and(|(_, info)| info.kind == syntax::ast::ClassKind::Trait)
                     && !out.iter().any(|n| n == name)
                 {
-                    out.push(name.clone());
+                    out.push(name.clone().to_string());
                 }
             }
             Type::Array(key, inner) => {
@@ -865,7 +864,7 @@ fn collect_scoped_template_params(
 /// one.
 pub(crate) fn receiver_class(ty: Type) -> Option<String> {
     match ty {
-        Type::Object(class, _) => Some(class),
+        Type::Object(class, _) => Some(class.to_string()),
         _ => None,
     }
 }

@@ -202,7 +202,7 @@ fn loose_kinds(ty: &Type, out: &mut Vec<LooseKind>) -> bool {
         Type::Null => LooseKind::Null,
         Type::Array(..) | Type::ArrayShape(_) => LooseKind::Array,
         Type::EnumCase(..) => LooseKind::Enum,
-        Type::Object(class, _) => LooseKind::Object(class.clone()),
+        Type::Object(class, _) => LooseKind::Object(class.clone().to_string()),
         Type::Union(members) => return members.iter().all(|m| loose_kinds(m, out)),
         Type::Intersection(members) => {
             if members

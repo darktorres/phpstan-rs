@@ -53,8 +53,8 @@ fn recurses_into_a_traversables_own_generic_argument_without_collecting_traversa
     // `Edge`'s own case/namespace-qualification must still be collected.
     let ctx = ctx_for("App");
     let ty = Type::Object(
-        "Traversable".to_string(),
-        vec![Type::Object("Edge".to_string(), Vec::new())],
+        "Traversable".into(),
+        vec![Type::Object("Edge".into(), Vec::new())],
     );
     let mut out = Vec::new();
     collect_class_name_case_refs(&ty, &ctx, &mut out);
@@ -66,7 +66,7 @@ fn recurses_through_a_variance_annotation() {
     let ctx = ctx_for("App");
     let ty = Type::VarianceArg(
         CallSiteVariance::Covariant,
-        Box::new(Type::Object("Foo".to_string(), Vec::new())),
+        Box::new(Type::Object("Foo".into(), Vec::new())),
     );
     let mut out = Vec::new();
     collect_class_name_case_refs(&ty, &ctx, &mut out);

@@ -466,8 +466,7 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
             default: None,
         };
         if let Some(m) = info.methods.get_mut("getDeclaringClass") {
-            m.return_type =
-                Type::Object("ReflectionClass".to_string(), vec![Type::TemplateParam(tp)]);
+            m.return_type = Type::Object("ReflectionClass".into(), vec![Type::TemplateParam(tp)]);
         }
     }
 
@@ -513,24 +512,21 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
         return;
     };
     if let Some(m) = rc_info.methods.get_mut("getMethod") {
-        m.return_type = Type::Object("ReflectionMethod".to_string(), vec![t_ty.clone()]);
+        m.return_type = Type::Object("ReflectionMethod".into(), vec![t_ty.clone()]);
     }
     if let Some(m) = rc_info.methods.get_mut("getMethods") {
         m.return_type = Type::Array(
             Box::new(Type::unknown_array_key()),
-            Box::new(Type::Object(
-                "ReflectionMethod".to_string(),
-                vec![t_ty.clone()],
-            )),
+            Box::new(Type::Object("ReflectionMethod".into(), vec![t_ty.clone()])),
         );
     }
     if let Some(m) = rc_info.methods.get_mut("getProperty") {
-        m.return_type = Type::Object("ReflectionProperty".to_string(), vec![t_ty.clone()]);
+        m.return_type = Type::Object("ReflectionProperty".into(), vec![t_ty.clone()]);
     }
     if let Some(m) = rc_info.methods.get_mut("getProperties") {
         m.return_type = Type::Array(
             Box::new(Type::unknown_array_key()),
-            Box::new(Type::Object("ReflectionProperty".to_string(), vec![t_ty])),
+            Box::new(Type::Object("ReflectionProperty".into(), vec![t_ty])),
         );
     }
 }
@@ -596,7 +592,7 @@ fn patch_reflection_and_exception_list_types(classes: &mut [(Arc<str>, ClassInfo
         m.return_type = Type::Intersection(vec![
             Type::Array(
                 Box::new(Type::unknown_array_key()),
-                Box::new(Type::Object("ReflectionParameter".to_string(), Vec::new())),
+                Box::new(Type::Object("ReflectionParameter".into(), Vec::new())),
             ),
             Type::Accessory(AccessoryKind::ArrayList),
         ]);

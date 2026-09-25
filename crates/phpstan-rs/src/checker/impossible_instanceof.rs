@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
                 match target_ty {
                     Type::StringLiteral(name) => (name, false),
                     Type::ClassString(inner_ty) => match *inner_ty {
-                        Type::Object(name, _) => (name, true),
+                        Type::Object(name, _) => (name.to_string(), true),
                         _ => return,
                     },
                     _ => return,
@@ -62,7 +62,7 @@ impl<'a> Checker<'a> {
                 let Type::Object(class, _) = self.resolve_name_expr(name) else {
                     return;
                 };
-                (class, false)
+                (class.to_string(), false)
             }
         };
         let Some((class, class_info)) = self.registry.lookup_class(class.trim_start_matches('\\'))

@@ -502,7 +502,7 @@ impl<'a> Checker<'a> {
             return;
         };
         let kind = class_kind_identifier(&info.kind);
-        let ty = Type::Object(class.to_string(), args.to_vec());
+        let ty = Type::Object(class.into(), args.to_vec());
         for (i, arg) in args.iter().enumerate() {
             let call_site = match arg {
                 Type::VarianceArg(types::CallSiteVariance::Covariant, _) => {
