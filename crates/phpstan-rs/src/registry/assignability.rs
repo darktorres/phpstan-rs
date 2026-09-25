@@ -208,34 +208,16 @@ impl Registry {
             // `class-string<Derived>` value would incorrectly fail to
             // satisfy a `class-string<Base>`-typed parameter even when
             // `Derived extends Base`.
-            // `interface-string`/`trait-string`'s own internal
-            // `"$$interface"`/`"$$trait"` sentinel bound (`types::
-            // parse_type_keyword_or_class`) - the *only* two `ClassString`
-            // inner types this project ever builds that aren't a real
-            // class reference at all. real PHPStan itself draws no
-            // distinction here (bare `interface-string`/`trait-string`
-            // resolve to the identical untyped `ClassStringType()` as
-            // bare `class-string`), but this project is allowed to check
-            // more strictly - `ClassInfo::kind` already tracks exactly
-            // this, so check it directly instead of the ordinary
-            // class-hierarchy walk below (which would need `sub`'s own
-            // name to be a real ancestor of a sentinel name that was
-            // never indexed at all, always failing).
-            (Type::ClassString(a), Type::ClassString(b)) if matches!(&**b, Type::Object(name, _) if name == "$$interface" || name == "$$trait") =>
-            {
+            // `interface-string`/`trait-string`: real PHPStan draws no
+            // distinction from bare `class-string` here, but this project
+            // is allowed to check more strictly - `ClassInfo::kind`
+            // already tracks exactly this.
+            (Type::ClassString(a), Type::ClassKindString(kind)) => {
                 let Type::Object(name, _) = &**a else {
                     return false;
                 };
-                let Type::Object(sentinel, _) = &**b else {
-                    unreachable!("guarded by the match arm's own condition above")
-                };
-                let wanted_kind = if sentinel == "$$interface" {
-                    ClassKind::Interface
-                } else {
-                    ClassKind::Trait
-                };
                 self.lookup_class(name)
-                    .is_some_and(|(_, info)| info.kind == wanted_kind)
+                    .is_some_and(|(_, info)| info.kind == *kind)
             }
             (Type::ClassString(a), Type::ClassString(b)) => self.is_assignable(a, b),
             // Mirrors `types::is_subtype`'s own bound-aware `TemplateParam`
@@ -848,7 +830,7 @@ fn leaf_family_and_class(ty: &Type) -> (Option<ScalarFamily>, Option<&str>) {
     match ty {
         Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => (Some(ScalarFamily::Int), None),
         Type::Float | Type::FloatLiteral(_) => (Some(ScalarFamily::Float), None),
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => {
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
             (Some(ScalarFamily::String), None)
         }
         Type::Bool | Type::True | Type::False => (Some(ScalarFamily::Bool), None),

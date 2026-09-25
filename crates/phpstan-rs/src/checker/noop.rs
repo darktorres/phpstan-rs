@@ -153,6 +153,7 @@ impl<'a> Checker<'a> {
             | Type::String
             | Type::StringLiteral(_)
             | Type::ClassString(_)
+            | Type::ClassKindString(_)
             | Type::Accessory(_)
             | Type::Null
             | Type::Bool

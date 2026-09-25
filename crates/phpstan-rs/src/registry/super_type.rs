@@ -99,9 +99,14 @@ impl Registry {
                 Type::Int | Type::IntLiteral(_) | Type::IntRange(..),
             ) => Trinary::No,
             // A plain string may or may not name a class.
-            (Type::ClassString(_), Type::String | Type::StringLiteral(_)) => Trinary::Maybe,
-            (Type::ClassString(_), Type::Intersection(ms))
-                if !ms.iter().any(|m| matches!(m, Type::ClassString(_))) =>
+            (
+                Type::ClassString(_) | Type::ClassKindString(_),
+                Type::String | Type::StringLiteral(_),
+            ) => Trinary::Maybe,
+            (Type::ClassString(_) | Type::ClassKindString(_), Type::Intersection(ms))
+                if !ms
+                    .iter()
+                    .any(|m| matches!(m, Type::ClassString(_) | Type::ClassKindString(_))) =>
             {
                 Trinary::Maybe
             }
@@ -271,7 +276,7 @@ impl Registry {
 fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
     let is_string = matches!(
         sub,
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_)
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_)
     );
     let is_array = matches!(sub, Type::Array(..) | Type::ArrayShape(_));
     match kind {

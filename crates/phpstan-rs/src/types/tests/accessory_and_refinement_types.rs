@@ -64,20 +64,18 @@ fn callable_string_is_a_string_and_callable_intersection() {
 }
 
 #[test]
-fn interface_string_and_trait_string_are_class_strings_bound_to_an_internal_kind_sentinel() {
+fn interface_string_and_trait_string_are_class_kind_strings() {
     // This project is allowed to check things more strictly than real
     // PHPStan does (real PHPStan gives these no distinguishing semantics
-    // from bare `class-string` either) - these route through
-    // `Type::ClassString` bound to an internal `$$interface`/`$$trait`
-    // sentinel, checked against the real `ClassKind` at
-    // `registry::is_assignable`'s own `ClassString` arm.
+    // from bare `class-string` either) - the kind is checked against the
+    // real `ClassKind` at `registry::is_assignable`.
     assert_eq!(
         parse_type_string("interface-string"),
-        Type::ClassString(Box::new(Type::Object("$$interface".to_string(), vec![])))
+        Type::ClassKindString(crate::types::ClassKind::Interface)
     );
     assert_eq!(
         parse_type_string("trait-string"),
-        Type::ClassString(Box::new(Type::Object("$$trait".to_string(), vec![])))
+        Type::ClassKindString(crate::types::ClassKind::Trait)
     );
 }
 

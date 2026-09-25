@@ -569,11 +569,6 @@ impl<'a> Checker<'a> {
     /// ordinary case.
     pub(crate) fn collect_unknown_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         match ty {
-            // `$$interface`/`$$trait` (`interface-string`/`trait-string`'s
-            // internal bound) are never a real class reference to flag,
-            // checked by `ClassKind` directly at `registry::is_assignable`'s
-            // `ClassString` arm instead.
-            Type::Object(name, _) if matches!(name.as_str(), "$$interface" | "$$trait") => {}
             Type::Object(name, _args) => {
                 if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
                     out.push(name.clone());

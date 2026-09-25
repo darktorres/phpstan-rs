@@ -170,6 +170,7 @@ pub(crate) fn type_can_never_be_object(ty: &Type) -> bool {
         | Type::String
         | Type::StringLiteral(_)
         | Type::ClassString(_)
+        | Type::ClassKindString(_)
         | Type::Array(..)
         | Type::ArrayShape(_)
         | Type::HasOffsetValue(..) => true,

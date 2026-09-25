@@ -51,7 +51,9 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
     match ty {
         Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => out.add("int"),
         Type::Float | Type::FloatLiteral(_) => out.add("float"),
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => out.add("string"),
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
+            out.add("string")
+        }
         Type::Bool => out.add("bool"),
         Type::True => out.add("true"),
         Type::False => out.add("false"),

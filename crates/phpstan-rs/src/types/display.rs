@@ -1,5 +1,7 @@
 use std::fmt;
 
+use syntax::ast::ClassKind;
+
 use crate::types::parse::display_shape_key;
 use crate::types::{AccessoryKind, CallSiteVariance, CallableSig, Type};
 
@@ -70,6 +72,10 @@ impl fmt::Display for Type {
                 }
             }
             Type::ClassString(inner) => write!(f, "class-string<{inner}>"),
+            Type::ClassKindString(ClassKind::Interface) => write!(f, "interface-string"),
+            Type::ClassKindString(ClassKind::Trait) => write!(f, "trait-string"),
+            Type::ClassKindString(ClassKind::Enum) => write!(f, "enum-string"),
+            Type::ClassKindString(ClassKind::Class) => write!(f, "class-string"),
             Type::ArrayShape(fields) => {
                 let parts: Vec<String> = fields
                     .iter()

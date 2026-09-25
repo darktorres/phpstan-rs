@@ -13,7 +13,9 @@ use syntax::ast::{Expr, ExprKind};
 
 fn is_string_type(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => true,
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
+            true
+        }
         Type::Intersection(members) => {
             members
                 .iter()

@@ -28,7 +28,10 @@ fn type_mentions(ty: &Type, name: &str) -> bool {
     let direct = match (name, ty) {
         ("float", Type::Float | Type::FloatLiteral(_)) => true,
         ("int", Type::Int | Type::IntLiteral(_) | Type::IntRange(..)) => true,
-        ("string", Type::String | Type::StringLiteral(_) | Type::ClassString(_)) => true,
+        (
+            "string",
+            Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_),
+        ) => true,
         ("bool", Type::Bool | Type::True | Type::False) => true,
         ("array", Type::Array(..) | Type::ArrayShape(_)) => true,
         ("mixed", Type::Mixed(_)) => true,

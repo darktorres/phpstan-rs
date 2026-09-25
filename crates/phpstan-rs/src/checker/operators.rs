@@ -56,7 +56,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn is_number_operand(&self, ty: &Type) -> bool {
         match ty {
             Type::Array(..) | Type::ArrayShape(_) => false,
-            Type::ClassString(_) => false,
+            Type::ClassString(_) | Type::ClassKindString(_) => false,
             Type::String => false,
             Type::StringLiteral(_) => {
                 is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
@@ -637,7 +637,10 @@ impl<'a> Checker<'a> {
     /// validity`'s own doc comment for why.
     fn is_incdec_operand_valid(&self, ty: &Type) -> bool {
         match ty {
-            Type::Array(..) | Type::ArrayShape(_) | Type::ClassString(_) => false,
+            Type::Array(..)
+            | Type::ArrayShape(_)
+            | Type::ClassString(_)
+            | Type::ClassKindString(_) => false,
             Type::Object(name, _) => {
                 self.registry.is_subclass_of(name, "SimpleXMLElement")
                     || self.registry.is_subclass_of(name, "GMP")
@@ -664,7 +667,8 @@ fn is_bitwise_not_operand(ty: &Type) -> bool {
         | Type::Object(..)
         | Type::ObjectWithoutClass
         | Type::Resource { .. }
-        | Type::ClassString(_) => false,
+        | Type::ClassString(_)
+        | Type::ClassKindString(_) => false,
         Type::Intersection(members) => members
             .iter()
             .any(|m| matches!(m, Type::String | Type::Int | Type::Float)),

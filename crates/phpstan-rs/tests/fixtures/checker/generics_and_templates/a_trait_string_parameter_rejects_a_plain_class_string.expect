@@ -1,1 +1,1 @@
-5:15-5:28 argument.type L5 <main> | Parameter #1 $x of function f expects class-string<$$trait>, class-string<Plain4> given.
+5:15-5:28 argument.type L5 <main> | Parameter #1 $x of function f expects trait-string, class-string<Plain4> given.

@@ -762,6 +762,7 @@ impl<'a> Checker<'a> {
             | Type::String
             | Type::StringLiteral(_)
             | Type::ClassString(_)
+            | Type::ClassKindString(_)
             | Type::Null => false,
             Type::Void
             | Type::Bool
@@ -833,7 +834,8 @@ impl<'a> Checker<'a> {
             | Type::FloatLiteral(_)
             | Type::String
             | Type::StringLiteral(_)
-            | Type::ClassString(_) => true,
+            | Type::ClassString(_)
+            | Type::ClassKindString(_) => true,
             Type::Object(class, _) | Type::EnumCase(class, _) => {
                 self.class_confirmed_not(class, "Traversable")
             }
@@ -884,7 +886,8 @@ impl<'a> Checker<'a> {
             | Type::FloatLiteral(_)
             | Type::String
             | Type::StringLiteral(_)
-            | Type::ClassString(_) => true,
+            | Type::ClassString(_)
+            | Type::ClassKindString(_) => true,
             Type::Object(class, _) | Type::EnumCase(class, _) => {
                 self.class_confirmed_not(class, "ArrayAccess")
             }
@@ -1421,7 +1424,10 @@ fn general_array_offset_verdict(key_ty: &Type, is_list: bool, dim: &Type) -> Opt
     let key_kinds = |t: &Type| -> (bool, bool) {
         match t {
             Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => (true, false),
-            Type::String | Type::StringLiteral(_) | Type::ClassString(_) => (false, true),
+            Type::String
+            | Type::StringLiteral(_)
+            | Type::ClassString(_)
+            | Type::ClassKindString(_) => (false, true),
             _ => (true, true),
         }
     };

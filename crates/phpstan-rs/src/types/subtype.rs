@@ -349,9 +349,9 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // `class-string<T>`-typed sink without erasing to bare `String`
         // along the way.
         (Type::ClassString(a), Type::ClassString(b)) => is_subtype(a, b),
-        (Type::ClassString(_), Type::String) => true,
-        (Type::StringLiteral(_), Type::ClassString(_)) => true,
-        (Type::String, Type::ClassString(_)) => true,
+        (Type::ClassString(_) | Type::ClassKindString(_), Type::String) => true,
+        (Type::StringLiteral(_), Type::ClassString(_) | Type::ClassKindString(_)) => true,
+        (Type::String, Type::ClassString(_) | Type::ClassKindString(_)) => true,
 
         // A shape is structurally an array, so it satisfies the bare
         // `array` hint; the reverse (does some homogeneous array actually
@@ -603,7 +603,9 @@ fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
     match ty {
         Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some(ScalarFamily::Int),
         Type::Float | Type::FloatLiteral(_) => Some(ScalarFamily::Float),
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => Some(ScalarFamily::String),
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
+            Some(ScalarFamily::String)
+        }
         Type::Bool | Type::True | Type::False => Some(ScalarFamily::Bool),
         Type::Null => Some(ScalarFamily::Null),
         Type::Array(_, _) | Type::ArrayShape(_) => Some(ScalarFamily::Array),

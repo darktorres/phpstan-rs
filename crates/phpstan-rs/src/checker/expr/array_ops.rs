@@ -1025,7 +1025,8 @@ fn array_filter_element_falsy_verdict(ty: &Type) -> Option<bool> {
         | Type::ObjectWithoutClass
         | Type::Resource { .. }
         | Type::EnumCase(..)
-        | Type::ClassString(..) => Some(false),
+        | Type::ClassString(..)
+        | Type::ClassKindString(_) => Some(false),
         // A `non-falsy-string` (never `""`/`"0"`) or `non-empty-array`
         // (never the empty array) accessory intersection is confidently
         // never falsy, whatever its own unrefined base type is. `list`

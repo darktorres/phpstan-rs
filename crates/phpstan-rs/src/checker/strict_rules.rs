@@ -895,7 +895,9 @@ fn is_number(ty: &Type) -> bool {
 
 fn is_string(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => true,
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
+            true
+        }
         Type::Intersection(members) => members.iter().any(is_string),
         _ => false,
     }
@@ -997,7 +999,7 @@ fn is_string_or_nullable_string(ty: &Type) -> bool {
 
 fn truthiness(ty: &Type) -> Option<bool> {
     match ty {
-        Type::EnumCase(..) | Type::ClassString(_) => Some(true),
+        Type::EnumCase(..) | Type::ClassString(_) | Type::ClassKindString(_) => Some(true),
         other => crate::checker::expr::ranges::type_truthiness(other),
     }
 }

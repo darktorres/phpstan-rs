@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+pub use syntax::ast::ClassKind;
+
 mod conditional;
 mod display;
 mod parse;
@@ -65,6 +67,10 @@ pub enum Type {
     // name, tracked so it can participate in `@template` binding; a bare
     // `class-string` has no `T` to bind and collapses to plain `String`.
     ClassString(Box<Type>),
+    // `interface-string`/`trait-string`: the name of some interface or
+    // trait. PHPStan reads both as a bare `class-string`; the kind is
+    // checked here too.
+    ClassKindString(ClassKind),
     // `array{name: string, age?: int}` - PHPDoc's structural array type.
     // (field name, field type, optional)
     ArrayShape(Vec<(String, Type, bool)>),
@@ -204,6 +210,7 @@ impl PartialEq for Type {
             (Type::StringLiteral(a), Type::StringLiteral(b)) => a == b,
             (Type::Array(ak, av), Type::Array(bk, bv)) => ak == bk && av == bv,
             (Type::ClassString(a), Type::ClassString(b)) => a == b,
+            (Type::ClassKindString(a), Type::ClassKindString(b)) => a == b,
             (Type::ArrayShape(a), Type::ArrayShape(b)) => a == b,
             (Type::ObjectShape(a), Type::ObjectShape(b)) => a == b,
             (Type::Object(an, aa), Type::Object(bn, ba)) => an == bn && aa == ba,

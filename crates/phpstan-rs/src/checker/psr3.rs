@@ -94,7 +94,7 @@ fn invalid_braces(message: &str) -> (bool, Vec<String>) {
 /// Whether some value of `ty` is a string not known to be literal.
 fn may_be_non_literal_string(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::ClassString(_) => true,
+        Type::String | Type::ClassString(_) | Type::ClassKindString(_) => true,
         Type::Union(members) => members.iter().any(may_be_non_literal_string),
         Type::Intersection(members) => {
             members.iter().any(|m| matches!(m, Type::String))

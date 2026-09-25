@@ -228,9 +228,8 @@ fn interface_string_and_trait_string_check_the_real_class_kind() {
             class Plain2 {}
         "#,
     );
-    let interface_string =
-        Type::ClassString(Box::new(Type::Object("$$interface".to_string(), vec![])));
-    let trait_string = Type::ClassString(Box::new(Type::Object("$$trait".to_string(), vec![])));
+    let interface_string = Type::ClassKindString(crate::types::ClassKind::Interface);
+    let trait_string = Type::ClassKindString(crate::types::ClassKind::Trait);
 
     assert!(r.is_assignable(
         &Type::ClassString(Box::new(Type::Object("Shape2".to_string(), vec![]))),

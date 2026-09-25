@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::types::{AccessoryKind, CallSiteVariance, CallableParam, CallableSig, Type};
+use crate::types::{AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Type};
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,
 /// `"int|string"`, `"\App\Foo"`, `"Countable&Iterator"`, or a PHPDoc type
@@ -975,24 +975,13 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         }
         // `interface-string`/`trait-string` (bare form): real PHPStan
         // gives these no distinguishing semantics from bare
-        // `class-string`, but this project checks more strictly.
-        // `ClassInfo` already tracks the distinction needed
-        // (`ClassKind::Interface`/`ClassKind::Trait`), so these route
-        // through `Type::ClassString` bound to an internal `$$`-prefixed
-        // sentinel marker (same convention as `$$valueof`) -
-        // `registry::is_assignable`'s `ClassString` arm
-        // special-cases these two sentinel names to check the
-        // candidate's real `ClassKind` instead of walking class
-        // hierarchy. No generic `<T>` form: real PHPStan has none for
-        // `trait-string`, and `interface-string<T>` has no real corpus
-        // evidence calling for it.
-        "interface-string" => Type::ClassString(Box::new(Type::Object(
-            "$$interface".to_string(),
-            Vec::new(),
-        ))),
-        "trait-string" => {
-            Type::ClassString(Box::new(Type::Object("$$trait".to_string(), Vec::new())))
-        }
+        // `class-string`, but this project checks more strictly -
+        // `ClassInfo::kind` already tracks the distinction. No generic
+        // `<T>` form: real PHPStan has none for `trait-string`, and
+        // `interface-string<T>` has no real corpus evidence calling for
+        // it.
+        "interface-string" => Type::ClassKindString(ClassKind::Interface),
+        "trait-string" => Type::ClassKindString(ClassKind::Trait),
         // Unlike its string-refinement neighbors above, `class-string<T>`
         // carries a real, template-bindable inner type when given one -
         // needed for `@template R of Base` / `@param class-string<R> $x`

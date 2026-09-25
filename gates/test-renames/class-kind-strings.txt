@@ -1,0 +1,1 @@
+types::tests::accessory_and_refinement_types::interface_string_and_trait_string_are_class_strings_bound_to_an_internal_kind_sentinel -> types::tests::accessory_and_refinement_types::interface_string_and_trait_string_are_class_kind_strings

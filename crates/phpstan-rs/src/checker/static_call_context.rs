@@ -16,7 +16,9 @@ use syntax::token::Span;
 /// (a class-name string) are always acceptable.
 fn type_can_never_call_static_methods(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => false,
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
+            false
+        }
         Type::Union(members) => members
             .iter()
             .filter(|m| !matches!(m, Type::Null))

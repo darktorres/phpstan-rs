@@ -276,7 +276,10 @@ impl<'a> Checker<'a> {
         let is_string = |t: &Type| {
             matches!(
                 t,
-                Type::String | Type::StringLiteral(_) | Type::ClassString(_)
+                Type::String
+                    | Type::StringLiteral(_)
+                    | Type::ClassString(_)
+                    | Type::ClassKindString(_)
             ) || matches!(t, Type::Intersection(ms) if ms.iter().any(|m| matches!(m, Type::String)))
         };
         let is_unknown =
