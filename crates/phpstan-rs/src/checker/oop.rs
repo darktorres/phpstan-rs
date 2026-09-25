@@ -952,7 +952,7 @@ impl<'a> Checker<'a> {
             if value_ty == Type::Mixed(false) {
                 continue;
             }
-            if !self.registry.is_assignable(&value_ty, &declared_ty) {
+            if !self.registry.accepts(&declared_ty, &value_ty).yes() {
                 self.report(
                     fqn.to_string(),
                     format!(
@@ -976,7 +976,7 @@ impl<'a> Checker<'a> {
         value_ty: &Type,
         has_native_type: bool,
     ) {
-        if self.registry.is_assignable(value_ty, phpdoc_ty) {
+        if self.registry.accepts(phpdoc_ty, value_ty).yes() {
             return;
         }
         let name = &c.name;
@@ -1156,7 +1156,7 @@ impl<'a> Checker<'a> {
             }
             if let Some(proto_native) = &proto.native_ty {
                 match &own.native_ty {
-                    Some(own_native) if !self.registry.is_assignable(own_native, proto_native) => {
+                    Some(own_native) if !self.registry.accepts(proto_native, own_native).yes() => {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 fqn.to_string(),
@@ -1189,7 +1189,7 @@ impl<'a> Checker<'a> {
             }
             if proto.has_phpdoc_type
                 && own.has_phpdoc_type
-                && !self.registry.is_assignable(&own.ty, &proto.ty)
+                && !self.registry.accepts(&proto.ty, &own.ty).yes()
             {
                 self.report(
                     fqn.to_string(),

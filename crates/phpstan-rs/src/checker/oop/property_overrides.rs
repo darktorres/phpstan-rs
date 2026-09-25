@@ -259,7 +259,7 @@ impl<'a> Checker<'a> {
     /// that distinction safely, so every mismatch here uses the same
     /// "must be exactly equal" rule real PHPStan's plain (non-hook)
     /// branch uses. Equality is checked bidirectionally through
-    /// `is_assignable` (not raw `Type` `PartialEq`, which is sensitive
+    /// `accepts` (not raw `Type` `PartialEq`, which is sensitive
     /// to union-member order), the same shape `resolve_pseudo`'d
     /// comparisons throughout this checker use for two types that must
     /// genuinely match.
@@ -307,8 +307,8 @@ impl<'a> Checker<'a> {
             return;
         }
         let own_ty = self.resolve_pseudo(&own_sig.ty_native, fqn);
-        if self.registry.is_assignable(&own_ty, &ancestor_ty)
-            && self.registry.is_assignable(&ancestor_ty, &own_ty)
+        if self.registry.accepts(&ancestor_ty, &own_ty).yes()
+            && self.registry.accepts(&own_ty, &ancestor_ty).yes()
         {
             return;
         }

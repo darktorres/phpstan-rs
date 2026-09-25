@@ -1105,7 +1105,7 @@ pub(crate) fn dynamic_write_key_type(idx_ty: &Type) -> Type {
         // own key expression can't be confidently proven `int` or
         // `string` is a *benevolent* union, not a plain one - accepted
         // later wherever *either* member would independently satisfy the
-        // target (`Registry::is_assignable`'s existing Benevolent
+        // target (`Registry::accepts`'s existing Benevolent
         // handling, from Fix 1, already does the right thing once a
         // value's type actually carries the marker). Real corpus false
         // positive this fixes: a dynamic-key write keyed by a `Type::

@@ -167,9 +167,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                     if body_ty != Type::Mixed(false)
-                        && !self
-                            .registry
-                            .accepts_at_configured_level(&body_ty, &expected)
+                        && !self.registry.rule_level_accepts(&expected, &body_ty).yes()
                     {
                         self.report(
                             label.to_string(),

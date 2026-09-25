@@ -1,11 +1,11 @@
-use crate::relation::Relation;
+use crate::relation::{AcceptsResult, Relation};
 use crate::{ShapeKey, Type, Variance};
 use syntax::ast::ClassKind;
 
 // Real PHPStan's own level-gated `RuleLevelHelper` behaviors
-// (`accepts_at_configured_level`/`accepts_at_configured_level_rec`/
-// `is_assignable_at_level`, below) - named here, at module scope, so
-// `accepts_at_configured_level`'s own unconfigured-level fallback can
+// (`rule_level_accepts`/`rule_level_accepts`/
+// `accepts_at_level`, below) - named here, at module scope, so
+// `rule_level_accepts`'s own unconfigured-level fallback can
 // reference `NULLABLES_CHECK_LEVEL` directly rather than duplicating the
 // literal `8`.
 const UNION_TYPES_CHECK_LEVEL: u8 = 7;
@@ -14,29 +14,43 @@ const EXPLICIT_MIXED_CHECK_LEVEL: u8 = 9;
 const IMPLICIT_MIXED_CHECK_LEVEL: u8 = 10;
 
 impl Relation<'_> {
-    /// Type-compatibility check that consults the class hierarchy for
-    /// `Object` types; every other case defers to `crate::is_subtype`,
-    /// which has no notion of class context.
-    pub fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
+    /// PHPStan's `Type::accepts()`: whether a value of `accepted` may
+    /// be passed where `accepting` is declared.
+    pub fn accepts(&self, accepting: &Type, accepted: &Type) -> AcceptsResult {
+        AcceptsResult::from_bool(self.accepts_type(accepted, accepting))
+    }
+
+    /// `accepts`, as a `RuleLevelHelper` applies it at the configured
+    /// rule level (`checkNullables`, `checkUnionTypes`,
+    /// `checkExplicitMixed`/`checkImplicitMixed`,
+    /// `checkBenevolentUnionTypes`).
+    pub fn rule_level_accepts(&self, accepting: &Type, accepted: &Type) -> AcceptsResult {
+        AcceptsResult::from_bool(self.rule_level_accepts_type(accepted, accepting))
+    }
+
+    /// `accepts` as a plain relation of `sub` to `sup`, consulting the
+    /// class hierarchy for `Object` types; every other case defers to
+    /// `crate::is_subtype`, which has no notion of class context.
+    pub(crate) fn accepts_type(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
             // A `key-of<T>`/`T[K]` still over a template is what `T`'s
             // bound makes it.
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
-                self.is_assignable(&crate::resolve_late_to_bounds(sub), sup)
+                self.accepts_type(&crate::resolve_late_to_bounds(sub), sup)
             }
             (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
-                self.is_assignable(sub, &crate::resolve_late_to_bounds(sup))
+                self.accepts_type(sub, &crate::resolve_late_to_bounds(sup))
             }
             // Two payloads ask the extension; anything else reads a
             // payload as its base type.
             (Type::Extension(a), Type::Extension(b)) => {
                 match b.is_super_type_of(&**a, self.hierarchy) {
                     Some(result) => result.yes(),
-                    None => self.is_assignable(&a.base(), &b.base()),
+                    None => self.accepts_type(&a.base(), &b.base()),
                 }
             }
-            (Type::Extension(a), _) => self.is_assignable(&a.base(), sup),
-            (_, Type::Extension(b)) => self.is_assignable(sub, &b.base()),
+            (Type::Extension(a), _) => self.accepts_type(&a.base(), sup),
+            (_, Type::Extension(b)) => self.accepts_type(sub, &b.base()),
             // The native `object` type hint is satisfied by *any* class
             // instance - an extremely common pattern, e.g. Doctrine's
             // `EntityRepository<T of object>` - and satisfies no
@@ -98,7 +112,7 @@ impl Relation<'_> {
                 // shape, `@template T of SomeInterface` - fail the
                 // Invariant comparison below against *any* concrete
                 // argument, since `bound != concrete-subtype` invariantly
-                // (`is_assignable(bound, concrete)` fails whenever
+                // (`accepts(bound, concrete)` fails whenever
                 // `concrete` is a strict subtype of `bound`) - a real,
                 // dangerous new false-positive class this project doesn't
                 // have data to avoid anyway: `ClassInfo` only persists
@@ -186,8 +200,8 @@ impl Relation<'_> {
                         continue;
                     }
                     let ok = match variance {
-                        Variance::Covariant => self.is_assignable(&a_i, &b_i),
-                        Variance::Contravariant => self.is_assignable(&b_i, &a_i),
+                        Variance::Covariant => self.accepts_type(&a_i, &b_i),
+                        Variance::Contravariant => self.accepts_type(&b_i, &a_i),
                         // Mutual assignability approximates real
                         // PHPStan's exact `equals()` here - deliberately
                         // chosen over raw structural `==`, since this
@@ -197,10 +211,10 @@ impl Relation<'_> {
                         // sorts), making `==` order-sensitive and *more*
                         // likely to falsely reject two independently
                         // built but semantically identical unions than
-                        // mutual `is_assignable` is to miss a genuine
+                        // mutual `accepts` is to miss a genuine
                         // mismatch.
                         Variance::Invariant => {
-                            self.is_assignable(&a_i, &b_i) && self.is_assignable(&b_i, &a_i)
+                            self.accepts_type(&a_i, &b_i) && self.accepts_type(&b_i, &a_i)
                         }
                     };
                     if !ok {
@@ -241,11 +255,11 @@ impl Relation<'_> {
                     .find_class(name)
                     .is_some_and(|class| class.kind == *kind)
             }
-            (Type::ClassString(a), Type::ClassString(b)) => self.is_assignable(a, b),
+            (Type::ClassString(a), Type::ClassString(b)) => self.accepts_type(a, b),
             // Mirrors `crate::is_subtype`'s own bound-aware `TemplateParam`
             // arm (see its doc comment for the full reasoning and why
             // this needs to run *before* the `Union` arms just below),
-            // but recurses through `self.is_assignable` rather than the
+            // but recurses through `self.accepts` rather than the
             // plain, hierarchy-*unaware* `crate::is_subtype`: delegating
             // straight to `crate::is_subtype(sub, sup)` would silently
             // drop the class-hierarchy-walking half of this whole method
@@ -258,7 +272,7 @@ impl Relation<'_> {
             // extends `Node` only via `Expr`, a multi-level ancestor
             // chain plain name-equality can't see).
             (Type::TemplateParam(tp), _) => {
-                matches!(*tp.bound, Type::Mixed(_)) || self.is_assignable(&tp.bound, sup)
+                matches!(*tp.bound, Type::Mixed(_)) || self.accepts_type(&tp.bound, sup)
             }
             // Mirrors `crate::is_subtype`'s own identically-placed
             // `Type::Conditional` arm exactly (see that arm's own doc
@@ -284,7 +298,7 @@ impl Relation<'_> {
                     if_true, if_false, ..
                 },
                 _,
-            ) => self.is_assignable(
+            ) => self.accepts_type(
                 &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
                 sup,
             ),
@@ -293,13 +307,13 @@ impl Relation<'_> {
                 Type::Conditional {
                     if_true, if_false, ..
                 },
-            ) => self.is_assignable(
+            ) => self.accepts_type(
                 sub,
                 &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
             ),
-            (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
+            (Type::Union(members), _) => members.iter().all(|m| self.accepts_type(m, sup)),
             (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
-                members.iter().any(|m| self.is_assignable(sub, m))
+                members.iter().any(|m| self.accepts_type(sub, m))
             }
             // Mirrors `crate::is_subtype`'s own dedicated
             // Intersection-vs-Intersection rule, and for the same reason
@@ -311,20 +325,20 @@ impl Relation<'_> {
             // whole `sup` intersection, never whether `sub`'s own
             // combination does.
             (Type::Intersection(_), Type::Intersection(sup_members)) => {
-                sup_members.iter().all(|m| self.is_assignable(sub, m))
+                sup_members.iter().all(|m| self.accepts_type(sub, m))
             }
             // A benevolent union given (`RuleLevelHelper::accepts()`) is
             // accepted if *any* member matches `sup`, not only when *all*
             // do - the behavioral difference a benevolent union exists
             // for.
             (Type::BenevolentUnion(members), _) => {
-                members.iter().any(|m| self.is_assignable(m, sup))
+                members.iter().any(|m| self.accepts_type(m, sup))
             }
             // Each parameter/return comparison consults the class
             // hierarchy: `Closure(Animal): Dog` fits `callable(Dog):
             // Animal`, and `Event` fits a `T of object` template's bound.
             (Type::Callable(Some(a)), Type::Callable(Some(b))) => {
-                crate::callable_sig_is_subtype(a, b, &|x, y| self.is_assignable(x, y))
+                crate::callable_sig_is_subtype(a, b, &|x, y| self.accepts_type(x, y))
             }
             // A closure literal (`Type::closure_literal`) checked against a
             // shaped `callable(...)`/`Closure(...)`: only its own
@@ -339,10 +353,10 @@ impl Relation<'_> {
                 members
                     .iter()
                     .filter(|m| matches!(m, Type::Callable(Some(_))))
-                    .any(|m| self.is_assignable(m, sup))
+                    .any(|m| self.accepts_type(m, sup))
             }
-            (Type::Intersection(members), _) => members.iter().any(|m| self.is_assignable(m, sup)),
-            (_, Type::Intersection(members)) => members.iter().all(|m| self.is_assignable(sub, m)),
+            (Type::Intersection(members), _) => members.iter().any(|m| self.accepts_type(m, sup)),
+            (_, Type::Intersection(members)) => members.iter().all(|m| self.accepts_type(sub, m)),
             // Deliberately more lenient here than crate::is_subtype's pure
             // structural relation (which correctly treats Array(Mixed) as
             // NOT a subtype of Array(Int)): an array literal's element type
@@ -355,7 +369,7 @@ impl Relation<'_> {
             // with mixed type" philosophy.
             (Type::Array(_, a), Type::Array(_, b)) => {
                 (!self.strict_mixed_arrays && matches!(**a, Type::Mixed(_)))
-                    || self.is_assignable(a, b)
+                    || self.accepts_type(a, b)
             }
             // Same leniency, same reason, for an array of unknown structure
             // (an array literal, most commonly) checked against a specific
@@ -382,7 +396,7 @@ impl Relation<'_> {
                 !self.strict_mixed_arrays
                     && matches!(**a, Type::Mixed(_))
                     && (**key == Type::unknown_array_key()
-                        || self.is_assignable(key, &crate::shape_key_type(shape)))
+                        || self.accepts_type(key, &crate::shape_key_type(shape)))
             }
             // Now that an array literal carries a real per-position/
             // per-key shape instead of always reading as `Array(Mixed)`,
@@ -403,10 +417,10 @@ impl Relation<'_> {
             // silently accepted as satisfying `array<int, string>`,
             // checking only whether every field's value type matched.
             (Type::ArrayShape(shape), Type::Array(key, b)) => {
-                self.is_assignable(&crate::shape_key_type(shape), key)
+                self.accepts_type(&crate::shape_key_type(shape), key)
                     && shape.fields.iter().all(|f| {
                         (!self.strict_mixed_arrays && matches!(f.ty, Type::Mixed(_)))
-                            || self.is_assignable(&f.ty, b)
+                            || self.accepts_type(&f.ty, b)
                     })
             }
             // Same completion for shape-to-shape: a literal's own shape
@@ -419,7 +433,7 @@ impl Relation<'_> {
             // side's unsealed tail takes no part.
             (Type::ArrayShape(sub), Type::ArrayShape(sup)) => {
                 sup.fields.iter().all(|f| match sub.field(&f.key) {
-                    Some(sub_field) => self.is_assignable(&sub_field.ty, &f.ty),
+                    Some(sub_field) => self.accepts_type(&sub_field.ty, &f.ty),
                     None => f.optional,
                 })
             }
@@ -452,14 +466,14 @@ impl Relation<'_> {
                 class == "stdClass"
                     || shape.fields.iter().all(|f| {
                         match self.hierarchy.property_type(class, &f.key.to_string()) {
-                            Some(property_ty) => self.is_assignable(&property_ty, &f.ty),
+                            Some(property_ty) => self.accepts_type(&property_ty, &f.ty),
                             None => f.optional,
                         }
                     })
             }
             (Type::ObjectShape(sub), Type::ObjectShape(sup)) => {
                 sup.fields.iter().all(|f| match sub.field(&f.key) {
-                    Some(sub_field) => self.is_assignable(&sub_field.ty, &f.ty),
+                    Some(sub_field) => self.accepts_type(&sub_field.ty, &f.ty),
                     None => f.optional,
                 })
             }
@@ -478,16 +492,16 @@ impl Relation<'_> {
         }
     }
 
-    /// The level-aware counterpart to `is_assignable` above - real
+    /// The level-aware counterpart to `accepts` above - real
     /// PHPStan's `RuleLevelHelper::accepts()` two genuinely level-gated
     /// behaviors (`checkNullables`/`checkUnionTypes`) applied to the
-    /// identical argument/return/property-type check `is_assignable`
+    /// identical argument/return/property-type check `accepts`
     /// already performs, for the handful of real call sites a `Rule`
     /// class actually consumes `RuleLevelHelper` through (not every
-    /// `is_assignable` call site project-wide - narrowing, LSP-override
+    /// `accepts` call site project-wide - narrowing, LSP-override
     /// compatibility, and generics bound-checking are real PHPStan's own
     /// separate, never-level-gated `isSuperTypeOf()` domain, and must
-    /// keep calling `is_assignable` directly).
+    /// keep calling `accepts` directly).
     ///
     /// `self.configured_level` is the project's own `level` setting
     /// *before* `check-project`'s own `MAX_LEVEL`-driven `.unwrap_or(6)`
@@ -496,18 +510,18 @@ impl Relation<'_> {
     /// that never opts into this.
     ///
     /// Deliberately not a full tri-state (`Yes`/`No`/`Maybe`) rewrite of
-    /// `is_assignable`'s own boolean API: real PHPStan's `checkUnionTypes`
+    /// `accepts`'s own boolean API: real PHPStan's `checkUnionTypes`
     /// distinguishes "definitely accepts" from "maybe accepts" via
     /// `TrinaryLogic`, a distinction this project's plain boolean
     /// `.all()`/`.any()` combinators (already used, unconditionally, by
-    /// `is_assignable` itself) have no way to represent without that
+    /// `accepts` itself) have no way to represent without that
     /// larger rewrite - `UNION_TYPES_CHECK_LEVEL` is still named and
     /// folded into the fast-path guard below (both real gates must be at
-    /// their strict threshold before this collapses to `is_assignable`
+    /// their strict threshold before this collapses to `accepts`
     /// unchanged), but doesn't get its own separate `.all()`-vs-`.any()`
     /// switch the way `NULLABLES_CHECK_LEVEL` gets its own null-stripping
     /// switch.
-    pub fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
+    fn rule_level_accepts_type(&self, sub: &Type, sup: &Type) -> bool {
         // Never configured means "assume the strictest threshold for
         // `checkNullables`/`checkUnionTypes`" (`NULLABLES_CHECK_LEVEL`,
         // matching this method's own pre-existing behavior exactly - the
@@ -518,21 +532,21 @@ impl Relation<'_> {
         // unconfigured level must keep accepting `Mixed` unconditionally,
         // exactly like every other caller already did before either
         // existed. `NULLABLES_CHECK_LEVEL` sits below both, so passing it
-        // through `accepts_at_configured_level_rec` gets both properties
+        // through `rule_level_accepts` gets both properties
         // at once rather than needing its own separate branch.
         let level = self.configured_level.unwrap_or(NULLABLES_CHECK_LEVEL);
-        self.accepts_at_configured_level_rec(sub, sup, level)
+        self.rule_level_accepts_rec(sub, sup, level)
     }
 
-    fn accepts_at_configured_level_rec(&self, sub: &Type, sup: &Type, level: u8) -> bool {
+    fn rule_level_accepts_rec(&self, sub: &Type, sup: &Type, level: u8) -> bool {
         // Real PHPStan's own `checkBenevolentUnionTypes` (`RuleLevelHelper::
         // transformAcceptedType`) runs first, unconditionally, independent
         // of level - mirrored here ahead of both fast paths below, which
-        // would otherwise fall straight through to `is_assignable_at_level`
-        // (and from there, `is_assignable`'s own always-lenient Benevolent
+        // would otherwise fall straight through to `accepts_at_level`
+        // (and from there, `accepts`'s own always-lenient Benevolent
         // arm) without ever seeing this override. Strips the marker and
         // demands *every* member of the wrapped `Union` satisfy `sup`,
-        // recursing back into this same method (not plain `is_assignable`)
+        // recursing back into this same method (not plain `accepts`)
         // so the rest of this method's own level-aware behavior (`checkNullables`/
         // `checkUnionTypes`/`checkExplicitMixed`/`checkImplicitMixed`) still
         // applies per-member exactly as it would for an ordinary Union.
@@ -541,11 +555,11 @@ impl Relation<'_> {
         {
             return wrapped
                 .iter()
-                .all(|m| self.accepts_at_configured_level_rec(m, sup, level));
+                .all(|m| self.rule_level_accepts_rec(m, sup, level));
         }
 
         // Fast path: both real gates already at their strict threshold -
-        // byte-identical to `is_assignable_at_level` (which still applies
+        // byte-identical to `accepts_at_level` (which still applies
         // `checkExplicitMixed`/`checkImplicitMixed`, real PHPStan's own
         // level 9/10 - unlike `checkNullables`/`checkUnionTypes`, neither
         // is subsumed by this fast path, since 9/10 sit *above* 8), the
@@ -558,15 +572,15 @@ impl Relation<'_> {
         // gates," matching real PHPStan's own two separately-named flags.
         if level >= NULLABLES_CHECK_LEVEL {
             debug_assert!(level >= UNION_TYPES_CHECK_LEVEL);
-            return self.is_assignable_at_level(sub, sup, level);
+            return self.accepts_at_level(sub, sup, level);
         }
         // Fast path: neither side is a `Union` at all - nothing for
         // either level-gated behavior to touch, so this collapses to
-        // `is_assignable_at_level` too (the `Union` arms below are the
+        // `accepts_at_level` too (the `Union` arms below are the
         // only ones this method ever needs to diverge from plain
         // assignability on).
         if !matches!(sub, Type::Union(_)) && !matches!(sup, Type::Union(_)) {
-            return self.is_assignable_at_level(sub, sup, level);
+            return self.accepts_at_level(sub, sup, level);
         }
 
         // `checkNullables` (real PHPStan's own `transformAcceptedType`,
@@ -607,7 +621,7 @@ impl Relation<'_> {
         let sub = stripped_sub.as_ref().unwrap_or(sub);
 
         // A naive version of this method would bail straight to plain
-        // `is_assignable` whenever `sup` was also a Union, on the theory
+        // `accepts` whenever `sup` was also a Union, on the theory
         // that a nested Union-vs-Union pair is rare - but this project
         // represents every nullable declared type (`?string`, `?int`,
         // `?Foo`, the single most common PHP nullability idiom) as
@@ -615,26 +629,26 @@ impl Relation<'_> {
         // a Union at every one of this method's real call sites checking
         // a nullable-declared parameter/property/return type - exactly
         // the scenario `checkNullables` exists for. Recursing into
-        // `self.accepts_at_configured_level_rec` (not plain
-        // `is_assignable`) on both sides whenever either is a Union,
-        // symmetric to `is_assignable`'s own existing `282`/`283` arms,
+        // `self.rule_level_accepts` (not plain
+        // `accepts`) on both sides whenever either is a Union,
+        // symmetric to `accepts`'s own existing `282`/`283` arms,
         // is what keeps that leniency reaching its single most common
         // trigger.
         match (sub, sup) {
             (Type::Union(members), _) => members
                 .iter()
-                .all(|m| self.accepts_at_configured_level_rec(m, sup, level)),
+                .all(|m| self.rule_level_accepts_rec(m, sup, level)),
             (_, Type::Union(members)) => members
                 .iter()
-                .any(|m| self.accepts_at_configured_level_rec(sub, m, level)),
-            _ => self.is_assignable_at_level(sub, sup, level),
+                .any(|m| self.rule_level_accepts_rec(sub, m, level)),
+            _ => self.accepts_at_level(sub, sup, level),
         }
     }
 
-    /// `is_assignable`, additionally aware of real PHPStan's own level
+    /// `accepts`, additionally aware of real PHPStan's own level
     /// 9/10 `checkExplicitMixed`/`checkImplicitMixed`.
     ///
-    /// This project's `is_subtype`/`is_assignable` never actually gave
+    /// This project's `is_subtype`/`accepts` never actually gave
     /// `Mixed` a blanket "accepted anywhere" structural rule the way real
     /// PHPStan's own `MixedType::isAcceptedBy()` unconditionally does
     /// (confirmed directly: there is no `(Type::Mixed(_), _) => true` arm
@@ -656,7 +670,7 @@ impl Relation<'_> {
     /// src/Type/StrictMixedType.php`) returns Yes only when the accepting
     /// type is itself `(Strict)MixedType`, Maybe otherwise - collapsed to
     /// a plain `false` here, this method's own boolean-only API (see
-    /// `accepts_at_configured_level`'s own doc comment on why a full
+    /// `rule_level_accepts`'s own doc comment on why a full
     /// trinary rewrite isn't attempted).
     /// The level at which real PHPStan's `RuleLevelHelper::
     /// findTypeToCheck` turns `ty` into a `StrictMixedType` receiver -
@@ -665,7 +679,7 @@ impl Relation<'_> {
     /// `None` when `ty` isn't `Mixed` or the configured level is below
     /// that threshold. An unconfigured level never triggers it, the same
     /// "`checkExplicitMixed`/`checkImplicitMixed` stay off unless opted
-    /// into" default `accepts_at_configured_level` documents.
+    /// into" default `rule_level_accepts` documents.
     pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
         let Type::Mixed(is_explicit) = ty else {
             return None;
@@ -678,7 +692,7 @@ impl Relation<'_> {
         (self.configured_level? >= threshold).then_some(threshold)
     }
 
-    fn is_assignable_at_level(&self, sub: &Type, sup: &Type, level: u8) -> bool {
+    fn accepts_at_level(&self, sub: &Type, sup: &Type, level: u8) -> bool {
         if let Type::Mixed(is_explicit) = sub {
             let strict_level = if *is_explicit {
                 EXPLICIT_MIXED_CHECK_LEVEL
@@ -690,7 +704,7 @@ impl Relation<'_> {
             }
             return matches!(sup, Type::Mixed(_));
         }
-        self.is_assignable(sub, sup)
+        self.accepts_type(sub, sup)
     }
 
     /// `checker::check_strict_comparison_of_different_types`'s own
@@ -698,10 +712,10 @@ impl Relation<'_> {
     /// resolveIdenticalType` reaches this same question via `leftType->
     /// isSuperTypeOf(rightType)->no() && rightType->isSuperTypeOf(leftType)
     /// ->no()`, a genuinely *trinary* (yes/no/maybe) answer this project's
-    /// own `is_assignable` doesn't give (`!is_assignable(a, b)` only means
+    /// own `accepts` doesn't give (`!accepts(a, b)` only means
     /// "not provably a subtype," not "provably no overlap at all" - the
     /// stronger claim this function exists to answer directly, class by
-    /// class, rather than trying to derive it from two `is_assignable`
+    /// class, rather than trying to derive it from two `accepts`
     /// calls that can't actually express it). Recurses into `Union` on
     /// either side (every member of one side must be disjoint from the
     /// other for the whole comparison to count, the same "stay on the

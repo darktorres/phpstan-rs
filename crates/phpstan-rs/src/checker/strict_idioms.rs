@@ -103,7 +103,7 @@ impl<'a> Checker<'a> {
         if is_static
             || sig.visibility != Visibility::Public
             || required != 1
-            || !self.registry.is_assignable(other, &sig.params[0].ty)
+            || !self.registry.accepts(&sig.params[0].ty, other).yes()
         {
             return None;
         }

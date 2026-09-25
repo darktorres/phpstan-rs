@@ -75,7 +75,7 @@ impl<'a> Checker<'a> {
                     // type, not a call-site variance marker wrapping it
                     // (`Collection<covariant Foo>` still needs `Foo`
                     // itself checked against the bound -
-                    // `is_assignable`'s own variance handling is
+                    // `accepts`'s own variance handling is
                     // separate) - `strip_call_site_variance` unwraps for
                     // both the substitution bindings and the bound
                     // comparison; the *displayed* `arg` below stays the
@@ -117,14 +117,14 @@ impl<'a> Checker<'a> {
                         // `RuleLevelHelper::accepts()` - `checkExplicitMixed`/
                         // `checkImplicitMixed` never applies to a generic
                         // bound check in real PHPStan either, so this
-                        // stays on plain `is_assignable`, not
-                        // `accepts_at_configured_level` (see that
+                        // stays on plain `accepts`, not
+                        // `rule_level_accepts` (see that
                         // method's own doc comment, which already
                         // disclosed this exact exclusion).
                         if *checked_arg != Type::Mixed(false)
                             && self.is_type_fully_known(checked_arg)
                             && self.is_type_fully_known(&bound)
-                            && !self.registry.is_assignable(checked_arg, &bound)
+                            && !self.registry.accepts(&bound, checked_arg).yes()
                         {
                             let kind = class_kind_identifier(&info.kind);
                             self.report(
@@ -635,7 +635,7 @@ impl<'a> Checker<'a> {
                     if let Some(bound) = bounds.get(name)
                         && self.is_type_fully_known(default)
                         && self.is_type_fully_known(bound)
-                        && !self.registry.is_assignable(default, bound)
+                        && !self.registry.accepts(bound, default).yes()
                     {
                         self.report(
                             label.to_string(),

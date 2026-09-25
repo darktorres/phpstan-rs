@@ -95,11 +95,11 @@ impl<'a> Checker<'a> {
             .reduce(union_types);
         let members: Vec<Type> = flatten_union(throws).into_iter().cloned().collect();
         for declared in members {
-            // Calling `is_assignable(actual, &declared)` directly would be
+            // Calling `accepts(actual, &declared)` directly would be
             // wrong once `actual` is a `Union` of several distinct throw
             // points (any call whose signature documents a different,
             // unrelated `@throws` type contributes one):
-            // `is_assignable`'s `Union`-in-sub-position rule requires
+            // `accepts`'s `Union`-in-sub-position rule requires
             // *every* member to satisfy the supertype, but the real
             // question here is "was `declared` (or something it covers)
             // thrown *anywhere* in this body," not "is everything this
@@ -112,7 +112,7 @@ impl<'a> Checker<'a> {
                 .map(flatten_union)
                 .unwrap_or_default()
                 .into_iter()
-                .any(|a| self.registry.is_assignable(a, &declared));
+                .any(|a| self.registry.accepts(&declared, a).yes());
             if is_used {
                 continue;
             }

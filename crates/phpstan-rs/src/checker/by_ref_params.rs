@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
         // See `checker::calls`' own identical comment: `accepts_at_
         // configured_level` already accepts a `Mixed` actual value
         // unconditionally below real PHPStan's own level 9/10.
-        if self.registry.accepts_at_configured_level(actual, &declared) {
+        if self.registry.rule_level_accepts(&declared, actual).yes() {
             return;
         }
         self.report(
@@ -162,10 +162,7 @@ impl<'a> Checker<'a> {
             let Some(actual) = snapshots.iter().cloned().reduce(union_types) else {
                 continue;
             };
-            if self
-                .registry
-                .accepts_at_configured_level(&actual, &declared)
-            {
+            if self.registry.rule_level_accepts(&declared, &actual).yes() {
                 continue;
             }
             self.report(
@@ -216,7 +213,7 @@ impl<'a> Checker<'a> {
                 .filter(|m| {
                     !actual_members
                         .iter()
-                        .any(|a| **a == Type::Mixed(false) || self.registry.is_assignable(a, m))
+                        .any(|a| **a == Type::Mixed(false) || self.registry.accepts(m, a).yes())
                 })
                 .map(|m| m.to_string())
                 .collect();

@@ -29,7 +29,7 @@ pub use parse::parse_type_string;
 pub use parse::{canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance};
 pub use php_float_format::format_php_float;
 pub use php_version::{PhpFeature, PhpVersion, PhpVersions, parse_php_version};
-pub use relation::Relation;
+pub use relation::{AcceptsResult, Relation};
 pub use shape::{Shape, ShapeField, ShapeKey};
 pub use subtype::is_subtype;
 pub use subtype::types_definitely_disjoint;
@@ -95,7 +95,7 @@ pub enum Type {
     ArrayShape(Shape),
     // `object{name: string, age?: int}` - the `object`-flavored sibling
     // of `ArrayShape`. Structural, not a real registered class:
-    // `registry::is_assignable` checks a real instance against it
+    // `registry::accepts` checks a real instance against it
     // property-by-property.
     ObjectShape(Shape),
     // A class name plus its resolved `@template` type arguments, if any;
@@ -113,7 +113,7 @@ pub enum Type {
     },
     // A single enum case's singleton type (enum fqn, case name), distinct
     // from the coarser `Object(Suit, [])`. Not a subtype target in
-    // `crate::is_subtype`'s class-hierarchy sense; `registry::is_assignable`
+    // `crate::is_subtype`'s class-hierarchy sense; `registry::accepts`
     // handles `EnumCase -> Object(enum_fqn)` assignability instead.
     EnumCase(Name, Name),
     // `None` = unknown shape; `Some(sig)` = a parsed `Closure(int):

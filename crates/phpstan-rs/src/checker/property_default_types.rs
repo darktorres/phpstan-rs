@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
             let previous_class = self.current_class.replace(fqn.to_string());
             let default_ty = self.infer_expr(default, &Locals::default());
             self.current_class = previous_class;
-            if self.registry.is_assignable(&default_ty, property_ty) {
+            if self.registry.accepts(property_ty, &default_ty).yes() {
                 continue;
             }
             let kind = if prop_sig.is_static {

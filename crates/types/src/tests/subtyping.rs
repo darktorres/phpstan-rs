@@ -33,7 +33,7 @@ fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
 
 // On top of the "only when the array's own value type is Mixed" rule (no
 // per-field value comparison happens here at all - that's
-// `registry::is_assignable`'s own, separate job), a shape's aggregate key
+// `registry::accepts`'s own, separate job), a shape's aggregate key
 // type must also be a subtype of a precisely-keyed `Type::Array`'s
 // declared key type.
 
@@ -156,7 +156,7 @@ fn union_subtype_rules() {
 #[test]
 fn intersection_subtype_rules() {
     // Coverage measurement found both Intersection arms of is_subtype
-    // had zero executions (registry::is_assignable's own, separate
+    // had zero executions (registry::accepts's own, separate
     // Intersection handling was covered independently).
     let both = Type::Intersection(vec![Type::Int, Type::String]);
     // sub is the intersection: satisfies any one of its members.
@@ -259,7 +259,7 @@ fn array_accessory_subtype_rules() {
     // deliberately: `is_subtype`'s own pre-existing, unrelated
     // `(ArrayShape(_), Array(b)) => matches!(**b, Mixed)` rule is
     // already conservative about a *specific*-element `Array(b)`
-    // (that per-field check is `is_assignable`'s own job, not
+    // (that per-field check is `accepts`'s own job, not
     // `is_subtype`'s) - using `Array(Mixed)` here isolates the new
     // accessory logic from that pre-existing, unrelated asymmetry.
     let list_ty = Type::Intersection(vec![

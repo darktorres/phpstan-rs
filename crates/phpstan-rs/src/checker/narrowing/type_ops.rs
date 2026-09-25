@@ -90,7 +90,7 @@ fn is_object_like(ty: &Type) -> bool {
 /// intermediate abstract class) would otherwise narrow the whole union
 /// down to zero matching members, falling through to the
 /// `target.clone()` case below and discarding every member's own
-/// additional properties/methods entirely - `Registry::is_assignable`
+/// additional properties/methods entirely - `Registry::accepts`
 /// is the identical hierarchy-aware check `is_subtype` is documented as
 /// a non-hierarchy-aware subset of, so using it here can only keep
 /// strictly more genuinely-compatible members than before, never fewer.
@@ -99,7 +99,7 @@ pub(crate) fn narrow_type_to(registry: &Registry, original: &Type, target: &Type
         Type::Union(members) | Type::BenevolentUnion(members) => {
             let kept: Vec<Type> = members
                 .iter()
-                .filter(|m| registry.is_assignable(m, target))
+                .filter(|m| registry.accepts(target, m).yes())
                 .cloned()
                 .collect();
             match kept.len() {
@@ -125,7 +125,7 @@ pub(crate) fn narrow_type_to(registry: &Registry, original: &Type, target: &Type
         // interface inherited from an ancestor, not declared directly)
         // must still keep its own, more specific type here rather than
         // needlessly widening to the bare interface.
-        _ if registry.is_assignable(original, target) => original.clone(),
+        _ if registry.accepts(target, original).yes() => original.clone(),
         _ => target.clone(),
     }
 }

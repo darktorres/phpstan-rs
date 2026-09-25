@@ -201,7 +201,7 @@ impl<'a> Checker<'a> {
             return;
         };
         if matches!(value, types::Type::Mixed(false))
-            || self.registry.is_assignable(value, &configured)
+            || self.registry.accepts(&configured, value).yes()
         {
             return;
         }

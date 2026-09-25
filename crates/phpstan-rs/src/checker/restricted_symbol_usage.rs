@@ -237,7 +237,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(type_string) = &cond.type_string {
             let configured = types::parse_type_string(type_string);
-            return self.registry.is_assignable(&ty, &configured);
+            return self.registry.accepts(&configured, &ty).yes();
         }
         if let Some(value) = &cond.value {
             return scalar_value_matches(&ty, value, case_insensitive);

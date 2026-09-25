@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
             // the member, or merely overlaps it, uses it.
             let is_used = actual_members.iter().any(|a| {
                 *a == Type::Mixed(false)
-                    || self.registry.is_assignable(a, member)
+                    || self.registry.accepts(member, a).yes()
                     || !types::types_definitely_disjoint(a, member)
             });
             if is_used {

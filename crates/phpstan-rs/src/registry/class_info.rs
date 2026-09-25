@@ -1609,7 +1609,7 @@ impl ClassInfo {
         // `BackedEnum`) by virtue of being an enum at all - never
         // declared in source, the same as its synthesized `cases()`/
         // `name`/`value` above, but this time needed for hierarchy
-        // checks (`is_subclass_of`/`is_assignable`), not member lookup.
+        // checks (`is_subclass_of`/`accepts`), not member lookup.
         // Without this, real code narrowing/typing an enum against
         // `UnitEnum` would be flagged as a bound violation despite being
         // exactly what real PHP guarantees.

@@ -4086,13 +4086,10 @@ impl<'a> Checker<'a> {
                         );
                     }
                     // See `checker::calls`' own identical comment:
-                    // `accepts_at_configured_level` already accepts a
+                    // `rule_level_accepts` already accepts a
                     // `Mixed` body type unconditionally below real
                     // PHPStan's own level 9/10.
-                    if !self
-                        .registry
-                        .accepts_at_configured_level(&body_ty, &expected)
-                    {
+                    if !self.registry.rule_level_accepts(&expected, &body_ty).yes() {
                         self.report(
                             label.to_string(),
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
@@ -4461,7 +4458,7 @@ impl<'a> Checker<'a> {
             // - infer the same `Object("Closure", ...)` the native
             // `Closure` type hint resolves to (rather than the broader
             // `Type::Callable`, which `callable`-hinted parameters accept
-            // via `is_assignable`'s separate leniency), so a strictly
+            // via `accepts`'s separate leniency), so a strictly
             // `Closure`-typed parameter correctly accepts it. A closure/
             // arrow-fn literal additionally carries its own signature
             // (`closure_literal_type`).
@@ -4961,7 +4958,7 @@ impl<'a> Checker<'a> {
             return inferred;
         };
         let declared = self.resolve_type_hint(Some(hint));
-        if inferred != Type::Mixed(false) && self.registry.is_assignable(&inferred, &declared) {
+        if inferred != Type::Mixed(false) && self.registry.accepts(&declared, &inferred).yes() {
             inferred
         } else {
             declared
@@ -6598,7 +6595,7 @@ impl<'a> Checker<'a> {
     /// declared `@throws` (`current_declared_throws_type`) - both real,
     /// if rare, ways to make the "your `match` might throw" fact this
     /// check exists for already an explicit, handled part of the
-    /// contract rather than a silent runtime surprise. `is_assignable`
+    /// contract rather than a silent runtime surprise. `accepts`
     /// (not a plain class-name string comparison) so a broader catch/
     /// `@throws` type - `\Throwable`, `\Error`, or a real union
     /// containing either - counts too, not just the exact
@@ -6607,13 +6604,14 @@ impl<'a> Checker<'a> {
         let unhandled_match_error = Type::Object("UnhandledMatchError".into(), Vec::new());
         self.current_catch_types
             .iter()
-            .any(|caught| self.registry.is_assignable(&unhandled_match_error, caught))
+            .any(|caught| self.registry.accepts(caught, &unhandled_match_error).yes())
             || self
                 .current_declared_throws_type
                 .as_ref()
                 .is_some_and(|declared| {
                     self.registry
-                        .is_assignable(&unhandled_match_error, declared)
+                        .accepts(declared, &unhandled_match_error)
+                        .yes()
                 })
     }
 
@@ -6769,7 +6767,7 @@ fn intersect_but_not_never(registry: &Registry, native: &Type, inferred: Type) -
         let fits = !matches!(m, Type::Void)
             && native_members
                 .iter()
-                .any(|n| !(int_like && matches!(n, Type::Float)) && registry.is_assignable(&m, n));
+                .any(|n| !(int_like && matches!(n, Type::Float)) && registry.accepts(n, &m).yes());
         if fits {
             kept.push(m);
             continue;
@@ -6777,7 +6775,7 @@ fn intersect_but_not_never(registry: &Registry, native: &Type, inferred: Type) -
         kept.extend(
             native_members
                 .iter()
-                .filter(|n| !matches!(n, Type::Null) && registry.is_assignable(n, &m))
+                .filter(|n| !matches!(n, Type::Null) && registry.accepts(&m, n).yes())
                 .map(|n| (*n).clone()),
         );
     }

@@ -25,10 +25,10 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use types::union_types;
 use crate::registry::infer_const_type;
 use syntax::ast::{BinOp, Expr, ExprKind, GlobalVar, Literal, StaticTarget, Stmt, StmtKind};
 use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
+use types::union_types;
 use types::{Shape, Type};
 
 use super::Registry;

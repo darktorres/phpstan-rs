@@ -2,7 +2,7 @@
 
 use super::helpers::*;
 
-// `Registry::is_assignable` applies real variance to a generic class's
+// `Registry::accepts` applies real variance to a generic class's
 // own type arguments, instead of ignoring them entirely (`Collection<Cat>`
 // and `Collection<Dog>` are not mutually assignable). These exercise it
 // through ordinary argument-type checking (`checker/calls.rs`), the
@@ -13,7 +13,7 @@ use super::helpers::*;
 fn a_bare_erased_generic_reference_is_never_flagged_either_direction() {
     // The overwhelmingly common real shape: no `<T>` at all. Padding a
     // missing slot with plain `Mixed` (not the class's own declared
-    // bound - see `Registry::is_assignable`'s own doc comment for why
+    // bound - see `Registry::accepts`'s own doc comment for why
     // that distinction matters) keeps this silent, matching this
     // project's established "erased generic = don't know = don't flag"
     // leniency everywhere else - even though `Collection` here declares
@@ -51,7 +51,7 @@ fn a_call_site_variance_marker_inside_a_declared_parameter_overrides_declaration
     // nested `Collection<contravariant T>` flips the composed position
     // from input back to output, making this sound - proof
     // `Registry::effective_slot_variance` is really wired into
-    // `walk_variance`, not just `is_assignable`.
+    // `walk_variance`, not just `accepts`.
     let d = diagnostics_for(
         r#"<?php
             /**

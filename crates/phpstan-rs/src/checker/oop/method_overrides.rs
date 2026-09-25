@@ -162,7 +162,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             }
-            if self.registry.is_assignable(&own_throws, &parent_throws) {
+            if self.registry.accepts(&parent_throws, &own_throws).yes() {
                 continue;
             }
             self.report(
@@ -562,7 +562,7 @@ impl<'a> Checker<'a> {
             // Mixed avoids flagging the overwhelmingly common case at
             // the cost of missing the rare genuine `mixed`-narrows-a-
             // real-type case - the same "don't guess wrong on Mixed"
-            // tradeoff `is_assignable` makes elsewhere in this project.
+            // tradeoff `accepts` makes elsewhere in this project.
             //
             // Checked at the native level only (`ty_native`, ignoring
             // any `@param` docblock refinement on either side) - real
@@ -585,7 +585,7 @@ impl<'a> Checker<'a> {
             // some shared, comparable-by-name sentinel - `self` in
             // `fqn`'s override and `self` in `ancestor_owner`'s
             // declaration usually name two different concrete classes.
-            // `is_assignable`/`is_subtype` have no rule for a concrete
+            // `accepts`/`is_subtype` have no rule for a concrete
             // `Object` satisfying a still-bare `SelfRef` (only the
             // reverse - `self` satisfying a concrete class - is
             // handled), so resolving both sides first, same as any other
@@ -610,7 +610,7 @@ impl<'a> Checker<'a> {
                 fqn
             };
             let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty_native, ancestor_pseudo_owner);
-            if !self.registry.is_assignable(&ancestor_ty, &own_ty) {
+            if !self.registry.accepts(&own_ty, &ancestor_ty).yes() {
                 self.report(fqn.to_string(), format!(
                         "{fqn}::{method_name}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
                         i + 1,
@@ -659,7 +659,8 @@ impl<'a> Checker<'a> {
                 || (!matches!(own_ty, Type::Mixed(false))
                     && self
                         .registry
-                        .is_assignable(&self.resolve_pseudo(own_ty, fqn), ancestor_ty));
+                        .accepts(ancestor_ty, &self.resolve_pseudo(own_ty, fqn))
+                        .yes());
             if !will_change && !compatible {
                 let own_display = if matches!(own_ty, Type::Mixed(false)) {
                     "mixed".to_string()
@@ -693,10 +694,13 @@ impl<'a> Checker<'a> {
         if own_sig.return_type_native != Type::Mixed(false)
             && ancestor_sig.return_type_native != Type::Mixed(false)
             && !ancestor_return_uses_static(&ancestor_sig.return_type_native)
-            && !self.registry.is_assignable(
-                &self.resolve_pseudo(&own_sig.return_type_native, fqn),
-                &self.resolve_pseudo(&ancestor_sig.return_type_native, ancestor_pseudo_owner),
-            )
+            && !self
+                .registry
+                .accepts(
+                    &self.resolve_pseudo(&ancestor_sig.return_type_native, ancestor_pseudo_owner),
+                    &self.resolve_pseudo(&own_sig.return_type_native, fqn),
+                )
+                .yes()
         {
             self.report(fqn.to_string(), format!(
                     "{fqn}::{method_name}() return type {} is not compatible with the inherited return type {}",

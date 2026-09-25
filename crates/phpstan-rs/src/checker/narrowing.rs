@@ -1557,7 +1557,7 @@ impl<'a> Checker<'a> {
             return;
         };
         let negated_prefix = if info.negated { "negated " } else { "" };
-        let is_super = self.registry.is_assignable(&param.ty, &info.ty);
+        let is_super = self.registry.accepts(&info.ty, &param.ty).yes();
         let is_disjoint = types_definitely_disjoint(&info.ty, &param.ty);
         let (impossible, already_narrowed) = if info.negated {
             (is_super, is_disjoint)

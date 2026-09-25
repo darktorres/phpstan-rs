@@ -260,7 +260,7 @@ impl<'a> Checker<'a> {
     /// exactly mirroring real PHPStan's `VarianceCheck`/
     /// `getReferencedTemplateTypes`, which consult the identical
     /// call-site-overrides-declared rule this project's own
-    /// `is_assignable` now also uses (`registry.rs`) - both are real
+    /// `accepts` now also uses (`registry.rs`) - both are real
     /// consumers of the same effective-variance concept, not just one.
     fn walk_variance(
         &self,

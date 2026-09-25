@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 let another_value_of_needle =
-                    self.registry.is_assignable(&needle, &generalize(value));
+                    self.registry.accepts(&generalize(value), &needle).yes();
                 dead.push((value.clone(), another_value_of_needle));
             }
         }

@@ -186,7 +186,7 @@ type ContainerFieldFactsMap = imbl::GenericHashMap<
 // ordinary (still-flat, still-corrupted) tracked type would otherwise
 // fail: reconstructing `Union([true-slot, false-slot])` from here and
 // re-checking against the same declared type's own already-flattened
-// fallback union passes through 100% pre-existing `is_assignable`
+// fallback union passes through 100% pre-existing `accepts`
 // per-member `Union`-vs-`Union` logic, no further mechanism needed.
 // `merge_scopes` *unions* both sides (like `branch_implied_facts`, not
 // like `container_field_facts`'s intersection): a `(container, subject,

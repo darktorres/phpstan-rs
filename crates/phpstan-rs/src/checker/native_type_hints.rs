@@ -228,7 +228,7 @@ impl<'a> Checker<'a> {
             let suggested_ty = self.suggested_type(&suggested, class_name);
             if let Some(default) = &param_sig.default_ty
                 && !matches!(default, Type::Mixed(_))
-                && !self.registry.is_assignable(default, &suggested_ty)
+                && !self.registry.accepts(&suggested_ty, default).yes()
             {
                 continue;
             }

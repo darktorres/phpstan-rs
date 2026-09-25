@@ -919,7 +919,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // synthesizes `implements UnitEnum` at declaration time
         // (`registry/class_info.rs`), so this gets real narrowing/
         // assignability for free through the ordinary Object-vs-Object
-        // class-hierarchy walk in `registry::is_assignable` - no new
+        // class-hierarchy walk in `registry::accepts` - no new
         // type-system machinery needed.
         "enum-string" => {
             let unit_enum = Type::Object("UnitEnum".into(), Vec::new());
@@ -1102,8 +1102,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         }
         // `Closure` is a concrete class only a real closure object
         // satisfies, strictly narrower than the four shapes `callable`
-        // accepts (see `is_assignable`'s `Type::Callable` arms) -
-        // represented as a real `Object` so `is_assignable`'s ordinary
+        // accepts (see `accepts`'s `Type::Callable` arms) -
+        // represented as a real `Object` so `accepts`'s ordinary
         // class-hierarchy check handles it.
         //
         // Preserves `original`'s leading `\`: a bare, unqualified
@@ -1184,7 +1184,7 @@ fn parse_generic_arg(a: &str) -> Type {
 /// wraps, for every consumer that only cares "what type is really being
 /// referenced here," not the variance override itself
 /// (existence-checking, bound-checking, substitution's own recursive
-/// rebuild, ...). `Registry::effective_slot_variance`/`is_assignable`
+/// rebuild, ...). `Registry::effective_slot_variance`/`accepts`
 /// are the two places that DO care about the annotation itself and read
 /// it directly rather than through this helper. `*` has no real type to
 /// unwrap to at all - `None` here means "nothing to verify," the same as

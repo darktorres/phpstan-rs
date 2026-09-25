@@ -816,7 +816,7 @@ impl Project {
     }
 
     /// Configures the project's own `level` setting for
-    /// `registry::Registry::accepts_at_configured_level` - see that
+    /// `registry::Registry::rule_level_accepts` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the
     /// collapsed `u8` `check-project` otherwise uses for diagnostic
     /// filtering) and why `None` must keep today's always-strict

@@ -376,7 +376,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // no shape subtyping (e.g. "has at least these keys") is modeled.
         // On top of the "only when the array's
         // own value type is Mixed" rule (this function does no per-field
-        // value comparison of its own - that's `registry::is_assignable`'s
+        // value comparison of its own - that's `registry::accepts`'s
         // job), also require the shape's own real aggregate key type to
         // be a subtype of the array's own declared key type -
         // `array{name: string}` (all-string-keyed) must never satisfy
@@ -390,7 +390,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // satisfies the ordinary bare hint" rule `ArrayShape` gets just
         // above, one type family over. Checking whether some *real*
         // class (`Type::Object(class, _)`) structurally has these exact
-        // properties needs the registry - `registry::is_assignable`'s
+        // properties needs the registry - `registry::accepts`'s
         // own `ObjectShape` arm handles that hierarchy/property-aware
         // direction; this function has no class context to consult.
         (Type::ObjectShape(_), Type::ObjectWithoutClass) => true,
@@ -405,7 +405,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // A specific case is a real instance of its own enum -
         // the exact-name check here is the same non-hierarchy-aware
         // baseline `Object`-vs-`Object` gets just below; `registry::
-        // is_assignable` is where the hierarchy-aware upgrade (matching
+        // accepts` is where the hierarchy-aware upgrade (matching
         // `UnitEnum`/`BackedEnum`/any interface the enum implements)
         // actually happens, mirroring how plain class inheritance already
         // works one layer up from this function.

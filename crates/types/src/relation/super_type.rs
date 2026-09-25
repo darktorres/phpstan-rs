@@ -5,7 +5,7 @@ use syntax::ast::ClassKind;
 impl Relation<'_> {
     /// Whether every value of `sub` is a `sup` (`Yes`), none is (`No`),
     /// or some are (`Maybe`) - real PHPStan's `isSuperTypeOf`, as the
-    /// PHPDoc-vs-native rules read it. `Yes` follows `is_assignable`, so it
+    /// PHPDoc-vs-native rules read it. `Yes` follows `accepts`, so it
     /// inherits that relation's leniencies; `No` needs a proof (disjoint
     /// scalar families, distinct literals, or two unrelated classes
     /// neither of which can be extended into the other), and anything
@@ -83,7 +83,7 @@ impl Relation<'_> {
                 TrinaryLogic::Maybe
             }
             // A class name the registry never saw (or an unresolved
-            // constant reference) proves nothing; `is_assignable` would
+            // constant reference) proves nothing; `accepts` would
             // accept anything into it.
             (Type::Object(name, _), _) | (_, Type::Object(name, _))
                 if is_unresolved_reference(name) =>
@@ -107,7 +107,7 @@ impl Relation<'_> {
             (Type::ArrayShape(sup_shape), Type::ArrayShape(sub_shape)) => {
                 self.shape_super_type_of(sup_shape, sub_shape)
             }
-            // Arrays compare structurally: `is_assignable` reads an
+            // Arrays compare structurally: `accepts` reads an
             // `array<mixed>` value as "unknown" and lets it fit any array,
             // right for accepting an argument but not for "always". An
             // empty array fits every array type, so this is never `No`.
@@ -128,7 +128,7 @@ impl Relation<'_> {
             }
             // A general array may or may not carry a shape's keys.
             (Type::ArrayShape(_), Type::Array(..)) => TrinaryLogic::Maybe,
-            _ if self.is_assignable(sub, sup) => TrinaryLogic::Yes,
+            _ if self.accepts_type(sub, sup) => TrinaryLogic::Yes,
             (_, Type::Intersection(members)) => {
                 let refused = members
                     .iter()

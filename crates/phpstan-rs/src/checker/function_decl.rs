@@ -1586,10 +1586,10 @@ impl<'a> Checker<'a> {
     /// `param_ty` mirrors real PHPStan's own explicit `TemplateTypeHelper::
     /// resolveToBounds` step - without it, a `@template T`-typed
     /// parameter's own default would be checked against the bare,
-    /// unresolved `TemplateParam` itself, which `registry::is_assignable`
+    /// unresolved `TemplateParam` itself, which `registry::accepts`
     /// has no dedicated rule for on the *super*-type side (only the
     /// *sub*-type side, `(Type::TemplateParam(tp), _) => ... self.
-    /// is_assignable(&tp.bound, sup)`, already used elsewhere for the
+    /// accepts(&tp.bound, sup)`, already used elsewhere for the
     /// opposite direction). Deliberately shallow - only a bare top-level
     /// `T $x = ...`, not real PHPStan's own recursive substitution
     /// through the whole type tree (e.g. a template nested inside
@@ -1624,7 +1624,7 @@ impl<'a> Checker<'a> {
             };
             let default_ty = self.infer_expr(default, &Locals::default());
             if matches!(default_ty, Type::Mixed(_))
-                || self.registry.is_assignable(&default_ty, param_ty)
+                || self.registry.accepts(param_ty, &default_ty).yes()
             {
                 continue;
             }

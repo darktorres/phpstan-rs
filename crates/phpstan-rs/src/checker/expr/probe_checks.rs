@@ -602,7 +602,7 @@ impl<'a> Checker<'a> {
     /// exact same disjointness/subtyping primitives `assert.
     /// impossibleType`/`.alreadyNarrowedType` already established for
     /// the PHPDoc-tag version of this same idea (`types_definitely_
-    /// disjoint`, `registry.is_assignable`) - `types_definitely_disjoint`
+    /// disjoint`, `registry.accepts`) - `types_definitely_disjoint`
     /// only fires on a genuinely different scalar family (never a guess
     /// between two object types), so `is_string((object) $x)` stays
     /// silent rather than risking a wrong "always false".
@@ -616,7 +616,7 @@ impl<'a> Checker<'a> {
     /// body path's own facts before a post-loop condition ever sees
     /// them, so a variable that's sometimes `string` and sometimes `int`
     /// across iterations already reads back as `string|int` here, which
-    /// neither `types_definitely_disjoint` nor `is_assignable` treats as
+    /// neither `types_definitely_disjoint` nor `accepts` treats as
     /// decided.
     pub(crate) fn check_impossible_type_check_call(
         &mut self,

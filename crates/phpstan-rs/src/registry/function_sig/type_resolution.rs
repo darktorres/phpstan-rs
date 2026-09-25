@@ -197,7 +197,7 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
 /// all genuinely *did* address that native alternative - but
 /// `types::is_subtype`'s own Object handling is name-equality only, with
 /// none of those leniencies (this function has no `&Registry` to check
-/// real hierarchy or any of `Registry::is_assignable`'s own object-
+/// real hierarchy or any of `Registry::accepts`'s own object-
 /// specific rules with - see `member_possible_given_native`'s own
 /// identical "no hierarchy this early" doc comment). Wrongly adding a
 /// covered class-named member back produces a real, new false positive

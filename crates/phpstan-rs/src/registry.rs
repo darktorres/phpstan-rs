@@ -375,7 +375,7 @@ pub struct Registry {
     pub check_renamed_named_arguments: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
-    // explicitly configured, which `accepts_at_configured_level` treats
+    // explicitly configured, which `rule_level_accepts` treats
     // as "keep today's always-strict answer," not real PHPStan's lenient
     // level-0 default. Set once from `check-project`'s already-resolved
     // `level`/`config.level` merge, not a flag of its own.
@@ -387,10 +387,10 @@ pub struct Registry {
     // default (`false`) is already unconditionally lenient toward a
     // `BenevolentUnionType` accepted value, exactly this project's own
     // existing, always-on `AccessoryKind::Benevolent` leniency in
-    // `is_assignable` (not an "opposite gap" from real PHPStan's default
+    // `accepts` (not an "opposite gap" from real PHPStan's default
     // posture, contrary to an earlier draft of this ROADMAP's own
     // claim). This flag opts *into* real PHPStan's stricter, non-default
-    // behavior: when `true`, `accepts_at_configured_level_rec` strips a
+    // behavior: when `true`, `rule_level_accepts` strips a
     // Benevolent-marked `sub`'s own leniency and requires *every* member
     // of its wrapped `Union` to satisfy `sup`, mirroring `RuleLevelHelper::
     // transformAcceptedType`'s own `checkBenevolentUnionTypes` branch

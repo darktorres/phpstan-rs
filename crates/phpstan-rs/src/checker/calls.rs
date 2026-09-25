@@ -435,10 +435,7 @@ impl<'a> Checker<'a> {
             // See the identical, earlier comment in this file's own
             // ordinary-call argument check for why no separate `Mixed`
             // bail-out is needed here.
-            if !self
-                .registry
-                .accepts_at_configured_level(&arg_ty, &param.ty)
-            {
+            if !self.registry.rule_level_accepts(&param.ty, &arg_ty).yes() {
                 self.report(
                     label.to_string(),
                     format!(

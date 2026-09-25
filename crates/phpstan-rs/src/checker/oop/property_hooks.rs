@@ -299,7 +299,7 @@ impl<'a> Checker<'a> {
             PropertyHookBody::Arrow(e) => {
                 let body_ty = self.check_expr(e, &mut locals, &label);
                 if body_ty != Type::Mixed(false)
-                    && !self.registry.is_assignable(&body_ty, &prop_sig.ty)
+                    && !self.registry.accepts(&prop_sig.ty, &body_ty).yes()
                 {
                     self.report(
                         label.clone(),
@@ -476,7 +476,7 @@ impl<'a> Checker<'a> {
                 );
                 let prop_native_ty =
                     self.resolve_type_hint(type_hint.map(TypeHint::to_string).as_deref());
-                if !self.registry.is_assignable(&prop_native_ty, &param_ty) {
+                if !self.registry.accepts(&param_ty, &prop_native_ty).yes() {
                     self.report_builder(
                         DiagnosticBuilder::new(
                             fqn.to_string(),

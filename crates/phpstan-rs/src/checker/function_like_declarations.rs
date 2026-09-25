@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
             };
             let default_ty = self.infer_expr(default, &Locals::default());
             if matches!(default_ty, Type::Mixed(_))
-                || self.registry.is_assignable(&default_ty, &param_ty)
+                || self.registry.accepts(&param_ty, &default_ty).yes()
             {
                 continue;
             }

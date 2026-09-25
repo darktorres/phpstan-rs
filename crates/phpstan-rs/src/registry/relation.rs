@@ -6,7 +6,7 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 
 use crate::registry::Registry;
-use types::{ClassFacts, ClassHierarchy, Relation, TrinaryLogic, Type, Variance};
+use types::{AcceptsResult, ClassFacts, ClassHierarchy, Relation, TrinaryLogic, Type, Variance};
 
 impl ClassHierarchy for Registry {
     fn is_subclass_of(&self, class: &str, of: &str) -> bool {
@@ -71,12 +71,12 @@ impl Registry {
         }
     }
 
-    pub fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
-        self.relation().is_assignable(sub, sup)
+    pub fn accepts(&self, accepting: &Type, accepted: &Type) -> AcceptsResult {
+        self.relation().accepts(accepting, accepted)
     }
 
-    pub fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
-        self.relation().accepts_at_configured_level(sub, sup)
+    pub fn rule_level_accepts(&self, accepting: &Type, accepted: &Type) -> AcceptsResult {
+        self.relation().rule_level_accepts(accepting, accepted)
     }
 
     pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {

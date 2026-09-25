@@ -49,7 +49,7 @@ impl<'a> Checker<'a> {
             if !self.registry.classes.contains_key(class.as_str()) {
                 continue;
             }
-            let covered = throws.is_some_and(|t| self.registry.is_assignable(&thrown, t));
+            let covered = throws.is_some_and(|t| self.registry.accepts(t, &thrown).yes());
             if covered {
                 continue;
             }

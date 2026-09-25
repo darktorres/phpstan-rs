@@ -501,7 +501,8 @@ impl<'a> Checker<'a> {
         );
         if self
             .registry
-            .accepts_at_configured_level(&values_ty, &expected)
+            .rule_level_accepts(&expected, &values_ty)
+            .yes()
         {
             return;
         }
@@ -545,7 +546,7 @@ impl<'a> Checker<'a> {
         let allowed = format_value_type();
         for (i, arg) in args.iter().enumerate().skip(function.format + 1) {
             let arg_ty = self.infer_expr(&arg.value, locals);
-            if !self.registry.accepts_at_configured_level(&arg_ty, &allowed) {
+            if !self.registry.rule_level_accepts(&allowed, &arg_ty).yes() {
                 self.report(
                     label.to_string(),
                     format!(
@@ -629,42 +630,51 @@ impl<'a> Checker<'a> {
     /// `PrintfPlaceholder::doesArgumentTypeMatchPlaceholder`.
     fn matches_placeholder(&self, ty: &Type, accepting: Accepting, strict: bool) -> bool {
         match accepting {
-            Accepting::StrictInt => self.registry.is_assignable(ty, &Type::Int),
-            Accepting::Int if strict => self.registry.is_assignable(
-                ty,
-                &Type::Union(vec![
-                    Type::Int,
-                    Type::Intersection(vec![
-                        Type::String,
-                        Type::Accessory(AccessoryKind::DecimalIntegerString),
+            Accepting::StrictInt => self.registry.accepts(&Type::Int, ty).yes(),
+            Accepting::Int if strict => self
+                .registry
+                .accepts(
+                    &Type::Union(vec![
+                        Type::Int,
+                        Type::Intersection(vec![
+                            Type::String,
+                            Type::Accessory(AccessoryKind::DecimalIntegerString),
+                        ]),
                     ]),
-                ]),
-            ),
-            Accepting::Float if strict => self.registry.is_assignable(
-                ty,
-                &Type::Union(vec![
-                    Type::Float,
-                    Type::Int,
-                    Type::Intersection(vec![
-                        Type::String,
-                        Type::Accessory(AccessoryKind::NumericString),
+                    ty,
+                )
+                .yes(),
+            Accepting::Float if strict => self
+                .registry
+                .accepts(
+                    &Type::Union(vec![
+                        Type::Float,
+                        Type::Int,
+                        Type::Intersection(vec![
+                            Type::String,
+                            Type::Accessory(AccessoryKind::NumericString),
+                        ]),
                     ]),
-                ]),
-            ),
+                    ty,
+                )
+                .yes(),
             Accepting::Int => self.casts_to_number(ty, true),
             Accepting::Float => self.casts_to_number(ty, false),
             Accepting::String | Accepting::Mixed => {
                 !strict
-                    || self.registry.is_assignable(
-                        ty,
-                        &Type::Union(vec![
-                            Type::String,
-                            Type::Object("Stringable".into(), Vec::new()),
-                            Type::Float,
-                            Type::Int,
-                            Type::Null,
-                        ]),
-                    )
+                    || self
+                        .registry
+                        .accepts(
+                            &Type::Union(vec![
+                                Type::String,
+                                Type::Object("Stringable".into(), Vec::new()),
+                                Type::Float,
+                                Type::Int,
+                                Type::Null,
+                            ]),
+                            ty,
+                        )
+                        .yes()
             }
         }
     }

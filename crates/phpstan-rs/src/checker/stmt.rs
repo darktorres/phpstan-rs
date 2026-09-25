@@ -591,13 +591,10 @@ impl<'a> Checker<'a> {
                             "return.void",
                         );
                     // See `checker::calls`' own identical comment:
-                    // `accepts_at_configured_level` already accepts a
+                    // `rule_level_accepts` already accepts a
                     // `Mixed` actual value unconditionally below real
                     // PHPStan's own level 9/10.
-                    } else if !self
-                        .registry
-                        .accepts_at_configured_level(&actual, &expected)
-                    {
+                    } else if !self.registry.rule_level_accepts(&expected, &actual).yes() {
                         // `DiscriminantArrayFactsMap`'s own doc comment -
                         // before reporting a real mismatch, retry against
                         // a *reconstructed* type built from this exact
@@ -610,9 +607,8 @@ impl<'a> Checker<'a> {
                         // doesn't apply to (the overwhelming majority)
                         // sees no change in behavior at all.
                         let reconstructed = reconstructed_discriminant_return_type(e, locals);
-                        let passes_via_reconstruction = reconstructed.is_some_and(|r| {
-                            self.registry.accepts_at_configured_level(&r, &expected)
-                        });
+                        let passes_via_reconstruction = reconstructed
+                            .is_some_and(|r| self.registry.rule_level_accepts(&expected, &r).yes());
                         if !passes_via_reconstruction {
                             self.report(
                                 label.to_string(),

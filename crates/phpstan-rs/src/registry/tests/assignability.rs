@@ -12,14 +12,20 @@ fn is_assignable_uses_class_hierarchy() {
             class Circle implements Shape {}
         "#,
     );
-    assert!(r.is_assignable(
-        &Type::Object("Circle".into(), Vec::new()),
-        &Type::Object("Shape".into(), Vec::new())
-    ));
-    assert!(!r.is_assignable(
-        &Type::Object("Shape".into(), Vec::new()),
-        &Type::Object("Circle".into(), Vec::new())
-    ));
+    assert!(
+        r.accepts(
+            &Type::Object("Shape".into(), Vec::new()),
+            &Type::Object("Circle".into(), Vec::new())
+        )
+        .yes()
+    );
+    assert!(
+        !r.accepts(
+            &Type::Object("Circle".into(), Vec::new()),
+            &Type::Object("Shape".into(), Vec::new())
+        )
+        .yes()
+    );
 }
 
 #[test]
@@ -32,23 +38,29 @@ fn class_string_is_assignable_follows_class_hierarchy_not_name_equality() {
         "#,
     );
     let cs = |name: &str| Type::ClassString(Box::new(Type::Object(name.into(), Vec::new())));
-    assert!(r.is_assignable(&cs("Circle"), &cs("Shape")));
-    assert!(!r.is_assignable(&cs("Square"), &cs("Shape")));
+    assert!(r.accepts(&cs("Shape"), &cs("Circle")).yes());
+    assert!(!r.accepts(&cs("Shape"), &cs("Square")).yes());
 }
 
 #[test]
 fn any_class_instance_is_assignable_to_the_native_object_type() {
     let r = build_registry("<?php class Foo {}");
-    assert!(r.is_assignable(
-        &Type::Object("Foo".into(), Vec::new()),
-        &Type::ObjectWithoutClass
-    ));
+    assert!(
+        r.accepts(
+            &Type::ObjectWithoutClass,
+            &Type::Object("Foo".into(), Vec::new())
+        )
+        .yes()
+    );
     // Not the other way around - a plain `object` isn't known to be
     // any particular class.
-    assert!(!r.is_assignable(
-        &Type::ObjectWithoutClass,
-        &Type::Object("Foo".into(), Vec::new())
-    ));
+    assert!(
+        !r.accepts(
+            &Type::Object("Foo".into(), Vec::new()),
+            &Type::ObjectWithoutClass
+        )
+        .yes()
+    );
 }
 
 #[test]
@@ -60,13 +72,13 @@ fn is_assignable_treats_unknown_array_element_type_as_compatible() {
     );
     let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
     // The lenient direction that types::is_subtype deliberately does
-    // NOT take (see its own array-covariance test) - is_assignable is
+    // NOT take (see its own array-covariance test) - accepts is
     // the practical, checker-facing layer where "we don't know" must
     // not read as "definitely incompatible".
-    assert!(r.is_assignable(&unknown_elements, &ints));
+    assert!(r.accepts(&ints, &unknown_elements).yes());
     // A genuinely known, different element type is still caught.
     let strings = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String));
-    assert!(!r.is_assignable(&strings, &ints));
+    assert!(!r.accepts(&ints, &strings).yes());
 }
 
 #[test]
@@ -81,11 +93,11 @@ fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
         Type::String,
         false,
     )]));
-    assert!(r.is_assignable(&unknown, &shape));
+    assert!(r.accepts(&shape, &unknown).yes());
     // A genuinely known, homogeneous array still doesn't satisfy an
     // arbitrary shape.
     let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
-    assert!(!r.is_assignable(&ints, &shape));
+    assert!(!r.accepts(&shape, &ints).yes());
 }
 
 // An `ArrayShape`'s aggregate key type (int-vs-string, mirroring
@@ -98,7 +110,7 @@ fn a_string_keyed_array_type_is_not_assignable_to_an_int_keyed_shape() {
     let r = Registry::default();
     let strings = Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)));
     let shape = Type::ArrayShape(Shape::from_named(vec![("0".to_string(), Type::Int, false)]));
-    assert!(!r.is_assignable(&strings, &shape));
+    assert!(!r.accepts(&shape, &strings).yes());
 }
 
 #[test]
@@ -110,7 +122,7 @@ fn an_int_keyed_array_type_is_not_assignable_to_a_string_keyed_shape() {
         Type::String,
         false,
     )]));
-    assert!(!r.is_assignable(&ints, &shape));
+    assert!(!r.accepts(&shape, &ints).yes());
 }
 
 #[test]
@@ -122,7 +134,7 @@ fn a_string_keyed_shape_is_not_assignable_to_an_int_keyed_array_type() {
         false,
     )]));
     let ints = Type::Array(Box::new(Type::Int), Box::new(Type::String));
-    assert!(!r.is_assignable(&shape, &ints));
+    assert!(!r.accepts(&ints, &shape).yes());
 }
 
 #[test]
@@ -134,7 +146,7 @@ fn an_int_keyed_shape_is_still_assignable_to_a_matching_int_keyed_array_type() {
         false,
     )]));
     let ints = Type::Array(Box::new(Type::Int), Box::new(Type::String));
-    assert!(r.is_assignable(&shape, &ints));
+    assert!(r.accepts(&ints, &shape).yes());
 }
 
 #[test]
@@ -148,17 +160,20 @@ fn strict_mixed_arrays_opts_out_of_the_unknown_array_element_leniency() {
         Box::new(Type::Mixed(false)),
     );
     let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
-    assert!(!r.is_assignable(&unknown_elements, &ints));
+    assert!(!r.accepts(&ints, &unknown_elements).yes());
     // Still correctly permissive when the element types genuinely
     // match - strictness only removes the "we don't know" free pass,
     // it doesn't break real assignability.
-    assert!(r.is_assignable(
-        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int)),
-        &ints
-    ));
+    assert!(
+        r.accepts(
+            &ints,
+            &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
+        )
+        .yes()
+    );
 
     r.strict_mixed_arrays = false;
-    assert!(r.is_assignable(&unknown_elements, &ints));
+    assert!(r.accepts(&ints, &unknown_elements).yes());
 }
 
 #[test]
@@ -176,7 +191,7 @@ fn strict_mixed_arrays_opts_out_of_the_unknown_array_shape_leniency() {
         Type::String,
         false,
     )]));
-    assert!(!r.is_assignable(&unknown, &shape));
+    assert!(!r.accepts(&shape, &unknown).yes());
 }
 
 #[test]
@@ -187,9 +202,9 @@ fn is_assignable_accepts_a_value_matching_any_union_member_on_the_supertype_side
     // executions. Manually verified correct against real code first.
     let r = Registry::default();
     let int_or_string = Type::Union(vec![Type::Int, Type::String]);
-    assert!(r.is_assignable(&Type::Int, &int_or_string));
-    assert!(r.is_assignable(&Type::String, &int_or_string));
-    assert!(!r.is_assignable(&Type::Bool, &int_or_string));
+    assert!(r.accepts(&int_or_string, &Type::Int).yes());
+    assert!(r.accepts(&int_or_string, &Type::String).yes());
+    assert!(!r.accepts(&int_or_string, &Type::Bool).yes());
 }
 
 #[test]
@@ -215,10 +230,10 @@ fn is_assignable_handles_intersection_types_on_either_side() {
 
     // sub is the intersection: satisfies a supertype matching any one
     // of its members.
-    assert!(r.is_assignable(&both, &countable_only));
+    assert!(r.accepts(&countable_only, &both).yes());
     // sup is the intersection: a value only known to be one of the
     // two doesn't satisfy a requirement for both.
-    assert!(!r.is_assignable(&countable_only, &both));
+    assert!(!r.accepts(&both, &countable_only).yes());
 }
 
 #[test]
@@ -230,14 +245,20 @@ fn a_real_enum_class_string_satisfies_enum_string() {
         "#,
     );
     let enum_string = Type::ClassString(Box::new(Type::Object("UnitEnum".into(), vec![])));
-    assert!(r.is_assignable(
-        &Type::ClassString(Box::new(Type::Object("Suit".into(), vec![]))),
-        &enum_string
-    ));
-    assert!(!r.is_assignable(
-        &Type::ClassString(Box::new(Type::Object("Foo".into(), vec![]))),
-        &enum_string
-    ));
+    assert!(
+        r.accepts(
+            &enum_string,
+            &Type::ClassString(Box::new(Type::Object("Suit".into(), vec![])))
+        )
+        .yes()
+    );
+    assert!(
+        !r.accepts(
+            &enum_string,
+            &Type::ClassString(Box::new(Type::Object("Foo".into(), vec![])))
+        )
+        .yes()
+    );
 }
 
 #[test]
@@ -252,25 +273,37 @@ fn interface_string_and_trait_string_check_the_real_class_kind() {
     let interface_string = Type::ClassKindString(types::ClassKind::Interface);
     let trait_string = Type::ClassKindString(types::ClassKind::Trait);
 
-    assert!(r.is_assignable(
-        &Type::ClassString(Box::new(Type::Object("Shape2".into(), vec![]))),
-        &interface_string
-    ));
-    assert!(!r.is_assignable(
-        &Type::ClassString(Box::new(Type::Object("Plain2".into(), vec![]))),
-        &interface_string
-    ));
-    assert!(r.is_assignable(
-        &Type::ClassString(Box::new(Type::Object("Helper2".into(), vec![]))),
-        &trait_string
-    ));
-    assert!(!r.is_assignable(
-        &Type::ClassString(Box::new(Type::Object("Plain2".into(), vec![]))),
-        &trait_string
-    ));
+    assert!(
+        r.accepts(
+            &interface_string,
+            &Type::ClassString(Box::new(Type::Object("Shape2".into(), vec![])))
+        )
+        .yes()
+    );
+    assert!(
+        !r.accepts(
+            &interface_string,
+            &Type::ClassString(Box::new(Type::Object("Plain2".into(), vec![])))
+        )
+        .yes()
+    );
+    assert!(
+        r.accepts(
+            &trait_string,
+            &Type::ClassString(Box::new(Type::Object("Helper2".into(), vec![])))
+        )
+        .yes()
+    );
+    assert!(
+        !r.accepts(
+            &trait_string,
+            &Type::ClassString(Box::new(Type::Object("Plain2".into(), vec![])))
+        )
+        .yes()
+    );
 }
 
-// `accepts_at_configured_level`'s level-aware leniency.
+// `rule_level_accepts`'s level-aware leniency.
 
 #[test]
 fn accepts_at_configured_level_matches_is_assignable_when_never_configured() {
@@ -278,10 +311,10 @@ fn accepts_at_configured_level_matches_is_assignable_when_never_configured() {
     let nullable_string = Type::Union(vec![Type::String, Type::Null]);
     assert_eq!(r.configured_level, None);
     assert_eq!(
-        r.accepts_at_configured_level(&nullable_string, &Type::String),
-        r.is_assignable(&nullable_string, &Type::String)
+        r.rule_level_accepts(&Type::String, &nullable_string).yes(),
+        r.accepts(&Type::String, &nullable_string).yes()
     );
-    assert!(!r.accepts_at_configured_level(&nullable_string, &Type::String));
+    assert!(!r.rule_level_accepts(&Type::String, &nullable_string).yes());
 }
 
 #[test]
@@ -289,13 +322,13 @@ fn accepts_at_configured_level_matches_is_assignable_at_the_strict_threshold() {
     let mut r = build_registry("<?php");
     r.configured_level = Some(8);
     let nullable_string = Type::Union(vec![Type::String, Type::Null]);
-    assert!(!r.accepts_at_configured_level(&nullable_string, &Type::String));
+    assert!(!r.rule_level_accepts(&Type::String, &nullable_string).yes());
 }
 
 // The load-bearing case: a nullable-typed actual value (`?string`, the
 // single most common PHP nullability idiom) must be accepted by a
 // plain, non-nullable declared type below level 8, where plain
-// `is_assignable` (and a naive "bail to is_assignable whenever `sup` is
+// `accepts` (and a naive "bail to accepts whenever `sup` is
 // a Union too" fast path) both reject it.
 #[test]
 fn a_nullable_actual_type_is_accepted_by_a_non_nullable_declared_type_below_level_eight() {
@@ -304,7 +337,7 @@ fn a_nullable_actual_type_is_accepted_by_a_non_nullable_declared_type_below_leve
     for level in 0..8 {
         r.configured_level = Some(level);
         assert!(
-            r.accepts_at_configured_level(&nullable_string, &Type::String),
+            r.rule_level_accepts(&Type::String, &nullable_string).yes(),
             "level {level} should accept a nullable actual type"
         );
     }
@@ -313,7 +346,7 @@ fn a_nullable_actual_type_is_accepted_by_a_non_nullable_declared_type_below_leve
 // The real, common shape every one of this phase's 8 call sites actually
 // sees: a nullable *declared* type (`sup = Union([String, Null])`, e.g. a
 // `?string`-typed parameter) accepting a plain non-nullable actual
-// argument - already true via plain `is_assignable`'s own unconditional
+// argument - already true via plain `accepts`'s own unconditional
 // `.any()` arm, but must keep working once routed through the new
 // recursive Union-vs-Union-aware method instead of silently regressing.
 #[test]
@@ -321,14 +354,14 @@ fn a_plain_actual_value_still_satisfies_a_nullable_declared_type() {
     let mut r = build_registry("<?php");
     let nullable_string = Type::Union(vec![Type::String, Type::Null]);
     r.configured_level = Some(5);
-    assert!(r.accepts_at_configured_level(&Type::String, &nullable_string));
+    assert!(r.rule_level_accepts(&nullable_string, &Type::String).yes());
 }
 
 #[test]
 fn a_definite_null_actual_value_is_still_rejected_by_a_non_nullable_declared_type() {
     let mut r = build_registry("<?php");
     r.configured_level = Some(5);
-    assert!(!r.accepts_at_configured_level(&Type::Null, &Type::String));
+    assert!(!r.rule_level_accepts(&Type::String, &Type::Null).yes());
 }
 
 #[test]
@@ -339,7 +372,7 @@ fn a_nullable_actual_type_is_not_accepted_by_a_definite_null_declared_type() {
     // Stripping Null out of `sub` must never happen when `sup` is itself
     // bare `Type::Null` - a `?string` actual value still doesn't
     // definitely satisfy a target that only ever accepts `null`.
-    assert!(!r.accepts_at_configured_level(&nullable_string, &Type::Null));
+    assert!(!r.rule_level_accepts(&Type::Null, &nullable_string).yes());
 }
 
 #[test]
@@ -347,16 +380,19 @@ fn a_union_vs_union_pair_recurses_correctly_below_the_strict_threshold() {
     let mut r = build_registry("<?php");
     r.configured_level = Some(5);
     let nullable_string = Type::Union(vec![Type::String, Type::Null]);
-    assert!(r.accepts_at_configured_level(&nullable_string, &nullable_string));
+    assert!(
+        r.rule_level_accepts(&nullable_string, &nullable_string)
+            .yes()
+    );
     let nullable_int = Type::Union(vec![Type::Int, Type::Null]);
     // A nullable string's non-null member (`string`) doesn't satisfy a
     // nullable int's declared type at all, even once Null is stripped
     // from the actual side.
-    assert!(!r.accepts_at_configured_level(&nullable_string, &nullable_int));
+    assert!(!r.rule_level_accepts(&nullable_int, &nullable_string).yes());
 }
 
 // `checkExplicitMixed`/`checkImplicitMixed` - real PHPStan's own level
-// 9/10 (`accepts_at_configured_level`'s own `is_assignable_at_level`).
+// 9/10 (`rule_level_accepts`'s own `accepts_at_level`).
 
 #[test]
 fn below_level_nine_an_explicit_mixed_value_is_accepted_by_a_concrete_declared_type() {
@@ -364,7 +400,8 @@ fn below_level_nine_an_explicit_mixed_value_is_accepted_by_a_concrete_declared_t
     for level in 0..9 {
         r.configured_level = Some(level);
         assert!(
-            r.accepts_at_configured_level(&Type::Mixed(true), &Type::String),
+            r.rule_level_accepts(&Type::String, &Type::Mixed(true))
+                .yes(),
             "level {level} should still accept an explicit mixed value"
         );
     }
@@ -374,7 +411,10 @@ fn below_level_nine_an_explicit_mixed_value_is_accepted_by_a_concrete_declared_t
 fn at_level_nine_an_explicit_mixed_value_is_rejected_by_a_concrete_declared_type() {
     let mut r = build_registry("<?php");
     r.configured_level = Some(9);
-    assert!(!r.accepts_at_configured_level(&Type::Mixed(true), &Type::String));
+    assert!(
+        !r.rule_level_accepts(&Type::String, &Type::Mixed(true))
+            .yes()
+    );
 }
 
 #[test]
@@ -383,23 +423,38 @@ fn at_level_nine_an_implicit_mixed_value_is_still_accepted() {
     r.configured_level = Some(9);
     // Level 9 is `checkExplicitMixed` only - `checkImplicitMixed` needs
     // level 10, real PHPStan's own cumulative-but-distinct pair.
-    assert!(r.accepts_at_configured_level(&Type::Mixed(false), &Type::String));
+    assert!(
+        r.rule_level_accepts(&Type::String, &Type::Mixed(false))
+            .yes()
+    );
 }
 
 #[test]
 fn at_level_ten_both_explicit_and_implicit_mixed_values_are_rejected() {
     let mut r = build_registry("<?php");
     r.configured_level = Some(10);
-    assert!(!r.accepts_at_configured_level(&Type::Mixed(true), &Type::String));
-    assert!(!r.accepts_at_configured_level(&Type::Mixed(false), &Type::String));
+    assert!(
+        !r.rule_level_accepts(&Type::String, &Type::Mixed(true))
+            .yes()
+    );
+    assert!(
+        !r.rule_level_accepts(&Type::String, &Type::Mixed(false))
+            .yes()
+    );
 }
 
 #[test]
 fn at_level_ten_a_mixed_value_is_still_accepted_by_a_mixed_declared_type() {
     let mut r = build_registry("<?php");
     r.configured_level = Some(10);
-    assert!(r.accepts_at_configured_level(&Type::Mixed(true), &Type::Mixed(false)));
-    assert!(r.accepts_at_configured_level(&Type::Mixed(false), &Type::Mixed(true)));
+    assert!(
+        r.rule_level_accepts(&Type::Mixed(false), &Type::Mixed(true))
+            .yes()
+    );
+    assert!(
+        r.rule_level_accepts(&Type::Mixed(true), &Type::Mixed(false))
+            .yes()
+    );
 }
 
 #[test]
@@ -407,7 +462,7 @@ fn at_level_ten_a_mixed_value_inside_a_union_is_still_rejected_by_a_concrete_typ
     let mut r = build_registry("<?php");
     r.configured_level = Some(10);
     let string_or_mixed = Type::Union(vec![Type::String, Type::Mixed(false)]);
-    assert!(!r.accepts_at_configured_level(&string_or_mixed, &Type::String));
+    assert!(!r.rule_level_accepts(&Type::String, &string_or_mixed).yes());
 }
 
 #[test]
@@ -417,7 +472,7 @@ fn at_level_ten_ordinary_rejection_is_unaffected() {
     // A real mismatch (not mixed-driven at all) must still be rejected -
     // this mechanism only ever turns an acceptance into a rejection,
     // never masks a genuine one.
-    assert!(!r.accepts_at_configured_level(&Type::Int, &Type::String));
+    assert!(!r.rule_level_accepts(&Type::String, &Type::Int).yes());
 }
 
 // `check_benevolent_union_types` - real PHPStan's own standalone
@@ -430,7 +485,10 @@ fn a_benevolent_union_is_accepted_leniently_by_default() {
     assert!(!r.check_benevolent_union_types);
     // Only `Int` actually matches `Type::String` here - the default,
     // unconfigured leniency accepts because *any* member does.
-    assert!(r.accepts_at_configured_level(&Type::benevolent_array_key(), &Type::String));
+    assert!(
+        r.rule_level_accepts(&Type::String, &Type::benevolent_array_key())
+            .yes()
+    );
 }
 
 #[test]
@@ -439,7 +497,10 @@ fn a_benevolent_union_is_rejected_strictly_once_opted_in() {
     r.check_benevolent_union_types = true;
     // Once opted in, *every* member of the wrapped union must satisfy
     // `sup` - `Int` doesn't satisfy `Type::String`, so this now fails.
-    assert!(!r.accepts_at_configured_level(&Type::benevolent_array_key(), &Type::String));
+    assert!(
+        !r.rule_level_accepts(&Type::String, &Type::benevolent_array_key())
+            .yes()
+    );
 }
 
 #[test]
@@ -448,7 +509,10 @@ fn a_benevolent_union_still_accepted_once_opted_in_when_every_member_matches() {
     r.check_benevolent_union_types = true;
     let int_or_string = Type::BenevolentUnion(vec![Type::Int, Type::String]);
     let int_or_string_target = Type::Union(vec![Type::Int, Type::String]);
-    assert!(r.accepts_at_configured_level(&int_or_string, &int_or_string_target));
+    assert!(
+        r.rule_level_accepts(&int_or_string_target, &int_or_string)
+            .yes()
+    );
 }
 
 #[test]
@@ -457,11 +521,14 @@ fn opting_in_never_affects_is_assignable_directly() {
     // `RuleLevelHelper::accepts()` - never a bare `isSuperTypeOf()`/
     // `accepts()` call outside it (narrowing, generics bound-checking,
     // ...). Mirrored here: opting in must never touch this project's
-    // own general-purpose `is_assignable`, only `accepts_at_configured_
+    // own general-purpose `accepts`, only `accepts_at_configured_
     // level`.
     let mut r = build_registry("<?php");
     r.check_benevolent_union_types = true;
-    assert!(r.is_assignable(&Type::benevolent_array_key(), &Type::String));
+    assert!(
+        r.accepts(&Type::String, &Type::benevolent_array_key())
+            .yes()
+    );
 }
 
 #[test]
@@ -478,14 +545,20 @@ fn variance_composes_through_a_nested_covariant_generic_argument() {
     );
     let producer_of = |name: &str| Type::Object("Producer".into(), vec![obj(name)]);
     let container_of = |t: Type| Type::Object("Container".into(), vec![t]);
-    assert!(r.is_assignable(
-        &container_of(producer_of("Cat")),
-        &container_of(producer_of("Animal"))
-    ));
-    assert!(!r.is_assignable(
-        &container_of(producer_of("Animal")),
-        &container_of(producer_of("Cat"))
-    ));
+    assert!(
+        r.accepts(
+            &container_of(producer_of("Animal")),
+            &container_of(producer_of("Cat"))
+        )
+        .yes()
+    );
+    assert!(
+        !r.accepts(
+            &container_of(producer_of("Cat")),
+            &container_of(producer_of("Animal"))
+        )
+        .yes()
+    );
 }
 
 #[test]
@@ -506,14 +579,20 @@ fn variance_flips_through_a_nested_contravariant_generic_argument() {
     // Container<Consumer<Animal>> <: Container<Consumer<Cat>> too, once
     // the inner slot's own contravariance is composed through the outer
     // covariant one rather than inherited as covariant by default.
-    assert!(r.is_assignable(
-        &container_of(consumer_of("Animal")),
-        &container_of(consumer_of("Cat"))
-    ));
-    assert!(!r.is_assignable(
-        &container_of(consumer_of("Cat")),
-        &container_of(consumer_of("Animal"))
-    ));
+    assert!(
+        r.accepts(
+            &container_of(consumer_of("Cat")),
+            &container_of(consumer_of("Animal"))
+        )
+        .yes()
+    );
+    assert!(
+        !r.accepts(
+            &container_of(consumer_of("Animal")),
+            &container_of(consumer_of("Cat"))
+        )
+        .yes()
+    );
 }
 
 fn obj(name: &str) -> Type {
@@ -556,23 +635,26 @@ fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() 
         panic!("expected a generic parent");
     };
     let case = |c: &str| Type::EnumCase("ProbeTb\\Id".into(), c.into());
-    assert!(r.is_assignable(&case("ARRAY"), &case("ARRAY")));
-    assert!(!r.is_assignable(&case("ARRAY"), &case("ITERABLE")));
-    assert!(r.is_assignable(
-        &args[0],
-        &r.classes["ProbeTb\\Generic"].template_bounds["T"]
-    ));
+    assert!(r.accepts(&case("ARRAY"), &case("ARRAY")).yes());
+    assert!(!r.accepts(&case("ITERABLE"), &case("ARRAY")).yes());
+    assert!(
+        r.accepts(
+            &r.classes["ProbeTb\\Generic"].template_bounds["T"],
+            &args[0]
+        )
+        .yes()
+    );
 }
 
 #[test]
 fn has_method_and_has_property_are_read_off_the_class() {
     let r = build_registry("<?php class Foo { public int $x = 0; public function bar(): void {} }");
     let foo = Type::Object("Foo".into(), vec![]);
-    assert!(r.is_assignable(&foo, &Type::HasMethod("bar".into())));
-    assert!(r.is_assignable(&foo, &Type::HasMethod("BAR".into())));
-    assert!(!r.is_assignable(&foo, &Type::HasMethod("baz".into())));
-    assert!(r.is_assignable(&foo, &Type::HasProperty("x".into())));
-    assert!(!r.is_assignable(&foo, &Type::HasProperty("y".into())));
+    assert!(r.accepts(&Type::HasMethod("bar".into()), &foo).yes());
+    assert!(r.accepts(&Type::HasMethod("BAR".into()), &foo).yes());
+    assert!(!r.accepts(&Type::HasMethod("baz".into()), &foo).yes());
+    assert!(r.accepts(&Type::HasProperty("x".into()), &foo).yes());
+    assert!(!r.accepts(&Type::HasProperty("y".into()), &foo).yes());
 }
 
 #[test]
@@ -580,9 +662,9 @@ fn a_shape_has_the_offsets_it_requires() {
     let r = build_registry("<?php");
     let shape = types::parse_type_string("array{a: int, b?: string}");
     let has = |key: &str| Type::HasOffset(types::ShapeKey::from_name(key));
-    assert!(r.is_assignable(&shape, &has("a")));
-    assert!(!r.is_assignable(&shape, &has("b")));
-    assert!(!r.is_assignable(&shape, &has("c")));
+    assert!(r.accepts(&has("a"), &shape).yes());
+    assert!(!r.accepts(&has("b"), &shape).yes());
+    assert!(!r.accepts(&has("c"), &shape).yes());
 }
 
 /// A toy extension payload: a `Builder` that knows how many joins it has.
@@ -630,9 +712,9 @@ fn an_extension_payload_relates_through_its_hooks_and_its_base() {
     assert_eq!(joins(1), joins(1));
     assert_ne!(joins(1), joins(2));
     assert_eq!(joins(2).to_string(), "Builder<joins=2>");
-    assert!(r.is_assignable(&joins(1), &joins(1)));
-    assert!(!r.is_assignable(&joins(1), &joins(2)));
-    assert!(r.is_assignable(&joins(1), &builder));
+    assert!(r.accepts(&joins(1), &joins(1)).yes());
+    assert!(!r.accepts(&joins(2), &joins(1)).yes());
+    assert!(r.accepts(&builder, &joins(1)).yes());
     assert_eq!(r.is_super_type_of(&builder, &joins(3)), TrinaryLogic::Yes);
     assert_eq!(r.is_super_type_of(&joins(3), &builder), TrinaryLogic::Maybe);
     // Distinct payloads stay distinct until the union cap, then widen.

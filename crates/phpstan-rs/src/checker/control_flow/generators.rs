@@ -150,7 +150,8 @@ impl<'a> Checker<'a> {
             && inner_key != Type::Mixed(false)
             && !self
                 .registry
-                .accepts_at_configured_level(&inner_key, &enclosing_key)
+                .rule_level_accepts(&enclosing_key, &inner_key)
+                .yes()
         {
             self.report(
                 label.to_string(),
@@ -166,7 +167,8 @@ impl<'a> Checker<'a> {
             && inner_value != Type::Mixed(false)
             && !self
                 .registry
-                .accepts_at_configured_level(&inner_value, &enclosing_value)
+                .rule_level_accepts(&enclosing_value, &inner_value)
+                .yes()
         {
             self.report(
                 label.to_string(),
@@ -184,7 +186,7 @@ impl<'a> Checker<'a> {
         // generator delegates that same value into the inner one).
         if enclosing_send != Type::Mixed(false)
             && inner_send != Type::Mixed(false)
-            && !self.registry.is_assignable(&enclosing_send, &inner_send)
+            && !self.registry.accepts(&inner_send, &enclosing_send).yes()
         {
             self.report(
                 label.to_string(),

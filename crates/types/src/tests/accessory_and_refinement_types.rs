@@ -68,7 +68,7 @@ fn interface_string_and_trait_string_are_class_kind_strings() {
     // This project is allowed to check things more strictly than real
     // PHPStan does (real PHPStan gives these no distinguishing semantics
     // from bare `class-string` either) - the kind is checked against the
-    // real `ClassKind` at `registry::is_assignable`.
+    // real `ClassKind` at `registry::accepts`.
     assert_eq!(
         parse_type_string("interface-string"),
         Type::ClassKindString(crate::ClassKind::Interface)
