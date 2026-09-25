@@ -668,7 +668,9 @@ fn is_bitwise_not_operand(ty: &Type) -> bool {
         Type::Intersection(members) => members
             .iter()
             .any(|m| matches!(m, Type::String | Type::Int | Type::Float)),
-        Type::Union(members) => members.iter().any(is_bitwise_not_operand),
+        Type::Union(members) | Type::BenevolentUnion(members) => {
+            members.iter().any(is_bitwise_not_operand)
+        }
         _ => true,
     }
 }

@@ -143,6 +143,12 @@ impl fmt::Display for Type {
             Type::ParentRef => write!(f, "parent"),
             Type::StaticRef => write!(f, "static"),
             Type::TemplateParam(tp) => write!(f, "{}", tp.name),
+            // Parenthesized, as PHPStan describes a benevolent union, so
+            // a message tells it apart from a plain one.
+            Type::BenevolentUnion(members) => {
+                let parts: Vec<String> = members.iter().map(Type::to_string).collect();
+                write!(f, "({})", parts.join("|"))
+            }
             Type::Union(members) => {
                 let parts: Vec<String> = members.iter().map(Type::to_string).collect();
                 write!(f, "{}", parts.join("|"))
@@ -213,7 +219,6 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
         AccessoryKind::LowercaseString => "lowercase-string",
         AccessoryKind::UppercaseString => "uppercase-string",
         AccessoryKind::DecimalIntegerString => "decimal-int-string",
-        AccessoryKind::Benevolent => "benevolent",
     }
 }
 
@@ -231,17 +236,6 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
 /// in place.
 fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
     let has = |k: AccessoryKind| members.contains(&Type::Accessory(k));
-    // `Type::benevolent_array_key()`'s own real `BenevolentUnionType`
-    // marker - real PHPStan's own `describe()` shows it parenthesized
-    // (`(int|string)`), distinct from a plain, unparenthesized `Union`
-    // display (`int|string`) precisely so a diagnostic message can tell
-    // the two apart, confirmed reading `vendor/phpstan-src` directly.
-    if has(AccessoryKind::Benevolent)
-        && let Some(Type::Union(u)) = members.iter().find(|m| matches!(m, Type::Union(_)))
-    {
-        let parts: Vec<String> = u.iter().map(Type::to_string).collect();
-        return Some(format!("({})", parts.join("|")));
-    }
     if let Some((key, elem)) = members.iter().find_map(|m| match m {
         Type::Array(k, e) => Some((k.as_ref(), e.as_ref())),
         _ => None,

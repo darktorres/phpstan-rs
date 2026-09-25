@@ -21,7 +21,7 @@
 use crate::checker::Checker;
 use crate::php_version::PhpVersion;
 use crate::registry::{FunctionSig, Trinary};
-use crate::types::{AccessoryKind, Type};
+use crate::types::Type;
 use syntax::ast::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -68,16 +68,15 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
         Type::EnumCase(class, _) => out.add(class),
         Type::Object(class, _) => out.add(class),
         Type::TemplateParam(param) => return collect(&param.bound, position, out),
-        Type::Union(members) => return members.iter().all(|m| collect(m, position, out)),
+        Type::Union(members) | Type::BenevolentUnion(members) => {
+            return members.iter().all(|m| collect(m, position, out));
+        }
         Type::Intersection(members) => {
             let bases: Vec<&Type> = members
                 .iter()
                 .filter(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
                 .collect();
-            let benevolent = members
-                .iter()
-                .any(|m| matches!(m, Type::Accessory(AccessoryKind::Benevolent)));
-            if benevolent || bases.len() == 1 {
+            if bases.len() == 1 {
                 return bases.iter().all(|b| collect(b, position, out));
             }
             let mut classes = Vec::new();

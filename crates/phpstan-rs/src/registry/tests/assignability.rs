@@ -426,10 +426,7 @@ fn a_benevolent_union_is_rejected_strictly_once_opted_in() {
 fn a_benevolent_union_still_accepted_once_opted_in_when_every_member_matches() {
     let mut r = build_registry("<?php");
     r.check_benevolent_union_types = true;
-    let int_or_string = Type::Intersection(vec![
-        Type::Union(vec![Type::Int, Type::String]),
-        Type::Accessory(crate::types::AccessoryKind::Benevolent),
-    ]);
+    let int_or_string = Type::BenevolentUnion(vec![Type::Int, Type::String]);
     let int_or_string_target = Type::Union(vec![Type::Int, Type::String]);
     assert!(r.accepts_at_configured_level(&int_or_string, &int_or_string_target));
 }

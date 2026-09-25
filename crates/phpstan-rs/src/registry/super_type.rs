@@ -61,13 +61,7 @@ impl Registry {
             (Type::Mixed(_), _) | (_, Type::Never) => Trinary::Yes,
             // A benevolent union (`(int|string)`) is its members for
             // `isSuperTypeOf`; only `accepts` is lenient about it.
-            (_, Type::Intersection(members)) if is_benevolent(members) => {
-                self.is_super_type_of(sup, &benevolent_inner(members))
-            }
-            (Type::Intersection(members), _) if is_benevolent(members) => {
-                self.is_super_type_of(&benevolent_inner(members), sub)
-            }
-            (_, Type::Union(members)) => {
+            (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
                 Trinary::all(members.iter().map(|m| self.is_super_type_of(sup, m)))
             }
             (_, Type::TemplateParam(tp)) => self.is_super_type_of(sup, &tp.bound),
@@ -81,7 +75,7 @@ impl Registry {
                     .into_iter()
                     .map(|branch| self.is_super_type_of(sup, branch)),
             ),
-            (Type::Union(members), _) => {
+            (Type::Union(members) | Type::BenevolentUnion(members), _) => {
                 Trinary::any(members.iter().map(|m| self.is_super_type_of(m, sub)))
             }
             (_, Type::Mixed(_)) | (Type::TemplateParam(_), _) => Trinary::Maybe,
@@ -297,23 +291,6 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         | AccessoryKind::DecimalIntegerString => {
             !is_string && types::types_definitely_disjoint(&Type::String, sub)
         }
-        _ => false,
-    }
-}
-
-fn is_benevolent(members: &[Type]) -> bool {
-    members.contains(&Type::Accessory(AccessoryKind::Benevolent))
-}
-
-fn benevolent_inner(members: &[Type]) -> Type {
-    let rest: Vec<Type> = members
-        .iter()
-        .filter(|m| **m != Type::Accessory(AccessoryKind::Benevolent))
-        .cloned()
-        .collect();
-    match rest.len() {
-        1 => rest.into_iter().next().unwrap(),
-        _ => Type::Intersection(rest),
     }
 }
 

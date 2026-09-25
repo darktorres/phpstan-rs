@@ -232,20 +232,8 @@ impl<'a> Checker<'a> {
         if contains_mixed(ty) || is_number(ty) {
             return true;
         }
-        if let Type::Intersection(members) = ty
-            && members
-                .iter()
-                .any(|m| matches!(m, Type::Accessory(AccessoryKind::Benevolent)))
-        {
-            let mut inner: Vec<&Type> = Vec::new();
-            for member in members {
-                match member {
-                    Type::Union(ms) => inner.extend(ms.iter()),
-                    Type::Accessory(_) => {}
-                    other => inner.push(other),
-                }
-            }
-            return inner.iter().any(|m| is_number(m));
+        if let Type::BenevolentUnion(members) = ty {
+            return members.iter().any(is_number);
         }
         let members: Vec<&Type> = match ty {
             Type::Union(members) => members.iter().collect(),

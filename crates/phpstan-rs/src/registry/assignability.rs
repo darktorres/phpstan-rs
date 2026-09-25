@@ -294,7 +294,9 @@ impl Registry {
                 &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
             ),
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
-            (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
+            (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
+                members.iter().any(|m| self.is_assignable(sub, m))
+            }
             // Mirrors `types::is_subtype`'s own dedicated
             // Intersection-vs-Intersection rule, and for the same reason
             // - without it, this function's own generic `(Intersection,
@@ -304,70 +306,15 @@ impl Registry {
             // asks whether one bare member of `sub` alone satisfies the
             // whole `sup` intersection, never whether `sub`'s own
             // combination does.
-            // Real PHPStan's own `BenevolentUnionType` (`Type::
-            // benevolent_array_key()`'s own doc comment) checked as the
-            // *accepting/expected* side - a bare `Accessory(Benevolent)`
-            // is metadata about how the wrapped `Union` was constructed,
-            // never a real, independently-satisfiable type in its own
-            // right, so the ordinary "`sub` must satisfy *every* member
-            // of this `Intersection`" rule (the two arms just below) is
-            // wrong here - it would additionally demand `sub` satisfy
-            // the bare marker alone, which nothing ever does. Delegates
-            // straight to the wrapped `Union` alone, inheriting its own
-            // already-lenient sup-position `.any()` semantics (a plain
-            // `Union` sup already means "satisfies *any* alternative" -
-            // real PHPStan's own special-casing for a benevolent union
-            // is specifically about *sub*-position `.all()`-to-`.any()`
-            // loosening, covered by the next arm below; a benevolent
-            // union checked as *sup* needs no further loosening beyond
-            // what plain `Union`-as-sup already gives, just needs the
-            // stray `Accessory` member kept out of the check entirely).
-            // Checked before the `(Intersection, Intersection)` arm
-            // below so it also covers a Benevolent-marked sup checked
-            // against a *sub* that's itself an `Intersection`.
-            (_, Type::Intersection(sup_members))
-                if sup_members.contains(&Type::Accessory(types::AccessoryKind::Benevolent)) =>
-            {
-                sup_members
-                    .iter()
-                    .find_map(|m| {
-                        if let Type::Union(u) = m {
-                            Some(u)
-                        } else {
-                            None
-                        }
-                    })
-                    .is_some_and(|u| self.is_assignable(sub, &Type::Union(u.clone())))
-            }
             (Type::Intersection(_), Type::Intersection(sup_members)) => {
                 sup_members.iter().all(|m| self.is_assignable(sub, m))
             }
-            // The mirror image of the arm above - a `Benevolent`-marked
-            // *sub* (the value actually given, checked against an
-            // ordinary `sup`) does get `RuleLevelHelper::accepts()`'s
-            // own real extra leniency: accepted if *any* member matches
-            // `sup`, not only when *all* do (confirmed reading
-            // `vendor/phpstan-src` directly) - the actual behavioral
-            // difference a benevolent union exists for. Checked before
-            // the generic `(Intersection, _) => any(...)` rule just
-            // below, which would otherwise ask whether the *whole*
-            // wrapped `Union` alone satisfies `sup` (hitting the
-            // ordinary, strict sub-position `Union`-vs-`_` `.all()` rule
-            // above) rather than this marker's own real, looser
-            // semantics.
-            (Type::Intersection(members), _)
-                if members.contains(&Type::Accessory(types::AccessoryKind::Benevolent)) =>
-            {
-                members
-                    .iter()
-                    .find_map(|m| {
-                        if let Type::Union(u) = m {
-                            Some(u)
-                        } else {
-                            None
-                        }
-                    })
-                    .is_some_and(|u| u.iter().any(|m| self.is_assignable(m, sup)))
+            // A benevolent union given (`RuleLevelHelper::accepts()`) is
+            // accepted if *any* member matches `sup`, not only when *all*
+            // do - the behavioral difference a benevolent union exists
+            // for.
+            (Type::BenevolentUnion(members), _) => {
+                members.iter().any(|m| self.is_assignable(m, sup))
             }
             // Each parameter/return comparison consults the class
             // hierarchy: `Closure(Animal): Dog` fits `callable(Dog):
@@ -589,9 +536,7 @@ impl Registry {
         // `checkUnionTypes`/`checkExplicitMixed`/`checkImplicitMixed`) still
         // applies per-member exactly as it would for an ordinary Union.
         if self.check_benevolent_union_types
-            && let Type::Intersection(members) = sub
-            && members.contains(&Type::Accessory(types::AccessoryKind::Benevolent))
-            && let Some(Type::Union(wrapped)) = members.iter().find(|m| matches!(m, Type::Union(_)))
+            && let Type::BenevolentUnion(wrapped) = sub
         {
             return wrapped
                 .iter()

@@ -272,12 +272,19 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // never trying the intersection's own member-projection instead.
         // This arm tries both projections, succeeding if either proves
         // it - strictly additive.
-        (Type::Intersection(sub_members), Type::Union(sup_members)) => {
+        (
+            Type::Intersection(sub_members),
+            Type::Union(sup_members) | Type::BenevolentUnion(sup_members),
+        ) => {
             sub_members.iter().any(|m| is_subtype(m, sup))
                 || sup_members.iter().any(|s| is_subtype(sub, s))
         }
-        (Type::Union(members), _) => members.iter().all(|m| is_subtype(m, sup)),
-        (_, Type::Union(members)) => members.iter().any(|m| is_subtype(sub, m)),
+        (Type::Union(members) | Type::BenevolentUnion(members), _) => {
+            members.iter().all(|m| is_subtype(m, sup))
+        }
+        (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
+            members.iter().any(|m| is_subtype(sub, m))
+        }
 
         // An intersection-vs-intersection pair needs its own rule:
         // `sub` satisfies `sup` as a whole only if it satisfies *every*
@@ -552,8 +559,12 @@ pub(crate) fn is_decimal_integer_string_literal(s: &str) -> bool {
 /// `Callable`, `Accessory`, templates, and every pseudo-type.
 pub(crate) fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
     match (a, b) {
-        (Type::Union(members), _) => members.iter().all(|m| types_definitely_disjoint(m, b)),
-        (_, Type::Union(members)) => members.iter().all(|m| types_definitely_disjoint(a, m)),
+        (Type::Union(members) | Type::BenevolentUnion(members), _) => {
+            members.iter().all(|m| types_definitely_disjoint(m, b))
+        }
+        (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
+            members.iter().all(|m| types_definitely_disjoint(a, m))
+        }
         // Two different values of the same kind can never overlap - real
         // PHPStan's `ConstantStringType('send')->isSuperTypeOf(
         // 'list_to_send')` is a definite no, not a maybe.

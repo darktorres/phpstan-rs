@@ -104,6 +104,10 @@ pub enum Type {
     // `TemplateParam` below) rather than being a bare name.
     TemplateParam(TemplateParam),
     Union(Vec<Type>),
+    // Real PHPStan's `BenevolentUnionType`: a union for subtyping, but
+    // one an argument check accepts when *any* member fits (see
+    // `Type::benevolent_array_key()` for where it is constructed).
+    BenevolentUnion(Vec<Type>),
     Intersection(Vec<Type>),
     // A `T` range constrained to `[min, max]` (`None` = unbounded) -
     // `positive-int` = `IntRange(Some(1), None)`, `int<0, 255>` =
@@ -207,6 +211,7 @@ impl PartialEq for Type {
             (Type::StaticRef, Type::StaticRef) => true,
             (Type::TemplateParam(a), Type::TemplateParam(b)) => a == b,
             (Type::Union(a), Type::Union(b)) => a == b,
+            (Type::BenevolentUnion(a), Type::BenevolentUnion(b)) => a == b,
             (Type::Intersection(a), Type::Intersection(b)) => a == b,
             (Type::IntRange(amin, amax), Type::IntRange(bmin, bmax)) => {
                 amin == bmin && amax == bmax
@@ -443,6 +448,7 @@ impl Type {
                 templates: sig.templates.clone(),
             }))),
             Type::Union(ms) => Type::Union(ms.iter().map(&mut *f).collect()),
+            Type::BenevolentUnion(ms) => Type::BenevolentUnion(ms.iter().map(&mut *f).collect()),
             Type::Intersection(ms) => Type::Intersection(ms.iter().map(&mut *f).collect()),
             Type::HasOffsetValue(key, inner) => {
                 Type::HasOffsetValue(key.clone(), Box::new(f(inner)))
@@ -543,10 +549,7 @@ impl Type {
     /// construction sites this marker belongs at, not every "no more
     /// precise key" site project-wide.
     pub(crate) fn benevolent_array_key() -> Type {
-        Type::Intersection(vec![
-            Type::unknown_array_key(),
-            Type::Accessory(AccessoryKind::Benevolent),
-        ])
+        Type::BenevolentUnion(vec![Type::Int, Type::String])
     }
 }
 
@@ -568,10 +571,6 @@ pub enum AccessoryKind {
     // A string proven to parse as a canonical decimal integer (no
     // leading zero/`+`/whitespace, round-trips through `i64`).
     DecimalIntegerString,
-    // Mirrors real PHPStan's `BenevolentUnionType` - only ever wraps a
-    // `Type::Union` (see `Type::benevolent_array_key()`'s own doc
-    // comment for exactly which two construction sites use it and why).
-    Benevolent,
 }
 
 #[cfg(test)]
