@@ -43,6 +43,7 @@ fn every_real_php_modifier_is_accepted() {
 }
 
 #[test]
+#[cfg(feature = "pcre-validate")]
 fn a_genuinely_unclosed_group_fails_the_real_pcre2_compile_step() {
     let err = validate_pattern("/(unclosed/");
     assert!(err.is_some());
@@ -53,7 +54,16 @@ fn a_genuinely_unclosed_group_fails_the_real_pcre2_compile_step() {
 }
 
 #[test]
+#[cfg(feature = "pcre-validate")]
 fn duplicate_named_groups_require_the_j_modifier() {
     assert!(validate_pattern("/(?<a>x)|(?<a>y)/").is_some());
     assert_eq!(validate_pattern("/(?<a>x)|(?<a>y)/J"), None);
+}
+
+#[test]
+#[cfg(not(feature = "pcre-validate"))]
+fn without_pcre2_only_the_delimiters_and_modifiers_are_checked() {
+    assert_eq!(validate_pattern("/(unclosed/"), None);
+    assert_eq!(validate_pattern("/(?<a>x)|(?<a>y)/"), None);
+    assert!(validate_pattern("/abc/y").is_some());
 }
