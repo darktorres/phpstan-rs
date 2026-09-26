@@ -359,6 +359,59 @@ impl Registry {
         }
     }
 
+    /// A redeclared property inherits each hook of its parent's that it
+    /// doesn't declare itself, and is virtual only when the parent's is
+    /// and its own hooks never use the backing value.
+    #[hotpath::measure]
+    pub(crate) fn inherit_property_hooks(&mut self) {
+        let max_iterations = self.classes.len().max(1);
+        for _ in 0..max_iterations {
+            if !self.inherit_property_hooks_one_pass() {
+                break;
+            }
+        }
+    }
+
+    fn inherit_property_hooks_one_pass(&mut self) -> bool {
+        let mut updates: Vec<(Arc<str>, Arc<str>, PropertySig)> = Vec::new();
+        for (class_name, info) in &self.classes {
+            let Some(parent) = info.extends.first() else {
+                continue;
+            };
+            for (name, own) in &info.properties {
+                let Some((_, inherited)) = self.lookup_property_with_owner(parent, name) else {
+                    continue;
+                };
+                if inherited.visibility == Visibility::Private {
+                    continue;
+                }
+                let mut merged = own.clone();
+                if !own.has_get_hook && inherited.has_get_hook {
+                    merged.has_get_hook = true;
+                }
+                if !own.has_set_hook && inherited.has_set_hook {
+                    merged.has_set_hook = true;
+                    merged.set_ty = inherited.set_ty.clone();
+                    merged.set_case_refs = inherited.set_case_refs.clone();
+                }
+                merged.is_virtual = own.is_virtual && inherited.is_virtual;
+                if merged.has_get_hook != own.has_get_hook
+                    || merged.has_set_hook != own.has_set_hook
+                    || merged.is_virtual != own.is_virtual
+                {
+                    updates.push((class_name.clone(), name.clone(), merged));
+                }
+            }
+        }
+        let changed = !updates.is_empty();
+        for (class_name, name, merged) in updates {
+            if let Some(info) = self.classes.get_mut(&class_name) {
+                info.properties.insert(name, merged);
+            }
+        }
+        changed
+    }
+
     /// Resolves every `Type::ValueOf`/`Type::ClassConstant` (`types::
     /// parse_type_keyword_or_class`'s `value-of<T>`-on-a-class/enum, and
     /// `Foo::BAR` references) now that every class/enum is

@@ -2475,6 +2475,12 @@ impl<'a> Checker<'a> {
                 self.anonymous_class_type(e.span)
             }
             ExprKind::StaticCall(target, method, args) => {
+                if let Some(property) = target.parent_hook_property() {
+                    for a in args {
+                        self.check_expr(&a.value, locals, label);
+                    }
+                    return self.parent_hook_call_type(property, method);
+                }
                 // Mirrors ExprKind::MethodCall's own structure exactly -
                 // resolve first (self/parent/static-aware, or - for a
                 // genuinely dynamic receiver - via its own checked,
@@ -4569,6 +4575,9 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::StaticCall(target, method, args) => {
+                if let Some(property) = target.parent_hook_property() {
+                    return self.parent_hook_call_type(property, method);
+                }
                 if self.collect_member_refs
                     && let Some(class) = self.infer_static_target_class(target, locals)
                     && let Some((owner, _)) = self.registry.lookup_method_with_owner(&class, method)
@@ -5870,6 +5879,26 @@ impl<'a> Checker<'a> {
         let ty = self.infer_call_return_type(&as_return, resolved, locals);
         let ty = self.resolve_pseudo(&ty, class);
         locals.insert(key, ty);
+    }
+
+    /// What `parent::$property::get()` returns: the parent's property
+    /// type. `set()` returns nothing.
+    fn parent_hook_call_type(&self, property: &str, hook: &str) -> Type {
+        if !hook.eq_ignore_ascii_case("get") {
+            return Type::Void;
+        }
+        let Some(current) = &self.current_class else {
+            return Type::Mixed(false);
+        };
+        self.registry
+            .classes
+            .get(current.as_str())
+            .and_then(|info| info.extends.first())
+            .and_then(|parent| {
+                let (owner, sig) = self.registry.lookup_property_with_owner(parent, property)?;
+                Some(self.resolve_pseudo(&sig.ty, &owner))
+            })
+            .unwrap_or(Type::Mixed(false))
     }
 
     /// The method a static call on `class` reaches, with its declaring

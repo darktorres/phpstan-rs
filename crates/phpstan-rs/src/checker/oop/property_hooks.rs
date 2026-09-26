@@ -238,7 +238,10 @@ impl<'a> Checker<'a> {
         // `GetNonVirtualPropertyHookReadRule`: a non-virtual get hook
         // that never reads its own backing storage almost certainly
         // forgot to.
-        if !prop_sig.is_virtual && !registry::hook_body_references_property(body, name) {
+        if !prop_sig.is_virtual
+            && !registry::hook_body_references_property(body, name)
+            && !registry::hook_body_calls_parent_hook(body, name)
+        {
             self.report(
                 format!(
                     "Get hook for non-virtual property {fqn}::${name} does not read its value."
@@ -408,6 +411,7 @@ impl<'a> Checker<'a> {
         if !matches!(body, PropertyHookBody::Abstract)
             && !prop_sig.is_virtual
             && !registry::hook_body_references_property(body, name)
+            && !registry::hook_body_calls_parent_hook(body, name)
         {
             self.report(
                 format!(
@@ -422,10 +426,12 @@ impl<'a> Checker<'a> {
         // `SetPropertyHookParameterRule`'s native-type-contravariance
         // half only; its docblock-merged sibling is skipped, matching
         // real PHPStan's own default-off override-compatibility flag
-        // (see `FunctionSig::return_type_native`).
+        // (see `FunctionSig::return_type_native`). A hook without a
+        // parameter list has an implicit `$value` of the property's type.
         let param_has_native = param.is_some_and(|p| p.type_hint.is_some());
         let prop_has_native = type_hint.is_some();
         match (prop_has_native, param_has_native) {
+            _ if param.is_none() => {}
             (false, true) => {
                 self.report_builder(
                     DiagnosticBuilder::new(format!(

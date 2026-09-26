@@ -27,7 +27,7 @@ pub(crate) use doctrine_entity::DoctrineEntity;
 use doctrine_entity::compute_doctrine_entity;
 use tag_synthesis::method_tag_sig;
 pub(crate) use tag_synthesis::object_class_names;
-pub(crate) use virtual_property::hook_body_references_property;
+pub(crate) use virtual_property::{hook_body_calls_parent_hook, hook_body_references_property};
 use virtual_property::{hooks_reference_backing_storage, property_hook_set_type};
 
 impl PropertySig {

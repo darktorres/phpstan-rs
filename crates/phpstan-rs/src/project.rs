@@ -1009,6 +1009,7 @@ impl Project {
         self.registry.resolve_deferred_type_imports();
         self.registry.resolve_deferred_value_of();
         self.registry.flatten_phpdoc_inheritance();
+        self.registry.inherit_property_hooks();
         self.registry.apply_assertion_table();
         // Adds more method/property names (mixin members) -
         // `resolve_transitive_purity` right after this also consumes
@@ -1290,6 +1291,7 @@ impl Project {
         self.registry.resolve_deferred_type_imports();
         self.registry.resolve_deferred_value_of();
         self.registry.flatten_phpdoc_inheritance();
+        self.registry.inherit_property_hooks();
         self.registry.apply_assertion_table();
         // Adds more method/property names (mixin members) -
         // `resolve_transitive_purity` right after this also consumes a

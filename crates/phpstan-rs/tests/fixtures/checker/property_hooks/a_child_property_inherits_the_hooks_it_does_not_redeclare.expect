@@ -1,0 +1,1 @@
+37:19-39:6 propertyGetHook.noRead L3 | Get hook for non-virtual property Fixed::$n does not read its value.

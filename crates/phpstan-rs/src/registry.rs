@@ -21,9 +21,9 @@ mod resolve;
 mod type_node;
 
 pub(crate) use anonymous_class::collect_anonymous_classes;
-pub(crate) use class_info::hook_body_references_property;
 pub(crate) use class_info::object_class_names;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
+pub(crate) use class_info::{hook_body_calls_parent_hook, hook_body_references_property};
 pub(crate) use function_sig::apply_implicit_nullable_default;
 pub use function_sig::format_signature;
 pub(crate) use function_sig::is_allow_dynamic_properties_attribute_name;
@@ -557,6 +557,7 @@ impl Registry {
         registry.resolve_deferred_type_imports();
         registry.resolve_deferred_value_of();
         registry.flatten_phpdoc_inheritance();
+        registry.inherit_property_hooks();
         registry.apply_assertion_table();
         // Adds more method/property names (merges mixin members in) -
         // the member-owner maps need a second rebuild after this.

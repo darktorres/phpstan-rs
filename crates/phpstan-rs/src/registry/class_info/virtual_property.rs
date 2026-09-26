@@ -70,6 +70,31 @@ pub(crate) fn hook_body_references_property(body: &PropertyHookBody, prop_name: 
     }
 }
 
+/// Whether `body` calls the parent's hook of `prop_name`
+/// (`parent::$prop_name::get()`/`::set()`), which uses the backing value
+/// when the parent declares no such hook.
+pub(crate) fn hook_body_calls_parent_hook(body: &PropertyHookBody, prop_name: &str) -> bool {
+    fn in_expr(e: &Expr, prop_name: &str) -> bool {
+        if let ExprKind::StaticCall(target, _, _) = &e.kind
+            && target.parent_hook_property() == Some(prop_name)
+        {
+            return true;
+        }
+        child_exprs(e).into_iter().any(|c| in_expr(c, prop_name))
+    }
+    fn in_stmt(stmt: &Stmt, prop_name: &str) -> bool {
+        stmt_expr_fields(stmt)
+            .into_iter()
+            .any(|e| in_expr(e, prop_name))
+            || child_stmts(stmt).into_iter().any(|s| in_stmt(s, prop_name))
+    }
+    match body {
+        PropertyHookBody::Arrow(e) => in_expr(e, prop_name),
+        PropertyHookBody::Block(stmts) => stmts.iter().any(|s| in_stmt(s, prop_name)),
+        PropertyHookBody::Abstract => false,
+    }
+}
+
 /// Deliberately checks every occurrence of `$this->prop_name` - a read, a
 /// bare unused statement, an `isset()`/`unset()` argument, or a write
 /// target - uniformly, since real PHP's virtual-property algorithm

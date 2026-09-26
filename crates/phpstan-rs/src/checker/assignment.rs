@@ -282,11 +282,12 @@ impl<'a> Checker<'a> {
     /// deep. Per-key precision (`['name' => $n] = $shapedArray`) isn't
     /// resolved for a plain `Type::Array` source - every target gets the
     /// source's homogeneous element type, or Mixed for anything else.
-    /// What a property holds after `lhs = value`: `value` when it fits the
-    /// property's native type; otherwise the property's declared type, as
-    /// PHP either coerces the value into it or rejects the write with a
-    /// `TypeError`. A value that isn't a native-typed, hookless property
-    /// write is returned as is.
+    /// What a property reads as after `lhs = value`. A hooked property
+    /// reads as its declared type, as its hooks decide what is stored and
+    /// read. Otherwise `value` when it fits the property's native type, or
+    /// the declared type, as PHP either coerces the value into it or
+    /// rejects the write with a `TypeError`. A write that isn't to a known
+    /// property is returned as is.
     fn property_value_after_write(&self, lhs: &Expr, value: &Type, locals: &Locals) -> Type {
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             return value.clone();
@@ -295,10 +296,10 @@ impl<'a> Checker<'a> {
         let Some((_, sig)) = self.find_property_owner(&base_ty, prop) else {
             return value.clone();
         };
-        if !sig.has_native_type
-            || sig.set_ty.is_some()
-            || self.registry.relation().subtype(value, &sig.ty_native)
-        {
+        if sig.has_get_hook || sig.has_set_hook {
+            return sig.ty.clone();
+        }
+        if !sig.has_native_type || self.registry.relation().subtype(value, &sig.ty_native) {
             return value.clone();
         }
         sig.ty.clone()

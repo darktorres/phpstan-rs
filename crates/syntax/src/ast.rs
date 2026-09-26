@@ -730,6 +730,19 @@ impl StaticTarget {
             StaticTarget::Expr(e) => Some(e),
         }
     }
+
+    /// The property of a parent hook call's target, `parent::$property`
+    /// in `parent::$property::get()`.
+    pub fn parent_hook_property(&self) -> Option<&str> {
+        match &self.expr()?.kind {
+            ExprKind::StaticPropertyFetch(StaticTarget::Name(class, _), property)
+                if class.eq_ignore_ascii_case("parent") =>
+            {
+                Some(property.as_ref())
+            }
+            _ => None,
+        }
+    }
 }
 
 /// A reference to a class, function or constant by name: as written, and

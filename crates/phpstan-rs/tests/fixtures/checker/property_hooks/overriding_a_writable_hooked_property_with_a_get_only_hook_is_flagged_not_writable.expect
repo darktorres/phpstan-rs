@@ -1,1 +1,0 @@
-10:28-12:18 property.notWritable L0 | Property Child::$x does not have `set` hook and is not writable, but is required to be writable by property Base::$x.
