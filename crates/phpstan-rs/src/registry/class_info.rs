@@ -652,6 +652,7 @@ impl ClassInfo {
                     doc_ty.as_ref().and_then(|d| d.var_type.as_ref()),
                     native_hint,
                     native_parsed.as_ref(),
+                    &template_params,
                 );
                 // See `FunctionSig::from_decl`'s param loop for why this
                 // sharing is exact, not an approximation.
@@ -764,6 +765,7 @@ impl ClassInfo {
                     doc_ty.as_ref(),
                     native_hint,
                     native_parsed.as_ref(),
+                    &template_params,
                 );
                 // See `FunctionSig::from_decl`'s param loop for why this
                 // sharing is exact, not an approximation.

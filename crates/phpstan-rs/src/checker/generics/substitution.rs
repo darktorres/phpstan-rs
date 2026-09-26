@@ -294,27 +294,6 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
     }
 }
 
-/// Whether `ty` contains a `TemplateParam` *anywhere*, regardless of its
-/// own `scope` - the cheap gate `substitute_class_templates`'s own
-/// inherited-ancestor-template fallback uses before paying for an
-/// `all_ancestor_names` graph walk, so an ordinary non-generic signature
-/// (the overwhelming majority) never reaches it. Mirrors `substitute_
-/// scoped`'s own exact recursive shape (same `Type` variants), since a
-/// template this doesn't look inside couldn't be substituted by that
-/// function either.
-fn type_references_template(ty: &Type) -> bool {
-    match ty {
-        Type::TemplateParam(_) => true,
-        // A template-subject conditional names its template by
-        // `subject` alone.
-        Type::Conditional {
-            template_subject: true,
-            ..
-        } => true,
-        _ => ty.any_child(type_references_template),
-    }
-}
-
 /// Whether any param (its merged or native type, or `@param-out` type) or
 /// the return type (merged or native) of `sig` references a `TemplateParam`
 /// at all - `throws`/asserts aren't checked, matching the existing
@@ -324,9 +303,9 @@ fn type_references_template(ty: &Type) -> bool {
 /// corpus work has found).
 fn signature_references_any_template(sig: &FunctionSig) -> bool {
     sig.params.iter().any(|p| {
-        type_references_template(&p.ty)
-            || type_references_template(&p.ty_native)
-            || p.out_ty.as_ref().is_some_and(type_references_template)
-    }) || type_references_template(&sig.return_type)
-        || type_references_template(&sig.return_type_native)
+        types::references_template(&p.ty)
+            || types::references_template(&p.ty_native)
+            || p.out_ty.as_ref().is_some_and(types::references_template)
+    }) || types::references_template(&sig.return_type)
+        || types::references_template(&sig.return_type_native)
 }

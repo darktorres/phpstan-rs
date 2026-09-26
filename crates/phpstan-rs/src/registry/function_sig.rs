@@ -451,6 +451,7 @@ impl FunctionSig {
                     doc_ty.as_ref(),
                     native_hint,
                     native_parsed.as_ref(),
+                    &template_params,
                 );
                 // Whenever the docblock contributed nothing beyond the
                 // native hint (no doc tag at all, or `reconcile_with_
@@ -534,6 +535,7 @@ impl FunctionSig {
             doc_return,
             native_return_hint,
             native_return_parsed.as_ref(),
+            &template_params,
         );
         let return_shared = Some(&doc_reconciled_return) == native_return_parsed.as_ref();
         let return_type = mark_template_params(doc_reconciled_return, &template_params);

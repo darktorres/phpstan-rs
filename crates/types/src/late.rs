@@ -66,7 +66,7 @@ pub fn offset_access(base: &Type, key: &Type) -> Option<Type> {
 /// over an array type (an enum's needs the registry).
 pub fn settle(ty: Type) -> Type {
     match &ty {
-        Type::KeyOf(inner) | Type::OffsetAccess(inner, _) if !mentions_template(inner) => {
+        Type::KeyOf(inner) | Type::OffsetAccess(inner, _) if !references_template(inner) => {
             resolve_node(&ty, &|t| t.clone()).unwrap_or(Type::Mixed(false))
         }
         Type::ValueOf(_) => resolve_node(&ty, &|t| t.clone()).unwrap_or(ty),
@@ -74,8 +74,17 @@ pub fn settle(ty: Type) -> Type {
     }
 }
 
-fn mentions_template(ty: &Type) -> bool {
-    matches!(ty, Type::TemplateParam(_)) || ty.any_child(mentions_template)
+/// Whether `ty` names a template anywhere: a template parameter, or a
+/// conditional whose subject is one.
+pub fn references_template(ty: &Type) -> bool {
+    match ty {
+        Type::TemplateParam(_) => true,
+        Type::Conditional {
+            template_subject: true,
+            ..
+        } => true,
+        _ => ty.any_child(references_template),
+    }
 }
 
 /// `ty` with every late-resolvable node answered as far as its

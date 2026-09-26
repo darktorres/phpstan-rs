@@ -2487,8 +2487,8 @@ impl<'a> Checker<'a> {
                 // differ from `resolved_class` for an inherited method.
                 let sig_with_owner = resolved_class
                     .as_ref()
-                    .and_then(|class| self.registry.lookup_method_with_owner(class, method));
-                let sig = sig_with_owner.as_ref().map(|(_, s)| *s);
+                    .and_then(|class| self.static_call_method(target, class, method));
+                let sig = sig_with_owner.as_ref().map(|(_, s)| s.as_ref());
                 // Phase 92's own `::cases()` escape hatch - see
                 // `Checker::escaped_enums`'s own doc comment. `owner`
                 // (not `resolved_class`) is the registry's own
@@ -4591,28 +4591,31 @@ impl<'a> Checker<'a> {
                 }
                 self.infer_static_target_class(target, locals)
                     .and_then(|class| {
-                        self.registry.lookup_method(&class, method).map(|sig| {
-                            let resolved_args = resolve_call_args(args, &sig.params);
-                            let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
-                            let resolved =
-                                self.narrow_enum_from_call(&class, method, args, resolved, locals);
-                            // Phase 92's own `::from()`/`::tryFrom()`
-                            // literal-argument signal - see `check_expr`'s
-                            // identical fix just above `ExprKind::
-                            // ClassConstFetch` for why this reads the
-                            // already-computed type rather than
-                            // threading a new span parameter through
-                            // `narrow_enum_from_call`.
-                            if let Type::EnumCase(ref case_class, ref case) = resolved {
-                                self.record_member_ref(e.span, case_class, case);
-                            }
-                            if let Some(ty) =
-                                self.class_argument_return(&class, method, args, locals)
-                            {
-                                return ty;
-                            }
-                            self.resolve_static_call_return(&resolved, target, &class)
-                        })
+                        self.static_call_method(target, &class, method)
+                            .map(|(_, sig)| {
+                                let sig = sig.as_ref();
+                                let resolved_args = resolve_call_args(args, &sig.params);
+                                let resolved =
+                                    self.infer_call_return_type(sig, &resolved_args, locals);
+                                let resolved = self
+                                    .narrow_enum_from_call(&class, method, args, resolved, locals);
+                                // Phase 92's own `::from()`/`::tryFrom()`
+                                // literal-argument signal - see `check_expr`'s
+                                // identical fix just above `ExprKind::
+                                // ClassConstFetch` for why this reads the
+                                // already-computed type rather than
+                                // threading a new span parameter through
+                                // `narrow_enum_from_call`.
+                                if let Type::EnumCase(ref case_class, ref case) = resolved {
+                                    self.record_member_ref(e.span, case_class, case);
+                                }
+                                if let Some(ty) =
+                                    self.class_argument_return(&class, method, args, locals)
+                                {
+                                    return ty;
+                                }
+                                self.resolve_static_call_return(&resolved, target, &class)
+                            })
                     })
                     .unwrap_or(Type::Mixed(false))
             }
@@ -5869,16 +5872,31 @@ impl<'a> Checker<'a> {
         locals.insert(key, ty);
     }
 
+    /// The method a static call on `class` reaches, with its declaring
+    /// class. Called through `parent::`/`self::`/`static::`, the class
+    /// templates are those the calling class binds, as for `$this`.
+    fn static_call_method(
+        &self,
+        target: &StaticTarget,
+        class: &str,
+        method: &str,
+    ) -> Option<(std::sync::Arc<str>, std::borrow::Cow<'a, FunctionSig>)> {
+        let (owner, sig) = self.registry.lookup_method_with_owner(class, method)?;
+        let sig = match &self.current_class {
+            Some(current) if forwards_static_binding(target) => {
+                self.substitute_class_templates(sig, current, &[], &owner)
+            }
+            _ => std::borrow::Cow::Borrowed(sig),
+        };
+        Some((owner, sig))
+    }
+
     /// A static call's return type with `self`/`static`/`parent`
     /// resolved. Called through `parent::`/`self::`/`static::`, PHP
     /// forwards the late static binding, so `static` is the calling class,
     /// not the target.
     fn resolve_static_call_return(&self, ty: &Type, target: &StaticTarget, class: &str) -> Type {
-        let forwards = matches!(
-            target,
-            StaticTarget::Name(n, _)
-                if matches!(n.to_ascii_lowercase().as_str(), "parent" | "self" | "static")
-        );
+        let forwards = forwards_static_binding(target);
         match (&self.current_class, forwards) {
             (Some(current), true) => {
                 let bound = bind_static_ref(ty, current);
@@ -6137,6 +6155,15 @@ fn is_true_literal(e: &Expr) -> bool {
 
 /// A synthetic `target::method(args)` call, for a computed method name
 /// whose value is known.
+/// Whether a static call's target is `parent`, `self` or `static`.
+fn forwards_static_binding(target: &StaticTarget) -> bool {
+    matches!(
+        target,
+        StaticTarget::Name(n, _)
+            if matches!(n.to_ascii_lowercase().as_str(), "parent" | "self" | "static")
+    )
+}
+
 fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) -> Expr {
     Expr {
         id: NodeId::SYNTHETIC,

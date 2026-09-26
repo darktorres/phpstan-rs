@@ -1,8 +1,11 @@
+use rustc_hash::FxHashMap;
+
+use super::generics::mark_template_params;
 use crate::registry::resolve::type_contains_deferred_value_of;
 use crate::registry::type_node::parse_type_node;
 use phpdoc::grammar::TypeNode;
 use syntax::ast::{Expr, ExprKind, Literal};
-use types::{self, Type};
+use types::{self, TemplateParam, Type};
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
 /// over the native hint, since it's usually the more precise of the two
@@ -38,7 +41,12 @@ pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) 
 
 pub(crate) fn resolve_type(doc_type: Option<&TypeNode>, native_hint: Option<&str>) -> Type {
     let native_ty = native_hint.map(types::parse_type_string);
-    resolve_type_with_parsed_native(doc_type, native_hint, native_ty.as_ref())
+    resolve_type_with_parsed_native(
+        doc_type,
+        native_hint,
+        native_ty.as_ref(),
+        &FxHashMap::default(),
+    )
 }
 
 /// `resolve_type`'s own real body, taking the native hint's already-parsed
@@ -49,16 +57,19 @@ pub(crate) fn resolve_type(doc_type: Option<&TypeNode>, native_hint: Option<&str
 /// instead of each independently re-parsing the identical string.
 /// `native_hint`'s own raw text is still needed alongside `native_ty` for
 /// the two checks below that read it as text (nullability prefix, the
-/// `object` exclusion) rather than as a parsed `Type`.
+/// `object` exclusion) rather than as a parsed `Type`. `template_params`
+/// are the templates in scope, marked in the doc type before it is
+/// reconciled with the native one.
 pub(crate) fn resolve_type_with_parsed_native(
     doc_type: Option<&TypeNode>,
     native_hint: Option<&str>,
     native_ty: Option<&Type>,
+    template_params: &FxHashMap<String, TemplateParam>,
 ) -> Type {
     let Some(doc) = doc_type else {
         return native_ty.cloned().unwrap_or(Type::Mixed(false));
     };
-    let ty = parse_type_node(doc);
+    let ty = mark_template_params(parse_type_node(doc), template_params);
     // A docblock type is trusted as the complete picture and otherwise
     // fully replaces the native hint (deliberate - it's usually more
     // precise) - but real docblocks very commonly aren't fully redundant
@@ -166,11 +177,15 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
     // leftovers, e.g. a bare `null` out of `?Pkg`), and when a kept member
     // is a conditional return type: it resolves per call site, and a
     // backfilled native alternative would survive every resolution,
-    // turning a `non-empty-array` call's `T` into `T|null`.
+    // turning a `non-empty-array` call's `T` into `T|null`. A kept member
+    // naming a template is skipped the same way: the template's binding
+    // is the alternative the native member stands for, so `TKey|null`
+    // over a native `string|int|null` stays `TKey|null`.
     if let Type::Union(native_members) = &native_ty
         && !kept.is_empty()
         && !kept.iter().any(type_contains_deferred_value_of)
         && !kept.iter().any(|k| matches!(k, Type::Conditional { .. }))
+        && !kept.iter().any(types::references_template)
     {
         for nm in native_members {
             if native_member_addable(nm)
@@ -330,7 +345,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         return false;
     }
     match m {
-        // A class reference can't be verified this early. A late-
+        // A class reference or a template can't be verified this early. A late-
         // resolvable type or a `ClassConstant` is trusted the same way - `Registry::
         // resolve_deferred_value_of`'s own later, whole-registry pass
         // (see its own doc comment) restores the "fall back to native
@@ -338,6 +353,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // function would otherwise have given for free, once its real
         // value is actually known.
         Type::Object(_, _)
+        | Type::TemplateParam(_)
         | Type::ObjectWithoutClass
         | Type::ValueOf(_)
         | Type::KeyOf(_)
@@ -366,32 +382,18 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // A conditional return type (`($p is X ? A : B)`) is possible if
         // either branch is - each call site picks (or unions) its own.
         // Checked branch-wise through this same function, so a branch
-        // naming a still-unmarked `@template` (a bare `Object("T")` this
-        // early, see the `Array` arm below) is trusted the same way a
-        // plain one is, instead of failing `subtype`'s name-equality
-        // object check against the native class.
+        // naming a template or a class is trusted the same way a plain
+        // one is, instead of failing `subtype`'s name-equality object
+        // check against the native class.
         Type::Conditional {
             if_true, if_false, ..
         } => {
             member_possible_given_native(if_true, native_ty)
                 || member_possible_given_native(if_false, native_ty)
         }
-        // An array's own *key* type must not be checked against
-        // `native_ty` the same way every other member is - fine for a
-        // concrete key (`array<string, int>`'s `string` really is a
-        // subtype of `int|string`), but this function runs before
-        // `mark_template_params` ever gets a chance to substitute a
-        // `@template`-bound key placeholder (`array<TKey, TValue>`,
-        // `TKey` still a bare, unresolved `Object("TKey", [])` at this
-        // point) - `subtype(Object("TKey", []), int|string)` is
-        // correctly `false` for an arbitrary class, so checking the key
-        // would discard the entire array member in favor of the bare
-        // native `array`, silently losing `TValue` too even though it
-        // would resolve to a perfectly legitimate template param one
-        // step later. A native `array` hint carries no key information
-        // to contradict in the first place (PHP's own type system has
-        // no generics), so this only ever checks the value side against
-        // native's own - the key is always trusted as-is.
+        // An array's key is never checked against `native_ty`: a native
+        // `array` hint carries no key information to contradict, so only
+        // the value side is checked against the native's own.
         Type::Array(_, elem) => match native_ty {
             Type::Array(_, native_elem) => member_possible_given_native(elem, native_elem),
             _ => types::Relation::structural().subtype(m, native_ty),
