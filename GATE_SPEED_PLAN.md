@@ -299,7 +299,7 @@ them, so an interim fix would be thrown away:
   from inference ("analyser emits nothing"), and the facts pass becomes
   inference with no rules registered.
 
-## 5. Edits to CRATE_SPLIT_PLAN.md
+## 5. Edits to CRATE_SPLIT_PLAN.md and ROADMAP.md
 
 Each is a targeted edit in the step's own commit:
 - S4, §3.5 enumeration APIs and C5: the case-folded function key map is
