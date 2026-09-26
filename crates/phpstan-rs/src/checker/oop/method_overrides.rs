@@ -623,9 +623,10 @@ impl<'a> Checker<'a> {
         // `#[\ReturnTypeWillChange]` on either side opts out.
         let tentative = ancestor_sig.is_stub
             && has_attr(&ancestor_sig.attrs, "TentativeType")
-            && self.registry.php_version.is_none_or(|v| {
-                types::php_version::PhpFeature::TentativeReturnTypes.is_available(v)
-            });
+            && self
+                .registry
+                .php_supports_somewhere(types::php_version::PhpFeature::TentativeReturnTypes)
+                != Some(false);
         if tentative {
             let will_change = has_attr(&own_sig.attrs, "ReturnTypeWillChange")
                 || has_attr(&ancestor_sig.attrs, "ReturnTypeWillChange");

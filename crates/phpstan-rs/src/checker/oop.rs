@@ -1299,9 +1299,10 @@ impl<'a> Checker<'a> {
         display: &str,
         span: Span,
     ) {
-        if self.registry.php_version.is_some_and(|v| {
-            !types::php_version::PhpFeature::SerializableRequiresMagicMethods.is_available(v)
-        }) {
+        if self.registry.php_supports_somewhere(
+            types::php_version::PhpFeature::SerializableRequiresMagicMethods,
+        ) == Some(false)
+        {
             return;
         }
         let Some(info) = self.registry.classes.get(registry_name) else {
@@ -1346,9 +1347,6 @@ impl<'a> Checker<'a> {
         if !is_readonly {
             return;
         }
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
         let (feature, message) = if is_anonymous {
             (
                 types::php_version::PhpFeature::ReadOnlyAnonymousClasses,
@@ -1360,7 +1358,7 @@ impl<'a> Checker<'a> {
                 "Readonly classes are supported only on PHP 8.2 and later.",
             )
         };
-        if feature.is_available(version) {
+        if self.registry.php_supports_everywhere(feature) != Some(false) {
             return;
         }
         self.report_builder(
@@ -1394,7 +1392,6 @@ impl<'a> Checker<'a> {
         kind: ClassKind,
         consts: &[ClassConst],
     ) {
-        let version = self.registry.php_version;
         for c in consts {
             let constant = format!("{fqn}::{}", c.name);
             self.check_type_declaration(
@@ -1403,8 +1400,10 @@ impl<'a> Checker<'a> {
                 c.type_hint.as_ref().map(|h| h.span).unwrap_or(c.span),
             );
             if kind == ClassKind::Trait
-                && let Some(version) = version
-                && !types::php_version::PhpFeature::ConstantsInTraits.is_available(version)
+                && self
+                    .registry
+                    .php_supports_everywhere(types::php_version::PhpFeature::ConstantsInTraits)
+                    == Some(false)
             {
                 self.report_builder(
                     DiagnosticBuilder::new("Constant is declared inside a trait but is only supported on PHP 8.2 and later.".to_string(),
@@ -1416,8 +1415,10 @@ impl<'a> Checker<'a> {
                 );
             }
             if c.is_final
-                && let Some(version) = version
-                && !types::php_version::PhpFeature::FinalClassConstants.is_available(version)
+                && self
+                    .registry
+                    .php_supports_everywhere(types::php_version::PhpFeature::FinalClassConstants)
+                    == Some(false)
             {
                 self.report_builder(
                     DiagnosticBuilder::new(
@@ -1444,8 +1445,9 @@ impl<'a> Checker<'a> {
                 );
             }
             if c.type_hint.is_some()
-                && let Some(version) = version
-                && !types::php_version::PhpFeature::NativeTypedClassConstants.is_available(version)
+                && self.registry.php_supports_everywhere(
+                    types::php_version::PhpFeature::NativeTypedClassConstants,
+                ) == Some(false)
             {
                 self.report_builder(
                     DiagnosticBuilder::new("Class constants with native types are supported only on PHP 8.3 and later.".to_string(),
@@ -1737,10 +1739,10 @@ impl<'a> Checker<'a> {
         if !self.registry.check_promoted_property_suggestions {
             return;
         }
-        if !self
+        if self
             .registry
-            .php_version
-            .is_some_and(|v| types::php_version::PhpFeature::PromotedProperties.is_available(v))
+            .php_supports_everywhere(types::php_version::PhpFeature::PromotedProperties)
+            != Some(true)
         {
             return;
         }

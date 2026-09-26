@@ -133,10 +133,10 @@ impl<'a> Checker<'a> {
     /// check against, matching every other `PhpFeature`-gated rule's
     /// "unset means unconfigured, stay silent" convention.
     pub(crate) fn check_define_third_argument(&mut self, args: &[Arg], span: Span) {
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if types::php_version::PhpFeature::CaseInsensitiveConstantsRemoved.is_available(version) {
+        if self.registry.php_supports_everywhere(
+            types::php_version::PhpFeature::CaseInsensitiveConstantsRemoved,
+        ) != Some(false)
+        {
             return;
         }
         if args.len() < 3 {

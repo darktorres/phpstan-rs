@@ -26,10 +26,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn global_constant_type(&self, name: &str) -> Option<Type> {
         let (primary, fallback) = self.name_ctx.resolve_constant_candidates(name);
         let predefined = |n: &str| {
-            crate::checker::predefined_constants::predefined_constant_type(
-                n,
-                self.registry.php_version,
-            )
+            self.registry.php_version_consensus(|v| {
+                crate::checker::predefined_constants::predefined_constant_type(n, v)
+            })
         };
         if let Some(ty) = predefined(&primary).or_else(|| fallback.as_deref().and_then(predefined))
         {
@@ -387,7 +386,10 @@ impl<'a> Checker<'a> {
         if !matches!(op, BinOp::Eq | BinOp::NotEq) {
             return;
         }
-        let Some(equal) = loose_compare_literals(l_ty, r_ty, self.registry.php_version) else {
+        let Some(equal) = self
+            .registry
+            .php_version_consensus(|v| loose_compare_literals(l_ty, r_ty, v))
+        else {
             return;
         };
         let outcome = if matches!(op, BinOp::Eq) {

@@ -175,3 +175,16 @@ fn a_range_supports_a_feature_on_all_some_or_none_of_its_versions() {
         TrinaryLogic::No
     );
 }
+
+#[test]
+fn known_versions_where_spans_the_oldest_to_the_newest_admitted_release() {
+    let range = known_php_versions_where(|v| v >= PhpVersion::new(8, 1));
+    assert_eq!(
+        range,
+        Some(PhpVersions::new(
+            PhpVersion::new(8, 1),
+            PhpVersion::new(8, 5)
+        ))
+    );
+    assert_eq!(known_php_versions_where(|_| false), None);
+}

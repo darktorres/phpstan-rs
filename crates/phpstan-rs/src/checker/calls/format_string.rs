@@ -374,13 +374,13 @@ impl<'a> Checker<'a> {
         span: syntax::token::Span,
     ) -> Option<Vec<usize>> {
         let format_ty = self.infer_expr(&args.get(function.format)?.value, locals);
-        let php_version = self.registry.php_version;
+        let registry = self.registry;
         let mut counts = Vec::new();
         for format in format_ty.constant_strings() {
             let count = if function.kind == FormatKind::Scanf {
                 scanf_placeholder_count(format)
             } else {
-                printf_placeholder_count(format, php_version)
+                registry.php_version_consensus(|v| printf_placeholder_count(format, v))
             };
             let Some(count) = count else {
                 self.report(
@@ -528,7 +528,10 @@ impl<'a> Checker<'a> {
         let [format] = format_ty.constant_strings()[..] else {
             return;
         };
-        let Some(by_index) = printf_placeholders(format, self.registry.php_version) else {
+        let Some(by_index) = self
+            .registry
+            .php_version_consensus(|v| printf_placeholders(format, v))
+        else {
             return;
         };
         let strict = self.registry.check_strict_printf_placeholder_types;

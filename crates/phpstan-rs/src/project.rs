@@ -821,14 +821,11 @@ impl Project {
         self.registry.configured_level = level;
     }
 
-    /// Configures the project's target PHP version
-    /// (`registry::Registry::php_version`) - a narrow setter rather than
-    /// a general `&mut Registry` accessor, for the same reason given at
-    /// `set_strict_mixed_arrays`. `None` means "not configured" (the
-    /// default), not "PHP version zero" - every version-gated rule
-    /// reading this field needs to treat the two differently.
-    pub fn set_php_version(&mut self, php_version: Option<types::php_version::PhpVersion>) {
-        self.registry.php_version = php_version;
+    /// Configures the PHP versions the project runs on
+    /// (`registry::Registry::php_versions`). `None` means neither the
+    /// config nor composer.json says.
+    pub fn set_php_versions(&mut self, php_versions: Option<types::PhpVersions>) {
+        self.registry.php_versions = php_versions;
     }
 
     /// Which package owns each directory (`composer::PackageContext::

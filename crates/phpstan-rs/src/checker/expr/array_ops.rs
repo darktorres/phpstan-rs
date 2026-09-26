@@ -653,7 +653,8 @@ impl<'a> Checker<'a> {
     /// than flagged.
     pub(crate) fn check_array_item_key_type(&mut self, key_expr: &Expr, locals: &Locals) {
         let key_ty = self.infer_expr(key_expr, locals);
-        if let Some(desc) = invalid_array_key_description(&key_ty, self.registry.php_version) {
+        if let Some(desc) = invalid_array_key_description(&key_ty, self.registry.php_version_max())
+        {
             self.report(
                 format!("Invalid array key type {desc}."),
                 key_expr.span,
@@ -727,7 +728,8 @@ impl<'a> Checker<'a> {
         if !self.is_type_fully_known(&idx_ty) {
             return;
         }
-        if let Some(desc) = invalid_array_key_description(&idx_ty, self.registry.php_version) {
+        if let Some(desc) = invalid_array_key_description(&idx_ty, self.registry.php_version_max())
+        {
             self.report(
                 format!("Invalid array key type {desc}."),
                 idx.span,

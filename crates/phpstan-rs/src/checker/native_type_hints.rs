@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
         if f.name.starts_with("__") && class_name.is_some() {
             return;
         }
-        let version = self.registry.php_version;
+        let version = self.registry.php_version_min();
         let kind_word = if class_name.is_some() {
             "Method"
         } else {
@@ -297,7 +297,7 @@ impl<'a> Checker<'a> {
             if !collect(ty, Position::Parameter, &mut native) {
                 continue;
             }
-            let Some(suggested) = render(native, self.registry.php_version) else {
+            let Some(suggested) = render(native, self.registry.php_version_min()) else {
                 continue;
             };
             self.report(
@@ -315,7 +315,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_native_class_constant_types(&mut self, fqn: &str, consts: &[ClassConst]) {
         if self
             .registry
-            .php_version
+            .php_version_min()
             .is_none_or(|v| v < PhpVersion::new(8, 3))
         {
             return;
@@ -339,7 +339,7 @@ impl<'a> Checker<'a> {
             if !collect(&sig.ty, Position::Parameter, &mut native) {
                 continue;
             }
-            let Some(suggested) = render(native, self.registry.php_version) else {
+            let Some(suggested) = render(native, self.registry.php_version_min()) else {
                 continue;
             };
             let suggested_ty = self.suggested_type(&suggested, Some(fqn));

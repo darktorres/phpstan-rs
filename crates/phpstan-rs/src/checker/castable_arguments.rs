@@ -235,9 +235,11 @@ impl<'a> Checker<'a> {
         value_ty: &Type,
         span: syntax::token::Span,
     ) {
-        if !self.registry.php_version.is_some_and(|v| {
-            !types::php_version::PhpFeature::ArrayUnpackingWithStringKeys.is_available(v)
-        }) {
+        if self
+            .registry
+            .php_supports_everywhere(types::php_version::PhpFeature::ArrayUnpackingWithStringKeys)
+            != Some(false)
+        {
             return;
         }
         let Some(key_ty) = Self::array_key_type(value_ty) else {

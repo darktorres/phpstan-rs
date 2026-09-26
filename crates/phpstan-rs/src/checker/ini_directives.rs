@@ -155,7 +155,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) {
-        let Some(version) = self.registry.php_version else {
+        let Some(version) = self.registry.php_version_max() else {
             return;
         };
         let Some(arg) = args

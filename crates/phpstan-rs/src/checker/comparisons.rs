@@ -90,10 +90,13 @@ impl<'a> Checker<'a> {
             Some(Type::True) => Some(true),
             Some(_) => None,
         };
-        let version = self.registry.php_version;
         let can_never_match = |this: &Self, value: &Type| -> bool {
             let never_identical = || this.registry.identical_result(&needle, value) == Some(false);
-            let never_equal = || loose_compare_literals(&needle, value, version) == Some(false);
+            let never_equal = || {
+                this.registry
+                    .php_version_consensus(|v| loose_compare_literals(&needle, value, v))
+                    == Some(false)
+            };
             match strict {
                 Some(true) => never_identical(),
                 Some(false) => never_equal(),
@@ -226,7 +229,7 @@ impl<'a> Checker<'a> {
         use LooseKind::*;
         let before_php8 = self
             .registry
-            .php_version
+            .php_version_min()
             .is_none_or(|v| v < types::PhpVersion::new(8, 0));
         let numeric = |k: &LooseKind| matches!(k, Int | Float);
         let possibly_numeric_string = |k: &LooseKind| matches!(k, NumericString | String);

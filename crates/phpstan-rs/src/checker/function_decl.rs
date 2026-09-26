@@ -1349,10 +1349,11 @@ impl<'a> Checker<'a> {
         message: &str,
         span: Span,
     ) {
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if PhpFeature::NativeUnionTypes.is_available(version) {
+        if self
+            .registry
+            .php_supports_everywhere(PhpFeature::NativeUnionTypes)
+            != Some(false)
+        {
             return;
         }
         for hint in param_hints {
@@ -1415,10 +1416,11 @@ impl<'a> Checker<'a> {
         identifier: &'static str,
         span: Span,
     ) {
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if !PhpFeature::PureIntersectionTypes.is_available(version) {
+        if self
+            .registry
+            .php_supports_somewhere(PhpFeature::PureIntersectionTypes)
+            != Some(true)
+        {
             return;
         }
         let Some(hint) = hint else {
@@ -1453,10 +1455,11 @@ impl<'a> Checker<'a> {
     /// parameter's 1-based position among every parameter, typed or not -
     /// `i` below mirrors that exactly, not a typed-only counter.
     fn check_implicitly_nullable_params(&mut self, f: &FunctionDecl) {
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if !PhpFeature::ImplicitlyNullableParameterDeprecated.is_available(version) {
+        if self
+            .registry
+            .php_supports_somewhere(PhpFeature::ImplicitlyNullableParameterDeprecated)
+            != Some(true)
+        {
             return;
         }
         for (i, p) in f.params.iter().enumerate() {
@@ -1508,10 +1511,11 @@ impl<'a> Checker<'a> {
     /// sometimes counting as "optional," depending on whether its type
     /// is nullable/a union naming `null`/`mixed`) are left unbuilt.
     fn check_required_parameter_after_optional(&mut self, f: &FunctionDecl) {
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if !PhpFeature::RequiredParameterAfterOptionalDeprecated.is_available(version) {
+        if self
+            .registry
+            .php_supports_somewhere(PhpFeature::RequiredParameterAfterOptionalDeprecated)
+            != Some(true)
+        {
             return;
         }
         let mut optional_param: Option<&str> = None;

@@ -146,9 +146,11 @@ impl<'a> Checker<'a> {
     }
 
     fn check_type_version_support(&mut self, hint: &str, span: Span) {
-        let Some(version) = self.registry.php_version else {
+        if self.registry.php_versions.is_none() {
             return;
-        };
+        }
+        let unavailable =
+            |feature: PhpFeature| self.registry.php_supports_everywhere(feature) == Some(false);
         let shape = parse_shape(hint);
         let names: Vec<&str> = match &shape {
             Shape::Single(n) | Shape::Nullable(n) => vec![*n],
@@ -161,7 +163,7 @@ impl<'a> Checker<'a> {
                 })
                 .collect(),
         };
-        if !PhpFeature::DisjunctiveNormalFormTypes.is_available(version)
+        if unavailable(PhpFeature::DisjunctiveNormalFormTypes)
             && let Shape::Union(members) = &shape
             && members.iter().any(|m| matches!(m, Member::Group(_)))
         {
@@ -172,7 +174,7 @@ impl<'a> Checker<'a> {
                 "unionType.dnfNotSupported".to_string(),
             );
         }
-        if PhpFeature::StandaloneNullFalseTrueTypes.is_available(version) {
+        if !unavailable(PhpFeature::StandaloneNullFalseTrueTypes) {
             return;
         }
         if names.iter().any(|n| n.eq_ignore_ascii_case("true")) {

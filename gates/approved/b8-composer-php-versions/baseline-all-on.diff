@@ -1,0 +1,62 @@
+--- old
++++ new
+@@ -1,6 +1,38 @@
+ # files_checked 2792
++_analysis/phpstan-latte/themes-admin-default-template-admin.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_b01ea8feacbea169::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-admin-default-template-group_list.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_f2323062d6f1ed26::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-admin-default-template-layout.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_cb6d068a0405beed::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-admin-default-template-popuphelp.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_de8c9bd959914d67::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-admin-default-template-tags.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_bb7e6e9c3dad4c26::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-about.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_3deb9c2b63d4d0f3::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-comments.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_195e7de0d2a06e47::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-identification.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_a0101d471a9ada51::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-index.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_5e2fddbe13fafb73::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-layout.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_c27aeaa389b702f1::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-mail-text-plain-cat_group_info.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_7efbae75a351ad4d::ContentType can be declared natively as string.	
++_analysis/phpstan-latte/themes-default-template-mail-text-plain-mail-wrapper.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_42bfca941197c0c4::ContentType can be declared natively as string.	
++_analysis/phpstan-latte/themes-default-template-mail-text-plain-notification_admin.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_825514c8b73f7a31::ContentType can be declared natively as string.	
++_analysis/phpstan-latte/themes-default-template-mail-text-plain-notification_by_mail.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_61b5a990ab72e155::ContentType can be declared natively as string.	
++_analysis/phpstan-latte/themes-default-template-nbm.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_1bb6fc706ae3716c::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-notification.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_facb4f7400293132::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-password.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_da9783cb73473524::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-picture.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_89be4391cce4863c::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-popuphelp.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_c90fb7104b41207b::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-profile.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_daf72666642357ff::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-redirect.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_13ec685906ff2453::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-register.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_5ab5efc8bf6a720a::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-slideshow.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_9c8c15156fb912e8::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-default-template-tags.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_964b986c081d2e68::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-standard_pages-template-identification.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_fac596d850d02efd::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-standard_pages-template-layout.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_9297446f69c63d26::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-standard_pages-template-password.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_d4b6df95eeb830d2::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-standard_pages-template-profile.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_6987422ea6d18085::Blocks can be declared natively as array.	
++_analysis/phpstan-latte/themes-standard_pages-template-register.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_be3c83a5f502470a::Blocks can be declared natively as array.	
+ src/Piwigo/Admin/AdminShell.php	418	39	5	argument.type	Parameter #1 $params of method Piwigo\\Users\\PreferencesService::deleteParam() expects string|array<string>, non-empty-list given.	
+ src/Piwigo/Admin/BatchManagerUnitPageRenderer.php	481	28	5	argument.type	Parameter $activePlugins of class Piwigo\\Admin\\Projection\\BatchManagerUnitView constructor expects list<string>, list given.	
++src/Piwigo/Admin/Install/InstallPostInstallSession.php	79	21	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_only_cookies is deprecated since PHP 8.4.	
++src/Piwigo/Admin/Install/InstallPostInstallSession.php	80	21	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_trans_sid is deprecated since PHP 8.4.	
++src/Piwigo/Admin/Install/InstallWizard.php	76	19	0	missingNativeType.classConstant	Constant Piwigo\\Admin\\Install\\InstallWizard::OVERWRITE_TOKEN_COOKIE can be declared natively as string.	
+ src/Piwigo/Admin/Integrity/C13yInternal.php	167	54	5	argument.type	Parameter #1 $ids of method Piwigo\\Users\\UserService::getStatusByIds() expects list<int>, list given.	
+ src/Piwigo/Admin/LanguagesInstalledPageRenderer.php	171	24	5	argument.type	Parameter $languages of class Piwigo\\Admin\\Projection\\LanguagesInstalledView constructor expects list<Piwigo\\Admin\\Projection\\LanguageListRow>, array{}|non-empty-list|non-empty-list<Piwigo\\Admin\\Projection\\LanguageListRow> given.	
+ src/Piwigo/Admin/PluginsInstalledPageRenderer.php	246	32	5	argument.type	Parameter $countTypesPlugins of class Piwigo\\Admin\\Projection\\PluginsInstalledView constructor expects array<string, int>, array{active: 0, inactive: 0, missing: mixed, merged: 0}|array<string, mixed>|array{active: 0, inactive: 0, missing: 0, merged: 0} given.	
+@@ -26,6 +58,8 @@
+ src/Piwigo/Group/GroupService.php	270	54	5	argument.type	Parameter #2 $userIds of method Piwigo\\Group\\GroupRepository::addMembers() expects list<Piwigo\\Common\\ValueObject\\UserId>, list given.	
+ src/Piwigo/Group/GroupService.php	326	48	5	argument.type	Parameter #2 $objectId of method Piwigo\\Core\\ActivityLoggerInterface::record() expects int|string|array<int, int|string>, list given.	
+ src/Piwigo/Http/Middleware/ExceptionHandlerMiddleware.php	36	57	0	psr3.contextType	Context key 'exception' of a logger call expects Throwable, class-string<Throwable> given.	
++src/Piwigo/Http/SessionBootstrap.php	67	25	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_only_cookies is deprecated since PHP 8.4.	
++src/Piwigo/Http/SessionBootstrap.php	70	25	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_trans_sid is deprecated since PHP 8.4.	
+ src/Piwigo/Image/ImageRepository.php	583	36	5	argument.type	Parameter #2 $dbfields of method Piwigo\\Db\\BatchWriter::massInsert() expects array<(int|string), string>, list given.	
+ src/Piwigo/Mail/MailService.php	885	58	5	argument.type	Parameter #2 $confMail of static method Piwigo\\Mail\\MailService::resolveMailTheme() expects array{mail_theme?: mixed, ...}, array<string, mixed> given.	
+ src/Piwigo/Menu/BlockManager.php	173	34	5	argument.type	Parameter #1 $block_id of method Piwigo\\Menu\\BlockManager::hideBlock() expects string, (int|string) given.	
+@@ -58,6 +92,11 @@
+ tools/openapi-generate-input-dto.php	255	92	5	argument.type	Parameter #3 $fieldName of function narrowingExpr expects string, (int|string) given.	
+ tools/p58/assign.php	175	1	5	argument.type	Parameter #3 of function printf is expected to be int by placeholder #2 ("%4d"), int|float given.	
+ tools/p58/census.php	147	5	5	argument.type	Parameter #3 of function printf is expected to be int by placeholder #2 ("%d"), int|float given.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	19	18	0	missingNativeType.classConstant	Constant Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::FILTERS can be declared natively as array.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	104	18	0	missingNativeType.classConstant	Constant Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::FUNCTIONS can be declared natively as array.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	133	18	0	missingNativeType.classConstant	Constant Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::TEMPLATE_AWARE can be declared natively as array.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	334	28	0	missingNativeType.return	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::limit() return type can be declared natively as mixed.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	487	28	0	missingNativeType.return	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::webalize() return type can be declared natively as mixed.	
+ tools/phpstan/Latte/ShimClassGenerator.php	92	13	5	argument.type	Parameter #1 $filters of method Piwigo\\Tools\\PhpStan\\Latte\\ShimClassGenerator::renderClass() expects list<string>, list given.	
+ tools/phpstan/Latte/ShimClassGenerator.php	93	13	5	argument.type	Parameter #2 $functions of method Piwigo\\Tools\\PhpStan\\Latte\\ShimClassGenerator::renderClass() expects list<string>, list given.	
+ tools/phpstan/Latte/TemplateCallSiteScanner.php	116	76	5	argument.type	Parameter #3 $assignedTemplateVars of class Piwigo\\Tools\\PhpStan\\Latte\\CallSiteScanResult constructor expects list<string>, list given.	

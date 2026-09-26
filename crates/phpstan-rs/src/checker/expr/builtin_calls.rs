@@ -1849,10 +1849,11 @@ impl<'a> Checker<'a> {
     /// with none configured, this stays silent rather than assume PHP 8.5
     /// is intended.
     pub(crate) fn check_filter_var_flag_conflict(&mut self, args: &[Arg], span: Span) {
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if !types::php_version::PhpFeature::FilterThrowOnFailureConstant.is_available(version) {
+        if self
+            .registry
+            .php_supports_somewhere(types::php_version::PhpFeature::FilterThrowOnFailureConstant)
+            != Some(true)
+        {
             return;
         }
         let Some(flags_arg) = args.get(2) else {

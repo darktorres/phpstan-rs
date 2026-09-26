@@ -107,6 +107,34 @@ impl PhpVersions {
     }
 }
 
+/// Every PHP release a declared version range is drawn from, oldest first.
+pub const KNOWN_PHP_VERSIONS: &[PhpVersion] = &[
+    PhpVersion::new(5, 3),
+    PhpVersion::new(5, 4),
+    PhpVersion::new(5, 5),
+    PhpVersion::new(5, 6),
+    PhpVersion::new(7, 0),
+    PhpVersion::new(7, 1),
+    PhpVersion::new(7, 2),
+    PhpVersion::new(7, 3),
+    PhpVersion::new(7, 4),
+    PhpVersion::new(8, 0),
+    PhpVersion::new(8, 1),
+    PhpVersion::new(8, 2),
+    PhpVersion::new(8, 3),
+    PhpVersion::new(8, 4),
+    PhpVersion::new(8, 5),
+];
+
+/// The range from the oldest to the newest known release `admits` accepts,
+/// or `None` when it accepts none.
+pub fn known_php_versions_where(admits: impl Fn(PhpVersion) -> bool) -> Option<PhpVersions> {
+    let mut admitted = KNOWN_PHP_VERSIONS.iter().copied().filter(|&v| admits(v));
+    let min = admitted.next()?;
+    let max = admitted.last().unwrap_or(min);
+    Some(PhpVersions::new(min, max))
+}
+
 /// Parses the `"X.Y"` string format used by both the `--php-version` CLI
 /// flag and `config.rs`'s `php_version` TOML key (e.g. `"8.1"`) into a
 /// `PhpVersion`. Rejects anything else (a bare `"8"`, a patch component

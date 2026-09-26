@@ -35,7 +35,10 @@ pub use late::{contains_late, references_template, resolve_late_to_bounds, settl
 pub use parse::{canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance};
 pub use parse::{parse_native_type_string, parse_type_string};
 pub use php_float_format::format_php_float;
-pub use php_version::{PhpFeature, PhpVersion, PhpVersions, parse_php_version};
+pub use php_version::{
+    KNOWN_PHP_VERSIONS, PhpFeature, PhpVersion, PhpVersions, known_php_versions_where,
+    parse_php_version,
+};
 pub use relation::{AcceptsResult, Relation};
 pub use shape::{Shape, ShapeField, ShapeKey};
 pub use subtype::types_definitely_disjoint;

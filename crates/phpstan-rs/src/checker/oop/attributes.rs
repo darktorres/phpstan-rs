@@ -231,8 +231,10 @@ impl<'a> Checker<'a> {
         if first.attrs.is_empty() {
             return;
         }
-        if let Some(version) = self.registry.php_version
-            && !types::php_version::PhpFeature::AttributesOnGlobalConstants.is_available(version)
+        if self
+            .registry
+            .php_supports_everywhere(types::php_version::PhpFeature::AttributesOnGlobalConstants)
+            == Some(false)
         {
             self.report_builder(
                 DiagnosticBuilder::new(
@@ -353,8 +355,8 @@ impl<'a> Checker<'a> {
                 if kind == ClassKind::Trait {
                     if self
                         .registry
-                        .php_version
-                        .is_some_and(|v| !PhpFeature::DeprecatedAttributeOnTraits.is_available(v))
+                        .php_supports_everywhere(PhpFeature::DeprecatedAttributeOnTraits)
+                        == Some(false)
                     {
                         self.report_builder(
                             DiagnosticBuilder::new("Attribute class Deprecated can be used with traits only on PHP 8.5 and later."

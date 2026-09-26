@@ -1,0 +1,2 @@
+test.php:4:25-4:27 property.readOnlyNotSupported L0 | Readonly properties are supported only on PHP 8.1 and later.
+    non-ignorable

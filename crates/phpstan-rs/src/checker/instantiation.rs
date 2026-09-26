@@ -310,8 +310,8 @@ impl<'a> Checker<'a> {
             return false;
         }
         let abstract_trait_methods_supported = registry
-            .php_version
-            .is_none_or(|v| types::php_version::PhpFeature::AbstractTraitMethods.is_available(v));
+            .php_supports_everywhere(types::php_version::PhpFeature::AbstractTraitMethods)
+            != Some(false);
         if abstract_trait_methods_supported
             && let Some(t) = &self.current_trait
             && registry

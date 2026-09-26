@@ -486,7 +486,7 @@ impl Server {
             .set_sql_reflection_config(resolved.sql_reflection_config);
         self.project
             .set_sql_reflection_schema(resolved.sql_reflection_schema);
-        self.project.set_php_version(resolved.php_version);
+        self.project.set_php_versions(resolved.php_versions);
         self.project
             .set_assertion_tables(resolved.assertion_entries, resolved.class_argument_returns);
         self.project

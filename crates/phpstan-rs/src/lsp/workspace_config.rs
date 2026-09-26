@@ -69,7 +69,7 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_null_coercion: bool,
     pub(crate) check_new_exception_discarded: bool,
     pub(crate) check_risky_tests: bool,
-    pub(crate) php_version: Option<types::php_version::PhpVersion>,
+    pub(crate) php_versions: Option<types::PhpVersions>,
     pub(crate) assertion_entries: Vec<crate::assertion_tables::AssertionEntry>,
     pub(crate) class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
     pub(crate) restricted_symbol_entries: Vec<crate::restricted_symbols::RestrictedSymbolEntry>,
@@ -192,6 +192,9 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         composer::PackageContext::load(root, root)
     };
     let phpstan_api_check_enabled = package.requires_phpstan();
+    let php_versions = php_version
+        .map(types::PhpVersions::exactly)
+        .or_else(|| crate::project::session::declared_php_versions(&package));
     let package_dirs = package.package_dirs();
     let vendor_context = package.vendor;
 
@@ -292,7 +295,7 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         check_null_coercion: config.check_null_coercion.unwrap_or(false),
         check_new_exception_discarded: config.check_new_exception_discarded.unwrap_or(false),
         check_risky_tests: config.check_risky_tests.unwrap_or(false),
-        php_version,
+        php_versions,
         assertion_entries: config.assertions.take().unwrap_or_default(),
         class_argument_returns: config.class_argument_returns.take().unwrap_or_default(),
         restricted_symbol_entries,

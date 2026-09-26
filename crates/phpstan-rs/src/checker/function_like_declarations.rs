@@ -368,8 +368,8 @@ impl<'a> Checker<'a> {
         let Some(first) = params.iter().find(|p| is_promoted(p)) else {
             return;
         };
-        let version = self.registry.php_version;
-        let unavailable = |feature: PhpFeature| version.is_some_and(|v| !feature.is_available(v));
+        let unavailable =
+            |feature: PhpFeature| self.registry.php_supports_everywhere(feature) == Some(false);
         let first_span = first.span;
         if unavailable(PhpFeature::PromotedProperties) {
             self.report_declaration(

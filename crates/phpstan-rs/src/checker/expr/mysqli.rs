@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
     /// `mysqli_sql_exception` instead of returning `false`.
     fn mysqli_throws_exceptions(&self) -> bool {
         self.registry
-            .php_version
+            .php_version_min()
             .is_none_or(|version| version >= types::PhpVersion::new(8, 1))
     }
 

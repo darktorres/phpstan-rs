@@ -284,7 +284,7 @@ impl<'a> Checker<'a> {
             );
             if self
                 .registry
-                .php_version
+                .php_version_min()
                 .is_some_and(|v| v >= types::PhpVersion::new(8, 4))
             {
                 builder = builder.tip("Also BcMath\\Number is allowed.");

@@ -185,11 +185,8 @@ impl<'a> Checker<'a> {
             .filter(|p| !p.has_default && !p.variadic)
             .count();
         let max = if variadic { None } else { Some(params.len()) };
-        let supports = |feature: PhpFeature| {
-            self.registry
-                .php_version
-                .is_none_or(|v| feature.is_available(v))
-        };
+        let supports =
+            |feature: PhpFeature| self.registry.php_supports_everywhere(feature) != Some(false);
         let named_after_unpack = supports(PhpFeature::NamedArgumentAfterUnpackedArgument);
         let named_supported = supports(PhpFeature::NamedArguments);
 

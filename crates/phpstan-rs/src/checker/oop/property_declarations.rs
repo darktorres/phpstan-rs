@@ -157,9 +157,12 @@ impl<'a> Checker<'a> {
     }
 
     fn check_property_in_interface(&mut self, view: &PropertyView) {
-        let version = self.registry.php_version;
         let bodies = view.hook_bodies();
-        let error = if version.is_some_and(|v| !PhpFeature::PropertyHooks.is_available(v)) {
+        let error = if self
+            .registry
+            .php_supports_everywhere(PhpFeature::PropertyHooks)
+            == Some(false)
+        {
             Some((
                 "Interfaces can include properties only on PHP 8.4 and later.",
                 "property.inInterface",
@@ -218,8 +221,8 @@ impl<'a> Checker<'a> {
         registry_name: &str,
         is_class_abstract: bool,
     ) {
-        let version = self.registry.php_version;
-        let unavailable = |feature: PhpFeature| version.is_some_and(|v| !feature.is_available(v));
+        let unavailable =
+            |feature: PhpFeature| self.registry.php_supports_everywhere(feature) == Some(false);
         let bodies = view.hook_bodies();
         let has_hooks = view.has_hooks();
         let is_virtual = self
@@ -322,8 +325,8 @@ impl<'a> Checker<'a> {
             let mut errors = Vec::new();
             if self
                 .registry
-                .php_version
-                .is_some_and(|v| !PhpFeature::ReadOnlyProperties.is_available(v))
+                .php_supports_everywhere(PhpFeature::ReadOnlyProperties)
+                == Some(false)
             {
                 errors.push((
                     "Readonly properties are supported only on PHP 8.1 and later.",

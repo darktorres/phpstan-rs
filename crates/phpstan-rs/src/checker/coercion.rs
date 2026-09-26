@@ -37,10 +37,11 @@ impl<'a> Checker<'a> {
     /// Real PHPStan's `UnsetCastRule` (`cast.unset`) - the `(unset)`
     /// cast was removed as of PHP 8.0.
     pub(crate) fn check_unset_cast_supported(&mut self, span: Span) {
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if types::php_version::PhpFeature::UnsetCastRemoved.is_available(version) {
+        if self
+            .registry
+            .php_supports_everywhere(types::php_version::PhpFeature::UnsetCastRemoved)
+            != Some(false)
+        {
             return;
         }
         self.report_builder(
@@ -61,8 +62,10 @@ impl<'a> Checker<'a> {
     /// inside a larger expression - both checks can fire together on the
     /// same occurrence.
     pub(crate) fn check_void_cast(&mut self, span: Span, is_bare_statement: bool) {
-        if let Some(version) = self.registry.php_version
-            && !types::php_version::PhpFeature::VoidCast.is_available(version)
+        if self
+            .registry
+            .php_supports_everywhere(types::php_version::PhpFeature::VoidCast)
+            == Some(false)
         {
             self.report_builder(
                 DiagnosticBuilder::new(
@@ -103,10 +106,11 @@ impl<'a> Checker<'a> {
         ) {
             return;
         }
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if !types::php_version::PhpFeature::DeprecatedNonStandardCasts.is_available(version) {
+        if self
+            .registry
+            .php_supports_somewhere(types::php_version::PhpFeature::DeprecatedNonStandardCasts)
+            != Some(true)
+        {
             return;
         }
         let (spelling, canonical) = (cast.keyword(), cast.kind().keyword());
@@ -123,10 +127,11 @@ impl<'a> Checker<'a> {
     /// non-ignorable) - the backtick shell-exec operator is deprecated
     /// as of PHP 8.5 in favor of a plain `shell_exec()` call.
     pub(crate) fn check_backtick_deprecation(&mut self, span: Span) {
-        let Some(version) = self.registry.php_version else {
-            return;
-        };
-        if !types::php_version::PhpFeature::DeprecatedBacktickOperator.is_available(version) {
+        if self
+            .registry
+            .php_supports_somewhere(types::php_version::PhpFeature::DeprecatedBacktickOperator)
+            != Some(true)
+        {
             return;
         }
         self.report(

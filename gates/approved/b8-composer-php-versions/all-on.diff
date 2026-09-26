@@ -1,0 +1,661 @@
+--- old
++++ new
+@@ -2,6 +2,7 @@
+ ./composer.json	85	1	0	unused.composerDependency	Package pestphp/pest-plugin-mutate is in require-dev, but the analysed code uses none of its symbols.	
+ _analysis/phpstan-latte/themes-admin-default-template-admin.latte.php	8	13	5	class.unused	Class Template_b01ea8feacbea169 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-admin.latte.php	10	15	5	classConstant.unused	Constant Template_b01ea8feacbea169::Blocks is never used.	
++_analysis/phpstan-latte/themes-admin-default-template-admin.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_b01ea8feacbea169::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-admin-default-template-admin.latte.php	361	18	5	method.unused	Method Template_b01ea8feacbea169::blockContent is never used.	
+ _analysis/phpstan-latte/themes-admin-default-template-album_notification.latte.php	8	13	5	class.unused	Class Template_ba4da9524d68ad70 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-albums.latte.php	8	13	5	class.unused	Class Template_7d0159a957b44ffc is never referenced.	
+@@ -24,6 +25,7 @@
+ _analysis/phpstan-latte/themes-admin-default-template-element_set_ranks.latte.php	8	13	5	class.unused	Class Template_0b98cee08cfda128 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-group_list.latte.php	8	13	5	class.unused	Class Template_f2323062d6f1ed26 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-group_list.latte.php	10	15	5	classConstant.unused	Constant Template_f2323062d6f1ed26::Blocks is never used.	
++_analysis/phpstan-latte/themes-admin-default-template-group_list.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_f2323062d6f1ed26::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-admin-default-template-group_list.latte.php	524	18	5	method.unused	Method Template_f2323062d6f1ed26::blockGroupContent is never used.	
+ _analysis/phpstan-latte/themes-admin-default-template-group_perm.latte.php	8	13	5	class.unused	Class Template_4e34c8504c48a51a is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-help.latte.php	8	13	5	class.unused	Class Template_f371ac1a191611b7 is never referenced.	
+@@ -39,6 +41,7 @@
+ _analysis/phpstan-latte/themes-admin-default-template-languages_new.latte.php	8	13	5	class.unused	Class Template_ea2ebf1611066d3e is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-layout.latte.php	8	13	5	class.unused	Class Template_cb6d068a0405beed is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-layout.latte.php	10	15	5	classConstant.unused	Constant Template_cb6d068a0405beed::Blocks is never used.	
++_analysis/phpstan-latte/themes-admin-default-template-layout.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_cb6d068a0405beed::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-admin-default-template-layout.latte.php	643	18	5	method.unused	Method Template_cb6d068a0405beed::blockContent is never used.	
+ _analysis/phpstan-latte/themes-admin-default-template-maintenance_actions.latte.php	8	13	5	class.unused	Class Template_5e2ae410882b826a is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-maintenance_env.latte.php	8	13	5	class.unused	Class Template_f387bdbebbec363f is never referenced.	
+@@ -57,6 +60,7 @@
+ _analysis/phpstan-latte/themes-admin-default-template-plugins_new.latte.php	8	13	5	class.unused	Class Template_0aa4012a0f79f0b8 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-popuphelp.latte.php	8	13	5	class.unused	Class Template_de8c9bd959914d67 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-popuphelp.latte.php	10	15	5	classConstant.unused	Constant Template_de8c9bd959914d67::Blocks is never used.	
++_analysis/phpstan-latte/themes-admin-default-template-popuphelp.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_de8c9bd959914d67::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-admin-default-template-popuphelp.latte.php	300	18	5	method.unused	Method Template_de8c9bd959914d67::blockContent is never used.	
+ _analysis/phpstan-latte/themes-admin-default-template-rating.latte.php	8	13	5	class.unused	Class Template_f619692614c25776 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-rating_user.latte.php	8	13	5	class.unused	Class Template_f85bc60d1f2631f0 is never referenced.	
+@@ -66,6 +70,7 @@
+ _analysis/phpstan-latte/themes-admin-default-template-tabsheet.latte.php	8	13	5	class.unused	Class Template_8b677baae5485052 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-tags.latte.php	8	13	5	class.unused	Class Template_bb7e6e9c3dad4c26 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-tags.latte.php	10	15	5	classConstant.unused	Constant Template_bb7e6e9c3dad4c26::Blocks is never used.	
++_analysis/phpstan-latte/themes-admin-default-template-tags.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_bb7e6e9c3dad4c26::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-admin-default-template-tags.latte.php	582	18	5	method.unused	Method Template_bb7e6e9c3dad4c26::blockTagContent is never used.	
+ _analysis/phpstan-latte/themes-admin-default-template-themes_installed.latte.php	8	13	5	class.unused	Class Template_4619fc2c6d861e77 is never referenced.	
+ _analysis/phpstan-latte/themes-admin-default-template-themes_new.latte.php	8	13	5	class.unused	Class Template_506adc3ea73b5e2b is never referenced.	
+@@ -78,23 +83,28 @@
+ _analysis/phpstan-latte/themes-default-local_head.latte.php	8	13	5	class.unused	Class Template_ce33e85cdd2a70f4 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-about.latte.php	8	13	5	class.unused	Class Template_3deb9c2b63d4d0f3 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-about.latte.php	10	15	5	classConstant.unused	Constant Template_3deb9c2b63d4d0f3::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-about.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_3deb9c2b63d4d0f3::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-about.latte.php	300	18	5	method.unused	Method Template_3deb9c2b63d4d0f3::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-comment_list.latte.php	8	13	5	class.unused	Class Template_a07208c0937ea81c is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-comments.latte.php	8	13	5	class.unused	Class Template_195e7de0d2a06e47 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-comments.latte.php	10	15	5	classConstant.unused	Constant Template_195e7de0d2a06e47::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-comments.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_195e7de0d2a06e47::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-comments.latte.php	335	18	5	method.unused	Method Template_195e7de0d2a06e47::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-help-quick_search.latte.php	8	13	5	class.unused	Class Template_024eec3a5f82836d is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-identification.latte.php	8	13	5	class.unused	Class Template_a0101d471a9ada51 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-identification.latte.php	10	15	5	classConstant.unused	Constant Template_a0101d471a9ada51::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-identification.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_a0101d471a9ada51::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-identification.latte.php	325	18	5	method.unused	Method Template_a0101d471a9ada51::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-include-search_filters.inc.latte.php	8	13	5	class.unused	Class Template_f6ab0438cce7d723 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-include-selected_tags.inc.latte.php	8	13	5	class.unused	Class Template_51cc3530cbcab9ba is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-index.latte.php	8	13	5	class.unused	Class Template_5e2fddbe13fafb73 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-index.latte.php	10	15	5	classConstant.unused	Constant Template_5e2fddbe13fafb73::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-index.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_5e2fddbe13fafb73::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-index.latte.php	353	18	5	method.unused	Method Template_5e2fddbe13fafb73::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-infos_errors.latte.php	8	13	5	class.unused	Class Template_72861073811afdec is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-layout.latte.php	8	13	5	class.unused	Class Template_c27aeaa389b702f1 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-layout.latte.php	10	15	5	classConstant.unused	Constant Template_c27aeaa389b702f1::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-layout.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_c27aeaa389b702f1::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-layout.latte.php	660	18	5	method.unused	Method Template_c27aeaa389b702f1::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-html-cat_group_info.latte.php	8	13	5	class.unused	Class Template_2692560a2bf1696f is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-html-global-mail-css.latte.php	8	13	5	class.unused	Class Template_41b23983e7b101bc is never referenced.	
+@@ -105,12 +115,16 @@
+ _analysis/phpstan-latte/themes-default-template-mail-text-html-notification_by_mail.latte.php	8	13	5	class.unused	Class Template_179c3bb6be7a5b64 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-plain-cat_group_info.latte.php	8	13	5	class.unused	Class Template_7efbae75a351ad4d is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-plain-cat_group_info.latte.php	10	15	5	classConstant.unused	Constant Template_7efbae75a351ad4d::ContentType is never used.	
++_analysis/phpstan-latte/themes-default-template-mail-text-plain-cat_group_info.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_7efbae75a351ad4d::ContentType can be declared natively as string.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-plain-mail-wrapper.latte.php	8	13	5	class.unused	Class Template_42bfca941197c0c4 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-plain-mail-wrapper.latte.php	10	15	5	classConstant.unused	Constant Template_42bfca941197c0c4::ContentType is never used.	
++_analysis/phpstan-latte/themes-default-template-mail-text-plain-mail-wrapper.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_42bfca941197c0c4::ContentType can be declared natively as string.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-plain-notification_admin.latte.php	8	13	5	class.unused	Class Template_825514c8b73f7a31 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-plain-notification_admin.latte.php	10	15	5	classConstant.unused	Constant Template_825514c8b73f7a31::ContentType is never used.	
++_analysis/phpstan-latte/themes-default-template-mail-text-plain-notification_admin.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_825514c8b73f7a31::ContentType can be declared natively as string.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-plain-notification_by_mail.latte.php	8	13	5	class.unused	Class Template_61b5a990ab72e155 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-mail-text-plain-notification_by_mail.latte.php	10	15	5	classConstant.unused	Constant Template_61b5a990ab72e155::ContentType is never used.	
++_analysis/phpstan-latte/themes-default-template-mail-text-plain-notification_by_mail.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_61b5a990ab72e155::ContentType can be declared natively as string.	
+ _analysis/phpstan-latte/themes-default-template-mainpage_categories.latte.php	8	13	5	class.unused	Class Template_4a43f31eb213668c is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-menubar.latte.php	8	13	5	class.unused	Class Template_8c6881a4ab1090bf is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-menubar_categories.latte.php	8	13	5	class.unused	Class Template_91e040760de1c056 is never referenced.	
+@@ -124,53 +138,68 @@
+ _analysis/phpstan-latte/themes-default-template-navigation_bar.latte.php	8	13	5	class.unused	Class Template_80385a2856ce2ced is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-nbm.latte.php	8	13	5	class.unused	Class Template_1bb6fc706ae3716c is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-nbm.latte.php	10	15	5	classConstant.unused	Constant Template_1bb6fc706ae3716c::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-nbm.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_1bb6fc706ae3716c::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-nbm.latte.php	296	18	5	method.unused	Method Template_1bb6fc706ae3716c::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-no_photo_yet.latte.php	8	13	5	class.unused	Class Template_b79d6a54a5a83c4e is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-notification.latte.php	8	13	5	class.unused	Class Template_facb4f7400293132 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-notification.latte.php	10	15	5	classConstant.unused	Constant Template_facb4f7400293132::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-notification.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_facb4f7400293132::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-notification.latte.php	304	18	5	method.unused	Method Template_facb4f7400293132::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-password.latte.php	8	13	5	class.unused	Class Template_da9783cb73473524 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-password.latte.php	10	15	5	classConstant.unused	Constant Template_da9783cb73473524::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-password.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_da9783cb73473524::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-password.latte.php	324	18	5	method.unused	Method Template_da9783cb73473524::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-picture.latte.php	8	13	5	class.unused	Class Template_89be4391cce4863c is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-picture.latte.php	10	15	5	classConstant.unused	Constant Template_89be4391cce4863c::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-picture.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_89be4391cce4863c::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-picture.latte.php	405	18	5	method.unused	Method Template_89be4391cce4863c::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-picture_content.latte.php	8	13	5	class.unused	Class Template_688539dc2b29d1b3 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-picture_nav_buttons.latte.php	8	13	5	class.unused	Class Template_01c1af80feb8c5a5 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-popuphelp.latte.php	8	13	5	class.unused	Class Template_c90fb7104b41207b is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-popuphelp.latte.php	10	15	5	classConstant.unused	Constant Template_c90fb7104b41207b::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-popuphelp.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_c90fb7104b41207b::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-popuphelp.latte.php	300	18	5	method.unused	Method Template_c90fb7104b41207b::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-profile.latte.php	8	13	5	class.unused	Class Template_daf72666642357ff is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-profile.latte.php	10	15	5	classConstant.unused	Constant Template_daf72666642357ff::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-profile.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_daf72666642357ff::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-profile.latte.php	352	18	5	method.unused	Method Template_daf72666642357ff::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-profile_content.latte.php	8	13	5	class.unused	Class Template_2e0006fa8bae5a6d is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-redirect.latte.php	8	13	5	class.unused	Class Template_13ec685906ff2453 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-redirect.latte.php	10	15	5	classConstant.unused	Constant Template_13ec685906ff2453::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-redirect.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_13ec685906ff2453::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-redirect.latte.php	300	18	5	method.unused	Method Template_13ec685906ff2453::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-register.latte.php	8	13	5	class.unused	Class Template_5ab5efc8bf6a720a is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-register.latte.php	10	15	5	classConstant.unused	Constant Template_5ab5efc8bf6a720a::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-register.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_5ab5efc8bf6a720a::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-register.latte.php	329	18	5	method.unused	Method Template_5ab5efc8bf6a720a::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-slideshow.latte.php	8	13	5	class.unused	Class Template_9c8c15156fb912e8 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-slideshow.latte.php	10	15	5	classConstant.unused	Constant Template_9c8c15156fb912e8::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-slideshow.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_9c8c15156fb912e8::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-slideshow.latte.php	392	18	5	method.unused	Method Template_9c8c15156fb912e8::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-tags.latte.php	8	13	5	class.unused	Class Template_964b986c081d2e68 is never referenced.	
+ _analysis/phpstan-latte/themes-default-template-tags.latte.php	10	15	5	classConstant.unused	Constant Template_964b986c081d2e68::Blocks is never used.	
++_analysis/phpstan-latte/themes-default-template-tags.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_964b986c081d2e68::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-default-template-tags.latte.php	311	18	5	method.unused	Method Template_964b986c081d2e68::blockContent is never used.	
+ _analysis/phpstan-latte/themes-default-template-thumbnails.latte.php	8	13	5	class.unused	Class Template_786773e77e691965 is never referenced.	
+ _analysis/phpstan-latte/themes-standard_pages-template-identification.latte.php	8	13	5	class.unused	Class Template_fac596d850d02efd is never referenced.	
+ _analysis/phpstan-latte/themes-standard_pages-template-identification.latte.php	10	15	5	classConstant.unused	Constant Template_fac596d850d02efd::Blocks is never used.	
++_analysis/phpstan-latte/themes-standard_pages-template-identification.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_fac596d850d02efd::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-standard_pages-template-identification.latte.php	325	18	5	method.unused	Method Template_fac596d850d02efd::blockContent is never used.	
+ _analysis/phpstan-latte/themes-standard_pages-template-layout.latte.php	8	13	5	class.unused	Class Template_9297446f69c63d26 is never referenced.	
+ _analysis/phpstan-latte/themes-standard_pages-template-layout.latte.php	10	15	5	classConstant.unused	Constant Template_9297446f69c63d26::Blocks is never used.	
++_analysis/phpstan-latte/themes-standard_pages-template-layout.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_9297446f69c63d26::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-standard_pages-template-layout.latte.php	394	18	5	method.unused	Method Template_9297446f69c63d26::blockContent is never used.	
+ _analysis/phpstan-latte/themes-standard_pages-template-password.latte.php	8	13	5	class.unused	Class Template_d4b6df95eeb830d2 is never referenced.	
+ _analysis/phpstan-latte/themes-standard_pages-template-password.latte.php	10	15	5	classConstant.unused	Constant Template_d4b6df95eeb830d2::Blocks is never used.	
++_analysis/phpstan-latte/themes-standard_pages-template-password.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_d4b6df95eeb830d2::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-standard_pages-template-password.latte.php	329	18	5	method.unused	Method Template_d4b6df95eeb830d2::blockContent is never used.	
+ _analysis/phpstan-latte/themes-standard_pages-template-profile.latte.php	8	13	5	class.unused	Class Template_6987422ea6d18085 is never referenced.	
+ _analysis/phpstan-latte/themes-standard_pages-template-profile.latte.php	10	15	5	classConstant.unused	Constant Template_6987422ea6d18085::Blocks is never used.	
++_analysis/phpstan-latte/themes-standard_pages-template-profile.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_6987422ea6d18085::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-standard_pages-template-profile.latte.php	357	18	5	method.unused	Method Template_6987422ea6d18085::blockContent is never used.	
+ _analysis/phpstan-latte/themes-standard_pages-template-register.latte.php	8	13	5	class.unused	Class Template_be3c83a5f502470a is never referenced.	
+ _analysis/phpstan-latte/themes-standard_pages-template-register.latte.php	10	15	5	classConstant.unused	Constant Template_be3c83a5f502470a::Blocks is never used.	
++_analysis/phpstan-latte/themes-standard_pages-template-register.latte.php	10	15	0	missingNativeType.classConstant	Constant Template_be3c83a5f502470a::Blocks can be declared natively as array.	
+ _analysis/phpstan-latte/themes-standard_pages-template-register.latte.php	329	18	5	method.unused	Method Template_be3c83a5f502470a::blockContent is never used.	
+ _analysis/phpstan-latte/themes-standard_pages-template-toaster.latte.php	8	13	5	class.unused	Class Template_2136a003c03f68c7 is never referenced.	
+ config/container.php	377	89	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -205,18 +234,18 @@
+ src/Piwigo/Activity/ActivityService.php	59	23	2	throws.missing	Method Piwigo\\Activity\\ActivityService::currentUser() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Activity/ActivityService.php	78	23	2	throws.missing	Method Piwigo\\Activity\\ActivityService::currentConfig() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Activity/ActivityService.php	158	51	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/AdminShell.php	172	21	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/AdminShell.php	172	21	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/AdminShell.php	291	38	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/AdminShell.php	329	68	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/AdminShell.php	343	13	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/AdminShell.php	360	17	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/AdminShell.php	371	17	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/AdminShell.php	401	17	0	comparison.nonComparable	Comparison mixed >= string|null contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/AdminShell.php	401	17	0	comparison.nonComparable	Comparison mixed >= string|null contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/AdminShell.php	418	39	5	argument.type	Parameter #1 $params of method Piwigo\\Users\\PreferencesService::deleteParam() expects string|array<string>, non-empty-list given.	
+ src/Piwigo/Admin/AdminShell.php	428	13	4	array.keyCast	Key '1' will be cast to 1 in the array.	
+ src/Piwigo/Admin/AdminShell.php	429	13	4	array.keyCast	Key '2' will be cast to 2 in the array.	
+ src/Piwigo/Admin/AdminShell.php	430	13	4	array.keyCast	Key '3' will be cast to 3 in the array.	
+-src/Piwigo/Admin/AdminShell.php	439	47	0	comparison.nonComparable	Comparison int|bool > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/AdminShell.php	439	47	0	comparison.nonComparable	Comparison int|bool > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/AdminShell.php	439	79	0	currentTime.relative	Calling strtotime() with "1 month ago" and no base timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Admin/AdminShell.php	448	61	0	currentTime.defaultTimestamp	Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Admin/AdminShell.php	448	89	0	currentTime.defaultTimestamp	Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+@@ -227,7 +256,7 @@
+ src/Piwigo/Admin/AlbumNotificationPageRenderer.php	227	95	0	argument.booleanTrap	Piwigo\\Core\\DateHelper::timeSince() argument #4 ($with_text) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/AlbumsPageRenderer.php	85	50	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/AlbumsPageRenderer.php	218	63	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-src/Piwigo/Admin/AlbumsPageRenderer.php	266	16	0	comparison.nonComparable	Comparison int|string|null <=> int|string|null contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/AlbumsPageRenderer.php	266	16	0	comparison.nonComparable	Comparison int|string|null <=> int|string|null contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/AlbumsPageRenderer.php	368	16	3	return.type	return type mismatch: expected list<array{rank: int|string|null, name: string, status: string, id: string, visible: string, uppercats: string, nb_images: int|string, last_updates: string, has_not_access: bool, nb_sub_photos: int, nb_subcats?: int<0, max>, children?: mixed}>, got list	
+ src/Piwigo/Admin/BatchManager/FilterPanelRenderer.php	222	23	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+ src/Piwigo/Admin/BatchManager/FilterPanelRenderer.php	222	45	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+@@ -237,7 +266,7 @@
+ src/Piwigo/Admin/BatchManager/FilterResolver.php	315	52	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/BatchManager/FilterResolver.php	322	50	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/BatchManager/FilterResolver.php	322	51	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+-src/Piwigo/Admin/BatchManagerGlobalPageRenderer.php	381	25	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/BatchManagerGlobalPageRenderer.php	381	25	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/BatchManagerGlobalPageRenderer.php	439	124	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/BatchManagerGlobalPageRenderer.php	481	51	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/BatchManagerGlobalPageRenderer.php	506	98	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -289,7 +318,7 @@
+ src/Piwigo/Admin/Extensions/CoreUpdateService.php	134	13	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
+ src/Piwigo/Admin/Extensions/CoreUpdateService.php	149	29	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
+ src/Piwigo/Admin/Extensions/CoreUpdateService.php	173	75	0	currentTime.defaultTimestamp	Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+-src/Piwigo/Admin/Extensions/CoreUpdateService.php	205	21	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/Extensions/CoreUpdateService.php	205	21	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/Extensions/CoreUpdateService.php	238	17	0	argument.booleanTrap	Piwigo\\Mail\\MailService::mailAdmins() argument #3 ($excludeCurrentUser) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/Extensions/CoreUpdateService.php	239	17	0	argument.booleanTrap	Piwigo\\Mail\\MailService::mailAdmins() argument #4 ($onlyWebmasters) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/Extensions/CoreUpdateService.php	249	34	0	currentTime.defaultTimestamp	Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+@@ -338,15 +367,15 @@
+ src/Piwigo/Admin/Extensions/PemCatalog.php	251	73	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/Extensions/PemCatalog.php	252	56	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+ src/Piwigo/Admin/Extensions/PemCatalog.php	252	76	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+-src/Piwigo/Admin/Extensions/PemCatalog.php	490	16	0	comparison.nonComparable	Comparison mixed < mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/Extensions/PemCatalog.php	490	16	0	comparison.nonComparable	Comparison mixed < mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/Extensions/PemCatalog.php	490	16	0	magicNumber.ternary	Do not use magic number in ternary operator. Move to constant with a suitable name.	
+ src/Piwigo/Admin/Extensions/PemCatalog.php	504	23	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+ src/Piwigo/Admin/Extensions/PemCatalog.php	504	43	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+-src/Piwigo/Admin/Extensions/PemCatalog.php	528	16	0	comparison.nonComparable	Comparison mixed < mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/Extensions/PemCatalog.php	528	16	0	comparison.nonComparable	Comparison mixed < mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/Extensions/PemCatalog.php	528	16	0	magicNumber.ternary	Do not use magic number in ternary operator. Move to constant with a suitable name.	
+ src/Piwigo/Admin/Extensions/PluginListBuilder.php	39	91	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+ src/Piwigo/Admin/Extensions/PluginListBuilder.php	39	113	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+-src/Piwigo/Admin/Extensions/ZipExtractor.php	98	17	0	comparison.nonComparable	Comparison int > mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/Extensions/ZipExtractor.php	98	17	0	comparison.nonComparable	Comparison int > mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/Extensions/ZipExtractor.php	115	25	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ src/Piwigo/Admin/Extensions/ZipExtractor.php	115	43	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/Extensions/ZipExtractor.php	121	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
+@@ -460,6 +489,8 @@
+ src/Piwigo/Admin/Install/InstallDataSeeder.php	84	73	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/Install/InstallDataSeeder.php	153	62	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/Install/InstallEnvWriter.php	56	60	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
++src/Piwigo/Admin/Install/InstallPostInstallSession.php	79	21	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_only_cookies is deprecated since PHP 8.4.	
++src/Piwigo/Admin/Install/InstallPostInstallSession.php	80	21	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_trans_sid is deprecated since PHP 8.4.	
+ src/Piwigo/Admin/Install/InstallPostInstallSession.php	121	39	0	argument.booleanTrap	Piwigo\\Auth\\AuthService::logUser() argument #2 ($rememberMe) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/Install/InstallSchemaDropper.php	46	77	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/Install/InstallSchemaDropper.php	90	24	0	missingNativeType.parameter	Parameter $classMetadata of the closure can be declared natively as Doctrine\\ORM\\Mapping\\ClassMetadata.	
+@@ -476,6 +507,7 @@
+ src/Piwigo/Admin/Install/InstallService.php	128	23	5	throw.baseClass	Throwing the base Exception class is not recommended, use a specific subclass instead.	
+ src/Piwigo/Admin/Install/InstallService.php	128	23	2	throws.missing	Method Piwigo\\Admin\\Install\\InstallService::installDbConnect() throws Exception but it's not covered by any @throws tag.	
+ src/Piwigo/Admin/Install/InstallService.php	132	16	4	catch.baseWithoutRethrow	Catching Exception swallows every such exception unless the catch rethrows; add an unconditional throw.	
++src/Piwigo/Admin/Install/InstallWizard.php	76	19	0	missingNativeType.classConstant	Constant Piwigo\\Admin\\Install\\InstallWizard::OVERWRITE_TOKEN_COOKIE can be declared natively as string.	
+ src/Piwigo/Admin/Install/InstallWizard.php	283	36	0	currentTime.defaultTimestamp	Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Admin/Install/InstallWizard.php	283	63	0	currentTime.defaultTimestamp	Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Admin/Install/InstallWizard.php	317	19	2	throws.missing	Method Piwigo\\Admin\\Install\\InstallWizard::boot() throws Piwigo\\Http\\ResponseReadyException but it's not covered by any @throws tag.	
+@@ -495,9 +527,9 @@
+ src/Piwigo/Admin/Install/Request/InstallWizardRequest.php	59	52	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/InstallationStats.php	83	66	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/InstallationStats.php	85	51	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/InstallationStats.php	85	60	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/InstallationStats.php	85	60	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/InstallationStats.php	89	51	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/InstallationStats.php	89	60	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/InstallationStats.php	89	60	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/Integrity/C13yInternal.php	95	17	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
+ src/Piwigo/Admin/Integrity/C13yInternal.php	167	54	5	argument.type	Parameter #1 $ids of method Piwigo\\Users\\UserService::getStatusByIds() expects list<int>, list given.	
+ src/Piwigo/Admin/Integrity/C13yInternal.php	211	13	5	switch.missingDefault	Switch has no default branch.	
+@@ -538,7 +570,7 @@
+ src/Piwigo/Admin/MenubarPageRenderer.php	81	34	0	magicNumber.ternary	Do not use magic number in ternary operator. Move to constant with a suitable name.	
+ src/Piwigo/Admin/MenubarPageRenderer.php	112	22	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/MenubarPageRenderer.php	147	72	0	magicNumber.defaultParameter	Do not use magic number as default parameter. Move to constant with a suitable name.	
+-src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	127	36	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	127	36	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	127	102	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	127	119	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	156	44	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+@@ -556,10 +588,10 @@
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	253	17	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	274	47	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	317	52	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	340	17	0	comparison.nonComparable	Comparison int|string|bool > int|string|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	340	17	0	comparison.nonComparable	Comparison int|string|bool > int|string|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	343	71	0	argument.booleanTrap	Piwigo\\Admin\\Upload\\UploadService::getIniSize() argument #2 ($in_bytes) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	344	65	0	argument.booleanTrap	Piwigo\\Admin\\Upload\\UploadService::getIniSize() argument #2 ($in_bytes) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	349	17	0	comparison.nonComparable	Comparison int|string|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	349	17	0	comparison.nonComparable	Comparison int|string|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	349	69	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PhotosAddDirectPageRenderer.php	356	32	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PictureCoiPageRenderer.php	89	28	0	currentTime.time	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+@@ -572,19 +604,19 @@
+ src/Piwigo/Admin/PictureModifyPageRenderer.php	194	65	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/PictureModifyPageRenderer.php	244	85	0	argument.booleanTrap	Piwigo\\Image\\ImageService::getImageInfos() argument #3 ($dieOnMissing) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/PictureModifyPageRenderer.php	276	92	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/PictureModifyPageRenderer.php	301	20	0	comparison.nonComparable	Comparison mixed >= mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PictureModifyPageRenderer.php	301	20	0	comparison.nonComparable	Comparison mixed >= mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PictureModifyPageRenderer.php	319	119	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/PictureModifyPageRenderer.php	333	74	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PictureModifyPageRenderer.php	344	187	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PictureModifyPageRenderer.php	347	49	0	restrictedSymbol.function	Call to restricted function strtoupper(): use mb_strtoupper() instead; strtoupper() counts bytes, not characters	
+ src/Piwigo/Admin/PictureModifyPageRenderer.php	348	20	0	restrictedSymbol.function	Call to restricted function strtoupper(): use mb_strtoupper() instead; strtoupper() counts bytes, not characters	
+ src/Piwigo/Admin/PiwigoInfosSender.php	81	79	0	argument.booleanTrap	Piwigo\\Config\\ConfigService::loadConfFromDb() argument #2 ($dieIfNotFound) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Admin/PiwigoInfosSender.php	92	17	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PiwigoInfosSender.php	92	17	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PiwigoInfosSender.php	127	102	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PiwigoInfosSender.php	127	110	0	argument.booleanTrap	Piwigo\\Config\\ConfigService::confUpdateParam() argument #3 ($updateGlobal) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/PiwigoInfosSender.php	141	35	0	currentTime.defaultTimestamp	Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Admin/PiwigoInfosSender.php	151	62	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+-src/Piwigo/Admin/PiwigoInfosSender.php	176	53	0	comparison.nonComparable	Comparison int|bool > int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PiwigoInfosSender.php	176	53	0	comparison.nonComparable	Comparison int|bool > int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PiwigoInfosSender.php	230	31	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PiwigoInfosSender.php	230	31	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PiwigoInfosSender.php	241	76	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -593,8 +625,8 @@
+ src/Piwigo/Admin/PiwigoInfosSender.php	321	45	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/PiwigoInfosSender.php	331	52	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/PiwigoInfosSender.php	478	69	0	cast.useless	Casting to int something that's already int.	
+-src/Piwigo/Admin/PiwigoInfosSender.php	484	58	0	comparison.nonComparable	Comparison int|bool > int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
+-src/Piwigo/Admin/PiwigoInfosSender.php	491	57	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PiwigoInfosSender.php	484	58	0	comparison.nonComparable	Comparison int|bool > int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
++src/Piwigo/Admin/PiwigoInfosSender.php	491	57	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PiwigoInfosSender.php	527	31	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PiwigoInfosSender.php	527	31	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PiwigoInfosSender.php	529	27	0	currentTime.defaultTimestamp	Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+@@ -608,10 +640,10 @@
+ src/Piwigo/Admin/PluginsNewPageRenderer.php	174	100	0	argument.booleanTrap	Piwigo\\Admin\\Extensions\\PemCatalog::getServerExtensions() argument #3 ($new) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/PluginsNewPageRenderer.php	213	29	0	currentTime.relative	Calling date_create() with no date reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Admin/PluginsNewPageRenderer.php	241	21	0	magicNumber.assignment	Do not assign magic number to variable. Move to constant with a suitable name.	
+-src/Piwigo/Admin/PluginsNewPageRenderer.php	242	27	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PluginsNewPageRenderer.php	242	27	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PluginsNewPageRenderer.php	242	27	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PluginsNewPageRenderer.php	243	21	0	magicNumber.assignment	Do not assign magic number to variable. Move to constant with a suitable name.	
+-src/Piwigo/Admin/PluginsNewPageRenderer.php	244	27	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/PluginsNewPageRenderer.php	244	27	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/PluginsNewPageRenderer.php	244	27	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PluginsNewPageRenderer.php	245	21	0	magicNumber.assignment	Do not assign magic number to variable. Move to constant with a suitable name.	
+ src/Piwigo/Admin/PluginsNewPageRenderer.php	246	27	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+@@ -721,7 +753,7 @@
+ src/Piwigo/Admin/ThemesInstalledPageRenderer.php	173	72	5	argument.type	Parameter #3 $db_theme_ids of method Piwigo\\Admin\\ThemesInstalledPageRenderer::buildTplTheme() expects list<string>, list given.	
+ src/Piwigo/Admin/ThemesInstalledPageRenderer.php	216	48	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/ThemesInstalledPageRenderer.php	326	13	0	magicNumber.return	Do not return magic number. Move to constant with a suitable name.	
+-src/Piwigo/Admin/ThemesInstalledPageRenderer.php	347	16	0	comparison.nonComparable	Comparison mixed >= mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/ThemesInstalledPageRenderer.php	347	16	0	comparison.nonComparable	Comparison mixed >= mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/ThemesInstalledPageRenderer.php	347	16	0	magicNumber.ternary	Do not use magic number in ternary operator. Move to constant with a suitable name.	
+ src/Piwigo/Admin/ThemesNewPageRenderer.php	148	97	0	argument.booleanTrap	Piwigo\\Admin\\Extensions\\PemCatalog::getServerExtensions() argument #3 ($new) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/ThemesStandardPagesPageRenderer.php	94	108	0	argument.booleanTrap	Piwigo\\Config\\ConfigService::confUpdateParam() argument #3 ($updateGlobal) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -742,8 +774,8 @@
+ src/Piwigo/Admin/UpdatesPwgPageRenderer.php	184	50	5	booleanAnd.rightNotBoolean	Only booleans are allowed in and, int|bool given on the right side.	
+ src/Piwigo/Admin/UpdatesPwgPageRenderer.php	208	43	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ src/Piwigo/Admin/UpdatesPwgPageRenderer.php	208	75	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-src/Piwigo/Admin/Upload/UploadService.php	227	70	0	comparison.nonComparable	Comparison int|float|string|bool >= int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
+-src/Piwigo/Admin/Upload/UploadService.php	227	89	0	comparison.nonComparable	Comparison int|float|string|bool <= int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/Upload/UploadService.php	227	70	0	comparison.nonComparable	Comparison int|float|string|bool >= int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
++src/Piwigo/Admin/Upload/UploadService.php	227	89	0	comparison.nonComparable	Comparison int|float|string|bool <= int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/Upload/UploadService.php	274	23	5	throw.baseClass	Throwing the base Exception class is not recommended, use a specific subclass instead.	
+ src/Piwigo/Admin/Upload/UploadService.php	274	23	2	throws.missing	Method Piwigo\\Admin\\Upload\\UploadService::addUploadedFile() throws Exception but it's not covered by any @throws tag.	
+ src/Piwigo/Admin/Upload/UploadService.php	319	23	5	throw.baseClass	Throwing the base Exception class is not recommended, use a specific subclass instead.	
+@@ -834,9 +866,9 @@
+ src/Piwigo/Admin/UserActivityPageRenderer.php	118	87	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/UserActivityPageRenderer.php	119	66	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ src/Piwigo/Admin/UserActivityPageRenderer.php	119	87	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-src/Piwigo/Admin/UserRatingAccumulator.php	98	13	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/UserRatingAccumulator.php	98	13	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Admin/UserRatingAccumulator.php	112	17	0	magicNumber.ternary	Do not use magic number in ternary operator. Move to constant with a suitable name.	
+-src/Piwigo/Admin/UserRatingAccumulator.php	114	20	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Admin/UserRatingAccumulator.php	114	20	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Asset/PageAssets.php	549	35	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Asset/PageAssets.php	550	19	2	throws.missing	Method Piwigo\\Asset\\PageAssets::computeOrder() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Asset/ViteManifestEntry.php	47	19	2	throws.missing	Method Piwigo\\Asset\\ViteManifestEntry::fromArray() throws InvalidArgumentException but it's not covered by any @throws tag.	
+@@ -852,7 +884,7 @@
+ src/Piwigo/Auth/ApiKeyService.php	127	23	5	throw.baseClass	Throwing the base Exception class is not recommended, use a specific subclass instead.	
+ src/Piwigo/Auth/ApiKeyService.php	127	23	2	throws.missing	Method Piwigo\\Auth\\ApiKeyService::get() throws Exception but it's not covered by any @throws tag.	
+ src/Piwigo/Auth/ApiKeyService.php	127	23	2	throws.missing	Method Piwigo\\Auth\\ApiKeyService::get() throws Exception but it's not covered by any @throws tag.	
+-src/Piwigo/Auth/ApiKeyService.php	135	21	0	comparison.nonComparable	Comparison int|bool > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Auth/ApiKeyService.php	135	21	0	comparison.nonComparable	Comparison int|bool > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Auth/ApiKeyService.php	146	47	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Auth/ApiKeyService.php	174	89	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Auth/AuthRepository.php	69	21	0	nullCoalesce.offset	Offset 'username' on array{username: Piwigo\\Common\\ValueObject\\Username, password: string|null} on left side of ?? always exists and is not nullable.	
+@@ -873,12 +905,12 @@
+ src/Piwigo/Auth/AuthService.php	253	52	0	argument.booleanTrap	Piwigo\\Auth\\AuthService::logUser() argument #2 ($rememberMe) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Auth/AuthService.php	285	66	0	argument.booleanTrap	Piwigo\\Auth\\Event\\TryLogUser::__construct() argument #1 ($success) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Auth/AuthService.php	474	51	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-src/Piwigo/Auth/AuthService.php	533	13	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Auth/AuthService.php	533	13	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Auth/AuthService.php	539	103	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Auth/AuthService.php	560	56	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ src/Piwigo/Auth/AuthService.php	560	83	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Auth/AuthService.php	566	17	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+-src/Piwigo/Auth/AuthService.php	570	24	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Auth/AuthService.php	570	24	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Auth/AuthService.php	599	38	0	argument.booleanTrap	Piwigo\\Auth\\AuthService::logUser() argument #2 ($rememberMe) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Auth/AuthService.php	633	60	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Auth/AuthService.php	637	57	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -1085,7 +1117,7 @@
+ src/Piwigo/Bootstrap/PageTail.php	287	19	2	throws.missing	Method Piwigo\\Bootstrap\\PageTail::mailService() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Bootstrap/PageTail.php	297	19	2	throws.missing	Method Piwigo\\Bootstrap\\PageTail::extensionUpdateCachePool() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Bootstrap/PageTail.php	307	19	2	throws.missing	Method Piwigo\\Bootstrap\\PageTail::eventDispatcher() throws LogicException but it's not covered by any @throws tag.	
+-src/Piwigo/Bootstrap/PageTail.php	335	21	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Bootstrap/PageTail.php	335	21	0	comparison.nonComparable	Comparison int|bool < int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Bootstrap/PresentationAccessor.php	38	19	2	throws.missing	Method Piwigo\\Bootstrap\\PresentationAccessor::htmlService() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Bootstrap/PresentationAccessor.php	47	19	2	throws.missing	Method Piwigo\\Bootstrap\\PresentationAccessor::mailService() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Bootstrap/PresentationAccessor.php	56	19	2	throws.missing	Method Piwigo\\Bootstrap\\PresentationAccessor::urlService() throws LogicException but it's not covered by any @throws tag.	
+@@ -1210,7 +1242,7 @@
+ src/Piwigo/Cache/PersistentFileCache.php	73	26	0	argument.booleanTrap	Piwigo\\Cache\\PersistentFileCache::purge() argument #1 ($all) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Cache/PersistentFileCache.php	77	25	0	currentTime.time	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Cache/PersistentFileCache.php	101	18	0	currentTime.time	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+-src/Piwigo/Cache/PersistentFileCache.php	103	25	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Cache/PersistentFileCache.php	103	25	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Caddie/CaddieRepository.php	108	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Calendar/CalendarBase.php	148	21	0	method.notFinalInAbstractClass	Method Piwigo\\Calendar\\CalendarBase::getChronologyNavigationBars() is not final, but since the containing class is abstract, it should be.	
+ src/Piwigo/Calendar/CalendarBase.php	161	1	0	ignore.unmatchedIdentifier	No error with identifier shipmonk.deadMethod is reported on line 161.	
+@@ -1325,12 +1357,12 @@
+ src/Piwigo/Category/CategoryService.php	187	19	2	throws.missing	Method Piwigo\\Category\\CategoryService::paths() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Category/CategoryService.php	277	65	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Category/CategoryService.php	291	94	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Category/CategoryService.php	523	81	0	comparison.nonComparable	Comparison string < string|null contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Category/CategoryService.php	523	81	0	comparison.nonComparable	Comparison string < string|null contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Category/CategoryService.php	664	35	0	foreach.valueOverwrite	Foreach overwrites $cat with its value variable.	
+ src/Piwigo/Category/CategoryService.php	667	27	0	restrictedSymbol.function	Call to restricted function substr_count(): use mb_substr_count() instead; substr_count() counts bytes, not characters	
+ src/Piwigo/Category/CategoryService.php	678	72	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Category/CategoryService.php	703	83	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Category/CategoryService.php	806	30	0	comparison.nonComparable	Comparison string|null > string|null contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Category/CategoryService.php	806	30	0	comparison.nonComparable	Comparison string|null > string|null contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Category/CategoryService.php	818	21	0	argument.booleanTrap	Piwigo\\Category\\CategoryService::getDisplayImagesCount() argument #5 ($shortMessage) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Category/CategoryService.php	824	28	0	restrictedSymbol.function	Call to restricted function substr_count(): use mb_substr_count() instead; substr_count() counts bytes, not characters	
+ src/Piwigo/Category/CategoryService.php	883	22	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+@@ -1579,11 +1611,11 @@
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	368	59	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	397	112	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	400	77	0	argument.booleanTrap	array_search() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Controller/Admin/ConfigurationSubController.php	450	29	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/ConfigurationSubController.php	450	29	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	450	29	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+-src/Piwigo/Controller/Admin/ConfigurationSubController.php	451	29	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/ConfigurationSubController.php	451	29	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	451	29	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+-src/Piwigo/Controller/Admin/ConfigurationSubController.php	468	30	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/ConfigurationSubController.php	468	30	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	468	30	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	476	58	0	foreach.valueOverwrite	Foreach overwrites $checkbox with its value variable.	
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	516	67	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -1603,9 +1635,9 @@
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	894	25	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	894	47	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	943	35	5	argument.type	Parameter $filtersNames of class Piwigo\\Controller\\Admin\\Projection\\ConfigurationSearchTabData constructor expects list<string>, list given.	
+-src/Piwigo/Controller/Admin/ConfigurationSubController.php	1015	13	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/ConfigurationSubController.php	1015	13	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	1015	13	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+-src/Piwigo/Controller/Admin/ConfigurationSubController.php	1015	45	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/ConfigurationSubController.php	1015	45	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	1015	45	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	1049	17	0	magicNumber.assignment	Do not assign magic number to variable. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	1055	17	0	magicNumber.assignment	Do not assign magic number to variable. Move to constant with a suitable name.	
+@@ -1635,7 +1667,7 @@
+ src/Piwigo/Controller/Admin/ConfigurationSubController.php	1610	43	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Admin/IntroSubController.php	153	13	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/IntroSubController.php	169	64	0	argument.booleanTrap	Piwigo\\Category\\CategoryService::countByVisible() argument #1 ($visible) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Controller/Admin/IntroSubController.php	194	17	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/IntroSubController.php	194	17	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/IntroSubController.php	194	49	0	currentTime.relative	Calling strtotime() with "2 weeks ago" and no base timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Controller/Admin/IntroSubController.php	194	78	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/IntroSubController.php	194	96	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+@@ -1648,7 +1680,7 @@
+ src/Piwigo/Controller/Admin/IntroSubController.php	231	47	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/IntroSubController.php	284	85	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/IntroSubController.php	412	25	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+-src/Piwigo/Controller/Admin/IntroSubController.php	418	20	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/IntroSubController.php	418	20	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/IntroSubController.php	418	20	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Admin/IntroSubController.php	419	64	0	argument.booleanTrap	array_search() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Admin/IntroSubController.php	423	17	0	magicNumber.assignment	Do not assign magic number to variable. Move to constant with a suitable name.	
+@@ -1667,8 +1699,8 @@
+ src/Piwigo/Controller/Admin/IntroSubController.php	501	34	0	restrictedSymbol.function	Call to restricted function strtoupper(): use mb_strtoupper() instead; strtoupper() counts bytes, not characters	
+ src/Piwigo/Controller/Admin/IntroSubController.php	518	34	0	restrictedSymbol.function	Call to restricted function strtoupper(): use mb_strtoupper() instead; strtoupper() counts bytes, not characters	
+ src/Piwigo/Controller/Admin/IntroSubController.php	532	43	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+-src/Piwigo/Controller/Admin/IntroSubController.php	631	16	0	comparison.nonComparable	Comparison mixed <=> mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
+-src/Piwigo/Controller/Admin/IntroSubController.php	657	39	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/IntroSubController.php	631	16	0	comparison.nonComparable	Comparison mixed <=> mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
++src/Piwigo/Controller/Admin/IntroSubController.php	657	39	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/IntroSubController.php	657	64	0	currentTime.relative	Calling strtotime() with "24 hours ago" and no base timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Controller/Admin/NotificationByMailSubController.php	142	9	5	switch.missingDefault	Switch has no default branch.	
+ src/Piwigo/Controller/Admin/NotificationByMailSubController.php	150	65	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -1695,7 +1727,7 @@
+ src/Piwigo/Controller/Admin/Projection/IntroView.php	135	16	3	return.type	return type mismatch: expected list<string>, got non-empty-list	
+ src/Piwigo/Controller/Admin/Request/BatchManagerRequest.php	79	44	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Admin/Request/BatchManagerRequest.php	81	45	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Controller/Admin/Request/BatchManagerRequest.php	91	16	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Admin/Request/BatchManagerRequest.php	91	16	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Admin/Request/BatchManagerRequest.php	101	42	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Admin/Request/BatchManagerRequest.php	111	56	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Admin/Request/BatchManagerRequest.php	119	53	0	argument.booleanTrap	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -1728,8 +1760,8 @@
+ src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php	87	96	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php	88	69	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php	92	69	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php	210	23	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
+-src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php	210	55	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php	210	23	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
++src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php	210	55	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php	280	98	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Api/Categories/CategoryCreateController.php	56	59	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/Api/Categories/CategoryCreateController.php	67	61	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -1917,7 +1949,7 @@
+ src/Piwigo/Controller/Api/SessionLogoutController.php	31	61	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Api/SessionStatusPresenter.php	45	68	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+ src/Piwigo/Controller/Api/SessionStatusPresenter.php	65	29	5	argument.type	Parameter $availableSizes of class Piwigo\\Controller\\Api\\SessionStatus constructor expects list<string>, list given.	
+-src/Piwigo/Controller/Api/Tags/TagAvailableListController.php	41	65	0	comparison.nonComparable	Comparison mixed <=> mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/Api/Tags/TagAvailableListController.php	41	65	0	comparison.nonComparable	Comparison mixed <=> mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/Api/Tags/TagCreateController.php	50	69	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Api/Tags/TagCreateController.php	65	12	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Controller/Api/Tags/TagDeleteController.php	57	58	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -2117,7 +2149,7 @@
+ src/Piwigo/Controller/NotificationController.php	135	55	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Controller/PasswordController.php	199	87	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/PasswordController.php	266	87	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Controller/PasswordController.php	415	21	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/PasswordController.php	415	21	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/PasswordController.php	415	70	0	currentTime.time	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Controller/PasswordController.php	468	29	0	currentTime.time	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Controller/PasswordController.php	469	75	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -2154,7 +2186,7 @@
+ src/Piwigo/Controller/PopuphelpController.php	85	112	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Controller/ProfileController.php	221	86	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/ProfileFormHandler.php	98	114	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Controller/ProfileFormHandler.php	135	20	0	comparison.nonComparable	Comparison int|float|string|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Controller/ProfileFormHandler.php	135	20	0	comparison.nonComparable	Comparison int|float|string|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Controller/ProfileFormHandler.php	139	130	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/ProfileFormHandler.php	144	163	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Controller/ProfileFormHandler.php	286	55	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -2251,8 +2283,8 @@
+ src/Piwigo/Core/DateHelper.php	273	43	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Core/DateHelper.php	274	47	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Core/DateHelper.php	277	55	0	argument.booleanTrap	array_search() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/Core/DateHelper.php	287	38	0	comparison.nonComparable	Comparison int >= int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
+-src/Piwigo/Core/DateHelper.php	300	38	0	comparison.nonComparable	Comparison int >= int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Core/DateHelper.php	287	38	0	comparison.nonComparable	Comparison int >= int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
++src/Piwigo/Core/DateHelper.php	300	38	0	comparison.nonComparable	Comparison int >= int|bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Core/DateHelper.php	354	17	0	currentTime.createFromFormat	createFromFormat() with format "Y-m-d H:i:s" takes every field it doesn't parse from the current time; start the format with ! or end it with |.	
+ src/Piwigo/Core/DateHelper.php	361	17	0	currentTime.createFromFormat	createFromFormat() with format "Y-m-d" takes every field it doesn't parse from the current time; start the format with ! or end it with |.	
+ src/Piwigo/Core/Env.php	97	16	0	currentTime.relative	Instantiating DateTime with no date reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+@@ -2282,7 +2314,7 @@
+ src/Piwigo/Core/Logger.php	346	23	2	throws.missing	Method Piwigo\\Core\\Logger::write() throws RuntimeException but it's not covered by any @throws tag.	
+ src/Piwigo/Core/Logger.php	367	18	0	currentTime.time	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Core/Logger.php	367	27	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+-src/Piwigo/Core/Logger.php	370	17	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Core/Logger.php	370	17	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Core/Logger.php	394	23	2	throws.missing	Method Piwigo\\Core\\Logger::requestMetrics() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Core/Logger.php	414	23	2	throws.missing	Method Piwigo\\Core\\Logger::currentConfig() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Core/Logger.php	455	25	0	currentTime.time	Calling microtime() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+@@ -2294,7 +2326,7 @@
+ src/Piwigo/Core/Logger.php	536	30	2	throws.missing	Method Piwigo\\Core\\Logger::codeToLevel() throws RuntimeException but it's not covered by any @throws tag.	
+ src/Piwigo/Core/PageFilterHelper.php	23	29	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+ src/Piwigo/Core/PaginationService.php	123	57	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-src/Piwigo/Core/RecentIconResolver.php	66	34	0	comparison.nonComparable	Comparison string > mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Core/RecentIconResolver.php	66	34	0	comparison.nonComparable	Comparison string > mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Core/RedirectServiceInterface.php	30	61	0	magicNumber.defaultParameter	Do not use magic number as default parameter. Move to constant with a suitable name.	
+ src/Piwigo/Core/RedirectServiceInterface.php	40	102	0	magicNumber.defaultParameter	Do not use magic number as default parameter. Move to constant with a suitable name.	
+ src/Piwigo/Core/ServerTiming.php	41	39	0	currentTime.time	Calling microtime() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+@@ -2308,7 +2340,7 @@
+ src/Piwigo/Core/StringHelper.php	20	47	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ src/Piwigo/Core/StringHelper.php	29	16	0	restrictedSymbol.function	Call to restricted function strrpos(): use mb_strrpos() instead; strrpos() counts bytes, not characters	
+ src/Piwigo/Core/StringHelper.php	30	47	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+-src/Piwigo/Core/StringHelper.php	41	22	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Core/StringHelper.php	41	22	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Core/StringHelper.php	41	27	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+ src/Piwigo/Core/StringHelper.php	42	17	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Core/StringHelper.php	46	17	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+@@ -2534,7 +2566,7 @@
+ src/Piwigo/History/HistoryRepository.php	634	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/History/HistoryRepository.php	689	52	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/History/HistoryService.php	109	65	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-src/Piwigo/History/HistoryService.php	109	74	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/History/HistoryService.php	109	74	0	comparison.nonComparable	Comparison int|bool < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/History/HistoryService.php	109	101	0	currentTime.time	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/History/HistoryService.php	132	17	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/History/HistoryService.php	132	17	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+@@ -2646,6 +2678,8 @@
+ src/Piwigo/Http/ResponseFactory.php	51	61	0	magicNumber.defaultParameter	Do not use magic number as default parameter. Move to constant with a suitable name.	
+ src/Piwigo/Http/ResponseFactory.php	65	76	0	magicNumber.defaultParameter	Do not use magic number as default parameter. Move to constant with a suitable name.	
+ src/Piwigo/Http/ResponseFactory.php	77	29	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
++src/Piwigo/Http/SessionBootstrap.php	67	25	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_only_cookies is deprecated since PHP 8.4.	
++src/Piwigo/Http/SessionBootstrap.php	70	25	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_trans_sid is deprecated since PHP 8.4.	
+ src/Piwigo/Http/SessionBootstrap.php	115	44	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+ src/Piwigo/Image/DerivativeCacheService.php	51	70	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Image/DerivativeCacheService.php	91	45	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -2756,8 +2790,8 @@
+ src/Piwigo/Image/ImageService.php	92	23	2	throws.missing	Method Piwigo\\Image\\ImageService::logger() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Image/ImageService.php	114	23	2	throws.missing	Method Piwigo\\Image\\ImageService::currentConfigService() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Image/ImageService.php	134	19	2	throws.missing	Method Piwigo\\Image\\ImageService::sortRenderer() throws LogicException but it's not covered by any @throws tag.	
+-src/Piwigo/Image/ImageService.php	165	13	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
+-src/Piwigo/Image/ImageService.php	167	19	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Image/ImageService.php	165	13	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
++src/Piwigo/Image/ImageService.php	167	19	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Image/ImageService.php	406	18	0	currentTime.time	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Image/ImageService.php	412	17	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Image/ImageService.php	420	48	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -3156,7 +3190,7 @@
+ src/Piwigo/Search/QMultiToken.php	63	20	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+ src/Piwigo/Search/QMultiToken.php	63	45	0	isset.object	isset() on an object (Piwigo\\Search\\QSearchScope|null) says less than a !== null check.	
+ src/Piwigo/Search/QMultiToken.php	64	23	0	isset.object	isset() on an object (Piwigo\\Search\\QSearchScope|null) says less than a !== null check.	
+-src/Piwigo/Search/QMultiToken.php	88	40	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Search/QMultiToken.php	88	40	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Search/QMultiToken.php	88	46	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+ src/Piwigo/Search/QMultiToken.php	93	36	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+ src/Piwigo/Search/QMultiToken.php	113	48	0	restrictedSymbol.function	Call to restricted function strtolower(): use mb_strtolower() instead; strtolower() counts bytes, not characters	
+@@ -3239,7 +3273,7 @@
+ src/Piwigo/Search/SearchService.php	872	27	5	throw.baseClass	Throwing the base Exception class is not recommended, use a specific subclass instead.	
+ src/Piwigo/Search/SearchService.php	872	27	2	throws.missing	Method Piwigo\\Search\\SearchService::qsearchGetTextTokenSearchSql() throws Exception but it's not covered by any @throws tag.	
+ src/Piwigo/Search/SearchService.php	872	27	2	throws.missing	Method Piwigo\\Search\\SearchService::qsearchGetTextTokenSearchSql() throws Exception but it's not covered by any @throws tag.	
+-src/Piwigo/Search/SearchService.php	876	21	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Search/SearchService.php	876	21	0	comparison.nonComparable	Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Search/SearchService.php	876	21	0	magicNumber.comparison	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ src/Piwigo/Search/SearchService.php	911	79	5	booleanAnd.rightNotBoolean	Only booleans are allowed in &&, int|bool given on the right side.	
+ src/Piwigo/Search/SearchService.php	1076	13	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -3351,9 +3385,9 @@
+ src/Piwigo/Tag/TagService.php	197	37	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Tag/TagService.php	200	28	0	foreach.valueOverwrite	Foreach overwrites $tag with its value variable.	
+ src/Piwigo/Tag/TagService.php	203	18	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
+-src/Piwigo/Tag/TagService.php	204	21	0	comparison.nonComparable	Comparison mixed > float contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Tag/TagService.php	204	21	0	comparison.nonComparable	Comparison mixed > float contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Tag/TagService.php	224	16	0	magicNumber.ternary	Do not use magic number in ternary operator. Move to constant with a suitable name.	
+-src/Piwigo/Tag/TagService.php	224	17	0	comparison.nonComparable	Comparison mixed < mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Tag/TagService.php	224	17	0	comparison.nonComparable	Comparison mixed < mixed contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Tag/TagService.php	242	16	0	magicNumber.ternary	Do not use magic number in ternary operator. Move to constant with a suitable name.	
+ src/Piwigo/Tag/TagService.php	426	26	5	argument.type	Parameter #1 $tagsOf of method Piwigo\\Tag\\TagService::setTagsOf() expects array<list<Piwigo\\Common\\ValueObject\\TagId>>, array given.	
+ src/Piwigo/Tag/TagService.php	613	48	5	argument.type	Parameter #1 $imageIds of method Piwigo\\Tag\\TagService::getImageTagIds() expects array<int, int|string>, list given.	
+@@ -3407,7 +3441,7 @@
+ src/Piwigo/Url/UrlService.php	271	48	0	restrictedSymbol.function	Call to restricted function strrchr(): use mb_strrchr() instead; strrchr() counts bytes, not characters	
+ src/Piwigo/Url/UrlService.php	317	63	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Url/UrlService.php	484	53	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-src/Piwigo/Url/UrlService.php	531	41	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++src/Piwigo/Url/UrlService.php	531	41	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ src/Piwigo/Url/UrlService.php	726	39	0	magicNumber.arithmetic	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ src/Piwigo/Url/UrlService.php	931	82	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Url/UrlService.php	1029	27	0	restrictedSymbol.function	Call to restricted function strpos(): use mb_strpos() instead; strpos() counts bytes, not characters	
+@@ -15625,10 +15659,10 @@
+ tools/i18n/verify-parity.php	54	38	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/i18n/verify-parity.php	83	19	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ tools/i18n/verify-parity.php	83	37	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+-tools/i18n/verify-parity.php	149	6	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++tools/i18n/verify-parity.php	149	6	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ tools/latte-lint.php	6	24	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/latte-lint.php	50	10	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-tools/latte-lint.php	65	5	0	comparison.nonComparable	Comparison int|bool > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	
++tools/latte-lint.php	65	5	0	comparison.nonComparable	Comparison int|bool > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ tools/normalize-fixture.php	6	24	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/opcache-preload.php	75	24	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/opcache-preload.php	112	12	4	catch.baseWithoutRethrow	Catching Throwable swallows every such exception unless the catch rethrows; add an unconditional throw.	
+@@ -15691,7 +15725,10 @@
+ tools/phpstan/GessoHookMethodUsageProvider.php	50	97	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tools/phpstan/Latte/ContextVariableExtractor.php	697	20	4	catch.baseWithoutRethrow	Catching Throwable swallows every such exception unless the catch rethrows; add an unconditional throw.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	19	18	5	classConstant.unused	Constant Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::FILTERS is never used.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	19	18	0	missingNativeType.classConstant	Constant Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::FILTERS can be declared natively as array.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	104	18	5	classConstant.unused	Constant Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::FUNCTIONS is never used.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	104	18	0	missingNativeType.classConstant	Constant Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::FUNCTIONS can be declared natively as array.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	133	18	0	missingNativeType.classConstant	Constant Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::TEMPLATE_AWARE can be declared natively as array.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	142	28	5	method.unused	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::batch is never used.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	144	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::batch() throws LogicException but it's not covered by any @throws tag.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	149	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::breakLines() throws LogicException but it's not covered by any @throws tag.	
+@@ -15756,6 +15793,7 @@
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	327	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::length() throws LogicException but it's not covered by any @throws tag.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	334	19	5	return.neverCandidate	could be declared to return never - it never returns normally	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	334	28	5	method.unused	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::limit is never used.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	334	28	0	missingNativeType.return	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::limit() return type can be declared natively as mixed.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	336	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::limit() throws LogicException but it's not covered by any @throws tag.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	339	28	5	method.unused	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::localDate is never used.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	341	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::localDate() throws LogicException but it's not covered by any @throws tag.	
+@@ -15808,6 +15846,7 @@
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	481	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::upper() throws LogicException but it's not covered by any @throws tag.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	487	19	5	return.neverCandidate	could be declared to return never - it never returns normally	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	487	28	5	method.unused	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::webalize is never used.	
++tools/phpstan/Latte/Generated/LatteAnalysisShims.php	487	28	0	missingNativeType.return	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::webalize() return type can be declared natively as mixed.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	489	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::webalize() throws LogicException but it's not covered by any @throws tag.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	494	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::translate() throws LogicException but it's not covered by any @throws tag.	
+ tools/phpstan/Latte/Generated/LatteAnalysisShims.php	499	15	2	throws.missing	Method Piwigo\\Tools\\PhpStan\\Latte\\Generated\\LatteAnalysisShims::l10n() throws LogicException but it's not covered by any @throws tag.	

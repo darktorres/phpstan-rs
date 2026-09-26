@@ -1,0 +1,11 @@
+--- old
++++ new
+@@ -7323,6 +7323,8 @@
+ checker/type_declarations/a_native_resource_hint_names_a_class: a_native_resource_hint_names_a_class.php:17:9 [] h: resource
+ checker/type_declarations/closures_and_arrow_functions_are_checked: closures_and_arrow_functions_are_checked.php:2:13 [] f: Closure(int|int): int|null (native Closure)
+ checker/type_declarations/closures_and_arrow_functions_are_checked: closures_and_arrow_functions_are_checked.php:3:13 [] f: Closure(int|int): int|null (native Closure); g: Closure(void): void (native Closure)
++checker/type_declarations/composer_require_php_7_4_reports_readonly_properties: test.php:8:9 [Point] this: Point; this->x: int; x: int (native int)
++checker/type_declarations/composer_require_php_8_1_reports_implicitly_nullable_parameters: test.php:4:5 [] name: string|null (native string|null)
+ checker/type_declarations/nullable_null_and_intersection_members: nullable_null_and_intersection_members.php:3:74 [] x: null|null (native null|null); y: A&int (native A&int); z: A&B&A (native A&B&A)
+ checker/type_declarations/positions_that_reject_void_never_and_static: positions_that_reject_void_never_and_static.php:7:75 [Foo] this: Foo; x: void (native void); y: never (native never); z: Foo (native Foo)
+ checker/type_declarations/standalone_null_false_true_and_dnf_need_php_8_2__0: standalone_null_false_true_and_dnf_need_php_8_2__0.php:3:77 [] w: int|false (native int|false); x: null (native null); y: false|null (native false|null); z: null|false (native null|false)

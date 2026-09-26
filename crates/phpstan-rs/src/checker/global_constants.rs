@@ -237,9 +237,11 @@ impl<'a> Checker<'a> {
     /// aren't).
     pub(crate) fn check_dynamic_class_constant_fetch(&mut self, name_ty: &types::Type, span: Span) {
         use types::Type;
-        if self.registry.php_version.is_some_and(|v| {
-            !types::php_version::PhpFeature::DynamicClassConstantFetch.is_available(v)
-        }) {
+        if self
+            .registry
+            .php_supports_everywhere(types::php_version::PhpFeature::DynamicClassConstantFetch)
+            == Some(false)
+        {
             self.report_builder(
                 DiagnosticBuilder::new("Fetching class constants with a dynamic name is supported only on PHP 8.3 and later."
                         .to_string(),

@@ -144,8 +144,8 @@ impl<'a> Checker<'a> {
         if sig.implicit_protected_set
             && self
                 .registry
-                .php_version
-                .is_none_or(|v| PhpFeature::AsymmetricVisibility.is_available(v))
+                .php_supports_somewhere(PhpFeature::AsymmetricVisibility)
+                != Some(false)
         {
             return Visibility::Protected;
         }
@@ -165,11 +165,8 @@ impl<'a> Checker<'a> {
         on_this: bool,
         locals: &mut Locals,
     ) -> Option<(String, &'static str)> {
-        let supports = |feature: PhpFeature| {
-            self.registry
-                .php_version
-                .is_none_or(|v| feature.is_available(v))
-        };
+        let supports =
+            |feature: PhpFeature| self.registry.php_supports_everywhere(feature) != Some(false);
         let out_of_class = || {
             (
                 format!(
@@ -297,8 +294,8 @@ impl<'a> Checker<'a> {
         if !can_write {
             let asymmetric_supported = self
                 .registry
-                .php_version
-                .is_none_or(|v| types::php_version::PhpFeature::PropertyHooks.is_available(v));
+                .php_supports_somewhere(types::php_version::PhpFeature::PropertyHooks)
+                != Some(false);
             if asymmetric_supported && !is_static_fetch {
                 let description = if write_visibility != sig.visibility {
                     match write_visibility {

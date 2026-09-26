@@ -90,8 +90,10 @@ impl<'a> Checker<'a> {
         // real ancestor mismatch is still a real ancestor mismatch on
         // any PHP version), matching real PHPStan's two independent
         // rules, which can both fire on the same property at once.
-        if let Some(version) = self.registry.php_version
-            && !PhpFeature::OverrideAttributeOnProperty.is_available(version)
+        if self
+            .registry
+            .php_supports_everywhere(PhpFeature::OverrideAttributeOnProperty)
+            == Some(false)
         {
             self.report_builder(
                 DiagnosticBuilder::new("Attribute class Override can be used with properties only on PHP 8.5 and later."

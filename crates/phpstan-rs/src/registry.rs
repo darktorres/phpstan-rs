@@ -452,11 +452,11 @@ pub struct Registry {
     // since this project has no real corpus case to verify a "which
     // one wins" rule against.
     doctrine_entity_table_index: std::sync::OnceLock<FxHashMap<Arc<str>, Arc<str>>>,
-    // The project's configured target PHP version, if any - `None`
-    // means "not configured," which every version-gated rule should
-    // treat as "nothing to check yet." See `types::php_version::PhpFeature`
-    // for the feature-availability lookup table this unlocks.
-    pub php_version: Option<types::php_version::PhpVersion>,
+    // The PHP versions the project runs on: exactly the configured
+    // `php_version`, else the range its composer.json declares. `None`
+    // means neither says, and every version-gated rule stays silent. See
+    // `types::php_version::PhpFeature` for the feature table.
+    pub php_versions: Option<types::PhpVersions>,
     // Class names with at least one *unconditional* declaration indexed
     // so far - lets `insert_built_decl` tell "this name's entry is
     // itself unconditional, so a second one should merge onto it"
@@ -531,6 +531,44 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// Whether `feature` is available on every PHP version the project
+    /// runs on; `None` when none is known.
+    pub(crate) fn php_supports_everywhere(&self, feature: types::PhpFeature) -> Option<bool> {
+        self.php_versions.map(|v| v.supports(feature).yes())
+    }
+
+    /// Whether `feature` is available on some PHP version the project runs
+    /// on; `None` when none is known.
+    pub(crate) fn php_supports_somewhere(&self, feature: types::PhpFeature) -> Option<bool> {
+        self.php_versions.map(|v| !v.supports(feature).no())
+    }
+
+    /// The lowest PHP version the project runs on.
+    pub(crate) fn php_version_min(&self) -> Option<types::PhpVersion> {
+        self.php_versions.map(|v| v.min)
+    }
+
+    /// The highest PHP version the project runs on.
+    pub(crate) fn php_version_max(&self) -> Option<types::PhpVersion> {
+        self.php_versions.map(|v| v.max)
+    }
+
+    /// `eval`'s answer on every PHP version the project runs on: the same
+    /// at both ends of the range (every version gate is one threshold),
+    /// else `None`. With no known version, `eval(None)`.
+    pub(crate) fn php_version_consensus<T: PartialEq>(
+        &self,
+        eval: impl Fn(Option<types::PhpVersion>) -> Option<T>,
+    ) -> Option<T> {
+        match self.php_versions {
+            None => eval(None),
+            Some(range) => {
+                let low = eval(Some(range.min));
+                (low == eval(Some(range.max))).then_some(low).flatten()
+            }
+        }
+    }
+
     pub fn build(program: &[Stmt]) -> Registry {
         let mut registry = Registry::index_and_flatten(program);
         registry.resolve_transitive_purity();

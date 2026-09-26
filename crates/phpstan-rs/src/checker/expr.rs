@@ -4095,9 +4095,9 @@ impl<'a> Checker<'a> {
             // same as an ordinary call would.
             ExprKind::FirstClassCallable(inner) => {
                 if !matches!(inner.kind, ExprKind::New(..))
-                    && self.registry.php_version.is_some_and(|v| {
-                        !types::php_version::PhpFeature::FirstClassCallables.is_available(v)
-                    })
+                    && self.registry.php_supports_everywhere(
+                        types::php_version::PhpFeature::FirstClassCallables,
+                    ) == Some(false)
                 {
                     self.report_builder(
                         DiagnosticBuilder::new(
@@ -5310,7 +5310,10 @@ impl<'a> Checker<'a> {
             BinOp::Eq | BinOp::NotEq => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
-                match loose_compare_literals(&lt, &rt, self.registry.php_version) {
+                match self
+                    .registry
+                    .php_version_consensus(|v| loose_compare_literals(&lt, &rt, v))
+                {
                     Some(equal) => {
                         let outcome = if matches!(op, BinOp::Eq) {
                             equal

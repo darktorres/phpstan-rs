@@ -60,7 +60,7 @@ pub struct Session {
     level: u8,
     configured_level: Option<u8>,
     emission_order: bool,
-    php_version: Option<types::PhpVersion>,
+    php_versions: Option<types::PhpVersions>,
     psr3_context_key_pattern: Option<regex::Regex>,
     restricted_symbol_entries: Vec<restricted_symbols::RestrictedSymbolEntry>,
     banned_constructs: Vec<banned::BannedConstruct>,
@@ -111,6 +111,21 @@ pub struct Analysis {
 /// The directory a composer project containing `dirs` is rooted at: the
 /// nearest ancestor with a `composer.json`, per directory, falling back
 /// to `root`.
+/// The PHP versions a project's composer.json declares it runs on (its
+/// `config.platform.php`, else `require.php`): the known releases the
+/// constraint admits, a release counting when any of its patch versions
+/// does.
+pub(crate) fn declared_php_versions(
+    package: &composer::PackageContext,
+) -> Option<types::PhpVersions> {
+    let constraint = package.php_constraint()?;
+    types::known_php_versions_where(|v| {
+        ["0", "99"].iter().any(|patch| {
+            composer::constraint::satisfies(constraint, &format!("{v}.{patch}")) == Some(true)
+        })
+    })
+}
+
 fn composer_roots(dirs: &[PathBuf], root: &Path) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     for dir in dirs {
@@ -270,6 +285,7 @@ impl Session {
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
         let mut package_dirs = Vec::new();
+        let mut composer_php_versions = None;
         let mut dirs = dirs;
         if !no_composer {
             let canonical_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
@@ -284,6 +300,9 @@ impl Session {
                     composer_root.clone()
                 };
                 let package = composer::PackageContext::load(&composer_root, &manifest_root);
+                if composer_root == canonical_root {
+                    composer_php_versions = declared_php_versions(&package);
+                }
                 scan_dirs.extend(package.vendor.dirs.iter().cloned());
                 scan_files.extend(package.vendor.files.iter().cloned());
                 phpstan_api_check_enabled |= package.requires_phpstan();
@@ -314,6 +333,10 @@ impl Session {
             }
         }
 
+        let php_versions = php_version
+            .map(types::PhpVersions::exactly)
+            .or(composer_php_versions);
+
         Ok(Session {
             root,
             config,
@@ -324,7 +347,7 @@ impl Session {
             level,
             configured_level,
             emission_order: overrides.emission_order,
-            php_version,
+            php_versions,
             psr3_context_key_pattern,
             restricted_symbol_entries,
             banned_constructs,
@@ -489,7 +512,7 @@ impl Session {
         project.set_doctrine_custom_functions(&self.doctrine_custom_function_entries);
         project.set_sql_reflection_config(self.sql_reflection_config.clone());
         project.set_sql_reflection_schema(self.sql_reflection_schema.clone());
-        project.set_php_version(self.php_version);
+        project.set_php_versions(self.php_versions);
         project.set_phpstan_api_check_enabled(self.phpstan_api_check_enabled);
         project.set_package_dirs(self.package_dirs.clone());
     }
