@@ -2,9 +2,11 @@
 //! level 2) for a named function or method: every `@param`/`@param-out`
 //! tag must name a real parameter (`parameter.notFound`), `@param-out`
 //! needs a by-reference one (`parameter.notByRef`), and a `@param`/
-//! `@param-out`/`@return` type must fit its native hint
-//! (`parameter.phpDocType`/`return.phpDocType`) - "incompatible" when no
-//! value can satisfy both, "not subtype" when only some can.
+//! `@return` type must fit its native hint (`parameter.phpDocType`/
+//! `return.phpDocType`) - "incompatible" when no value can satisfy both,
+//! "not subtype" when only some can. A `@param-out` type needn't: PHP
+//! checks a parameter's native type on entry only, so a by-reference
+//! argument may leave holding anything.
 //! `IncompatiblePropertyPhpDocTypeRule` does the same for a property's
 //! `@var` (a promoted property's constructor `@param` or inline `@var`,
 //! reported as its "PHPDoc type") against its native type
@@ -104,13 +106,15 @@ impl<'a> Checker<'a> {
                 {
                     doc_ty = array_value_type(&doc_ty).unwrap();
                 }
-                self.report_phpdoc_native_mismatch(
-                    &format!("PHPDoc tag {tag} for parameter ${name}"),
-                    &doc_ty,
-                    &native,
-                    f.name_span,
-                    "parameter.phpDocType",
-                );
+                if tag == "@param" {
+                    self.report_phpdoc_native_mismatch(
+                        &format!("PHPDoc tag {tag} for parameter ${name}"),
+                        &doc_ty,
+                        &native,
+                        f.name_span,
+                        "parameter.phpDocType",
+                    );
+                }
                 self.check_generic_callables(
                     &doc_ty,
                     &format!("{tag} for parameter ${name}"),

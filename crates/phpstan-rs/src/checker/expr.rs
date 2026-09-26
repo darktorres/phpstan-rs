@@ -825,6 +825,7 @@ impl<'a> Checker<'a> {
                             is_builtin: self.registry.is_builtin_function(name),
                             span: e.span,
                         });
+                        self.apply_param_out_types(sig, args, locals);
                         self.check_castable_array_arguments(name, sig, args, &resolved, locals);
                         self.check_impossible_haystack_values(name, args, locals, e.span);
                         if name.eq_ignore_ascii_case("define") {
@@ -1445,6 +1446,7 @@ impl<'a> Checker<'a> {
                             is_builtin: self.registry.is_builtin_class(owner),
                             span: e.span,
                         });
+                        self.apply_param_out_types(sig, args, locals);
                     }
                 }
                 // Delegates to `method_call_return_type`, the same
@@ -2353,6 +2355,7 @@ impl<'a> Checker<'a> {
                                 is_builtin: self.registry.is_builtin_class(class),
                                 span: e.span,
                             });
+                            self.apply_param_out_types(sig, args, locals);
                         }
                     } else {
                         self.report(
@@ -2683,6 +2686,7 @@ impl<'a> Checker<'a> {
                             is_builtin: self.registry.is_builtin_class(&owner),
                             span: e.span,
                         });
+                        self.apply_param_out_types(sig, args, locals);
                     } else if self.registry.classes.contains_key(class.as_str())
                         && self.registry.lookup_method(class, "__callStatic").is_none()
                     {

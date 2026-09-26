@@ -311,6 +311,11 @@ impl<'a> Checker<'a> {
             // already-narrower-typed argument turns into. Anything else
             // falls back to `Mixed`, matching the undefined-variable case
             // above.
+            // A declared `@param-out` type is written after the call's
+            // arguments are checked (`apply_param_out_types`).
+            if param.out_ty.is_some() {
+                continue;
+            }
             let substituted = types::substitute_template(&param.ty, &FxHashMap::default());
             // `Checker::is_array_like` also trusts a `list<T>`/
             // `non-empty-array<T>`-declared by-ref parameter (an
@@ -329,6 +334,37 @@ impl<'a> Checker<'a> {
             // it with.
             purge_stale_narrowing_for(locals, name);
             locals.insert(name.to_string(), widened);
+        }
+    }
+
+    /// After a call's arguments are checked: each by-reference variable
+    /// argument whose parameter declares a `@param-out` type holds that
+    /// type, and no native type (PHP checks parameter types on entry only).
+    pub(crate) fn apply_param_out_types(
+        &self,
+        sig: &FunctionSig,
+        args: &[Arg],
+        locals: &mut Locals,
+    ) {
+        let resolved = resolve_call_args(args, &sig.params);
+        for (i, slot) in resolved.iter().enumerate() {
+            let Some(arg_expr) = slot else {
+                continue;
+            };
+            let ExprKind::Variable(name) = &arg_expr.kind else {
+                continue;
+            };
+            let param = sig
+                .params
+                .get(i)
+                .or_else(|| sig.params.last().filter(|p| p.variadic));
+            let Some(out_ty) = param.filter(|p| p.by_ref).and_then(|p| p.out_ty.as_ref()) else {
+                continue;
+            };
+            let out_ty = types::substitute_template(out_ty, &FxHashMap::default());
+            locals.clear_native(name);
+            purge_stale_narrowing_for(locals, name);
+            locals.insert(name.to_string(), out_ty);
         }
     }
 
