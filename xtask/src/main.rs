@@ -789,42 +789,136 @@ fn hyperfine_stats(path: &Path) -> Result<(f64, f64), String> {
 // --- build time ------------------------------------------------------------
 
 /// Files whose edit represents each rebuild scenario.
-const BUILD_SCENARIOS: &[(&str, &str)] = &[
-    ("engine", "crates/phpstan-rs/src/checker/expr.rs"),
-    ("rule", "crates/phpstan-rs/src/checker/magic_numbers.rs"),
-    ("lexer", "crates/phpstan-rs/src/lexer.rs"),
-    ("stub", "vendor/phpstorm-stubs/standard/standard_0.php"),
+/// Each build-time scenario: the file it touches, and the workspace
+/// library crates `cargo build -p phpstan-rs` must (`Some(true)`) or must
+/// not (`Some(false)`) rebuild after it; unlisted crates are unconstrained.
+/// An edit inside the package rebuilds no extracted crate; a lexer edit
+/// rebuilds `syntax` and so everything above it.
+const BUILD_SCENARIOS: &[(&str, &str, &[(&str, bool)])] = &[
+    (
+        "engine",
+        "crates/phpstan-rs/src/checker/expr.rs",
+        &[
+            ("syntax", false),
+            ("types", false),
+            ("phpdoc", false),
+            ("sql", false),
+            ("diagnostics", false),
+        ],
+    ),
+    (
+        "rule",
+        "crates/phpstan-rs/src/checker/magic_numbers.rs",
+        &[
+            ("syntax", false),
+            ("types", false),
+            ("phpdoc", false),
+            ("sql", false),
+            ("diagnostics", false),
+        ],
+    ),
+    (
+        "lexer",
+        "crates/syntax/src/lexer.rs",
+        &[("syntax", true), ("sql", false)],
+    ),
+    (
+        "stub",
+        "vendor/phpstorm-stubs/standard/standard_0.php",
+        &[
+            ("syntax", false),
+            ("types", false),
+            ("phpdoc", false),
+            ("sql", false),
+            ("diagnostics", false),
+        ],
+    ),
 ];
 
 fn buildtime() -> Result<(), String> {
     require_clean_tree()?;
     let hash = head_hash()?;
     run(cargo().args(["test", "--workspace", "--no-run", "--quiet"]))?;
-    run(cargo().args(["build", "--release", "--bin", "phpstan-rs", "--quiet"]))?;
+    run(cargo().args(["build", "-p", "phpstan-rs", "--quiet"]))?;
     let mut report = String::new();
-    for (scenario, file) in BUILD_SCENARIOS {
-        for (label, args) in [
-            (
-                "test-no-run",
-                vec!["test", "--workspace", "--no-run", "--quiet"],
-            ),
-            (
-                "build-release",
-                vec!["build", "--release", "--bin", "phpstan-rs", "--quiet"],
-            ),
-        ] {
-            run(Command::new("touch").arg(root().join(file)))?;
-            let started = Instant::now();
-            run(cargo().args(&args))?;
-            let secs = started.elapsed().as_secs_f64();
-            writeln!(report, "{scenario}\t{label}\t{secs:.1}").unwrap();
-            eprintln!("{scenario} {label}: {secs:.1}s");
+    let mut violations = Vec::new();
+    for (scenario, file, expected) in BUILD_SCENARIOS {
+        run(Command::new("touch").arg(root().join(file)))?;
+        let started = Instant::now();
+        let rebuilt = rebuilt_workspace_crates(cargo().args([
+            "build",
+            "-p",
+            "phpstan-rs",
+            "--message-format=json",
+        ]))?;
+        let secs = started.elapsed().as_secs_f64();
+        writeln!(
+            report,
+            "{scenario}\tbuild\t{secs:.1}\t{}",
+            rebuilt.iter().cloned().collect::<Vec<_>>().join(",")
+        )
+        .unwrap();
+        eprintln!("{scenario} build: {secs:.1}s, rebuilt {rebuilt:?}");
+        for (krate, must) in *expected {
+            if rebuilt.contains(*krate) != *must {
+                violations.push(format!(
+                    "{scenario}: {krate} {}",
+                    if *must {
+                        "was not rebuilt"
+                    } else {
+                        "was rebuilt"
+                    }
+                ));
+            }
         }
+        run(Command::new("touch").arg(root().join(file)))?;
+        let started = Instant::now();
+        run(cargo().args(["test", "--workspace", "--no-run", "--quiet"]))?;
+        let secs = started.elapsed().as_secs_f64();
+        writeln!(report, "{scenario}\ttest-no-run\t{secs:.1}").unwrap();
+        eprintln!("{scenario} test-no-run: {secs:.1}s");
     }
     write(
         &gate_dir().join("buildtime").join(format!("{hash}.tsv")),
         report.as_bytes(),
-    )
+    )?;
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "build-time targets missed:\n{}",
+            violations.join("\n")
+        ))
+    }
+}
+
+/// The workspace library crates (by lib name) a cargo invocation with
+/// `--message-format=json` compiled rather than found fresh.
+fn rebuilt_workspace_crates(cmd: &mut Command) -> Result<BTreeSet<String>, String> {
+    let out = capture(cmd)?;
+    let workspace = root().join("crates");
+    let mut rebuilt = BTreeSet::new();
+    for line in out.lines() {
+        let Ok(msg) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if msg["reason"] != "compiler-artifact" || msg["fresh"] != false {
+            continue;
+        }
+        let in_workspace = msg["manifest_path"]
+            .as_str()
+            .is_some_and(|m| Path::new(m).starts_with(&workspace));
+        let is_lib = msg["target"]["kind"]
+            .as_array()
+            .is_some_and(|kinds| kinds.iter().any(|k| k == "lib"));
+        if in_workspace
+            && is_lib
+            && let Some(name) = msg["target"]["name"].as_str()
+        {
+            rebuilt.insert(name.to_string());
+        }
+    }
+    Ok(rebuilt)
 }
 
 // --- test-name manifest ----------------------------------------------------
