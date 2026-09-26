@@ -3402,7 +3402,7 @@ impl<'a> Checker<'a> {
                 // is the one implicit exception: a non-static closure
                 // declared inside a method still auto-binds it, the same
                 // as real PHP.
-                let mut closure_locals: Locals = locals.fresh_scope();
+                let mut closure_locals: Locals = locals.closure_scope();
                 for u in uses {
                     // Mirrors real PHPStan's
                     // `InvalidLexicalVariablesInClosureUseRule` - `$this`,
@@ -4884,7 +4884,7 @@ impl<'a> Checker<'a> {
                 {
                     return None;
                 }
-                let mut closure_locals: Locals = Locals::default();
+                let mut closure_locals: Locals = locals.closure_scope();
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed(false));
                     closure_locals.insert(u.name.to_string(), ty);
@@ -5979,7 +5979,7 @@ impl<'a> Checker<'a> {
         if body_contains_yield(body) {
             return None;
         }
-        let mut scope = locals.fresh_scope();
+        let mut scope = locals.closure_scope();
         for u in uses {
             if let Some(ty) = locals.get(&u.name) {
                 scope.insert(u.name.to_string(), ty.clone());

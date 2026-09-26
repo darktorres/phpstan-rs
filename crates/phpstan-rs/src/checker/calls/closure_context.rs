@@ -190,7 +190,7 @@ impl<'a> Checker<'a> {
                 if self.registry.check_native_type_hints {
                     self.suggest_closure_native_params(params, param_overrides);
                 }
-                let mut closure_locals: Locals = locals.fresh_scope();
+                let mut closure_locals: Locals = locals.closure_scope();
                 for u in uses {
                     // See the identical fix's own comment at
                     // `checker::expr`'s `ExprKind::Closure` arm.

@@ -496,6 +496,15 @@ impl Locals {
         }
     }
 
+    /// A closure body's starting scope: `fresh_scope` plus the functions
+    /// and constants proved to exist, which still exist when it runs.
+    pub(crate) fn closure_scope(&self) -> Locals {
+        let mut scope = self.fresh_scope();
+        scope.guarded_functions = self.guarded_functions.clone();
+        scope.guarded_constants = self.guarded_constants.clone();
+        scope
+    }
+
     /// Turns declaration-span tracking on for this scope and everything
     /// cloned from it - called once, at `check_function`'s entry point,
     /// gated on `Checker::probe_span` being active.
