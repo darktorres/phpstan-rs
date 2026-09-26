@@ -23,8 +23,6 @@
     non-ignorable
 12:28-12:54 property.virtualDefault L0 | Virtual hooked properties cannot have a default value.
     non-ignorable
-13:29-13:73 propertySetHook.nativeParameterType L0 | Parameter $value of set hook does not have a native type but the property Base::$fine does.
-    non-ignorable
 13:29-13:73 propertySetHook.noAssign L3 | Set hook for non-virtual property Base::$fine does not assign value to it.
 16:37-16:50 property.abstract L0 | Non-abstract classes cannot include abstract properties.
     non-ignorable
