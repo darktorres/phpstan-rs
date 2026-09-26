@@ -14,9 +14,9 @@ mod predicates;
 mod type_ops;
 
 use accessory_range::{
-    comparison_narrowed_bounds, int_comparison_operands, numeric_bounds_for_narrowing,
-    upgrade_array_to_list, upgrade_array_to_non_empty, upgrade_string_to_numeric,
-    upgrade_string_with_accessory,
+    comparison_narrowed_bounds, int_comparison_operands, narrow_array_to_non_list,
+    numeric_bounds_for_narrowing, upgrade_array_to_list, upgrade_array_to_non_empty,
+    upgrade_string_to_numeric, upgrade_string_with_accessory,
 };
 pub(crate) use accessory_range::{resolve_concat_type, string_type_has_accessory};
 pub(crate) use array_shape::{
@@ -912,18 +912,16 @@ impl<'a> Checker<'a> {
                         // has no "prove empty" counterpart).
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         locals.insert(key, upgrade_array_to_non_empty(&current));
-                    } else if name == "array_is_list" && branch_true {
-                        // `is_array($x) && array_is_list($x)` (a common
-                        // assertion-library idiom) proves list-ness, the
-                        // same shape `count($x)`'s own truthiness
-                        // upgrade just above already covers for
-                        // non-emptiness. Only the true branch is
-                        // narrowable - failing `array_is_list()` proves
-                        // nothing more specific than "not proven a list",
-                        // the same asymmetry `count`/`empty` already
-                        // accept above.
+                    } else if name == "array_is_list" {
+                        // Passing proves list-ness. Failing proves the
+                        // array non-empty, as an empty array is a list.
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
-                        locals.insert(key, upgrade_array_to_list(&current));
+                        let narrowed = if branch_true {
+                            upgrade_array_to_list(&current)
+                        } else {
+                            narrow_array_to_non_list(&current)
+                        };
+                        locals.insert(key, narrowed);
                     } else if name == "is_numeric" {
                         // Deliberately its own arm,
                         // not a `narrowing_type_for_predicate` table entry

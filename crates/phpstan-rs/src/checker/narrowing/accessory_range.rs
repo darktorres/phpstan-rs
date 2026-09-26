@@ -447,7 +447,33 @@ pub(crate) fn upgrade_array_to_list(ty: &Type) -> Type {
             members.push(Type::Accessory(AccessoryKind::ArrayList));
             Type::Intersection(members)
         }
+        Type::Union(members) => Type::Union(members.iter().map(upgrade_array_to_list).collect()),
         _ => ty.clone(),
+    }
+}
+
+/// A failing `array_is_list($x)`: no list alternative survives, and what
+/// does is non-empty, as an empty array is a list.
+pub(crate) fn narrow_array_to_non_list(ty: &Type) -> Type {
+    match ty {
+        Type::Intersection(members)
+            if members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
+        {
+            Type::Never
+        }
+        Type::Union(members) => {
+            let kept: Vec<Type> = members
+                .iter()
+                .map(narrow_array_to_non_list)
+                .filter(|m| *m != Type::Never)
+                .collect();
+            match kept.len() {
+                0 => Type::Never,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        _ => upgrade_array_to_non_empty(ty),
     }
 }
 
