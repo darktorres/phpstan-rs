@@ -1880,5 +1880,8 @@ impl ClassInfo {
 fn native_const_type(cc: &syntax::ast::ClassConst, ctx: &NameContext) -> Option<Type> {
     let hint_text = cc.type_hint.as_ref().map(TypeHint::to_string);
     let hint = hint_text.as_deref()?;
-    Some(resolve_names_in_type(types::parse_native_type_string(hint), ctx))
+    Some(resolve_names_in_type(
+        types::parse_native_type_string(hint),
+        ctx,
+    ))
 }

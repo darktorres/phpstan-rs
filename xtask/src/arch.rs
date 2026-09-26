@@ -4,7 +4,7 @@
 //! - A `Diagnostic` is built through its builder: no `Diagnostic { .. }`
 //!   expression outside the `diagnostics` crate.
 //! - No `"$$`-prefixed type-string sentinel.
-//! - Every library crate denies the print macros at its root.
+//! - Every library crate denies the print macros in its non-test code.
 
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,8 @@ use crate::modgraph::walk_dir;
 
 /// The extracted library crates, which must not print.
 const LIBRARY_CRATES: &[&str] = &["syntax", "types", "phpdoc", "sql", "diagnostics"];
-const PRINT_DENY: &str = "#![deny(clippy::print_stdout, clippy::print_stderr)]";
+const PRINT_DENY: &str =
+    "#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]";
 
 pub(crate) fn arch(root: &Path) -> Result<(), String> {
     let mut violations = Vec::new();

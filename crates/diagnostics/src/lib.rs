@@ -2,7 +2,7 @@
 //! [`DiagnosticBuilder`], with an optional textual [`DiagnosticFix`]
 //! (applied by [`fix`]).
 
-#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod fix;
 

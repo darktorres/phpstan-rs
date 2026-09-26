@@ -804,7 +804,12 @@ pub fn parse_native_type_string(s: &str) -> Type {
     }
     let alternatives = split_top_level(s, '|');
     if alternatives.len() > 1 {
-        return Type::Union(alternatives.iter().map(|a| parse_native_type_string(a)).collect());
+        return Type::Union(
+            alternatives
+                .iter()
+                .map(|a| parse_native_type_string(a))
+                .collect(),
+        );
     }
     let unwrapped = s
         .strip_prefix('(')
@@ -812,7 +817,12 @@ pub fn parse_native_type_string(s: &str) -> Type {
         .unwrap_or(s);
     let members = split_top_level(unwrapped, '&');
     if members.len() > 1 {
-        return Type::Intersection(members.iter().map(|m| parse_native_type_string(m)).collect());
+        return Type::Intersection(
+            members
+                .iter()
+                .map(|m| parse_native_type_string(m))
+                .collect(),
+        );
     }
     let name = unwrapped.trim();
     let bare = name.trim_start_matches('\\');

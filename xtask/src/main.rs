@@ -835,7 +835,10 @@ fn hyperfine_stats(path: &Path) -> Result<(f64, f64), String> {
 /// not (`Some(false)`) rebuild after it; unlisted crates are unconstrained.
 /// An edit inside the package rebuilds no extracted crate; a lexer edit
 /// rebuilds `syntax` and so everything above it.
-const BUILD_SCENARIOS: &[(&str, &str, &[(&str, bool)])] = &[
+/// A library crate and whether a scenario must rebuild it.
+type RebuildTarget = (&'static str, bool);
+
+const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
     (
         "engine",
         "crates/phpstan-rs/src/checker/expr.rs",

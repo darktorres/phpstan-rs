@@ -4,7 +4,7 @@
 //! check between the two, and the `SqlContext` service answering what
 //! columns a query's result set has - in its own column model.
 
-#![deny(clippy::print_stdout, clippy::print_stderr)]
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod column;
 pub mod config;
