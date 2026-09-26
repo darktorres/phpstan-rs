@@ -82,7 +82,7 @@ thread does 57% of all CPU work:
 - `Project::new`: ~65 ms to clone and merge the stubs;
 - `finish_loading`: ~145 ms to re-run every registry pass over the stub
   classes;
-- `analyse`: ~38 ms on a one-line file, cause not yet profiled (S6).
+- `analyse`: ~38 ms on a one-line file, cause not yet profiled (S7).
 
 Each fixture also builds its own worker pool sized to all cores, so 8
 parallel fixtures run 64 threads. About a third of the CPU goes to
@@ -107,9 +107,14 @@ The order is the order of the sections below.
 
 ### S2. Named-argument facts without a second pass (engine)
 This is the collector shape of crate-split §3.8.
-- The rename overrides become a registry query over the classes that
-  project and context files declare, the same set the pass covers
-  today. It lives next to `find_method_signature_prototype`.
+- The rename overrides come from a walk over each loaded file's class
+  declarations, with registry lookups, and no checker. Today's recording
+  runs once per `ClassDecl` the traversal reaches, so the walk covers:
+  - named, anonymous and nested classes, wherever they are declared;
+  - each class's own methods in source order, then its used-trait
+    methods sorted, as `record_named_argument_renames` does.
+
+  It lives next to `find_method_signature_prototype`.
 - The named-argument call sites are collected by the main check pass
   of the analysed files, as per-file data merged on the main thread in
   sorted path order.
@@ -125,26 +130,44 @@ This is the collector shape of crate-split §3.8.
 - Verify: corpus identical, all-on in particular; the rename rule's
   fixtures pass.
 
-### S3. Property-assign facts in parallel, in a defined order (engine)
+### S3. One injected worker pool (engine and harness)
+- `Session` stops building a pool per session. It takes a shared
+  `Arc<rayon::ThreadPool>`, which is the 64 MiB-stack pool crate-split
+  §3.10 assigns to the Session.
+- The binary builds one pool per process. The fixture harness builds
+  one for the whole suite: every fixture runs its work on it, and
+  work-stealing replaces the 64-thread oversubscription.
+- The LSP doesn't use `Session` today. It calls `Project` directly
+  (`check_paths_isolating_panics`) and checks serially. It builds the
+  same process-wide pool and passes it to `Project`, which S4b's
+  parallel facts pass needs. The re-checked paths run on that pool too.
+  F1 later moves the LSP onto `Session`, which then carries the pool.
+- Verify: fixture suite passes; `types-fixtures` identical; suite time
+  recorded.
+
+### S4. Property-assign facts in parallel, in a defined order (engine)
 This is the per-file-then-merge summary shape of crate-split §3.8.
-- **S3a (behaviour, only if output changes):** merge the per-file facts
+- **S4a (behaviour, only if output changes):** merge the per-file facts
   in sorted path order instead of `files.keys()` order. The CLI and LSP
   then agree by construction. If the corpus or fixtures change, the
   commit carries the approved delta.
-- **S3b (structural):** compute each file's facts on the session's pool
-  and merge them sequentially in that same order. `check_paths` uses
-  the same function.
-- **S3c (behaviour, only under a panic):** panics are isolated per file.
-  Today a single panic anywhere empties the facts for every file (a
-  `catch_unwind` around the whole pass in `session.rs`, then
-  `unwrap_or_default`), and `check_paths` doesn't catch panics at all.
+- **S4b (structural):** compute each file's facts on the injected pool
+  from S3 and merge them sequentially in that same order. The LSP's
+  `check_paths_isolating_panics` and `check_paths` use the same
+  function on the same pool. Nothing touches rayon's global pool: its
+  default worker stack is too small for the checker's deep recursion.
+- **S4c (behaviour, only under a panic):** panics are isolated per file.
+  Today a single panic anywhere empties the facts for every file, both
+  in `session.rs` and in the LSP's `check_paths_isolating_panics` (a
+  `catch_unwind` around the whole pass, then `unwrap_or_default`).
+  `check_paths` stays panic-transparent, as its tests expect.
   After this, a file that panics contributes no facts, and the other
   files keep theirs. This matches the main pass and F1's panic
   isolation. The corpus has no panics, so snapshots don't change. A
   fixture that injects a panic covers the new behaviour.
-- Verify: corpus identical to S3a; LSP tests pass.
+- Verify: corpus identical to S4a; LSP tests pass.
 
-### S4. Case-folded function keys, pulled forward from C5 (engine)
+### S5. Case-folded function keys, pulled forward from C5 (engine)
 - The C5 item "a case-folded function key map replacing the linear
   scan" lands now, in its designed form.
 - `Registry::functions` is keyed by the case-folded name, and
@@ -165,12 +188,12 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   - conditional declarations are merged (`existing.merge`);
   - otherwise the later insert replaces the earlier one.
 - Before changing the map, list the case-colliding keys in the stubs
-  and the corpus. If any exist and output changes, that lands as S4a
+  and the corpus. If any exist and output changes, that lands as S5a
   with its approved delta.
-- Verify: corpus identical (after S4a); registry, LSP and function-case
+- Verify: corpus identical (after S5a); registry, LSP and function-case
   tests pass.
 
-### S5. Composer hygiene without engine I/O (engine)
+### S6. Composer hygiene without engine I/O (engine)
 - The session resolves its root to an absolute path once, at intake,
   and hands the project that absolute root for resolution. It keeps the
   root's own spelling (`.` for the CLI) for display, so reported paths
@@ -181,10 +204,25 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   no `getcwd`.
 - `includes.rs` resolves against the absolute root instead of falling
   back to `current_dir()`.
-- Package ownership has one implementation: B8's
-  `PackageContext`/`owning_package(dirs, file)`, computed once per file.
-  `ComposerManifest::owning_package` and `OwnerCache` are deleted or
-  reduced to delegating to it, and `belongs_to_root` uses it.
+- Package ownership gets one implementation, computed once per file
+  when the session loads it and stored with the file. Today there are
+  two, and they differ:
+  - `ComposerManifest::owning_package` (composer hygiene) canonicalizes
+    the file before matching install directories, never returns the
+    root package, and returns the whole `InstalledPackage`;
+  - B8's `owning_package(dirs, file)` (the PHPStan-namespace rule)
+    matches the path as written against both vendor and install
+    directories, includes the root package, and returns only a name.
+
+  The single version returns an owner, either the root package or an
+  installed package's index, and resolves symlinks. The canonical path
+  comes from the session's one canonicalization per file at intake,
+  which is session I/O, not engine I/O. Composer hygiene,
+  `belongs_to_root` and the PHPStan-namespace rule all read it, and
+  `OwnerCache` is deleted.
+- **S6a (behaviour, only if output changes):** if the two rules ever
+  disagreed on a file, reconciling them changes one rule's output. That
+  lands first, with its approved delta.
 - The arch gate gains the part of §4.10's "no engine I/O" this step
   makes true: no `std::env::current_dir` or `fs::canonicalize` outside
   `project::session`, the binary and the LSP.
@@ -195,24 +233,17 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Verify: corpus identical, all-on in particular; composer tests pass;
   `cargo xtask arch` passes.
 
-### S6. Stub-proportional work in per-project passes (engine)
+### S7. Stub-proportional work in per-project passes (engine)
 - Profile a one-line fixture's `analyse` (~38 ms).
-- Any project-level pass that walks the whole registry but only reports
-  on project declarations (a lead: `project/class_shape.rs:105` iterates
-  `registry.classes`, stubs included) iterates the project's own
-  declarations instead.
+- Whatever the profile shows as proportional to the stubs rather than
+  to the project is made project-proportional, where the result can't
+  change. Project-level passes (`check_whole_program`,
+  `check_class_shapes`, `check_banned`, `check_architecture`) are
+  candidates, but most of them return early under a fixture's default
+  settings. `class_shape.rs:105`'s walk over every class, for example,
+  only runs when closed-class or parent-call checks are on. So the
+  profile decides, not guesses.
 - Verify: corpus and fixtures identical; per-fixture `analyse` time
-  recorded.
-
-### S7. One injected worker pool (engine and harness)
-- `Session` stops building a pool per session. It takes a shared
-  `Arc<rayon::ThreadPool>`, which is the 64 MiB-stack pool crate-split
-  §3.10 assigns to the Session.
-- The binary and the LSP each build one pool per process. In the LSP,
-  every per-root session shares that pool. The fixture
-  harness builds one for the whole suite: every fixture runs its work
-  on it, and work-stealing replaces the 64-thread oversubscription.
-- Verify: fixture suite passes; `types-fixtures` identical; suite time
   recorded.
 
 ### S8. Analysis result, finalizer and CLI entry point in the library, plus a gate runner
@@ -327,11 +358,11 @@ them, so an interim fix would be thrown away:
 ## 5. Edits to CRATE_SPLIT_PLAN.md and ROADMAP.md
 
 Each is a targeted edit in the step's own commit:
-- S4, §3.5 enumeration APIs and C5: the case-folded function key map is
+- S3, §3.10: the Session takes its pool injected.
+- S5, §3.5 enumeration APIs and C5: the case-folded function key map is
   marked as landed early. Class keys stay with C3.
-- S5, §4.10: the no-current-dir and no-canonicalize rule is listed as
+- S6, §4.10: the no-current-dir and no-canonicalize rule is listed as
   already enforced.
-- S7, §3.10: the Session takes its pool injected.
 - S8a/S8b, §3.10 and F1/F4: `AnalysisResult`, the finalizer and the
   check-project entry point in the library are marked as landed early.
   F1 keeps moving the LSP onto the finalizer as part of its parity work,
@@ -350,4 +381,4 @@ Each is a targeted edit in the step's own commit:
 - One `cargo xtask gates` run at the end passes, and its `gatetime` is
   compared with the §2 table. The expected quick tier is about 10–12 min,
   down from 25–30.
-- CHANGELOG notes the `check-project` speedup from S2–S6.
+- CHANGELOG notes the `check-project` speedup from S2–S7.
