@@ -79,7 +79,7 @@ thread does 57% of all CPU work:
 - `Project::new`: ~65 ms to clone and merge the stubs;
 - `finish_loading`: ~145 ms to re-run every registry pass over the stub
   classes;
-- `analyse`: ~38 ms on a one-line file, cause not yet profiled (S9).
+- `analyse`: ~38 ms on a one-line file, cause not yet profiled (S6).
 
 Each fixture also builds its own worker pool sized to all cores, so 8
 parallel fixtures run 64 threads. About a third of the CPU goes to
