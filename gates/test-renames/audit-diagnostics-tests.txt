@@ -1,0 +1,4 @@
+checker::tests::diagnostic_identifiers::diagnostic_builder_assembles_every_field -> tests::diagnostic_builder_assembles_every_field
+checker::tests::diagnostic_identifiers::diagnostic_builder_defaults_are_all_empty_absent_or_false -> tests::diagnostic_builder_defaults_are_all_empty_absent_or_false
+checker::tests::diagnostic_identifiers::several_tips_show_as_a_bulleted_list -> tests::several_tips_show_as_a_bulleted_list
+checker::tests::diagnostic_identifiers::an_identifier_is_dot_separated_alphanumeric_segments -> tests::an_identifier_is_dot_separated_alphanumeric_segments

@@ -273,3 +273,6 @@ impl DiagnosticBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
