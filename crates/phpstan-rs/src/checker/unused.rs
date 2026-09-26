@@ -360,8 +360,9 @@ impl<'a> Checker<'a> {
         removal: Option<Span>,
         usage: &MemberUsage,
     ) {
-        let tag_always_read = doc_comment.is_some_and(|d| d.contains("@phpstan-always-read"));
-        let tag_always_written = doc_comment.is_some_and(|d| d.contains("@phpstan-always-written"));
+        let doc = doc_comment.map(phpdoc::docblock::parse);
+        let tag_always_read = doc.as_ref().is_some_and(|d| d.always_read);
+        let tag_always_written = doc.as_ref().is_some_and(|d| d.always_written);
 
         let read = tag_always_read || usage.reads.contains(name);
         let written = tag_always_written || seed_written || usage.writes.contains(name);

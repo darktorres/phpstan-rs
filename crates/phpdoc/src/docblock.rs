@@ -93,6 +93,10 @@ pub struct DocBlock {
     // `final` without real PHP's native keyword. Consumed by
     // `ClassInfo::final_methods_by_phpdoc`/`final_properties_by_phpdoc`.
     pub is_final: bool,
+    // `@phpstan-always-read`/`@phpstan-always-written` on a property: it
+    // counts as read (written) for the unused-property checks.
+    pub always_read: bool,
+    pub always_written: bool,
     // `@phpstan-pure`/`@phpstan-impure` - checked against this project's
     // own computed purity classification rather than trusted outright
     // (`checker::noop::check_declared_purity_tag`). `pure` is parsed but
@@ -489,6 +493,8 @@ impl DocBlock {
             allow_private_mutation,
             immutable,
             is_final,
+            always_read,
+            always_written,
             pure,
             impure,
             deprecated,
@@ -539,6 +545,8 @@ impl DocBlock {
         self.properties.extend(properties);
         self.api |= api;
         self.api_do_not_implement |= api_do_not_implement;
+        self.always_read |= always_read;
+        self.always_written |= always_written;
         self.internal |= internal;
         self.consistent_constructor |= consistent_constructor;
         self.readonly |= readonly;
@@ -619,6 +627,8 @@ fn split_tag(tag_body: &str) -> (&str, &str) {
 /// The prefixed-only tag names phpdoc-parser gives a dedicated parser
 /// (only their `@phpstan-` form - see `PLAIN_TAGS_PHPSTAN_PARSES`).
 const PREFIXED_ONLY_TAGS_PHPSTAN_PARSES: &[&str] = &[
+    "always-read",
+    "always-written",
     "type",
     "import-type",
     "assert",
@@ -1083,6 +1093,12 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             "immutable" => {
                 block.immutable = true;
             }
+            "always-read" => {
+                block.always_read = true;
+            }
+            "always-written" => {
+                block.always_written = true;
+            }
             "final" => {
                 block.is_final = true;
             }
@@ -1211,40 +1227,28 @@ const KNOWN_PHPSTAN_TAGS: &[&str] = &[
     "param-closure-this",
     "all-methods-pure",
     "all-methods-impure",
+    "always-read",
+    "always-written",
 ];
 
-/// `@phpstan-*`-prefixed tag *names* found in `raw` that aren't in
+/// `@phpstan-*`-prefixed tag names written in `raw` that aren't in
 /// `KNOWN_PHPSTAN_TAGS` above - real PHPStan's own `InvalidPHPStanDocTagRule`
-/// (`phpDoc.phpstanTag`), a real, common way to catch a typo'd tag
-/// (`@phpstan-parm`) silently doing nothing instead of what was intended.
-/// A plain text scan, not routed through the rest of this module's own
-/// tag-line-joining machinery - deliberately so: that machinery exists
-/// to extract a tag's own *value*, but this only ever needs the tag
-/// *names* actually written, recognized or not, including one this
-/// module's own `apply_tag` would otherwise silently drop on the floor
-/// (its only way to report "you wrote a tag we don't understand" at
-/// all). A real, disclosed imprecision: a literal `@phpstan-` substring
-/// inside a description/code-example rather than a real tag position
-/// would also match - accepted as a corner case real PHPStan's own
-/// tokenizing lexer doesn't share, but not expected to occur in
-/// practice (a docblock talking *about* a tag almost always still writes
-/// it at the start of its own line, the position that matters for this
-/// scan too, just not enforced separately here).
+/// (`phpDoc.phpstanTag`), which catches a typo'd tag (`@phpstan-parm`)
+/// silently doing nothing. Read from the grammar's tags, so only a tag
+/// position counts, not a `@phpstan-` inside a description.
 pub fn unknown_phpstan_tags(raw: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut rest = raw;
-    while let Some(idx) = rest.find("@phpstan-") {
-        let after = &rest[idx + "@phpstan-".len()..];
-        let end = after
-            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-            .unwrap_or(after.len());
-        let tag = &after[..end];
-        if !tag.is_empty() && !KNOWN_PHPSTAN_TAGS.contains(&tag) {
-            result.push(tag.to_string());
-        }
-        rest = &after[end..];
-    }
-    result
+    grammar::parse(raw)
+        .tags
+        .iter()
+        .filter_map(|tag| {
+            let after = tag.name.strip_prefix("phpstan-")?;
+            let end = after
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .unwrap_or(after.len());
+            let name = &after[..end];
+            (!name.is_empty() && !KNOWN_PHPSTAN_TAGS.contains(&name)).then(|| name.to_string())
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -152,28 +152,38 @@ impl<'a> Walker<'a> {
     fn class(&mut self, c: &ClassDecl) {
         let mut mock_properties = 0;
         for p in &c.properties {
-            let doc_var = p.doc_comment.as_deref().and_then(|doc| {
-                let after = doc.split("@var").nth(1)?;
-                after.split_whitespace().next().map(str::to_string)
-            });
-            let Some(hint) = p.type_hint.as_ref().map(TypeHint::to_string).or(doc_var) else {
-                continue;
+            let (hint, written_members) = match &p.type_hint {
+                Some(native) => {
+                    let text = native.to_string();
+                    let members = text
+                        .trim_start_matches('?')
+                        .split('|')
+                        .map(|m| m.trim().to_string())
+                        .collect();
+                    (text, members)
+                }
+                None => {
+                    let Some(node) = p
+                        .doc_comment
+                        .as_deref()
+                        .and_then(|doc| phpdoc::docblock::parse(doc).var_type)
+                    else {
+                        continue;
+                    };
+                    let mut members = Vec::new();
+                    union_members(&node, &mut members);
+                    (node.to_source_string(), members)
+                }
             };
             let hint = &hint;
-            let members: Vec<String> = hint
-                .trim_start_matches('?')
-                .split('|')
-                .map(|m| {
-                    self.ctx
-                        .resolve(m.trim())
-                        .trim_start_matches('\\')
-                        .to_string()
-                })
+            let members: Vec<String> = written_members
+                .iter()
+                .map(|m| self.ctx.resolve(m).trim_start_matches('\\').to_string())
                 .collect();
             let is_mock = |m: &String| MOCK_TYPES.iter().any(|t| t.eq_ignore_ascii_case(m));
             if members.iter().any(is_mock) {
                 mock_properties += 1;
-                if hint.contains('|')
+                if members.len() > 1
                     && members
                         .iter()
                         .any(|m| !is_mock(m) && !m.eq_ignore_ascii_case("null"))
@@ -372,5 +382,18 @@ impl Project {
             }
         }
         out
+    }
+}
+
+/// The members of a PHPDoc union as written, `?T` as `T` and `null`.
+fn union_members(node: &phpdoc::grammar::TypeNode, out: &mut Vec<String>) {
+    use phpdoc::grammar::TypeNode;
+    match node.unwrap_paren() {
+        TypeNode::Union(members) => members.iter().for_each(|m| union_members(m, out)),
+        TypeNode::Nullable(inner) => {
+            union_members(inner, out);
+            out.push("null".to_string());
+        }
+        other => out.push(other.to_source_string()),
     }
 }
