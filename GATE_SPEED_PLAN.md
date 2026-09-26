@@ -82,7 +82,7 @@ thread does 57% of all CPU work:
 - `Project::new`: ~65 ms to clone and merge the stubs;
 - `finish_loading`: ~145 ms to re-run every registry pass over the stub
   classes;
-- `analyse`: ~38 ms on a one-line file, cause not yet profiled (S7).
+- `analyse`: ~38 ms on a one-line file, cause not yet profiled (S8).
 
 Each fixture also builds its own worker pool sized to all cores, so 8
 parallel fixtures run 64 threads. About a third of the CPU goes to
@@ -130,7 +130,28 @@ This is the collector shape of crate-split §3.8.
 - Verify: corpus identical, all-on in particular; the rename rule's
   fixtures pass.
 
-### S3. One injected worker pool (engine and harness)
+### S3. Type dump from the main pass (engine and gate)
+- `--dump-types` and `PHPSTAN_RS_DUMP_TYPES` go through
+  `Project::dump_types`, which runs a second full checker pass per
+  analysed file through `checker_for`. That checker never gets the
+  cross-file property-assign facts `check_file_impl` passes to the main
+  pass. So the `types-*` snapshots record types the diagnostics never
+  see, and every recorded corpus run and every fixture in `gates` pays
+  for a second pass.
+- The dump is taken from the main-pass checker (`set_dump_types` on the
+  checker in `check_file_impl`), and `Project::dump_types`' separate walk
+  is deleted. Diagnostics are unchanged, since the dump only records.
+- This is a behaviour change to the gate's own snapshots:
+  `types-scoped`, `types-all-on` and `types-fixtures` change wherever
+  property facts change an inferred type. It lands with its approved
+  delta, and each changed line is checked to be the type the
+  diagnostics already used.
+- E6 later re-expresses the dump as an observer on the main pass; the
+  single-pass property this step establishes carries over.
+- Verify: corpus diagnostics identical; the type-snapshot delta
+  reviewed; recorded-run and fixture-suite times recorded.
+
+### S4. One injected worker pool (engine and harness)
 - `Session` stops building a pool per session. It takes a shared
   `Arc<rayon::ThreadPool>`, which is the 64 MiB-stack pool crate-split
   §3.10 assigns to the Session.
@@ -139,24 +160,24 @@ This is the collector shape of crate-split §3.8.
   work-stealing replaces the 64-thread oversubscription.
 - The LSP doesn't use `Session` today. It calls `Project` directly
   (`check_paths_isolating_panics`) and checks serially. It builds the
-  same process-wide pool and passes it to `Project`, which S4b's
+  same process-wide pool and passes it to `Project`, which S5b's
   parallel facts pass needs. The re-checked paths run on that pool too.
   F1 later moves the LSP onto `Session`, which then carries the pool.
 - Verify: fixture suite passes; `types-fixtures` identical; suite time
   recorded.
 
-### S4. Property-assign facts in parallel, in a defined order (engine)
+### S5. Property-assign facts in parallel, in a defined order (engine)
 This is the per-file-then-merge summary shape of crate-split §3.8.
-- **S4a (behaviour, only if output changes):** merge the per-file facts
+- **S5a (behaviour, only if output changes):** merge the per-file facts
   in sorted path order instead of `files.keys()` order. The CLI and LSP
   then agree by construction. If the corpus or fixtures change, the
   commit carries the approved delta.
-- **S4b (structural):** compute each file's facts on the injected pool
-  from S3 and merge them sequentially in that same order. The LSP's
+- **S5b (structural):** compute each file's facts on the injected pool
+  from S4 and merge them sequentially in that same order. The LSP's
   `check_paths_isolating_panics` and `check_paths` use the same
   function on the same pool. Nothing touches rayon's global pool: its
   default worker stack is too small for the checker's deep recursion.
-- **S4c (behaviour, only under a panic):** panics are isolated per file.
+- **S5c (behaviour, only under a panic):** panics are isolated per file.
   Today a single panic anywhere empties the facts for every file, both
   in `session.rs` and in the LSP's `check_paths_isolating_panics` (a
   `catch_unwind` around the whole pass, then `unwrap_or_default`).
@@ -165,9 +186,9 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   files keep theirs. This matches the main pass and F1's panic
   isolation. The corpus has no panics, so snapshots don't change. A
   fixture that injects a panic covers the new behaviour.
-- Verify: corpus identical to S4a; LSP tests pass.
+- Verify: corpus identical to S5a; LSP tests pass.
 
-### S5. Case-folded function keys, pulled forward from C5 (engine)
+### S6. Case-folded function keys, pulled forward from C5 (engine)
 - The C5 item "a case-folded function key map replacing the linear
   scan" lands now, in its designed form.
 - `Registry::functions` is keyed by the case-folded name, and
@@ -188,12 +209,12 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   - conditional declarations are merged (`existing.merge`);
   - otherwise the later insert replaces the earlier one.
 - Before changing the map, list the case-colliding keys in the stubs
-  and the corpus. If any exist and output changes, that lands as S5a
+  and the corpus. If any exist and output changes, that lands as S6a
   with its approved delta.
-- Verify: corpus identical (after S5a); registry, LSP and function-case
+- Verify: corpus identical (after S6a); registry, LSP and function-case
   tests pass.
 
-### S6. Composer hygiene without engine I/O (engine)
+### S7. Composer hygiene without engine I/O (engine)
 - The session resolves its root to an absolute path once, at intake,
   and hands the project that absolute root for resolution. It keeps the
   root's own spelling (`.` for the CLI) for display, so reported paths
@@ -220,7 +241,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   which is session I/O, not engine I/O. Composer hygiene,
   `belongs_to_root` and the PHPStan-namespace rule all read it, and
   `OwnerCache` is deleted.
-- **S6a (behaviour, only if output changes):** if the two rules ever
+- **S7a (behaviour, only if output changes):** if the two rules ever
   disagreed on a file, reconciling them changes one rule's output. That
   lands first, with its approved delta.
 - The arch gate gains the part of §4.10's "no engine I/O" this step
@@ -233,7 +254,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Verify: corpus identical, all-on in particular; composer tests pass;
   `cargo xtask arch` passes.
 
-### S7. Stub-proportional work in per-project passes (engine)
+### S8. Stub-proportional work in per-project passes (engine)
 - Profile a one-line fixture's `analyse` (~38 ms).
 - Whatever the profile shows as proportional to the stubs rather than
   to the project is made project-proportional, where the result can't
@@ -246,8 +267,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Verify: corpus and fixtures identical; per-fixture `analyse` time
   recorded.
 
-### S8. Analysis result, finalizer and CLI entry point in the library, plus a gate runner
-- **S8a:** F1's `AnalysisResult` and finalizer land now. `analyse`
+### S9. Analysis result, finalizer and CLI entry point in the library, plus a gate runner
+- **S9a:** F1's `AnalysisResult` and finalizer land now. `analyse`
   returns unfinalized per-file results. One finalizer then applies, in
   today's order:
   - the level filter;
@@ -265,7 +286,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   the CLI's (crate-split §1), so moving it onto the finalizer is a
   behaviour change. That move happens in F1's LSP-parity commits, with
   their approved deltas.
-- **S8b:** everything check-project does after parsing its arguments
+- **S9b:** everything check-project does after parsing its arguments
   moves from `main/check_project.rs` into the library's app layer
   (crate-split §3.10), behind a plain `CheckRequest` struct. That covers
   config loading, the flag overlay, the baseline settings and
@@ -275,10 +296,10 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
     job is mapping arguments onto `CheckRequest`.
   - C1's `--set` redesign changes that mapping and the library's
     request handling, and nothing else.
-- **S8c:** `tools/gate-runner` is a workspace member with
+- **S9c:** `tools/gate-runner` is a workspace member with
   `publish = false`, not shipped, built with `--profile gate`.
   - It builds the `CheckRequest` for each gate configuration (config
-    file, level, `--no-composer`) and resolves it through S8b's entry
+    file, level, `--no-composer`) and resolves it through S9b's entry
     point, the same one the binary uses.
   - The only thing it can do differently from the binary is map a
     gate configuration onto that request. The cross-check below
@@ -303,7 +324,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   which rules run, and only a level-specific run shows that.
 - Verify: `compare` finds every snapshot identical.
 
-### S9. Quick-tier redundancy (xtask)
+### S10. Quick-tier redundancy (xtask)
 - `cargo bench --no-run` leaves the quick tier: `test --all-targets`
   already compiles every bench, and it only adds a release-profile
   build. `--full` and CI keep it.
@@ -313,7 +334,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   they cost. If the fuzz check is material, it shares the main target
   directory so dependencies aren't rebuilt.
 
-### S10. Measure, then decide (build config)
+### S11. Measure, then decide (build config)
 - **Dev-profile optimization:**
   - third-party dependencies: `[profile.dev.package."*"] opt-level = 1`
     or `2`;
@@ -324,6 +345,11 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   Time the cli and lib suites and the `buildtime` scenarios. Adopt each
   setting only if a suite drops by at least a third and no `buildtime`
   scenario misses its target.
+- **Lib tests in an optimized profile:** the lib suite spends ~200 s
+  running in debug. Measure its compile time plus run time under a test
+  profile that inherits `gate`, against debug's, for a one-file engine
+  edit (the `buildtime` "engine" scenario). Switch `gates` to it only if
+  the total is lower. Debug stays the default for `cargo test`.
 - **The criterion bench under `cargo test --all-targets`:** measure what
   `vendored_corpus` costs in test mode (one debug pass over 2,351
   files). If it's material, the bench target gets `test = false`, and
@@ -331,7 +357,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - The commit records every measurement, whichever way each decision
   goes.
 
-### S11. Fixed sleeps in LSP tests (harness)
+### S12. Fixed sleeps in LSP tests (harness)
 `run_across_debounce` sleeps a fixed 500 ms. Replace the sleep with a
 wait on an explicit signal from the server's run loop, such as a
 debounce-drained notification the test can observe, so the test is
@@ -358,27 +384,27 @@ them, so an interim fix would be thrown away:
 ## 5. Edits to CRATE_SPLIT_PLAN.md and ROADMAP.md
 
 Each is a targeted edit in the step's own commit:
-- S3, §3.10: the Session takes its pool injected.
-- S5, §3.5 enumeration APIs and C5: the case-folded function key map is
+- S4, §3.10: the Session takes its pool injected.
+- S6, §3.5 enumeration APIs and C5: the case-folded function key map is
   marked as landed early. Class keys stay with C3.
-- S6, §4.10: the no-current-dir and no-canonicalize rule is listed as
+- S7, §4.10: the no-current-dir and no-canonicalize rule is listed as
   already enforced.
-- S8a/S8b, §3.10 and F1/F4: `AnalysisResult`, the finalizer and the
+- S9a/S9b, §3.10 and F1/F4: `AnalysisResult`, the finalizer and the
   check-project entry point in the library are marked as landed early.
   F1 keeps moving the LSP onto the finalizer as part of its parity work,
   and F1 and F4 keep the rest of their lists.
-- S8c, roadmap Phase 181: the corpus gate switches to
+- S9c, roadmap Phase 181: the corpus gate switches to
   `report --export` and `tools/gate-runner` is deleted.
-- S9, §4 tier list: quick drops `cargo bench --no-run` and checks
+- S10, §4 tier list: quick drops `cargo bench --no-run` and checks
   rather than builds `--no-default-features`; full keeps both.
 - C4 and C5 gates: "the fixture suite and lib test wall times
   (`gatetime`) are recorded and lower than at the phase's start".
 
 ## 6. Done when
 
-- S0–S11 are committed. Each structural commit leaves the snapshots
+- S0–S12 are committed. Each structural commit leaves the snapshots
   identical, and each behaviour commit carries its approved delta.
 - One `cargo xtask gates` run at the end passes, and its `gatetime` is
   compared with the §2 table. The expected quick tier is about 10–12 min,
   down from 25–30.
-- CHANGELOG notes the `check-project` speedup from S2–S7.
+- CHANGELOG notes the `check-project` speedup from S2–S8.
