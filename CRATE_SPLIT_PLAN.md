@@ -936,7 +936,11 @@ Then extract `types`, with the proptest seeds moved to
 - Extract `sql`.
 
 **B7. diagnostics.**
-- The `RuleError` model (§3.7).
+- The `RuleError` model (§3.7). The file and trait file, identifier
+  families declared per rule, and AST-node fixes arrive with the rule
+  dispatcher (E), which has the rule declarations and the analysed file to
+  attach them from; B7 gives the model its validated `Identifier`, a list
+  of tips, and drops `location` and `metadata`.
 - The versioned baseline plus converter, as an approved-delta commit
   (location dropped, text format change).
 - Extract `diagnostics`. The ignore / baseline pipeline stays in the
