@@ -14,7 +14,15 @@ use syn::visit::Visit;
 use crate::modgraph::walk_dir;
 
 /// The extracted library crates, which must not print.
-const LIBRARY_CRATES: &[&str] = &["syntax", "types", "phpdoc", "sql", "diagnostics"];
+const LIBRARY_CRATES: &[&str] = &[
+    "syntax",
+    "types",
+    "phpdoc",
+    "sql",
+    "diagnostics",
+    "composer",
+    "stub-sources",
+];
 const PRINT_DENY: &str =
     "#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]";
 

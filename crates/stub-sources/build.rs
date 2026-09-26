@@ -4,13 +4,13 @@
 //! PHPStan classes like `PHPStan\Type\StringType`, referenced by any
 //! vendor package authoring a PHPStan rule/extension, that
 //! `phpstan/phpstan`'s own phar distribution can't provide since it
-//! ships no loose source at all), each a `&[&str]` so `php_stubs.rs`
+//! ships no loose source at all), each a `&[&str]` so the stub pipeline
 //! doesn't need hundreds of hand-written `include_str!` calls. Absolute
 //! paths are used in the generated `include_str!` invocations because the
 //! generated file lives under `OUT_DIR` (deep in `target/`), and
 //! `include_str!`'s path is resolved relative to the file containing the
 //! macro call, not the crate root - a relative path here would resolve
-//! against the wrong directory once `include!`-ed into `php_stubs.rs`.
+//! against the wrong directory once `include!`-ed into `lib.rs`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,16 @@ fn write_source_array(out: &mut String, name: &str, files: &[PathBuf]) {
     out.push_str(&format!("pub static {name}: &[&str] = &[\n"));
     for path in files {
         out.push_str(&format!("    include_str!({:?}),\n", path));
+    }
+    out.push_str("];\n");
+}
+
+/// Each file's path below `root`, parallel to its source array.
+fn write_path_array(out: &mut String, name: &str, files: &[PathBuf], root: &Path) {
+    out.push_str(&format!("pub static {name}: &[&str] = &[\n"));
+    for path in files {
+        let relative = path.strip_prefix(root).unwrap_or(path);
+        out.push_str(&format!("    {:?},\n", relative.to_string_lossy()));
     }
     out.push_str("];\n");
 }
@@ -83,7 +93,7 @@ fn main() {
 
     // PHPStan's own overrides of built-in class declarations (the
     // top-level `stubs/*.stub` files; `stubs/runtime/` is PHPStan's own
-    // polyfills) - `php_stubs.rs` reads their class-level `@template`
+    // polyfills) - the stub pipeline reads their class-level `@template`
     // declarations.
     let mut phpstan_stub_files: Vec<PathBuf> = fs::read_dir(vendor.join("phpstan-src/stubs"))
         .map(|entries| {
@@ -112,18 +122,27 @@ fn main() {
         generated.push_str(&format!("    {extension:?},\n"));
     }
     generated.push_str("];\n");
+    write_path_array(
+        &mut generated,
+        "PHPSTORM_STUBS_PATHS",
+        &phpstorm_files,
+        &stubs_root,
+    );
     write_source_array(&mut generated, "PHPSTAN_SRC_SOURCES", &phpstan_src_files);
+    write_path_array(
+        &mut generated,
+        "PHPSTAN_SRC_PATHS",
+        &phpstan_src_files,
+        &vendor.join("phpstan-src/src"),
+    );
     write_source_array(&mut generated, "PHPSTAN_STUB_SOURCES", &phpstan_stub_files);
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
-    fs::write(
-        Path::new(&out_dir).join("phpstorm_stubs_generated.rs"),
-        generated,
-    )
-    .unwrap();
+    fs::write(Path::new(&out_dir).join("stub_sources.rs"), generated).unwrap();
 
     println!("cargo:rerun-if-changed=../../vendor/phpstorm-stubs");
     println!("cargo:rerun-if-changed=../../vendor/phpstan-src/src");
     println!("cargo:rerun-if-changed=../../vendor/phpstan-src/stubs");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=index.tsv");
 }

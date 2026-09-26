@@ -10,6 +10,7 @@ composer.workspace = true
 diagnostics.workspace = true
 phpdoc.workspace = true
 sql.workspace = true
+stub-sources.workspace = true
 syntax.workspace = true
 types.workspace = true
 clap = { version = "4", features = ["derive"] }

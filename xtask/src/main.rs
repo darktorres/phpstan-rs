@@ -18,6 +18,7 @@ use std::time::Instant;
 
 mod arch;
 mod modgraph;
+mod stub_index;
 
 const LEVELS: [&str; 12] = [
     "unset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
@@ -34,6 +35,7 @@ fn main() -> ExitCode {
         Some("tests") => test_manifest(),
         Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
         Some("arch") => arch::arch(&root()),
+        Some("stub-index") => write_stub_index(),
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
         Some("rekey") => rekey(&args[1..]),
@@ -60,6 +62,7 @@ const USAGE: &str = "usage: cargo xtask <command>
                          gates/module-graph.txt (--inventory lists every
                          crossing edge)
   arch                   check the architecture rules
+  stub-index             regenerate crates/stub-sources/index.tsv
   baseline               generate the reference baselines (Stage A only)
   approve <slug> [--full] [--against <commit>]
                          write HEAD's snapshot diffs against its parent (or
@@ -67,6 +70,37 @@ const USAGE: &str = "usage: cargo xtask <command>
                          them in)
   rekey <old-hash>       move <old-hash>'s snapshots to HEAD after an amend
                          that only added gates/ files";
+
+/// The embedded stub corpora, in index priority order.
+pub(crate) fn stub_corpora() -> Vec<stub_index::Corpus<'static>> {
+    vec![
+        stub_index::Corpus {
+            tag: "c",
+            files: stub_sources::PHPSTORM_STUBS_PATHS
+                .iter()
+                .zip(stub_sources::PHPSTORM_STUBS_SOURCES)
+                .zip(stub_sources::PHPSTORM_STUBS_EXTENSIONS)
+                .map(|((path, source), extension)| (*path, *source, Some(*extension)))
+                .collect(),
+        },
+        stub_index::Corpus {
+            tag: "s",
+            files: stub_sources::PHPSTAN_SRC_PATHS
+                .iter()
+                .zip(stub_sources::PHPSTAN_SRC_SOURCES)
+                .map(|(path, source)| (*path, *source, None))
+                .collect(),
+        },
+    ]
+}
+
+fn write_stub_index() -> Result<(), String> {
+    let index = stub_index::generate(&stub_corpora());
+    write(
+        &root().join("crates/stub-sources/index.tsv"),
+        index.as_bytes(),
+    )
+}
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -857,7 +891,8 @@ fn hyperfine_stats(path: &Path) -> Result<(f64, f64), String> {
 /// library crates `cargo build -p phpstan-rs` must (`Some(true)`) or must
 /// not (`Some(false)`) rebuild after it; unlisted crates are unconstrained.
 /// An edit inside the package rebuilds no extracted crate; a lexer edit
-/// rebuilds `syntax` and so everything above it.
+/// rebuilds `syntax` and so everything above it; a stub edit rebuilds
+/// `stub_sources` and only its dependents.
 /// A library crate and whether a scenario must rebuild it.
 type RebuildTarget = (&'static str, bool);
 
@@ -871,6 +906,8 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("phpdoc", false),
             ("sql", false),
             ("diagnostics", false),
+            ("composer", false),
+            ("stub_sources", false),
         ],
     ),
     (
@@ -882,12 +919,14 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("phpdoc", false),
             ("sql", false),
             ("diagnostics", false),
+            ("composer", false),
+            ("stub_sources", false),
         ],
     ),
     (
         "lexer",
         "crates/syntax/src/lexer.rs",
-        &[("syntax", true), ("sql", false)],
+        &[("syntax", true), ("sql", false), ("stub_sources", false)],
     ),
     (
         "stub",
@@ -898,6 +937,8 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("phpdoc", false),
             ("sql", false),
             ("diagnostics", false),
+            ("composer", false),
+            ("stub_sources", true),
         ],
     ),
 ];

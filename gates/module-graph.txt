@@ -58,6 +58,7 @@ extern phpdoc phpdoc
 extern sql sql
 extern diagnostics diagnostics
 extern composer composer
+extern stub_sources stub-sources
 
 module output app
 module baseline project

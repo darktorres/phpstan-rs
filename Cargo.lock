@@ -1595,6 +1595,7 @@ dependencies = [
  "phpstan-rs-diagnostics",
  "phpstan-rs-phpdoc",
  "phpstan-rs-sql",
+ "phpstan-rs-stub-sources",
  "phpstan-rs-syntax",
  "phpstan-rs-types",
  "proptest",
@@ -1646,6 +1647,10 @@ dependencies = [
  "serde",
  "sqlparser",
 ]
+
+[[package]]
+name = "phpstan-rs-stub-sources"
+version = "0.1.0"
 
 [[package]]
 name = "phpstan-rs-syntax"
@@ -3067,6 +3072,8 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 name = "xtask"
 version = "0.0.0"
 dependencies = [
+ "phpstan-rs-stub-sources",
+ "phpstan-rs-syntax",
  "proc-macro2",
  "serde_json",
  "syn 2.0.119",

@@ -47,7 +47,9 @@ use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 use types::{self, AccessoryKind, Shape, TemplateParam, Type};
 
-include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
+use stub_sources::{
+    PHPSTAN_SRC_SOURCES, PHPSTAN_STUB_SOURCES, PHPSTORM_STUBS_EXTENSIONS, PHPSTORM_STUBS_SOURCES,
+};
 
 /// phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
 /// genuinely accurate) declaration of `array_multisort`'s variadic tail
