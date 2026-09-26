@@ -128,6 +128,44 @@ fn patch_usleep(stubs: &mut [(Arc<str>, FunctionSig)]) {
     }
 }
 
+/// The `array_udiff`/`array_uintersect`/`array_diff_ukey` family takes its
+/// comparison callback(s) as the last argument(s) of the variadic
+/// `...$rest`, which phpstorm-stubs types `array` only; `$rest` holds
+/// either. (`functionMap.php` spells out each arity as its own variant.)
+fn patch_array_callback_family(stubs: &mut [(Arc<str>, FunctionSig)]) {
+    const FAMILY: &[&str] = &[
+        "array_udiff",
+        "array_udiff_assoc",
+        "array_udiff_uassoc",
+        "array_uintersect",
+        "array_uintersect_assoc",
+        "array_uintersect_uassoc",
+        "array_diff_ukey",
+        "array_diff_uassoc",
+        "array_intersect_ukey",
+        "array_intersect_uassoc",
+    ];
+    for (name, sig) in stubs.iter_mut() {
+        if !FAMILY.contains(&name.as_ref()) {
+            continue;
+        }
+        if let Some(rest) = sig.params.iter_mut().find(|p| p.variadic) {
+            let ty = Type::Union(vec![
+                Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(Type::Mixed(false)),
+                ),
+                Type::Callable(None),
+            ]);
+            rest.ty = ty.clone();
+            rest.ty_native = ty.clone();
+            if rest.doc_ty.is_some() {
+                rest.doc_ty = Some(ty);
+            }
+        }
+    }
+}
+
 /// Phpstorm-stubs' own `#[ArrayShape(["key" => "type", ...])]` attribute
 /// (a JetBrains/PhpStorm IDE-inspection convention) is never read by
 /// real PHPStan at all - zero occurrences of "ArrayShape" anywhere in
@@ -913,6 +951,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_array_multisort_by_ref(&mut functions);
         patch_debug_backtrace(&mut functions);
         patch_usleep(&mut functions);
+        patch_array_callback_family(&mut functions);
         patch_functionmap_array_shapes(&mut functions);
         patch_reflection_class_constructor_template(&mut classes);
         patch_reflection_method_and_property_templates(&mut classes);
