@@ -27,7 +27,7 @@ pub(crate) struct MemberVisibilityCheck<'a> {
 struct StaticPrivateAccessCheck<'a> {
     verb: &'a str,
     noun: &'a str,
-    identifier: &'a str,
+    identifier: &'static str,
     owner: &'a str,
     member_display: &'a str,
     span: Span,
@@ -125,7 +125,7 @@ impl<'a> Checker<'a> {
             format!("access to {word} {describe}"),
             span,
             0,
-            &format!("{kind}.{word}"),
+            format!("{kind}.{word}"),
         );
     }
 

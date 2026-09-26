@@ -1634,7 +1634,13 @@ impl<'a> Checker<'a> {
     /// is `&str` here, not `impl Into<String>` like `DiagnosticBuilder::new`
     /// takes it, so call sites can pass a `&'static str` literal without an
     /// extra `.to_string()`.
-    pub(crate) fn report(&mut self, message: String, span: Span, level: u8, identifier: &str) {
+    pub(crate) fn report(
+        &mut self,
+        message: String,
+        span: Span,
+        level: u8,
+        identifier: impl Into<crate::diagnostic::Identifier>,
+    ) {
         self.diagnostics
             .push(DiagnosticBuilder::new(message, span, level, identifier).build());
     }

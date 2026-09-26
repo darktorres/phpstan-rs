@@ -49,7 +49,7 @@ impl<'a> Checker<'a> {
                         format!("calling {name}::{method}() outside of class scope"),
                         span,
                         0,
-                        &format!("outOfClass.{keyword}"),
+                        format!("outOfClass.{keyword}"),
                     );
                     return;
                 };

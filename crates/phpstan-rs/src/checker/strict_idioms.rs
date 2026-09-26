@@ -118,7 +118,13 @@ impl<'a> Checker<'a> {
         (!inside_equals).then(|| class.to_string())
     }
 
-    fn nullable_operand(&mut self, operand: &Expr, locals: &Locals, context: &str, id: &str) {
+    fn nullable_operand(
+        &mut self,
+        operand: &Expr,
+        locals: &Locals,
+        context: &str,
+        id: &'static str,
+    ) {
         let ty = self.infer_expr(operand, locals);
         if is_nullable(&ty) {
             self.report(
@@ -162,7 +168,7 @@ impl<'a> Checker<'a> {
                                     ),
                                     arg.value.span,
                                     0,
-                                    &format!("{which}.object"),
+                                    format!("{which}.object"),
                                 );
                             }
                         }

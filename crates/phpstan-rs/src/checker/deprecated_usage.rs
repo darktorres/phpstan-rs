@@ -81,7 +81,7 @@ impl<'a> Checker<'a> {
                 message,
                 span,
                 0,
-                &format!("{kind_word}.deprecated{type_word}"),
+                format!("{kind_word}.deprecated{type_word}"),
             );
             return;
         }
@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
             ),
             reason,
         );
-        self.report(message, span, 0, &format!("{kind_word}.deprecated"));
+        self.report(message, span, 0, format!("{kind_word}.deprecated"));
     }
 
     /// `property.deprecated`/`staticProperty.deprecated` - an instance or
@@ -142,7 +142,7 @@ impl<'a> Checker<'a> {
                 message,
                 span,
                 0,
-                &format!("{kind_word}.deprecated{type_word}"),
+                format!("{kind_word}.deprecated{type_word}"),
             );
             return;
         }
@@ -157,7 +157,7 @@ impl<'a> Checker<'a> {
             ),
             reason,
         );
-        self.report(message, span, 0, &format!("{kind_word}.deprecated"));
+        self.report(message, span, 0, format!("{kind_word}.deprecated"));
     }
 
     /// `classConstant.deprecated` - a class-constant access. Same
@@ -187,7 +187,7 @@ impl<'a> Checker<'a> {
                 message,
                 span,
                 0,
-                &format!("classConstant.deprecated{type_word}"),
+                format!("classConstant.deprecated{type_word}"),
             );
             return;
         }

@@ -153,7 +153,7 @@ fn type_class_names(ty: &Type, out: &mut Vec<String>) {
 
 /// `(selectors, the class's related classes, whether one must match,
 /// verb, identifier)`.
-type RelationCheck<'a> = (&'a [Selector], &'a [String], bool, &'a str, &'a str);
+type RelationCheck<'a> = (&'a [Selector], &'a [String], bool, &'a str, &'static str);
 
 struct Dependency {
     target: String,
@@ -453,7 +453,7 @@ impl Project {
         deps: &[Dependency],
     ) -> Vec<Diagnostic> {
         let mut out = Vec::new();
-        let report = |out: &mut Vec<Diagnostic>, span: Span, message: String, id: &str| {
+        let report = |out: &mut Vec<Diagnostic>, span: Span, message: String, id: &'static str| {
             out.push(DiagnosticBuilder::new(message, span, 0, id).build());
         };
         for dep in deps {

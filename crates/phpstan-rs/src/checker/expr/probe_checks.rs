@@ -188,7 +188,7 @@ impl<'a> Checker<'a> {
             format!("Variable ${name} {operator_description} always exists and {verdict}."),
             e.span,
             0,
-            &format!("{identifier_prefix}.variable"),
+            format!("{identifier_prefix}.variable"),
         );
     }
 
@@ -249,7 +249,7 @@ impl<'a> Checker<'a> {
                         ),
                         e.span,
                         0,
-                        &format!("{identifier_prefix}.offset"),
+                        format!("{identifier_prefix}.offset"),
                     );
                     return None;
                 }
@@ -326,7 +326,7 @@ impl<'a> Checker<'a> {
                     ),
                     e.span,
                     0,
-                    &format!("{identifier_prefix}.offset"),
+                    format!("{identifier_prefix}.offset"),
                 );
             }
             ExprKind::PropertyAccess(base, prop, _) => {
@@ -348,7 +348,7 @@ impl<'a> Checker<'a> {
                     ),
                     e.span,
                     0,
-                    &format!("{identifier_prefix}.property"),
+                    format!("{identifier_prefix}.property"),
                 );
             }
             _ => {}
@@ -407,7 +407,7 @@ impl<'a> Checker<'a> {
             ),
             span,
             4,
-            &format!("{rule_name}.always{}", if outcome { "True" } else { "False" }),
+            format!("{rule_name}.always{}", if outcome { "True" } else { "False" }),
         );
     }
 
@@ -486,7 +486,7 @@ impl<'a> Checker<'a> {
             ),
             span,
             4,
-            &format!("{rule_name}.always{}", if outcome { "True" } else { "False" }),
+            format!("{rule_name}.always{}", if outcome { "True" } else { "False" }),
         );
     }
 
@@ -561,7 +561,7 @@ impl<'a> Checker<'a> {
             ),
             span,
             4,
-            &format!(
+            format!(
                 "{rule_name}.always{}",
                 if outcome { "True" } else { "False" }
             ),

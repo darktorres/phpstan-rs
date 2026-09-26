@@ -99,7 +99,7 @@ impl<'a> Checker<'a> {
                 ),
                 l.span,
                 4,
-                &format!("{kind}.leftAlways{}", if value { "True" } else { "False" }),
+                format!("{kind}.leftAlways{}", if value { "True" } else { "False" }),
             );
         }
         if is_first_level {
@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
                 ),
                 r.span,
                 4,
-                &format!("{kind}.rightAlways{}", if value { "True" } else { "False" }),
+                format!("{kind}.rightAlways{}", if value { "True" } else { "False" }),
             );
         }
         // Deliberately bypasses `inferred_constant_condition` here (unlike
@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
                 ),
                 whole.span,
                 4,
-                &format!("{kind}.always{}", if value { "True" } else { "False" }),
+                format!("{kind}.always{}", if value { "True" } else { "False" }),
             );
         }
     }
@@ -159,7 +159,7 @@ impl<'a> Checker<'a> {
                 ),
                 l.span,
                 4,
-                &format!(
+                format!(
                     "logicalXor.leftAlways{}",
                     if value { "True" } else { "False" }
                 ),
@@ -173,7 +173,7 @@ impl<'a> Checker<'a> {
                 ),
                 r.span,
                 4,
-                &format!(
+                format!(
                     "logicalXor.rightAlways{}",
                     if value { "True" } else { "False" }
                 ),

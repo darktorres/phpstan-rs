@@ -77,3 +77,17 @@ fn several_tips_show_as_a_bulleted_list() {
         .build();
     assert_eq!(two.tip_text().as_deref(), Some("• first\n• second"));
 }
+
+#[test]
+fn an_identifier_is_dot_separated_alphanumeric_segments() {
+    use crate::diagnostic::Identifier;
+    assert!(Identifier::is_valid("argument.type"));
+    assert!(Identifier::is_valid("phpstanApi.class"));
+    assert!(Identifier::is_valid("ignore"));
+    assert!(!Identifier::is_valid(""));
+    assert!(!Identifier::is_valid("argument..type"));
+    assert!(!Identifier::is_valid(".type"));
+    assert!(!Identifier::is_valid("argument.type."));
+    assert!(!Identifier::is_valid("argument-type"));
+    assert!(!Identifier::is_valid("argument type"));
+}

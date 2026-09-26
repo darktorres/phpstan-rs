@@ -739,7 +739,7 @@ impl Project {
                         return false;
                     }
                     if let Some(ids) = ignores.identifiers.get(&line)
-                        && let Some(id) = ids.iter().find(|id| **id == d.identifier)
+                        && let Some(id) = ids.iter().find(|id| ***id == *d.identifier)
                     {
                         matched_ids.insert((line, id.as_str()));
                         return false;
@@ -753,7 +753,7 @@ impl Project {
             let trait_lines = trait_line_ranges(&file.ast);
             let in_trait = |line: u32| trait_lines.iter().any(|(a, b)| (*a..=*b).contains(&line));
             let mut unmatched: Vec<Diagnostic> = Vec::new();
-            let mut unmatched_line = |line: u32, message: String, identifier: &str| {
+            let mut unmatched_line = |line: u32, message: String, identifier: &'static str| {
                 let at = syntax::token::Position { line, col: 1 };
                 unmatched.push(
                     diagnostic::DiagnosticBuilder::new(
@@ -1713,7 +1713,7 @@ impl Project {
                         .ignores
                         .identifiers
                         .get(&d.span.start.line)
-                        .is_some_and(|ids| ids.iter().any(|id| id == &d.identifier))
+                        .is_some_and(|ids| ids.iter().any(|id| **id == *d.identifier))
             });
         }
         (
@@ -2013,7 +2013,7 @@ impl Project {
             message,
             span,
             level: 5,
-            identifier: identifier.to_string(),
+            identifier: identifier.into(),
             tips: Vec::new(),
             non_ignorable: false,
             fix: None,

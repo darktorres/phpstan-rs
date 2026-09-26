@@ -1,7 +1,72 @@
 //! What a check reports: a [`Diagnostic`], assembled through
 //! [`DiagnosticBuilder`], with an optional textual [`DiagnosticFix`].
 
+use std::borrow::Cow;
+
 use syntax::token::Span;
+
+/// A diagnostic kind's machine identifier: dot-separated ASCII
+/// alphanumeric segments (`argument.type`, `class.notFound`), the syntax
+/// PHPStan identifiers and `@phpstan-ignore` share.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Identifier(Cow<'static, str>);
+
+impl Identifier {
+    /// Whether `text` is a well-formed identifier.
+    pub fn is_valid(text: &str) -> bool {
+        !text.is_empty()
+            && text.split('.').all(|segment| {
+                !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_alphanumeric())
+            })
+    }
+
+    fn checked(text: Cow<'static, str>) -> Identifier {
+        debug_assert!(Identifier::is_valid(&text), "malformed identifier {text:?}");
+        Identifier(text)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&'static str> for Identifier {
+    fn from(text: &'static str) -> Identifier {
+        Identifier::checked(Cow::Borrowed(text))
+    }
+}
+
+impl From<String> for Identifier {
+    fn from(text: String) -> Identifier {
+        Identifier::checked(Cow::Owned(text))
+    }
+}
+
+impl std::ops::Deref for Identifier {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Identifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl PartialEq<str> for Identifier {
+    fn eq(&self, other: &str) -> bool {
+        *self.0 == *other
+    }
+}
+
+impl PartialEq<&str> for Identifier {
+    fn eq(&self, other: &&str) -> bool {
+        *self.0 == **other
+    }
+}
 
 /// Loosely mirrors PHPStan's own rule-gating levels (0 lowest/laxest,
 /// per `conf/config.levelN.neon`): 0 for the
@@ -36,7 +101,7 @@ pub struct Diagnostic {
     /// involved. Not guaranteed to match phpstan/phpstan's own strings
     /// one-for-one, though it reuses real PHPStan's spelling where
     /// confident.
-    pub identifier: String,
+    pub identifier: Identifier,
     /// Human-facing hints shown below the main message - real PHPStan's
     /// "💡 Tip: ..." lines. See `tip_text` for how several are shown.
     pub tips: Vec<String>,
@@ -120,7 +185,7 @@ pub struct DiagnosticBuilder {
     message: String,
     span: Span,
     level: u8,
-    identifier: String,
+    identifier: Identifier,
     tips: Vec<String>,
     non_ignorable: bool,
     fix: Option<DiagnosticFix>,
@@ -135,7 +200,7 @@ impl DiagnosticBuilder {
         message: impl Into<String>,
         span: Span,
         level: u8,
-        identifier: impl Into<String>,
+        identifier: impl Into<Identifier>,
     ) -> Self {
         DiagnosticBuilder {
             message: message.into(),

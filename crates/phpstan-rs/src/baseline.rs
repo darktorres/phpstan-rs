@@ -203,7 +203,7 @@ fn entries_for(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
             let key = Entry {
                 file: file.clone(),
                 message: d.message.clone(),
-                identifier: (!d.identifier.is_empty()).then(|| d.identifier.clone()),
+                identifier: (!d.identifier.is_empty()).then(|| d.identifier.to_string()),
                 count: 1,
             };
             *counts.entry(key).or_default() += 1;
@@ -412,7 +412,7 @@ pub fn filter(
                 return false;
             }
             if baseline.mode == MatchMode::Identifier
-                && take(by_identifier.get(&(normalized.clone(), d.identifier.clone())))
+                && take(by_identifier.get(&(normalized.clone(), d.identifier.to_string())))
             {
                 return false;
             }

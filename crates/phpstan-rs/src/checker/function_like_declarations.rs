@@ -420,7 +420,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_declaration(&mut self, message: &str, span: Span, identifier: &str) {
+    fn report_declaration(&mut self, message: &str, span: Span, identifier: &'static str) {
         self.report_builder(
             DiagnosticBuilder::new(message.to_string(), span, 0, identifier).non_ignorable(),
         );

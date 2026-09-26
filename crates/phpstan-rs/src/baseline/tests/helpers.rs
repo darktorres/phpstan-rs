@@ -23,7 +23,7 @@ pub(super) fn temp_path(label: &str) -> PathBuf {
     ))
 }
 
-pub(super) fn diag_with(message: &str, identifier: &str) -> Diagnostic {
+pub(super) fn diag_with(message: &str, identifier: &'static str) -> Diagnostic {
     DiagnosticBuilder::new(
         message.to_string(),
         Span {

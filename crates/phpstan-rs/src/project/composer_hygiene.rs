@@ -147,7 +147,7 @@ fn at_line(line: u32) -> Span {
     Span { start: at, end: at }
 }
 
-fn diagnostic(message: String, span: Span, identifier: &str) -> Diagnostic {
+fn diagnostic(message: String, span: Span, identifier: &'static str) -> Diagnostic {
     DiagnosticBuilder::new(message, span, 0, identifier).build()
 }
 

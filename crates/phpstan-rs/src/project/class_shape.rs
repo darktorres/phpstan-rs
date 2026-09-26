@@ -84,7 +84,7 @@ fn stmt_contains_parent_call(stmt: &Stmt, method: &str) -> bool {
             .any(|child| stmt_contains_parent_call(child, method))
 }
 
-fn diagnostic(message: String, span: Span, level: u8, id: &str) -> DiagnosticBuilder {
+fn diagnostic(message: String, span: Span, level: u8, id: &'static str) -> DiagnosticBuilder {
     DiagnosticBuilder::new(message, span, level, id)
 }
 
@@ -304,13 +304,14 @@ impl Project {
                 let body = &f.body;
                 let found = contains_parent_call(body, &f.name);
                 let label = format!("{fqn}::{}", f.name);
-                let mut report = |message: String, id: &str, fix: Option<(Span, String)>| {
-                    let mut builder = diagnostic(message, f.name_span, 2, id);
-                    if let Some((span, text)) = fix {
-                        builder = builder.fix(span, text, format!("Call {call}"));
-                    }
-                    out.push(builder.build());
-                };
+                let mut report =
+                    |message: String, id: &'static str, fix: Option<(Span, String)>| {
+                        let mut builder = diagnostic(message, f.name_span, 2, id);
+                        if let Some((span, text)) = fix {
+                            builder = builder.fix(span, text, format!("Call {call}"));
+                        }
+                        out.push(builder.build());
+                    };
                 if rule.invocation == Invocation::Never {
                     if found {
                         report(

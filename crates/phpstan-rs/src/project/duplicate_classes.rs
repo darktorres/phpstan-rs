@@ -87,7 +87,7 @@ pub(crate) fn check_duplicate_class_declarations(
                 message: message.clone(),
                 span: s.span,
                 level: 0,
-                identifier: identifier.clone(),
+                identifier: identifier.clone().into(),
                 tips: Vec::new(),
                 non_ignorable: true,
                 fix: None,

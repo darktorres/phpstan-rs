@@ -366,7 +366,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_property_declaration(&mut self, message: String, span: Span, identifier: &str) {
+    fn report_property_declaration(
+        &mut self,
+        message: String,
+        span: Span,
+        identifier: &'static str,
+    ) {
         self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
     }
 }

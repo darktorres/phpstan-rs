@@ -485,7 +485,7 @@ impl<'a> Checker<'a> {
                     ),
                     param.name_span,
                     0,
-                    &format!("{identifier_prefix}.parameterByRef"),
+                    format!("{identifier_prefix}.parameterByRef"),
                 );
             }
         }
@@ -500,7 +500,7 @@ impl<'a> Checker<'a> {
                 format!("{kind_word} {label}() is pure but has no return value."),
                 f.name_span,
                 0,
-                &format!("{identifier_prefix}.void"),
+                format!("{identifier_prefix}.void"),
             );
         }
         let class_name = if is_method {
@@ -525,7 +525,7 @@ impl<'a> Checker<'a> {
                 ),
                 occ.span,
                 0,
-                &identifier,
+                identifier.clone(),
             );
         }
     }

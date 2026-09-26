@@ -76,7 +76,7 @@ impl<'a> Checker<'a> {
                 format!("using {name} outside of class scope"),
                 span,
                 0,
-                &format!("outOfClass.{keyword}"),
+                format!("outOfClass.{keyword}"),
             );
             return;
         };
@@ -199,7 +199,7 @@ impl<'a> Checker<'a> {
                 ),
                 span,
                 0,
-                &format!("new.{word}Constructor"),
+                format!("new.{word}Constructor"),
             );
         }
         true

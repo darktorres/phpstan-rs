@@ -244,7 +244,7 @@ pub(crate) fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
     LspDiagnostic {
         range: to_lsp_range(d.span),
         severity: Some(level_to_severity(d.level)),
-        code: Some(NumberOrString::String(d.identifier.clone())),
+        code: Some(NumberOrString::String(d.identifier.to_string())),
         source: Some("phpstan-rs".to_string()),
         message,
         ..Default::default()

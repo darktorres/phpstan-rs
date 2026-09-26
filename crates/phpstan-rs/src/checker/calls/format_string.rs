@@ -387,7 +387,7 @@ impl<'a> Checker<'a> {
                     format!("Call to {name} contains an invalid placeholder."),
                     span,
                     0,
-                    &format!("argument.{name}"),
+                    format!("argument.{name}"),
                 );
                 return None;
             };
@@ -421,7 +421,7 @@ impl<'a> Checker<'a> {
             count_message(name, Count::exact(placeholders), Count::exact(values)),
             span,
             0,
-            &format!("argument.{name}"),
+            format!("argument.{name}"),
         );
     }
 
@@ -465,7 +465,7 @@ impl<'a> Checker<'a> {
             count_message(name, placeholders, values),
             span,
             0,
-            &format!("argument.{name}"),
+            format!("argument.{name}"),
         );
     }
 

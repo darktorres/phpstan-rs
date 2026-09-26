@@ -58,7 +58,7 @@ pub struct IgnoreErrorEntry {
 impl IgnoreErrorEntry {
     fn matches(&self, path: &str, d: &Diagnostic) -> bool {
         if let Some(identifier) = &self.identifier
-            && identifier != &d.identifier
+            && *identifier != *d.identifier
         {
             return false;
         }

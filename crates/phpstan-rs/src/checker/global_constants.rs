@@ -190,7 +190,7 @@ impl<'a> Checker<'a> {
         class: Option<&str>,
         name: &str,
         value: &types::Type,
-        identifier: &str,
+        identifier: &'static str,
         span: Span,
     ) {
         let Some(configured) = self.registry.configured_constant_type(class, name).cloned() else {

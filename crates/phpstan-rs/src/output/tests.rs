@@ -13,7 +13,7 @@ fn diag_with_identifier(
     line: u32,
     col: u32,
     level: u8,
-    identifier: &str,
+    identifier: &'static str,
 ) -> Diagnostic {
     Diagnostic {
         message: message.to_string(),
@@ -22,7 +22,7 @@ fn diag_with_identifier(
             end: Position { line, col },
         },
         level,
-        identifier: identifier.to_string(),
+        identifier: identifier.into(),
         tips: Vec::new(),
         non_ignorable: false,
         fix: None,

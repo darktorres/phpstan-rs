@@ -530,7 +530,7 @@ impl<'a> Checker<'a> {
         bound
     }
 
-    fn report_non_ignorable(&mut self, message: String, span: Span, identifier: &str) {
+    fn report_non_ignorable(&mut self, message: String, span: Span, identifier: &'static str) {
         self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
     }
 }

@@ -463,7 +463,7 @@ impl<'a> Checker<'a> {
                             ),
                             c.span,
                             0,
-                            &format!("requireExtends.{}", class_kind_identifier(&info.kind)),
+                            format!("requireExtends.{}", class_kind_identifier(&info.kind)),
                         );
                     }
                     ClassKind::Class if info.is_final => {
@@ -518,7 +518,7 @@ impl<'a> Checker<'a> {
                         ),
                         c.span,
                         0,
-                        &format!("requireImplements.{}", class_kind_identifier(&info.kind)),
+                        format!("requireImplements.{}", class_kind_identifier(&info.kind)),
                     );
                 }
             }
@@ -1916,7 +1916,7 @@ impl<'a> Checker<'a> {
                 format!("Type {fqn} is not allowed to be a subtype of {parent_fqn}."),
                 span,
                 0,
-                &format!("{}.disallowedSubtype", class_kind_identifier(&kind)),
+                format!("{}.disallowedSubtype", class_kind_identifier(&kind)),
             );
         }
     }

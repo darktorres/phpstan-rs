@@ -59,7 +59,7 @@ impl<'a> Checker<'a> {
             format!("Do not use magic number {place}. Move to constant with a suitable name."),
             span,
             0,
-            &format!("magicNumber.{id}"),
+            format!("magicNumber.{id}"),
         );
     }
 

@@ -87,7 +87,7 @@ pub(crate) fn check_duplicate_function_declarations(
                     message: message.clone(),
                     span: s.span,
                     level: 0,
-                    identifier: "function.duplicate".to_string(),
+                    identifier: "function.duplicate".into(),
                     tips: Vec::new(),
                     non_ignorable: true,
                     fix: None,

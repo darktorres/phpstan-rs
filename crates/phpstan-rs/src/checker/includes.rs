@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
                 format!("Path in {construct}() \"{path}\" is not a file or it does not exist."),
                 span,
                 0,
-                &format!("{identifier_prefix}.fileNotFound"),
+                format!("{identifier_prefix}.fileNotFound"),
             );
         }
     }

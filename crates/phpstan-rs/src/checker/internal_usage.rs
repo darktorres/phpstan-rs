@@ -165,7 +165,7 @@ impl<'a> Checker<'a> {
                 format!("{kind_word}.internal"),
             ),
         };
-        self.report(message, span, 0, &identifier);
+        self.report(message, span, 0, identifier);
     }
 
     /// `RestrictedInternalPropertyUsageExtension` - same four-branch
@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
                 format!("{kind_word}.internal"),
             ),
         };
-        self.report(message, span, 0, &identifier);
+        self.report(message, span, 0, identifier);
     }
 
     /// `RestrictedInternalClassConstantUsageExtension`: a constant's
@@ -280,7 +280,7 @@ impl<'a> Checker<'a> {
                 "classConstant.internal".to_string(),
             ),
         };
-        self.report(message, span, 0, &identifier);
+        self.report(message, span, 0, identifier);
     }
 
     /// `RestrictedInternalClassNameUsageExtension`, narrowed to
@@ -374,7 +374,7 @@ impl<'a> Checker<'a> {
             message,
             span,
             0,
-            &format!("{identifier_prefix}.internal{type_word}"),
+            format!("{identifier_prefix}.internal{type_word}"),
         );
     }
 
@@ -458,7 +458,7 @@ impl<'a> Checker<'a> {
             ),
             span,
             0,
-            &format!("{id_prefix}Internal{type_word}"),
+            format!("{id_prefix}Internal{type_word}"),
         );
     }
 
@@ -477,7 +477,7 @@ impl<'a> Checker<'a> {
             ),
             span,
             0,
-            &format!("traitUse.internal{type_word}"),
+            format!("traitUse.internal{type_word}"),
         );
     }
 
@@ -598,7 +598,7 @@ impl<'a> Checker<'a> {
             ),
             span,
             0,
-            &format!("{id_prefix}.internal{type_word}"),
+            format!("{id_prefix}.internal{type_word}"),
         );
     }
 }

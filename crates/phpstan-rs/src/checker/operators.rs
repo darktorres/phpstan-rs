@@ -579,7 +579,7 @@ impl<'a> Checker<'a> {
                 format!("Cannot use {symbol} on a non-variable."),
                 span,
                 0,
-                &format!("{name}.expr"),
+                format!("{name}.expr"),
             );
             return;
         }
@@ -590,7 +590,7 @@ impl<'a> Checker<'a> {
             format!("Cannot use {symbol} on {inner_ty}."),
             span,
             0,
-            &format!("{name}.type"),
+            format!("{name}.type"),
         );
     }
 

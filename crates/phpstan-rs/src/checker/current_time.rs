@@ -41,7 +41,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_current_time(&mut self, message: String, span: Span, id: &str) {
+    fn report_current_time(&mut self, message: String, span: Span, id: &'static str) {
         self.report(message, span, 0, id);
     }
 

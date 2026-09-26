@@ -184,7 +184,7 @@ impl<'a> Checker<'a> {
                         ),
                         e.span,
                         0,
-                        &format!("{id}.nonNumeric"),
+                        format!("{id}.nonNumeric"),
                     );
                 }
                 return;
@@ -214,7 +214,7 @@ impl<'a> Checker<'a> {
                     ),
                     e.span,
                     0,
-                    &format!("{id}.{side}NonNumeric"),
+                    format!("{id}.{side}NonNumeric"),
                 );
             }
         }
@@ -409,7 +409,7 @@ impl<'a> Checker<'a> {
                 ),
                 span,
                 0,
-                &format!("{prefix}.{id}"),
+                format!("{prefix}.{id}"),
             );
             return;
         }

@@ -1836,7 +1836,7 @@ impl<'a> Checker<'a> {
                 ),
                 span,
                 0,
-                &format!("argument.{}", name.to_ascii_lowercase()),
+                format!("argument.{}", name.to_ascii_lowercase()),
             );
         }
     }

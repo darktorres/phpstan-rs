@@ -67,7 +67,7 @@
 use rustc_hash::FxHashMap;
 use std::path::Path;
 
-use crate::checker::{Checker, class_type_word};
+use crate::checker::Checker;
 use crate::composer;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 use crate::registry::{FunctionSig, Registry, is_phpstan_namespace};
@@ -702,7 +702,7 @@ impl<'a> Walker<'a> {
             message,
             span,
             level: 0,
-            identifier: "phpstanApi.instanceofType".to_string(),
+            identifier: "phpstanApi.instanceofType".into(),
             tips: vec![
                 "Learn more: https://phpstan.org/blog/why-is-instanceof-type-wrong-and-getting-deprecated"
                     .to_string(),
@@ -728,7 +728,7 @@ impl<'a> Walker<'a> {
         fqn: &str,
         action: &str,
         span: Span,
-        identifier: &str,
+        identifier: &'static str,
         ctx: &NameContext,
     ) {
         if !self.is_phpstan_code(ctx.namespace(), fqn) {
@@ -746,7 +746,7 @@ impl<'a> Walker<'a> {
             ),
             span,
             level: 0,
-            identifier: identifier.to_string(),
+            identifier: identifier.into(),
             tips: Vec::new(),
             non_ignorable: false,
             fix: None,
@@ -803,7 +803,7 @@ impl<'a> Walker<'a> {
             ),
             span,
             level: 0,
-            identifier: "phpstanApi.method".to_string(),
+            identifier: "phpstanApi.method".into(),
             tips: Vec::new(),
             non_ignorable: false,
             fix: None,
@@ -821,7 +821,7 @@ impl<'a> Walker<'a> {
         fqn: &str,
         action: &str,
         span: Span,
-        identifier: &str,
+        identifier: &'static str,
         ctx: &NameContext,
     ) {
         if !self.is_phpstan_code(ctx.namespace(), fqn) {
@@ -833,7 +833,7 @@ impl<'a> Walker<'a> {
             ),
             span,
             level: 0,
-            identifier: identifier.to_string(),
+            identifier: identifier.into(),
             tips: Vec::new(),
             non_ignorable: false,
             fix: None,
@@ -860,7 +860,7 @@ impl<'a> Walker<'a> {
         fqn: &str,
         action: &str,
         span: Span,
-        identifier: &str,
+        identifier: &'static str,
         check_do_not_implement: bool,
         ctx: &NameContext,
     ) {
@@ -877,7 +877,7 @@ impl<'a> Walker<'a> {
                 ),
                 span,
                 level: 0,
-                identifier: identifier.to_string(),
+                identifier: identifier.into(),
                 tips: Vec::new(),
                 non_ignorable: false,
                 fix: None,
@@ -891,7 +891,7 @@ impl<'a> Walker<'a> {
                 ),
                 span,
                 level: 0,
-                identifier: identifier.to_string(),
+                identifier: identifier.into(),
                 tips: Vec::new(),
                 non_ignorable: false,
                 fix: None,
@@ -1048,7 +1048,7 @@ impl<'a> Walker<'a> {
                 .to_string(),
             span,
             level: 0,
-            identifier: "phpstanApi.phpstanNamespace".to_string(),
+            identifier: "phpstanApi.phpstanNamespace".into(),
             tips: vec![
                 "See:\n   https://phpstan.org/developing-extensions/backward-compatibility-promise"
                     .to_string(),
@@ -1079,7 +1079,7 @@ impl<'a> Walker<'a> {
             ),
             span,
             level: 0,
-            identifier: "phpParser.classRenamed".to_string(),
+            identifier: "phpParser.classRenamed".into(),
             tips: Vec::new(),
             non_ignorable: false,
             fix: None,
@@ -1104,7 +1104,7 @@ impl<'a> Walker<'a> {
             ),
             span,
             level: 0,
-            identifier: "phpstanApi.runtimeReflection".to_string(),
+            identifier: "phpstanApi.runtimeReflection".into(),
             tips: Vec::new(),
             non_ignorable: false,
             fix: None,
@@ -1134,7 +1134,7 @@ impl<'a> Walker<'a> {
             ),
             span,
             level: 0,
-            identifier: "phpstanApi.runtimeReflection".to_string(),
+            identifier: "phpstanApi.runtimeReflection".into(),
             tips: Vec::new(),
             non_ignorable: false,
             fix: None,
@@ -1368,9 +1368,13 @@ impl<'a> Walker<'a> {
                 {
                     if !info.is_api {
                         let action = format!("instanceof {fqn}");
-                        let identifier =
-                            format!("phpstanApi.{}", class_type_word(info.kind).to_lowercase());
-                        self.report_always(&fqn, &action, e.span, &identifier, ctx);
+                        let identifier = match info.kind {
+                            ClassKind::Class => "phpstanApi.class",
+                            ClassKind::Interface => "phpstanApi.interface",
+                            ClassKind::Trait => "phpstanApi.trait",
+                            ClassKind::Enum => "phpstanApi.enum",
+                        };
+                        self.report_always(&fqn, &action, e.span, identifier, ctx);
                     } else if fqn != "PHPStan\\Type\\Type" && info.kind != ClassKind::Interface {
                         self.diagnostics.push(Diagnostic {
                             message: format!(
@@ -1378,7 +1382,7 @@ impl<'a> Walker<'a> {
                             ),
                             span: e.span,
                             level: 0,
-                            identifier: "phpstanApi.instanceofAssumption".to_string(),
+                            identifier: "phpstanApi.instanceofAssumption".into(),
                             tips: Vec::new(),
                             non_ignorable: false,
                             fix: None,
