@@ -999,7 +999,10 @@ arguments, provenance, no AST bodies.
 
 **C4. Snapshots and lazy resolution**, one commit each:
 - per-class memoized resolution replacing the passes;
-- `ReflectionBuilder::apply` snapshots;
+- `ReflectionBuilder::apply` snapshots, which own their names: the
+  registry's and checker's calls to the process-wide
+  `syntax::intern::intern` (about 115) go through the project's interner,
+  so a session's names are reclaimed with it;
 - the three staleness fixes (approved deltas).
 
 **C5. Locator chain and stub layer**, one commit each:
@@ -1037,6 +1040,8 @@ sites, among them the narrowing exclusion in `narrowing/type_ops.rs` and
 the doc-vs-native reconciliation in `function_sig/type_resolution.rs`,
 which runs at registry build) switch to the hierarchy-aware relation, which
 lazy reflection makes available there - an approved-delta commit.
+`ClassHierarchy` gains the enum-cases query §3.2 lists, with the first
+relation that needs it.
 
 **C9. Summaries.** Purity and global-variable inference leave reflection for
 the summaries API. The ROADMAP mapping is recorded.
@@ -1165,7 +1170,10 @@ lands here, each its own commit:
   `syntax::printer`;
 - `accepts` reasons: `Relation::accepts` fills `AcceptsResult.reasons`
   (B4 ships the field empty), and the argument, return and property type
-  rules show them as tips.
+  rules show them as tips;
+- PHPStan's standard tip helpers (§3.7: discovering symbols,
+  `treatPhpDocTypesAsCertain`, and the rest), used by the rules that show
+  those tips.
 
 **E4. Extension modules.**
 - Order:
@@ -1179,6 +1187,11 @@ lands here, each its own commit:
   8. ext-disallowed-calls;
   9. ext-shipmonk, ext-type-perfect, ext-voku, ext-sidz, ext-slam,
      ext-psr3, ext-language-extensions and ext-extras.
+- Extensions register parse-time visitors of their own (§3.1's
+  annotations), through the registration API.
+- ext-sql resolves static-schema SQL (SELECT/CTE/derived-table columns
+  against the catalog) and validates parameters through an `sql` API;
+  `sqlparser` leaves the package.
 - The Doctrine QueryBuilder chain becomes extension type data, using
   method type-specifying (statement-level `$qb->andWhere()`) and an
   `ExpressionTypeResolverExtension`. This is an approved-delta commit with
