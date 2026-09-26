@@ -1764,11 +1764,10 @@ impl<'a> Checker<'a> {
                 if cast.kind() == CastKind::String {
                     self.check_implicit_tostring_usage(&inner_ty, e.span);
                 }
-                let cast_ty = cast_result_type(cast.kind());
                 if self.registry.check_useless_casts && cast.kind() != CastKind::Void {
-                    self.check_useless_cast(&cast_ty, &inner_ty, e.span);
+                    self.check_useless_cast(&cast_result_type(cast.kind()), &inner_ty, e.span);
                 }
-                cast_ty
+                self.cast_type(cast.kind(), &inner_ty)
             }
             // See `ExprKind::ShellExec`'s own doc comment - a thin
             // wrapper around the identical `Call` a plain `shell_exec()`
@@ -4397,7 +4396,10 @@ impl<'a> Checker<'a> {
             ExprKind::Throw(_) => Type::Never,
             ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
             ExprKind::ShellExec(inner) => self.infer_expr(inner, locals),
-            ExprKind::Cast(cast, _) => cast_result_type(cast.kind()),
+            ExprKind::Cast(cast, inner) => {
+                let inner_ty = self.infer_expr(inner, locals);
+                self.cast_type(cast.kind(), &inner_ty)
+            }
             ExprKind::Unary(UnaryOp::Not, _) => Type::Bool,
             // Real PHP's unary minus/plus convert a numeric string
             // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) -
@@ -6167,7 +6169,21 @@ fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
     }
 }
 
-/// The type a cast of this kind produces.
+impl Checker<'_> {
+    /// The type a cast of `inner_ty` produces: the coercion of the value
+    /// where PHP can make one, the cast's plain target type otherwise.
+    fn cast_type(&self, kind: CastKind, inner_ty: &Type) -> Type {
+        let coerced = match kind {
+            CastKind::Int => inner_ty.to_integer(self.registry),
+            CastKind::Float => inner_ty.to_float(self.registry),
+            CastKind::String => inner_ty.to_string_type(self.registry),
+            _ => None,
+        };
+        coerced.unwrap_or_else(|| cast_result_type(kind))
+    }
+}
+
+/// The type a cast of this kind produces, whatever it casts.
 fn cast_result_type(kind: CastKind) -> Type {
     match kind {
         CastKind::Int => Type::Int,

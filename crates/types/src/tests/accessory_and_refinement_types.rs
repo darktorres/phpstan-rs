@@ -1,5 +1,6 @@
 //! Accessory and refinement pseudo-types (list, class-string, int ranges, array shapes, etc.).
 use super::super::*;
+use super::is_subtype;
 
 #[test]
 fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
@@ -472,4 +473,20 @@ fn a_positional_class_constant_field_is_not_read_as_a_key() {
     let fields = fields.named_fields();
     let keys: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
     assert_eq!(keys, ["0", "1"]);
+}
+
+#[test]
+fn a_numeric_string_is_never_empty() {
+    assert!(is_subtype(
+        &parse_type_string("numeric-string"),
+        &parse_type_string("non-empty-string")
+    ));
+    assert!(is_subtype(
+        &parse_type_string("decimal-int-string"),
+        &parse_type_string("non-empty-string")
+    ));
+    assert!(!is_subtype(
+        &parse_type_string("numeric-string"),
+        &parse_type_string("non-falsy-string")
+    ));
 }

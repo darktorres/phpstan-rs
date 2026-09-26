@@ -199,10 +199,10 @@ impl Relation<'_> {
             (Type::StringLiteral(s), Type::Accessory(AccessoryKind::DecimalIntegerString)) => {
                 is_decimal_integer_string_literal(s)
             }
-            // Every non-falsy string is non-empty; no other pair implies
-            // another.
+            // Every non-falsy string is non-empty, and so is every numeric
+            // one (`""` isn't numeric).
             (
-                Type::Accessory(AccessoryKind::NonFalsyString),
+                Type::Accessory(AccessoryKind::NonFalsyString | AccessoryKind::NumericString),
                 Type::Accessory(AccessoryKind::NonEmptyString),
             ) => true,
             // A decimal integer string (`"0"`, `"123"`, `"-1"`) is always

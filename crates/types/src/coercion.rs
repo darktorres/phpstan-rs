@@ -15,10 +15,18 @@ const INT_CASTABLE_CLASSES: &[&str] = &["SimpleXMLElement", "GMP", "CurlHandle",
 const FLOAT_CASTABLE_CLASSES: &[&str] = &["SimpleXMLElement", "GMP"];
 
 impl Type {
-    /// `(int) $x`. A resource is legal (`(int) $fileHandle` is its id,
-    /// PHPStan's `ResourceType::toInteger()`), an arbitrary object isn't.
+    /// `(int) $x`: an int as it is, a bool or `null` as `1`/`0`, a finite
+    /// float literal truncated. A resource is legal (`(int) $fileHandle`
+    /// is its id), an arbitrary object isn't.
     pub fn to_integer(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
         match self {
+            Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => Some(self.clone()),
+            Type::True => Some(Type::IntLiteral(1)),
+            Type::False | Type::Null => Some(Type::IntLiteral(0)),
+            Type::Bool => Some(Type::IntRange(Some(0), Some(1))),
+            Type::FloatLiteral(f) if f.is_finite() && f.trunc().abs() < i64::MAX as f64 => {
+                Some(Type::IntLiteral(f.trunc() as i64))
+            }
             Type::Resource { .. } => Some(Type::Int),
             Type::Object(name, _) if castable(hierarchy, name, INT_CASTABLE_CLASSES) => {
                 Some(Type::Int)
@@ -34,10 +42,15 @@ impl Type {
         }
     }
 
-    /// `(float) $x`: as `to_integer`, with PHPStan's one entry narrower
+    /// `(float) $x`: a float as it is, an int, bool or `null` literal as its
+    /// value; otherwise as `to_integer`, with PHPStan's one entry narrower
     /// numeric-castable class list (no `CurlHandle`/`CurlMultiHandle`).
     pub fn to_float(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
         match self {
+            Type::Float | Type::FloatLiteral(_) => Some(self.clone()),
+            Type::IntLiteral(n) => Some(Type::FloatLiteral(*n as f64)),
+            Type::True => Some(Type::FloatLiteral(1.0)),
+            Type::False | Type::Null => Some(Type::FloatLiteral(0.0)),
             Type::Resource { .. } => Some(Type::Float),
             Type::Object(name, _) if castable(hierarchy, name, FLOAT_CASTABLE_CLASSES) => {
                 Some(Type::Float)
@@ -50,14 +63,49 @@ impl Type {
         }
     }
 
-    /// `(string) $x`. A resource is its `Resource id #N` text. Illegal for
-    /// an array (PHP's "Array to string conversion", whatever it holds)
-    /// and an object with no `__toString()`
-    /// that also isn't `GMP`/`BcMath\Number` (numeric-string-castable by
-    /// an operator overload). A class the hierarchy doesn't know is left
-    /// alone: stub coverage may simply not include it.
+    /// `(string) $x`: a string as it is, an int as its decimal digits, a bool or
+    /// `null` as `'1'`/`''`, a float as non-empty text (numeric when
+    /// finite, `INF`/`NAN` otherwise), a resource as its `Resource id #N`
+    /// text. Illegal for an array (PHP's "Array to string conversion",
+    /// whatever it holds) and an object with no `__toString()` that also
+    /// isn't `GMP`/`BcMath\Number` (numeric-string-castable by an operator
+    /// overload). A class the hierarchy doesn't know is left alone: stub
+    /// coverage may simply not include it.
     pub fn to_string_type(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
+        let decimal_int_string = || {
+            Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::DecimalIntegerString),
+            ])
+        };
+        let numeric_string = || {
+            Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NumericString),
+            ])
+        };
+        let non_empty_string = || {
+            Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NonEmptyString),
+            ])
+        };
+        if !matches!(self, Type::Mixed(_) | Type::Never)
+            && crate::Relation::structural().subtype(self, &Type::String)
+        {
+            return Some(self.clone());
+        }
         match self {
+            Type::IntLiteral(n) => Some(Type::StringLiteral(n.to_string())),
+            Type::Int | Type::IntRange(..) => Some(decimal_int_string()),
+            Type::FloatLiteral(f) if f.is_finite() => Some(numeric_string()),
+            Type::Float | Type::FloatLiteral(_) => Some(non_empty_string()),
+            Type::True => Some(Type::StringLiteral("1".to_string())),
+            Type::False | Type::Null => Some(Type::StringLiteral(String::new())),
+            Type::Bool => Some(Type::Union(vec![
+                Type::StringLiteral("1".to_string()),
+                Type::StringLiteral(String::new()),
+            ])),
             Type::Array(..) | Type::ArrayShape(_) => None,
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
                 None
