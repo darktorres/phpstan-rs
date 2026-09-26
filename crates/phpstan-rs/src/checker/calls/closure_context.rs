@@ -321,6 +321,7 @@ impl<'a> Checker<'a> {
                 let previous_assigned_variables = self.enter_assigned_variables(body);
                 // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+                let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
                 let previous_unannotated_call =
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
@@ -350,6 +351,7 @@ impl<'a> Checker<'a> {
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
                 self.current_function_throw_points = previous_throw_points;
+                self.try_throw_states = previous_try_throw_states;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;

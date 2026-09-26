@@ -7,6 +7,40 @@ use syntax::token::Span;
 use types::Type;
 
 impl<'a> Checker<'a> {
+    /// Whether some value of type `thrown` can be an instance of one of
+    /// `caught`. An unknown class on either side may be.
+    fn may_catch(&self, thrown: &Type, caught: &[Type]) -> bool {
+        thrown_members(thrown).iter().any(|t| {
+            let Type::Object(t, _) = t else {
+                return true;
+            };
+            caught.iter().any(|c| {
+                let Type::Object(c, _) = c else {
+                    return true;
+                };
+                t.eq_ignore_ascii_case(c)
+                    || self.registry.is_subclass_of(t, c)
+                    || self.registry.is_subclass_of(c, t)
+                    || !self.class_name_exists(t)
+                    || !self.class_name_exists(c)
+            })
+        })
+    }
+
+    /// Whether every value of type `thrown` is an instance of one of
+    /// `caught`.
+    fn surely_caught(&self, thrown: &Type, caught: &[Type]) -> bool {
+        thrown_members(thrown).iter().all(|t| {
+            let Type::Object(t, _) = t else {
+                return false;
+            };
+            caught.iter().any(|c| {
+                matches!(c, Type::Object(c, _)
+                    if t.eq_ignore_ascii_case(c) || self.registry.is_subclass_of(t, c))
+            })
+        })
+    }
+
     #[hotpath::measure]
     pub(crate) fn check_try(
         &mut self,
@@ -49,8 +83,24 @@ impl<'a> Checker<'a> {
             })
             .collect();
         self.current_catch_types.extend(new_catch_types);
+        self.try_throw_states.push(Vec::new());
         self.check_block(body, locals, declared_return, label);
+        let throw_states = self.try_throw_states.pop().unwrap_or_default();
         self.current_catch_types.truncate(catch_types_mark);
+        let all_catch_types: Vec<Type> = catches
+            .iter()
+            .flat_map(|c| &c.types)
+            .map(|t| self.resolve_name_expr(t))
+            .collect();
+        // What no catch is sure to catch reaches an enclosing `try`.
+        let escaping: Vec<(Type, Locals)> = throw_states
+            .iter()
+            .filter(|(thrown, _)| !self.surely_caught(thrown, &all_catch_types))
+            .cloned()
+            .collect();
+        if let Some(outer) = self.try_throw_states.last_mut() {
+            outer.extend(escaping);
+        }
         let try_end_locals = locals.clone();
         let try_terminates = body
             .last()
@@ -180,8 +230,21 @@ impl<'a> Checker<'a> {
                     "catch.alreadyCaught",
                 );
             }
-            previously_caught.extend(clause_types);
-            let mut catch_locals = locals.clone();
+            previously_caught.extend(clause_types.iter().cloned());
+            // Entered from every point in the body throwing something this
+            // clause can catch; with none, it cannot run.
+            let catch_entry = throw_states
+                .iter()
+                .filter(|(thrown, _)| self.may_catch(thrown, &clause_types))
+                .map(|(_, state)| state)
+                .fold(None, |acc: Option<Locals>, state| {
+                    Some(match acc {
+                        Some(acc) => merge_scopes(&acc, state),
+                        None => state.clone(),
+                    })
+                });
+            let catch_live = catch_entry.is_some();
+            let mut catch_locals = catch_entry.unwrap_or_else(|| locals.clone());
             if let Some(var) = &c.var {
                 // A multi-type catch (`catch (TypeA|TypeB $e)`,
                 // real, valid PHP since 7.1) binds the caught
@@ -218,7 +281,7 @@ impl<'a> Checker<'a> {
                 if let Some(s) = c.body.last() {
                     try_catch_exit_points.extend(collect_exit_point_statements(s));
                 }
-            } else {
+            } else if catch_live {
                 end_states.push(catch_locals);
             }
         }
@@ -452,5 +515,12 @@ impl<'a> Checker<'a> {
                 "catch.baseWithoutRethrow",
             );
         }
+    }
+}
+
+fn thrown_members(thrown: &Type) -> Vec<&Type> {
+    match thrown {
+        Type::Union(members) => members.iter().collect(),
+        other => vec![other],
     }
 }

@@ -122,7 +122,12 @@ impl<'a> Checker<'a> {
         &mut self,
         dynamic: Option<Type>,
         sig: Option<&FunctionSig>,
+        span: Span,
     ) {
+        if !self.try_throw_states.is_empty() {
+            let thrown = call_throw_type(dynamic.as_ref(), sig);
+            self.call_throw_types.insert(span, thrown);
+        }
         if let Some(t) = dynamic {
             if t != Type::Void {
                 self.current_function_throw_points.push(t);
@@ -154,6 +159,27 @@ impl<'a> Checker<'a> {
             2,
             "throws.notThrowable",
         );
+    }
+}
+
+/// What a call can throw, for the catches around it: its `@throws` type (a
+/// per-callee override first), anything for an unresolved callee or an
+/// undocumented user one, and `Error` for an undocumented builtin, which
+/// throws only `TypeError`/`ValueError`-style errors on bad input. A
+/// builtin's documented exceptions come with `Error` too. `None` for
+/// `@throws void`.
+fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionSig>) -> Option<Type> {
+    let object = |name: &str| Type::Object(name.into(), Vec::new());
+    let Some(sig) = sig else {
+        return Some(object("Throwable"));
+    };
+    let declared = dynamic.or(sig.throws.as_ref());
+    match (declared, sig.is_stub) {
+        (Some(Type::Void), _) => None,
+        (Some(t), false) => Some(t.clone()),
+        (Some(t), true) => Some(Type::Union(vec![t.clone(), object("Error")])),
+        (None, false) => Some(object("Throwable")),
+        (None, true) => Some(object("Error")),
     }
 }
 

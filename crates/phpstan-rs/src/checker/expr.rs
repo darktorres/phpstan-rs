@@ -235,10 +235,57 @@ impl<'a> Checker<'a> {
     /// `rule`'s own module doc comment).
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         let ty = self.check_expr_impl(e, locals, label);
+        if !self.try_throw_states.is_empty()
+            && let Some(thrown) = self.thrown_by(e, locals)
+        {
+            self.record_throw_state(thrown, locals);
+        }
         if !self.external_rules.is_empty() {
             self.dispatch_expr_rules(e, locals, &ty);
         }
         ty
+    }
+
+    /// Records `locals` as a scope the innermost enclosing `try` body can
+    /// throw `thrown` from.
+    pub(crate) fn record_throw_state(&mut self, thrown: Type, locals: &Locals) {
+        if let Some(frame) = self.try_throw_states.last_mut() {
+            frame.push((thrown, locals.clone()));
+        }
+    }
+
+    /// What evaluating `e` itself, after its operands, can throw, or
+    /// `None` when it cannot: a call what its signature says
+    /// (`call_throw_types`), anything when unresolved; `throw` its value;
+    /// division and modulo `DivisionByZeroError`; shifts
+    /// `ArithmeticError`; a `clone`, a `yield` (the generator may be
+    /// thrown into) or a pipe's call anything. A `match` records its own
+    /// throw point, before its arms.
+    fn thrown_by(&mut self, e: &Expr, locals: &Locals) -> Option<Type> {
+        let anything = || Type::Object("Throwable".into(), Vec::new());
+        match &e.kind {
+            ExprKind::Call(..)
+            | ExprKind::New(..)
+            | ExprKind::NewAnonymousClass { .. }
+            | ExprKind::MethodCall(..)
+            | ExprKind::DynamicMethodCall(..)
+            | ExprKind::StaticCall(..)
+            | ExprKind::DynamicStaticCall(..) => self
+                .call_throw_types
+                .remove(&e.span)
+                .unwrap_or_else(|| Some(anything())),
+            ExprKind::Throw(inner) => Some(self.infer_expr(inner, locals)),
+            ExprKind::Clone(..) | ExprKind::Yield(..) | ExprKind::YieldFrom(_) => Some(anything()),
+            ExprKind::Binary(op, _, _) | ExprKind::CompoundAssign(op, _, _) => match op {
+                BinOp::Div | BinOp::Mod => {
+                    Some(Type::Object("DivisionByZeroError".into(), Vec::new()))
+                }
+                BinOp::Shl | BinOp::Shr => Some(Type::Object("ArithmeticError".into(), Vec::new())),
+                BinOp::Pipe => Some(anything()),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     fn dispatch_expr_rules(&mut self, e: &Expr, locals: &Locals, ty: &Type) {
@@ -766,7 +813,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or(name)
                             .to_ascii_lowercase();
                         let dynamic_throw = self.dynamic_function_throw_type(&bare, args, locals);
-                        self.record_call_throw_point(dynamic_throw, Some(sig));
+                        self.record_call_throw_point(dynamic_throw, Some(sig), e.span);
                         self.check_internal_function_call(name, sig, e.span);
                         self.check_restricted_function_call(name, args, locals, e.span);
                         self.check_deprecated_function_call(name, sig, e.span);
@@ -1268,7 +1315,7 @@ impl<'a> Checker<'a> {
                 // This method call's own throw contribution.
                 if let Some((class, _, _, _)) = &receiver {
                     let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
-                    self.record_call_throw_point(dynamic_throw, sig);
+                    self.record_call_throw_point(dynamic_throw, sig, e.span);
                 } else {
                     // No resolved receiver class at all - genuinely
                     // unbounded, same reasoning as a dynamic callee.
@@ -2328,7 +2375,7 @@ impl<'a> Checker<'a> {
                     self.check_simplexml_element_constructor(class, args, e.span);
                     // This constructor's own throw contribution.
                     let dynamic_throw = self.dynamic_new_throw_type(class, args);
-                    self.record_call_throw_point(dynamic_throw, ctor_sig);
+                    self.record_call_throw_point(dynamic_throw, ctor_sig, e.span);
                     let (is_name, is_static) = match &class_expr.kind {
                         ExprKind::Name(raw) => (true, raw.eq_ignore_ascii_case("static")),
                         _ => (false, false),
@@ -2515,7 +2562,7 @@ impl<'a> Checker<'a> {
                 // This static call's own throw contribution.
                 if let Some(class) = &resolved_class {
                     let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
-                    self.record_call_throw_point(dynamic_throw, sig);
+                    self.record_call_throw_point(dynamic_throw, sig, e.span);
                 } else {
                     self.current_function_has_unannotated_call = true;
                 }
@@ -3110,6 +3157,8 @@ impl<'a> Checker<'a> {
                 arms,
                 default,
             } => {
+                let before_match = (default.is_none() && !self.try_throw_states.is_empty())
+                    .then(|| locals.clone());
                 self.check_expr(subject, locals, label);
                 // Real `match` has no fallthrough - each arm is mutually
                 // exclusive, so (unlike `switch`) a later arm/default can
@@ -3275,7 +3324,10 @@ impl<'a> Checker<'a> {
                 // including both of its real exemptions (`isUnhandledMatchErrorCaught`/
                 // `hasUnhandledMatchErrorThrowsTag`, `match_unhandled_error_is_exempted`
                 // below) and its `match(true)` handling.
-                if default.is_none() && !self.match_unhandled_error_is_exempted() {
+                // An unhandled value throws `UnhandledMatchError` before any
+                // arm runs, whether or not the report is exempted.
+                if default.is_none() {
+                    let exempted = self.match_unhandled_error_is_exempted();
                     if match_true {
                         // Real PHPStan's own mechanism for this shape: a
                         // `match(true)` chain is exhaustive exactly when
@@ -3297,7 +3349,10 @@ impl<'a> Checker<'a> {
                             matches!(conds.as_slice(), [only_cond]
                                 if self.condition_is_provably_true(only_cond, &accumulated_before_last_arm))
                         });
-                        if !last_is_exhaustive {
+                        if !last_is_exhaustive && let Some(before) = &before_match {
+                            self.record_throw_state(unhandled_match_error(), before);
+                        }
+                        if !last_is_exhaustive && !exempted {
                             // `$matchCondition` is the literal `true` -
                             // real PHPStan's own `$remainingType` for
                             // this shape is always just that same
@@ -3346,7 +3401,12 @@ impl<'a> Checker<'a> {
                                 }
                             }
                         }
-                        if remaining != Type::Never {
+                        if remaining != Type::Never
+                            && let Some(before) = &before_match
+                        {
+                            self.record_throw_state(unhandled_match_error(), before);
+                        }
+                        if remaining != Type::Never && !exempted {
                             self.report(
                                 format!(
                                     "Match expression does not handle remaining value: {remaining}"
@@ -3672,6 +3732,7 @@ impl<'a> Checker<'a> {
                 // on restore, same shape as
                 // `current_function_is_generator` above.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+                let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
                 let previous_unannotated_call =
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
@@ -3759,6 +3820,7 @@ impl<'a> Checker<'a> {
                 self.current_declared_return_type = previous_declared_return_type;
                 self.current_declared_throws_type = previous_declared_throws_type;
                 self.current_function_throw_points = previous_throw_points;
+                self.try_throw_states = previous_try_throw_states;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;
@@ -3913,6 +3975,7 @@ impl<'a> Checker<'a> {
                 // Same reasoning as the `Closure` arm above.
                 let previous_declared_throws_type = self.current_declared_throws_type.take();
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
+                let previous_try_throw_states = std::mem::take(&mut self.try_throw_states);
                 let previous_unannotated_call =
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
@@ -3936,6 +3999,7 @@ impl<'a> Checker<'a> {
                 self.current_declared_return_type = previous_declared_return_type;
                 self.current_declared_throws_type = previous_declared_throws_type;
                 self.current_function_throw_points = previous_throw_points;
+                self.try_throw_states = previous_try_throw_states;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_by_ref_params = previous_by_ref_params;
@@ -6184,6 +6248,10 @@ fn is_true_literal(e: &Expr) -> bool {
 
 /// A synthetic `target::method(args)` call, for a computed method name
 /// whose value is known.
+fn unhandled_match_error() -> Type {
+    Type::Object("UnhandledMatchError".into(), Vec::new())
+}
+
 /// Whether a static call's target is `parent`, `self` or `static`.
 fn forwards_static_binding(target: &StaticTarget) -> bool {
     matches!(

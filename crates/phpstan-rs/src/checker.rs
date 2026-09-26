@@ -683,6 +683,14 @@ pub struct Checker<'a> {
     // single-pass body walk a real `try` block's protected region is
     // already checked under.
     pub(crate) current_catch_types: Vec<Type>,
+    // One frame per enclosing `try` body in the current function: at each
+    // point in it that can throw, what it can throw and the scope there.
+    // A catch is entered from the merge of the points it can catch, and
+    // is dead when there are none.
+    pub(crate) try_throw_states: Vec<Vec<(Type, Locals)>>,
+    // What each call checked inside a `try` body can throw, by the call's
+    // span, from its resolved signature; `None` when it cannot throw.
+    pub(crate) call_throw_types: rustc_hash::FxHashMap<Span, Option<Type>>,
     // Every real throw point recorded so far inside the enclosing
     // function/method/closure body - an explicit `throw` expression's
     // thrown-value type, or a call's resolved `@throws` type (a matching
@@ -1271,6 +1279,8 @@ impl<'a> Checker<'a> {
             current_declared_throws_type: None,
             current_catch_types: Vec::new(),
             current_function_throw_points: Vec::new(),
+            try_throw_states: Vec::new(),
+            call_throw_types: rustc_hash::FxHashMap::default(),
             current_function_has_unannotated_call: false,
             current_function_explicit_throw_points: Vec::new(),
             current_function_return_points: Vec::new(),
