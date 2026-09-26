@@ -35,10 +35,13 @@ early; each edit goes in with the step that causes it.
 | fixture suite (gate profile) | 410–490 s | ~250 ms per fixture, see below |
 | lib tests (debug) | ~200 s | per test: stub clone and registry precompute |
 | cli tests (debug) | ~150 s for 44 tests | ~60 spawned debug binaries, each parsing every stub |
-| `cargo bench --no-run` | minutes | a release build with thin LTO and one codegen unit; `test --all-targets` already compiles every bench |
-| doc, fuzz check, `--no-default-features` build | ~1–2 min each | three more compiles of the package |
+| `cargo bench --no-run` | minutes (estimated) | a release build with thin LTO and one codegen unit; `test --all-targets` already compiles every bench |
+| doc, fuzz check, `--no-default-features` build | ~1–2 min each (estimated) | three more compiles of the package |
 | corpus step | ~7.5 min | six analysis runs (below) plus the gate build (~70 s) |
 | `zstd -19` of each type dump (~115 MB) | 11.6 s ×2 | `-3` takes 0.3 s and writes 1.5 MB instead of 1.0 MB |
+
+Rows marked "estimated" weren't timed in isolation. S0 measures them
+before any step relies on them.
 
 The quick tier's six corpus runs are:
 - the recorded scoped run (29 s) and all-on run (71 s);
@@ -139,19 +142,30 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   with its precomputed lowercase key, replace both the class map and
   `classes_lowercase`, so converting their 181 access sites now would
   be thrown away.
-- Two declarations whose names differ only in case are one function in
-  PHP, so the first one declared wins, as it already does for exact
-  duplicates. First list the case-colliding keys in the stubs and the
-  corpus. If any exist and output changes, that lands as S4a with its
-  approved delta.
+- In PHP, two declarations whose names differ only in case are one
+  function. So a case-only collision goes through the same policy as an
+  exact-name collision (`registry/index.rs`):
+  - a project declaration wins over a stub (`merge_stubs`'
+    `or_insert`);
+  - conditional declarations are merged (`existing.merge`);
+  - otherwise the later insert replaces the earlier one.
+- Before changing the map, list the case-colliding keys in the stubs
+  and the corpus. If any exist and output changes, that lands as S4a
+  with its approved delta.
 - Verify: corpus identical (after S4a); registry, LSP and function-case
   tests pass.
 
 ### S5. Composer hygiene without engine I/O (engine)
-- `Session` absolutizes every path once, at intake.
-- `path_starts_with` becomes a pure comparison with no `getcwd`.
-  `includes.rs` uses the Session's working directory rather than
-  `current_dir()`.
+- The session resolves its root to an absolute path once, at intake,
+  and hands the project that absolute root for resolution. It keeps the
+  root's own spelling (`.` for the CLI) for display, so reported paths
+  don't change. Today `resolved()` joins onto the spelled root `.` and
+  calls `std::path::absolute`, which is where the per-call `getcwd`
+  comes from.
+- `path_starts_with` becomes a pure comparison of absolute paths, with
+  no `getcwd`.
+- `includes.rs` resolves against the absolute root instead of falling
+  back to `current_dir()`.
 - Package ownership has one implementation: B8's
   `PackageContext`/`owning_package(dirs, file)`, computed once per file.
   `ComposerManifest::owning_package` and `OwnerCache` are deleted or
@@ -179,7 +193,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - `Session` stops building a pool per session. It takes a shared
   `Arc<rayon::ThreadPool>`, which is the 64 MiB-stack pool crate-split
   §3.10 assigns to the Session.
-- The binary and the LSP each build one pool per process. The fixture
+- The binary and the LSP each build one pool per process. In the LSP,
+  every per-root session shares that pool. The fixture
   harness builds one for the whole suite: every fixture runs its work
   on it, and work-stealing replaces the 64-thread oversubscription.
 - Verify: fixture suite passes; `types-fixtures` identical; suite time
@@ -195,8 +210,11 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   - the baseline, moved out of `main/check_project.rs`;
   - sorting.
 
-  `check-project`, the LSP and the fixture harness all call it. Output
-  stays identical.
+  `check-project` and the fixture harness call it, and their output
+  stays identical. The LSP doesn't yet: its level cutoff differs from
+  the CLI's (crate-split §1), so moving it onto the finalizer is a
+  behaviour change. That move happens in F1's LSP-parity commits, with
+  their approved deltas.
 - **S8b:** check-project's resolution from arguments to a session moves
   from `main/check_project.rs` into the library's app layer (crate-split
   §3.10), and the binary becomes a thin caller. This covers:
@@ -215,6 +233,11 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
     several times to write the recorded report, the baseline views and
     the emission-order view.
   - The shipped binary gets no gate-only flags.
+  - Once roadmap Phase 181 ships `report --export` (one analysis, with
+    every finding tagged by level and by what hides it), the corpus gate
+    derives its views from that export and the runner is deleted. The
+    gate then runs the shipped code path, with no second mechanism
+    doing the same job.
 - `corpus` uses the runner. The determinism check compares the runner's
   emission-order view with one fresh `check-project --emission-order`
   run from the shipped binary, in a separate process. That catches
@@ -280,13 +303,16 @@ them, so an interim fix would be thrown away:
 
 Each is a targeted edit in the step's own commit:
 - S4, §3.5 enumeration APIs and C5: the case-folded function key map is
-  marked as landed early, and `classes_lowercase` is folded into it.
+  marked as landed early. Class keys stay with C3.
 - S5, §4.10: the no-current-dir and no-canonicalize rule is listed as
   already enforced.
 - S7, §3.10: the Session takes its pool injected.
 - S8a/S8b, §3.10 and F1/F4: `AnalysisResult`, the finalizer and the
   check-project entry point in the library are marked as landed early.
-  F1 and F4 keep the rest of their lists.
+  F1 keeps moving the LSP onto the finalizer as part of its parity work,
+  and F1 and F4 keep the rest of their lists.
+- S8c, roadmap Phase 181: the corpus gate switches to
+  `report --export` and `tools/gate-runner` is deleted.
 - S9, §4 tier list: quick drops `cargo bench --no-run` and checks
   rather than builds `--no-default-features`; full keeps both.
 - C4 and C5 gates: "the fixture suite and lib test wall times
