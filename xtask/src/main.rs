@@ -27,7 +27,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("gates") => gates(&args[1..]),
-        Some("corpus") => corpus(&args[1..]),
+        Some("corpus") => corpus(&args[1..], true),
         Some("compare") => compare(&args[1..]),
         Some("perf") => perf(),
         Some("buildtime") => buildtime(),
@@ -377,7 +377,9 @@ fn run_corpus(config: &Config, level: &str, extra: &[String]) -> Result<(String,
     ))
 }
 
-fn corpus(args: &[String]) -> Result<(), String> {
+/// `with_fixture_types` records `types-fixtures` too; `gates` records it
+/// from its own fixture run instead.
+fn corpus(args: &[String], with_fixture_types: bool) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
     require_clean_tree()?;
     let hash = head_hash()?;
@@ -413,7 +415,9 @@ fn corpus(args: &[String]) -> Result<(), String> {
             started.elapsed().as_secs_f64()
         );
     }
-    record_fixture_types(&hash)?;
+    if with_fixture_types {
+        record_fixture_types(&hash)?;
+    }
     baseline_check(&hash)?;
     determinism_check(full)?;
     Ok(())
@@ -1113,7 +1117,7 @@ fn gates(args: &[String]) -> Result<(), String> {
         "warnings",
     ]))?;
     run(cargo().args(["test", "--workspace", "--all-targets", "--quiet"]))?;
-    run(cargo().args(["test", "--profile", "gate", "--test", "fixtures", "--quiet"]))?;
+    record_fixture_types(&head_hash()?)?;
     test_manifest()?;
     modgraph::modgraph(&root(), &[])?;
     arch::arch(&root())?;
@@ -1152,7 +1156,7 @@ fn gates(args: &[String]) -> Result<(), String> {
     if full {
         corpus_args.push("--full".to_string());
     }
-    corpus(&corpus_args)?;
+    corpus(&corpus_args, false)?;
     compare(&corpus_args)?;
     if full {
         perf()?;
