@@ -78,7 +78,7 @@ L1  phpdoc        the single PHPDoc grammar -> TypeNode AST; DocBlock  (syntax)
     sql           standalone SQL reflection with its own column-type model:
                   config section, DDL schema, live reflector (DB drivers,
                   sqlparser), drift, SqlContext service           (no deps)
-    diagnostics   Diagnostic/RuleError, builder, tips, fixes (text + AST),
+    diagnostics   Diagnostic, RuleError, builders, tips, fixes (text + AST),
                   Identifier (+ families)                         (syntax)
     composer      composer.json / installed.json model, package context
                                                                   (syntax)
@@ -397,7 +397,10 @@ Each index entry records:
     rememberPossiblyImpureFunctionValues).
 
 ### 3.7 diagnostics
-- `RuleError`, built by `RuleErrorBuilder`, carries:
+- `Diagnostic`, built by `DiagnosticBuilder`, is the reported item: what
+  the output formats, the baseline, ignores and the LSP consume, whatever
+  produced it (a rule, a parse error, an unmatched ignore, a project-level
+  check, a stale baseline entry). It carries:
   - message;
   - line/column/end;
   - file and trait file;
@@ -407,6 +410,10 @@ Each index entry records:
   - text fixes and AST-node fixes (rendered to diffs via
     `syntax::printer`);
   - `non_ignorable`.
+- `RuleError`, built by `RuleErrorBuilder`, is what a rule returns: the
+  same fields minus file and trait file, which a rule doesn't know. The
+  dispatcher turns each into a `Diagnostic` (PHPStan's `RuleError` →
+  `Error`).
 - `location` and `metadata` are removed. Dropping `location` changes text
   output and the baseline key, so the baseline format is versioned, keyed
   like PHPStan (path, identifier, message, count), with a converter.
@@ -505,9 +512,9 @@ Each index entry records:
   the hard-coded predicate table.
 - **Rules.**
   - `Rule` callbacks return `Vec<RuleError>`; there is no `Scope::report`.
-  - The dispatcher attaches file / trait file / line, validates
-    identifiers, applies `IgnoreErrorExtension`, and drops non-final-pass
-    output.
+  - The dispatcher turns each `RuleError` into a `Diagnostic`, attaching
+    file / trait file / line, validates identifiers, applies
+    `IgnoreErrorExtension`, and drops non-final-pass output.
   - Rules are `Send + Sync + &self`. Per-file state comes from derived
     nodes or engine-created typed `FileState` slots.
   - Collectors return owned, serde-serializable per-file data, which is
@@ -936,11 +943,11 @@ Then extract `types`, with the proptest seeds moved to
 - Extract `sql`.
 
 **B7. diagnostics.**
-- The `RuleError` model (§3.7). The file and trait file, identifier
-  families declared per rule, and AST-node fixes arrive with the rule
-  dispatcher (E), which has the rule declarations and the analysed file to
-  attach them from; B7 gives the model its validated `Identifier`, a list
-  of tips, and drops `location` and `metadata`.
+- The diagnostic model (§3.7). `RuleError`, the file and trait file,
+  identifier families declared per rule, and AST-node fixes arrive with
+  the rule dispatcher (E), which has the rule declarations and the analysed
+  file to attach them from; B7 gives `Diagnostic` its validated
+  `Identifier`, a list of tips, and drops `location` and `metadata`.
 - The versioned baseline plus converter, as an approved-delta commit
   (location dropped, text format change).
 - Extract `diagnostics`. The ignore / baseline pipeline stays in the
@@ -1129,10 +1136,13 @@ derived node, each listing its Appendix A rows:
 Mixed modules are split row by row (Appendix A). Gate: architecture rule 10
 for the analyser.
 
-The rest of the `RuleError` model (§3.7) that B7 left for the dispatcher
+The rest of the diagnostic model (§3.7) that B7 left for the dispatcher
 lands here, each its own commit:
-- file and trait file on every error, attached by the dispatcher (a trait
-  method's error analysed in a using class carries the trait's file);
+- `RuleError` and `RuleErrorBuilder`: rules return them, and the dispatcher
+  turns each into a `Diagnostic`;
+- file and trait file on every diagnostic, attached by the dispatcher (a
+  trait method's error analysed in a using class carries the trait's
+  file);
 - identifier families: each rule declares its identifiers as prefix ×
   suffix sets, the dispatcher debug-asserts every error against its rule's
   declaration, and the `format!`-built identifiers (about 40 sites today)
@@ -1488,6 +1498,11 @@ Non-Registry keys follow the table.
 
 - **Scope reporting.** Rules return `Vec<RuleError>`, as in PHPStan and
   today's external `Rule`. `Scope::report` does not exist.
+- **Diagnostic naming.** The reported item is `Diagnostic` (the compiler
+  and LSP term, and the crate's name), not `RuleError`: it also carries
+  parse errors, unmatched ignores, project-level findings and stale
+  baseline entries. `RuleError` names only what a rule returns, before the
+  dispatcher locates it - PHPStan's `RuleError` → `Error` split.
 - **Subtyping home.** A ClassHierarchy oracle trait in `types` with one
   tri-state relation, implemented by reflection. ExtensionTypeData hooks
   take `&dyn ClassHierarchy`. Level-dependent acceptance lives in
