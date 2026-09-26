@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::ast::{Attribute, Ident};
-use crate::intern::intern;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Span, Token};
 
@@ -262,7 +261,7 @@ impl Parser {
                     .cloned()
                     .flatten()
                     .unwrap_or_else(|| kw.as_str().to_string());
-                Some(intern(&raw))
+                Some(self.interner.str(&raw))
             }
             _ => None,
         }

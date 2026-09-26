@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::intern::intern;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
 
@@ -125,7 +124,7 @@ impl Parser {
             // only used structurally within this one expression. Interned
             // like any other name: every anonymous class in the corpus
             // shares this identical text, a real (if small) dedup win.
-            name: crate::intern::intern("class@anonymous"),
+            name: self.interner.str("class@anonymous"),
             // No real name token to point at - see `ClassDecl::name_span`'s
             // own doc comment.
             name_span: decl_span,
@@ -492,9 +491,9 @@ impl Parser {
             let first = self.parse_qualified_name();
             let (trait_name, method): (Option<Arc<str>>, Arc<str>) =
                 if self.eat(&Token::DoubleColon) {
-                    (Some(intern(&first)), self.expect_ident()?)
+                    (Some(self.interner.str(&first)), self.expect_ident()?)
                 } else {
-                    (None, intern(&first))
+                    (None, self.interner.str(&first))
                 };
             if matches!(self.peek(), Token::Identifier(s) if **s == *"insteadof") {
                 self.skip();
