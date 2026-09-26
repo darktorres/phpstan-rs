@@ -46,8 +46,14 @@ pub(crate) fn parse(raw: &str) -> PhpDocNode {
         });
         let mut parser = TagParser::new(tokens);
         let value = parser.parse_tag_value(&name);
-        node.errors.append(&mut parser.errors);
-        node.tags.push(PhpDocTag { name, span, value });
+        let errors = std::mem::take(&mut parser.errors);
+        node.errors.extend(errors.iter().cloned());
+        node.tags.push(PhpDocTag {
+            name,
+            span,
+            value,
+            errors,
+        });
     }
     node
 }

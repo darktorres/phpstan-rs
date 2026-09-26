@@ -1,0 +1,1 @@
+5:5-5:12 phpDoc.parseError L2 | PHPDoc tag @var has invalid value (array{ $x): Unexpected token "$x", expected type

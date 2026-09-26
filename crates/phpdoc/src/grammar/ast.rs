@@ -30,6 +30,9 @@ pub struct PhpDocTag {
     pub name: String,
     pub span: Span,
     pub value: PhpDocTagValue,
+    /// This tag's own parse errors (also in `PhpDocNode::errors`); a tag
+    /// with any is invalid and contributes nothing.
+    pub errors: Vec<PhpDocParseError>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

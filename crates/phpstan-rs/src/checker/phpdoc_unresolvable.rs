@@ -14,7 +14,8 @@ use phpdoc::grammar::{self, PhpDocTagValue, TypeNode};
 
 /// The winning type node of each tag real PHPStan resolves: plain,
 /// `@phan-`, `@psalm-`, then `@phpstan-`, a later spelling replacing an
-/// earlier one, and a foreign spelling that didn't parse skipped.
+/// earlier one, and a tag that didn't parse skipped (it contributes
+/// nothing; its parse error is reported on its own).
 #[derive(Default)]
 pub(crate) struct TagTypeNodes {
     pub params: FxHashMap<String, TypeNode>,
@@ -40,7 +41,7 @@ pub(crate) fn tag_type_nodes(doc: &str) -> TagTypeNodes {
                     _ => continue,
                 };
                 let Some(ty) = ty else { continue };
-                if !prefix.is_empty() && prefix != "phpstan-" && contains_error(ty) {
+                if !tag.errors.is_empty() {
                     continue;
                 }
                 match (name, variable) {
@@ -87,7 +88,7 @@ pub(crate) fn var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
             else {
                 continue;
             };
-            if !prefix.is_empty() && prefix != "phpstan-" && contains_error(ty) {
+            if !tag.errors.is_empty() {
                 continue;
             }
             match variable {
@@ -109,12 +110,6 @@ fn has_known_prefix(name: &str) -> bool {
     ["phan-", "psalm-", "phpstan-"]
         .iter()
         .any(|p| name.starts_with(p))
-}
-
-fn contains_error(node: &TypeNode) -> bool {
-    let mut found = false;
-    walk(node, &mut |n| found |= matches!(n, TypeNode::Error));
-    found
 }
 
 /// Calls `f` on `node` and every node nested in it.
