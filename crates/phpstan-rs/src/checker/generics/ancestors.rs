@@ -371,7 +371,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            if args.is_empty() || class.starts_with("$$") {
+            if args.is_empty() {
                 self.report(
                     format!("{} {ty}.", messages.incompatible),
                     span,
@@ -558,16 +558,6 @@ impl<'a> Checker<'a> {
                 let inner_position = position.compose(Position::from_call_site(*variance));
                 self.collect_ancestor_variance(inner, inner_position, fqn, out);
             }
-            Type::Object(name, args) if name.starts_with("$$") => {
-                for a in args {
-                    self.collect_ancestor_variance(
-                        a,
-                        position.compose(Position::Bivariant),
-                        fqn,
-                        out,
-                    );
-                }
-            }
             Type::ValueOf(_) | Type::ClassConstant { .. } => ty.for_each_child(&mut |t| {
                 self.collect_ancestor_variance(t, position.compose(Position::Bivariant), fqn, out)
             }),
@@ -585,9 +575,6 @@ impl<'a> Checker<'a> {
                         Type::VarianceArg(_, inner)
                         | Type::ValueOf(inner)
                         | Type::ClassConstant { class: inner, .. } => inner,
-                        Type::Object(n, inner_args) if n.starts_with("$$") => {
-                            inner_args.first().unwrap_or(arg)
-                        }
                         _ => arg,
                     };
                     self.collect_ancestor_variance(inner, position.compose(effective), fqn, out);
@@ -638,9 +625,7 @@ fn upper_first(s: &str) -> String {
 fn collect_class_names(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Object(name, args) => {
-            if !name.starts_with("$$") {
-                out.push(name.clone().to_string());
-            }
+            out.push(name.clone().to_string());
             for a in args {
                 collect_class_names(a, out);
             }

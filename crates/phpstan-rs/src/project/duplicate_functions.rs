@@ -25,7 +25,7 @@
 use std::path::Path;
 
 use crate::project::duplicate_fn_sites::{DuplicateFunctionSites, FnDeclSite};
-use diagnostics::Diagnostic;
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 
 fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
     a.param_hints != b.param_hints || a.return_hint != b.return_hint
@@ -83,15 +83,11 @@ pub(crate) fn check_duplicate_function_declarations(
                 if s.path != path {
                     continue;
                 }
-                diagnostics.push(Diagnostic {
-                    message: message.clone(),
-                    span: s.span,
-                    level: 0,
-                    identifier: "function.duplicate".into(),
-                    tips: Vec::new(),
-                    non_ignorable: true,
-                    fix: None,
-                });
+                diagnostics.push(
+                    DiagnosticBuilder::new(message.clone(), s.span, 0, "function.duplicate")
+                        .non_ignorable()
+                        .build(),
+                );
             }
         }
     }

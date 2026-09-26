@@ -698,18 +698,8 @@ impl<'a> Walker<'a> {
             }
             None => format!("Doing instanceof {fqn} is error-prone and deprecated."),
         };
-        self.diagnostics.push(Diagnostic {
-            message,
-            span,
-            level: 0,
-            identifier: "phpstanApi.instanceofType".into(),
-            tips: vec![
-                "Learn more: https://phpstan.org/blog/why-is-instanceof-type-wrong-and-getting-deprecated"
-                    .to_string(),
-            ],
-            non_ignorable: false,
-            fix: None,
-        });
+        self.diagnostics.push(DiagnosticBuilder::new(message, span, 0, "phpstanApi.instanceofType").tip("Learn more: https://phpstan.org/blog/why-is-instanceof-type-wrong-and-getting-deprecated"
+                    ).build());
     }
 
     /// "Referencing this at all requires `@api`" - covers every reference
@@ -740,17 +730,9 @@ impl<'a> Walker<'a> {
         if info.is_api {
             return;
         }
-        self.diagnostics.push(Diagnostic {
-            message: format!(
+        self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
-            ),
-            span,
-            level: 0,
-            identifier: identifier.into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        });
+            ), span, 0, identifier).build());
     }
 
     /// `ApiStaticCallRule::isCovered()`'s real resolution -
@@ -797,17 +779,9 @@ impl<'a> Walker<'a> {
             return;
         }
         let action = format!("calling {owner}::{method}()");
-        self.diagnostics.push(Diagnostic {
-            message: format!(
+        self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {owner})"
-            ),
-            span,
-            level: 0,
-            identifier: "phpstanApi.method".into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        });
+            ), span, 0, "phpstanApi.method").build());
     }
 
     /// An unconditional report with no `@api` short-
@@ -827,17 +801,9 @@ impl<'a> Walker<'a> {
         if !self.is_phpstan_code(ctx.namespace(), fqn) {
             return;
         }
-        self.diagnostics.push(Diagnostic {
-            message: format!(
+        self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
-            ),
-            span,
-            level: 0,
-            identifier: identifier.into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        });
+            ), span, 0, identifier).build());
     }
 
     /// `check_do_not_implement`: real PHPStan's own `@api-do-not-implement`
@@ -871,31 +837,15 @@ impl<'a> Walker<'a> {
             return;
         };
         if check_do_not_implement && info.is_api_do_not_implement {
-            self.diagnostics.push(Diagnostic {
-                message: format!(
+            self.diagnostics.push(DiagnosticBuilder::new(format!(
                     "{action} is not supported: {fqn} is marked @api-do-not-implement and may gain new members in a minor version"
-                ),
-                span,
-                level: 0,
-                identifier: identifier.into(),
-                tips: Vec::new(),
-                non_ignorable: false,
-                fix: None,
-            });
+                ), span, 0, identifier).build());
             return;
         }
         if !info.is_api {
-            self.diagnostics.push(Diagnostic {
-                message: format!(
+            self.diagnostics.push(DiagnosticBuilder::new(format!(
                     "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
-                ),
-                span,
-                level: 0,
-                identifier: identifier.into(),
-                tips: Vec::new(),
-                non_ignorable: false,
-                fix: None,
-            });
+                ), span, 0, identifier).build());
         }
     }
 
@@ -1043,19 +993,18 @@ impl<'a> Walker<'a> {
         {
             return;
         }
-        self.diagnostics.push(Diagnostic {
-            message: "Declaring PHPStan namespace is not allowed in 3rd party packages."
-                .to_string(),
-            span,
-            level: 0,
-            identifier: "phpstanApi.phpstanNamespace".into(),
-            tips: vec![
-                "See:\n   https://phpstan.org/developing-extensions/backward-compatibility-promise"
-                    .to_string(),
-            ],
-            non_ignorable: false,
-            fix: None,
-        });
+        self.diagnostics.push(
+            DiagnosticBuilder::new(
+                "Declaring PHPStan namespace is not allowed in 3rd party packages.".to_string(),
+                span,
+                0,
+                "phpstanApi.phpstanNamespace",
+            )
+            .tip(
+                "See:\n   https://phpstan.org/developing-extensions/backward-compatibility-promise",
+            )
+            .build(),
+        );
     }
 
     /// `OldPhpParser4ClassRule`'s own reporting half - the
@@ -1073,17 +1022,17 @@ impl<'a> Walker<'a> {
         else {
             return;
         };
-        self.diagnostics.push(Diagnostic {
-            message: format!(
-                "Class {name} not found. It has been renamed to {new_name} in PHP-Parser v5."
-            ),
-            span,
-            level: 0,
-            identifier: "phpParser.classRenamed".into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        });
+        self.diagnostics.push(
+            DiagnosticBuilder::new(
+                format!(
+                    "Class {name} not found. It has been renamed to {new_name} in PHP-Parser v5."
+                ),
+                span,
+                0,
+                "phpParser.classRenamed",
+            )
+            .build(),
+        );
     }
 
     /// `RuntimeReflectionFunctionRule`'s own reporting half.
@@ -1098,17 +1047,9 @@ impl<'a> Walker<'a> {
         else {
             return;
         };
-        self.diagnostics.push(Diagnostic {
-            message: format!(
+        self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "Function {matched}() is a runtime reflection concept that might not work in PHPStan because it uses fully static reflection engine. Use objects retrieved from ReflectionProvider instead."
-            ),
-            span,
-            level: 0,
-            identifier: "phpstanApi.runtimeReflection".into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        });
+            ), span, 0, "phpstanApi.runtimeReflection").build());
     }
 
     /// `RuntimeReflectionInstantiationRule`'s own reporting half.
@@ -1128,17 +1069,9 @@ impl<'a> Walker<'a> {
         else {
             return;
         };
-        self.diagnostics.push(Diagnostic {
-            message: format!(
+        self.diagnostics.push(DiagnosticBuilder::new(format!(
                 "Creating new {matched} is a runtime reflection concept that might not work in PHPStan because it uses fully static reflection engine. Use objects retrieved from ReflectionProvider instead."
-            ),
-            span,
-            level: 0,
-            identifier: "phpstanApi.runtimeReflection".into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        });
+            ), span, 0, "phpstanApi.runtimeReflection").build());
     }
 
     /// Mirrors `deps::collect_stmt`'s exact shape - see that function's
@@ -1376,17 +1309,9 @@ impl<'a> Walker<'a> {
                         };
                         self.report_always(&fqn, &action, e.span, identifier, ctx);
                     } else if fqn != "PHPStan\\Type\\Type" && info.kind != ClassKind::Interface {
-                        self.diagnostics.push(Diagnostic {
-                            message: format!(
+                        self.diagnostics.push(DiagnosticBuilder::new(format!(
                                 "Although {fqn} is covered by backward compatibility promise, this instanceof assumption might break in a minor PHPStan version."
-                            ),
-                            span: e.span,
-                            level: 0,
-                            identifier: "phpstanApi.instanceofAssumption".into(),
-                            tips: Vec::new(),
-                            non_ignorable: false,
-                            fix: None,
-                        });
+                            ), e.span, 0, "phpstanApi.instanceofAssumption").build());
                     }
                 }
                 self.check_expr(inner, ctx, param_types, label);

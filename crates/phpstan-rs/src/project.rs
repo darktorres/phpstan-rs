@@ -9,7 +9,7 @@ use crate::ignore_comments;
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
 use crate::registry::Registry;
-use diagnostics::{self, Diagnostic};
+use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use syntax::lexer::{LexWarning, Lexer};
 use syntax::name::Interner;
@@ -2011,15 +2011,7 @@ impl Project {
         {
             return None;
         }
-        Some(Diagnostic {
-            message,
-            span,
-            level: 5,
-            identifier: identifier.into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        })
+        Some(DiagnosticBuilder::new(message, span, 5, identifier).build())
     }
 
     /// Runs every opt-in whole-program diagnostic check (currently

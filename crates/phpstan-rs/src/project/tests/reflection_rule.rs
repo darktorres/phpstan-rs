@@ -3,21 +3,21 @@
 use super::super::*;
 use crate::reflection_rule::ReflectionRule;
 use crate::registry::{ClassInfo, FunctionSig};
-use diagnostics::Diagnostic;
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 
 struct FlagsEveryPublicClass;
 impl ReflectionRule for FlagsEveryPublicClass {
     fn check_class(&self, class: &ClassInfo, fqn: &str) -> Vec<Diagnostic> {
         let _ = class;
-        vec![Diagnostic {
-            message: format!("saw class {fqn}"),
-            span: syntax::token::Span::default(),
-            level: 0,
-            identifier: "test.sawClass".into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        }]
+        vec![
+            DiagnosticBuilder::new(
+                format!("saw class {fqn}"),
+                syntax::token::Span::default(),
+                0,
+                "test.sawClass",
+            )
+            .build(),
+        ]
     }
 }
 
@@ -25,15 +25,15 @@ struct FlagsEveryFunction;
 impl ReflectionRule for FlagsEveryFunction {
     fn check_function(&self, sig: &FunctionSig, fqn: &str) -> Vec<Diagnostic> {
         let _ = sig;
-        vec![Diagnostic {
-            message: format!("saw function {fqn}"),
-            span: syntax::token::Span::default(),
-            level: 0,
-            identifier: "test.sawFunction".into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        }]
+        vec![
+            DiagnosticBuilder::new(
+                format!("saw function {fqn}"),
+                syntax::token::Span::default(),
+                0,
+                "test.sawFunction",
+            )
+            .build(),
+        ]
     }
 }
 

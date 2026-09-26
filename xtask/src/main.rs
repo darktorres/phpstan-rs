@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
+mod arch;
 mod modgraph;
 
 const LEVELS: [&str; 12] = [
@@ -32,6 +33,7 @@ fn main() -> ExitCode {
         Some("buildtime") => buildtime(),
         Some("tests") => test_manifest(),
         Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
+        Some("arch") => arch::arch(&root()),
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
         Some("rekey") => rekey(&args[1..]),
@@ -57,6 +59,7 @@ const USAGE: &str = "usage: cargo xtask <command>
   modgraph [--inventory] check the module graph against
                          gates/module-graph.txt (--inventory lists every
                          crossing edge)
+  arch                   check the architecture rules
   baseline               generate the reference baselines (Stage A only)
   approve <slug> [--full] [--against <commit>]
                          write HEAD's snapshot diffs against its parent (or
@@ -1053,6 +1056,7 @@ fn gates(args: &[String]) -> Result<(), String> {
     run(cargo().args(["test", "--profile", "gate", "--test", "fixtures", "--quiet"]))?;
     test_manifest()?;
     modgraph::modgraph(&root(), &[])?;
+    arch::arch(&root())?;
     run(cargo().args(["doc", "--workspace", "--no-deps", "--quiet"]))?;
     run(cargo().args(["bench", "--workspace", "--no-run", "--quiet"]))?;
     run(cargo().args([

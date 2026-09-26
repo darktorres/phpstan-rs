@@ -2,6 +2,7 @@ use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 use super::*;
+use diagnostics::DiagnosticBuilder;
 use syntax::token::{Position, Span};
 
 fn diag(message: &str, line: u32, col: u32, level: u8) -> Diagnostic {
@@ -15,18 +16,16 @@ fn diag_with_identifier(
     level: u8,
     identifier: &'static str,
 ) -> Diagnostic {
-    Diagnostic {
-        message: message.to_string(),
-        span: Span {
+    DiagnosticBuilder::new(
+        message.to_string(),
+        Span {
             start: Position { line, col },
             end: Position { line, col },
         },
         level,
-        identifier: identifier.into(),
-        tips: Vec::new(),
-        non_ignorable: false,
-        fix: None,
-    }
+        identifier,
+    )
+    .build()
 }
 
 #[test]

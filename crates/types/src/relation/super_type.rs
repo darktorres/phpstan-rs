@@ -82,14 +82,7 @@ impl Relation<'_> {
             {
                 TrinaryLogic::Maybe
             }
-            // A class name the registry never saw (or an unresolved
-            // constant reference) proves nothing; `accepts` would
-            // accept anything into it.
-            (Type::Object(name, _), _) | (_, Type::Object(name, _))
-                if is_unresolved_reference(name) =>
-            {
-                TrinaryLogic::Maybe
-            }
+            // An unresolved constant reference proves nothing.
             (Type::ValueOf(_) | Type::ClassConstant { .. }, _)
             | (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => TrinaryLogic::Maybe,
             (Type::Object(a, a_args), Type::Object(b, b_args))
@@ -277,10 +270,4 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
             !is_string && crate::types_definitely_disjoint(&Type::String, sub)
         }
     }
-}
-
-/// A constant reference (`Foo::BAR`) or `$$` sentinel left unresolved:
-/// its real type is unknown, so it proves nothing either way.
-fn is_unresolved_reference(name: &str) -> bool {
-    name.contains("::") || name.starts_with("$$")
 }

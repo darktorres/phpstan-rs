@@ -1,6 +1,7 @@
 use super::*;
 use crate::checker::Checker;
 use crate::registry::Registry;
+use diagnostics::DiagnosticBuilder;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 
@@ -18,15 +19,13 @@ impl Rule for FlagsVariableNamed {
 
     fn check_expr(&self, _scope: &Scope, expr: &Expr, ty: &Type) -> Vec<Diagnostic> {
         vec![
-            Diagnostic {
-                message: format!("flagged ${} (inferred {ty})", self.0),
-                span: expr.span,
-                level: 6,
-                identifier: "test.flagged".into(),
-                tips: Vec::new(),
-                non_ignorable: false,
-                fix: None,
-            };
+            DiagnosticBuilder::new(
+                format!("flagged ${} (inferred {ty})", self.0),
+                expr.span,
+                6,
+                "test.flagged"
+            )
+            .build();
             1
         ]
     }
@@ -41,15 +40,15 @@ impl Rule for FlagsEchoStatements {
     }
 
     fn check_stmt(&self, _scope: &Scope, stmt: &Stmt) -> Vec<Diagnostic> {
-        vec![Diagnostic {
-            message: "flagged an echo".to_string(),
-            span: stmt.span,
-            level: 6,
-            identifier: "test.echoFlagged".into(),
-            tips: Vec::new(),
-            non_ignorable: false,
-            fix: None,
-        }]
+        vec![
+            DiagnosticBuilder::new(
+                "flagged an echo".to_string(),
+                stmt.span,
+                6,
+                "test.echoFlagged",
+            )
+            .build(),
+        ]
     }
 }
 
@@ -130,20 +129,20 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
         }
 
         fn check_expr(&self, scope: &Scope, expr: &Expr, _ty: &Type) -> Vec<Diagnostic> {
-            vec![Diagnostic {
-                message: format!(
-                    "class={:?} method={:?} local_type={:?}",
-                    scope.current_class(),
-                    scope.current_method(),
-                    scope.local_type("x")
-                ),
-                span: expr.span,
-                level: 6,
-                identifier: "test.scope".into(),
-                tips: Vec::new(),
-                non_ignorable: false,
-                fix: None,
-            }]
+            vec![
+                DiagnosticBuilder::new(
+                    format!(
+                        "class={:?} method={:?} local_type={:?}",
+                        scope.current_class(),
+                        scope.current_method(),
+                        scope.local_type("x")
+                    ),
+                    expr.span,
+                    6,
+                    "test.scope",
+                )
+                .build(),
+            ]
         }
     }
 
@@ -177,15 +176,15 @@ fn is_function_guarded_reflects_a_real_function_exists_narrowing() {
         }
 
         fn check_expr(&self, scope: &Scope, expr: &Expr, _ty: &Type) -> Vec<Diagnostic> {
-            vec![Diagnostic {
-                message: format!("guarded={}", scope.is_function_guarded("maybe_missing")),
-                span: expr.span,
-                level: 6,
-                identifier: "test.guard".into(),
-                tips: Vec::new(),
-                non_ignorable: false,
-                fix: None,
-            }]
+            vec![
+                DiagnosticBuilder::new(
+                    format!("guarded={}", scope.is_function_guarded("maybe_missing")),
+                    expr.span,
+                    6,
+                    "test.guard",
+                )
+                .build(),
+            ]
         }
     }
 

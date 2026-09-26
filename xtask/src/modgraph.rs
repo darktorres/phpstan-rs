@@ -281,7 +281,7 @@ fn parse_files(src: &Path) -> Result<Vec<SourceFile>, String> {
     Ok(files)
 }
 
-fn walk_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+pub(crate) fn walk_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for entry in entries {
         let path = entry.map_err(|e| e.to_string())?.path();

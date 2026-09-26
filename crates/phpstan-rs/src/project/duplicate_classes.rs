@@ -32,7 +32,7 @@ use std::path::Path;
 
 use crate::checker::{class_kind_identifier, class_kind_word};
 use crate::project::duplicate_class_sites::{ClassDeclSite, DuplicateClassSites};
-use diagnostics::Diagnostic;
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 
 pub(crate) fn check_duplicate_class_declarations(
     path: &Path,
@@ -83,15 +83,11 @@ pub(crate) fn check_duplicate_class_declarations(
             if s.path != path {
                 continue;
             }
-            diagnostics.push(Diagnostic {
-                message: message.clone(),
-                span: s.span,
-                level: 0,
-                identifier: identifier.clone().into(),
-                tips: Vec::new(),
-                non_ignorable: true,
-                fix: None,
-            });
+            diagnostics.push(
+                DiagnosticBuilder::new(message.clone(), s.span, 0, identifier.clone())
+                    .non_ignorable()
+                    .build(),
+            );
         }
     }
     diagnostics
