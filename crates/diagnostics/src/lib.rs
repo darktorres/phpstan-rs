@@ -2,6 +2,8 @@
 //! [`DiagnosticBuilder`], with an optional textual [`DiagnosticFix`]
 //! (applied by [`fix`]).
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 pub mod fix;
 
 use std::borrow::Cow;

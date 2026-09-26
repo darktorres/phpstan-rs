@@ -1,3 +1,8 @@
+//! The type model: `Type`, the relations between types, and the algebra
+//! and coercions over them.
+
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 

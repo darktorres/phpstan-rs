@@ -1,6 +1,8 @@
 //! PHP syntax: the lexer, the parser and the tree it builds, traversal,
 //! name resolution, parse-time annotations and interned names.
 
+#![deny(clippy::print_stdout, clippy::print_stderr)]
+
 pub mod annotations;
 pub mod ast;
 pub mod intern;

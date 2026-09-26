@@ -19,6 +19,8 @@ pub mod ignore_errors;
 pub mod lsp;
 pub mod output;
 pub mod parent_calls;
+// PCRE2 is reached through its C API.
+#[allow(unsafe_code)]
 pub(crate) mod pcre_validate;
 pub mod pest_config;
 pub(crate) mod php_date_parser;

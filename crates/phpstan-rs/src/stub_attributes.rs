@@ -189,7 +189,7 @@ fn return_overrides(attrs: &[Attribute], aliases: &Aliases) -> Vec<String> {
 
 /// Applies and removes the version attributes in a parsed file, then
 /// resolves the names of any type it added.
-pub fn apply_stub_attributes(stmts: &mut Vec<Stmt>) {
+pub(crate) fn apply_stub_attributes(stmts: &mut Vec<Stmt>) {
     if !mentions_stub_attributes(stmts) {
         return;
     }

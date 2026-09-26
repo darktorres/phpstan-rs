@@ -493,7 +493,7 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
 /// this type stays round-trippable back through this same parser rather
 /// than showing a key text that would parse differently (or not at all)
 /// if pasted back into a real `@var`/`@param` tag.
-pub fn display_shape_key(key: &str) -> String {
+pub(crate) fn display_shape_key(key: &str) -> String {
     let is_bare_integer = canonical_int_key(key).is_some();
     let is_bare_identifier = {
         let mut chars = key.chars();

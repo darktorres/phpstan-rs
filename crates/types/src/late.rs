@@ -6,7 +6,7 @@ use crate::{ShapeKey, Type};
 
 /// `key-of<ty>` when `ty` is an array type: its key type. `None` for
 /// anything whose keys aren't known from the type alone.
-pub fn key_of(ty: &Type) -> Option<Type> {
+pub(crate) fn key_of(ty: &Type) -> Option<Type> {
     match ty {
         Type::Mixed(_) => Some(Type::Mixed(false)),
         Type::Array(key, _) => Some((**key).clone()),
@@ -21,7 +21,7 @@ pub fn key_of(ty: &Type) -> Option<Type> {
 
 /// `value-of<ty>` when `ty` is an array type: its value type. An enum's
 /// case values need the registry (`Registry::resolve_deferred_value_of`).
-pub fn value_of(ty: &Type) -> Option<Type> {
+pub(crate) fn value_of(ty: &Type) -> Option<Type> {
     match ty {
         Type::Mixed(_) => Some(Type::Mixed(false)),
         Type::Array(_, value) => Some((**value).clone()),
@@ -39,7 +39,7 @@ pub fn value_of(ty: &Type) -> Option<Type> {
 /// `base[key]` (PHPStan's `OffsetAccessType::getResult()`): the value
 /// type `base` holds at `key`. A shape without the key, or a non-array
 /// `base`, gives `Mixed`; `None` when `base` isn't known yet.
-pub fn offset_access(base: &Type, key: &Type) -> Option<Type> {
+pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
     match base {
         Type::ArrayShape(shape) | Type::ObjectShape(shape) => Some(
             ShapeKey::from_type(key)

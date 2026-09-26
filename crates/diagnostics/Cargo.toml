@@ -3,9 +3,13 @@ name = "phpstan-rs-diagnostics"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [lib]
 name = "diagnostics"
 
 [dependencies]
 syntax.workspace = true
+
+[lints]
+workspace = true

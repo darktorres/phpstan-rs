@@ -3,8 +3,12 @@ name = "xtask"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
-serde_json = "1"
+serde_json.workspace = true
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full", "visit"] }
+
+[lints]
+workspace = true

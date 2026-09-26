@@ -30,6 +30,7 @@ fn a_literal_password_is_used_when_no_password_env_is_set() {
 }
 
 #[test]
+#[allow(unsafe_code)]
 fn password_env_takes_precedence_over_a_literal_password() {
     // SAFETY: test-local env var, no other thread reads this name.
     unsafe {

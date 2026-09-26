@@ -56,7 +56,7 @@ struct Edge {
     line: usize,
 }
 
-pub fn modgraph(root: &Path, args: &[String]) -> Result<(), String> {
+pub(crate) fn modgraph(root: &Path, args: &[String]) -> Result<(), String> {
     let inventory = args.iter().any(|a| a == "--inventory");
     let spec = read_spec(&root.join(SPEC))?;
     let files = parse_files(&root.join(SRC))?;

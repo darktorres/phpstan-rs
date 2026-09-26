@@ -579,7 +579,7 @@ pub fn is_numeric_string_literal(s: &str) -> bool {
 /// hand, so the same edge cases (`"007"`, `"+1"`, `"-0"`, `""`, `"1.0"`)
 /// are excluded for the identical reason real PHP's int cast excludes
 /// them - a mismatched round trip, not a hand-maintained rule list.
-pub fn is_decimal_integer_string_literal(s: &str) -> bool {
+pub(crate) fn is_decimal_integer_string_literal(s: &str) -> bool {
     s.parse::<i64>().is_ok_and(|n| n.to_string() == s)
 }
 

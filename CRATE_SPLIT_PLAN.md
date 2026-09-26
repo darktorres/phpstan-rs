@@ -1487,7 +1487,7 @@ Non-Registry keys follow the table.
 | crossbeam-channel, lsp-server, lsp-types | lsp |
 | dhat | bin |
 | hotpath | every measured crate (plain dependency); features only on the bin |
-| imbl | analyser (holder maps); reflection only if its snapshots use it |
+| imbl | syntax (name resolution's `use` map); analyser (holder maps); reflection only if its snapshots use it |
 | indexmap | reflection |
 | md5 | reflection (anonymous-class naming) |
 | pcre2-sys | builtins (`pcre-validate`) |

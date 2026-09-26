@@ -13,6 +13,9 @@ mod demo;
 #[path = "main/incremental_bench.rs"]
 mod incremental_bench;
 
+#[cfg(all(feature = "dhat-heap", feature = "hotpath-alloc"))]
+compile_error!("`dhat-heap` and `hotpath-alloc` each install a global allocator; enable one");
+
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
