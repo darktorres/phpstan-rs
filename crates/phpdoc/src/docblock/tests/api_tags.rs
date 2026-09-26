@@ -55,3 +55,18 @@ fn phpstan_prefixed_api_tag_is_recognized_the_same_as_the_plain_one() {
     );
     assert!(block.api);
 }
+
+#[test]
+fn a_see_target_is_its_first_word_with_an_argument_list_kept_whole() {
+    let block = parse(
+        "/**\n * @see Foo::bar(int $x) for the details\n * @see https://example.com/a b\n * @see \\Baz\n */",
+    );
+    assert_eq!(
+        block.see,
+        vec![
+            "Foo::bar(int $x)".to_string(),
+            "https://example.com/a".to_string(),
+            "\\Baz".to_string(),
+        ]
+    );
+}

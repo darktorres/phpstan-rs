@@ -295,10 +295,7 @@ pub fn parse(raw: &str) -> DocBlock {
     // line (`@return array{id: int, name: string,\n *   ...}`, a real,
     // common style for documenting large DTOs). Every line joins onto
     // the most recent `@tag` line until the next one starts, rather than
-    // being parsed as its own (tagless, ignored) line - take_type_token
-    // below still correctly stops at the type's own closing bracket
-    // followed by whitespace, discarding any joined-on description text
-    // that follows it on the same logical line.
+    // being parsed as its own (tagless, ignored) line.
     let mut tag_lines: Vec<String> = Vec::new();
     for raw_line in inner.lines() {
         let line = raw_line.trim();
@@ -1117,7 +1114,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // see `DocBlock::see`'s own doc comment) - the type grammar's
             // stricter parsing would only misparse it.
             "see" => {
-                let target = take_type_token(rest);
+                let target = see_target(rest);
                 if !target.is_empty() {
                     block.see.push(target.to_string());
                 }
@@ -1148,71 +1145,16 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
     }
 }
 
-/// Takes the leading type expression off `s`, stopping at the first
-/// whitespace that occurs outside any `<>`/`{}`/`()`/`[]` nesting - a plain
-/// `split_whitespace().next()` would wrongly cut an array shape or generic
-/// off at its first internal space (`array{count: int, ...}`). A `'...'`/
-/// `"..."` string-literal segment (a legal PHPStan literal-string-union
-/// member, e.g. `' '|'>'|'+'|'~'`) is tracked as one opaque run too -
-/// without this, a space inside the quotes is wrongly treated as the
-/// token's end, cutting the whole type down to a bare, dangling `'`.
-fn take_type_token(s: &str) -> &str {
-    let mut depth = 0i32;
-    let mut quote: Option<char> = None;
-    // True from the moment a `)` brings `depth` back to 0 *and*
-    // a `:` genuinely follows it (skipping whitespace) - a `Closure(...):
-    // ReturnType`/`callable(...): ReturnType` shape's own trailing return
-    // type sits outside the parens, separated from them by this `:`, and
-    // the plain depth-0-whitespace-stops rule below would otherwise
-    // truncate right after the `:` (`@param Closure(int): string $fn`
-    // would lose everything from " string" onward, silently degrading to
-    // the bare `Closure(int):` fragment). Decided once, right at the `)`,
-    // via a bounded lookahead - not a blanket
-    // "tolerate whitespace after any `)`" rule, which would wrongly
-    // swallow an *ordinary* parenthesized type's own real terminating
-    // space too (`(A&B) $x` must still stop right after its own `)`,
-    // since nothing but the next token follows it). Cleared the moment
-    // the first real (non-whitespace) return-type character is consumed,
-    // so a *later* space - the real terminator before e.g. `$fn` - still
-    // stops normally; recurses correctly for a nested callable-shape
-    // return type too (`Closure(int): Closure(string): bool`), since
-    // each `)` closing back to depth 0 re-triggers its own lookahead.
-    let mut in_return_type_transition = false;
+/// A `@see` tag's target: its first word, with a parenthesized argument
+/// list kept whole (`Foo::bar(int $x)`).
+fn see_target(s: &str) -> &str {
+    let mut depth = 0u32;
     for (i, c) in s.char_indices() {
-        if let Some(q) = quote {
-            if c == q {
-                quote = None;
-            }
-            continue;
-        }
         match c {
-            '\'' | '"' => {
-                quote = Some(c);
-                in_return_type_transition = false;
-            }
-            '<' | '{' | '(' | '[' => {
-                depth += 1;
-                in_return_type_transition = false;
-            }
-            ')' => {
-                depth -= 1;
-                in_return_type_transition =
-                    depth == 0 && s[i + c.len_utf8()..].trim_start().starts_with(':');
-            }
-            '>' | '}' | ']' => {
-                depth -= 1;
-                in_return_type_transition = false;
-            }
-            ':' if in_return_type_transition => {}
-            c if c.is_whitespace() && depth == 0 => {
-                if in_return_type_transition {
-                    continue;
-                }
-                return &s[..i];
-            }
-            _ => {
-                in_return_type_transition = false;
-            }
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            c if c.is_whitespace() && depth == 0 => return &s[..i],
+            _ => {}
         }
     }
     s

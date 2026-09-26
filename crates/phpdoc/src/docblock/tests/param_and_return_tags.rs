@@ -196,9 +196,9 @@ fn param_type_with_internal_spaces_still_finds_the_variable_name() {
 #[test]
 fn a_return_type_wrapped_across_multiple_lines_is_not_truncated() {
     // A real, common style for documenting a large DTO's shape,
-    // spanning multiple physical lines - `take_type_token` must see the
-    // whole multi-line type, not just the first physical line (which
-    // would leave an unclosed `{`).
+    // spanning multiple physical lines - the parser must see the whole
+    // multi-line type, not just the first physical line (which would
+    // leave an unclosed `{`).
     let block = parse(
         r#"/**
          * @return array{id: int, file: string, date_available: ?string,
@@ -218,8 +218,8 @@ fn a_var_type_wrapped_across_multiple_lines_with_trailing_line_comments_strips_t
     // pestphp/pest-plugin-browser's own
     // JavaScriptSerializer::parseValue: each wrapped shape field carries
     // its own trailing `// description`, which must not get spliced into
-    // the joined type string - `take_type_token` would otherwise parse
-    // "// null" as a bare class-like name, corrupting the whole shape.
+    // the joined type - otherwise "// null" would parse as a bare
+    // class-like name, corrupting the whole shape.
     let block = parse(
         r#"/**
          * @var array{
@@ -281,9 +281,8 @@ fn phpstan_template_extends_and_implements_are_recognized() {
 fn a_real_phpstan_conditional_return_type_is_captured_as_its_own_raw_token() {
     // Doctrine DBAL's own DriverManager::getConnection().
     // `Type::Conditional`/`resolve_conditional` do real per-call-site
-    // binding, so this raw token is captured like any other `@return`
-    // type - `take_type_token`'s own balanced-parens grab already
-    // produces the exact substring `types::parse_type_string` needs.
+    // binding, so this type is captured like any other `@return`
+    // type.
     let block = parse(
         r#"/**
          * @template T of Connection
