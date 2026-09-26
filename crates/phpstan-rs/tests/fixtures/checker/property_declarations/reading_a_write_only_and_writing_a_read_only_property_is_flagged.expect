@@ -1,6 +1,5 @@
 7:24-7:56 missingType.return L6 | Method Magic::__get() has no return type specified.
 7:39-7:41 missingType.parameter L6 | Method Magic::__get() has parameter $n with no type specified.
-8:24-8:49 missingType.return L6 | Method Magic::__set() has no return type specified.
 8:39-8:41 missingType.parameter L6 | Method Magic::__set() has parameter $n with no type specified.
 8:43-8:45 missingType.parameter L6 | Method Magic::__set() has parameter $v with no type specified.
 10:28-10:61 propertySetHook.nativeParameterType L0 | Parameter $value of set hook does not have a native type but the property Magic::$setOnly does.

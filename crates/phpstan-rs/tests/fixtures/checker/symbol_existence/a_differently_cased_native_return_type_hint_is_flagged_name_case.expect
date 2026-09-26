@@ -1,2 +1,1 @@
 3:13-3:52 class.nameCase L0 | Class referenced with incorrect case: foo.
-3:40-3:49 return.type L3 | return type mismatch: expected foo, got Foo

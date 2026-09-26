@@ -1,3 +1,2 @@
-5:24-6:18 catch.notThrowable L0 | cannot catch myexception: it does not implement Throwable
 5:26-5:37 class.nameCase L0 | Class referenced with incorrect case: myexception.
     fix: Use MyException => "MyException"
