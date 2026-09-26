@@ -154,7 +154,7 @@ impl<'a> Checker<'a> {
     ) {
         let mut seen_non_repeatable: FxHashSet<String> = FxHashSet::default();
         for attr in attrs {
-            let fqn = self.name_ctx.resolve(&attr.name);
+            let fqn = self.resolve_class_name(&attr.name);
             let Some(info) = self.registry.classes.get(fqn.as_str()) else {
                 continue;
             };

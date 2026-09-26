@@ -75,7 +75,7 @@ impl Type {
                 }
                 match hierarchy.method_return_type(name, "__toString") {
                     Some(ty) => Some(ty),
-                    None if hierarchy.class_exactly(name).is_some() => None,
+                    None if hierarchy.find_class(name).is_some() => None,
                     None => Some(Type::String),
                 }
             }

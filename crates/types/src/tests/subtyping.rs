@@ -488,3 +488,32 @@ fn a_decimal_integer_string_implies_numeric_lowercase_uppercase_and_non_empty() 
         &decimal
     ));
 }
+
+#[test]
+fn class_names_are_one_class_whatever_their_case() {
+    use std::hash::{BuildHasher, BuildHasherDefault};
+    let hash = |t: &Type| BuildHasherDefault::<rustc_hash::FxHasher>::default().hash_one(t);
+    let written = Type::Object("foo".into(), Vec::new());
+    let declared = Type::Object("Foo".into(), Vec::new());
+    assert_eq!(written, declared);
+    assert_eq!(hash(&written), hash(&declared));
+    assert!(is_subtype(&written, &declared));
+    assert!(is_subtype(&declared, &written));
+    assert_eq!(
+        Type::EnumCase("suit".into(), "Hearts".into()),
+        Type::EnumCase("Suit".into(), "Hearts".into())
+    );
+    assert_ne!(
+        Type::EnumCase("Suit".into(), "hearts".into()),
+        Type::EnumCase("Suit".into(), "Hearts".into())
+    );
+}
+
+#[test]
+fn property_names_keep_their_case_method_names_do_not() {
+    assert_ne!(
+        Type::HasProperty("name".into()),
+        Type::HasProperty("Name".into())
+    );
+    assert_eq!(Type::HasMethod("run".into()), Type::HasMethod("Run".into()));
+}

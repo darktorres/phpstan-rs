@@ -8,6 +8,8 @@ use rustc_hash::FxHashMap;
 use crate::registry::Registry;
 use types::{AcceptsResult, ClassFacts, ClassHierarchy, Relation, TrinaryLogic, Type, Variance};
 
+/// Every class name is looked up as PHP resolves it, case-insensitively:
+/// a name the relations carry keeps its spelling as written.
 impl ClassHierarchy for Registry {
     fn is_subclass_of(&self, class: &str, of: &str) -> bool {
         Registry::is_subclass_of(self, class, of)
@@ -21,33 +23,29 @@ impl ClassHierarchy for Registry {
         })
     }
 
-    fn class_exactly(&self, name: &str) -> Option<ClassFacts<'_>> {
-        self.classes.get(name).map(|info| ClassFacts {
-            kind: info.kind,
-            is_final: info.is_final,
-            templates: &info.templates,
-        })
-    }
-
     fn ancestor_names(&self, class: &str) -> Vec<Arc<str>> {
-        self.all_ancestor_names(class).into_iter().collect()
+        self.all_ancestor_names(self.canonical_class_name(class))
+            .into_iter()
+            .collect()
     }
 
     fn has_method(&self, class: &str, method: &str) -> bool {
-        self.lookup_method(class, method).is_some()
+        self.lookup_method(self.canonical_class_name(class), method)
+            .is_some()
     }
 
     fn method_return_type(&self, class: &str, method: &str) -> Option<Type> {
-        self.lookup_method(class, method)
+        self.lookup_method(self.canonical_class_name(class), method)
             .map(|sig| sig.return_type.clone())
     }
 
     fn property_type(&self, class: &str, property: &str) -> Option<Type> {
-        self.lookup_property(class, property).map(|p| p.ty.clone())
+        self.lookup_property(self.canonical_class_name(class), property)
+            .map(|p| p.ty.clone())
     }
 
     fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
-        Registry::slot_variance(self, class, index)
+        Registry::slot_variance(self, self.canonical_class_name(class), index)
     }
 
     fn ancestor_template_bindings(
@@ -56,11 +54,22 @@ impl ClassHierarchy for Registry {
         args: &[Type],
         ancestor: &str,
     ) -> FxHashMap<String, Type> {
-        self.class_template_bindings(class, args, ancestor)
+        self.class_template_bindings(
+            self.canonical_class_name(class),
+            args,
+            self.canonical_class_name(ancestor),
+        )
     }
 }
 
 impl Registry {
+    /// `name` in its declared spelling when the class is known, as
+    /// written otherwise.
+    pub fn canonical_class_name<'a>(&'a self, name: &'a str) -> &'a str {
+        self.lookup_class(name)
+            .map_or(name, |(declared, _)| declared)
+    }
+
     /// The type relations against this registry's classes and settings.
     pub fn relation(&self) -> Relation<'_> {
         Relation {

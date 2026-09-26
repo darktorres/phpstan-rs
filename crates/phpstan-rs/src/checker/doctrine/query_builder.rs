@@ -329,7 +329,9 @@ impl<'a> Checker<'a> {
     /// `FROM`/`JOIN` clause names its own target class.
     fn foldable_class_name(&self, arg: &Arg, _locals: &crate::checker::Locals) -> Option<String> {
         match &arg.value.kind {
-            ExprKind::ClassNameFetch(target) => target.as_name().map(|n| self.name_ctx.resolve(n)),
+            ExprKind::ClassNameFetch(target) => {
+                target.as_name().map(|n| self.resolve_class_name(n))
+            }
             _ => None,
         }
     }

@@ -260,10 +260,10 @@ impl PartialEq for Type {
             (Type::ClassKindString(a), Type::ClassKindString(b)) => a == b,
             (Type::ArrayShape(a), Type::ArrayShape(b)) => a == b,
             (Type::ObjectShape(a), Type::ObjectShape(b)) => a == b,
-            (Type::Object(an, aa), Type::Object(bn, ba)) => an == bn && aa == ba,
+            (Type::Object(an, aa), Type::Object(bn, ba)) => an.eq_ignore_case(bn) && aa == ba,
             (Type::ObjectWithoutClass, Type::ObjectWithoutClass) => true,
             (Type::Resource { closed: a }, Type::Resource { closed: b }) => a == b,
-            (Type::EnumCase(ae, ac), Type::EnumCase(be, bc)) => ae == be && ac == bc,
+            (Type::EnumCase(ae, ac), Type::EnumCase(be, bc)) => ae.eq_ignore_case(be) && ac == bc,
             (Type::Callable(a), Type::Callable(b)) => a == b,
             (Type::SelfRef(a), Type::SelfRef(b)) => a == b,
             (Type::ParentRef, Type::ParentRef) => true,
@@ -281,8 +281,8 @@ impl PartialEq for Type {
             (Type::Accessory(a), Type::Accessory(b)) => a == b,
             (Type::HasOffsetValue(ak, av), Type::HasOffsetValue(bk, bv)) => ak == bk && av == bv,
             (Type::HasOffset(a), Type::HasOffset(b)) => a == b,
-            (Type::HasMethod(a), Type::HasMethod(b))
-            | (Type::HasProperty(a), Type::HasProperty(b)) => a.eq_ignore_case(b),
+            (Type::HasMethod(a), Type::HasMethod(b)) => a.eq_ignore_case(b),
+            (Type::HasProperty(a), Type::HasProperty(b)) => a == b,
             (Type::ReflectedMember(ao, an), Type::ReflectedMember(bo, bn)) => ao == bo && an == bn,
             (Type::ValueOf(a), Type::ValueOf(b)) => a == b,
             (Type::Extension(a), Type::Extension(b)) => a.eq_data(&**b),
@@ -406,12 +406,12 @@ impl Hash for Type {
             Type::ClassKindString(kind) => kind.hash(state),
             Type::ArrayShape(shape) | Type::ObjectShape(shape) => shape.hash(state),
             Type::Object(name, args) => {
-                name.hash(state);
+                name.lower().hash(state);
                 args.hash(state);
             }
             Type::Resource { closed } => closed.hash(state),
             Type::EnumCase(class, case) => {
-                class.hash(state);
+                class.lower().hash(state);
                 case.hash(state);
             }
             Type::Callable(sig) => sig.hash(state),
@@ -446,7 +446,8 @@ impl Hash for Type {
                 value.hash(state);
             }
             Type::HasOffset(key) => key.hash(state),
-            Type::HasMethod(name) | Type::HasProperty(name) => name.lower().hash(state),
+            Type::HasMethod(name) => name.lower().hash(state),
+            Type::HasProperty(name) => name.hash(state),
             Type::ReflectedMember(owner, member) => {
                 owner.hash(state);
                 member.hash(state);

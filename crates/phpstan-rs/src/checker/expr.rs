@@ -2444,7 +2444,7 @@ impl<'a> Checker<'a> {
                             .chain(decl.implements.iter())
                             .find_map(|name| {
                                 self.registry
-                                    .lookup_method(&self.name_ctx.resolve(name), &m.function.name)
+                                    .lookup_method(&self.resolve_class_name(name), &m.function.name)
                             });
                     self.check_function_with_ancestor_hint(
                         &m.function,

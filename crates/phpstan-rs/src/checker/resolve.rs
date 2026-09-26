@@ -29,7 +29,18 @@ impl<'a> Checker<'a> {
                     None => raw,
                 }
             }
-            _ => Type::Object(self.name_ctx.resolve(name).into(), Vec::new()),
+            _ => Type::Object(self.resolve_class_name(name).into(), Vec::new()),
+        }
+    }
+
+    /// A class name as written in this file, resolved against its
+    /// namespace and imports, in its declared spelling when the class is
+    /// known - PHP class names are case-insensitive.
+    pub(crate) fn resolve_class_name(&self, name: &str) -> String {
+        let resolved = self.name_ctx.resolve(name);
+        match self.registry.lookup_class(&resolved) {
+            Some((canonical, _)) => canonical.to_string(),
+            None => resolved,
         }
     }
 

@@ -399,16 +399,17 @@ impl Relation<'_> {
     /// `mixed` slot hold for anything). A class the hierarchy doesn't
     /// know compares its arguments as written.
     fn object_subtype(&self, a: &str, args_a: &[Type], b: &str, args_b: &[Type]) -> bool {
-        if a != b && !self.hierarchy.is_subclass_of(a, b) {
+        let same_class = a.eq_ignore_ascii_case(b);
+        if !same_class && !self.hierarchy.is_subclass_of(a, b) {
             return false;
         }
         if args_b.is_empty() {
             return true;
         }
-        let Some(class_b) = self.hierarchy.class_exactly(b) else {
+        let Some(class_b) = self.hierarchy.find_class(b) else {
             return args_a == args_b;
         };
-        let effective_args_a: Vec<Type> = if a == b {
+        let effective_args_a: Vec<Type> = if same_class {
             args_a.to_vec()
         } else {
             let bindings = self.hierarchy.ancestor_template_bindings(a, args_a, b);

@@ -760,7 +760,7 @@ pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
 pub(crate) fn is_integer_parameter_type(checker: &Checker, expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), member) => {
-            let resolved = checker.name_ctx.resolve(class_name);
+            let resolved = checker.resolve_class_name(class_name);
             let short_name = resolved.rsplit('\\').next().unwrap_or(&resolved);
             match short_name {
                 "ParameterType" => &**member == "INTEGER",

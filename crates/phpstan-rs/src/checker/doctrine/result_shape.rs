@@ -231,7 +231,7 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
         // (the same leniency an ordinary `new UnknownClass()` expression
         // already gets elsewhere in this project's own type system).
         SelectItemKind::New(class) => {
-            Type::Object(checker.name_ctx.resolve(class).into(), Vec::new())
+            Type::Object(checker.resolve_class_name(class).into(), Vec::new())
         }
         // A custom, project-registered DQL function (ROADMAP
         // Phase 168 168h) - `Mixed` when this project's own

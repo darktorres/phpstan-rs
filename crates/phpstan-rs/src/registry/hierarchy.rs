@@ -16,12 +16,17 @@ impl Registry {
     /// `self.ancestor_names` (see `precompute_ancestor_names`) - cheaper
     /// than a fresh `extends`+`implements` DFS on every one of this
     /// function's dozens of read-only, post-load call sites.
+    /// Whether `class` is `of` or extends or implements it, both compared
+    /// as PHP compares class names, case-insensitively.
     pub fn is_subclass_of(&self, class: &str, of: &str) -> bool {
-        class == of
-            || self
-                .ancestor_names
-                .get(class)
-                .is_some_and(|ancestors| ancestors.contains(of))
+        if class.eq_ignore_ascii_case(of) {
+            return true;
+        }
+        let class = self.lookup_class(class).map_or(class, |(k, _)| k);
+        let of = self.lookup_class(of).map_or(of, |(k, _)| k);
+        self.ancestor_names
+            .get(class)
+            .is_some_and(|ancestors| ancestors.contains(of))
     }
 
     /// The exact `extends`+`implements`-only transitive closure

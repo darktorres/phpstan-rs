@@ -23,9 +23,6 @@ pub trait ClassHierarchy {
     /// `name`'s facts, looked up as written and then case-insensitively.
     fn find_class(&self, name: &str) -> Option<ClassFacts<'_>>;
 
-    /// `name`'s facts, looked up exactly as written.
-    fn class_exactly(&self, name: &str) -> Option<ClassFacts<'_>>;
-
     /// Every ancestor's name: parents, interfaces and used traits.
     fn ancestor_names(&self, class: &str) -> Vec<Arc<str>>;
 
@@ -75,14 +72,10 @@ pub struct NoClasses;
 
 impl ClassHierarchy for NoClasses {
     fn is_subclass_of(&self, class: &str, of: &str) -> bool {
-        class == of
+        class.eq_ignore_ascii_case(of)
     }
 
     fn find_class(&self, _: &str) -> Option<ClassFacts<'_>> {
-        None
-    }
-
-    fn class_exactly(&self, _: &str) -> Option<ClassFacts<'_>> {
         None
     }
 

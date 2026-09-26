@@ -87,10 +87,10 @@ impl Relation<'_> {
             // comparison - the one deliberate leniency left in this
             // design.
             (Type::Object(a, args_a), Type::Object(b, args_b)) => {
-                if a != b && !self.hierarchy.is_subclass_of(a, b) {
+                if !a.eq_ignore_case(b) && !self.hierarchy.is_subclass_of(a, b) {
                     return false;
                 }
-                let Some(info_b) = self.hierarchy.class_exactly(b) else {
+                let Some(info_b) = self.hierarchy.find_class(b) else {
                     return true;
                 };
                 // `b` isn't generic at all, so the whole template-binding
@@ -452,11 +452,11 @@ impl Relation<'_> {
             (Type::ObjectWithoutClass, Type::ObjectShape(_)) => true,
             // A class the registry never saw can't be checked either way.
             (Type::Object(class, _), Type::HasMethod(method)) => {
-                self.hierarchy.class_exactly(class).is_none()
+                self.hierarchy.find_class(class).is_none()
                     || self.hierarchy.has_method(class, method)
             }
             (Type::Object(class, _), Type::HasProperty(property)) => {
-                self.hierarchy.class_exactly(class).is_none()
+                self.hierarchy.find_class(class).is_none()
                     || self.hierarchy.property_type(class, property).is_some()
             }
             (Type::ObjectShape(shape), Type::HasProperty(property)) => shape
@@ -485,7 +485,7 @@ impl Relation<'_> {
             // never an actual `Params`-named object - only the
             // Object-vs-Object arm's leniency would leave those failing
             // just the same way.
-            (_, Type::Object(name, _)) if self.hierarchy.class_exactly(name).is_none() => true,
+            (_, Type::Object(name, _)) if self.hierarchy.find_class(name).is_none() => true,
             // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
             (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => true,
             _ => self.subtype(sub, sup) || accepted_though_no_subtype(sub, sup),
@@ -782,7 +782,7 @@ impl Relation<'_> {
     /// hierarchy, don't guess).
     fn is_closed_class_kind(&self, name: &str) -> bool {
         self.hierarchy
-            .class_exactly(name)
+            .find_class(name)
             .is_some_and(|class| matches!(class.kind, ClassKind::Class | ClassKind::Enum))
     }
 
