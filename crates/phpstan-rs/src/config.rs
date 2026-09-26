@@ -161,11 +161,11 @@ pub struct Config {
     /// `registry::Registry::check_deprecated_usage`.
     pub check_deprecated_usage: Option<bool>,
     /// Extra directories loaded for type-resolution context only - never
-    /// analyzed or reported on. See `composer::discover_vendor_context`
+    /// analyzed or reported on. See `composer::vendor::discover_vendor_context`
     /// for the automatic `vendor/` counterpart to this.
     pub scan_paths: Option<Vec<PathBuf>>,
     /// Disables the automatic Composer-autoloader-based `vendor/`
-    /// context load (see `composer::discover_vendor_context`).
+    /// context load (see `composer::vendor::discover_vendor_context`).
     pub no_composer: Option<bool>,
     /// The project's target PHP version, as a `"major.minor"` string
     /// (see `php_version::parse_php_version`) - a plain `String` since

@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::composer::ComposerContext;
+use crate::composer::vendor::VendorContext;
 
 /// Everything a workspace's `phpstan-rs.toml` (or its absence) resolves
 /// into, applied once per `Server::configure_from_workspace` call.
@@ -79,7 +79,8 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) sql_reflection_config: Option<sql::config::SqlReflectionConfig>,
     pub(crate) sql_reflection_schema: Option<sql::schema::SchemaCatalog>,
     pub(crate) phpstan_api_check_enabled: bool,
-    pub(crate) vendor_context: ComposerContext,
+    pub(crate) package_dirs: Vec<(PathBuf, String)>,
+    pub(crate) vendor_context: VendorContext,
     pub(crate) extra_context_dirs: Vec<PathBuf>,
     pub(crate) baseline: Option<crate::baseline::Baseline>,
     pub(crate) ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
@@ -97,7 +98,7 @@ pub(crate) struct ResolvedWorkspaceConfig {
 /// empty -> analyze everything under the given dirs" default, not "empty
 /// -> analyze nothing".
 pub(crate) struct WorkspaceContextPaths {
-    pub(crate) vendor: ComposerContext,
+    pub(crate) vendor: VendorContext,
     pub(crate) extra_dirs: Vec<PathBuf>,
     pub(crate) analyze_paths: Vec<PathBuf>,
 }
@@ -185,14 +186,14 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
     });
 
     let no_composer = config.no_composer.unwrap_or(false);
-    let (vendor_context, phpstan_api_check_enabled) = if no_composer {
-        (ComposerContext::default(), false)
+    let package = if no_composer {
+        crate::composer::PackageContext::default()
     } else {
-        (
-            crate::composer::discover_vendor_context(root),
-            crate::composer::detect_phpstan_dependency(root),
-        )
+        crate::composer::PackageContext::load(root, root)
     };
+    let phpstan_api_check_enabled = package.requires_phpstan();
+    let package_dirs = package.package_dirs();
+    let vendor_context = package.vendor;
 
     let analyze_paths: Vec<PathBuf> = config
         .paths
@@ -304,6 +305,7 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         sql_reflection_config,
         sql_reflection_schema,
         phpstan_api_check_enabled,
+        package_dirs,
         vendor_context,
         extra_context_dirs,
         baseline,

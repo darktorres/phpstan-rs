@@ -13,7 +13,7 @@
 //! main `Checker` pass instead, see below): this checks code that
 //! consumes real PHPStan as a Composer library.
 //!
-//! Only ever called when `composer::detect_phpstan_dependency` found a
+//! Only ever called when `composer::PackageContext::requires_phpstan` found a
 //! real `phpstan/phpstan`/`phpstan/extension-installer` dependency in the
 //! analyzed project's own `composer.json` (`Project::check_file`) - a
 //! project with no such dependency has no backward-compatibility promise
@@ -985,11 +985,11 @@ impl<'a> Walker<'a> {
         if !is_phpstan_namespace(ns) {
             return;
         }
-        let Some(dir) = self.file_path.and_then(Path::parent) else {
+        let Some(file) = self.file_path else {
             return;
         };
-        if let Some(package_name) = composer::find_composer_package_name(dir)
-            && package_name.starts_with("phpstan/")
+        if composer::owning_package(&self.registry.package_dirs, file)
+            .is_some_and(|name| name.starts_with("phpstan/"))
         {
             return;
         }

@@ -74,6 +74,9 @@ pub struct Session {
     sql_reflection_schema: Option<sql::schema::SchemaCatalog>,
     composer_manifests: Vec<composer::manifest::ComposerManifest>,
     phpstan_api_check_enabled: bool,
+    /// Every composer root's package directories (`PackageContext::
+    /// package_dirs`), for which package owns an analysed file.
+    package_dirs: Vec<(PathBuf, String)>,
     /// Non-fatal problems found while resolving (e.g. SQL schema drift).
     pub warnings: Vec<String>,
 }
@@ -266,15 +269,12 @@ impl Session {
         let mut scan_files = Vec::new();
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
+        let mut package_dirs = Vec::new();
         let mut dirs = dirs;
         if !no_composer {
             let canonical_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
             let mut promoted: Vec<PathBuf> = Vec::new();
             for composer_root in composer_roots(&dirs, &canonical_root) {
-                let vendor_context = composer::discover_vendor_context(&composer_root);
-                scan_dirs.extend(vendor_context.dirs);
-                scan_files.extend(vendor_context.files);
-                phpstan_api_check_enabled |= composer::detect_phpstan_dependency(&composer_root);
                 // The root itself keeps its own spelling (`.` for the CLI),
                 // so the manifest's paths compare against analysed paths
                 // spelled the same way.
@@ -283,7 +283,12 @@ impl Session {
                 } else {
                     composer_root.clone()
                 };
-                if let Some(manifest) = composer::manifest::ComposerManifest::load(&manifest_root) {
+                let package = composer::PackageContext::load(&composer_root, &manifest_root);
+                scan_dirs.extend(package.vendor.dirs.iter().cloned());
+                scan_files.extend(package.vendor.files.iter().cloned());
+                phpstan_api_check_enabled |= package.requires_phpstan();
+                package_dirs.extend(package.package_dirs());
+                if let Some(manifest) = package.manifest {
                     promoted.extend(
                         manifest
                             .path_repository_packages()
@@ -333,6 +338,7 @@ impl Session {
             sql_reflection_schema,
             composer_manifests,
             phpstan_api_check_enabled,
+            package_dirs,
             warnings,
         })
     }
@@ -485,6 +491,7 @@ impl Session {
         project.set_sql_reflection_schema(self.sql_reflection_schema.clone());
         project.set_php_version(self.php_version);
         project.set_phpstan_api_check_enabled(self.phpstan_api_check_enabled);
+        project.set_package_dirs(self.package_dirs.clone());
     }
 
     /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`

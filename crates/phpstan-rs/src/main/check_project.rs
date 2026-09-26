@@ -418,7 +418,7 @@ pub(crate) struct CheckProjectArgs {
     #[arg(long = "stub-path")]
     pub(crate) stub_paths: Vec<PathBuf>,
     /// Disables the automatic Composer-autoloader-based `vendor/`
-    /// context load (see `composer::discover_vendor_context`).
+    /// context load (see `composer::vendor::discover_vendor_context`).
     /// `--scan-dir` still works.
     #[arg(long)]
     pub(crate) no_composer: bool,

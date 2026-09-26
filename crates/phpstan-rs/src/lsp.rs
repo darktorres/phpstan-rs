@@ -491,6 +491,7 @@ impl Server {
             .set_assertion_tables(resolved.assertion_entries, resolved.class_argument_returns);
         self.project
             .set_phpstan_api_check_enabled(resolved.phpstan_api_check_enabled);
+        self.project.set_package_dirs(resolved.package_dirs);
 
         self.root = Some(root.to_path_buf());
         self.project.set_working_dir(root.to_path_buf());

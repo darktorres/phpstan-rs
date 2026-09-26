@@ -2,15 +2,18 @@
 //! type-resolution context from a project's real, installed Composer
 //! autoloader.
 
-use super::super::*;
 use super::helpers::*;
+use crate::composer::vendor::*;
+use syntax::ast::*;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 #[test]
 fn no_composer_json_means_no_context() {
     let dir = TempDir::new("no_composer_json");
     assert_eq!(
         discover_vendor_context(dir.path()),
-        ComposerContext::default()
+        VendorContext::default()
     );
 }
 
@@ -20,7 +23,7 @@ fn composer_json_without_installed_vendor_means_no_context() {
     dir.write("composer.json", "{}");
     assert_eq!(
         discover_vendor_context(dir.path()),
-        ComposerContext::default()
+        VendorContext::default()
     );
 }
 

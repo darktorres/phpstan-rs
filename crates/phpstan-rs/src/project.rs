@@ -831,12 +831,16 @@ impl Project {
         self.registry.php_version = php_version;
     }
 
+    /// Which package owns each directory (`composer::PackageContext::
+    /// package_dirs`), read by the checker through the registry.
+    pub fn set_package_dirs(&mut self, package_dirs: Vec<(PathBuf, String)>) {
+        self.registry.package_dirs = package_dirs;
+    }
+
     /// Opts every subsequent `check_file`/`check_all` call into
     /// `checker::phpstan_api::check_phpstan_api_usage` - the caller
-    /// (`main.rs`) decides this once, via
-    /// `composer::detect_phpstan_dependency` against the project's own
-    /// `composer.json`, the same way it already decides whether to load
-    /// `composer::discover_vendor_context`'s own `vendor/` context. Also
+    /// decides this once, from the project's `composer::PackageContext`
+    /// (`requires_phpstan`). Also
     /// mirrored into `self.registry.phpstan_api_check_enabled`, since
     /// the main `Checker` pass's own `MethodCall` arm needs to read this
     /// too (`phpstanApi.method`/`phpParser.nodeConnectingAttribute`), and
