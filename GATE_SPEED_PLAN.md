@@ -141,6 +141,10 @@ This is the collector shape of crate-split §3.8.
 - The dump is taken from the main-pass checker (`set_dump_types` on the
   checker in `check_file_impl`), and `Project::dump_types`' separate walk
   is deleted. Diagnostics are unchanged, since the dump only records.
+- The dump comes back as data in the analysis result. The binary and
+  the fixture harness write the file. Today `Session::analyse` writes it
+  and prints `failed to write type dump` itself, which is library I/O
+  and a print in a library.
 - This is a behaviour change to the gate's own snapshots:
   `types-scoped`, `types-all-on` and `types-fixtures` change wherever
   property facts change an inferred type. It lands with its approved
@@ -296,6 +300,19 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
     job is mapping arguments onto `CheckRequest`.
   - C1's `--set` redesign changes that mapping and the library's
     request handling, and nothing else.
+- **Diagnostics beyond the report go through the same path.** The
+  gate's `.err` snapshots hold what the binary prints to stderr today:
+  - startup warnings (SQL drift, lexer warnings; `check_project.rs:673`
+    and `:689`);
+  - stale baseline entries (`:744`);
+  - check panics.
+
+  §3.10 already puts these in `AnalysisResult` as data. S9a makes that
+  true now: the library returns them and prints nothing, and one shared
+  library function renders them as text. The binary prints that
+  rendering, and the runner writes it to the `.err` snapshot. So the
+  runner's `.err` output can't drift from the binary's, and no print
+  moves into a library.
 - **S9c:** `tools/gate-runner` is a workspace member with
   `publish = false`, not shipped, built with `--profile gate`.
   - It builds the `CheckRequest` for each gate configuration (config
@@ -316,7 +333,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
     doing the same job.
 - `corpus` uses the runner. The determinism check compares the runner's
   emission-order view with one fresh `check-project --emission-order`
-  run from the shipped binary, in a separate process. That catches
+  run from the shipped binary, in a separate process. It compares stdout
+  and stderr, as the determinism check does today. That catches
   process-level nondeterminism, and any difference between the runner
   and the binary; the failure message names both possibilities.
 - Quick tier: 3 analyses instead of 6. `--full`: 2 fewer unscoped runs.
