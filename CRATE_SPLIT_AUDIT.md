@@ -46,6 +46,8 @@ step.
 | 29 | Tests placement | GAP | The `diagnostics` crate's own unit tests (builder, `Identifier`, `tip_text`) live in the package (`checker/tests/diagnostic_identifiers.rs`). | that file | now |
 | 30 | Leftovers | GAP | Empty directories on disk: `crates/phpstan-rs/src/ast_walk/tests`, `crates/phpstan-rs/proptest-regressions`. | `find crates -type d -empty` | now |
 | 31 | CI | pending | The only recorded Rust CI run (`867d9cb3`) was in progress at the time of writing (fmt and clippy passed). | `gh run list` | check |
+| 32 | Checker | GAP | `class_exists('X')` narrows nothing: `new X()` inside `if (class_exists('X'))` is still `class.notFound`, at top level and inside closures. `function_exists()`/`defined()` have guards (`Locals::guarded_functions`/`guarded_constants`); classes have none. Found while fixing the A2 closure-guard bug. | `checker/narrowing.rs` (no `class_exists` arm) | after the A2 bugs |
+| 33 | Fixtures | GAP | A native `resource` hint is a class name in PHP, not the resource pseudo-type; the old `(string)` resource-cast fixture relied on it and was deleted. How a native `resource` hint is typed has not been checked. | `a2-resource-cast` rename | after the A2 bugs |
 
 ## Checked and in order
 
