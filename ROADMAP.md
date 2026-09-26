@@ -1691,6 +1691,8 @@ Pick items the same way any other Pending/partial phase gets picked up.
   directly (2026-09-22). That pass also turned up gaps with no earlier
   phase, and each gets the next number in whichever section it belongs
   to.
+- **181** (Part 12) is a product feature rather than a finding: a local
+  web viewer for one analysis's results (2026-09-26).
 
 A number between 85 and 179 with no entry here (86, 92, 93, 99,
 102-104, 106, 108, 135, 138, 158-172, 174, 175, 179) belongs to a phase that has fully
@@ -4222,6 +4224,93 @@ change:
   pass (not just identifier-census-matched as the first pass did) and
   confirmed already covered by phpstan-rs's existing, comprehensive
   type-checking, visibility, and symbol-resolution machinery.
+
+## Part 12: Findings viewer
+
+### Phase 181 — Scan once, then browse and triage in a local web viewer (§AS)
+
+PHPStan Pro, PHPStan's paid add-on, is essentially a web UI for browsing
+an analysis's findings. phpstan-rs can offer the same for free, and go
+further. It scans once, at the highest level, keeping findings that
+inline ignores, `ignore_errors` or the baseline would hide. A local web
+page then filters that one result by level, rule, path and ignore state
+without rescanning. Each finding has one-click actions that write the
+ignore or the fix to disk.
+
+**Why one scan is enough, and the gate that keeps it true.** Today the
+level is mostly a filter on finished results
+(`project/session.rs`: `diagnostics.retain(|d| d.level <= self.level)`,
+applied before inline ignores and `ignore_errors`). It isn't purely a
+filter yet: `Registry::configured_level` drives emission-time acceptance
+at thresholds 7/8/9/10, and some sites compute their level at runtime.
+Levels phase E5 of the crate split turns every computed-level site into a
+named parameter with a level. After that, the viewer's scan runs at max
+with every parameter on, and tags each finding with the lowest level
+that reports it.
+
+Gate: for each level 0–10 and unset, the viewer's filter applied to the
+max scan must equal a real run at that level, over the corpus's
+per-level snapshots. Some parameter may change a finding's message
+instead of adding or removing a finding. If so, the tag records each
+variant with its level range, or the viewer rescans for that level;
+the gate's first run decides which.
+
+**Shape:**
+- `phpstan-rs report`: one analysis through `Session`, kept as the
+  unfinalized `AnalysisResult` (crate split F1), served on `127.0.0.1`
+  as a single page.
+- `report --export <dir>`: a read-only static copy, so a CI run's
+  results can be browsed from its artifacts.
+- The page's data is the versioned JSON schema (F3), plus each
+  finding's minimum level and hidden-by reason. HTML, JS and CSS are
+  embedded in the binary and work offline, with no CDN.
+- It lives in its own app-layer crate above the session. The finalizer
+  it shares with `check-project` is the same one `GATE_SPEED_PLAN.md`
+  S7 uses for its baseline and emission-order views.
+
+**Filters:**
+- level (a slider, applied instantly);
+- rule identifier, grouped by family;
+- path tree;
+- free-text search on the message;
+- new versus baselined;
+- a "hidden" toggle that shows findings suppressed by an inline ignore,
+  `ignore_errors` or the baseline, each with the entry that hid it;
+- unmatched ignores (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`).
+
+Each finding shows the source around its span, its message, tips,
+identifier and level, and a preview of its fix when it has one.
+
+**One-click actions** (served mode only):
+- **Ignore here:** writes `// @phpstan-ignore <identifier>`, using the
+  same-line/previous-line semantics `Project::apply_inline_ignores`
+  already implements. The file is then re-checked through the Session's
+  incremental update, which picks up the shifted line numbers.
+- **Ignore this identifier** in this file, or under a path glob: appends
+  an `[[ignore_errors]]` entry to `phpstan-rs.toml`, editing it in place
+  so the user's formatting and comments survive.
+- **Add to baseline:** updates the configured baseline file.
+- **Apply fix:** the same `diagnostics::fix::apply_fixes` path as
+  `check-project --fix` and the LSP's quick fixes.
+
+Every write first checks that the target file's content hash still
+matches the scanned one, and refuses if it doesn't. Every action records
+its reverse edit, so it can be undone from the page.
+
+**Security.** The endpoints write files, so the server:
+- binds to loopback only;
+- requires a random per-run token in the URL;
+- rejects requests whose `Origin`/`Host` isn't its own, which blocks
+  DNS-rebinding and cross-site writes from other pages in the browser.
+
+**Later:** a watch mode that keeps the page live as files change, on top
+of the F2 result cache and the Session VFS.
+
+**Depends on:** crate-split F1 (`AnalysisResult` and the finalizer), E5
+(levels), F3 (versioned JSON schema); watch mode also needs F2. It starts
+after Stage F.
+
+**Effort: large.**
 
 ---
 
