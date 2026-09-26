@@ -946,7 +946,11 @@ Then extract `types`, with the proptest seeds moved to
 - Extract `diagnostics`. The ignore / baseline pipeline stays in the
   package's future `project` module.
 
-**B8. composer.** The package context is computed once. Extract.
+**B8. composer.** The package context is computed once. Extract. The
+default `PhpVersions` range comes from it (§3.2): composer
+`config.platform.php`, else `require.php`; today an unconfigured
+`php_version` leaves every version-gated rule silent. An approved-delta
+commit of its own.
 
 **B9. stub-sources.**
 - The generated index plus the xtask plus the regeneration test.
@@ -1007,7 +1011,12 @@ going through the node's printed text) and the checker's
 
 **C8. Reflection extension points** (§3.5), with the built-in implementors.
 Reflection implements ClassHierarchy. The adapter and the duplicate
-subtyping implementations are deleted.
+subtyping implementations are deleted. The callers still on
+`Relation::structural()` (a class a subtype only of itself; about 24
+sites, among them the narrowing exclusion in `narrowing/type_ops.rs` and
+the doc-vs-native reconciliation in `function_sig/type_resolution.rs`,
+which runs at registry build) switch to the hierarchy-aware relation, which
+lazy reflection makes available there - an approved-delta commit.
 
 **C9. Summaries.** Purity and global-variable inference leave reflection for
 the summaries API. The ROADMAP mapping is recorded.
@@ -1129,7 +1138,10 @@ lands here, each its own commit:
   declaration, and the `format!`-built identifiers (about 40 sites today)
   become family members;
 - AST-node fixes beside text fixes, rendered to diffs through
-  `syntax::printer`.
+  `syntax::printer`;
+- `accepts` reasons: `Relation::accepts` fills `AcceptsResult.reasons`
+  (B4 ships the field empty), and the argument, return and property type
+  rules show them as tips.
 
 **E4. Extension modules.**
 - Order:
