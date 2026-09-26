@@ -1,11 +1,12 @@
 # Guiding the fuzzer
 
-Four targets now: `lex_parse`/`token_stream_parse` (from the original
-`master`-side Phase 19 work) plus `structured_php`/`phpdoc_type`
-(merged in alongside them - see ROADMAP.md's Phase 19 entry for how the
-two efforts relate). This doc covers ways to make mutations land on more
-syntactically-interesting input for the two byte/token-level targets, and
-how the two structured targets already avoid needing most of them.
+Four targets: `lex_parse` and `token_stream_parse` (source bytes and
+token streams into the PHP parser), `structured_php` (generated PHP
+programs through the whole per-file project pipeline) and `phpdoc_type`
+(strings through the PHPDoc grammar, as a type and as a whole doc
+comment). This doc covers ways to make mutations land on more
+syntactically-interesting input for the byte/token-level targets, and how
+`structured_php` avoids needing most of them.
 
 ## 1. Feed `lex_parse` a bigger real corpus
 
@@ -48,12 +49,12 @@ Recommended combined invocation for a longer session:
   are legitimate lexer input), worth adding only for faster iteration on
   ASCII syntax specifically.
 
-## 4. The two structured targets already do this differently
+## 4. `structured_php` already does this differently
 
-`structured_php` and `phpdoc_type` don't need any of the above -
-they generate syntactically-plausible input directly via a hand-written
-`Arbitrary` impl instead of relying on byte-level mutation to stumble
-onto valid syntax. `structured_php`'s own generator
+`structured_php` doesn't need any of the above - it generates
+syntactically-plausible input directly via a hand-written `Arbitrary` impl
+instead of relying on byte-level mutation to stumble onto valid syntax.
+Its generator
 (`fuzz_targets/structured_php.rs`) assembles a small `FuzzProgram` out of
 a `Fragment`/`Expr` enum pair - `if`/`while`/`for`/`foreach`/`match`/
 `switch` wrapping a nested fragment, `function`/`class`/`interface`/
@@ -67,11 +68,17 @@ a single `"<?php\n"`-prefixed source string. `token_stream_parse`
 `structured_php`'s own source-text rendering) entirely.
 
     cargo fuzz run structured_php -- -max_total_time=120
+
+`phpdoc_type` has no generator: it mutates raw strings, starting from the
+type expressions checked in under `fuzz/corpus/phpdoc_type/`. More seeds
+there (real `@param`/`@return` types from `vendor/phpstorm-stubs`, say)
+steer it the way section 1 steers `lex_parse`.
+
     cargo fuzz run phpdoc_type -- -max_total_time=120
 
-Both share `fuzz/src/lib.rs`'s panic-handling/64MiB-worker-stack guard
-(`guarded_parse`/`guarded_parse_phpdoc`) - see that file's own doc comment
-for why `structured_php` needs it (its generator reaches real recursive
-depth on purpose, unlike `lex_parse`/`token_stream_parse`, which don't
-swallow any panic message at all - see their own doc comments for why
-that's the right call for them).
+`structured_php` and `phpdoc_type` share `fuzz/src/lib.rs`'s 64MiB worker
+stack (`guarded_parse`/`guarded_parse_phpdoc`) - see that file's doc
+comment for why: both reach real recursive depth, unlike
+`lex_parse`/`token_stream_parse`, which don't swallow any panic message
+at all - see their own doc comments for why that's the right call for
+them.
