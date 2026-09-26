@@ -21,17 +21,21 @@ Artifacts:
 
 - `scoped`, `all-on`, `unscoped`, `<config>-L<n>`: `check-project
   --format json`, normalized to one line per diagnostic in output order:
-  `path, line, col, level, identifier, location, message, tip`
+  `path, line, col, level, identifier, message, tip`
   (tab-separated; `\t`/`\n`/`\\` escaped). The first line records
   `files_checked`. Stderr is kept separately as `<commit>.err`.
 - `types-scoped`, `types-all-on`: `--dump-types` output (every tracked
   variable's type and native type after each statement), zstd-compressed.
+- `types-fixtures`: the same for every fixture of the fixture suite, each
+  line prefixed with the fixture's name, recorded through the harness's
+  `PHPSTAN_RS_DUMP_TYPES`.
 - `baseline-scoped`, `baseline-all-on`: the run with the reference
   baselines from `cargo xtask baseline` (generated once, by the Stage A
   binary). Stage A's run is empty with no stale entries; a later commit
   may change it only by an approved delta, like any other artifact.
 - `perf/`, `buildtime/`, `tests/`: hyperfine + peak RSS of the scoped
-  run, incremental rebuild times, and the test-name manifest.
+  run, incremental rebuild times with the workspace crates each scenario
+  rebuilt (its targets asserted), and the test-name manifest.
 
 `all-on` is the scoped path set with every opt-in check enabled; `xtask`
 writes it to `<corpus>/.phpstan-rs-gate-all-on.toml`. The corpus runs use
