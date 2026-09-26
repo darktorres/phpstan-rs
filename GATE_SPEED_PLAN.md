@@ -91,9 +91,12 @@ faster than one.
 The order is the order of the sections below.
 
 ### S0. Gate step timing (xtask)
-`gates` and `corpus` print each step's wall time and write
-`.corpus-runs/gate/gatetime/<hash>.tsv` (step, seconds). Every later step
-reads its before and after times from it.
+- `gates` and `corpus` print each step's wall time and write
+  `.corpus-runs/gate/gatetime/<hash>.tsv` (step, seconds). Every later
+  step reads its before and after times from it.
+- `cargo test` runs its test binaries one after another, so each
+  target's own time (lib, cli, each crate's tests, fixtures) is recorded
+  separately from libtest's `finished in` summary.
 
 ### S1. Type-dump compression (xtask)
 - `zstd -3 -T0` instead of `-19` for the `types-*` snapshots.
@@ -125,13 +128,17 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 
 ### S4. Case-folded function keys, pulled forward from C5 (engine)
 - The C5 item "a case-folded function key map replacing the linear
-  scan" lands now, in its designed form. Functions are found through
-  the lowercase key (`syntax::Name`'s precomputed key where the name is
-  already interned) and keep their declared spelling for display.
-- `classes_lowercase` becomes the same mechanism, leaving one scheme
-  for both.
-- Every mutation path keeps the map current: stub merge, project
-  indexing, `remove_declarations`, LSP updates.
+  scan" lands now, in its designed form.
+- `Registry::functions` is keyed by the case-folded name, and
+  `FunctionSig` carries the declared spelling. There's one map and no
+  side index, so no mutation path (stub merge, project indexing,
+  `remove_declarations`, LSP updates) can leave the two out of step.
+- The 59 access sites go through the folded key. Sites that print a
+  function name use the declared spelling from the signature.
+- Class keys are left alone. C3's reflections, keyed by `syntax::Name`
+  with its precomputed lowercase key, replace both the class map and
+  `classes_lowercase`, so converting their 181 access sites now would
+  be thrown away.
 - Two declarations whose names differ only in case are one function in
   PHP, so the first one declared wins, as it already does for exact
   duplicates. First list the case-colliding keys in the stubs and the
@@ -152,6 +159,10 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - The arch gate gains the part of §4.10's "no engine I/O" this step
   makes true: no `std::env::current_dir` or `fs::canonicalize` outside
   `project::session`, the binary and the LSP.
+- File-existence checks (`includes.rs`'s `is_file()`) remain engine I/O.
+  F1's VFS replaces them, because each lookup there also records a
+  dependency for F2's result cache; building that ahead of F2 would be
+  thrown away.
 - Verify: corpus identical, all-on in particular; composer tests pass;
   `cargo xtask arch` passes.
 
@@ -174,7 +185,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Verify: fixture suite passes; `types-fixtures` identical; suite time
   recorded.
 
-### S8. Analysis result and finalizer, pulled forward from F1, plus a gate runner
+### S8. Analysis result, finalizer and CLI entry point in the library, plus a gate runner
 - **S8a:** F1's `AnalysisResult` and finalizer land now. `analyse`
   returns unfinalized per-file results. One finalizer then applies, in
   today's order:
@@ -186,18 +197,29 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 
   `check-project`, the LSP and the fixture harness all call it. Output
   stays identical.
-- **S8b:** `tools/gate-runner` is a workspace member with
-  `publish = false`, not shipped, built with `--profile gate`. It runs
-  one analysis per configuration through the library, then applies the
-  finalizer several times to write:
-  - the recorded report;
-  - the baseline views;
-  - the emission-order view.
+- **S8b:** check-project's resolution from arguments to a session moves
+  from `main/check_project.rs` into the library's app layer (crate-split
+  §3.10), and the binary becomes a thin caller. This covers:
+  - `CheckProjectArgs`;
+  - `overlay_flags`;
+  - the baseline settings;
+  - `Session::resolve`.
 
-  The shipped binary gets no gate-only flags.
+  C1's `--set` redesign then changes only that library entry point.
+- **S8c:** `tools/gate-runner` is a workspace member with
+  `publish = false`, not shipped, built with `--profile gate`.
+  - It takes the same argv as today's corpus commands and resolves it
+    through S8b's entry point, so it can't configure a run differently
+    from the binary.
+  - It runs one analysis per configuration, then applies the finalizer
+    several times to write the recorded report, the baseline views and
+    the emission-order view.
+  - The shipped binary gets no gate-only flags.
 - `corpus` uses the runner. The determinism check compares the runner's
   emission-order view with one fresh `check-project --emission-order`
-  run, a separate process, so process-level nondeterminism still shows.
+  run from the shipped binary, in a separate process. That catches
+  process-level nondeterminism, and any difference between the runner
+  and the binary; the failure message names both possibilities.
 - Quick tier: 3 analyses instead of 6. `--full`: 2 fewer unscoped runs.
 - Per-level runs stay real runs. Under crate-split §3.9 the level decides
   which rules run, and only a level-specific run shows that.
@@ -248,7 +270,11 @@ them, so an interim fix would be thrown away:
   resolution from the `stub-sources` index;
 - `check_paths` recomputing property-assign facts over every file on
   every LSP check. The Summaries API (crate-split §3.8), stored per
-  reflection snapshot with invalidation keys, replaces it.
+  reflection snapshot with invalidation keys, replaces it;
+- the facts pass still runs the whole checker, with `facts_only` checks
+  scattered through it to skip report-only work. Stage D separates rules
+  from inference ("analyser emits nothing"), and the facts pass becomes
+  inference with no rules registered.
 
 ## 5. Edits to CRATE_SPLIT_PLAN.md
 
@@ -258,8 +284,9 @@ Each is a targeted edit in the step's own commit:
 - S5, §4.10: the no-current-dir and no-canonicalize rule is listed as
   already enforced.
 - S7, §3.10: the Session takes its pool injected.
-- S8a, §3.10 and F1: `AnalysisResult` and the finalizer are marked as
-  landed early. F1 keeps the rest of its list.
+- S8a/S8b, §3.10 and F1/F4: `AnalysisResult`, the finalizer and the
+  check-project entry point in the library are marked as landed early.
+  F1 and F4 keep the rest of their lists.
 - S9, §4 tier list: quick drops `cargo bench --no-run` and checks
   rather than builds `--no-default-features`; full keeps both.
 - C4 and C5 gates: "the fixture suite and lib test wall times
