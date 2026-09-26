@@ -805,7 +805,7 @@ fn report(
                 for path in paths {
                     for d in &results[path] {
                         println!("{}:{}", path.display(), output::diagnostic_line(d));
-                        if let Some(tip) = &d.tip {
+                        if let Some(tip) = d.tip_text() {
                             println!("    💡 {tip}");
                         }
                         total += 1;

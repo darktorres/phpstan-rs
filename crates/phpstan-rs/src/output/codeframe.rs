@@ -199,7 +199,7 @@ pub fn render_friendly(results: &FxHashMap<PathBuf, Vec<Diagnostic>>, colour: bo
                 )
             );
             frame(&mut out, &lines, highlights.as_ref(), d, &painter);
-            if let Some(tip) = &d.tip {
+            if let Some(tip) = d.tip_text() {
                 let _ = writeln!(out, "  💡 {tip}");
             }
             out.push('\n');

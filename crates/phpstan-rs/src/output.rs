@@ -89,7 +89,7 @@ struct JsonMessage<'a> {
     level: u8,
     identifier: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tip: Option<&'a str>,
+    tip: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -146,7 +146,7 @@ pub fn render_json(results: &FxHashMap<PathBuf, Vec<Diagnostic>>, files_checked:
                 column: d.span.start.col,
                 level: d.level,
                 identifier: &d.identifier,
-                tip: d.tip.as_deref(),
+                tip: d.tip_text(),
             })
             .collect();
         files.insert(
@@ -234,7 +234,7 @@ pub fn render_junit(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> String {
                 xml_escape(&d.identifier),
             ));
             let mut body = d.message.clone();
-            if let Some(tip) = &d.tip {
+            if let Some(tip) = d.tip_text() {
                 body.push_str(&format!("\n{tip}"));
             }
             out.push_str(&format!(

@@ -140,7 +140,7 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     } else {
         for d in &diagnostics {
             println!("{}", output::diagnostic_line(d));
-            if let Some(tip) = &d.tip {
+            if let Some(tip) = d.tip_text() {
                 println!("    💡 {tip}");
             }
         }

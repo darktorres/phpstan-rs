@@ -237,7 +237,7 @@ fn percent_encode_path(s: &str) -> String {
 /// semantics this mirrors (low number = more certain/severe, not a
 /// per-finding confidence score).
 pub(crate) fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
-    let message = match &d.tip {
+    let message = match d.tip_text() {
         Some(tip) => format!("{}\n💡 {tip}", d.message),
         None => d.message.clone(),
     };

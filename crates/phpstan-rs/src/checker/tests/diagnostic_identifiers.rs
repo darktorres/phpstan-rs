@@ -35,7 +35,7 @@ fn diagnostic_builder_assembles_every_field() {
     assert_eq!(diag.message, "something went wrong");
     assert_eq!(diag.level, 5);
     assert_eq!(diag.identifier, "my.identifier");
-    assert_eq!(diag.tip.as_deref(), Some("try this instead"));
+    assert_eq!(diag.tips, vec!["try this instead".to_string()]);
     assert!(diag.non_ignorable);
     let fix = diag.fix.expect("expected a fix to have been set");
     assert_eq!(fix.replacement, "replacement text");
@@ -60,7 +60,20 @@ fn diagnostic_builder_defaults_are_all_empty_absent_or_false() {
     )
     .build();
 
-    assert!(diag.tip.is_none());
+    assert!(diag.tips.is_empty());
     assert!(!diag.non_ignorable);
     assert!(diag.fix.is_none());
+}
+
+#[test]
+fn several_tips_show_as_a_bulleted_list() {
+    let one = DiagnosticBuilder::new("m".to_string(), dummy_span(), 0, "a.b")
+        .tip("first")
+        .build();
+    assert_eq!(one.tip_text().as_deref(), Some("first"));
+    let two = DiagnosticBuilder::new("m".to_string(), dummy_span(), 0, "a.b")
+        .tip("first")
+        .tip("second")
+        .build();
+    assert_eq!(two.tip_text().as_deref(), Some("• first\n• second"));
 }

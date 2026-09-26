@@ -82,7 +82,7 @@ pub(crate) fn run_incremental_bench(dir: &Path, file_to_touch: Option<&Path>) {
         println!("{}: {} diagnostic(s)", path.display(), diagnostics.len());
         for d in diagnostics {
             println!("  {}", output::diagnostic_line(d));
-            if let Some(tip) = &d.tip {
+            if let Some(tip) = d.tip_text() {
                 println!("      💡 {tip}");
             }
         }

@@ -88,7 +88,7 @@ pub(crate) fn check_duplicate_function_declarations(
                     span: s.span,
                     level: 0,
                     identifier: "function.duplicate".to_string(),
-                    tip: None,
+                    tips: Vec::new(),
                     non_ignorable: true,
                     fix: None,
                 });

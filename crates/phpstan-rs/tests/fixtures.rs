@@ -116,7 +116,7 @@ fn render(
                 one_line(&portable(&d.message, base)),
             )
             .unwrap();
-            if let Some(tip) = &d.tip {
+            for tip in &d.tips {
                 writeln!(out, "    tip: {}", one_line(&portable(tip, base))).unwrap();
             }
             if let Some(fix) = &d.fix {

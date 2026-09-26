@@ -703,10 +703,10 @@ impl<'a> Walker<'a> {
             span,
             level: 0,
             identifier: "phpstanApi.instanceofType".to_string(),
-            tip: Some(
+            tips: vec![
                 "Learn more: https://phpstan.org/blog/why-is-instanceof-type-wrong-and-getting-deprecated"
                     .to_string(),
-            ),
+            ],
             non_ignorable: false,
             fix: None,
         });
@@ -747,7 +747,7 @@ impl<'a> Walker<'a> {
             span,
             level: 0,
             identifier: identifier.to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         });
@@ -804,7 +804,7 @@ impl<'a> Walker<'a> {
             span,
             level: 0,
             identifier: "phpstanApi.method".to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         });
@@ -834,7 +834,7 @@ impl<'a> Walker<'a> {
             span,
             level: 0,
             identifier: identifier.to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         });
@@ -878,7 +878,7 @@ impl<'a> Walker<'a> {
                 span,
                 level: 0,
                 identifier: identifier.to_string(),
-                tip: None,
+                tips: Vec::new(),
                 non_ignorable: false,
                 fix: None,
             });
@@ -892,7 +892,7 @@ impl<'a> Walker<'a> {
                 span,
                 level: 0,
                 identifier: identifier.to_string(),
-                tip: None,
+                tips: Vec::new(),
                 non_ignorable: false,
                 fix: None,
             });
@@ -1049,10 +1049,10 @@ impl<'a> Walker<'a> {
             span,
             level: 0,
             identifier: "phpstanApi.phpstanNamespace".to_string(),
-            tip: Some(
+            tips: vec![
                 "See:\n   https://phpstan.org/developing-extensions/backward-compatibility-promise"
                     .to_string(),
-            ),
+            ],
             non_ignorable: false,
             fix: None,
         });
@@ -1080,7 +1080,7 @@ impl<'a> Walker<'a> {
             span,
             level: 0,
             identifier: "phpParser.classRenamed".to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         });
@@ -1105,7 +1105,7 @@ impl<'a> Walker<'a> {
             span,
             level: 0,
             identifier: "phpstanApi.runtimeReflection".to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         });
@@ -1135,7 +1135,7 @@ impl<'a> Walker<'a> {
             span,
             level: 0,
             identifier: "phpstanApi.runtimeReflection".to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         });
@@ -1379,7 +1379,7 @@ impl<'a> Walker<'a> {
                             span: e.span,
                             level: 0,
                             identifier: "phpstanApi.instanceofAssumption".to_string(),
-                            tip: None,
+                            tips: Vec::new(),
                             non_ignorable: false,
                             fix: None,
                         });

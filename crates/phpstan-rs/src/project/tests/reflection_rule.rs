@@ -14,7 +14,7 @@ impl ReflectionRule for FlagsEveryPublicClass {
             span: syntax::token::Span::default(),
             level: 0,
             identifier: "test.sawClass".to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         }]
@@ -30,7 +30,7 @@ impl ReflectionRule for FlagsEveryFunction {
             span: syntax::token::Span::default(),
             level: 0,
             identifier: "test.sawFunction".to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         }]

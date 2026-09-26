@@ -23,7 +23,7 @@ fn diag_with_identifier(
         },
         level,
         identifier: identifier.to_string(),
-        tip: None,
+        tips: Vec::new(),
         non_ignorable: false,
         fix: None,
     }
@@ -221,7 +221,7 @@ fn friendly_frames_the_reported_line_with_its_span_underlined() {
     let path = friendly_fixture("plain");
     let mut d = diag_with_identifier("Wrong return.", 4, 12, 0, "return.type");
     d.span.end = Position { line: 4, col: 18 };
-    d.tip = Some("Return a string.".to_string());
+    d.tips = vec!["Return a string.".to_string()];
     let results = FxHashMap::from_iter([(path.clone(), vec![d])]);
     let text = render_friendly(&results, false);
     let expected = format!(

@@ -37,9 +37,9 @@ pub struct Diagnostic {
     /// one-for-one, though it reuses real PHPStan's spelling where
     /// confident.
     pub identifier: String,
-    /// An optional one-line, human-facing hint appended below the main
-    /// message - real PHPStan's own "💡 Tip: ..." line.
-    pub tip: Option<String>,
+    /// Human-facing hints shown below the main message - real PHPStan's
+    /// "💡 Tip: ..." lines. See `tip_text` for how several are shown.
+    pub tips: Vec<String>,
     /// Mirrors real PHPStan's `RuleErrorBuilder::nonIgnorable()`: when
     /// `true`, this diagnostic must never be suppressible via
     /// `@phpstan-ignore <identifier>`.
@@ -48,6 +48,23 @@ pub struct Diagnostic {
     /// from-AST facility, so a fix is a literal source-text replacement
     /// over a `Span` rather than a replacement AST node.
     pub fix: Option<DiagnosticFix>,
+}
+
+impl Diagnostic {
+    /// The tips as one text: a single tip as written, several as a
+    /// bulleted list, the way PHPStan shows them. `None` without tips.
+    pub fn tip_text(&self) -> Option<String> {
+        match self.tips.as_slice() {
+            [] => None,
+            [tip] => Some(tip.clone()),
+            tips => Some(
+                tips.iter()
+                    .map(|tip| format!("• {tip}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+        }
+    }
 }
 
 /// The total order every consumer presents diagnostics in within a file:
@@ -59,14 +76,14 @@ pub fn diagnostic_order(a: &Diagnostic, b: &Diagnostic) -> std::cmp::Ordering {
         a.span.start.col,
         &a.identifier,
         &a.message,
-        &a.tip,
+        &a.tips,
     )
         .cmp(&(
             b.span.start.line,
             b.span.start.col,
             &b.identifier,
             &b.message,
-            &b.tip,
+            &b.tips,
         ))
 }
 
@@ -104,7 +121,7 @@ pub struct DiagnosticBuilder {
     span: Span,
     level: u8,
     identifier: String,
-    tip: Option<String>,
+    tips: Vec<String>,
     non_ignorable: bool,
     fix: Option<DiagnosticFix>,
 }
@@ -125,14 +142,14 @@ impl DiagnosticBuilder {
             span,
             level,
             identifier: identifier.into(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         }
     }
 
     pub fn tip(mut self, tip: impl Into<String>) -> Self {
-        self.tip = Some(tip.into());
+        self.tips.push(tip.into());
         self
     }
 
@@ -180,7 +197,7 @@ impl DiagnosticBuilder {
             span: self.span,
             level: self.level,
             identifier: self.identifier,
-            tip: self.tip,
+            tips: self.tips,
             non_ignorable: self.non_ignorable,
             fix: self.fix,
         }

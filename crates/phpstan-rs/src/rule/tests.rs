@@ -23,7 +23,7 @@ impl Rule for FlagsVariableNamed {
                 span: expr.span,
                 level: 6,
                 identifier: "test.flagged".to_string(),
-                tip: None,
+                tips: Vec::new(),
                 non_ignorable: false,
                 fix: None,
             };
@@ -46,7 +46,7 @@ impl Rule for FlagsEchoStatements {
             span: stmt.span,
             level: 6,
             identifier: "test.echoFlagged".to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         }]
@@ -140,7 +140,7 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
                 span: expr.span,
                 level: 6,
                 identifier: "test.scope".to_string(),
-                tip: None,
+                tips: Vec::new(),
                 non_ignorable: false,
                 fix: None,
             }]
@@ -182,7 +182,7 @@ fn is_function_guarded_reflects_a_real_function_exists_narrowing() {
                 span: expr.span,
                 level: 6,
                 identifier: "test.guard".to_string(),
-                tip: None,
+                tips: Vec::new(),
                 non_ignorable: false,
                 fix: None,
             }]

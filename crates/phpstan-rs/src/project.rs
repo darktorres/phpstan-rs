@@ -2014,7 +2014,7 @@ impl Project {
             span,
             level: 5,
             identifier: identifier.to_string(),
-            tip: None,
+            tips: Vec::new(),
             non_ignorable: false,
             fix: None,
         })
