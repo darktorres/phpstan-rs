@@ -86,9 +86,10 @@ pub(crate) const MISSING_TYPEHINT_LENIENT_GENERIC_CLASS_NAMES: [&str; 1] =
 /// get flagged as "has no return type specified" - real PHPStan never
 /// does, since its own reflection layer already knows `__construct`
 /// implicitly returns `void`, not `mixed`.
-const MAGIC_METHODS_WITH_IMPLICIT_RETURN_TYPE: [&str; 9] = [
+const MAGIC_METHODS_WITH_IMPLICIT_RETURN_TYPE: [&str; 10] = [
     "__construct",
     "__destruct",
+    "__set",
     "__unset",
     "__wakeup",
     "__clone",
