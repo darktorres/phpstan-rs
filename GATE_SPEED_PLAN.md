@@ -37,7 +37,7 @@ early; each edit goes in with the step that causes it.
 | cli tests (debug) | ~150 s for 44 tests | ~60 spawned debug binaries, each parsing every stub |
 | `cargo bench --no-run` | minutes (estimated) | a release build with thin LTO and one codegen unit; `test --all-targets` already compiles every bench |
 | doc, fuzz check, `--no-default-features` build | ~1–2 min each (estimated) | three more compiles of the package |
-| corpus step | ~7.5 min | six analysis runs (below) plus the gate build (~70 s) |
+| corpus step | ~7.5 min | six analysis runs (below) plus the gate build (~70 s); the two recorded runs also pay a second checker pass for `--dump-types` (S3) |
 | `zstd -19` of each type dump (~115 MB) | 11.6 s ×2 | `-3` takes 0.3 s and writes 1.5 MB instead of 1.0 MB |
 
 Rows marked "estimated" weren't timed in isolation. S0 measures them
@@ -57,9 +57,10 @@ thread does 57% of all CPU work:
 - `collect_named_argument_facts` (~24% of total CPU): a facts-only
   checker pass over every loaded file, serial, only when
   `check_renamed_named_arguments` is on. Neither of its inputs needs it:
-  - the override facts are a pure registry query
-    (`record_one_named_argument_rename` reads only `registry.classes`
-    and `find_method_signature_prototype`);
+  - the override facts come from class declarations plus registry
+    lookups (`record_named_argument_renames` walks a `ClassDecl`, and
+    `record_one_named_argument_rename` reads only `registry.classes` and
+    `find_method_signature_prototype`), with no inference;
   - the call sites only matter in analysed files, because
     `whole_program_diagnostic` drops every other path.
 - `collect_property_assign_facts` (~14%): a facts-only pass, serial, on
@@ -138,22 +139,25 @@ This is the collector shape of crate-split §3.8.
   pass. So the `types-*` snapshots record types the diagnostics never
   see, and every recorded corpus run and every fixture in `gates` pays
   for a second pass.
-- The dump is taken from the main-pass checker (`set_dump_types` on the
-  checker in `check_file_impl`), and `Project::dump_types`' separate walk
-  is deleted. Diagnostics are unchanged, since the dump only records.
-- The dump comes back as data in the analysis result. The binary and
-  the fixture harness write the file. Today `Session::analyse` writes it
-  and prints `failed to write type dump` itself, which is library I/O
-  and a print in a library.
-- This is a behaviour change to the gate's own snapshots:
-  `types-scoped`, `types-all-on` and `types-fixtures` change wherever
-  property facts change an inferred type. It lands with its approved
-  delta, and each changed line is checked to be the type the
-  diagnostics already used.
+- **S3a (behaviour, gate snapshots only):** the dump walk gets the same
+  cross-file property-assign facts as the main pass. `types-scoped`,
+  `types-all-on` and `types-fixtures` change wherever those facts change
+  an inferred type. The commit carries the approved delta, and each
+  changed line is checked to be the type the diagnostics already used.
+- **S3b (structural):** the dump is taken from the main-pass checker
+  (`set_dump_types` on the checker in `check_file_impl`), and
+  `Project::dump_types`' separate walk is deleted. Diagnostics and type
+  snapshots are identical to S3a's, since the dump only records.
+- The dump comes back as data in the analysis result, and whoever
+  requested it writes the file: the binary, the fixture harness, and
+  from S9c the gate runner. Today `Session::analyse` writes it and prints
+  `failed to write type dump` itself, which is library I/O and a print
+  in a library.
 - E6 later re-expresses the dump as an observer on the main pass; the
   single-pass property this step establishes carries over.
-- Verify: corpus diagnostics identical; the type-snapshot delta
-  reviewed; recorded-run and fixture-suite times recorded.
+- Verify: corpus diagnostics identical at both commits; the S3a delta
+  reviewed; S3b's type snapshots identical to S3a's; recorded-run and
+  fixture-suite times recorded.
 
 ### S4. One injected worker pool (engine and harness)
 - `Session` stops building a pool per session. It takes a shared
@@ -264,10 +268,10 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   to the project is made project-proportional, where the result can't
   change. Project-level passes (`check_whole_program`,
   `check_class_shapes`, `check_banned`, `check_architecture`) are
-  candidates, but most of them return early under a fixture's default
-  settings. `class_shape.rs:105`'s walk over every class, for example,
-  only runs when closed-class or parent-call checks are on. So the
-  profile decides, not guesses.
+  candidates. At least one returns early under a fixture's default
+  settings: `class_shape.rs:105`'s walk over every class only runs when
+  closed-class or parent-call checks are on. So the profile decides,
+  not guesses.
 - Verify: corpus and fixtures identical; per-fixture `analyse` time
   recorded.
 
@@ -324,7 +328,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
     which catches that.
   - It runs one analysis per configuration, then applies the finalizer
     several times to write the recorded report, the baseline views and
-    the emission-order view.
+    the emission-order view. It also writes the type dump that S3 returns
+    as data.
   - The shipped binary gets no gate-only flags.
   - Once roadmap Phase 181 ships `report --export` (one analysis, with
     every finding tagged by level and by what hides it), the corpus gate
