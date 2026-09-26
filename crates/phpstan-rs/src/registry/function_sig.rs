@@ -446,7 +446,7 @@ impl FunctionSig {
                 // independently re-parse this same hint string.
                 let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
                 let native_hint = native_hint_text.as_deref();
-                let native_parsed = native_hint.map(types::parse_type_string);
+                let native_parsed = native_hint.map(types::parse_native_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
                     doc_ty.as_ref(),
                     native_hint,
@@ -530,7 +530,7 @@ impl FunctionSig {
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_ref());
         let native_return_hint_text = f.return_type.as_ref().map(TypeHint::to_string);
         let native_return_hint = native_return_hint_text.as_deref();
-        let native_return_parsed = native_return_hint.map(types::parse_type_string);
+        let native_return_parsed = native_return_hint.map(types::parse_native_type_string);
         let doc_reconciled_return = resolve_type_with_parsed_native(
             doc_return,
             native_return_hint,

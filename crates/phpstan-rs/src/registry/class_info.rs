@@ -671,7 +671,7 @@ impl ClassInfo {
                 let doc_ty = p.doc_comment.as_deref().map(docblock::parse);
                 let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
                 let native_hint = native_hint_text.as_deref();
-                let native_parsed = native_hint.map(types::parse_type_string);
+                let native_parsed = native_hint.map(types::parse_native_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
                     doc_ty.as_ref().and_then(|d| d.var_type.as_ref()),
                     native_hint,
@@ -784,7 +784,7 @@ impl ClassInfo {
                     });
                 let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
                 let native_hint = native_hint_text.as_deref();
-                let native_parsed = native_hint.map(types::parse_type_string);
+                let native_parsed = native_hint.map(types::parse_native_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
                     doc_ty.as_ref(),
                     native_hint,
@@ -1880,5 +1880,5 @@ impl ClassInfo {
 fn native_const_type(cc: &syntax::ast::ClassConst, ctx: &NameContext) -> Option<Type> {
     let hint_text = cc.type_hint.as_ref().map(TypeHint::to_string);
     let hint = hint_text.as_deref()?;
-    Some(resolve_names_in_type(types::parse_type_string(hint), ctx))
+    Some(resolve_names_in_type(types::parse_native_type_string(hint), ctx))
 }

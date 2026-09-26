@@ -111,7 +111,7 @@ impl<'a> Checker<'a> {
         hint: Option<&str>,
     ) -> (Type, Vec<(std::sync::Arc<str>, std::sync::Arc<str>)>) {
         match hint {
-            Some(h) => self.resolve_written_type(types::parse_type_string(h)),
+            Some(h) => self.resolve_written_type(types::parse_native_type_string(h)),
             None => (Type::Mixed(false), Vec::new()),
         }
     }

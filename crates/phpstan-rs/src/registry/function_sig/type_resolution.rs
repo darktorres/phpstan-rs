@@ -40,7 +40,7 @@ pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) 
 }
 
 pub(crate) fn resolve_type(doc_type: Option<&TypeNode>, native_hint: Option<&str>) -> Type {
-    let native_ty = native_hint.map(types::parse_type_string);
+    let native_ty = native_hint.map(types::parse_native_type_string);
     resolve_type_with_parsed_native(
         doc_type,
         native_hint,

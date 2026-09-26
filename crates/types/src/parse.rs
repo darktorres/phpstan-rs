@@ -786,6 +786,43 @@ fn parse_type_atom(s: &str) -> Type {
     ty
 }
 
+/// PHP's reserved type names: the only keywords a native type
+/// declaration has.
+const NATIVE_TYPE_KEYWORDS: &[&str] = &[
+    "int", "float", "string", "bool", "false", "true", "null", "void", "never", "mixed", "array",
+    "iterable", "object", "callable", "static", "self", "parent",
+];
+
+/// The type a native type declaration (`?T`, `A|B`, `A&B`, `(A&B)|C`)
+/// denotes. Only PHP's reserved type names are keywords; any other name,
+/// a PHPDoc keyword such as `resource` or `integer` included, is a class,
+/// as PHP itself reads it.
+pub fn parse_native_type_string(s: &str) -> Type {
+    let s = s.trim();
+    if let Some(inner) = s.strip_prefix('?') {
+        return Type::Union(vec![parse_native_type_string(inner), Type::Null]);
+    }
+    let alternatives = split_top_level(s, '|');
+    if alternatives.len() > 1 {
+        return Type::Union(alternatives.iter().map(|a| parse_native_type_string(a)).collect());
+    }
+    let unwrapped = s
+        .strip_prefix('(')
+        .and_then(|inner| inner.strip_suffix(')'))
+        .unwrap_or(s);
+    let members = split_top_level(unwrapped, '&');
+    if members.len() > 1 {
+        return Type::Intersection(members.iter().map(|m| parse_native_type_string(m)).collect());
+    }
+    let name = unwrapped.trim();
+    let bare = name.trim_start_matches('\\');
+    if NATIVE_TYPE_KEYWORDS.contains(&bare.to_ascii_lowercase().as_str()) {
+        parse_type_string(bare)
+    } else {
+        Type::Object(name.into(), Vec::new())
+    }
+}
+
 /// Parses one bound of an `int<min, max>` range - real PHPStan's own
 /// `"min"`/`"max"` keywords mean unbounded on that side (`Some(None)`),
 /// a plain integer literal is a real bound (`Some(Some(n))`). A

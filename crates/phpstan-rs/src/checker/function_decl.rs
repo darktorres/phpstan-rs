@@ -774,7 +774,7 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .map(TypeHint::to_string)
                 .as_deref()
-                .map(types::parse_type_string)
+                .map(types::parse_native_type_string)
                 .map(|ty| resolve_names_in_type(ty, &self.name_ctx))?;
             Some(match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
