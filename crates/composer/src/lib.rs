@@ -3,6 +3,8 @@
 //! for context (`vendor`), and the answers read from them, computed once
 //! per project root.
 
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
+
 pub mod constraint;
 pub mod manifest;
 pub mod vendor;
