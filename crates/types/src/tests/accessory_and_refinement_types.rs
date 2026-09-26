@@ -490,3 +490,20 @@ fn a_numeric_string_is_never_empty() {
         &parse_type_string("non-falsy-string")
     ));
 }
+
+#[test]
+fn an_intersection_of_arrays_is_one_array_with_every_refinement() {
+    let expected = parse_type_string("non-empty-list<int>");
+    for written in [
+        "list<int>&non-empty-array",
+        "non-empty-array&list<int>",
+        "list<int>&non-empty-list<int>",
+    ] {
+        let ty = parse_type_string(written);
+        assert!(
+            is_subtype(&ty, &expected) && is_subtype(&expected, &ty),
+            "{written} parsed as {ty}"
+        );
+        assert_eq!(ty.to_string(), "non-empty-list<int>", "{written}");
+    }
+}

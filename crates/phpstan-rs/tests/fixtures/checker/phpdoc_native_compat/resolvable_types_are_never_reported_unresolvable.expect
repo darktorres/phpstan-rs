@@ -1,3 +1,1 @@
-26:63-26:65 missingType.iterableValue L6 | Method App\\Known::f() has parameter $h with no value type specified in iterable type non-empty-array.
-    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
 26:83-26:85 class.notFound L0 | parameter $m of App\\Known::f() has invalid type OCI-Lob

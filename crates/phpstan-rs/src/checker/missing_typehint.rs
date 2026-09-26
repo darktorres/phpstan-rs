@@ -226,22 +226,30 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
             }
         }
         Type::Intersection(members) => {
-            // `list<V>`/`non-empty-array<V>`/`non-empty-list<V>` - the
-            // only shapes this project's own `parse_type_keyword_or_class`
-            // ever builds as `Intersection([Array(V), Accessory(_), ...])`
-            // - found by locating the `Array` member directly
-            // rather than re-checking which `AccessoryKind` rides along
-            // with it.
-            if let Some(inner) = members.iter().find_map(|m| match m {
-                Type::Array(_, inner) => Some(inner.as_ref()),
-                _ => None,
-            }) {
-                if matches!(inner, Type::Mixed(_)) {
+            // `list<V>`, `non-empty-array<V>`, `list<V>&non-empty-array`: the
+            // value type is whatever any `Array` member specifies, so only
+            // an intersection whose every array member is bare lacks one.
+            let values: Vec<&Type> = members
+                .iter()
+                .filter_map(|m| match m {
+                    Type::Array(_, inner) => Some(inner.as_ref()),
+                    _ => None,
+                })
+                .collect();
+            if !values.is_empty() {
+                let specified: Vec<&Type> = values
+                    .iter()
+                    .copied()
+                    .filter(|v| !matches!(v, Type::Mixed(_)))
+                    .collect();
+                if specified.is_empty() {
                     if !explicit_mixed {
                         out.push(format!("iterable type {ty}"));
                     }
                 } else {
-                    collect_iterable_missing_value_types(inner, explicit_mixed, out);
+                    for inner in specified {
+                        collect_iterable_missing_value_types(inner, explicit_mixed, out);
+                    }
                 }
                 return;
             }

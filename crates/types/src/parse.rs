@@ -38,7 +38,7 @@ pub fn parse_type_string(raw: &str) -> Type {
         }
         Type::Union(members)
     } else if amp_parts.len() > 1 {
-        Type::Intersection(amp_parts.into_iter().map(parse_type_atom).collect())
+        crate::intersect_types(amp_parts.into_iter().map(parse_type_atom).collect())
     } else {
         parse_type_atom(s)
     };
