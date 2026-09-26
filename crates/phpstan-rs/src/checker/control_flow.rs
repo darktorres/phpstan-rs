@@ -534,6 +534,10 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         .guarded_constants
         .clone()
         .intersection(else_locals.guarded_constants.clone());
+    merged.guarded_classes = then_locals
+        .guarded_classes
+        .clone()
+        .intersection(else_locals.guarded_classes.clone());
     // Identical intersection treatment for the
     // method_exists()/property_exists() guard sets - a member is only
     // still provably guarded after an if/else join when both branches

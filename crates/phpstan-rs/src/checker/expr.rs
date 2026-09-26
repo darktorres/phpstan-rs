@@ -1915,7 +1915,9 @@ impl<'a> Checker<'a> {
                     // genuine bare class-name reference.
                     InstanceofTarget::Name(name, name_span) => {
                         if let Type::Object(class, _) = self.resolve_name_expr(name) {
-                            if !self.class_name_exists(&class) {
+                            if !self.class_name_exists(&class)
+                                && !Self::class_guarded(&class, locals)
+                            {
                                 self.report(
                                     format!("instanceof check target class {class} not found"),
                                     e.span,
@@ -2404,7 +2406,7 @@ impl<'a> Checker<'a> {
                             });
                             self.apply_param_out_types(sig, args, locals);
                         }
-                    } else {
+                    } else if !Self::class_guarded(class, locals) {
                         self.report(
                             format!("instantiated class {class} not found"),
                             e.span,
@@ -2754,7 +2756,9 @@ impl<'a> Checker<'a> {
                             0,
                             "staticMethod.notFound",
                         );
-                    } else if !self.registry.classes.contains_key(class.as_str()) {
+                    } else if !self.registry.classes.contains_key(class.as_str())
+                        && !Self::class_guarded(class, locals)
+                    {
                         // Mirrors real PHPStan's `StaticMethodCallCheck`'s
                         // "class doesn't exist at all" half - neither
                         // branch above fires for a genuinely undefined
@@ -6377,6 +6381,9 @@ impl<'a> Checker<'a> {
         let Some(class) = self.resolve_static_class_name(class_name) else {
             return Type::Mixed(false);
         };
+        if Self::class_guarded(&class, locals) && self.registry.lookup_class(&class).is_none() {
+            return Type::Mixed(false);
+        }
         self.static_member_of_class(e, &class, Some(class_name), member, is_property)
     }
 

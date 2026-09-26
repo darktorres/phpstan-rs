@@ -428,6 +428,15 @@ impl<'a> Checker<'a> {
     /// the registry - without this exemption, a `self`/`static`-typed
     /// return inside an anonymous class's own body would always read as
     /// an unresolvable class.
+    /// Whether a `class_exists()`-style guard in `locals` proved `name`
+    /// declared.
+    pub(crate) fn class_guarded(name: &str, locals: &Locals) -> bool {
+        !locals.guarded_classes.is_empty()
+            && locals
+                .guarded_classes
+                .contains(&name.trim_start_matches('\\').to_ascii_lowercase())
+    }
+
     pub(crate) fn class_name_exists(&self, name: &str) -> bool {
         matches!(name, "Traversable" | "class@anonymous")
             || self.registry.lookup_class(name).is_some()

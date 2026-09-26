@@ -237,6 +237,9 @@ pub(crate) struct Locals {
     pub(crate) guarded_functions: GuardedFunctionSet,
     // Global constant names a `defined('NAME')` test proved defined.
     pub(crate) guarded_constants: GuardedFunctionSet,
+    // Lowercased class names a `class_exists('X')` test (or its interface,
+    // trait and enum siblings) proved declared.
+    pub(crate) guarded_classes: GuardedFunctionSet,
     pub(crate) guarded_methods: GuardedMemberSet,
     pub(crate) guarded_properties: GuardedMemberSet,
     pub(crate) clone_reinitialized: ReinitializedPropertySet,
@@ -482,6 +485,7 @@ impl Locals {
             provenance: ProvenanceMap::default(),
             guarded_functions: GuardedFunctionSet::default(),
             guarded_constants: GuardedFunctionSet::default(),
+            guarded_classes: GuardedFunctionSet::default(),
             guarded_methods: GuardedMemberSet::default(),
             guarded_properties: GuardedMemberSet::default(),
             clone_reinitialized: ReinitializedPropertySet::default(),
@@ -496,12 +500,14 @@ impl Locals {
         }
     }
 
-    /// A closure body's starting scope: `fresh_scope` plus the functions
-    /// and constants proved to exist, which still exist when it runs.
+    /// A closure body's starting scope: `fresh_scope` plus the functions,
+    /// constants and classes proved to exist, which still exist when it
+    /// runs.
     pub(crate) fn closure_scope(&self) -> Locals {
         let mut scope = self.fresh_scope();
         scope.guarded_functions = self.guarded_functions.clone();
         scope.guarded_constants = self.guarded_constants.clone();
+        scope.guarded_classes = self.guarded_classes.clone();
         scope
     }
 

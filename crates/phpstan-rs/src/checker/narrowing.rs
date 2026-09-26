@@ -679,6 +679,27 @@ impl<'a> Checker<'a> {
                 .guarded_functions
                 .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
         }
+        // `class_exists('X')`'s true branch (or `interface_exists`,
+        // `trait_exists`, `enum_exists`) proves the class-like `X` declared.
+        if branch_true
+            && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
+            && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
+            && matches!(
+                fn_name
+                    .rsplit('\\')
+                    .next()
+                    .unwrap_or(fn_name)
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "class_exists" | "interface_exists" | "trait_exists" | "enum_exists"
+            )
+            && let Some(guarded_arg) = args.first()
+            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
+        {
+            locals
+                .guarded_classes
+                .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
+        }
         // `defined('NAME')`'s true branch proves the global constant
         // `NAME` exists, the constant counterpart of `function_exists`.
         if branch_true
