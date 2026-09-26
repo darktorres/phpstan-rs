@@ -7,7 +7,7 @@ conventions), §3.1–§3.3 and §3.7 (designs of the extracted crates), §4
 Appendix F decisions, Stage A (A0–A2) and B1–B7.
 
 Status: **OK** done as planned · **GAP** planned, not done, no step
-schedules it · **PARTIAL** done in part · **DEVIATION** done differently
+schedules it · **DONE** fixed after the audit · **PARTIAL** done in part · **DEVIATION** done differently
 from the plan's wording · **SCHEDULED** deferred and recorded in a later
 step.
 
@@ -30,7 +30,7 @@ step.
 | 13 | §4.11 renames | DEVIATION | `fuzz/fuzz_targets/parse_type_string.rs → phpdoc_type.rs` shows as delete + create in `8b2fd202` (moved and rewritten in one commit). No `.git-blame-ignore-revs` exists (every other move is an `R`). | `git show -M --summary 8b2fd202` | record only |
 | 14 | §6 changelog | GAP | No changelog. User-visible changes so far: total output order (A1); output formats without the location, baseline v2 and `convert-baseline` (B7); restricted-symbol path zones in the LSP (B7). | no `CHANGELOG*` | now |
 | 15 | A2 conversion | PARTIAL | A2 converts every test that asserts on diagnostics; 221 Rust tests were kept (`2b331b4d`: "touch internals or need hand-written fixture config"). Many are plain table-driven diagnostic tests A2 allows as N fixtures: `checker/tests/receiver_type_checks.rs` (52 tests), `checker/phpstan_api/tests.rs` (45), `strict_rules.rs` (10), `key_value_of.rs` (5), `narrowing.rs` (5), and 1–4 each in about 20 more files. | `grep diagnostics_for` over `src/**/tests` | now: convert the diagnostic-asserting ones, keep the internals tests |
-| 16 | A2 known bugs | GAP | None of the ~30 A2 known bugs (plus the B3 purity bug) is fixed, and no step schedules them. | commit log since `3bd26284` | a scheduled step (decision pending) |
+| 16 | A2 known bugs | DONE | Fixed one commit each (`eb491e00`..`1f102328`), delta approved as `gates/approved/a2-known-bugs`; the plan records the behaviours. | `git log eb491e00^..1f102328` | done |
 | 17 | §3.1 interner | PARTIAL | The interner is sharded and project-owned, but about 115 call sites in `registry/` and `checker/` intern project class and member names through `syntax::intern::intern` (the process-wide interner), so they are never reclaimed, which §3.1's Session scoping is for. The parser has its own interner yet calls the global one at 4 sites (`parser/tokens.rs:265`, `parser/classes.rs:128,495,497`). | grep `intern(` | parser now; registry/checker with C3/C4 (snapshots own their names) |
 | 18 | §3.1 annotations | GAP | "Extensions can register extra visitors" has no support and no step. | `syntax/src/annotations.rs` | E4 |
 | 19 | §3.3 one grammar | PARTIAL | Doc text is still read around the grammar: `checker/unused.rs:363` finds `@phpstan-always-read`/`-written` by substring (matches the words anywhere, e.g. in a description); `project/mock_hygiene.rs:156` takes the text after the first `@var` and splits on whitespace (wrong for shapes with spaces, ignores `@phpstan-var`); `phpdoc::docblock::unknown_phpstan_tags` scans raw text instead of the parsed tags. | the three sites | now (B5 completion) |
@@ -141,7 +141,7 @@ step.
 | A2: every diagnostic-asserting test converted | PARTIAL | see #15 |
 | A2: family filter removed from the harness | OK | `tests/fixtures.rs` renders every diagnostic |
 | A2: `examples/stress*.php` | OK | `2f96cba5`; no `examples/` |
-| A2 known bugs | GAP | see #16 |
+| A2 known bugs | OK | see #16 |
 
 ### B1, B2
 | Item | Status | Evidence |

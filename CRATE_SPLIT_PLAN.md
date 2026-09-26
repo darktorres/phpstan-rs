@@ -842,31 +842,40 @@ commit); the unsorted corpus comparison starts here.
 - The harness backend at this point is today's Project API, in the bin
   package's integration tests.
 
-**Known bugs found during A2**, each fixed later in its own commit with an
-approved delta (none blocks the split):
-- false positives: `array_udiff()`-family trailing callbacks rejected;
-  `(string)` of a resource; a differently cased `catch` class; a method
-  called on an intersection checked against a private declaration an
-  instance cannot have; `@param-out` wider than the native by-ref type;
-  `list<int>&non-empty-array` reported as missing a value type; a method
-  overriding a builtin's tentative return type reported as untyped;
-  duplicate method declarations checked against each other's signature;
-  a class name resolved case-sensitively as a static-call target or in a
-  return type; `function_exists()` narrowing lost inside a closure; a
-  child hooked property losing the hooks it inherits; a set hook without
-  a parameter list or a short `set => expr` treated as untyped and
-  non-assigning; `__set()` required to declare a return type; a pipe
-  expression and an interpolated string reported as no-op statements;
-- imprecise inference: a native typed property narrowed to an invalid
-  written value; an invalid inline `@var` type applied; the sort family's
-  by-ref argument not becoming a list; `array_splice()`'s by-ref argument
-  not spliced; a failing `array_is_list()` not proving non-emptiness; a
-  flag variable set beside a side effect not narrowing; a try block that
-  cannot throw leaving its catch live; a non-exhaustive match not
-  throwing `UnhandledMatchError`;
-- found during B3: the purity classifier (`registry/purity.rs`) treats a
-  dynamic method call `$obj->{$m}()` as pure when its receiver and
-  arguments are.
+**Bugs found during A2**, and the purity bug found during B3, were fixed
+after B7, one commit each with fixtures; the Piwigo delta is approved as
+`gates/approved/a2-known-bugs`. The fixes changed these behaviours:
+- class names resolve case-insensitively, in `catch`, static-call targets
+  and types;
+- casts, `echo` and interpolation give precise types, a resource included;
+- the `array_udiff()` family's trailing callbacks are accepted;
+- `list<int>&non-empty-array` is one intersected type;
+- a method called on an intersection uses its most visible declaration;
+- `@param-out` may be wider than the native by-reference type, and holds
+  after the call;
+- an invalid inline `@var` is not applied;
+- a native-typed property keeps its type after a write it rejects, and a
+  hooked property reads back as its declared type;
+- an override without a return type has the builtin's tentative one: doc
+  templates are marked before reconciling with the native type, and
+  `parent::`/`self::`/`static::` bind the calling class's templates;
+- each declaration of a duplicate method is checked against its own
+  signature, and every class-body duplicate is reported;
+- `function_exists()` and `defined()` guards hold inside a closure;
+- a child property inherits the hooks it does not redeclare;
+  `parent::$prop::get()`/`set()` resolve; a set hook without a parameter
+  list takes the property's type;
+- `__set()` needs no return type;
+- a failing `array_is_list()` proves a non-empty non-list array;
+- a boolean flag set in a branch implies that branch's narrowing, unioned
+  over every path that sets it;
+- a catch is entered from the points in its try that can throw what it
+  catches, and is dead when there are none; an unhandled `match` throws
+  `UnhandledMatchError`;
+- a dynamic method call is impure.
+
+Two reported bugs were not bugs: the sort family and `array_splice()`
+were already right, and an interpolated string statement has no effect.
 
 ### Stage B: workspace and leaf layers
 
