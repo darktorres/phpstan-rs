@@ -863,9 +863,9 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
         .collect())
 }
 
-/// Every test of the parent commit must still exist, or be listed in a
-/// `gates/test-renames/*.txt` file HEAD's commit adds, as
-/// `old -> new` or `old -> REMOVED: reason`.
+/// Every test of the nearest ancestor with a recorded manifest must still
+/// exist, or be listed in a `gates/test-renames/*.txt` file a commit since
+/// then added or changed, as `old -> new` or `old -> REMOVED: reason`.
 fn test_manifest() -> Result<(), String> {
     require_clean_tree()?;
     let hash = head_hash()?;
@@ -874,18 +874,30 @@ fn test_manifest() -> Result<(), String> {
     let dir = gate_dir().join("tests");
     write(&dir.join(format!("{hash}.txt")), listing.as_bytes())?;
     eprintln!("{hash}: {} tests", tests.len());
-    let parent = parent_hash()?;
-    let Ok(old) = std::fs::read_to_string(dir.join(format!("{parent}.txt"))) else {
-        eprintln!("no manifest recorded for {parent}; nothing to compare");
+    let ancestors = git(&["rev-list", "--max-count=200", "HEAD~1"])?;
+    let Some((base, old)) = ancestors.lines().find_map(|hash| {
+        std::fs::read_to_string(dir.join(format!("{hash}.txt")))
+            .ok()
+            .map(|text| (hash.to_string(), text))
+    }) else {
+        eprintln!("no manifest recorded for any recent ancestor; nothing to compare");
         return Ok(());
     };
+    eprintln!("comparing against {base}");
     let mut renames = std::collections::BTreeMap::new();
-    let changed = git(&["show", "--name-only", "--format=", "HEAD"])?;
-    for path in changed
-        .lines()
-        .filter(|p| p.starts_with("gates/test-renames/"))
-    {
-        let text = std::fs::read_to_string(root().join(path)).map_err(|e| e.to_string())?;
+    let changed = git(&[
+        "log",
+        "--name-only",
+        "--format=",
+        &format!("{base}..HEAD"),
+        "--",
+        "gates/test-renames/",
+    ])?;
+    let files: BTreeSet<&str> = changed.lines().filter(|p| !p.is_empty()).collect();
+    for path in files {
+        let Ok(text) = std::fs::read_to_string(root().join(path)) else {
+            continue;
+        };
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
             if let Some((from, to)) = line.split_once(" -> ") {
                 renames.insert(from.trim().to_string(), to.trim().to_string());
@@ -897,7 +909,21 @@ fn test_manifest() -> Result<(), String> {
         if tests.contains(name) {
             continue;
         }
-        match renames.get(name) {
+        let mut target = renames.get(name);
+        let mut hops = 0;
+        while let Some(to) = target
+            && !tests.contains(to)
+            && hops < 16
+        {
+            match renames.get(to) {
+                Some(next) => {
+                    target = Some(next);
+                    hops += 1;
+                }
+                None => break,
+            }
+        }
+        match target {
             Some(to) if to.starts_with("REMOVED:") || tests.contains(to) => {}
             Some(to) => missing.push(format!("{name} -> {to} (target missing)")),
             None => missing.push(name.to_string()),
@@ -907,7 +933,7 @@ fn test_manifest() -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "{} test(s) of {parent} disappeared without a rename/removal entry:\n{}",
+            "{} test(s) of {base} disappeared without a rename/removal entry:\n{}",
             missing.len(),
             missing.join("\n")
         ))
