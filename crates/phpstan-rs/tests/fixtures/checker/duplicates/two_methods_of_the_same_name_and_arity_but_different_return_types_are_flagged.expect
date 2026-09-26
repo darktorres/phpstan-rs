@@ -1,0 +1,5 @@
+3:24-3:43 missingType.return L6 | Method X::fetch() has no return type specified.
+4:17-4:50 class.duplicateMethod L0 | Cannot redeclare method X::fetch().
+    non-ignorable
+4:24-4:50 missingType.iterableValue L6 | Method X::fetch() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

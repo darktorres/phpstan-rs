@@ -1,0 +1,2 @@
+4:40-4:45 class.duplicateProperty L0 | Cannot redeclare property Directory::$path.
+    non-ignorable

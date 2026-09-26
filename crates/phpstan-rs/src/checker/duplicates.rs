@@ -85,9 +85,7 @@ impl<'a> Checker<'a> {
     ) {
         let mut seen: rustc_hash::FxHashMap<&str, &PropertyDecl> = rustc_hash::FxHashMap::default();
         for p in properties {
-            if let Some(prev) = seen.insert(p.name.as_ref(), p)
-                && !property_shapes_differ(prev, p)
-            {
+            if seen.insert(p.name.as_ref(), p).is_some() {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!("Cannot redeclare property {fqn}::${}.", p.name),
@@ -101,11 +99,8 @@ impl<'a> Checker<'a> {
         }
         // A promoted constructor parameter is a property declaration in
         // disguise - PHPStan's own helper checks it against the same
-        // `$declaredProperties` set for exactly this reason. Only ever
-        // compared against another promoted collision, since a plain
-        // property's shape isn't directly comparable to a `Param`'s.
-        let mut seen_promoted: rustc_hash::FxHashMap<&str, &Param> =
-            rustc_hash::FxHashMap::default();
+        // `$declaredProperties` set for exactly this reason.
+        let mut seen_promoted: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
         for m in methods {
             if !m.function.name.eq_ignore_ascii_case("__construct") {
                 continue;
@@ -126,9 +121,7 @@ impl<'a> Checker<'a> {
                     );
                     continue;
                 }
-                if let Some(prev) = seen_promoted.insert(param.name.as_ref(), param)
-                    && TypeHint::same(prev.type_hint.as_ref(), param.type_hint.as_ref())
-                {
+                if !seen_promoted.insert(param.name.as_ref()) {
                     self.report_builder(
                         DiagnosticBuilder::new(
                             format!("Cannot redeclare property {fqn}::${}.", param.name),
@@ -146,12 +139,9 @@ impl<'a> Checker<'a> {
     fn check_duplicate_methods(&mut self, fqn: &str, kind: &str, methods: &[MethodDecl]) {
         // Case-insensitive, matching real PHP's own method-name lookup
         // rules (and real PHPStan's own `strtolower` in the same spot).
-        let mut seen: rustc_hash::FxHashMap<String, &MethodDecl> = rustc_hash::FxHashMap::default();
+        let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         for m in methods {
-            let lower = m.function.name.to_ascii_lowercase();
-            if let Some(prev) = seen.insert(lower, m)
-                && !method_signatures_differ(prev, m)
-            {
+            if !seen.insert(m.function.name.to_ascii_lowercase()) {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!("Cannot redeclare method {fqn}::{}().", m.function.name),
@@ -173,47 +163,4 @@ pub(crate) fn class_kind_identifier(kind: &ClassKind) -> &'static str {
         ClassKind::Trait => "trait",
         ClassKind::Enum => "enum",
     }
-}
-
-/// phpstorm-stubs represents "this member's own shape changed across PHP
-/// versions" by declaring the same conceptual member twice, once per
-/// era (e.g. `ReflectionMethod::setAccessible()`'s pre-8.0/8.1+
-/// signature split, `Directory::$path`'s untyped/`readonly
-/// string`-typed split) - each gated by its own `#[PhpStormStubsElementAvailable(
-/// from: X, to: Y)]` attribute in the source, but this project's own
-/// lexer (`skip_stub_availability_attribute`) consumes that attribute
-/// entirely before the parser ever sees it (a deliberate, pre-existing
-/// design for the *parameter*-level version-split idiom - see
-/// `registry::function_sig::dedup_versioned_params`'s own doc comment -
-/// that happens to erase the same signal a *member*-level check like
-/// this one would otherwise want to read back). Detected structurally
-/// instead: a real version-gated split always changes the member's own
-/// native shape (a different param count/type, return type, or
-/// readonly-ness) - an actual copy-paste duplicate bug never does,
-/// since it's definitionally the same declaration twice. A signature
-/// difference is treated as proof of the versioning idiom rather than a
-/// second, independent bug to also report - conservative, matching this
-/// project's own "don't guess, don't double up" precedent elsewhere.
-fn method_signatures_differ(a: &MethodDecl, b: &MethodDecl) -> bool {
-    function_decl_signatures_differ(&a.function, &b.function)
-}
-
-/// `pub(crate)`: also reused by `project::duplicate_functions` for the
-/// identical top-level-function shape of this same "is this a real bug or
-/// a version-gated split" question.
-pub(crate) fn function_decl_signatures_differ(af: &FunctionDecl, bf: &FunctionDecl) -> bool {
-    if af.params.len() != bf.params.len() {
-        return true;
-    }
-    if !TypeHint::same(af.return_type.as_ref(), bf.return_type.as_ref()) {
-        return true;
-    }
-    af.params
-        .iter()
-        .zip(&bf.params)
-        .any(|(ap, bp)| !TypeHint::same(ap.type_hint.as_ref(), bp.type_hint.as_ref()))
-}
-
-fn property_shapes_differ(a: &PropertyDecl, b: &PropertyDecl) -> bool {
-    !TypeHint::same(a.type_hint.as_ref(), b.type_hint.as_ref()) || a.is_readonly != b.is_readonly
 }

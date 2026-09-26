@@ -59,7 +59,14 @@ impl<'a> Checker<'a> {
         for (host_index, host) in contexts.into_iter().enumerate() {
             let host_start = self.diagnostics.len();
             for m in &c.methods {
-                let own_sig = own_info.methods.get(m.function.name.as_ref());
+                let site = (
+                    m.function.name_span.start.line,
+                    m.function.name_span.start.col,
+                );
+                let own_sig = own_info
+                    .redeclared_methods
+                    .get(&site)
+                    .or_else(|| own_info.methods.get(m.function.name.as_ref()));
                 self.check_function_with_own_sig(
                     &m.function,
                     Some(&host),
@@ -208,12 +215,14 @@ impl<'a> Checker<'a> {
         is_static: bool,
         is_concrete: bool,
     ) {
-        // The registry keeps one signature per top-level function name; a
-        // second declaration of the same name elsewhere is checked against
-        // its own.
-        if class_name.is_none()
-            && let Some(own) = self.own_declaration_sig(f)
-        {
+        // The registry keeps one signature per top-level function name, and
+        // the union of a class body's declarations of one method name; a
+        // declaration whose slot isn't its own is checked against its own.
+        let own = match class_name {
+            None => self.own_declaration_sig(f),
+            Some(class) => self.own_redeclared_method_sig(f, class),
+        };
+        if let Some(own) = own {
             self.check_function_impl(f, class_name, is_static, is_concrete, None, Some(&own));
             return;
         }
@@ -237,6 +246,18 @@ impl<'a> Checker<'a> {
             syntax::ast::Visibility::Public,
         );
         Some(self.registry.finalize_standalone_sig(fresh))
+    }
+
+    /// `f`'s own signature when `class` declares its name more than once.
+    fn own_redeclared_method_sig(&self, f: &FunctionDecl, class: &str) -> Option<FunctionSig> {
+        let site = (f.name_span.start.line, f.name_span.start.col);
+        let sig = self
+            .registry
+            .classes
+            .get(class)?
+            .redeclared_methods
+            .get(&site)?;
+        Some(self.registry.finalize_standalone_sig(sig.clone()))
     }
 
     /// `check_function`'s real body - `ancestor_sig_hint` is `Some` only

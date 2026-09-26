@@ -209,6 +209,10 @@ pub struct ClassInfo {
     pub extends: Vec<Arc<str>>,
     pub implements: Vec<Arc<str>>,
     pub methods: FxHashMap<Arc<str>, FunctionSig>,
+    // The own signature of each method whose name the body declares more
+    // than once, keyed by its name's position: `methods` holds their
+    // union.
+    pub redeclared_methods: FxHashMap<(u32, u32), FunctionSig>,
     pub properties: FxHashMap<Arc<str>, PropertySig>,
     // Declaration order is kept: a listing of constants (a `match`
     // remainder, a `Foo::X_*` wildcard) follows source order, as in real
@@ -452,11 +456,27 @@ pub struct ResolvedTypeImport {
 /// (`DatePeriod::__construct($start, $interval, $end)` - the stub's own
 /// first, 3-required-arg overload - vanishes entirely, since the file's
 /// last declaration is the unrelated `($isostr, $options = 0)` form).
+///
+/// Also returns each such declaration's own signature, keyed by its
+/// name's position (`ClassInfo::redeclared_methods`).
+#[allow(clippy::type_complexity)]
 fn collect_merged_methods(
-    methods: impl Iterator<Item = (Arc<str>, FunctionSig)>,
-) -> FxHashMap<Arc<str>, FunctionSig> {
+    methods: Vec<(Arc<str>, (u32, u32), FunctionSig)>,
+) -> (
+    FxHashMap<Arc<str>, FunctionSig>,
+    FxHashMap<(u32, u32), FunctionSig>,
+) {
+    let mut counts: FxHashMap<&str, usize> = FxHashMap::default();
+    for (name, _, _) in &methods {
+        *counts.entry(name.as_ref()).or_default() += 1;
+    }
+    let redeclared: FxHashMap<(u32, u32), FunctionSig> = methods
+        .iter()
+        .filter(|(name, _, _)| counts[name.as_ref()] > 1)
+        .map(|(_, site, sig)| (*site, sig.clone()))
+        .collect();
     let mut out: FxHashMap<Arc<str>, FunctionSig> = FxHashMap::default();
-    for (name, sig) in methods {
+    for (name, _, sig) in methods {
         match out.remove(&name) {
             Some(existing) => {
                 out.insert(name, existing.merge(sig));
@@ -466,7 +486,11 @@ fn collect_merged_methods(
             }
         }
     }
-    out
+    (out, redeclared)
+}
+
+fn name_site(f: &syntax::ast::FunctionDecl) -> (u32, u32) {
+    (f.name_span.start.line, f.name_span.start.col)
 }
 
 impl ClassInfo {
@@ -524,7 +548,8 @@ impl ClassInfo {
         // cloned only for the sets it actually belongs to, instead of
         // every method in the class being filtered/name-cloned once per
         // set across 5 separate iterations.
-        let mut methods_vec: Vec<(Arc<str>, FunctionSig)> = Vec::with_capacity(c.methods.len());
+        let mut methods_vec: Vec<(Arc<str>, (u32, u32), FunctionSig)> =
+            Vec::with_capacity(c.methods.len());
         let mut abstract_methods: FxHashSet<Arc<str>> = FxHashSet::default();
         let mut final_methods: FxHashSet<Arc<str>> = FxHashSet::default();
         let mut static_methods: FxHashSet<Arc<str>> = FxHashSet::default();
@@ -570,10 +595,9 @@ impl ClassInfo {
                 &type_aliases,
                 m.visibility.clone(),
             );
-            methods_vec.push((name.clone(), sig));
+            methods_vec.push((name.clone(), name_site(&m.function), sig));
         }
-        let methods: FxHashMap<Arc<str>, FunctionSig> =
-            collect_merged_methods(methods_vec.into_iter());
+        let (methods, redeclared_methods) = collect_merged_methods(methods_vec);
         // Same private-is-not-overridable exemption `final_methods`
         // above applies, one member kind over - a private property
         // (final or not) is never part of a subclass's overridable
@@ -1174,6 +1198,7 @@ impl ClassInfo {
             extends: c.extends.iter().map(|s| intern(&ctx.resolve(s))).collect(),
             implements,
             methods,
+            redeclared_methods,
             properties,
             consts,
             uses: c.uses.iter().map(|s| intern(&ctx.resolve(s))).collect(),
@@ -1265,19 +1290,24 @@ impl ClassInfo {
                 },
             )
             .collect();
-        let mut methods: FxHashMap<Arc<str>, FunctionSig> =
-            collect_merged_methods(e.methods.iter().map(|m| {
-                (
-                    m.function.name.clone(),
-                    FunctionSig::from_decl(
-                        &m.function,
-                        ctx,
-                        &FxHashMap::default(),
-                        &FxHashMap::default(),
-                        m.visibility.clone(),
-                    ),
-                )
-            }));
+        let (mut methods, redeclared_methods) = collect_merged_methods(
+            e.methods
+                .iter()
+                .map(|m| {
+                    (
+                        m.function.name.clone(),
+                        name_site(&m.function),
+                        FunctionSig::from_decl(
+                            &m.function,
+                            ctx,
+                            &FxHashMap::default(),
+                            &FxHashMap::default(),
+                            m.visibility.clone(),
+                        ),
+                    )
+                })
+                .collect(),
+        );
         // `cases(): array` is a real, built-in static method every enum
         // gets from the language itself (`UnitEnum`), and a backed
         // enum's `from(int|string $value): static`/`tryFrom(...): ?static`
@@ -1679,6 +1709,7 @@ impl ClassInfo {
             extends: Vec::new(),
             implements,
             methods,
+            redeclared_methods,
             properties,
             consts,
             uses: e.uses.iter().map(|s| intern(&ctx.resolve(s))).collect(),
@@ -1781,6 +1812,7 @@ impl ClassInfo {
                 }
             }
         }
+        self.redeclared_methods.extend(other.redeclared_methods);
         self.properties.extend(other.properties);
         self.consts.extend(other.consts);
         self.enum_case_values.extend(other.enum_case_values);

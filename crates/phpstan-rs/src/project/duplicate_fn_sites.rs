@@ -15,12 +15,8 @@ use syntax::token::Span;
 pub(crate) struct FnDeclSite {
     pub(crate) path: PathBuf,
     pub(crate) span: Span,
-    // A snapshot of the declaration's own native shape at index time -
-    // `param_hints`/`return_hint` deliberately mirror
-    // `checker::duplicates::function_decl_signatures_differ`'s own
-    // comparison fields exactly (param count via `Vec::len`, per-param
-    // native hint, native return hint) so the two can never silently
-    // drift into judging "is this the same signature" two different ways.
+    // The declaration's native shape at index time: each parameter's
+    // native hint and the native return hint.
     pub(crate) param_hints: Vec<Option<String>>,
     pub(crate) return_hint: Option<String>,
 }
