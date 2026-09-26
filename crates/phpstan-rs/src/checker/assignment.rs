@@ -282,6 +282,28 @@ impl<'a> Checker<'a> {
     /// deep. Per-key precision (`['name' => $n] = $shapedArray`) isn't
     /// resolved for a plain `Type::Array` source - every target gets the
     /// source's homogeneous element type, or Mixed for anything else.
+    /// What a property holds after `lhs = value`: `value` when it fits the
+    /// property's native type; otherwise the property's declared type, as
+    /// PHP either coerces the value into it or rejects the write with a
+    /// `TypeError`. A value that isn't a native-typed, hookless property
+    /// write is returned as is.
+    fn property_value_after_write(&self, lhs: &Expr, value: &Type, locals: &Locals) -> Type {
+        let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
+            return value.clone();
+        };
+        let base_ty = self.infer_expr(base, locals);
+        let Some((_, sig)) = self.find_property_owner(&base_ty, prop) else {
+            return value.clone();
+        };
+        if !sig.has_native_type
+            || sig.set_ty.is_some()
+            || self.registry.relation().subtype(value, &sig.ty_native)
+        {
+            return value.clone();
+        }
+        sig.ty.clone()
+    }
+
     pub(crate) fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
         // Keep any existing `narrowing_key` entry for this exact
         // property-chain/literal-index-chain expression in sync with a
@@ -305,7 +327,8 @@ impl<'a> Checker<'a> {
             // `narrowing_key` shape (bare variable, property chain, or
             // index chain), not just a bare variable.
             purge_stale_narrowing_for(locals, &key);
-            locals.insert(key, ty.clone());
+            let stored = self.property_value_after_write(lhs, &ty, locals);
+            locals.insert(key, stored);
         }
         match &lhs.kind {
             // The one real "this variable is now bound to a fresh
