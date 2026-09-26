@@ -413,8 +413,46 @@ fn corpus(args: &[String]) -> Result<(), String> {
             started.elapsed().as_secs_f64()
         );
     }
+    record_fixture_types(&hash)?;
     baseline_check(&hash)?;
     determinism_check(full)?;
+    Ok(())
+}
+
+/// Runs the fixture suite with each fixture's type dump on and records
+/// them, in fixture order, as the `types-fixtures` snapshot.
+fn record_fixture_types(hash: &str) -> Result<(), String> {
+    let started = Instant::now();
+    let dir = gate_dir().join(".fixture-types.tmp");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    run(cargo()
+        .args(["test", "--profile", "gate", "--test", "fixtures", "--quiet"])
+        .env("PHPSTAN_RS_DUMP_TYPES", &dir))?;
+    let mut dumps: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "types"))
+        .collect();
+    dumps.sort();
+    let mut text = String::new();
+    for dump in &dumps {
+        text.push_str(&std::fs::read_to_string(dump).map_err(|e| e.to_string())?);
+    }
+    let joined = dir.join("all.txt");
+    write(&joined, text.as_bytes())?;
+    let target = snapshot_path("types-fixtures", hash, "txt.zst");
+    std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+    run(Command::new("zstd")
+        .args(["-q", "-f", "-19", "-T0"])
+        .arg(&joined)
+        .arg("-o")
+        .arg(&target))?;
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    eprintln!(
+        "recorded types-fixtures in {:.1}s",
+        started.elapsed().as_secs_f64()
+    );
     Ok(())
 }
 
@@ -566,7 +604,7 @@ fn unified_diff(old: &[u8], new: &[u8]) -> Result<String, String> {
 
 /// Every artifact `compare` checks, with its file extension.
 fn compared_artifacts(full: bool) -> Vec<(String, &'static str)> {
-    let mut names = Vec::new();
+    let mut names = vec![("types-fixtures".to_string(), "txt.zst")];
     for (config, level) in artifacts(full) {
         let artifact = artifact_name(&config, level);
         if level == "unset" && config.name != "unscoped" {

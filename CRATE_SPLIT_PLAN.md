@@ -1054,7 +1054,8 @@ with a fixture per transition and trigger:
 - `container_field_facts` folding;
 - conditional holders with `mergeWith`;
 - frozen condition aliases;
-- certainty plus maybe-undefined (level-gated);
+- certainty plus maybe-undefined (level-gated), with each variable's
+  certainty added to the type snapshot;
 - `afterExtractCall` replacing extract/eval truncation;
 - invalidation unification (receiver rebind, by-ref, declare purges);
 - the transition set;

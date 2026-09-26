@@ -9,7 +9,9 @@
 //! `no_composer`, composer discovery is off.
 //!
 //! `PHPSTAN_RS_BLESS=1 cargo test --test fixtures` rewrites every
-//! expectation from the current output.
+//! expectation from the current output. `PHPSTAN_RS_DUMP_TYPES=<dir>`
+//! also writes each fixture's `--dump-types` output to `<dir>`, its paths
+//! relative to the fixture and each line prefixed with the fixture's name.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -45,16 +47,22 @@ fn collect(root: &Path, dir: &Path, trials: &mut Vec<Trial>) {
                 .with_extension("")
                 .display()
                 .to_string();
-            trials.push(Trial::test(name, move || run_fixture(&path)));
+            trials.push(Trial::test(name.clone(), move || run_fixture(&name, &path)));
         }
     }
 }
 
-fn run_fixture(expect_file: &Path) -> Result<(), Failed> {
+fn run_fixture(name: &str, expect_file: &Path) -> Result<(), Failed> {
     let stem = expect_file.with_extension("");
     let (session, base) = Session::for_fixture(&stem)?;
     let single_file = stem.with_extension("php").is_file();
-    let analysis = session.run(None)?;
+    let dump = std::env::var_os("PHPSTAN_RS_DUMP_TYPES")
+        .map(|dir| PathBuf::from(dir).join(name.replace('/', "__")));
+    let raw = dump.as_ref().map(|d| d.with_extension("raw"));
+    let analysis = session.run(raw.as_deref())?;
+    if let (Some(dump), Some(raw)) = (&dump, &raw) {
+        write_type_dump(name, &base, raw, &dump.with_extension("types"))?;
+    }
     if analysis.skipped_analyze > 0 {
         return Err(format!(
             "{} analysed file(s) failed to parse",
@@ -81,6 +89,21 @@ fn run_fixture(expect_file: &Path) -> Result<(), Failed> {
         )
         .into())
     }
+}
+
+/// Rewrites `raw`, the session's type dump, into `out`: each line's path
+/// relative to `base` and prefixed with the fixture's name.
+fn write_type_dump(name: &str, base: &Path, raw: &Path, out: &Path) -> Result<(), Failed> {
+    let text = std::fs::read_to_string(raw)?;
+    let prefix = format!("{}/", base.display());
+    let mut rewritten = String::new();
+    for line in text.lines() {
+        let line = line.strip_prefix(&prefix).unwrap_or(line);
+        writeln!(rewritten, "{name}: {line}").unwrap();
+    }
+    std::fs::write(out, rewritten)?;
+    std::fs::remove_file(raw)?;
+    Ok(())
 }
 
 /// One entry per diagnostic, files in path order, diagnostics in output
