@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::composer::vendor::VendorContext;
+use composer::vendor::VendorContext;
 
 /// Everything a workspace's `phpstan-rs.toml` (or its absence) resolves
 /// into, applied once per `Server::configure_from_workspace` call.
@@ -187,9 +187,9 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
 
     let no_composer = config.no_composer.unwrap_or(false);
     let package = if no_composer {
-        crate::composer::PackageContext::default()
+        composer::PackageContext::default()
     } else {
-        crate::composer::PackageContext::load(root, root)
+        composer::PackageContext::load(root, root)
     };
     let phpstan_api_check_enabled = package.requires_phpstan();
     let package_dirs = package.package_dirs();

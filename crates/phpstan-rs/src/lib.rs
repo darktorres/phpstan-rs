@@ -10,7 +10,6 @@ pub mod assertion_tables;
 pub mod banned;
 pub mod baseline;
 pub mod checker;
-pub mod composer;
 pub mod config;
 pub mod deps;
 pub mod doctrine_functions;

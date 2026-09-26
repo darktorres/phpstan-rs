@@ -16,6 +16,7 @@ types = { package = "phpstan-rs-types", path = "crates/types" }
 phpdoc = { package = "phpstan-rs-phpdoc", path = "crates/phpdoc" }
 sql = { package = "phpstan-rs-sql", path = "crates/sql" }
 diagnostics = { package = "phpstan-rs-diagnostics", path = "crates/diagnostics" }
+composer = { package = "phpstan-rs-composer", path = "crates/composer" }
 criterion = "0.8.2"
 hotpath = "0.24"
 imbl = "7.0.1"

@@ -25,9 +25,9 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
-use crate::composer::constraint;
-use crate::composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use crate::php_stubs;
+use composer::constraint;
+use composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use syntax::ast::*;
 use syntax::token::{Position, Span};
 use syntax::visit::{child_exprs, child_stmts, stmt_exprs};

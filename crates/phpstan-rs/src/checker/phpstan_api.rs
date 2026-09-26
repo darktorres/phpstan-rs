@@ -68,7 +68,6 @@ use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use crate::checker::Checker;
-use crate::composer;
 use crate::registry::{FunctionSig, Registry, is_phpstan_namespace};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;

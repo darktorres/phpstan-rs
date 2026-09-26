@@ -3,7 +3,7 @@
 //! autoloader.
 
 use super::helpers::*;
-use crate::composer::vendor::*;
+use crate::vendor::*;
 use syntax::ast::*;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;

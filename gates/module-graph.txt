@@ -57,12 +57,12 @@ extern types types
 extern phpdoc phpdoc
 extern sql sql
 extern diagnostics diagnostics
+extern composer composer
 
 module output app
 module baseline project
 module ignore_errors project
 module ignore_comments project
-module composer composer
 module deps project
 module config config
 module php_date_parser builtins
@@ -233,7 +233,7 @@ allow project project::composer_hygiene E1
 allow project::architecture project E1
 allow project::banned project E1
 allow project::class_shape project E1
-allow project::composer_hygiene composer E1
+allow project::composer_hygiene @composer E1
 allow project::composer_hygiene project E1
 
 allow checker checker::expr::preg_shapes E2
@@ -366,7 +366,7 @@ allow checker::function_decl checker::internal_usage E3g
 allow checker::function_decl checker::restricted_symbol_usage E3g
 allow checker::imports checker::restricted_symbol_usage E3g
 allow checker::oop checker::internal_usage E3g
-allow checker::phpstan_api composer E3g
+allow checker::phpstan_api @composer E3g
 allow checker::property_assignment checker::deprecated_usage E3g
 allow checker::property_assignment checker::restricted_symbol_usage E3g
 allow checker::resolve checker::internal_usage E3g

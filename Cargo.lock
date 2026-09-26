@@ -1591,6 +1591,7 @@ dependencies = [
  "lsp-types",
  "md5",
  "pcre2-sys",
+ "phpstan-rs-composer",
  "phpstan-rs-diagnostics",
  "phpstan-rs-phpdoc",
  "phpstan-rs-sql",
@@ -1605,6 +1606,14 @@ dependencies = [
  "serde_json",
  "sqlparser",
  "toml",
+]
+
+[[package]]
+name = "phpstan-rs-composer"
+version = "0.1.0"
+dependencies = [
+ "phpstan-rs-syntax",
+ "serde_json",
 ]
 
 [[package]]

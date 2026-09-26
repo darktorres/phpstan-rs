@@ -1,0 +1,19 @@
+composer::constraint::tests::composer_constraint_forms -> constraint::tests::composer_constraint_forms
+composer::manifest::tests::path_repository_packages_are_recognized_through_their_symlink -> manifest::tests::path_repository_packages_are_recognized_through_their_symlink
+composer::tests::phpstan_dependency_detection::a_composer_json_with_unrelated_dependencies_is_not_detected -> tests::phpstan_dependency_detection::a_composer_json_with_unrelated_dependencies_is_not_detected
+composer::tests::phpstan_dependency_detection::malformed_json_degrades_to_not_detected_rather_than_panicking -> tests::phpstan_dependency_detection::malformed_json_degrades_to_not_detected_rather_than_panicking
+composer::tests::phpstan_dependency_detection::no_composer_json_means_not_detected -> tests::phpstan_dependency_detection::no_composer_json_means_not_detected
+composer::tests::phpstan_dependency_detection::phpstan_extension_installer_in_require_dev_is_detected -> tests::phpstan_dependency_detection::phpstan_extension_installer_in_require_dev_is_detected
+composer::tests::phpstan_dependency_detection::phpstan_phpstan_in_require_is_detected -> tests::phpstan_dependency_detection::phpstan_phpstan_in_require_is_detected
+composer::tests::vendor_context_discovery::a_path_repository_symlink_out_of_vendor_is_still_vendor_context -> tests::vendor_context_discovery::a_path_repository_symlink_out_of_vendor_is_still_vendor_context
+composer::tests::vendor_context_discovery::always_includes_composers_own_class_loader_file -> tests::vendor_context_discovery::always_includes_composers_own_class_loader_file
+composer::tests::vendor_context_discovery::composer_json_without_installed_vendor_means_no_context -> tests::vendor_context_discovery::composer_json_without_installed_vendor_means_no_context
+composer::tests::vendor_context_discovery::dunder_dir_lexes_and_parses_as_a_bare_name -> tests::vendor_context_discovery::dunder_dir_lexes_and_parses_as_a_bare_name
+composer::tests::vendor_context_discovery::no_composer_json_means_no_context -> tests::vendor_context_discovery::no_composer_json_means_no_context
+composer::tests::vendor_context_discovery::resolves_classmap_and_psr4_from_the_separate_files -> tests::vendor_context_discovery::resolves_classmap_and_psr4_from_the_separate_files
+composer::tests::vendor_context_discovery::resolves_the_real_autoload_static_shape_with_chained_dir_concat -> tests::vendor_context_discovery::resolves_the_real_autoload_static_shape_with_chained_dir_concat
+composer::tests::composer_package_name_lookup::finds_the_name_in_the_starting_directory_itself -> REMOVED: package ownership comes from the package context, not an upward composer.json walk (tests::package_ownership)
+composer::tests::composer_package_name_lookup::walks_upward_to_find_an_ancestor_composer_json -> REMOVED: package ownership comes from the package context, not an upward composer.json walk (tests::package_ownership)
+composer::tests::composer_package_name_lookup::a_composer_json_with_no_name_field_is_not_found -> REMOVED: package ownership comes from the package context, not an upward composer.json walk (tests::package_ownership)
+composer::tests::composer_package_name_lookup::a_malformed_composer_json_stops_the_search_rather_than_walking_further_up -> REMOVED: package ownership comes from the package context, not an upward composer.json walk (tests::package_ownership)
+composer::tests::composer_package_name_lookup::no_composer_json_anywhere_up_to_the_root_is_not_found -> REMOVED: package ownership comes from the package context, not an upward composer.json walk (tests::package_ownership)

@@ -15,8 +15,8 @@ use rayon::prelude::*;
 
 use crate::config::{self, Config};
 use crate::{
-    architecture, assertion_tables, banned, composer, doctrine_functions, ignore_errors,
-    parent_calls, restricted_symbols,
+    architecture, assertion_tables, banned, doctrine_functions, ignore_errors, parent_calls,
+    restricted_symbols,
 };
 use syntax::token::Span;
 

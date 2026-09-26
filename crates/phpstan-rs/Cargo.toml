@@ -6,6 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+composer.workspace = true
 diagnostics.workspace = true
 phpdoc.workspace = true
 sql.workspace = true
