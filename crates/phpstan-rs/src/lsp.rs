@@ -50,7 +50,7 @@ use crate::diagnostic;
 use crate::project::Project;
 use crate::project::use_sites;
 use crate::registry::{FunctionSig, format_signature, param_label};
-use crate::{baseline, ignore_errors, restricted_symbols};
+use crate::{baseline, ignore_errors};
 use syntax::ast::ClassKind;
 use syntax::token::Span;
 use types::Type;
@@ -491,6 +491,7 @@ impl Server {
             .set_phpstan_api_check_enabled(resolved.phpstan_api_check_enabled);
 
         self.root = Some(root.to_path_buf());
+        self.project.set_working_dir(root.to_path_buf());
         self.baseline = resolved.baseline;
         self.ignore_error_entries = resolved.ignore_error_entries;
         self.level_cutoff = resolved.configured_level;
@@ -541,7 +542,6 @@ impl Server {
         if !self.ignore_error_entries.is_empty() {
             ignore_errors::filter(&mut relative, &self.ignore_error_entries);
         }
-        restricted_symbols::filter_by_path(&mut relative);
         if let Some(baseline) = &self.baseline {
             let _stale = baseline::filter(&mut relative, baseline);
         }

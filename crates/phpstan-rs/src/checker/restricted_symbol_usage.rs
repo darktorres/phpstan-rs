@@ -405,18 +405,9 @@ impl<'a> Checker<'a> {
         None
     }
 
-    /// Every `check_restricted_*` report call routes through here -
-    /// centralizes both halves of Phase 67's own filter-DSL extension
-    /// (confirmed against the real `spaze/phpstan-disallowed-calls`
-    /// docs): attribute-context matching (`allow_in_class_with_
-    /// attributes`/`allow_in_methods_with_attributes` and their
-    /// `allow_except_*` inverses) is checked inline, right here, against
-    /// `current_class_attrs`/`current_method_attrs` - the checker already
-    /// has that context on hand at report time, unlike the file path
-    /// (path-scoped `allow_in`/`allow_except_in` are instead attached as
-    /// diagnostic metadata and resolved by a later post-filter,
-    /// `restricted_symbols::filter_by_path` - see that function's own doc
-    /// comment for why).
+    /// Every `check_restricted_*` report call routes through here: an
+    /// entry allowed in the current context (attributes, calling method,
+    /// instance-of, or the file's path zone) isn't reported.
     fn report_restricted(
         &mut self,
         entry: &RestrictedSymbolEntry,
@@ -428,17 +419,11 @@ impl<'a> Checker<'a> {
         self.report_restricted_with_params_gate(entry, label, message, span, identifier, None);
     }
 
-    /// `report_restricted`'s own real body, plus one extra piece only
-    /// `Function`/`Method`/`StaticMethod` call sites ever have:
-    /// `params_gate` (`Self::params_in_allowed_gate`'s already-resolved
-    /// verdict) is attached as diagnostic metadata for `restricted_
-    /// symbols::filter_by_path`'s own post-filter to combine with the
-    /// path-scoped `allow_in`/`allow_except_in` zone, exactly the way
-    /// `is_allowed_by_params_in_allowed_context` already combines it
-    /// with the instance-of/methods zones inline, right here, before a
-    /// diagnostic is even built - the path zone alone has no call-site
-    /// context available at post-filter time (see `filter_by_path`'s
-    /// own doc comment).
+    /// `report_restricted`, with `params_gate` - the call site's
+    /// `Self::params_in_allowed_gate` verdict, which only
+    /// `Function`/`Method`/`StaticMethod` call sites have - narrowing the
+    /// path zone the way `is_allowed_by_params_in_allowed_context`
+    /// narrows the instance-of/methods zones.
     fn report_restricted_with_params_gate(
         &mut self,
         entry: &RestrictedSymbolEntry,
@@ -451,29 +436,32 @@ impl<'a> Checker<'a> {
         if self.is_allowed_by_attribute_context(entry)
             || self.is_allowed_by_calling_context(entry)
             || self.is_allowed_by_instance_of_context(entry)
+            || self
+                .project_relative_path()
+                .is_some_and(|path| entry.allowed_at_path(&path, params_gate))
         {
             return;
         }
-        let mut builder = DiagnosticBuilder::new(label.to_string(), message, span, 0, identifier);
-        if !entry.allow_in.is_empty() {
-            builder = builder.metadata(
-                "restrictedSymbol.allowIn",
-                serde_json::json!(entry.allow_in),
-            );
-        }
-        if !entry.allow_except_in.is_empty() {
-            builder = builder.metadata(
-                "restrictedSymbol.allowExceptIn",
-                serde_json::json!(entry.allow_except_in),
-            );
-        }
-        if let Some(gate) = params_gate {
-            builder = builder.metadata(
-                "restrictedSymbol.paramsInAllowedGate",
-                serde_json::json!(gate),
-            );
-        }
-        self.report_builder(builder);
+        self.report_builder(DiagnosticBuilder::new(
+            label.to_string(),
+            message,
+            span,
+            0,
+            identifier,
+        ));
+    }
+
+    /// The checked file's path as path-scoped config spells it: relative
+    /// to the project's working directory when it lies below it, as
+    /// given otherwise. `None` when no file is being checked.
+    fn project_relative_path(&self) -> Option<String> {
+        let file = self.current_file.as_deref()?;
+        let relative = self
+            .working_dir
+            .as_deref()
+            .and_then(|dir| file.strip_prefix(dir).ok())
+            .unwrap_or(file);
+        Some(relative.display().to_string())
     }
 
     /// `allow_in_class_with_attributes`/`allow_except_in_class_with_

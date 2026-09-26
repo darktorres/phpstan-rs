@@ -775,7 +775,6 @@ impl Session {
             &mut results,
             &self.config.ignore_errors.clone().unwrap_or_default(),
         );
-        restricted_symbols::filter_by_path(&mut results);
         if !self.emission_order {
             for diagnostics in results.values_mut() {
                 diagnostic::sort_diagnostics(diagnostics);
