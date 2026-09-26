@@ -1112,13 +1112,24 @@ derived node, each listing its Appendix A rows:
 - (e) declarations, generics checks and PHPDoc;
 - (f) control flow, returns, throws and generators;
 - (g) the restricted-usage framework: `@internal` core, deprecation
-  (ext-deprecation-rules), disallowed-calls with path zones decided in the
-  rule (`filter_by_path` and `metadata` deleted), and `phpstan_api`;
+  (ext-deprecation-rules), disallowed-calls (its path zones already
+  decided at the report site since B7), and `phpstan_api`;
 - (h) `FileAssertRule`, the dump rules and the four asserts;
 - (i) semantic-token predicates exposed.
 
 Mixed modules are split row by row (Appendix A). Gate: architecture rule 10
 for the analyser.
+
+The rest of the `RuleError` model (§3.7) that B7 left for the dispatcher
+lands here, each its own commit:
+- file and trait file on every error, attached by the dispatcher (a trait
+  method's error analysed in a using class carries the trait's file);
+- identifier families: each rule declares its identifiers as prefix ×
+  suffix sets, the dispatcher debug-asserts every error against its rule's
+  declaration, and the `format!`-built identifiers (about 40 sites today)
+  become family members;
+- AST-node fixes beside text fixes, rendered to diffs through
+  `syntax::printer`.
 
 **E4. Extension modules.**
 - Order:
