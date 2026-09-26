@@ -101,11 +101,15 @@ impl<'a> Checker<'a> {
                 .unwrap_or((None, None)),
             // Same reasoning as `find_property_owner`'s own doc
             // comment above.
+            // An instance of every member has the most visible of their
+            // declarations: a subclass implementing a public interface
+            // method is public, whatever a parent keeps private.
             Type::Intersection(members) => members
                 .iter()
                 .rev()
                 .map(|m| self.find_method_receiver_class(m, method))
-                .find(|(sig, _)| sig.is_some())
+                .filter(|(sig, _)| sig.is_some())
+                .min_by_key(|(sig, _)| sig.map(|s| visibility_rank(&s.visibility)))
                 .unwrap_or((None, None)),
             _ => (None, None),
         }
@@ -255,10 +259,13 @@ impl<'a> Checker<'a> {
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.find_method_receiver(m, method)),
+            // See `find_method_receiver_class`: the most visible
+            // declaration among the members.
             Type::Intersection(members) => members
                 .iter()
                 .rev()
-                .find_map(|m| self.find_method_receiver(m, method)),
+                .filter_map(|m| self.find_method_receiver(m, method))
+                .min_by_key(|(_, _, _, sig)| visibility_rank(&sig.visibility)),
             _ => None,
         }
     }
@@ -1207,5 +1214,15 @@ impl<'a> Checker<'a> {
             _ if single_scalar => element_or_mixed,
             _ => collection(),
         }
+    }
+}
+
+/// Public first: the order in which a declaration's visibility lets more
+/// callers in.
+fn visibility_rank(visibility: &syntax::ast::Visibility) -> u8 {
+    match visibility {
+        syntax::ast::Visibility::Public => 0,
+        syntax::ast::Visibility::Protected => 1,
+        syntax::ast::Visibility::Private => 2,
     }
 }
