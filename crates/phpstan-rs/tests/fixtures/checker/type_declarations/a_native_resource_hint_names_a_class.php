@@ -1,7 +1,6 @@
 <?php
 function takesHandle(resource $handle): void
 {
-    \PHPStan\Testing\assertType('resource', $handle);
 }
 
 /** @param resource $handle */

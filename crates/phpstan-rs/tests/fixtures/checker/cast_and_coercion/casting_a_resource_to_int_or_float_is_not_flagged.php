@@ -1,5 +1,6 @@
 <?php
-            function test(resource $r): void {
+            /** @param resource $r */
+            function test($r): void {
                 $i = (int) $r;
                 $f = (float) $r;
             }
