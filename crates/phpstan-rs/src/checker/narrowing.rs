@@ -427,6 +427,7 @@ impl<'a> Checker<'a> {
                 .map(|key| (key, if branch_true { Type::True } else { Type::False }))
         };
         let mut subjects: Vec<(String, Type)> = primary_subject.into_iter().collect();
+        let mut flag_subjects: Vec<(String, Type)> = Vec::new();
         for (name, after_ty) in after.iter() {
             let is_flag_proxy = matches!(after_ty, Type::True | Type::False);
             // A variable that became a concrete `Object` type specifically
@@ -449,11 +450,35 @@ impl<'a> Checker<'a> {
                 && !subjects.iter().any(|(k, _)| k == name)
             {
                 subjects.push((name.clone(), after_ty.clone()));
+                if is_flag_proxy {
+                    flag_subjects.push((name.clone(), after_ty.clone()));
+                }
             }
         }
         if subjects.is_empty() {
             return;
         }
+        // A flag set in this branch stands for the whole branch having
+        // run, so it also implies every variable the branch narrowed,
+        // including the ones `cond` tests.
+        let mut narrowed: Vec<(String, Type)> = Vec::new();
+        if !flag_subjects.is_empty() {
+            for (name, after_ty) in after.iter() {
+                if !is_real_variable_key(name)
+                    || subjects.iter().any(|(k, _)| k == name)
+                    || *after_ty == Type::Never
+                {
+                    continue;
+                }
+                if let Some(before_ty) = before.get(name)
+                    && before_ty != after_ty
+                    && self.registry.relation().subtype(after_ty, before_ty)
+                {
+                    narrowed.push((name.clone(), after_ty.clone()));
+                }
+            }
+        }
+        record_implied_facts(after, &flag_subjects, &narrowed);
         let mut implied: Vec<(String, Type)> = Vec::new();
         for (name, after_ty) in after.iter() {
             if subjects.iter().any(|(k, _)| k == name) {
@@ -486,31 +511,37 @@ impl<'a> Checker<'a> {
                 implied.push((name.clone(), after_ty.clone()));
             }
         }
-        if implied.is_empty() {
-            return;
-        }
-        for (subject_key, value_ty) in subjects {
-            let key = discriminant_canonical_key(&subject_key, &value_ty);
-            let mut combined = after
-                .branch_implied_facts
-                .get(&key)
-                .map(|existing| (**existing).clone())
-                .unwrap_or_default();
-            // Deduped, not a blind `extend` - re-recording the identical
-            // fact across repeated loop-convergence passes (this branch
-            // sits inside a loop body re-checked up to `MAX_PASSES` times)
-            // must reach a fixed point rather than growing every pass, the
-            // same unbounded-growth hazard `merge_scopes`'s own
-            // `branch_implied_facts` merge had.
-            for fact in &implied {
-                if !combined.contains(fact) {
-                    combined.push(fact.clone());
-                }
+        record_implied_facts(after, &subjects, &implied);
+    }
+}
+
+/// Adds `implied` to the facts recorded under each of `subjects`. A fact
+/// for a variable already recorded under that subject replaces it, so
+/// re-recording across loop-convergence passes reaches a fixed point.
+fn record_implied_facts(
+    after: &mut Locals,
+    subjects: &[(String, Type)],
+    implied: &[(String, Type)],
+) {
+    if implied.is_empty() {
+        return;
+    }
+    for (subject_key, value_ty) in subjects {
+        let key = discriminant_canonical_key(subject_key, value_ty);
+        let mut combined = after
+            .branch_implied_facts
+            .get(&key)
+            .map(|existing| (**existing).clone())
+            .unwrap_or_default();
+        for (name, ty) in implied {
+            match combined.iter_mut().find(|(k, _)| k == name) {
+                Some(existing) => existing.1 = ty.clone(),
+                None => combined.push((name.clone(), ty.clone())),
             }
-            after
-                .branch_implied_facts
-                .insert(key, std::rc::Rc::new(combined));
         }
+        after
+            .branch_implied_facts
+            .insert(key, std::rc::Rc::new(combined));
     }
 }
 
