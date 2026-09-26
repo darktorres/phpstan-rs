@@ -290,10 +290,12 @@ struct Server {
     // cache is what actually saves a repeated `check_program` pass).
     #[allow(clippy::type_complexity)]
     inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<(Span, Arc<str>)>, Vec<(Span, Type)>)>,
+    // The version `initialize` reports, the binary's own.
+    version: String,
 }
 
 impl Server {
-    fn new() -> Self {
+    fn new(version: &str) -> Self {
         let mut project = Project::new();
         // hover/definition's own text-split technique needs each file's
         // exact source text - see `Project::retain_source`'s own doc
@@ -327,6 +329,7 @@ impl Server {
             supports_watched_files: false,
             file_versions: FxHashMap::default(),
             inlay_hint_cache: FxHashMap::default(),
+            version: version.to_string(),
         }
     }
 
@@ -2134,8 +2137,8 @@ fn queue_change(
 
 /// Returns the process exit code `main.rs` should exit with (per the LSP
 /// spec's `exit`-notification contract - see `run_loop`'s own doc
-/// comment).
-pub fn run() -> i32 {
+/// comment). `version` is the binary's, reported on `initialize`.
+pub fn run(version: &str) -> i32 {
     // `bounded`, not `unbounded`: backpressures a fast/misbehaving
     // client (blocks the reader thread, and so the OS pipe) instead of
     // buffering unboundedly.
@@ -2153,7 +2156,7 @@ pub fn run() -> i32 {
     // the exact same `Write` handle `run_loop`'s own dispatch uses,
     // matching `writer`'s own new `Arc<Mutex<W>>` shape everywhere else.
     let writer = Arc::new(Mutex::new(io::stdout()));
-    run_loop(&rx, writer)
+    run_loop(&rx, writer, version)
     // Not joined: once run_loop exits the process is ending anyway; the
     // reader thread, possibly still blocked in a real Message::read on
     // stdin with nothing left reading its sender, is simply abandoned -
@@ -2192,8 +2195,12 @@ pub fn run() -> i32 {
 /// returns 0 regardless of `shutdown_received` - the spec's exit-code
 /// contract binds the `exit` notification specifically, not every way a
 /// session can end.
-fn run_loop<W: Write + Send + 'static>(receiver: &Receiver<Message>, writer: Arc<Mutex<W>>) -> i32 {
-    let server = Arc::new(Mutex::new(Server::new()));
+fn run_loop<W: Write + Send + 'static>(
+    receiver: &Receiver<Message>,
+    writer: Arc<Mutex<W>>,
+    version: &str,
+) -> i32 {
+    let server = Arc::new(Mutex::new(Server::new(version)));
     let debounce = Arc::new(DebounceHandle {
         queue: Mutex::new(debounce::DebounceQueue::new(DEFAULT_DEBOUNCE)),
         cv: Condvar::new(),
@@ -2585,7 +2592,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 },
                 server_info: Some(ServerInfo {
                     name: "phpstan-rs".to_string(),
-                    version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                    version: Some(server.version.clone()),
                 }),
             };
             Message::Response(Response::new_ok(id.clone(), result))

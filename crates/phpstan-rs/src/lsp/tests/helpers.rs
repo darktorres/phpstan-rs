@@ -118,7 +118,7 @@ pub(super) fn run_with_capabilities(
     // for any fixture that omits a trailing `exit` notification.
     drop(tx);
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer));
+    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
     let bytes = writer.lock().unwrap().clone();
     decode_all(&bytes)
 }
@@ -149,7 +149,7 @@ pub(super) fn run_across_debounce(dir: &TempDir, before: &[Value], after: &[Valu
     let writer = Arc::new(Mutex::new(Vec::new()));
     let worker_writer = Arc::clone(&writer);
     let handle = std::thread::spawn(move || {
-        run_loop(&rx, worker_writer);
+        run_loop(&rx, worker_writer, env!("CARGO_PKG_VERSION"));
     });
 
     tx.send(to_message(request(
@@ -247,7 +247,7 @@ pub(super) fn run_multi(dirs: &[&TempDir], extra: &[Value]) -> Vec<Value> {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer));
+    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
     let bytes = writer.lock().unwrap().clone();
     decode_all(&bytes)
 }

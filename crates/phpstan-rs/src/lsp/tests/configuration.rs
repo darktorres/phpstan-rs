@@ -241,7 +241,7 @@ fn reload_configuration_rereads_an_on_disk_config_change() {
     let path = dir.write("a.php", DEPRECATED_FIXTURE);
     let uri = path_to_uri(&path).to_string();
 
-    let mut server = Server::new();
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
     server.add_workspace_folders(std::slice::from_ref(&dir.0));
     let initial: Vec<Value> = server
         .publish_workspace_diagnostics()
