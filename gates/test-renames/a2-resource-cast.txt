@@ -1,0 +1,1 @@
+checker/cast_and_coercion/casting_a_resource_to_string_is_flagged -> checker/cast_and_coercion/a_resource_casts_to_its_resource_id_text

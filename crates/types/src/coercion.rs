@@ -50,9 +50,9 @@ impl Type {
         }
     }
 
-    /// `(string) $x`. Illegal for an array (PHP's "Array to string
-    /// conversion", whatever it holds), a resource (PHPStan's
-    /// `ResourceType::toString()`), and an object with no `__toString()`
+    /// `(string) $x`. A resource is its `Resource id #N` text. Illegal for
+    /// an array (PHP's "Array to string conversion", whatever it holds)
+    /// and an object with no `__toString()`
     /// that also isn't `GMP`/`BcMath\Number` (numeric-string-castable by
     /// an operator overload). A class the hierarchy doesn't know is left
     /// alone: stub coverage may simply not include it.
@@ -62,7 +62,10 @@ impl Type {
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
                 None
             }
-            Type::Resource { .. } => None,
+            Type::Resource { .. } => Some(Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::NonEmptyString),
+            ])),
             Type::Object(name, _) => {
                 if hierarchy.is_subclass_of(name, "GMP")
                     || hierarchy.is_subclass_of(name, "BcMath\\Number")
