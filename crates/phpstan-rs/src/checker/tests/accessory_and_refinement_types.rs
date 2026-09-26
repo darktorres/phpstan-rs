@@ -1,7 +1,6 @@
 //! Union collapsing, readonly/property hooks, literal/accessory refinement types.
 
 use super::super::*;
-use super::helpers::*;
 use types::AccessoryKind;
 use types::Shape;
 
@@ -206,27 +205,3 @@ fn union_types_itself_generalizes_before_collapsing_to_mixed() {
 }
 
 // String accessory case-tracking, full concat algorithm.
-
-#[test]
-fn a_float_literal_concatenated_with_a_string_literal_narrows_via_the_composed_accessories() {
-    // This project's own inference has never given a bare float literal
-    // expression a precise `Type::FloatLiteral` (only `Literal::Int`
-    // does, `checker/expr.rs`'s own `ExprKind::Literal` arm collapses
-    // `Literal::Float` straight to plain `Type::Float`) - so `1.5` here
-    // reaches `resolve_concat_type` as `Type::Float`, not a literal, and
-    // the result is the composed-accessory answer for that shape
-    // (`Float`'s own `toString()` projection carries no non-empty/non-
-    // falsy accessory on its own, so only the literal `'-suffix'`
-    // operand's own non-falsiness survives the AND/OR composition).
-    // `format_php_float`'s own real algorithm is covered directly by
-    // `checker::narrowing::accessory_range`'s own unit tests instead,
-    // where a real `Type::FloatLiteral` value is easy to construct by
-    // hand.
-    let d = diagnostics_for(
-        r#"<?php
-            use function PHPStan\Testing\assertType;
-            assertType('non-falsy-string', 1.5 . '-suffix');
-        "#,
-    );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
-}

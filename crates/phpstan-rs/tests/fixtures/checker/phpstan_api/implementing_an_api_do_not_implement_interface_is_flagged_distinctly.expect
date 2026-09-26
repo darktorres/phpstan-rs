@@ -1,0 +1,3 @@
+test.php:3:9-3:60 class.abstractMethodNotImplemented L0 | class App\\MyScope does not implement abstract method(s): canAccessConstant, canAccessProperty, canAnyVariableExist, and 54 more
+    tip: either implement every method listed above, or declare this class itself abstract
+test.php:3:9-3:60 phpstanApi.interface L0 | implementing PHPStan\\Analyser\\Scope is not supported: PHPStan\\Analyser\\Scope is marked @api-do-not-implement and may gain new members in a minor version

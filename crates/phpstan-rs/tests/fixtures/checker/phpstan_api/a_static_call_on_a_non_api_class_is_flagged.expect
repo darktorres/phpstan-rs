@@ -1,0 +1,3 @@
+test.php:3:9-5:10 missingType.return L6 | Function f() has no return type specified.
+test.php:4:13-4:43 phpstanApi.method L0 | calling PHPStan\\Rules\\Helper::check() is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\Rules\\Helper)
+test.php:4:13-4:43 staticMethod.resultUnused L4 | Call to PHPStan\\Rules\\Helper::check() on a separate line has no effect.

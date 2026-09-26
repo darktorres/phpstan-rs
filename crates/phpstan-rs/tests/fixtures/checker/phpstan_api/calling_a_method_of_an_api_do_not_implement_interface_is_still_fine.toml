@@ -1,0 +1,3 @@
+no_composer = false
+paths = ["test.php"]
+scan_paths = ["vendor/phpstan/phpstan/src"]

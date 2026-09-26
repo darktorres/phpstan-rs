@@ -1,0 +1,2 @@
+test.php:3:9-5:10 missingType.return L6 | Function f() has no return type specified.
+test.php:4:18-4:44 phpstanApi.classConstant L0 | accessing PHPStan\\Rules\\Helper::FOO is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\Rules\\Helper)

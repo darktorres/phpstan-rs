@@ -1,0 +1,1 @@
+test.php:3:9-3:60 phpstanApi.interface L0 | extending PHPStan\\Rules\\BaseRule is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\Rules\\BaseRule)

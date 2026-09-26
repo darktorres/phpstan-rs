@@ -1,0 +1,6 @@
+test.php:3:9-7:10 class.abstractMethodNotImplemented L0 | class App\\MyRule does not implement abstract method(s): getNodeType, processNode
+    tip: either implement every method listed above, or declare this class itself abstract
+test.php:3:9-7:10 missingType.generics L6 | Class App\\MyRule implements generic interface PHPStan\\Rules\\Rule but does not specify its types: TNodeType
+test.php:4:20-6:14 missingType.return L6 | Method App\\MyRule::check() has no return type specified.
+test.php:4:35-4:37 missingType.parameter L6 | Method App\\MyRule::check() has parameter $x with no type specified.
+test.php:5:17-5:32 phpstanApi.runtimeReflection L0 | Function is_a() is a runtime reflection concept that might not work in PHPStan because it uses fully static reflection engine. Use objects retrieved from ReflectionProvider instead.

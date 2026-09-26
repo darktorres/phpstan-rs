@@ -1,0 +1,1 @@
+test.php:3:9-5:10 phpstanApi.trait L0 | using trait PHPStan\\Rules\\RuleHelperTrait is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\Rules\\RuleHelperTrait)

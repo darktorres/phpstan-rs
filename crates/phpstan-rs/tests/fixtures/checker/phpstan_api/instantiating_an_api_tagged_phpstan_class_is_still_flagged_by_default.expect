@@ -1,0 +1,3 @@
+test.php:3:9-5:10 missingType.return L6 | Function f() has no return type specified.
+test.php:4:18-4:43 new.interface L0 | cannot instantiate interface PHPStan\\Rules\\Rule
+test.php:4:18-4:43 phpstanApi.constructor L0 | instantiating PHPStan\\Rules\\Rule is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\Rules\\Rule)

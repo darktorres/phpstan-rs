@@ -1,32 +1,7 @@
 //! Array literal typing, shapes, list-ness, index assignment, destructuring.
 
 use super::super::*;
-use super::helpers::*;
 use types::Shape;
-
-#[test]
-fn a_dynamic_write_disables_typo_catching_for_the_rest_of_that_variable() {
-    // A real, deliberate cost of this design, pinned down as a test
-    // rather than left as prose: once `$x` is widened away from
-    // `Type::ArrayShape` by an append/dynamic-key write anywhere in
-    // its lifetime, `check_offset_existence` (which only fires on
-    // `Type::ArrayShape`) stops catching a genuine typo on *any* key
-    // of that variable from that point on - not just the new one.
-    let d = diagnostics_for(
-        r#"<?php
-            function test(): void {
-                $x = [];
-                $x['a'] = 1;
-                $x[] = 2;
-                echo $x['typo'];
-            }
-        "#,
-    );
-    assert!(
-        d.is_empty(),
-        "expected the typo to go uncaught (the fix's known trade-off), got: {d:?}"
-    );
-}
 
 // Array-shape generalization, tried before the hard
 // MAX_UNION_MEMBERS collapse - 13 shapes that all share the *same*

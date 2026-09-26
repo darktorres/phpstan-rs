@@ -1,0 +1,2 @@
+test.php:3:9-5:10 missingType.return L6 | Function f() has no return type specified.
+test.php:4:13-4:43 staticMethod.resultUnused L4 | Call to PHPStan\\Rules\\Helper::check() on a separate line has no effect.

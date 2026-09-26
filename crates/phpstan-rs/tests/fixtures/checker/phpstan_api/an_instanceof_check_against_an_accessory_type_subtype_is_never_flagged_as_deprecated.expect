@@ -1,0 +1,3 @@
+test.php:3:9-6:10 missingType.return L6 | Function f() has no return type specified.
+test.php:3:20-3:22 missingType.parameter L6 | Function f() has parameter $x with no type specified.
+test.php:4:17-4:82 phpstanApi.instanceofAssumption L0 | Although PHPStan\\Type\\Accessory\\AccessoryNonEmptyStringType is covered by backward compatibility promise, this instanceof assumption might break in a minor PHPStan version.

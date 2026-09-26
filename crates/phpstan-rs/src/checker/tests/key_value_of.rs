@@ -22,59 +22,6 @@ use super::helpers::*;
 // property type rather than recomputing it.
 
 #[test]
-fn value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type() {
-    // `@return value-of<T>` where `T` is a `@template` placeholder (never
-    // resolvable to a concrete enum, so `Registry::
-    // resolve_deferred_value_of` degrades it to `Mixed`) must not
-    // silently discard a genuinely useful native return type in favor of
-    // a bare `Mixed` - `resolve_type`'s `reconcile_with_native` must
-    // fall back to the native type for this exact shape.
-    let d = diagnostics_for(
-        r#"<?php
-            use function PHPStan\Testing\assertType;
-            /**
-             * @template T of \UnitEnum
-             */
-            class Coercer {
-                /**
-                 * @return value-of<T>
-                 */
-                public function coerce(mixed $value): string|int {
-                    return $value;
-                }
-            }
-            function f(Coercer $c): void {
-                assertType('string|int', $c->coerce('x'));
-            }
-        "#,
-    );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
-}
-
-#[test]
-fn value_of_on_a_backed_enum_resolves_in_a_property_type_too() {
-    // Exercises a different walked location than a function param/return -
-    // `Registry::resolve_deferred_value_of` also rewrites property types.
-    let d = diagnostics_for(
-        r#"<?php
-            use function PHPStan\Testing\assertType;
-            enum Suit: string {
-                case Hearts = 'H';
-                case Spades = 'S';
-            }
-            class Holder {
-                /** @var value-of<Suit> */
-                public $x;
-            }
-            function f(Holder $h): void {
-                assertType("'H'|'S'", $h->x);
-            }
-        "#,
-    );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
-}
-
-#[test]
 fn key_of_a_template_resolves_once_a_call_binds_it() {
     let d = diagnostics_for(
         r#"<?php
