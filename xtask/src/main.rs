@@ -311,7 +311,7 @@ fn artifact_name(config: &Config, level: &str) -> String {
 }
 
 /// One line per diagnostic, in output order:
-/// `path \t line \t col \t level \t identifier \t location \t message \t tip`.
+/// `path \t line \t col \t level \t identifier \t message \t tip`.
 fn normalize(json: &str) -> Result<String, String> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| format!("corpus output is not JSON: {e}"))?;
@@ -332,12 +332,11 @@ fn normalize(json: &str) -> Result<String, String> {
             };
             writeln!(
                 out,
-                "{path}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{path}\t{}\t{}\t{}\t{}\t{}\t{}",
                 m["line"],
                 m["column"],
                 m["level"],
                 field("identifier"),
-                field("location"),
                 field("message"),
                 field("tip"),
             )

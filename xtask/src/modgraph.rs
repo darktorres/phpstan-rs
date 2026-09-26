@@ -210,7 +210,8 @@ fn read_spec(path: &Path) -> Result<Spec, String> {
                         i + 1
                     ));
                 }
-                spec.modules.insert(vec![format!("@{library}")], krate.to_string());
+                spec.modules
+                    .insert(vec![format!("@{library}")], krate.to_string());
             }
             ["allow", from, to, phase] => allows.push((i + 1, *from, *to, *phase)),
             _ => return Err(bad()),
@@ -354,7 +355,11 @@ struct Resolver<'a> {
 }
 
 impl<'a> Resolver<'a> {
-    fn new(known: &'a BTreeSet<ModPath>, externs: &'a BTreeSet<String>, files: &[SourceFile]) -> Self {
+    fn new(
+        known: &'a BTreeSet<ModPath>,
+        externs: &'a BTreeSet<String>,
+        files: &[SourceFile],
+    ) -> Self {
         let mut resolver = Resolver {
             known,
             externs,
