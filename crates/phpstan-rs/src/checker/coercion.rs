@@ -2,7 +2,7 @@
 //! coercions (`types::coercion`).
 
 use crate::checker::Checker;
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::{CastKind, CastSpelling};
 use syntax::token::Span;
 use types::Type;

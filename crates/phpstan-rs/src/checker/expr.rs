@@ -10,10 +10,10 @@ use crate::checker::{
     purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
     superglobal_default_type,
 };
-use crate::diagnostic::DiagnosticBuilder;
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::{FunctionSig, Registry};
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};

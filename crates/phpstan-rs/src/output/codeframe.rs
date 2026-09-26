@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
-use crate::diagnostic::Diagnostic;
+use diagnostics::Diagnostic;
 use syntax::lexer::Lexer;
 use syntax::token::{Position, Token};
 

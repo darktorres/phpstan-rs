@@ -1,6 +1,6 @@
 use crate::checker::calls::is_language_construct;
 use crate::checker::{Checker, Locals, narrow_type_excluding};
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::Type;

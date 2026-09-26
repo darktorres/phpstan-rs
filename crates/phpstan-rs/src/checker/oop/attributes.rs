@@ -1,8 +1,8 @@
 use rustc_hash::FxHashSet;
 
 use crate::checker::{CheckArgsCall, Checker, Locals, class_type_word};
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{is_allow_dynamic_properties_attribute_name, is_deprecated_attribute_name};
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::php_version::PhpFeature;

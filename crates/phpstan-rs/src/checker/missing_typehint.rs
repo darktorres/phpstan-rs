@@ -21,8 +21,8 @@
 //! `array_map`'s callback), so inventing that check here would be new,
 //! false-positive-prone behavior with no real rule to model it on.
 use crate::checker::Checker;
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::FunctionSig;
+use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;

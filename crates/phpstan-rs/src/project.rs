@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
-use crate::diagnostic::{self, Diagnostic};
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
 use crate::registry::Registry;
+use diagnostics::{self, Diagnostic};
 use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use syntax::lexer::{LexWarning, Lexer};
 use syntax::name::Interner;
@@ -756,7 +756,7 @@ impl Project {
             let mut unmatched_line = |line: u32, message: String, identifier: &'static str| {
                 let at = syntax::token::Position { line, col: 1 };
                 unmatched.push(
-                    diagnostic::DiagnosticBuilder::new(
+                    diagnostics::DiagnosticBuilder::new(
                         message,
                         Span { start: at, end: at },
                         0,
@@ -1667,7 +1667,7 @@ impl Project {
                 col: 1,
             };
             diagnostics.push(
-                diagnostic::DiagnosticBuilder::new(
+                diagnostics::DiagnosticBuilder::new(
                     format!("Parse error in @phpstan-ignore: {message}"),
                     Span { start: at, end: at },
                     0,

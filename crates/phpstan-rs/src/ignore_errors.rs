@@ -17,7 +17,7 @@
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
-use crate::diagnostic::Diagnostic;
+use diagnostics::Diagnostic;
 use serde::Deserialize;
 
 /// One `ignoreErrors:` entry. Every field is optional and AND-combined

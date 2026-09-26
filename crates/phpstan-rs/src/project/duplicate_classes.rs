@@ -31,8 +31,8 @@
 use std::path::Path;
 
 use crate::checker::{class_kind_identifier, class_kind_word};
-use crate::diagnostic::Diagnostic;
 use crate::project::duplicate_class_sites::{ClassDeclSite, DuplicateClassSites};
+use diagnostics::Diagnostic;
 
 pub(crate) fn check_duplicate_class_declarations(
     path: &Path,

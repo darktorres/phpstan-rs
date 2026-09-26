@@ -15,8 +15,8 @@
 //! Calls and `new` are left to `check_pure_call_without_effect`.
 
 use crate::checker::{Checker, Locals};
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{FunctionSig, collect_impure_points};
+use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::TypeHint;
 use syntax::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};

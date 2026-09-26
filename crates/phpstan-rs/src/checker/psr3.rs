@@ -27,7 +27,7 @@
 //! key.
 
 use crate::checker::{Checker, Locals};
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::{ShapeKey, Type};

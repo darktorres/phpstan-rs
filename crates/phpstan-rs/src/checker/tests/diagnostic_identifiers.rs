@@ -5,7 +5,7 @@
 //! that attach one, `tip`) correctly, and that `DiagnosticBuilder`
 //! itself behaves as a plain, independently-testable unit.
 
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::token::{Position, Span};
 
 fn dummy_span() -> Span {
@@ -80,7 +80,7 @@ fn several_tips_show_as_a_bulleted_list() {
 
 #[test]
 fn an_identifier_is_dot_separated_alphanumeric_segments() {
-    use crate::diagnostic::Identifier;
+    use diagnostics::Identifier;
     assert!(Identifier::is_valid("argument.type"));
     assert!(Identifier::is_valid("phpstanApi.class"));
     assert!(Identifier::is_valid("ignore"));

@@ -4,11 +4,11 @@ use crate::checker::{
     generator_missing_return_type, is_constant_condition_family_identifier,
     type_allows_generator_return,
 };
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{
     ClassInfo, FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
     resolve_names_in_type, resolve_type,
 };
+use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;

@@ -17,7 +17,7 @@ use types::Type;
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
-use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::name_resolution::NameContext;
 
 /// A class-like declaration's own facts the registry doesn't keep.

@@ -2,9 +2,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
-use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 use crate::pest_config;
 use crate::registry::Registry;
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
@@ -1639,7 +1639,7 @@ impl<'a> Checker<'a> {
         message: String,
         span: Span,
         level: u8,
-        identifier: impl Into<crate::diagnostic::Identifier>,
+        identifier: impl Into<diagnostics::Identifier>,
     ) {
         self.diagnostics
             .push(DiagnosticBuilder::new(message, span, level, identifier).build());

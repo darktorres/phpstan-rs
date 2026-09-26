@@ -1,5 +1,8 @@
 //! What a check reports: a [`Diagnostic`], assembled through
-//! [`DiagnosticBuilder`], with an optional textual [`DiagnosticFix`].
+//! [`DiagnosticBuilder`], with an optional textual [`DiagnosticFix`]
+//! (applied by [`fix`]).
+
+pub mod fix;
 
 use std::borrow::Cow;
 

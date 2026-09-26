@@ -763,7 +763,7 @@ fn report(
                 continue;
             };
             let (fixed, applied) =
-                phpstan_rs::fix::apply_fixes(&source, phpstan_rs::fix::fixes_of(diagnostics));
+                diagnostics::fix::apply_fixes(&source, diagnostics::fix::fixes_of(diagnostics));
             if applied == 0 || fixed == source {
                 continue;
             }

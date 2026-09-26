@@ -53,7 +53,7 @@
 //!   it).
 
 use crate::checker::{Checker, Locals};
-use crate::diagnostic::Diagnostic;
+use diagnostics::Diagnostic;
 use syntax::ast::{Expr, ExprKind, Stmt, StmtKind};
 use types::Type;
 

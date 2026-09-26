@@ -56,10 +56,9 @@ extern syntax syntax
 extern types types
 extern phpdoc phpdoc
 extern sql sql
+extern diagnostics diagnostics
 
 module output app
-module diagnostic diagnostics
-module fix diagnostics
 module baseline project
 module ignore_errors project
 module ignore_comments project

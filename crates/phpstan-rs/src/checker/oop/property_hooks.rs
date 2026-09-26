@@ -2,8 +2,8 @@ use crate::checker::{
     ATTRIBUTE_TARGET_METHOD, Checker, Locals, body_contains_explicit_throw, collect_goto_targets,
     expr_contains_explicit_throw,
 };
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{self, PropertySig, resolve_names_in_type};
+use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;

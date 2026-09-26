@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+diagnostics.workspace = true
 phpdoc.workspace = true
 sql.workspace = true
 syntax.workspace = true

@@ -69,8 +69,8 @@ use std::path::Path;
 
 use crate::checker::Checker;
 use crate::composer;
-use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 use crate::registry::{FunctionSig, Registry, is_phpstan_namespace};
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;

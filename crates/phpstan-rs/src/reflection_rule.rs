@@ -22,8 +22,8 @@
 //! `checker::internal_rules`'s own doc comment) would need a real
 //! `Scope` facade to expose safely, which doesn't exist yet.
 
-use crate::diagnostic::Diagnostic;
 use crate::registry::{ClassInfo, FunctionSig};
+use diagnostics::Diagnostic;
 
 /// One reflection-level check. Default no-op bodies (unlike this
 /// project's own first-party checks, which enumerate every `ClassKind`

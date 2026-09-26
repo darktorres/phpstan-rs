@@ -13,7 +13,7 @@
 use crate::checker::calls::contains_nullsafe_access;
 use crate::checker::type_declarations::TypePosition;
 use crate::checker::{Checker, Locals};
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};

@@ -15,7 +15,7 @@
 //! of what real PHP does with it."
 
 use crate::checker::Checker;
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 
 impl<'a> Checker<'a> {

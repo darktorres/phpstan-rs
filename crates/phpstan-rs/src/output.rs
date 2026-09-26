@@ -25,7 +25,7 @@ use rustc_hash::FxHashMap;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::diagnostic::Diagnostic;
+use diagnostics::Diagnostic;
 use serde::Serialize;
 
 mod codeframe;

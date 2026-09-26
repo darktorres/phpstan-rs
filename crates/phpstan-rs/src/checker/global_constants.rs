@@ -9,7 +9,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::checker::Checker;
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};

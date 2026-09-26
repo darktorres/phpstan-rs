@@ -1,6 +1,6 @@
 use super::super::*;
-use crate::diagnostic::Diagnostic;
 use crate::registry::Registry;
+use diagnostics::Diagnostic;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 

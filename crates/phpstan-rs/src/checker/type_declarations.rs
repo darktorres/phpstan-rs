@@ -8,7 +8,7 @@
 //! `null`/`false`, the `true` type, and DNF types.
 
 use crate::checker::Checker;
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::token::Span;
 use types::php_version::PhpFeature;
 

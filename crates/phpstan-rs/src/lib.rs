@@ -13,9 +13,7 @@ pub mod checker;
 pub mod composer;
 pub mod config;
 pub mod deps;
-pub mod diagnostic;
 pub mod doctrine_functions;
-pub mod fix;
 pub mod ignore_comments;
 pub mod ignore_errors;
 pub mod lsp;
@@ -34,6 +32,6 @@ pub mod rule;
 pub(crate) mod stub_attributes;
 
 pub use checker::Checker;
-pub use diagnostic::{Diagnostic, DiagnosticBuilder, DiagnosticFix};
+pub use diagnostics::{Diagnostic, DiagnosticBuilder, DiagnosticFix};
 pub use project::Project;
 pub use registry::Registry;

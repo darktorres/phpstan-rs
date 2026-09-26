@@ -15,7 +15,7 @@ use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
 use types::Type;
 
 use super::Project;
-use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::name_resolution::NameContext;
 
 const SUPERGLOBALS: [&str; 9] = [

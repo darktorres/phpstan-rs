@@ -34,7 +34,7 @@ use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
-use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::name_resolution::NameContext;
 
 /// PSR virtual packages and the interfaces a provider must implement.

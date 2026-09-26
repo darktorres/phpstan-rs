@@ -12,7 +12,7 @@
 //! parameter, ... all routinely go unused without being a bug).
 
 use crate::checker::Checker;
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 

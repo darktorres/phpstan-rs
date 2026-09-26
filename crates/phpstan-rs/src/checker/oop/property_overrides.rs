@@ -1,7 +1,7 @@
 use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::PropertySig;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::php_version::PhpFeature;

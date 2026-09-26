@@ -48,8 +48,8 @@
 //!   string. Trait bodies are skipped: their `$this` has no single type.
 
 use crate::checker::{Checker, Locals};
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::FunctionSig;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use types::TrinaryLogic;
 use types::{AccessoryKind, Type, is_numeric_string_literal};

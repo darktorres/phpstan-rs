@@ -24,8 +24,8 @@
 
 use std::path::Path;
 
-use crate::diagnostic::Diagnostic;
 use crate::project::duplicate_fn_sites::{DuplicateFunctionSites, FnDeclSite};
+use diagnostics::Diagnostic;
 
 fn sites_differ(a: &FnDeclSite, b: &FnDeclSite) -> bool {
     a.param_hints != b.param_hints || a.return_hint != b.return_hint

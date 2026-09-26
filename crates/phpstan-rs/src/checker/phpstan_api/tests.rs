@@ -962,7 +962,7 @@ mod namespace_in_3rd_party_package {
         }
     }
 
-    fn diagnostics_for_file(php_path: &Path, src: &str) -> Vec<crate::diagnostic::Diagnostic> {
+    fn diagnostics_for_file(php_path: &Path, src: &str) -> Vec<diagnostics::Diagnostic> {
         let tokens = Lexer::new(src).tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
         let registry = Registry::build(&program);

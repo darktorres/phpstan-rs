@@ -18,7 +18,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::diagnostic::Diagnostic;
+use diagnostics::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 /// The current on-disk format version.

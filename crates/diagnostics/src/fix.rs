@@ -1,6 +1,6 @@
 //! Applying diagnostics' suggested fixes (`DiagnosticFix`) to source text.
 
-use crate::diagnostic::{Diagnostic, DiagnosticFix};
+use crate::{Diagnostic, DiagnosticFix};
 use syntax::token::{Position, Span};
 
 /// Byte offset of 1-based `position` (column in characters) in `source`,

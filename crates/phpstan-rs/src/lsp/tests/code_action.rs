@@ -7,7 +7,7 @@
 use super::super::*;
 use super::helpers::run;
 use super::helpers::*;
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use lsp_types::CodeActionOrCommand;
 use serde_json::{Value, json};
 use syntax::token::{Position, Span};

@@ -1218,24 +1218,27 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "md5",
- "mysql",
  "pcre2-sys",
+ "phpstan-rs-diagnostics",
  "phpstan-rs-phpdoc",
+ "phpstan-rs-sql",
  "phpstan-rs-syntax",
  "phpstan-rs-types",
- "postgres",
- "r2d2",
- "r2d2_postgres",
- "r2d2_sqlite",
  "rayon",
  "regex",
  "roxmltree",
- "rusqlite",
  "rustc-hash",
  "serde",
  "serde_json",
  "sqlparser",
  "toml",
+]
+
+[[package]]
+name = "phpstan-rs-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "phpstan-rs-syntax",
 ]
 
 [[package]]
@@ -1256,6 +1259,21 @@ dependencies = [
  "hotpath",
  "phpstan-rs-syntax",
  "rustc-hash",
+]
+
+[[package]]
+name = "phpstan-rs-sql"
+version = "0.1.0"
+dependencies = [
+ "mysql",
+ "postgres",
+ "r2d2",
+ "r2d2_postgres",
+ "r2d2_sqlite",
+ "rusqlite",
+ "rustc-hash",
+ "serde",
+ "sqlparser",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 //! Suggested fixes, checked by applying them to the source.
 
 use super::helpers::*;
-use crate::diagnostic::DiagnosticFix;
+use diagnostics::DiagnosticFix;
 
 fn fixed(
     src: &str,
@@ -15,7 +15,7 @@ fn fixed(
         .filter_map(|x| x.fix.as_ref())
         .collect();
     assert!(!fixes.is_empty(), "no {identifier} fix in {d:?}");
-    crate::fix::apply_fixes(src, fixes).0
+    diagnostics::fix::apply_fixes(src, fixes).0
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn unused_private_members_are_deleted_with_their_doc_comments() {
         .filter(|x| x.identifier.ends_with(".unused"))
         .filter_map(|x| x.fix.as_ref())
         .collect();
-    let (out, applied) = crate::fix::apply_fixes(src, fixes);
+    let (out, applied) = diagnostics::fix::apply_fixes(src, fixes);
     assert_eq!(applied, 3, "{d:?}");
     assert_eq!(
         out,

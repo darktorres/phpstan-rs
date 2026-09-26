@@ -1,6 +1,6 @@
 use crate::checker::{Checker, Locals, class_type_word};
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{self, FunctionSig};
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::StaticTarget;
 use syntax::token::Span;
 use types::{self, Type};

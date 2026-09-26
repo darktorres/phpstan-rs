@@ -7,8 +7,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::calls::{contains_nullsafe_access, is_valid_byref_argument_expr};
 use crate::checker::{Checker, Locals, union_types};
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{FunctionSig, ParamSig};
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::php_version::PhpFeature;

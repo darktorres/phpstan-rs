@@ -11,7 +11,7 @@ use lsp_types::{
     Range as LspRange, TextEdit, Uri, WorkDoneProgress, WorkspaceEdit,
 };
 
-use crate::diagnostic::{Diagnostic, diagnostic_order};
+use diagnostics::{Diagnostic, diagnostic_order};
 use syntax::token::{Position, Span};
 
 /// The outcome of trying to read one framed LSP message. `Eof` (a clean
@@ -315,7 +315,7 @@ pub(crate) fn diagnostic_fix_to_code_action(
 ) -> Option<CodeActionOrCommand> {
     let fix = d.fix.as_ref()?;
     let span = match source {
-        Some(source) => crate::fix::resolve_span(source, fix)?,
+        Some(source) => diagnostics::fix::resolve_span(source, fix)?,
         None if fix.within.is_none() => fix.span,
         None => return None,
     };

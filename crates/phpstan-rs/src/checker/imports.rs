@@ -1,7 +1,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::{Checker, class_kind_identifier};
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 
 /// Real PHPStan's own `INTERNAL_CLASS_PREFIXES`

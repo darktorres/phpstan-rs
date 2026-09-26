@@ -1,7 +1,7 @@
 use crate::checker::{
     Checker, Locals, LoopZeroIterations, collect_goto_targets, purge_stale_narrowing_for,
 };
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::visit::body_contains_yield;
 use types::Type;

@@ -7,11 +7,11 @@
 use crate::checker::internal_usage::class_type_word;
 use crate::checker::internal_usage::collect_referenced_class_names;
 use crate::checker::{Checker, Locals};
-use crate::diagnostic::DiagnosticBuilder;
 use crate::ignore_errors::glob_matches;
 use crate::restricted_symbols::{
     ParamCondition, ParamFlagsCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry,
 };
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::TypeHint;
 use syntax::ast::{Arg, ClassKind, Expr, ExprKind, FunctionDecl, Literal, Param, UnaryOp};
 use syntax::token::Span;

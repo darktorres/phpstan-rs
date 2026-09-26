@@ -21,7 +21,7 @@ use crate::{
 use syntax::token::Span;
 
 use super::{ParsedFile, Project};
-use crate::diagnostic::{self, Diagnostic};
+use diagnostics::{self, Diagnostic};
 
 /// The level reported when neither the command line nor the config sets
 /// one: every level this project's diagnostics are tagged with.
@@ -777,7 +777,7 @@ impl Session {
         );
         if !self.emission_order {
             for diagnostics in results.values_mut() {
-                diagnostic::sort_diagnostics(diagnostics);
+                diagnostics::sort_diagnostics(diagnostics);
             }
         }
 

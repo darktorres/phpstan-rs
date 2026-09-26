@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::token::{Position, Span};
 
 pub(super) fn diag(message: &str) -> Diagnostic {

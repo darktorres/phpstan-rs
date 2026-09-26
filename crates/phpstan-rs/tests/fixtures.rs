@@ -14,8 +14,8 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use diagnostics::Diagnostic;
 use libtest_mimic::{Arguments, Failed, Trial};
-use phpstan_rs::diagnostic::Diagnostic;
 use phpstan_rs::project::session::Session;
 
 fn main() {

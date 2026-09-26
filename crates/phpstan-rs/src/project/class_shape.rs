@@ -16,7 +16,7 @@ use syntax::token::Span;
 use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
 
 use super::Project;
-use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
+use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::name_resolution::NameContext;
 
 const DOCTRINE_MAPPED: [&str; 3] = ["Entity", "Embeddable", "MappedSuperclass"];

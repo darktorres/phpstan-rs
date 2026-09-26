@@ -1,5 +1,5 @@
 use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
-use crate::diagnostic::DiagnosticBuilder;
+use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use types::{AccessoryKind, Shape, ShapeField, ShapeKey, Type};
 

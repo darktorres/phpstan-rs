@@ -1,11 +1,11 @@
 use rustc_hash::FxHashMap;
 
 use crate::checker::{Checker, Locals, class_kind_identifier};
-use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{
     FunctionSig, PropertySig, collect_class_name_case_refs, object_class_names,
     resolve_names_in_type,
 };
+use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
