@@ -401,16 +401,15 @@ impl<'a> Checker<'a> {
     /// condition plus zero or more flag variables) - the identical implied
     /// facts get recorded under every one of them, each a valid, separate
     /// way to later prove "this branch ran."
-    pub(crate) fn record_branch_implied_facts(
+    /// The discriminant `cond` itself establishes in its `branch_true`
+    /// branch, as `(subject, value)`, when it has one facts are keyed by.
+    pub(crate) fn primary_discriminant(
         &self,
         cond: &Expr,
         before: &Locals,
-        after: &mut Locals,
         branch_true: bool,
-    ) {
-        let primary_subject = if branch_true
-            && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind
-        {
+    ) -> Option<(String, Type)> {
+        if branch_true && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind {
             match (narrowing_key(l), narrowing_key(r)) {
                 (Some(key), _) => Some((key, self.infer_expr(r, before))),
                 (None, Some(key)) => Some((key, self.infer_expr(l, before))),
@@ -425,7 +424,29 @@ impl<'a> Checker<'a> {
         } else {
             truthiness_discriminant_subject(cond)
                 .map(|key| (key, if branch_true { Type::True } else { Type::False }))
-        };
+        }
+    }
+
+    /// The key facts under `cond`'s own discriminant for its `branch_true`
+    /// branch are recorded at, if any.
+    pub(crate) fn primary_discriminant_key(
+        &self,
+        cond: &Expr,
+        before: &Locals,
+        branch_true: bool,
+    ) -> Option<String> {
+        self.primary_discriminant(cond, before, branch_true)
+            .map(|(subject, value)| discriminant_canonical_key(&subject, &value))
+    }
+
+    pub(crate) fn record_branch_implied_facts(
+        &self,
+        cond: &Expr,
+        before: &Locals,
+        after: &mut Locals,
+        branch_true: bool,
+    ) {
+        let primary_subject = self.primary_discriminant(cond, before, branch_true);
         let mut subjects: Vec<(String, Type)> = primary_subject.into_iter().collect();
         let mut flag_subjects: Vec<(String, Type)> = Vec::new();
         for (name, after_ty) in after.iter() {
@@ -515,9 +536,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Adds `implied` to the facts recorded under each of `subjects`. A fact
-/// for a variable already recorded under that subject replaces it, so
-/// re-recording across loop-convergence passes reaches a fixed point.
+/// Adds `implied` to the facts recorded under each of `subjects`.
 fn record_implied_facts(
     after: &mut Locals,
     subjects: &[(String, Type)],
@@ -534,10 +553,7 @@ fn record_implied_facts(
             .map(|existing| (**existing).clone())
             .unwrap_or_default();
         for (name, ty) in implied {
-            match combined.iter_mut().find(|(k, _)| k == name) {
-                Some(existing) => existing.1 = ty.clone(),
-                None => combined.push((name.clone(), ty.clone())),
-            }
+            crate::checker::control_flow::add_implied_fact(&mut combined, name, ty);
         }
         after
             .branch_implied_facts

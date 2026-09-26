@@ -162,24 +162,20 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// What a call can throw, for the catches around it: its `@throws` type (a
-/// per-callee override first), anything for an unresolved callee or an
-/// undocumented user one, and `Error` for an undocumented builtin, which
-/// throws only `TypeError`/`ValueError`-style errors on bad input. A
-/// builtin's documented exceptions come with `Error` too. `None` for
-/// `@throws void`.
+/// What a call can throw, for the catches around it: a user function's
+/// `@throws` type (a per-callee override first), and anything for an
+/// unresolved callee, an undocumented user one, or a builtin, which can run
+/// user code (a callback, a reflected method, an autoloader, `__toString`)
+/// whatever it documents. `None` for `@throws void`.
 fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionSig>) -> Option<Type> {
-    let object = |name: &str| Type::Object(name.into(), Vec::new());
+    let anything = Type::Object("Throwable".into(), Vec::new());
     let Some(sig) = sig else {
-        return Some(object("Throwable"));
+        return Some(anything);
     };
-    let declared = dynamic.or(sig.throws.as_ref());
-    match (declared, sig.is_stub) {
-        (Some(Type::Void), _) => None,
-        (Some(t), false) => Some(t.clone()),
-        (Some(t), true) => Some(Type::Union(vec![t.clone(), object("Error")])),
-        (None, false) => Some(object("Throwable")),
-        (None, true) => Some(object("Error")),
+    match dynamic.or(sig.throws.as_ref()) {
+        Some(Type::Void) => None,
+        Some(t) if !sig.is_stub => Some(t.clone()),
+        _ => Some(anything),
     }
 }
 

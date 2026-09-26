@@ -41,3 +41,18 @@ function c(int|string $x): void
         \PHPStan\Testing\assertType('1', $x);
     }
 }
+
+function d(?string $s, bool $late): void
+{
+    $flag = false;
+    if ($s !== null) {
+        if ($late) {
+            $flag = true;
+        }
+    } else {
+        $flag = true;
+    }
+    if ($flag) {
+        \PHPStan\Testing\assertType('null|string', $s);
+    }
+}

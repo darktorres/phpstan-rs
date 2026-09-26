@@ -1253,7 +1253,19 @@ impl<'a> Checker<'a> {
         *locals = match (then_terminates, else_terminates) {
             (true, false) => else_locals,
             (false, true) => then_locals,
-            _ => merge_scopes(&then_locals, &else_locals),
+            _ => {
+                let mut merged = merge_scopes(&then_locals, &else_locals);
+                // `cond`'s own discriminant cannot hold in the other
+                // branch, so its facts stay as that branch recorded them.
+                for (branch, branch_true) in [(&then_locals, true), (&else_locals, false)] {
+                    if let Some(key) = self.primary_discriminant_key(cond, locals, branch_true)
+                        && let Some(facts) = branch.branch_implied_facts.get(&key)
+                    {
+                        merged.branch_implied_facts.insert(key, facts.clone());
+                    }
+                }
+                merged
+            }
         };
     }
 

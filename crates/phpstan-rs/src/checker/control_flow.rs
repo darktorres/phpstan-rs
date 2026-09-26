@@ -406,6 +406,108 @@ impl<'a> Checker<'a> {
 /// real reaching-definitions precision, with no further change needed
 /// at any of those call sites.
 #[hotpath::measure]
+/// Adds the fact that `name` is `ty` to `facts`. Two facts for one
+/// variable under one discriminant come from different paths, so it is
+/// either.
+pub(crate) fn add_implied_fact(facts: &mut Vec<(String, Type)>, name: &str, ty: &Type) {
+    match facts.iter_mut().find(|(k, _)| k == name) {
+        Some((_, existing)) if types::types_equal_for_union(existing, ty) => {}
+        Some((_, existing)) => *existing = union_types(existing.clone(), ty.clone()),
+        None => facts.push((name.to_string(), ty.clone())),
+    }
+}
+
+/// Both sides' facts under one discriminant. A variable only one side has
+/// a fact for is, on the other side, whatever that side holds, since the
+/// discriminant held there too.
+fn merge_implied_facts(
+    then_facts: &[(String, Type)],
+    else_facts: &[(String, Type)],
+    then_locals: &Locals,
+    else_locals: &Locals,
+) -> Option<std::rc::Rc<Vec<(String, Type)>>> {
+    let mut combined: Vec<(String, Type)> = Vec::new();
+    for (name, ty) in then_facts {
+        match else_facts.iter().find(|(k, _)| k == name) {
+            Some((_, other)) => {
+                add_implied_fact(&mut combined, name, ty);
+                add_implied_fact(&mut combined, name, other);
+            }
+            None => {
+                if let Some(other) = else_locals.get(name) {
+                    add_implied_fact(&mut combined, name, ty);
+                    add_implied_fact(&mut combined, name, other);
+                }
+            }
+        }
+    }
+    for (name, ty) in else_facts {
+        if then_facts.iter().any(|(k, _)| k == name) {
+            continue;
+        }
+        if let Some(other) = then_locals.get(name) {
+            add_implied_fact(&mut combined, name, ty);
+            add_implied_fact(&mut combined, name, other);
+        }
+    }
+    (!combined.is_empty()).then(|| std::rc::Rc::new(combined))
+}
+
+/// One side's facts under `key`, merged with an `other` side that has none:
+/// kept when the discriminant cannot hold there, and otherwise each widened
+/// by what `other` holds for its variable.
+fn widen_implied_facts(
+    facts: &std::rc::Rc<Vec<(String, Type)>>,
+    key: &str,
+    other: &Locals,
+) -> Option<std::rc::Rc<Vec<(String, Type)>>> {
+    if !discriminant_may_hold(other, key) {
+        return Some(facts.clone());
+    }
+    let mut widened: Vec<(String, Type)> = Vec::new();
+    for (name, ty) in facts.iter() {
+        if let Some(other_ty) = other.get(name) {
+            add_implied_fact(&mut widened, name, ty);
+            add_implied_fact(&mut widened, name, other_ty);
+        }
+    }
+    (!widened.is_empty()).then(|| std::rc::Rc::new(widened))
+}
+
+/// Whether `locals` allows the discriminant `key` (`subject==value`, see
+/// `discriminant_canonical_key`) to hold. A subject that isn't a local, or a
+/// value this can't compare, may.
+fn discriminant_may_hold(locals: &Locals, key: &str) -> bool {
+    let Some((subject, value)) = key.split_once("==") else {
+        return true;
+    };
+    let Some(ty) = locals.get(subject) else {
+        // An undefined variable reads as `null`.
+        return value == "False" || !crate::checker::narrowing::is_real_variable_key(subject);
+    };
+    let members: Vec<&Type> = match ty {
+        Type::Union(members) => members.iter().collect(),
+        other => vec![other],
+    };
+    match value {
+        "True" => members
+            .iter()
+            .any(|m| !matches!(m, Type::False | Type::Null)),
+        "False" => members.iter().any(|m| !matches!(m, Type::True)),
+        literal => members.iter().any(|m| {
+            !matches!(
+                m,
+                Type::True
+                    | Type::False
+                    | Type::Null
+                    | Type::IntLiteral(_)
+                    | Type::StringLiteral(_)
+                    | Type::EnumCase(..)
+            ) || format!("{m:?}") == literal
+        }),
+    }
+}
+
 pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
     let mut merged = then_locals.fresh_scope();
     merged.any_variable_may_exist =
@@ -553,31 +655,26 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // two different `if`s sharing one discriminant).
     merged.branch_implied_facts = then_locals.branch_implied_facts.clone();
     for (key, else_facts) in else_locals.branch_implied_facts.iter() {
-        match merged.branch_implied_facts.get(key) {
-            Some(then_facts) if std::rc::Rc::ptr_eq(then_facts, else_facts) => {}
+        let combined = match then_locals.branch_implied_facts.get(key) {
+            Some(then_facts) if std::rc::Rc::ptr_eq(then_facts, else_facts) => continue,
             Some(then_facts) => {
-                // Content-deduped: `Rc::ptr_eq` above only catches an
-                // unchanged pair, and a fresh `Rc` is allocated below on
-                // every call, so a converged pair re-merged again (e.g.
-                // each `converge_loop_body` pass, nested loops compounding
-                // it further) would otherwise blind-`extend` its own
-                // already-stable content onto itself without bound.
-                let mut combined = (**then_facts).clone();
-                for fact in else_facts.iter() {
-                    if !combined.contains(fact) {
-                        combined.push(fact.clone());
-                    }
-                }
-                merged
-                    .branch_implied_facts
-                    .insert(key.clone(), std::rc::Rc::new(combined));
+                merge_implied_facts(then_facts, else_facts, then_locals, else_locals)
             }
-            None => {
-                merged
-                    .branch_implied_facts
-                    .insert(key.clone(), else_facts.clone());
-            }
+            None => widen_implied_facts(else_facts, key, then_locals),
+        };
+        match combined {
+            Some(facts) => merged.branch_implied_facts.insert(key.clone(), facts),
+            None => merged.branch_implied_facts.remove(key),
+        };
+    }
+    for (key, then_facts) in then_locals.branch_implied_facts.iter() {
+        if else_locals.branch_implied_facts.contains_key(key) {
+            continue;
         }
+        match widen_implied_facts(then_facts, key, else_locals) {
+            Some(facts) => merged.branch_implied_facts.insert(key.clone(), facts),
+            None => merged.branch_implied_facts.remove(key),
+        };
     }
     for (name, then_ty) in then_locals.iter() {
         if let Some(else_ty) = else_locals.get(name) {

@@ -1,0 +1,10 @@
+--- old
++++ new
+@@ -3194,7 +3194,6 @@
+ src/Piwigo/Search/QNumericRangeScope.php	88	1	0	ignore.unmatchedIdentifier	No error with identifier cast.useless is reported on line 88.	
+ src/Piwigo/Search/QNumericRangeScope.php	91	1	0	ignore.unmatchedIdentifier	No error with identifier cast.useless is reported on line 91.	
+ src/Piwigo/Search/QSearchScope.php	33	34	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+-src/Piwigo/Search/QSearchScope.php	39	21	5	method.unused	Method Piwigo\\Search\\QSearchScope::processChar is never used.	
+ src/Piwigo/Search/QSearchScope.php	53	15	2	throws.missing	Method Piwigo\\Search\\QSearchScope::getSql() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Search/QSingleToken.php	73	19	0	isset.object	isset() on an object (Piwigo\\Search\\QSearchScope|null) says less than a !== null check.	
+ src/Piwigo/Search/SavedSearchEntity.php	38	17	5	property.unused	Property Piwigo\\Search\\SavedSearchEntity::id is never used.	

@@ -57,13 +57,31 @@ function betweenCalls(): void
     \PHPStan\Testing\assertType("'end'|'mid'", $s);
 }
 
-function builtinErrorsAreNotExceptions(): int
+function aBuiltinCanRunUserCode(\ReflectionMethod $m, object $o): void
+{
+    $caught = null;
+    try {
+        $m->invoke($o);
+    } catch (AppError $e) {
+        $caught = $e;
+    }
+    \PHPStan\Testing\assertType('null|AppError', $caught);
+}
+
+/** @throws void */
+function cannotThrowByContract(): int
+{
+    return 1;
+}
+
+function aThrowsVoidCallCannotThrow(): void
 {
     try {
-        $x = strlen('a');
+        $x = cannotThrowByContract();
     } catch (\Exception $e) {
+        $x = null;
     }
-    return $x;
+    \PHPStan\Testing\assertType('int', $x);
 }
 
 function userCallMayThrow(): int
