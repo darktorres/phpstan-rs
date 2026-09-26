@@ -113,8 +113,15 @@ This is the collector shape of crate-split §3.8.
 - The named-argument call sites are collected by the main check pass
   of the analysed files, as per-file data merged on the main thread in
   sorted path order.
+- Both main-pass entry points return the collected call sites: the
+  plain check and the tier-2 check that also collects member references.
+  `record_named_argument_call` already runs in both modes.
 - `collect_named_argument_facts` and the checker's override recording
   are deleted, and `check_whole_program` reads the collected data.
+- Loop bodies are checked several times, and call sites recorded on
+  earlier passes are kept. That's identical today in both the facts pass
+  and the main pass, so output is unchanged. Keeping only final-pass
+  data is the Stage D dispatcher's job ("drops non-final-pass output").
 - Verify: corpus identical, all-on in particular; the rename rule's
   fixtures pass.
 
@@ -127,6 +134,14 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - **S3b (structural):** compute each file's facts on the session's pool
   and merge them sequentially in that same order. `check_paths` uses
   the same function.
+- **S3c (behaviour, only under a panic):** panics are isolated per file.
+  Today a single panic anywhere empties the facts for every file (a
+  `catch_unwind` around the whole pass in `session.rs`, then
+  `unwrap_or_default`), and `check_paths` doesn't catch panics at all.
+  After this, a file that panics contributes no facts, and the other
+  files keep theirs. This matches the main pass and F1's panic
+  isolation. The corpus has no panics, so snapshots don't change. A
+  fixture that injects a panic covers the new behaviour.
 - Verify: corpus identical to S3a; LSP tests pass.
 
 ### S4. Case-folded function keys, pulled forward from C5 (engine)
@@ -210,25 +225,34 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   - the baseline, moved out of `main/check_project.rs`;
   - sorting.
 
+  The level stage is temporary. Crate-split §3.10's finalizer has none,
+  because after E5 rules above the level never run, and E5 removes the
+  stage then.
+
   `check-project` and the fixture harness call it, and their output
   stays identical. The LSP doesn't yet: its level cutoff differs from
   the CLI's (crate-split §1), so moving it onto the finalizer is a
   behaviour change. That move happens in F1's LSP-parity commits, with
   their approved deltas.
-- **S8b:** check-project's resolution from arguments to a session moves
-  from `main/check_project.rs` into the library's app layer (crate-split
-  §3.10), and the binary becomes a thin caller. This covers:
-  - `CheckProjectArgs`;
-  - `overlay_flags`;
-  - the baseline settings;
-  - `Session::resolve`.
-
-  C1's `--set` redesign then changes only that library entry point.
+- **S8b:** everything check-project does after parsing its arguments
+  moves from `main/check_project.rs` into the library's app layer
+  (crate-split §3.10), behind a plain `CheckRequest` struct. That covers
+  config loading, the flag overlay, the baseline settings and
+  `Session::resolve`.
+  - `CheckProjectArgs` and its clap derive stay in the binary, per
+    "No `clap` in any library crate" (§3.7) and the L8 binary. Its only
+    job is mapping arguments onto `CheckRequest`.
+  - C1's `--set` redesign changes that mapping and the library's
+    request handling, and nothing else.
 - **S8c:** `tools/gate-runner` is a workspace member with
   `publish = false`, not shipped, built with `--profile gate`.
-  - It takes the same argv as today's corpus commands and resolves it
-    through S8b's entry point, so it can't configure a run differently
-    from the binary.
+  - It builds the `CheckRequest` for each gate configuration (config
+    file, level, `--no-composer`) and resolves it through S8b's entry
+    point, the same one the binary uses.
+  - The only thing it can do differently from the binary is map a
+    gate configuration onto that request. The cross-check below
+    compares its output with the shipped binary's on every gate run,
+    which catches that.
   - It runs one analysis per configuration, then applies the finalizer
     several times to write the recorded report, the baseline views and
     the emission-order view.
@@ -262,8 +286,9 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - **Dev-profile optimization:**
   - third-party dependencies: `[profile.dev.package."*"] opt-level = 1`
     or `2`;
-  - leaf workspace crates: `phpstan-rs-syntax`, `-stub-sources`,
-    `-types` at `opt-level = 3`.
+  - leaf workspace crates `phpstan-rs-syntax` and `-types` at
+    `opt-level = 3`. `-stub-sources` is only embedded data, so its
+    optimization level doesn't matter.
 
   Time the cli and lib suites and the `buildtime` scenarios. Adopt each
   setting only if a suite drops by at least a third and no `buildtime`
