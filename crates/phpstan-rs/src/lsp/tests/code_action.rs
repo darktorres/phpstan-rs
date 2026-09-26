@@ -40,15 +40,9 @@ fn range(start: (u32, u32), end: (u32, u32)) -> lsp_types::Range {
 #[test]
 fn diagnostic_with_fix_becomes_a_quickfix_code_action() {
     let uri = path_to_uri(Path::new("/tmp/a.php"));
-    let diag = DiagnosticBuilder::new(
-        "f".to_string(),
-        "msg".to_string(),
-        dummy_span(),
-        5,
-        "some.identifier",
-    )
-    .fix(dummy_span(), "CorrectCasing", "Fix casing")
-    .build();
+    let diag = DiagnosticBuilder::new("msg".to_string(), dummy_span(), 5, "some.identifier")
+        .fix(dummy_span(), "CorrectCasing", "Fix casing")
+        .build();
 
     let Some(CodeActionOrCommand::CodeAction(action)) =
         diagnostic_fix_to_code_action(&uri, &diag, None)
@@ -79,14 +73,8 @@ fn diagnostic_with_fix_becomes_a_quickfix_code_action() {
 #[test]
 fn diagnostic_without_fix_yields_no_code_action() {
     let uri = path_to_uri(Path::new("/tmp/a.php"));
-    let diag = DiagnosticBuilder::new(
-        "f".to_string(),
-        "msg".to_string(),
-        dummy_span(),
-        5,
-        "some.identifier",
-    )
-    .build();
+    let diag =
+        DiagnosticBuilder::new("msg".to_string(), dummy_span(), 5, "some.identifier").build();
     assert!(diagnostic_fix_to_code_action(&uri, &diag, None).is_none());
 }
 

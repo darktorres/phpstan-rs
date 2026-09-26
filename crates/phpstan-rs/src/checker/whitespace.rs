@@ -45,9 +45,7 @@ impl<'a> Checker<'a> {
         {
             let after_bom = html.strip_prefix(BOM);
             if after_bom.is_some() {
-                self.report(
-                    "<main>".to_string(),
-                    "File begins with UTF-8 BOM character. This may cause problems when running the code in the web browser."
+                self.report("File begins with UTF-8 BOM character. This may cause problems when running the code in the web browser."
                         .to_string(),
                     first.span,
                     0,
@@ -55,9 +53,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if program.len() > 1 && is_whitespace_run(after_bom.unwrap_or(html)) {
-                self.report(
-                    "<main>".to_string(),
-                    "File begins with whitespace before the opening <?php tag. This may cause problems when running the code in the web browser."
+                self.report("File begins with whitespace before the opening <?php tag. This may cause problems when running the code in the web browser."
                         .to_string(),
                     first.span,
                     0,
@@ -77,9 +73,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             reported.push(end);
-            self.report(
-                "<main>".to_string(),
-                "File ends with a trailing whitespace. This may cause problems when running the code in the web browser. Remove the closing ?> mark or remove the whitespace."
+            self.report("File ends with a trailing whitespace. This may cause problems when running the code in the web browser. Remove the closing ?> mark or remove the whitespace."
                     .to_string(),
                 end.span,
                 0,

@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
                     return false;
                 }
                 if self.registry.check_native_type_hints {
-                    self.suggest_closure_native_params(params, param_overrides, label);
+                    self.suggest_closure_native_params(params, param_overrides);
                 }
                 let mut arrow_locals = locals.clone();
                 for (p, override_ty) in params.iter().zip(param_overrides) {
@@ -124,16 +124,14 @@ impl<'a> Checker<'a> {
                         &ty,
                         &format!("parameter ${} of arrow function", p.name),
                         p.span,
-                        label,
                     );
                     self.check_type_trait_refs(
                         &ty,
                         &format!("parameter ${} of arrow function", p.name),
                         p.span,
-                        label,
                         "parameter.trait",
                     );
-                    self.check_type_class_name_case(&case_refs, label, p.span);
+                    self.check_type_class_name_case(&case_refs, p.span);
                     arrow_locals.declare(p.name.to_string(), ty, p.name_span);
                     arrow_locals.set_native(&p.name, self.closure_param_native(p));
                 }
@@ -146,14 +144,12 @@ impl<'a> Checker<'a> {
                         &expected,
                         "return type of arrow function",
                         closure_expr.span,
-                        label,
                     );
-                    self.check_type_class_name_case(&expected_case_refs, label, closure_expr.span);
+                    self.check_type_class_name_case(&expected_case_refs, closure_expr.span);
                     self.check_type_trait_refs(
                         &expected,
                         "return type of arrow function",
                         closure_expr.span,
-                        label,
                         "return.trait",
                     );
                     if let Some(c) = self.current_class.clone() {
@@ -162,7 +158,6 @@ impl<'a> Checker<'a> {
                             &resolved_return,
                             "return type of arrow function",
                             closure_expr.span,
-                            label,
                             "return.noParent",
                         );
                     }
@@ -170,7 +165,6 @@ impl<'a> Checker<'a> {
                         && !self.registry.rule_level_accepts(&expected, &body_ty).yes()
                     {
                         self.report(
-                            label.to_string(),
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             body.span,
                             3,
@@ -194,7 +188,7 @@ impl<'a> Checker<'a> {
                     return false;
                 }
                 if self.registry.check_native_type_hints {
-                    self.suggest_closure_native_params(params, param_overrides, label);
+                    self.suggest_closure_native_params(params, param_overrides);
                 }
                 let mut closure_locals: Locals = locals.fresh_scope();
                 for u in uses {
@@ -203,7 +197,6 @@ impl<'a> Checker<'a> {
                     if u.name == "this".into() {
                         self.report_builder(
                             DiagnosticBuilder::new(
-                                label.to_string(),
                                 "Cannot use $this as lexical variable.".to_string(),
                                 u.span,
                                 0,
@@ -214,7 +207,6 @@ impl<'a> Checker<'a> {
                     } else if is_superglobal(&u.name) {
                         self.report_builder(
                             DiagnosticBuilder::new(
-                                label.to_string(),
                                 format!(
                                     "Cannot use superglobal variable ${} as lexical variable.",
                                     u.name
@@ -227,9 +219,7 @@ impl<'a> Checker<'a> {
                         );
                     } else if params.iter().any(|p| p.name == u.name) {
                         self.report_builder(
-                            DiagnosticBuilder::new(
-                                label.to_string(),
-                                format!(
+                            DiagnosticBuilder::new(format!(
                                     "Cannot use lexical variable ${} since a parameter with the same name already exists.",
                                     u.name
                                 ),
@@ -241,7 +231,6 @@ impl<'a> Checker<'a> {
                         );
                     } else if !u.by_ref && !locals.contains_key(&u.name) {
                         self.report(
-                            label.to_string(),
                             format!("undefined variable ${}", u.name),
                             u.span,
                             0,
@@ -277,16 +266,14 @@ impl<'a> Checker<'a> {
                         &ty,
                         &format!("parameter ${} of anonymous function", p.name),
                         p.span,
-                        &closure_label,
                     );
                     self.check_type_trait_refs(
                         &ty,
                         &format!("parameter ${} of anonymous function", p.name),
                         p.span,
-                        &closure_label,
                         "parameter.trait",
                     );
-                    self.check_type_class_name_case(&case_refs, &closure_label, p.span);
+                    self.check_type_class_name_case(&case_refs, p.span);
                     closure_locals.declare(p.name.to_string(), ty, p.name_span);
                     closure_locals.set_native(&p.name, self.closure_param_native(p));
                 }
@@ -299,20 +286,14 @@ impl<'a> Checker<'a> {
                     declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                     "return type of anonymous function",
                     closure_expr.span,
-                    &closure_label,
                 );
                 self.check_type_trait_refs(
                     declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                     "return type of anonymous function",
                     closure_expr.span,
-                    &closure_label,
                     "return.trait",
                 );
-                self.check_type_class_name_case(
-                    &declared_return_case_refs,
-                    &closure_label,
-                    closure_expr.span,
-                );
+                self.check_type_class_name_case(&declared_return_case_refs, closure_expr.span);
                 if let Some(c) = self.current_class.clone() {
                     let resolved_return = self.resolve_pseudo(
                         declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
@@ -322,7 +303,6 @@ impl<'a> Checker<'a> {
                         &resolved_return,
                         "return type of anonymous function",
                         closure_expr.span,
-                        &closure_label,
                         "return.noParent",
                     );
                 }
@@ -345,11 +325,7 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
                     std::mem::take(&mut self.current_function_explicit_throw_points);
-                self.check_generator_return_type(
-                    declared_return.as_ref(),
-                    closure_expr.span,
-                    &closure_label,
-                );
+                self.check_generator_return_type(declared_return.as_ref(), closure_expr.span);
                 // See `checker::expr`'s `ExprKind::Closure` arm's
                 // identical `converge_loop_body` fix and comment.
                 let (converged, _) = self.converge_loop_body(
@@ -370,7 +346,6 @@ impl<'a> Checker<'a> {
                     declared_return.as_ref(),
                     &closure_locals,
                     closure_expr.span,
-                    &closure_label,
                 );
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
@@ -379,7 +354,7 @@ impl<'a> Checker<'a> {
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;
                 self.current_function_assigned_variables = previous_assigned_variables;
-                self.check_unused_closure_uses(uses, body, &closure_label, closure_expr.span);
+                self.check_unused_closure_uses(uses, body, closure_expr.span);
                 for u in uses {
                     if !u.by_ref {
                         continue;

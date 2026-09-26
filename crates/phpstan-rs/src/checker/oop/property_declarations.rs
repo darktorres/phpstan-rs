@@ -122,16 +122,15 @@ impl<'a> Checker<'a> {
                 p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                 crate::checker::type_declarations::TypePosition::Property(&property),
                 p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.span),
-                display,
             );
         }
         for view in &views {
             if kind == ClassKind::Interface {
-                self.check_property_in_interface(view, display);
+                self.check_property_in_interface(view);
             } else if kind == ClassKind::Class {
-                self.check_property_in_class(view, registry_name, display, is_class_abstract);
+                self.check_property_in_class(view, registry_name, is_class_abstract);
             }
-            self.check_readonly_property_declaration(view, display);
+            self.check_readonly_property_declaration(view);
             self.check_unresolvable_native_type(
                 view.type_hint.map(TypeHint::to_string).as_deref(),
                 &format!(
@@ -140,14 +139,12 @@ impl<'a> Checker<'a> {
                 ),
                 "property.unresolvableNativeType",
                 view.span,
-                display,
             );
             if view
                 .type_hint
                 .is_some_and(|h| native_hint_mentions_callable(&h.to_string()))
             {
                 self.report_property_declaration(
-                    display,
                     format!(
                         "Property {display}::${} cannot have callable in its type declaration.",
                         view.name
@@ -159,7 +156,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_property_in_interface(&mut self, view: &PropertyView, display: &str) {
+    fn check_property_in_interface(&mut self, view: &PropertyView) {
         let version = self.registry.php_version;
         let bodies = view.hook_bodies();
         let error = if version.is_some_and(|v| !PhpFeature::PropertyHooks.is_available(v)) {
@@ -211,7 +208,7 @@ impl<'a> Checker<'a> {
             None
         };
         if let Some((message, identifier)) = error {
-            self.report_property_declaration(display, message.to_string(), view.span, identifier);
+            self.report_property_declaration(message.to_string(), view.span, identifier);
         }
     }
 
@@ -219,7 +216,6 @@ impl<'a> Checker<'a> {
         &mut self,
         view: &PropertyView,
         registry_name: &str,
-        display: &str,
         is_class_abstract: bool,
     ) {
         let version = self.registry.php_version;
@@ -317,11 +313,11 @@ impl<'a> Checker<'a> {
             None
         };
         if let Some((message, identifier)) = error {
-            self.report_property_declaration(display, message.to_string(), view.span, identifier);
+            self.report_property_declaration(message.to_string(), view.span, identifier);
         }
     }
 
-    fn check_readonly_property_declaration(&mut self, view: &PropertyView, display: &str) {
+    fn check_readonly_property_declaration(&mut self, view: &PropertyView) {
         if view.is_readonly {
             let mut errors = Vec::new();
             if self
@@ -353,12 +349,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             for (message, identifier) in errors {
-                self.report_property_declaration(
-                    display,
-                    message.to_string(),
-                    view.span,
-                    identifier,
-                );
+                self.report_property_declaration(message.to_string(), view.span, identifier);
             }
             return;
         }
@@ -367,7 +358,6 @@ impl<'a> Checker<'a> {
         };
         if doc.readonly && !doc.allow_private_mutation && view.has_default {
             self.report_builder(DiagnosticBuilder::new(
-                display.to_string(),
                 "@readonly property cannot have a default value.".to_string(),
                 view.span,
                 0,
@@ -376,16 +366,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_property_declaration(
-        &mut self,
-        display: &str,
-        message: String,
-        span: Span,
-        identifier: &str,
-    ) {
-        self.report_builder(
-            DiagnosticBuilder::new(display.to_string(), message, span, 0, identifier)
-                .non_ignorable(),
-        );
+    fn report_property_declaration(&mut self, message: String, span: Span, identifier: &str) {
+        self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
     }
 }

@@ -1,2 +1,2 @@
-5:13-5:24 arguments.count L0 <main> | Function needsTwo invoked with 1 parameter, 2 required.
-5:13-5:24 function.resultUnused L4 <main> | Call to function needsTwo() on a separate line has no effect.
+5:13-5:24 arguments.count L0 | Function needsTwo invoked with 1 parameter, 2 required.
+5:13-5:24 function.resultUnused L4 | Call to function needsTwo() on a separate line has no effect.

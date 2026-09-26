@@ -1,2 +1,2 @@
-6:13-6:46 class.abstractMethodNotImplemented L0 Person9 | class Person9 does not implement abstract method(s): getName
+6:13-6:46 class.abstractMethodNotImplemented L0 | class Person9 does not implement abstract method(s): getName
     tip: either implement every method listed above, or declare this class itself abstract

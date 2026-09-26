@@ -1,4 +1,4 @@
-//! `Diagnostic` carries `identifier`/`tip`/`non_ignorable`/`metadata`/
+//! `Diagnostic` carries `identifier`/`tip`/`non_ignorable`/
 //! `fix` fields, and `DiagnosticBuilder` is the fluent way to assemble
 //! one. These tests exercise both halves: that real checker call sites
 //! actually populate `identifier` (and, for the couple of call sites
@@ -22,7 +22,6 @@ fn diagnostic_builder_assembles_every_field() {
     // `RuleErrorBuilder::message(...)->identifier(...)->tip(...)->build()`
     // chain.
     let diag = DiagnosticBuilder::new(
-        "MyClass::myMethod".to_string(),
         "something went wrong".to_string(),
         dummy_span(),
         5,
@@ -30,17 +29,14 @@ fn diagnostic_builder_assembles_every_field() {
     )
     .tip("try this instead")
     .non_ignorable()
-    .metadata("count", 3)
     .fix(dummy_span(), "replacement text", "swap it out")
     .build();
 
-    assert_eq!(diag.location, "MyClass::myMethod");
     assert_eq!(diag.message, "something went wrong");
     assert_eq!(diag.level, 5);
     assert_eq!(diag.identifier, "my.identifier");
     assert_eq!(diag.tip.as_deref(), Some("try this instead"));
     assert!(diag.non_ignorable);
-    assert_eq!(diag.metadata.get("count").and_then(|v| v.as_i64()), Some(3));
     let fix = diag.fix.expect("expected a fix to have been set");
     assert_eq!(fix.replacement, "replacement text");
     assert_eq!(fix.description, "swap it out");
@@ -57,7 +53,6 @@ fn diagnostic_builder_defaults_are_all_empty_absent_or_false() {
     // fields set should never spuriously populate any of the optional
     // ones.
     let diag = DiagnosticBuilder::new(
-        "<main>".to_string(),
         "plain message".to_string(),
         dummy_span(),
         0,
@@ -67,6 +62,5 @@ fn diagnostic_builder_defaults_are_all_empty_absent_or_false() {
 
     assert!(diag.tip.is_none());
     assert!(!diag.non_ignorable);
-    assert!(diag.metadata.is_empty());
     assert!(diag.fix.is_none());
 }

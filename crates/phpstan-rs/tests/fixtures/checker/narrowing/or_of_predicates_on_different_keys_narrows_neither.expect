@@ -1,1 +1,1 @@
-5:29-5:31 argument.type L5 handle | Parameter #1 $s of function needsString expects string, int|null given.
+5:29-5:31 argument.type L5 | Parameter #1 $s of function needsString expects string, int|null given.

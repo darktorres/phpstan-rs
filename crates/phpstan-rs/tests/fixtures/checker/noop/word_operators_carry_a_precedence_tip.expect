@@ -1,2 +1,2 @@
-2:38-2:47 logicalXor.resultUnused L4 t | Unused result of "xor" operator.
+2:38-2:47 logicalXor.resultUnused L4 | Unused result of "xor" operator.
     tip: This operator has unexpected precedence, try disambiguating the logic with parentheses ().

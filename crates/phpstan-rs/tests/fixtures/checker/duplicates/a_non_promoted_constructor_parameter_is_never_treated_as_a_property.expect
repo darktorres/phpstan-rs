@@ -1,1 +1,1 @@
-4:45-4:53 constructor.unusedParameter L1 Z::__construct | Constructor of class Z has an unused parameter $val.
+4:45-4:53 constructor.unusedParameter L1 | Constructor of class Z has an unused parameter $val.

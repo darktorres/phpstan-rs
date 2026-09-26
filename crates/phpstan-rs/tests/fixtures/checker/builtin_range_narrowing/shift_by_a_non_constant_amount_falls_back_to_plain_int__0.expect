@@ -1,1 +1,1 @@
-6:31-6:43 argument.type L5 test | Parameter #1 $x of function needsNarrower expects int<1, 10>, int given.
+6:31-6:43 argument.type L5 | Parameter #1 $x of function needsNarrower expects int<1, 10>, int given.

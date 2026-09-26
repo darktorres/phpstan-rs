@@ -1,2 +1,2 @@
-5:31-5:40 class.notFound L0 Holder | property Holder::$hit has invalid type TestIndexType
-8:43-8:53 class.notFound L0 Holder::recordHit | parameter $testIndex of Holder::recordHit() has invalid type TestIndexType
+5:31-5:40 class.notFound L0 | property Holder::$hit has invalid type TestIndexType
+8:43-8:53 class.notFound L0 | parameter $testIndex of Holder::recordHit() has invalid type TestIndexType

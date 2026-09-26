@@ -1,1 +1,1 @@
-2:13-4:14 class.notFound L0 f | return type of f() has invalid type TotallyMadeUpReturn
+2:13-4:14 class.notFound L0 | return type of f() has invalid type TotallyMadeUpReturn

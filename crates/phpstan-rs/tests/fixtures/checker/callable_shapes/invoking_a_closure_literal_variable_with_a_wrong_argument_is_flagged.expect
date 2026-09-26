@@ -1,1 +1,1 @@
-4:20-4:32 argument.type L5 test | Closure() argument #1 expects int, 'not an int' given
+4:20-4:32 argument.type L5 | Closure() argument #1 expects int, 'not an int' given

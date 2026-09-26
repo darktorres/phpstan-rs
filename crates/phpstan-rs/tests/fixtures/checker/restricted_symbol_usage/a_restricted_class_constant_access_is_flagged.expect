@@ -1,1 +1,1 @@
-3:40-3:55 restrictedSymbol.classConstant L0 f | Access to restricted constant Legacy::VERSION: use Config::VERSION instead
+3:40-3:55 restrictedSymbol.classConstant L0 | Access to restricted constant Legacy::VERSION: use Config::VERSION instead

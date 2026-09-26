@@ -1,1 +1,1 @@
-1:7-1:42 new.dateTime L5 <main> | DateTime::__construct() date string '2024-01-15T25:00:00' is malformed and will throw at runtime
+1:7-1:42 new.dateTime L5 | DateTime::__construct() date string '2024-01-15T25:00:00' is malformed and will throw at runtime

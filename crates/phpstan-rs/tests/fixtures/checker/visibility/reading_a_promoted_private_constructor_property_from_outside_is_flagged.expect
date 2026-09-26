@@ -1,2 +1,2 @@
-3:45-3:59 property.onlyWritten L4 Foo | private property Foo::$x is never read, only written
-6:24-6:29 property.private L0 test | access to private property Foo::$x
+3:45-3:59 property.onlyWritten L4 | private property Foo::$x is never read, only written
+6:24-6:29 property.private L0 | access to private property Foo::$x

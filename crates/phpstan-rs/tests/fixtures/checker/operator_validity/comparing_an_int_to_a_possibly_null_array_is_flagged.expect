@@ -1,2 +1,2 @@
-4:17-4:25 expr.resultUnused L4 test | Expression "$i < $xs" on a separate line does not do anything.
-4:17-4:19 smaller.invalid L2 test | Comparison operation "<" between int and array<(int|string), int>|null results in an error.
+4:17-4:25 expr.resultUnused L4 | Expression "$i < $xs" on a separate line does not do anything.
+4:17-4:19 smaller.invalid L2 | Comparison operation "<" between int and array<(int|string), int>|null results in an error.

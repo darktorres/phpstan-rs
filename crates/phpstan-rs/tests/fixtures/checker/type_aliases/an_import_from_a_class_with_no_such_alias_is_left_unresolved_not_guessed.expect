@@ -1,4 +1,4 @@
-11:24-13:18 class.notFound L0 ErrorBag::firstError | return type of ErrorBag::firstError() has invalid type Nonexistent
-11:24-13:18 missingType.iterableValue L6 ErrorBag::firstError | Method ErrorBag::firstError() return type has no value type specified in iterable type array.
+11:24-13:18 class.notFound L0 | return type of ErrorBag::firstError() has invalid type Nonexistent
+11:24-13:18 missingType.iterableValue L6 | Method ErrorBag::firstError() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-11:33-11:43 return.phpDocType L2 ErrorBag::firstError | PHPDoc tag @return with type Nonexistent is incompatible with native type array.
+11:33-11:43 return.phpDocType L2 | PHPDoc tag @return with type Nonexistent is incompatible with native type array.

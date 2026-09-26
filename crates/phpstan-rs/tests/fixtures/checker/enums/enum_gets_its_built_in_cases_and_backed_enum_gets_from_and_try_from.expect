@@ -1,2 +1,2 @@
-8:13-16:14 missingType.return L6 f | Function f() has no return type specified.
-15:17-15:32 staticMethod.notFound L0 f | call to undefined static method Pure::from()
+8:13-16:14 missingType.return L6 | Function f() has no return type specified.
+15:17-15:32 staticMethod.notFound L0 | call to undefined static method Pure::from()

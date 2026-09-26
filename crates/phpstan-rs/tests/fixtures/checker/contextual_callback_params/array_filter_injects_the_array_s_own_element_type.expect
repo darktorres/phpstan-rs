@@ -1,1 +1,1 @@
-6:33-6:35 argument.type L5 f (closure) | Parameter #1 $s of function needsString expects string, int given.
+6:33-6:35 argument.type L5 | Parameter #1 $s of function needsString expects string, int given.

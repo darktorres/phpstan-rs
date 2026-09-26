@@ -27,7 +27,6 @@ impl<'a> Checker<'a> {
         &mut self,
         items: &[ArrayItem],
         locals: &Locals,
-        label: &str,
     ) {
         if items.iter().any(|item| item.spread) {
             return;
@@ -114,7 +113,6 @@ impl<'a> Checker<'a> {
                             format!("'{}'", key.replace('\\', "\\\\").replace('\'', "\\'"))
                         };
                         self.report(
-                            label.to_string(),
                             format!("Array has duplicate key {display}."),
                             *first_span,
                             0,
@@ -421,7 +419,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         let bare_name = name.rsplit('\\').next().unwrap_or(name);
         let useless_value = if bare_name.eq_ignore_ascii_case("var_export") {
@@ -445,9 +442,7 @@ impl<'a> Checker<'a> {
         if !is_useless {
             return;
         }
-        self.report(
-            label.to_string(),
-            format!(
+        self.report(format!(
                 "Return value of function {bare_name}() is always {useless_value} and the result is printed instead of being returned. Pass in true as parameter #2 $return to return the output instead."
             ),
             span,
@@ -470,13 +465,7 @@ impl<'a> Checker<'a> {
     /// the tracked element type across the branch, and a `try { $x =
     /// ...; } finally { array_filter([..., $x]); }` shape must account
     /// for the possibility the assignment inside `try` never ran.
-    pub(crate) fn check_array_filter_no_op(
-        &mut self,
-        args: &[Arg],
-        locals: &Locals,
-        label: &str,
-        span: Span,
-    ) {
+    pub(crate) fn check_array_filter_no_op(&mut self, args: &[Arg], locals: &Locals, span: Span) {
         if args.len() != 1 {
             return;
         }
@@ -486,7 +475,6 @@ impl<'a> Checker<'a> {
         }
         if Self::is_known_empty_array(&arr_ty) {
             self.report(
-                label.to_string(),
                 format!("call to array_filter() with an empty array ({arr_ty}) has no effect"),
                 span,
                 0,
@@ -499,9 +487,7 @@ impl<'a> Checker<'a> {
         };
         match array_filter_element_falsy_verdict(&element_ty) {
             Some(false) => {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "call to array_filter() with an array of only non-falsy values ({arr_ty}) has no effect"
                     ),
                     span,
@@ -510,9 +496,7 @@ impl<'a> Checker<'a> {
                 );
             }
             Some(true) => {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "call to array_filter() with an array of only falsy values ({arr_ty}) always returns an empty array"
                     ),
                     span,
@@ -529,13 +513,7 @@ impl<'a> Checker<'a> {
     /// the same accessory-marker check this call's own return-type
     /// inference already relies on to know it *always* produces a fresh
     /// list regardless of the input's own shape).
-    pub(crate) fn check_array_values_no_op(
-        &mut self,
-        args: &[Arg],
-        locals: &Locals,
-        label: &str,
-        span: Span,
-    ) {
+    pub(crate) fn check_array_values_no_op(&mut self, args: &[Arg], locals: &Locals, span: Span) {
         if args.len() != 1 {
             return;
         }
@@ -545,7 +523,6 @@ impl<'a> Checker<'a> {
         }
         if Self::is_known_empty_array(&arr_ty) {
             self.report(
-                label.to_string(),
                 format!("call to array_values() with an empty array ({arr_ty}) has no effect"),
                 span,
                 0,
@@ -553,7 +530,6 @@ impl<'a> Checker<'a> {
             );
         } else if Self::is_list_like(&arr_ty) {
             self.report(
-                label.to_string(),
                 format!(
                     "call to array_values() on {arr_ty}, which is already a list, has no effect"
                 ),
@@ -675,16 +651,10 @@ impl<'a> Checker<'a> {
     /// "don't guess" leniency this project applies everywhere else, so a
     /// `Mixed`/unresolved/partially-legal key is silently allowed rather
     /// than flagged.
-    pub(crate) fn check_array_item_key_type(
-        &mut self,
-        key_expr: &Expr,
-        locals: &Locals,
-        label: &str,
-    ) {
+    pub(crate) fn check_array_item_key_type(&mut self, key_expr: &Expr, locals: &Locals) {
         let key_ty = self.infer_expr(key_expr, locals);
         if let Some(desc) = invalid_array_key_description(&key_ty, self.registry.php_version) {
             self.report(
-                label.to_string(),
                 format!("Invalid array key type {desc}."),
                 key_expr.span,
                 3,
@@ -695,7 +665,6 @@ impl<'a> Checker<'a> {
             && let Some((from, to)) = array_key_cast_description(key_expr, &key_ty)
         {
             self.report(
-                label.to_string(),
                 format!("Key {from} will be cast to {to} in the array."),
                 key_expr.span,
                 4,
@@ -740,13 +709,7 @@ impl<'a> Checker<'a> {
     /// this project's usual leniency rather than real PHPStan's own
     /// tri-state `isSuperTypeOf` grading (`reportMaybes`, off by
     /// default).
-    pub(crate) fn check_dim_fetch_key_type(
-        &mut self,
-        base: &Expr,
-        idx: &Expr,
-        locals: &Locals,
-        label: &str,
-    ) {
+    pub(crate) fn check_dim_fetch_key_type(&mut self, base: &Expr, idx: &Expr, locals: &Locals) {
         let base_ty = self.infer_expr(base, locals);
         if !is_confidently_array(&base_ty) {
             return;
@@ -766,7 +729,6 @@ impl<'a> Checker<'a> {
         }
         if let Some(desc) = invalid_array_key_description(&idx_ty, self.registry.php_version) {
             self.report(
-                label.to_string(),
                 format!("Invalid array key type {desc}."),
                 idx.span,
                 3,
@@ -777,7 +739,6 @@ impl<'a> Checker<'a> {
             && let Some((from, to)) = array_key_cast_description(idx, &idx_ty)
         {
             self.report(
-                label.to_string(),
                 format!("Key {from} will be cast to {to} in the array access."),
                 idx.span,
                 4,

@@ -1,2 +1,2 @@
-2:13-6:14 missingType.return L6 makeAdder | Function makeAdder() has no return type specified.
-3:24-5:18 closure.unusedUse L1 makeAdder (closure) | closure has an unused use ($base)
+2:13-6:14 missingType.return L6 | Function makeAdder() has no return type specified.
+3:24-5:18 closure.unusedUse L1 | closure has an unused use ($base)

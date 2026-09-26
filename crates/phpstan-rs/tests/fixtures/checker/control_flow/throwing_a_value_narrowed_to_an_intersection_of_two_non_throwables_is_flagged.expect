@@ -1,1 +1,1 @@
-6:27-6:32 throw.notThrowable L0 test | cannot throw View: it does not implement Throwable
+6:27-6:32 throw.notThrowable L0 | cannot throw View: it does not implement Throwable

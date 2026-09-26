@@ -1,1 +1,1 @@
-4:13-4:34 throws.notThrowable L2 f | PHPDoc tag @throws with type NotAThrowable is not subtype of Throwable
+4:13-4:34 throws.notThrowable L2 | PHPDoc tag @throws with type NotAThrowable is not subtype of Throwable

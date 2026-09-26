@@ -1,1 +1,1 @@
-7:22-7:24 class.toStringDeprecated L0 f | Casting class OldThing to string is deprecated.:\ndo not stringify
+7:22-7:24 class.toStringDeprecated L0 | Casting class OldThing to string is deprecated.:\ndo not stringify

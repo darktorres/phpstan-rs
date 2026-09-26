@@ -1,2 +1,2 @@
-5:22-5:32 new.trait L0 f | cannot instantiate trait NewT
-6:22-6:32 new.enum L0 f | cannot instantiate enum NewE
+5:22-5:32 new.trait L0 | cannot instantiate trait NewT
+6:22-6:32 new.enum L0 | cannot instantiate enum NewE

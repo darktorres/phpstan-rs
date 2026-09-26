@@ -1,1 +1,1 @@
-3:31-8:18 propertySetHook.noAssign L3 BadSet | Set hook for non-virtual property BadSet::$z does not assign value to it.
+3:31-8:18 propertySetHook.noAssign L3 | Set hook for non-virtual property BadSet::$z does not assign value to it.

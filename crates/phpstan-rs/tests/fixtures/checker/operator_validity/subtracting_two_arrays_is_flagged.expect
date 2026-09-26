@@ -1,2 +1,2 @@
-5:17-5:19 binaryOp.invalid L2 test | Binary operation "-" between array<(int|string), int> and array<(int|string), int> results in an error.
-5:17-5:24 expr.resultUnused L4 test | Expression "$a - $b" on a separate line does not do anything.
+5:17-5:19 binaryOp.invalid L2 | Binary operation "-" between array<(int|string), int> and array<(int|string), int> results in an error.
+5:17-5:24 expr.resultUnused L4 | Expression "$a - $b" on a separate line does not do anything.

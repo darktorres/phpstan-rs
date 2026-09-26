@@ -1,3 +1,3 @@
-3:31-3:36 classConstant.unused L4 Foo | private constant Foo::X is unused
+3:31-3:36 classConstant.unused L4 | private constant Foo::X is unused
     fix: Remove constant X => ""
-6:24-6:30 classConstant.private L0 test | access to private constant Foo::X
+6:24-6:30 classConstant.private L0 | access to private constant Foo::X

@@ -1,1 +1,1 @@
-4:58-4:60 argument.type L5 test | Parameter #1 $fn of function apply expects callable, NotInvokable given.
+4:58-4:60 argument.type L5 | Parameter #1 $fn of function apply expects callable, NotInvokable given.

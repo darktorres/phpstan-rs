@@ -1,1 +1,1 @@
-9:36-9:54 generator.void L0 f | Result of yield from is used but the delegated generator never returns anything, it's return type is void.
+9:36-9:54 generator.void L0 | Result of yield from is used but the delegated generator never returns anything, it's return type is void.

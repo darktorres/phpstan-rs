@@ -106,14 +106,13 @@ fn render(
             let s = &d.span;
             writeln!(
                 out,
-                "{}:{}-{}:{} {} L{} {} | {}",
+                "{}:{}-{}:{} {} L{} | {}",
                 s.start.line,
                 s.start.col,
                 s.end.line,
                 s.end.col,
                 d.identifier,
                 d.level,
-                d.location,
                 one_line(&portable(&d.message, base)),
             )
             .unwrap();

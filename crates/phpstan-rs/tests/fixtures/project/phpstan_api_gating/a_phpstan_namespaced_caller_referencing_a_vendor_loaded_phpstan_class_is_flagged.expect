@@ -1,5 +1,5 @@
-src/Doctrine/MyRule.php:1:7-1:34 phpstanApi.phpstanNamespace L0 <main> | Declaring PHPStan namespace is not allowed in 3rd party packages.
+src/Doctrine/MyRule.php:1:7-1:34 phpstanApi.phpstanNamespace L0 | Declaring PHPStan namespace is not allowed in 3rd party packages.
     tip: See:\n   https://phpstan.org/developing-extensions/backward-compatibility-promise
-src/Doctrine/MyRule.php:1:57-1:123 missingType.return L6 PHPStan\Doctrine\MyRule::run | Method PHPStan\\Doctrine\\MyRule::run() has no return type specified.
-src/Doctrine/MyRule.php:1:74-1:120 phpstanApi.method L0 PHPStan\Doctrine\MyRule::run | calling PHPStan\\ZzzPhase40TrinaryLogicMarker::check() is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\ZzzPhase40TrinaryLogicMarker)
-src/Doctrine/MyRule.php:1:74-1:120 staticMethod.resultUnused L4 PHPStan\Doctrine\MyRule::run | Call to PHPStan\\ZzzPhase40TrinaryLogicMarker::check() on a separate line has no effect.
+src/Doctrine/MyRule.php:1:57-1:123 missingType.return L6 | Method PHPStan\\Doctrine\\MyRule::run() has no return type specified.
+src/Doctrine/MyRule.php:1:74-1:120 phpstanApi.method L0 | calling PHPStan\\ZzzPhase40TrinaryLogicMarker::check() is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\ZzzPhase40TrinaryLogicMarker)
+src/Doctrine/MyRule.php:1:74-1:120 staticMethod.resultUnused L4 | Call to PHPStan\\ZzzPhase40TrinaryLogicMarker::check() on a separate line has no effect.

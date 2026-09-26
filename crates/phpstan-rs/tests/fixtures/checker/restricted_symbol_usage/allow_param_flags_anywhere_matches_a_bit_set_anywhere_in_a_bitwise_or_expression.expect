@@ -1,5 +1,5 @@
-4:13-4:34 missingType.return L6 f | Function f() has no return type specified.
-4:24-4:30 missingType.parameter L6 f | Function f() has parameter $flags with no type specified.
-5:13-5:40 function.resultUnused L4 <main> | Call to function f() on a separate line has no effect.
-6:13-6:26 function.resultUnused L4 <main> | Call to function f() on a separate line has no effect.
-6:13-6:26 restrictedSymbol.function L0 <main> | Call to restricted function f(): no bare calls
+4:13-4:34 missingType.return L6 | Function f() has no return type specified.
+4:24-4:30 missingType.parameter L6 | Function f() has parameter $flags with no type specified.
+5:13-5:40 function.resultUnused L4 | Call to function f() on a separate line has no effect.
+6:13-6:26 function.resultUnused L4 | Call to function f() on a separate line has no effect.
+6:13-6:26 restrictedSymbol.function L0 | Call to restricted function f(): no bare calls

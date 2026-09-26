@@ -1,1 +1,1 @@
-2:20-4:14 generator.returnType L0 <main> (closure) | yields, but its declared return type int is not a supertype of Generator, Iterator, Traversable, or iterable
+2:20-4:14 generator.returnType L0 | yields, but its declared return type int is not a supertype of Generator, Iterator, Traversable, or iterable

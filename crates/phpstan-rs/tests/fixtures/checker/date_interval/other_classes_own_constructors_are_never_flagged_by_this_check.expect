@@ -1,2 +1,2 @@
-3:45-3:54 constructor.unusedParameter L1 DateIntervalLookalike::__construct | Constructor of class DateIntervalLookalike has an unused parameter $x.
-5:13-5:49 new.resultUnused L4 <main> | Call to new DateIntervalLookalike() on a separate line has no effect.
+3:45-3:54 constructor.unusedParameter L1 | Constructor of class DateIntervalLookalike has an unused parameter $x.
+5:13-5:49 new.resultUnused L4 | Call to new DateIntervalLookalike() on a separate line has no effect.

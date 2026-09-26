@@ -1,1 +1,1 @@
-15:28-15:71 return.type L3 Derived::make | return type mismatch: expected int, got Derived
+15:28-15:71 return.type L3 | return type mismatch: expected int, got Derived

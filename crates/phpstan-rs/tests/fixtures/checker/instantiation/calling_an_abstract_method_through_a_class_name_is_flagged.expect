@@ -1,2 +1,2 @@
-7:48-7:62 method.callToAbstract L0 Impl::work | cannot call abstract method AbsBase::work()
-8:56-8:71 staticMethod.callToAbstract L0 Impl::build | cannot call abstract static method AbsBase::build()
+7:48-7:62 method.callToAbstract L0 | cannot call abstract method AbsBase::work()
+8:56-8:71 staticMethod.callToAbstract L0 | cannot call abstract static method AbsBase::build()

@@ -1,1 +1,1 @@
-3:34-3:46 restrictedSymbol.class L0 f | Instantiation of restricted class Banned: do not use Banned
+3:34-3:46 restrictedSymbol.class L0 | Instantiation of restricted class Banned: do not use Banned

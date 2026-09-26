@@ -1,3 +1,3 @@
-2:44-2:50 property.finalPrivate L0 Base | Property cannot be both final and private.
+2:44-2:50 property.finalPrivate L0 | Property cannot be both final and private.
     non-ignorable
-2:44-2:50 property.onlyWritten L4 Base | private property Base::$x is never read, only written
+2:44-2:50 property.onlyWritten L4 | private property Base::$x is never read, only written

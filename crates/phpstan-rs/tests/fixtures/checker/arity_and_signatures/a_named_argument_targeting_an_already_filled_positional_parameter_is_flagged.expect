@@ -1,2 +1,2 @@
-3:37-3:49 argument.missing L0 test | Missing parameter $b (int) in call to function f22.
-3:47-3:48 argument.duplicate L0 test | Argument for parameter $a has already been passed.
+3:37-3:49 argument.missing L0 | Missing parameter $b (int) in call to function f22.
+3:47-3:48 argument.duplicate L0 | Argument for parameter $a has already been passed.

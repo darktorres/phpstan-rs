@@ -158,7 +158,6 @@ pub(crate) struct ParametersCheck<'a> {
     pub sig: &'a FunctionSig,
     pub args: &'a [Arg],
     pub locals: &'a Locals,
-    pub label: &'a str,
     /// The class `self`/`static` in parameter types resolve against.
     pub defining_class: Option<&'a str>,
     /// Whether the callee is a PHP builtin: a builtin's variadic takes no
@@ -175,7 +174,6 @@ impl<'a> Checker<'a> {
             sig,
             args,
             locals,
-            label,
             defining_class,
             is_builtin,
             span,
@@ -204,7 +202,6 @@ impl<'a> Checker<'a> {
             }
             if has_named && arg.spread {
                 self.report_non_ignorable(
-                    label,
                     "Named argument cannot be followed by an unpacked (...) argument.".to_string(),
                     arg.value.span,
                     "argument.unpackAfterNamed",
@@ -212,7 +209,6 @@ impl<'a> Checker<'a> {
             }
             if has_unpacked && !arg.spread && (arg.name.is_none() || !named_after_unpack) {
                 self.report_non_ignorable(
-                    label,
                     "Unpacked argument (...) cannot be followed by a non-unpacked argument."
                         .to_string(),
                     arg.value.span,
@@ -253,7 +249,6 @@ impl<'a> Checker<'a> {
 
         if has_named && !named_supported && !matches!(callee, Callee::AttributeConstructor(_)) {
             self.report_non_ignorable(
-                label,
                 "Named arguments are supported only on PHP 8.0 and later.".to_string(),
                 span,
                 "argument.namedNotSupported",
@@ -283,7 +278,6 @@ impl<'a> Checker<'a> {
                     // Too many arguments is `checkExtraArguments`, from
                     // level 1; too few is level 0.
                     self.report(
-                        label.to_string(),
                         format!(
                             "{} invoked with {invoked} {parameters}, {required}.",
                             callee.invoked()
@@ -296,8 +290,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let bound =
-            self.bind_arguments(callee, sig, &arguments, has_named, is_builtin, label, span);
+        let bound = self.bind_arguments(callee, sig, &arguments, has_named, is_builtin, span);
 
         for (i, (argument, param)) in arguments.iter().zip(bound).enumerate() {
             let Some(param) = param else { continue };
@@ -317,7 +310,6 @@ impl<'a> Checker<'a> {
                     None => Position::Index(i + 1),
                 };
                 self.report(
-                    label.to_string(),
                     format!(
                         "{} of {} expects {param_ty}, {arg_ty} given.",
                         describe_parameter(param, position),
@@ -339,7 +331,6 @@ impl<'a> Checker<'a> {
                 || (!argument.unpack && !is_valid_byref_argument_expr(argument.value))
             {
                 self.report(
-                    label.to_string(),
                     callee.by_ref_message(&describe_parameter(param, position)),
                     argument.span,
                     5,
@@ -431,7 +422,6 @@ impl<'a> Checker<'a> {
         arguments: &[Argument],
         has_named: bool,
         is_builtin: bool,
-        label: &str,
         span: Span,
     ) -> Vec<Option<&'s ParamSig>> {
         let params = &sig.params;
@@ -463,7 +453,6 @@ impl<'a> Checker<'a> {
                         None => {
                             if !natively_variadic || is_builtin {
                                 self.report(
-                                    label.to_string(),
                                     format!(
                                         "Unknown parameter ${name} in call to {}.",
                                         callee.target()
@@ -477,7 +466,6 @@ impl<'a> Checker<'a> {
                             }
                             if !variadic_names.insert(name.as_str()) {
                                 self.report(
-                                    label.to_string(),
                                     format!(
                                         "Named parameter ${name} overwrites previous argument."
                                     ),
@@ -493,7 +481,6 @@ impl<'a> Checker<'a> {
             };
             if named_occurred && argument.name.is_none() && !argument.unpack {
                 self.report_non_ignorable(
-                    label,
                     "Named argument cannot be followed by a positional argument.".to_string(),
                     argument.span,
                     "argument.positionalAfterNamed",
@@ -509,7 +496,6 @@ impl<'a> Checker<'a> {
                     }
                     None if has_named => {
                         self.report(
-                            label.to_string(),
                             format!(
                                 "Argument for parameter ${} has already been passed.",
                                 param.name
@@ -529,7 +515,6 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 self.report(
-                    label.to_string(),
                     format!(
                         "Missing parameter ${} ({}) in call to {}.",
                         param.name,
@@ -545,9 +530,7 @@ impl<'a> Checker<'a> {
         bound
     }
 
-    fn report_non_ignorable(&mut self, label: &str, message: String, span: Span, identifier: &str) {
-        self.report_builder(
-            DiagnosticBuilder::new(label.to_string(), message, span, 0, identifier).non_ignorable(),
-        );
+    fn report_non_ignorable(&mut self, message: String, span: Span, identifier: &str) {
+        self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
     }
 }

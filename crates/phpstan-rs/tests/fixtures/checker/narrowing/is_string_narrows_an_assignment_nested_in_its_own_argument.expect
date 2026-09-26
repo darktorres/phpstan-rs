@@ -1,1 +1,1 @@
-2:13-2:59 return.unusedType L4 fetch | Function fetch() never returns false so it can be removed from the return type.
+2:13-2:59 return.unusedType L4 | Function fetch() never returns false so it can be removed from the return type.

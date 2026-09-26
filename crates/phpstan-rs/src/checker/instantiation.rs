@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
     /// `new $expr()` where `$expr`'s type can never be a class name or
     /// an object (`new.nonObject`). Level 0 when every member is
     /// unusable, level 7 when only some members of a union are.
-    pub(crate) fn check_new_on_non_class_name(&mut self, ty: &Type, span: Span, label: &str) {
+    pub(crate) fn check_new_on_non_class_name(&mut self, ty: &Type, span: Span) {
         if !type_can_never_name_a_class(ty) {
             return;
         }
@@ -57,7 +57,6 @@ impl<'a> Checker<'a> {
             _ => true,
         };
         self.report(
-            label.to_string(),
             format!("cannot instantiate class using {ty}"),
             span,
             if every_member { 0 } else { 7 },
@@ -67,14 +66,13 @@ impl<'a> Checker<'a> {
 
     /// `new self`/`new static`/`new parent` legality (`outOfClass.*`,
     /// `class.noParent`), for a pseudo-name that resolved to no class.
-    pub(crate) fn check_new_pseudo_target(&mut self, name: &str, span: Span, label: &str) {
+    pub(crate) fn check_new_pseudo_target(&mut self, name: &str, span: Span) {
         let keyword = name.to_ascii_lowercase();
         if !matches!(keyword.as_str(), "self" | "static" | "parent") {
             return;
         }
         let Some(class) = self.current_class.clone() else {
             self.report(
-                label.to_string(),
                 format!("using {name} outside of class scope"),
                 span,
                 0,
@@ -95,7 +93,6 @@ impl<'a> Checker<'a> {
         }
         let method = self.current_method.clone().unwrap_or_default();
         self.report(
-            label.to_string(),
             format!("{class}::{method}() calls new parent but {class} does not extend any class"),
             span,
             0,
@@ -119,7 +116,6 @@ impl<'a> Checker<'a> {
         is_static: bool,
         has_args: bool,
         span: Span,
-        label: &str,
     ) -> bool {
         let Some((_, info)) = self.registry.lookup_class(class) else {
             return true;
@@ -128,14 +124,13 @@ impl<'a> Checker<'a> {
             return true;
         }
         if is_static {
-            self.check_new_static(span, label);
+            self.check_new_static(span);
         }
         let kind = info.kind;
         let is_abstract = info.is_abstract;
         match kind {
             ClassKind::Trait => {
                 self.report(
-                    label.to_string(),
                     format!("cannot instantiate trait {class}"),
                     span,
                     0,
@@ -145,7 +140,6 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Enum => {
                 self.report(
-                    label.to_string(),
                     format!("cannot instantiate enum {class}"),
                     span,
                     0,
@@ -155,7 +149,6 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Interface if !is_static => {
                 self.report(
-                    label.to_string(),
                     format!("cannot instantiate interface {class}"),
                     span,
                     0,
@@ -165,9 +158,7 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Class if is_abstract && !is_static => {
                 self.report_builder(
-                    DiagnosticBuilder::new(
-                        label.to_string(),
-                        format!("cannot instantiate abstract class {class}"),
+                    DiagnosticBuilder::new(format!("cannot instantiate abstract class {class}"),
                         span,
                         0,
                         "new.abstract",
@@ -186,9 +177,7 @@ impl<'a> Checker<'a> {
             .map(|(owner, sig)| (owner, sig.visibility.clone()))
         else {
             if has_args && !self.registry.has_unresolvable_ancestor(class) {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "class {class} does not have a constructor and must be instantiated without any parameters"
                     ),
                     span,
@@ -205,7 +194,6 @@ impl<'a> Checker<'a> {
         };
         if !self.is_member_access_visible(&owner, &visibility, "__construct", "method") {
             self.report(
-                label.to_string(),
                 format!(
                     "cannot instantiate class {class} via {word} constructor {owner}::__construct()"
                 ),
@@ -226,7 +214,7 @@ impl<'a> Checker<'a> {
     /// `new static()` in a static method of an abstract class
     /// (`new.staticInAbstractClassStaticMethod`), which a direct call
     /// to that method on the abstract class itself would crash.
-    fn check_new_static(&mut self, span: Span, label: &str) {
+    fn check_new_static(&mut self, span: Span) {
         let Some(class) = self.current_class.clone() else {
             return;
         };
@@ -236,9 +224,7 @@ impl<'a> Checker<'a> {
         let is_abstract = info.is_abstract;
         if !info.is_final && !info.is_final_by_phpdoc && self.new_static_is_unsafe(&class) {
             self.report_builder(
-                DiagnosticBuilder::new(
-                    label.to_string(),
-                    "unsafe usage of new static()".to_string(),
+                DiagnosticBuilder::new("unsafe usage of new static()".to_string(),
                     span,
                     0,
                     "new.static",
@@ -261,9 +247,7 @@ impl<'a> Checker<'a> {
             });
         if is_abstract && in_static_method {
             self.report_builder(
-                DiagnosticBuilder::new(
-                    label.to_string(),
-                    format!(
+                DiagnosticBuilder::new(format!(
                         "unsafe usage of new static() in abstract class {class} in static method {method}()"
                     ),
                     span,

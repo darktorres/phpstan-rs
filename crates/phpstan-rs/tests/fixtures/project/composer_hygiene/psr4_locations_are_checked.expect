@@ -1,6 +1,6 @@
-composer.json:5:1-5:1 unused.composerDependency L0 composer.json | Package acme/used is in require, but the analysed code uses none of its symbols.
-composer.json:6:1-6:1 unused.composerDependency L0 composer.json | Package acme/unused is in require, but the analysed code uses none of its symbols.
-composer.json:10:1-10:1 unused.composerDependency L0 composer.json | Package acme/dev-tool is in require-dev, but the analysed code uses none of its symbols.
-src/Misplaced.php:1:40-1:49 psr4.pathMismatch L0 App\Other\Elsewhere | Class App\\Other\\Elsewhere is declared in src/Misplaced.php, but PSR-4 prefix App\\ maps it to <fixture>/src/Other/Elsewhere.php.
-src/Outside.php:1:40-1:47 psr4.pathMismatch L0 Unrelated\Outside | Class Unrelated\\Outside is declared under the PSR-4 root of prefix App\\, but its namespace doesn't start with that prefix; the autoloader can't find it.
-src/http/Router.php:1:39-1:45 psr4.caseMismatch L0 App\Http\Router | Class App\\Http\\Router is declared in src/http/Router.php, whose letter case differs from <fixture>/src/Http/Router.php that PSR-4 prefix App\\ maps it to; a case-sensitive filesystem won't find it.
+composer.json:5:1-5:1 unused.composerDependency L0 | Package acme/used is in require, but the analysed code uses none of its symbols.
+composer.json:6:1-6:1 unused.composerDependency L0 | Package acme/unused is in require, but the analysed code uses none of its symbols.
+composer.json:10:1-10:1 unused.composerDependency L0 | Package acme/dev-tool is in require-dev, but the analysed code uses none of its symbols.
+src/Misplaced.php:1:40-1:49 psr4.pathMismatch L0 | Class App\\Other\\Elsewhere is declared in src/Misplaced.php, but PSR-4 prefix App\\ maps it to <fixture>/src/Other/Elsewhere.php.
+src/Outside.php:1:40-1:47 psr4.pathMismatch L0 | Class Unrelated\\Outside is declared under the PSR-4 root of prefix App\\, but its namespace doesn't start with that prefix; the autoloader can't find it.
+src/http/Router.php:1:39-1:45 psr4.caseMismatch L0 | Class App\\Http\\Router is declared in src/http/Router.php, whose letter case differs from <fixture>/src/Http/Router.php that PSR-4 prefix App\\ maps it to; a case-sensitive filesystem won't find it.

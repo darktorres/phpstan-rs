@@ -1,1 +1,1 @@
-6:24-6:34 nullsafe.neverNull L0 test | Using nullsafe method call on non-nullable type Foo. Use -> instead.
+6:24-6:34 nullsafe.neverNull L0 | Using nullsafe method call on non-nullable type Foo. Use -> instead.

@@ -1,8 +1,6 @@
 //! What a check reports: a [`Diagnostic`], assembled through
 //! [`DiagnosticBuilder`], with an optional textual [`DiagnosticFix`].
 
-use rustc_hash::FxHashMap;
-
 use syntax::token::Span;
 
 /// Loosely mirrors PHPStan's own rule-gating levels (0 lowest/laxest,
@@ -28,7 +26,6 @@ use syntax::token::Span;
 /// PHPStan's missing-typehints level).
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
-    pub location: String,
     pub message: String,
     pub span: Span,
     pub level: u8,
@@ -47,10 +44,6 @@ pub struct Diagnostic {
     /// `true`, this diagnostic must never be suppressible via
     /// `@phpstan-ignore <identifier>`.
     pub non_ignorable: bool,
-    /// Free-form structured data a rule wants attached without inventing a
-    /// new `Diagnostic` field - a `HashMap`, not `Vec<(String, Value)>`,
-    /// since a consumer looks up one known key rather than iterating all.
-    pub metadata: FxHashMap<String, serde_json::Value>,
     /// A suggested textual auto-fix. This project has no code-generation-
     /// from-AST facility, so a fix is a literal source-text replacement
     /// over a `Span` rather than a replacement AST node.
@@ -98,7 +91,7 @@ pub struct DiagnosticFix {
 }
 
 /// Fluent assembly for a [`Diagnostic`], mirroring real PHPStan's own
-/// `RuleErrorBuilder`. A plain diagnostic with no tip/metadata/fix still
+/// `RuleErrorBuilder`. A plain diagnostic with no tip/fix still
 /// goes through this via `Checker::report` (a thin wrapper), so there's one
 /// real construction path for every `Diagnostic`.
 ///
@@ -107,14 +100,12 @@ pub struct DiagnosticFix {
 /// immediately consumed at one `report_builder` call site, never stored or
 /// branched on mid-construction.
 pub struct DiagnosticBuilder {
-    location: String,
     message: String,
     span: Span,
     level: u8,
     identifier: String,
     tip: Option<String>,
     non_ignorable: bool,
-    metadata: FxHashMap<String, serde_json::Value>,
     fix: Option<DiagnosticFix>,
 }
 
@@ -124,21 +115,18 @@ impl DiagnosticBuilder {
     /// here already knows its identifier, so there's no "forgot to set it"
     /// state worth representing.
     pub fn new(
-        location: impl Into<String>,
         message: impl Into<String>,
         span: Span,
         level: u8,
         identifier: impl Into<String>,
     ) -> Self {
         DiagnosticBuilder {
-            location: location.into(),
             message: message.into(),
             span,
             level,
             identifier: identifier.into(),
             tip: None,
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         }
     }
@@ -150,11 +138,6 @@ impl DiagnosticBuilder {
 
     pub fn non_ignorable(mut self) -> Self {
         self.non_ignorable = true;
-        self
-    }
-
-    pub fn metadata(mut self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Self {
-        self.metadata.insert(key.into(), value.into());
         self
     }
 
@@ -193,14 +176,12 @@ impl DiagnosticBuilder {
 
     pub fn build(self) -> Diagnostic {
         Diagnostic {
-            location: self.location,
             message: self.message,
             span: self.span,
             level: self.level,
             identifier: self.identifier,
             tip: self.tip,
             non_ignorable: self.non_ignorable,
-            metadata: self.metadata,
             fix: self.fix,
         }
     }

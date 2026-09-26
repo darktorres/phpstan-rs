@@ -1,2 +1,2 @@
-4:31-4:38 property.unresolvableType L2 Holder | PHPDoc tag @var for property Holder::$a contains unresolvable type.
-7:21-7:34 property.unresolvableType L2 Holder | PHPDoc type for property Holder::$b contains unresolvable type.
+4:31-4:38 property.unresolvableType L2 | PHPDoc tag @var for property Holder::$a contains unresolvable type.
+7:21-7:34 property.unresolvableType L2 | PHPDoc type for property Holder::$b contains unresolvable type.

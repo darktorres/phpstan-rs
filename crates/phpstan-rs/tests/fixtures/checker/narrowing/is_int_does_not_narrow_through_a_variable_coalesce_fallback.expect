@@ -1,1 +1,1 @@
-5:28-5:46 return.type L3 f | return type mismatch: expected int, got int|string
+5:28-5:46 return.type L3 | return type mismatch: expected int, got int|string

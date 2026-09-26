@@ -1,2 +1,2 @@
-7:13-7:33 function.resultUnused L4 <main> | Call to function double() on a separate line has no effect.
-7:20-7:32 argument.type L5 <main> | Parameter #1 $x of function double expects int, 'not an int' given.
+7:13-7:33 function.resultUnused L4 | Call to function double() on a separate line has no effect.
+7:20-7:32 argument.type L5 | Parameter #1 $x of function double expects int, 'not an int' given.

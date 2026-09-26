@@ -1,2 +1,2 @@
-2:13-4:14 missingType.return L6 f | Function f() has no return type specified.
-3:27-3:53 class.notFound L0 f | parameter $x of arrow function has invalid type TotallyMadeUpArrowParam
+2:13-4:14 missingType.return L6 | Function f() has no return type specified.
+3:27-3:53 class.notFound L0 | parameter $x of arrow function has invalid type TotallyMadeUpArrowParam

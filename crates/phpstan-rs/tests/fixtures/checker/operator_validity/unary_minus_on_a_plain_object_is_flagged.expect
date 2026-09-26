@@ -1,2 +1,2 @@
-4:17-4:20 expr.resultUnused L4 test | Expression "-$f" on a separate line does not do anything.
-4:18-4:20 unaryOp.invalid L2 test | Unary operation "-" on Foo results in an error.
+4:17-4:20 expr.resultUnused L4 | Expression "-$f" on a separate line does not do anything.
+4:18-4:20 unaryOp.invalid L2 | Unary operation "-" on Foo results in an error.

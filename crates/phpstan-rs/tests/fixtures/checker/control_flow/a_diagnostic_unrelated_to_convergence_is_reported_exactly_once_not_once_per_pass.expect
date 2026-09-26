@@ -1,2 +1,2 @@
-3:13-9:14 missingType.return L6 f | Function f() has no return type specified.
-6:21-6:47 function.notFound L0 f | call to undefined function totallyUndefinedFunction()
+3:13-9:14 missingType.return L6 | Function f() has no return type specified.
+6:21-6:47 function.notFound L0 | call to undefined function totallyUndefinedFunction()

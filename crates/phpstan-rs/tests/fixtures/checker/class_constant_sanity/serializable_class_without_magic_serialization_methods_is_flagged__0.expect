@@ -1,6 +1,6 @@
-2:15-2:24 class.serializable L0 OldSchool | non-abstract class OldSchool implements the Serializable interface, but does not implement __serialize()
+2:15-2:24 class.serializable L0 | non-abstract class OldSchool implements the Serializable interface, but does not implement __serialize()
     tip: See https://wiki.php.net/rfc/phase_out_serializable
-2:15-2:24 class.serializable L0 OldSchool | non-abstract class OldSchool implements the Serializable interface, but does not implement __unserialize()
+2:15-2:24 class.serializable L0 | non-abstract class OldSchool implements the Serializable interface, but does not implement __unserialize()
     tip: See https://wiki.php.net/rfc/phase_out_serializable
-10:43-10:54 missingType.iterableValue L6 Modern::__unserialize | Method Modern::__unserialize() has parameter $data with no value type specified in iterable type array.
+10:43-10:54 missingType.iterableValue L6 | Method Modern::__unserialize() has parameter $data with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

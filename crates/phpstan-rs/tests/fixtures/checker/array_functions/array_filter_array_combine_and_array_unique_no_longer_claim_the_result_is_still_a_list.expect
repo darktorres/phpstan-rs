@@ -1,3 +1,3 @@
-6:24-6:40 return.type L3 usingFilter | return type mismatch: expected list<int>, got array<int, int>
-12:24-12:45 return.type L3 usingCombine | return type mismatch: expected list<int>, got array<int, int>
-18:24-18:40 return.type L3 usingUnique | return type mismatch: expected list<int>, got array<int, int>
+6:24-6:40 return.type L3 | return type mismatch: expected list<int>, got array<int, int>
+12:24-12:45 return.type L3 | return type mismatch: expected list<int>, got array<int, int>
+18:24-18:40 return.type L3 | return type mismatch: expected list<int>, got array<int, int>

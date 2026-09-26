@@ -1,2 +1,2 @@
-3:13-5:14 return.missing L2 f | should return bool but return statement is missing
+3:13-5:14 return.missing L2 | should return bool but return statement is missing
     non-ignorable

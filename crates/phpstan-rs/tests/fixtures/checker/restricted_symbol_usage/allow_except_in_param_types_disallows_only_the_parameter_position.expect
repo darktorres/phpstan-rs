@@ -1,1 +1,1 @@
-4:41-4:52 restrictedSymbol.class L0 Bar::process | Parameter $v references restricted class LegacyValue: do not accept LegacyValue as a parameter type
+4:41-4:52 restrictedSymbol.class L0 | Parameter $v references restricted class LegacyValue: do not accept LegacyValue as a parameter type

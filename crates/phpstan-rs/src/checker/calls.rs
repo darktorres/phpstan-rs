@@ -21,7 +21,6 @@ pub(crate) struct CheckArgsCall<'a> {
     pub(crate) sig: &'a FunctionSig,
     pub(crate) args: &'a [Arg],
     pub(crate) locals: &'a Locals,
-    pub(crate) label: &'a str,
     pub(crate) defining_class: Option<&'a str>,
     /// A PHP builtin (whose variadic takes no unknown named argument).
     pub(crate) is_builtin: bool,
@@ -341,23 +340,21 @@ impl<'a> Checker<'a> {
             sig,
             args,
             locals,
-            label,
             defining_class,
             is_builtin,
             span,
         } = call;
         if self.registry.check_boolean_trap {
-            self.check_boolean_trap_arguments(callee_label, sig, args, defining_class, label);
+            self.check_boolean_trap_arguments(callee_label, sig, args, defining_class);
         }
         if self.registry.check_swapped_arguments {
-            self.check_swapped_argument_names(callee_label, sig, args, defining_class, label);
+            self.check_swapped_argument_names(callee_label, sig, args, defining_class);
         }
         self.check_parameters(parameters::ParametersCheck {
             callee,
             sig,
             args,
             locals,
-            label,
             defining_class,
             is_builtin,
             span,
@@ -382,7 +379,6 @@ impl<'a> Checker<'a> {
         sig: &types::CallableSig,
         args: &[Arg],
         locals: &Locals,
-        label: &str,
         span: Span,
     ) {
         if args.iter().any(|a| a.name.is_some() || a.spread) {
@@ -396,7 +392,6 @@ impl<'a> Checker<'a> {
         let last_is_variadic = sig.params.last().is_some_and(|p| p.variadic);
         if args.len() < required {
             self.report(
-                label.to_string(),
                 format!(
                     "Closure() expects at least {required} argument(s), {} given",
                     args.len()
@@ -412,7 +407,6 @@ impl<'a> Checker<'a> {
                 "at most"
             };
             self.report(
-                label.to_string(),
                 format!(
                     "Closure() expects {quantifier} {} argument(s), {} given",
                     sig.params.len(),
@@ -437,7 +431,6 @@ impl<'a> Checker<'a> {
             // bail-out is needed here.
             if !self.registry.rule_level_accepts(&param.ty, &arg_ty).yes() {
                 self.report(
-                    label.to_string(),
                     format!(
                         "Closure() argument #{} expects {}, {} given",
                         i + 1,
@@ -465,7 +458,6 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         args: &[Arg],
         defining_class: Option<&str>,
-        label: &str,
     ) {
         let mut positional_index = 0usize;
         for arg in args {
@@ -488,9 +480,7 @@ impl<'a> Checker<'a> {
             if param_ty != Type::Bool {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "{callee_label}() argument #{} (${}) is a bare `{literal}` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead",
                     index + 1,
                     param.name
@@ -516,7 +506,6 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         args: &[Arg],
         defining_class: Option<&str>,
-        label: &str,
     ) {
         let mut positional: Vec<(usize, &Expr)> = Vec::new();
         let mut positional_index = 0usize;
@@ -563,9 +552,7 @@ impl<'a> Checker<'a> {
             if ty_a == Type::Mixed(false) || ty_a != ty_b {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "{callee_label}() arguments #{} (${a_name}) and #{} (${b_name}) may be swapped - their variable names match the reversed parameter order (${}, ${})",
                     i + 1,
                     j + 1,
@@ -590,7 +577,7 @@ impl<'a> Checker<'a> {
     /// PHPStan's `isDefaultEscaped`/`removeDefaultEscapedDelimiters`
     /// exactly - a mismatch against one of those is inconsequential,
     /// since `preg_quote` escapes it either way).
-    pub(crate) fn check_preg_quote_delimiter(&mut self, name: &str, args: &[Arg], label: &str) {
+    pub(crate) fn check_preg_quote_delimiter(&mut self, name: &str, args: &[Arg]) {
         const PREG_PATTERN_FUNCTIONS: &[&str] = &[
             "preg_match",
             "preg_match_all",
@@ -636,7 +623,6 @@ impl<'a> Checker<'a> {
         for call_args in quote_calls {
             if call_args.len() == 1 {
                 self.report(
-                    label.to_string(),
                     format!(
                         "Call to preg_quote() is missing delimiter {delimiter} to be effective."
                     ),
@@ -653,9 +639,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if !given.starts_with(delimiter) {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Call to preg_quote() uses invalid delimiter {given} while pattern uses {delimiter}."
                     ),
                     call_args[1].value.span,
@@ -720,7 +704,6 @@ impl<'a> Checker<'a> {
         name: &str,
         args: &[Arg],
         locals: &mut Locals,
-        label: &str,
         span: Span,
     ) {
         if name.eq_ignore_ascii_case("call_user_func") {
@@ -739,7 +722,6 @@ impl<'a> Checker<'a> {
                 sig: &sig,
                 args: callee_args,
                 locals,
-                label,
                 defining_class: None,
                 is_builtin: false,
                 span,
@@ -773,7 +755,6 @@ impl<'a> Checker<'a> {
                 sig: &sig,
                 args: &synthesized,
                 locals,
-                label,
                 defining_class: None,
                 is_builtin: false,
                 span,

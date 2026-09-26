@@ -1,2 +1,2 @@
-5:17-5:20 binaryOp.invalid L2 test | Binary operation "+" between array<(int|string), int> and Foo results in an error.
-5:17-5:25 expr.resultUnused L4 test | Expression "$xs + $f" on a separate line does not do anything.
+5:17-5:20 binaryOp.invalid L2 | Binary operation "+" between array<(int|string), int> and Foo results in an error.
+5:17-5:25 expr.resultUnused L4 | Expression "$xs + $f" on a separate line does not do anything.

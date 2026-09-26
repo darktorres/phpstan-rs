@@ -1,1 +1,1 @@
-11:38-11:45 missingType.generics L6 Holder::pair | Method Holder::pair() has parameter $p with generic class Pair but does not specify its types: K, V (1-2 required)
+11:38-11:45 missingType.generics L6 | Method Holder::pair() has parameter $p with generic class Pair but does not specify its types: K, V (1-2 required)

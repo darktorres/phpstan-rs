@@ -1,2 +1,2 @@
-3:17-3:18 binaryOp.invalid L2 test | Binary operation "+" between 1 and string results in an error.
-3:17-3:23 expr.resultUnused L4 test | Expression "1 + $s" on a separate line does not do anything.
+3:17-3:18 binaryOp.invalid L2 | Binary operation "+" between 1 and string results in an error.
+3:17-3:23 expr.resultUnused L4 | Expression "1 + $s" on a separate line does not do anything.

@@ -1,11 +1,11 @@
-2:13-2:37 missingType.return L6 uses | Function uses() has no return type specified.
-2:27-2:33 missingType.parameter L6 uses | Function uses() has parameter $class with no type specified.
-3:13-3:46 missingType.return L6 beforeEach | Function beforeEach() has no return type specified.
-3:33-3:42 missingType.parameter L6 beforeEach | Function beforeEach() has parameter $callback with no type specified.
-4:13-4:52 missingType.return L6 it | Function it() has no return type specified.
-4:25-4:37 missingType.parameter L6 it | Function it() has parameter $description with no type specified.
-4:39-4:48 missingType.parameter L6 it | Function it() has parameter $callback with no type specified.
-6:13-6:38 function.resultUnused L4 <main> | Call to function uses() on a separate line has no effect.
-7:13-7:65 function.resultUnused L4 <main> | Call to function beforeEach() on a separate line has no effect.
-8:13-10:15 function.resultUnused L4 <main> | Call to function it() on a separate line has no effect.
-9:22-9:49 property.notFound L2 <main> (closure) | access to undefined property RealTestBase::$totallyUndefinedProp
+2:13-2:37 missingType.return L6 | Function uses() has no return type specified.
+2:27-2:33 missingType.parameter L6 | Function uses() has parameter $class with no type specified.
+3:13-3:46 missingType.return L6 | Function beforeEach() has no return type specified.
+3:33-3:42 missingType.parameter L6 | Function beforeEach() has parameter $callback with no type specified.
+4:13-4:52 missingType.return L6 | Function it() has no return type specified.
+4:25-4:37 missingType.parameter L6 | Function it() has parameter $description with no type specified.
+4:39-4:48 missingType.parameter L6 | Function it() has parameter $callback with no type specified.
+6:13-6:38 function.resultUnused L4 | Call to function uses() on a separate line has no effect.
+7:13-7:65 function.resultUnused L4 | Call to function beforeEach() on a separate line has no effect.
+8:13-10:15 function.resultUnused L4 | Call to function it() on a separate line has no effect.
+9:22-9:49 property.notFound L2 | access to undefined property RealTestBase::$totallyUndefinedProp

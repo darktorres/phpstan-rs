@@ -1,1 +1,1 @@
-3:13-9:14 missingType.generics L6 UntypedIterator | Class UntypedIterator implements generic interface Iterator but does not specify its types: TKey, TValue
+3:13-9:14 missingType.generics L6 | Class UntypedIterator implements generic interface Iterator but does not specify its types: TKey, TValue

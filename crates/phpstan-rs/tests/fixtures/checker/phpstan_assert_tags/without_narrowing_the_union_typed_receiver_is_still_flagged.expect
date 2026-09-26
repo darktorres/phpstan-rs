@@ -1,1 +1,1 @@
-10:26-10:31 property.notFound L2 run | access to undefined property A|B|C::$x
+10:26-10:31 property.notFound L2 | access to undefined property A|B|C::$x

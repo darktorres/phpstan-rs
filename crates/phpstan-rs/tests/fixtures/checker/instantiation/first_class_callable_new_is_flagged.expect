@@ -1,3 +1,3 @@
-2:54-2:60 constructor.unusedParameter L1 Made::__construct | Constructor of class Made has an unused parameter $x.
-4:28-4:41 callable.notSupported L0 f | Cannot create callable from the new operator.
+2:54-2:60 constructor.unusedParameter L1 | Constructor of class Made has an unused parameter $x.
+4:28-4:41 callable.notSupported L0 | Cannot create callable from the new operator.
     non-ignorable

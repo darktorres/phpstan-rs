@@ -1,2 +1,2 @@
-1:7-1:46 missingType.return L6 f | Function f() has no return type specified.
-1:27-1:31 booleanNot.alwaysFalse L4 f | Negated boolean expression is always false.
+1:7-1:46 missingType.return L6 | Function f() has no return type specified.
+1:27-1:31 booleanNot.alwaysFalse L4 | Negated boolean expression is always false.

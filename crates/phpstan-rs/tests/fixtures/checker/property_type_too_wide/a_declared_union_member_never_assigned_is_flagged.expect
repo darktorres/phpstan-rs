@@ -1,2 +1,2 @@
-3:36-3:38 property.onlyWritten L4 C | private property C::$x is never read, only written
-3:36-3:38 property.unusedType L4 C::$x | C::$x is never assigned string so it can be removed from the property type.
+3:36-3:38 property.onlyWritten L4 | private property C::$x is never read, only written
+3:36-3:38 property.unusedType L4 | C::$x is never assigned string so it can be removed from the property type.

@@ -1,4 +1,4 @@
-9:13-11:14 missingType.return L6 f | Function f() has no return type specified.
-9:24-9:46 parameter.internalInterface L0 f | Parameter $t of function f() has typehint with internal interface Vendor\\Internal\\Thing.
-9:24-9:49 type.internalInterface L0 f | Referencing internal interface Vendor\\Internal\\Thing.
-10:17-10:30 method.internalInterface L0 f | Call to method doStuff() of internal interface Vendor\\Internal\\Thing from outside its root namespace Vendor.
+9:13-11:14 missingType.return L6 | Function f() has no return type specified.
+9:24-9:46 parameter.internalInterface L0 | Parameter $t of function f() has typehint with internal interface Vendor\\Internal\\Thing.
+9:24-9:49 type.internalInterface L0 | Referencing internal interface Vendor\\Internal\\Thing.
+10:17-10:30 method.internalInterface L0 | Call to method doStuff() of internal interface Vendor\\Internal\\Thing from outside its root namespace Vendor.

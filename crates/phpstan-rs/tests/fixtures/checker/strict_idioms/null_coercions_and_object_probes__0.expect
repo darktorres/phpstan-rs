@@ -1,13 +1,13 @@
-4:13-4:15 interpolation.nullable L0 f | A possibly-null value (string|null) is silently coerced to "" in a string.
-5:10-5:12 concat.nullable L0 f | A possibly-null value (string|null) is silently coerced to "" by concatenation.
-6:14-6:16 binaryOp.nullable L0 f | A possibly-null value (int|null) is silently coerced to 0 by arithmetic.
-7:15-7:17 assignOp.nullable L0 f | A possibly-null value (string|null) is silently coerced by a compound assignment.
-8:5-8:14 expr.resultUnused L4 f | Expression "isset($a)" on a separate line does not do anything.
-8:11-8:13 isset.object L0 f | isset() on an object (A|null) says less than a !== null check.
-9:5-9:14 expr.resultUnused L4 f | Expression "empty($b)" on a separate line does not do anything.
-9:11-9:13 empty.object L0 f | empty() on an object (A) says less than instanceof.
-9:11-9:13 empty.variable L0 f | Variable $b in empty() always exists and is not falsy.
-11:5-11:18 expr.resultUnused L4 f | Expression "isset($plain)" on a separate line does not do anything.
-11:11-11:17 isset.variable L0 f | Variable $plain in isset() always exists and is not nullable.
-13:5-13:20 expr.resultUnused L4 f | Expression "isset($list[0])" on a separate line does not do anything.
-13:11-13:19 isset.offset L0 f | Offset '0' on array{0: A} in isset() always exists and is not nullable.
+4:13-4:15 interpolation.nullable L0 | A possibly-null value (string|null) is silently coerced to "" in a string.
+5:10-5:12 concat.nullable L0 | A possibly-null value (string|null) is silently coerced to "" by concatenation.
+6:14-6:16 binaryOp.nullable L0 | A possibly-null value (int|null) is silently coerced to 0 by arithmetic.
+7:15-7:17 assignOp.nullable L0 | A possibly-null value (string|null) is silently coerced by a compound assignment.
+8:5-8:14 expr.resultUnused L4 | Expression "isset($a)" on a separate line does not do anything.
+8:11-8:13 isset.object L0 | isset() on an object (A|null) says less than a !== null check.
+9:5-9:14 expr.resultUnused L4 | Expression "empty($b)" on a separate line does not do anything.
+9:11-9:13 empty.object L0 | empty() on an object (A) says less than instanceof.
+9:11-9:13 empty.variable L0 | Variable $b in empty() always exists and is not falsy.
+11:5-11:18 expr.resultUnused L4 | Expression "isset($plain)" on a separate line does not do anything.
+11:11-11:17 isset.variable L0 | Variable $plain in isset() always exists and is not nullable.
+13:5-13:20 expr.resultUnused L4 | Expression "isset($list[0])" on a separate line does not do anything.
+13:11-13:19 isset.offset L0 | Offset '0' on array{0: A} in isset() always exists and is not nullable.

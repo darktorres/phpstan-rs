@@ -1,1 +1,1 @@
-5:30-5:50 argument.type L5 test | Parameter #1 $x of function needsBounded expects int<0, 100>, int<min, 10> given.
+5:30-5:50 argument.type L5 | Parameter #1 $x of function needsBounded expects int<0, 100>, int<min, 10> given.

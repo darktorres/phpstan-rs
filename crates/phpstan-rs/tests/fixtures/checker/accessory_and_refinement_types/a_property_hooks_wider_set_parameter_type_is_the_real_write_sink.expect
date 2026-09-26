@@ -1,2 +1,2 @@
-10:36-10:46 missingType.iterableValue L6 f | Function f() has parameter $raw with no value type specified in iterable type array.
+10:36-10:46 missingType.iterableValue L6 | Function f() has parameter $raw with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

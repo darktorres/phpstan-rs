@@ -1,2 +1,2 @@
-3:41-3:49 closure.useSuperGlobal L0 test | Cannot use superglobal variable $_SERVER as lexical variable.
+3:41-3:49 closure.useSuperGlobal L0 | Cannot use superglobal variable $_SERVER as lexical variable.
     non-ignorable

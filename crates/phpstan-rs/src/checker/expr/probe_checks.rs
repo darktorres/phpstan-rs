@@ -116,7 +116,6 @@ impl<'a> Checker<'a> {
                             || self.registry.lookup_method(c, "__get").is_some()
                     }) {
                         self.report(
-                            label.to_string(),
                             format!("access to undefined property {base_ty}::${prop}"),
                             e.span,
                             2,
@@ -151,7 +150,6 @@ impl<'a> Checker<'a> {
         &mut self,
         e: &Expr,
         locals: &Locals,
-        label: &str,
         identifier_prefix: &str,
         operator_description: &str,
         verdict_fn: NullProbeVerdictFn,
@@ -187,7 +185,6 @@ impl<'a> Checker<'a> {
             return;
         };
         self.report(
-            label.to_string(),
             format!("Variable ${name} {operator_description} always exists and {verdict}."),
             e.span,
             0,
@@ -216,7 +213,6 @@ impl<'a> Checker<'a> {
         &mut self,
         e: &Expr,
         locals: &Locals,
-        label: &str,
         identifier_prefix: &str,
         operator_description: &str,
     ) -> Option<Type> {
@@ -235,7 +231,6 @@ impl<'a> Checker<'a> {
                 let base_ty = self.resolve_always_exists(
                     base,
                     locals,
-                    label,
                     identifier_prefix,
                     operator_description,
                 )?;
@@ -249,7 +244,6 @@ impl<'a> Checker<'a> {
                 // twice rather than duplicating its own logic.
                 if narrow_array_shape_by_key_presence(&base_ty, &key, true) == Type::Never {
                     self.report(
-                        label.to_string(),
                         format!(
                             "Offset '{key}' on {base_ty} {operator_description} does not exist."
                         ),
@@ -268,7 +262,6 @@ impl<'a> Checker<'a> {
                 let base_ty = self.resolve_always_exists(
                     base,
                     locals,
-                    label,
                     identifier_prefix,
                     operator_description,
                 )?;
@@ -304,7 +297,6 @@ impl<'a> Checker<'a> {
         &mut self,
         e: &Expr,
         locals: &Locals,
-        label: &str,
         identifier_prefix: &str,
         operator_description: &str,
         verdict_fn: NullProbeVerdictFn,
@@ -313,7 +305,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let Some(leaf_ty) =
-            self.resolve_always_exists(e, locals, label, identifier_prefix, operator_description)
+            self.resolve_always_exists(e, locals, identifier_prefix, operator_description)
         else {
             return;
         };
@@ -329,9 +321,7 @@ impl<'a> Checker<'a> {
                     return;
                 };
                 let base_ty = self.infer_expr(base, locals);
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Offset '{key}' on {base_ty} {operator_description} always exists and {verdict}."
                     ),
                     e.span,
@@ -353,7 +343,6 @@ impl<'a> Checker<'a> {
                     .map(|(owner, _)| owner)
                     .unwrap_or_else(|| base_ty.to_string().into());
                 self.report(
-                    label.to_string(),
                     format!(
                         "Property {owner}::${prop} ({leaf_ty}) {operator_description} {verdict}."
                     ),
@@ -391,7 +380,6 @@ impl<'a> Checker<'a> {
         l_ty: &Type,
         r_ty: &Type,
         span: Span,
-        label: &str,
     ) {
         if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
             return;
@@ -413,9 +401,7 @@ impl<'a> Checker<'a> {
         } else {
             "notEqual"
         };
-        self.report(
-            label.to_string(),
-            format!(
+        self.report(format!(
                 "Loose comparison using {sigil} between {l_ty} and {r_ty} will always evaluate to {}.",
                 if outcome { "true" } else { "false" }
             ),
@@ -466,7 +452,6 @@ impl<'a> Checker<'a> {
         r_ty: &Type,
         span: Span,
         is_exempt_last_condition: bool,
-        label: &str,
     ) {
         if self.loop_depth > 0
             || expr_reads_a_mutable_property(l)
@@ -495,9 +480,7 @@ impl<'a> Checker<'a> {
         } else {
             "notIdentical"
         };
-        self.report(
-            label.to_string(),
-            format!(
+        self.report(format!(
                 "Strict comparison using {sigil} between {l_ty} and {r_ty} will always evaluate to {}.",
                 if outcome { "true" } else { "false" }
             ),
@@ -544,7 +527,6 @@ impl<'a> Checker<'a> {
         l_ty: &Type,
         r_ty: &Type,
         span: Span,
-        label: &str,
     ) {
         if self.loop_depth > 0 || expr_reads_a_property(l) || expr_reads_a_property(r) {
             return;
@@ -573,7 +555,6 @@ impl<'a> Checker<'a> {
             _ => unreachable!(),
         };
         self.report(
-            label.to_string(),
             format!(
                 "Comparison operation \"{sigil}\" between {l_ty} and {r_ty} is always {}.",
                 if outcome { "true" } else { "false" }
@@ -625,7 +606,6 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         is_exempt_last_condition: bool,
         span: Span,
-        label: &str,
     ) {
         let ExprKind::Name(name) = &callee.kind else {
             return;
@@ -660,7 +640,6 @@ impl<'a> Checker<'a> {
         }
         if types_definitely_disjoint(&target_ty, &arg_ty) {
             self.report(
-                label.to_string(),
                 format!("Call to function {name}() with {arg_ty} will always evaluate to false."),
                 span,
                 4,
@@ -670,7 +649,6 @@ impl<'a> Checker<'a> {
             && self.registry.is_super_type_of(&target_ty, &arg_ty) == types::TrinaryLogic::Yes
         {
             self.report(
-                label.to_string(),
                 format!("Call to function {name}() with {arg_ty} will always evaluate to true."),
                 span,
                 4,

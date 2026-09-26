@@ -1,1 +1,1 @@
-4:13-4:23 requireExtends.trait L0 T | PHPDoc tag @phpstan-require-extends cannot contain non-class type OtherTrait.
+4:13-4:23 requireExtends.trait L0 | PHPDoc tag @phpstan-require-extends cannot contain non-class type OtherTrait.

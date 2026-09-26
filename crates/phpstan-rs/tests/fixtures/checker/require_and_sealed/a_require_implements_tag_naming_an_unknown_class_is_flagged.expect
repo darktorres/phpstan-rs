@@ -1,1 +1,1 @@
-3:13-3:23 class.notFound L0 T | PHPDoc tag @phpstan-require-implements contains unknown class NoSuchInterface.
+3:13-3:23 class.notFound L0 | PHPDoc tag @phpstan-require-implements contains unknown class NoSuchInterface.

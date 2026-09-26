@@ -1,8 +1,8 @@
-2:24-2:36 missingType.iterableValue L6 f | Function f() has parameter $items with no value type specified in iterable type array.
+2:24-2:36 missingType.iterableValue L6 | Function f() has parameter $items with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-4:17-4:26 varTag.differentVariable L2 f | Variable $wrong in PHPDoc tag @var does not match assigned variable $x.
-11:17-11:26 varTag.multipleTags L2 f | Multiple PHPDoc @var tags above single variable assignment are not supported.
-13:17-13:35 varTag.noVariable L2 f | PHPDoc tag @var above assignment does not specify variable name.
-15:17-15:48 varTag.differentVariable L2 f | Variable $nope in PHPDoc tag @var does not match any variable in the foreach loop: $items, $k, $v
-17:17-17:24 varTag.variableNotFound L2 f | Variable $ghost in PHPDoc tag @var does not exist.
-19:17-19:24 varTag.noVariable L2 f | PHPDoc tag @var does not specify variable name.
+4:17-4:26 varTag.differentVariable L2 | Variable $wrong in PHPDoc tag @var does not match assigned variable $x.
+11:17-11:26 varTag.multipleTags L2 | Multiple PHPDoc @var tags above single variable assignment are not supported.
+13:17-13:35 varTag.noVariable L2 | PHPDoc tag @var above assignment does not specify variable name.
+15:17-15:48 varTag.differentVariable L2 | Variable $nope in PHPDoc tag @var does not match any variable in the foreach loop: $items, $k, $v
+17:17-17:24 varTag.variableNotFound L2 | Variable $ghost in PHPDoc tag @var does not exist.
+19:17-19:24 varTag.noVariable L2 | PHPDoc tag @var does not specify variable name.

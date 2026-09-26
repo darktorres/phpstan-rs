@@ -1,1 +1,1 @@
-10:28-12:18 property.notReadable L0 Child | Property Child::$x does not have `get` hook and is not readable, but is required to be readable by property Base::$x.
+10:28-12:18 property.notReadable L0 | Property Child::$x does not have `get` hook and is not readable, but is required to be readable by property Base::$x.

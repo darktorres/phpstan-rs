@@ -1,4 +1,4 @@
-2:13-4:14 missingType.return L6 test | Function test() has no return type specified.
-3:22-3:34 cast.void L0 test | The (void) cast cannot be used within an expression.
+2:13-4:14 missingType.return L6 | Function test() has no return type specified.
+3:22-3:34 cast.void L0 | The (void) cast cannot be used within an expression.
     non-ignorable
-3:29-3:34 function.notFound L0 test | call to undefined function foo()
+3:29-3:34 function.notFound L0 | call to undefined function foo()

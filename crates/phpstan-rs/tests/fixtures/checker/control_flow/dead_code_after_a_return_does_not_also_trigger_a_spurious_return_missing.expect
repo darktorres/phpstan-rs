@@ -1,1 +1,1 @@
-4:17-4:29 deadCode.unreachable L4 f | Unreachable statement - code above always terminates.
+4:17-4:29 deadCode.unreachable L4 | Unreachable statement - code above always terminates.

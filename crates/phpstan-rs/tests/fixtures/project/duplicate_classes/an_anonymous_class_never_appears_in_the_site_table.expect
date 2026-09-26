@@ -1,1 +1,1 @@
-a.php:1:7-1:47 missingType.return L6 make | Function make() has no return type specified.
+a.php:1:7-1:47 missingType.return L6 | Function make() has no return type specified.

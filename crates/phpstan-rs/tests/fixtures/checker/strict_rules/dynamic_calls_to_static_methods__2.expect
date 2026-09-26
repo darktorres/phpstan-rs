@@ -1,2 +1,2 @@
-2:61-2:73 new.static L0 Base::make | unsafe usage of new static()
+2:61-2:73 new.static L0 | unsafe usage of new static()
     tip: See: https://phpstan.org/blog/solving-phpstan-error-unsafe-usage-of-new-static

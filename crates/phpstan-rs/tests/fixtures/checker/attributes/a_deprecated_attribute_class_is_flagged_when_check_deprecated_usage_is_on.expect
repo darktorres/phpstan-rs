@@ -1,1 +1,1 @@
-5:15-5:18 attribute.deprecated L0 Bar | Attribute class Foo is deprecated.
+5:15-5:18 attribute.deprecated L0 | Attribute class Foo is deprecated.

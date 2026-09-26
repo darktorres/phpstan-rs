@@ -1,3 +1,3 @@
-3:27-3:38 missingType.iterableValue L6 test | Function test() has parameter $args with no value type specified in iterable type array.
+3:27-3:38 missingType.iterableValue L6 | Function test() has parameter $args with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-3:48-3:71 argument.missing L0 test | Missing parameter $b (int) in call to function f28.
+3:48-3:71 argument.missing L0 | Missing parameter $b (int) in call to function f28.

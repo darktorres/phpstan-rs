@@ -1,1 +1,1 @@
-1:7-1:44 argument.sprintf L0 <main> | Call to sprintf contains 2 placeholders, 1 value given.
+1:7-1:44 argument.sprintf L0 | Call to sprintf contains 2 placeholders, 1 value given.

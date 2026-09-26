@@ -1,2 +1,2 @@
-4:17-4:47 class.duplicateMethod L0 X | Cannot redeclare method X::foo().
+4:17-4:47 class.duplicateMethod L0 | Cannot redeclare method X::foo().
     non-ignorable

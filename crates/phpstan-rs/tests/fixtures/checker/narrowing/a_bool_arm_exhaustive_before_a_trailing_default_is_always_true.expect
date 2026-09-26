@@ -1,1 +1,1 @@
-5:21-5:26 match.alwaysTrue L4 f | Match arm comparison between false and false is always true.
+5:21-5:26 match.alwaysTrue L4 | Match arm comparison between false and false is always true.

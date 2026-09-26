@@ -1,10 +1,10 @@
-t.php:4:1-7:2 class.notFound L0 OnlyMocksTest | OnlyMocksTest extends unknown class PHPUnit\\Framework\\TestCase
-t.php:4:13-4:26 mock.onlyMockProperties L2 <main> | Test class OnlyMocksTest has only mock properties; nothing real is under test in its fixtures.
-t.php:5:26-5:28 class.notFound L0 OnlyMocksTest | property OnlyMocksTest::$a has invalid type A
-t.php:5:26-5:28 class.notFound L0 OnlyMocksTest | property OnlyMocksTest::$a has invalid type PHPUnit\\Framework\\MockObject\\MockObject
-t.php:5:26-5:28 property.unused L4 OnlyMocksTest | private property OnlyMocksTest::$a is unused
+t.php:4:1-7:2 class.notFound L0 | OnlyMocksTest extends unknown class PHPUnit\\Framework\\TestCase
+t.php:4:13-4:26 mock.onlyMockProperties L2 | Test class OnlyMocksTest has only mock properties; nothing real is under test in its fixtures.
+t.php:5:26-5:28 class.notFound L0 | property OnlyMocksTest::$a has invalid type A
+t.php:5:26-5:28 class.notFound L0 | property OnlyMocksTest::$a has invalid type PHPUnit\\Framework\\MockObject\\MockObject
+t.php:5:26-5:28 property.unused L4 | private property OnlyMocksTest::$a is unused
     fix: Remove property $a => ""
-t.php:6:26-6:28 class.notFound L0 OnlyMocksTest | property OnlyMocksTest::$b has invalid type B
-t.php:6:26-6:28 class.notFound L0 OnlyMocksTest | property OnlyMocksTest::$b has invalid type PHPUnit\\Framework\\MockObject\\MockObject
-t.php:6:26-6:28 property.unused L4 OnlyMocksTest | private property OnlyMocksTest::$b is unused
+t.php:6:26-6:28 class.notFound L0 | property OnlyMocksTest::$b has invalid type B
+t.php:6:26-6:28 class.notFound L0 | property OnlyMocksTest::$b has invalid type PHPUnit\\Framework\\MockObject\\MockObject
+t.php:6:26-6:28 property.unused L4 | private property OnlyMocksTest::$b is unused
     fix: Remove property $b => ""

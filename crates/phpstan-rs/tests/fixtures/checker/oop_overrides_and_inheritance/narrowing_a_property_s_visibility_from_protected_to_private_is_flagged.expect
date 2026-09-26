@@ -1,2 +1,2 @@
-3:52-3:58 property.onlyWritten L4 Child | private property Child::$x is never read, only written
-3:52-3:58 property.visibility L0 Child | Child::$x overriding protected property Base::$x must not reduce visibility
+3:52-3:58 property.onlyWritten L4 | private property Child::$x is never read, only written
+3:52-3:58 property.visibility L0 | Child::$x overriding protected property Base::$x must not reduce visibility

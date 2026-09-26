@@ -1,2 +1,2 @@
-4:17-4:45 interface.duplicateMethod L0 I | Cannot redeclare method I::baz().
+4:17-4:45 interface.duplicateMethod L0 | Cannot redeclare method I::baz().
     non-ignorable

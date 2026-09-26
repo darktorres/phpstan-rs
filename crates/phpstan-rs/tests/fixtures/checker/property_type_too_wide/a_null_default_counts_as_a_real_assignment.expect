@@ -1,1 +1,1 @@
-3:33-3:42 property.onlyWritten L4 C | private property C::$x is never read, only written
+3:33-3:42 property.onlyWritten L4 | private property C::$x is never read, only written

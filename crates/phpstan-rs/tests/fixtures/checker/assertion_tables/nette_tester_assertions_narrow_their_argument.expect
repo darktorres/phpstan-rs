@@ -1,2 +1,2 @@
-10:21-10:23 phpstanRs.assertType L0 f | assertType() mismatch: expected type "?", actual type "string"
-12:21-12:23 phpstanRs.assertType L0 f | assertType() mismatch: expected type "?", actual type "true"
+10:21-10:23 phpstanRs.assertType L0 | assertType() mismatch: expected type "?", actual type "string"
+12:21-12:23 phpstanRs.assertType L0 | assertType() mismatch: expected type "?", actual type "true"

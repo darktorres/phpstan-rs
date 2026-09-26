@@ -1,1 +1,1 @@
-7:29-7:31 argument.type L5 test | Parameter #1 $s of function needsString expects string, 1 given.
+7:29-7:31 argument.type L5 | Parameter #1 $s of function needsString expects string, 1 given.

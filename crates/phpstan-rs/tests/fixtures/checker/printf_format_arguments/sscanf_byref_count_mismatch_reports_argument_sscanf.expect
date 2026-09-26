@@ -1,2 +1,2 @@
-3:13-3:39 argument.sscanf L0 <main> | Call to sscanf contains 2 placeholders, 1 value given.
-3:13-3:39 argument.sscanf L0 <main> | Call to sscanf() contains 2 placeholder(s), 1 value(s) given.
+3:13-3:39 argument.sscanf L0 | Call to sscanf contains 2 placeholders, 1 value given.
+3:13-3:39 argument.sscanf L0 | Call to sscanf() contains 2 placeholder(s), 1 value(s) given.

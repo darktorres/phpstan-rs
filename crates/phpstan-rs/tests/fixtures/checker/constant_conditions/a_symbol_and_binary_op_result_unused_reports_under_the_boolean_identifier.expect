@@ -1,2 +1,2 @@
-1:7-1:49 missingType.return L6 f | Function f() has no return type specified.
-1:38-1:46 booleanAnd.resultUnused L4 f | Unused result of "&&" operator.
+1:7-1:49 missingType.return L6 | Function f() has no return type specified.
+1:38-1:46 booleanAnd.resultUnused L4 | Unused result of "&&" operator.

@@ -1,2 +1,2 @@
-4:49-4:83 missingType.iterableValue L6 ExposesPageData2::exposedPageData | Method ExposesPageData2::exposedPageData() return type has no value type specified in iterable type array.
+4:49-4:83 missingType.iterableValue L6 | Method ExposesPageData2::exposedPageData() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

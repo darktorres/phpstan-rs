@@ -84,8 +84,8 @@ fn stmt_contains_parent_call(stmt: &Stmt, method: &str) -> bool {
             .any(|child| stmt_contains_parent_call(child, method))
 }
 
-fn diagnostic(label: &str, message: String, span: Span, level: u8, id: &str) -> DiagnosticBuilder {
-    DiagnosticBuilder::new(label.to_string(), message, span, level, id)
+fn diagnostic(message: String, span: Span, level: u8, id: &str) -> DiagnosticBuilder {
+    DiagnosticBuilder::new(message, span, level, id)
 }
 
 impl Project {
@@ -170,7 +170,6 @@ impl Project {
         {
             out.push(
                 diagnostic(
-                    fqn,
                     format!("Class {fqn} is not final."),
                     c.name_span,
                     0,
@@ -196,7 +195,6 @@ impl Project {
                 if m.visibility == Visibility::Protected && !inherited(&m.function.name, true) {
                     out.push(
                         diagnostic(
-                            fqn,
                             format!(
                                 "Method {fqn}::{}() is protected, but since the containing class is final, it can be private.",
                                 m.function.name
@@ -213,7 +211,6 @@ impl Project {
                 if p.visibility == Visibility::Protected && !inherited(&p.name, false) {
                     out.push(
                         diagnostic(
-                            fqn,
                             format!(
                                 "Property {fqn}::${} is protected, but since the containing class is final, it can be private.",
                                 p.name
@@ -234,7 +231,6 @@ impl Project {
                 if k.visibility == Visibility::Protected && !from_parent {
                     out.push(
                         diagnostic(
-                            fqn,
                             format!(
                                 "Constant {fqn}::{} is protected, but since the containing class is final, it can be private.",
                                 k.name
@@ -261,7 +257,6 @@ impl Project {
                 }
                 out.push(
                     diagnostic(
-                        fqn,
                         format!(
                             "Method {fqn}::{name}() is not final, but since the containing class is abstract, it should be."
                         ),
@@ -310,7 +305,7 @@ impl Project {
                 let found = contains_parent_call(body, &f.name);
                 let label = format!("{fqn}::{}", f.name);
                 let mut report = |message: String, id: &str, fix: Option<(Span, String)>| {
-                    let mut builder = diagnostic(&label, message, f.name_span, 2, id);
+                    let mut builder = diagnostic(message, f.name_span, 2, id);
                     if let Some((span, text)) = fix {
                         builder = builder.fix(span, text, format!("Call {call}"));
                     }

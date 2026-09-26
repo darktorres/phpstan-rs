@@ -1,6 +1,6 @@
-5:13-5:55 classImplements.class L0 A1 | class A1 cannot implement class ImplC
-5:13-5:55 classImplements.enum L0 A1 | class A1 cannot implement enum ImplE
-5:13-5:55 classImplements.trait L0 A1 | class A1 cannot implement trait ImplT
-6:13-6:54 enumImplements.class L0 E1 | enum E1 cannot implement class ImplC
-6:13-6:54 enumImplements.enum L0 E1 | enum E1 cannot implement enum ImplE
-6:13-6:54 enumImplements.trait L0 E1 | enum E1 cannot implement trait ImplT
+5:13-5:55 classImplements.class L0 | class A1 cannot implement class ImplC
+5:13-5:55 classImplements.enum L0 | class A1 cannot implement enum ImplE
+5:13-5:55 classImplements.trait L0 | class A1 cannot implement trait ImplT
+6:13-6:54 enumImplements.class L0 | enum E1 cannot implement class ImplC
+6:13-6:54 enumImplements.enum L0 | enum E1 cannot implement enum ImplE
+6:13-6:54 enumImplements.trait L0 | enum E1 cannot implement trait ImplT

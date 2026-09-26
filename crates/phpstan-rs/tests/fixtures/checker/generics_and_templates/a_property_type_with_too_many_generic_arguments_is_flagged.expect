@@ -1,1 +1,1 @@
-6:24-6:26 generics.moreTypes L6 Holder | Generic type Collection<int, string> in PHPDoc tag @var for property Holder::$c specifies 2 template types, but class Collection supports only 1: T
+6:24-6:26 generics.moreTypes L6 | Generic type Collection<int, string> in PHPDoc tag @var for property Holder::$c specifies 2 template types, but class Collection supports only 1: T

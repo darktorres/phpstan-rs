@@ -1,1 +1,1 @@
-3:13-5:14 generics.lessTypes L6 f | Generic type Generator<int, string, bool> in PHPDoc tag @return does not specify all template types of class Generator: TKey, TYield, TSend, TReturn
+3:13-5:14 generics.lessTypes L6 | Generic type Generator<int, string, bool> in PHPDoc tag @return does not specify all template types of class Generator: TKey, TYield, TSend, TReturn

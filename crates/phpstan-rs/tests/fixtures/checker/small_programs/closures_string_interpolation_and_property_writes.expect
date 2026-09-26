@@ -1,2 +1,2 @@
-26:5-26:21 match.alwaysFalse L4 <main> | Match arm comparison between true and false is always false.
-27:5-27:22 match.alwaysTrue L4 <main> | Match arm comparison between true and true is always true.
+26:5-26:21 match.alwaysFalse L4 | Match arm comparison between true and false is always false.
+27:5-27:22 match.alwaysTrue L4 | Match arm comparison between true and true is always true.

@@ -1,1 +1,1 @@
-5:32-5:45 variable.undefined L0 UndefinedInHook::$u (get hook) | undefined variable $undefinedVar
+5:32-5:45 variable.undefined L0 | undefined variable $undefinedVar

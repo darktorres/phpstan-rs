@@ -1,1 +1,1 @@
-13:28-13:48 return.type L3 Foo::testFilesFile | return type mismatch: expected string, got string|null
+13:28-13:48 return.type L3 | return type mismatch: expected string, got string|null

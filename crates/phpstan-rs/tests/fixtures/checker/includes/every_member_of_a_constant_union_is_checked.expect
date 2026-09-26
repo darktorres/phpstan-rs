@@ -1,1 +1,1 @@
-main.php:4:5-4:38 require.fileNotFound L0 load | Path in require() "<fixture>/lib/gone.php" is not a file or it does not exist.
+main.php:4:5-4:38 require.fileNotFound L0 | Path in require() "<fixture>/lib/gone.php" is not a file or it does not exist.

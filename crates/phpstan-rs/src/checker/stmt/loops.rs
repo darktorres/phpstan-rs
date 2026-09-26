@@ -116,7 +116,6 @@ impl<'a> Checker<'a> {
                     &cond_ty,
                     "a while condition",
                     "while.condNotBoolean",
-                    label,
                 );
                 // `WhileLoopAlwaysFalseConditionRule`/
                 // `WhileLoopAlwaysTrueConditionRule`: real
@@ -137,7 +136,6 @@ impl<'a> Checker<'a> {
                 // to also flag the loop).
                 if this.inferred_constant_condition(cond, pass_locals) == Some(false) {
                     this.report(
-                        label.to_string(),
                         "While loop condition is always false.".to_string(),
                         cond.span,
                         4,
@@ -147,7 +145,6 @@ impl<'a> Checker<'a> {
                     && !skip_always_true
                 {
                     this.report(
-                        label.to_string(),
                         "While loop condition is always true.".to_string(),
                         cond.span,
                         4,
@@ -282,7 +279,6 @@ impl<'a> Checker<'a> {
             &cond_ty,
             "a do-while condition",
             "doWhile.condNotBoolean",
-            label,
         );
         self.loop_depth -= 1;
         // `DoWhileLoopConstantConditionRule`: real inferred-type
@@ -297,7 +293,6 @@ impl<'a> Checker<'a> {
         if self.inferred_constant_condition(cond, locals) == Some(false) {
             if !stmt_contains_break(body) {
                 self.report(
-                    label.to_string(),
                     "Do-while loop condition is always false.".to_string(),
                     cond.span,
                     4,
@@ -310,7 +305,6 @@ impl<'a> Checker<'a> {
             && !body_contains_yield(std::slice::from_ref(body))
         {
             self.report(
-                label.to_string(),
                 "Do-while loop condition is always true.".to_string(),
                 cond.span,
                 4,
@@ -595,7 +589,6 @@ impl<'a> Checker<'a> {
         // earlier convergence passes can still see a not-yet-grown array.
         if self.loop_depth == 0 && type_is_always_empty_array(&subject_ty) {
             self.report(
-                label.to_string(),
                 "Empty array passed to foreach.".to_string(),
                 subject.span,
                 4,
@@ -648,9 +641,7 @@ impl<'a> Checker<'a> {
                     // `check_dim_fetch_key_type`'s "report and continue"
                     // precedent.
                     if self.type_confirmed_not_iterable(&subject_ty) {
-                        self.report(
-                            label.to_string(),
-                            format!(
+                        self.report(format!(
                                 "Argument of an invalid type {subject_ty} supplied for foreach, only iterables are supported."
                             ),
                             subject.span,
@@ -772,8 +763,8 @@ impl<'a> Checker<'a> {
                 // value variable that happens to name one of this
                 // function's own by-ref parameters (or destructures one
                 // out) is checked against its declared type here too.
-                this.check_param_out_assignment(value, &element_ty, label);
-                this.check_by_ref_destructuring(value, &element_ty, label);
+                this.check_param_out_assignment(value, &element_ty);
+                this.check_by_ref_destructuring(value, &element_ty);
                 this.bind_assignment_target(value, element_ty.clone(), pass_locals);
                 // Eager propagation: `value` was just bound from
                 // `subject`'s own (dynamic-keyed) element - if `subject`

@@ -1,1 +1,1 @@
-7:18-9:14 return.internalClass L0 <main> (closure) | Return type of function <main> (closure)() has typehint with internal class Vendor\\Internal\\Foo.
+7:18-9:14 return.internalClass L0 | Return type of function <main> (closure)() has typehint with internal class Vendor\\Internal\\Foo.

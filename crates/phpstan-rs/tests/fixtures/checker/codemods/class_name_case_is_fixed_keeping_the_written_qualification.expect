@@ -1,4 +1,4 @@
-6:9-6:25 class.nameCase L0 f | Class referenced with incorrect case: App\\models\\usermodel.
+6:9-6:25 class.nameCase L0 | Class referenced with incorrect case: App\\models\\usermodel.
     fix: Use Models\\UserModel => "Models\\UserModel"
-7:9-7:30 class.nameCase L0 f | Class referenced with incorrect case: APP\\Models\\UserModel.
+7:9-7:30 class.nameCase L0 | Class referenced with incorrect case: APP\\Models\\UserModel.
     fix: Use \\App\\Models\\UserModel => "\\App\\Models\\UserModel"

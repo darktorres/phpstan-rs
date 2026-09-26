@@ -454,7 +454,7 @@ impl Project {
     ) -> Vec<Diagnostic> {
         let mut out = Vec::new();
         let report = |out: &mut Vec<Diagnostic>, span: Span, message: String, id: &str| {
-            out.push(DiagnosticBuilder::new(fqn.to_string(), message, span, 0, id).build());
+            out.push(DiagnosticBuilder::new(message, span, 0, id).build());
         };
         for dep in deps {
             if ctx.matches_any(&rule.should_not_depend_on, &dep.target) {

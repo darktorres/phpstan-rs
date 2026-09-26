@@ -344,7 +344,6 @@ impl<'a> Checker<'a> {
         name: &str,
         args: &[Arg],
         locals: &Locals,
-        label: &str,
         span: syntax::token::Span,
     ) {
         let Some(function) = format_function(name) else {
@@ -352,15 +351,15 @@ impl<'a> Checker<'a> {
         };
         match function.kind {
             FormatKind::PrintfArray => {
-                self.check_format_array_count(name, &function, args, locals, label, span);
-                self.check_format_values_array_type(name, &function, args, locals, label);
+                self.check_format_array_count(name, &function, args, locals, span);
+                self.check_format_values_array_type(name, &function, args, locals);
             }
             FormatKind::Printf | FormatKind::Scanf => {
-                self.check_format_count(name, &function, args, locals, label, span);
+                self.check_format_count(name, &function, args, locals, span);
             }
         }
         if function.kind == FormatKind::Printf {
-            self.check_format_value_types(name, &function, args, locals, label, span);
+            self.check_format_value_types(name, &function, args, locals, span);
         }
     }
 
@@ -372,7 +371,6 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        label: &str,
         span: syntax::token::Span,
     ) -> Option<Vec<usize>> {
         let format_ty = self.infer_expr(&args.get(function.format)?.value, locals);
@@ -386,7 +384,6 @@ impl<'a> Checker<'a> {
             };
             let Some(count) = count else {
                 self.report(
-                    label.to_string(),
                     format!("Call to {name} contains an invalid placeholder."),
                     span,
                     0,
@@ -407,13 +404,12 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        label: &str,
         span: syntax::token::Span,
     ) {
         if args.iter().any(|a| a.spread) || args.len() < function.minimum {
             return;
         }
-        let Some(counts) = self.format_counts(name, function, args, locals, label, span) else {
+        let Some(counts) = self.format_counts(name, function, args, locals, span) else {
             return;
         };
         let placeholders = counts.into_iter().max().unwrap_or(0);
@@ -422,7 +418,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             count_message(name, Count::exact(placeholders), Count::exact(values)),
             span,
             0,
@@ -438,13 +433,12 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        label: &str,
         span: syntax::token::Span,
     ) {
         if args.len() < function.minimum {
             return;
         }
-        let Some(counts) = self.format_counts(name, function, args, locals, label, span) else {
+        let Some(counts) = self.format_counts(name, function, args, locals, span) else {
             return;
         };
         let placeholders = Count {
@@ -468,7 +462,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             count_message(name, placeholders, values),
             span,
             0,
@@ -485,7 +478,6 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        label: &str,
     ) {
         let position = function.format + 1;
         let Some(values) = args.get(position) else {
@@ -506,9 +498,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        self.report(
-            label.to_string(),
-            format!(
+        self.report(format!(
                 "Parameter #{} $values of function {name} expects array<bool|float|int|string|null>, {values_ty} given.",
                 position + 1
             ),
@@ -529,7 +519,6 @@ impl<'a> Checker<'a> {
         function: &FormatFunction,
         args: &[Arg],
         locals: &Locals,
-        label: &str,
         span: syntax::token::Span,
     ) {
         if args.iter().any(|a| a.spread) || args.len() < function.minimum {
@@ -547,9 +536,7 @@ impl<'a> Checker<'a> {
         for (i, arg) in args.iter().enumerate().skip(function.format + 1) {
             let arg_ty = self.infer_expr(&arg.value, locals);
             if !self.registry.rule_level_accepts(&allowed, &arg_ty).yes() {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Parameter #{} ...$values of function {name} expects bool|float|int|string|null, {arg_ty} given.",
                         i + 1
                     ),
@@ -577,9 +564,7 @@ impl<'a> Checker<'a> {
                     (Accepting::Float, false) => "castable to float",
                     (Accepting::String | Accepting::Mixed, false) => "castable to string",
                 };
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Parameter #{} of function {name} is expected to be {expected} by placeholder #{} ({}), {} given.",
                         i + 1,
                         placeholder.number,

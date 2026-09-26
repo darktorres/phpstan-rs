@@ -1,4 +1,4 @@
-5:24-5:32 missingType.iterableValue L6 f | Function f() has parameter $x with no value type specified in iterable type array.
+5:24-5:32 missingType.iterableValue L6 | Function f() has parameter $x with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-11:24-11:32 missingType.iterableValue L6 g | Function g() has parameter $x with no value type specified in iterable type array.
+11:24-11:32 missingType.iterableValue L6 | Function g() has parameter $x with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

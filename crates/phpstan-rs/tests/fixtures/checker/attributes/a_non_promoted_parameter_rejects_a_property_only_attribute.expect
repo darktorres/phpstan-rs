@@ -1,2 +1,2 @@
-6:17-6:50 missingType.return L6 C::f | Method C::f() has no return type specified.
-6:30-6:38 attribute.target L0 C::f | Attribute class PropOnly does not have the parameter target.
+6:17-6:50 missingType.return L6 | Method C::f() has no return type specified.
+6:30-6:38 attribute.target L0 | Attribute class PropOnly does not have the parameter target.

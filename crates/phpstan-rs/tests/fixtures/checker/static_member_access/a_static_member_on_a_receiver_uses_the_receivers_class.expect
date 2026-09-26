@@ -1,1 +1,1 @@
-11:10-11:21 classConstant.notFound L0 f | access to undefined constant Foo::MISSING
+11:10-11:21 classConstant.notFound L0 | access to undefined constant Foo::MISSING

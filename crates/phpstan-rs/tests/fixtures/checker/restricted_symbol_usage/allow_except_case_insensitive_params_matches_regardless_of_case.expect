@@ -1,5 +1,5 @@
-2:13-2:28 restrictedSymbol.function L0 <main> | Call to restricted function hash(): md5 is not a secure hash
-2:25-2:27 variable.undefined L0 <main> | undefined variable $s
-3:13-3:28 restrictedSymbol.function L0 <main> | Call to restricted function hash(): md5 is not a secure hash
-3:25-3:27 variable.undefined L0 <main> | undefined variable $s
-4:28-4:30 variable.undefined L0 <main> | undefined variable $s
+2:13-2:28 restrictedSymbol.function L0 | Call to restricted function hash(): md5 is not a secure hash
+2:25-2:27 variable.undefined L0 | undefined variable $s
+3:13-3:28 restrictedSymbol.function L0 | Call to restricted function hash(): md5 is not a secure hash
+3:25-3:27 variable.undefined L0 | undefined variable $s
+4:28-4:30 variable.undefined L0 | undefined variable $s

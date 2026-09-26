@@ -1,2 +1,2 @@
-3:17-5:18 missingType.return L6 f | Function f() has no return type specified.
-4:29-4:32 offsetAccess.nonOffsetAccessible L3 f | Cannot access offset on Plain.
+3:17-5:18 missingType.return L6 | Function f() has no return type specified.
+4:29-4:32 offsetAccess.nonOffsetAccessible L3 | Cannot access offset on Plain.

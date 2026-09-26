@@ -1,1 +1,1 @@
-5:21-5:85 throws.void L3 f | Function f() throws exception but the PHPDoc contains @throws void.
+5:21-5:85 throws.void L3 | Function f() throws exception but the PHPDoc contains @throws void.

@@ -1,1 +1,1 @@
-7:15-7:27 arguments.count L1 Foo | Attribute class MyAttr constructor invoked with 2 parameters, 1 required.
+7:15-7:27 arguments.count L1 | Attribute class MyAttr constructor invoked with 2 parameters, 1 required.

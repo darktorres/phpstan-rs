@@ -1,1 +1,1 @@
-3:24-3:28 parameter.trait L0 f | parameter $t of f() has invalid type T
+3:24-3:28 parameter.trait L0 | parameter $t of f() has invalid type T

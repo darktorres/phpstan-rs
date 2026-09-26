@@ -1,1 +1,1 @@
-6:30-6:37 argument.type L5 test | Parameter #1 $x of function needsTighter expects int<4, 39>, int<4, 40> given.
+6:30-6:37 argument.type L5 | Parameter #1 $x of function needsTighter expects int<4, 39>, int<4, 40> given.

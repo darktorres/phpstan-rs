@@ -1,1 +1,1 @@
-4:31-4:61 missingType.return L6 Db::query | Method Db::query() has no return type specified.
+4:31-4:61 missingType.return L6 | Method Db::query() has no return type specified.

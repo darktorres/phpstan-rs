@@ -1,14 +1,14 @@
-3:5-3:11 currentTime.time L0 f | Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-4:5-4:20 currentTime.time L0 f | Calling microtime() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-5:5-5:18 currentTime.defaultTimestamp L0 f | Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-7:5-7:24 currentTime.defaultTimestamp L0 f | Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-8:5-8:14 currentTime.defaultTimestamp L0 f | Calling getdate() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-10:5-10:14 currentTime.defaultTimestamp L0 f | Calling mktime() with fewer than 6 arguments takes the missing components from the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-11:5-11:24 currentTime.relative L0 f | Calling strtotime() with "+1 day" and no base timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-15:5-15:29 currentTime.relative L0 f | Instantiating DateTimeImmutable with no date reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-16:5-16:42 currentTime.relative L0 f | Instantiating DateTimeImmutable with "next monday" reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-18:5-18:27 currentTime.relative L0 f | Instantiating DateTime with "10:30" reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-19:5-19:18 currentTime.relative L0 f | Calling date_create() with no date reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
-20:5-20:64 currentTime.createFromFormat L0 f | createFromFormat() with format "Y-m-d" takes every field it doesn't parse from the current time; start the format with ! or end it with |.
-23:5-23:29 currentTime.requestTime L0 f | Reading $_SERVER['REQUEST_TIME'] depends on the current request's time; rely on an injected clock (PSR-20 ClockInterface) instead.
-23:5-23:29 expr.resultUnused L4 f | Expression "$_SERVER['REQUEST_TIME']" on a separate line does not do anything.
+3:5-3:11 currentTime.time L0 | Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+4:5-4:20 currentTime.time L0 | Calling microtime() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+5:5-5:18 currentTime.defaultTimestamp L0 | Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+7:5-7:24 currentTime.defaultTimestamp L0 | Calling date() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+8:5-8:14 currentTime.defaultTimestamp L0 | Calling getdate() without a timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+10:5-10:14 currentTime.defaultTimestamp L0 | Calling mktime() with fewer than 6 arguments takes the missing components from the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+11:5-11:24 currentTime.relative L0 | Calling strtotime() with "+1 day" and no base timestamp reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+15:5-15:29 currentTime.relative L0 | Instantiating DateTimeImmutable with no date reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+16:5-16:42 currentTime.relative L0 | Instantiating DateTimeImmutable with "next monday" reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+18:5-18:27 currentTime.relative L0 | Instantiating DateTime with "10:30" reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+19:5-19:18 currentTime.relative L0 | Calling date_create() with no date reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.
+20:5-20:64 currentTime.createFromFormat L0 | createFromFormat() with format "Y-m-d" takes every field it doesn't parse from the current time; start the format with ! or end it with |.
+23:5-23:29 currentTime.requestTime L0 | Reading $_SERVER['REQUEST_TIME'] depends on the current request's time; rely on an injected clock (PSR-20 ClockInterface) instead.
+23:5-23:29 expr.resultUnused L4 | Expression "$_SERVER['REQUEST_TIME']" on a separate line does not do anything.

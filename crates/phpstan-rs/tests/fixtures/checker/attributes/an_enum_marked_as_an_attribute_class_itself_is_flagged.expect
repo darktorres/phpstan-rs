@@ -1,1 +1,1 @@
-2:15-2:25 attribute.enum L0 Foo | Enum cannot be an Attribute class.
+2:15-2:25 attribute.enum L0 | Enum cannot be an Attribute class.

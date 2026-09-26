@@ -1,5 +1,5 @@
-2:13-2:62 missingType.return L6 waldo | Function waldo() has no return type specified.
-3:13-3:32 function.resultUnused L4 <main> | Call to function waldo() on a separate line has no effect.
-3:13-3:32 restrictedSymbol.function L0 <main> | Call to restricted function waldo(): no waldo
-4:13-4:25 function.resultUnused L4 <main> | Call to function waldo() on a separate line has no effect.
-5:13-5:20 function.resultUnused L4 <main> | Call to function waldo() on a separate line has no effect.
+2:13-2:62 missingType.return L6 | Function waldo() has no return type specified.
+3:13-3:32 function.resultUnused L4 | Call to function waldo() on a separate line has no effect.
+3:13-3:32 restrictedSymbol.function L0 | Call to restricted function waldo(): no waldo
+4:13-4:25 function.resultUnused L4 | Call to function waldo() on a separate line has no effect.
+5:13-5:20 function.resultUnused L4 | Call to function waldo() on a separate line has no effect.

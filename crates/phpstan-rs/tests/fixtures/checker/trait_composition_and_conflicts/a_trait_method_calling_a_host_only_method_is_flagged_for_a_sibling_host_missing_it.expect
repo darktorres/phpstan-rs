@@ -1,1 +1,1 @@
-3:58-3:71 method.notFound L0 Robot::greet | call to undefined method Robot::name()
+3:58-3:71 method.notFound L0 | call to undefined method Robot::name()

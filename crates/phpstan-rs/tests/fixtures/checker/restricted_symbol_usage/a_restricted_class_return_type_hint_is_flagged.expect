@@ -1,1 +1,1 @@
-3:27-3:33 restrictedSymbol.class L0 f | Return type references restricted class Banned: do not use Banned
+3:27-3:33 restrictedSymbol.class L0 | Return type references restricted class Banned: do not use Banned

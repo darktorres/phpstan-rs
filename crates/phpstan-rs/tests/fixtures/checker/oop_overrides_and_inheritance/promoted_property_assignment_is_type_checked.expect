@@ -1,1 +1,1 @@
-6:21-6:27 assign.propertyType L3 <main> | Point::$x expects int, 'nope' given
+6:21-6:27 assign.propertyType L3 | Point::$x expects int, 'nope' given

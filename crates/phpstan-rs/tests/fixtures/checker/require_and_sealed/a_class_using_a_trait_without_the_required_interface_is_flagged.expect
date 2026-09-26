@@ -1,1 +1,1 @@
-5:13-5:38 class.missingImplements L0 Bad | Trait Helper requires using class to implement Contract, but Bad does not.
+5:13-5:38 class.missingImplements L0 | Trait Helper requires using class to implement Contract, but Bad does not.

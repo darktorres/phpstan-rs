@@ -1,2 +1,2 @@
-5:45-5:50 parameter.defaultValue L2 Holder::make | Default value of the parameter #1 $x ('str') of anonymous function is incompatible with type int.
-6:67-6:68 parameter.defaultValue L2 Holder::make | Default value of the parameter #2 $flag (0) of arrow function is incompatible with type bool.
+5:45-5:50 parameter.defaultValue L2 | Default value of the parameter #1 $x ('str') of anonymous function is incompatible with type int.
+6:67-6:68 parameter.defaultValue L2 | Default value of the parameter #2 $flag (0) of arrow function is incompatible with type bool.

@@ -1,1 +1,1 @@
-3:27-3:29 isset.variable L0 test | Variable $x in isset() always exists and is not nullable.
+3:27-3:29 isset.variable L0 | Variable $x in isset() always exists and is not nullable.

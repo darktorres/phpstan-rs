@@ -1,2 +1,2 @@
-2:13-6:14 enum.serializable L0 Status | Enum Status cannot implement the Serializable interface.
+2:13-6:14 enum.serializable L0 | Enum Status cannot implement the Serializable interface.
     non-ignorable

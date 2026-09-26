@@ -1,1 +1,1 @@
-8:17-8:47 throws.shouldBeVoid L2 Child | Method Child::foo() should not throw RuntimeException because parent method Base::foo() has PHPDoc tag @throws void.
+8:17-8:47 throws.shouldBeVoid L2 | Method Child::foo() should not throw RuntimeException because parent method Base::foo() has PHPDoc tag @throws void.

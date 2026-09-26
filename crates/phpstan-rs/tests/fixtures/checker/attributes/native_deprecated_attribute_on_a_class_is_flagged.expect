@@ -1,2 +1,2 @@
-2:15-2:26 class.deprecatedAttribute L0 Foo | Attribute class Deprecated cannot be used with class Foo.
+2:15-2:26 class.deprecatedAttribute L0 | Attribute class Deprecated cannot be used with class Foo.
     non-ignorable

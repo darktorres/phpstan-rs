@@ -1,1 +1,1 @@
-4:13-4:22 function.deprecated L0 <main> | Call to deprecated function oldFunc().
+4:13-4:22 function.deprecated L0 | Call to deprecated function oldFunc().

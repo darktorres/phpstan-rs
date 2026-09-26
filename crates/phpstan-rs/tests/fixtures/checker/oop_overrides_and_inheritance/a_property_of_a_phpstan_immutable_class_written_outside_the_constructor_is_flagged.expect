@@ -1,1 +1,1 @@
-6:54-6:62 property.readOnlyByPhpDocAssignNotInConstructor L0 Point::setX | @readonly property Point::$x is assigned outside of the constructor.
+6:54-6:62 property.readOnlyByPhpDocAssignNotInConstructor L0 | @readonly property Point::$x is assigned outside of the constructor.

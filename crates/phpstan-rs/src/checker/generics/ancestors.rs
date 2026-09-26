@@ -364,7 +364,6 @@ impl<'a> Checker<'a> {
         for (node, ty) in &tag_types {
             let Type::Object(class, args) = ty else {
                 self.report(
-                    label.clone(),
                     format!("{} {ty}.", messages.incompatible),
                     span,
                     2,
@@ -374,7 +373,6 @@ impl<'a> Checker<'a> {
             };
             if args.is_empty() || class.starts_with("$$") {
                 self.report(
-                    label.clone(),
                     format!("{} {ty}.", messages.incompatible),
                     span,
                     2,
@@ -391,15 +389,9 @@ impl<'a> Checker<'a> {
                         } else {
                             format!("{prefix} {class} {rest} {listed}.")
                         };
-                        self.report(label.clone(), message, span, 2, "generics.wrongParent");
+                        self.report(message, span, 2, "generics.wrongParent");
                     }
-                    _ => self.report(
-                        label.clone(),
-                        messages.no_names.clone(),
-                        span,
-                        2,
-                        "generics.noParent",
-                    ),
+                    _ => self.report(messages.no_names.clone(), span, 2, "generics.noParent"),
                 }
                 continue;
             };
@@ -409,7 +401,6 @@ impl<'a> Checker<'a> {
             self.check_ancestor_generic_object(ty, &location, &label, span);
             if self.type_node_unresolvable(node, Some(fqn)) {
                 self.report(
-                    label.clone(),
                     messages.unresolvable.clone(),
                     span,
                     2,
@@ -425,7 +416,6 @@ impl<'a> Checker<'a> {
                 }
                 match self.registry.lookup_class(&name) {
                     None => self.report(
-                        label.clone(),
                         format!("{location} has invalid type {name}."),
                         span,
                         0,
@@ -433,7 +423,6 @@ impl<'a> Checker<'a> {
                     ),
                     Some((_, info)) if info.kind == ClassKind::Trait && name != *class => self
                         .report(
-                            label.clone(),
                             format!("{location} has invalid type {name}."),
                             span,
                             2,
@@ -452,9 +441,7 @@ impl<'a> Checker<'a> {
                 let mut violations = Vec::new();
                 self.collect_ancestor_variance(ty, Position::Static, fqn, &mut violations);
                 for (name, declared, position) in violations {
-                    self.report(
-                        label.clone(),
-                        format!(
+                    self.report(format!(
                             "Template type {name} is declared as {}, but occurs in {} position {context}.",
                             variance_word(declared),
                             position.describe()
@@ -467,9 +454,7 @@ impl<'a> Checker<'a> {
             }
             for arg in args {
                 if let Some(projection) = call_site_projection(arg) {
-                    self.report(
-                        label.clone(),
-                        format!(
+                    self.report(format!(
                             "Call-site variance annotation of {projection} in generic type {ty} in {location} is not allowed."
                         ),
                         span,
@@ -498,7 +483,6 @@ impl<'a> Checker<'a> {
                     list.push_str(&format!(" ({required}-{total} required)"));
                 }
                 self.report(
-                    label.clone(),
                     format!("{missing} {canonical} but does not specify its types: {list}"),
                     span,
                     6,

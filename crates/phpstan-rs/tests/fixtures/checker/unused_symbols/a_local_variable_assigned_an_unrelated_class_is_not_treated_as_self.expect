@@ -1,2 +1,2 @@
-10:25-10:51 method.unused L4 Foo | private method Foo::helper() is unused
+10:25-10:51 method.unused L4 | private method Foo::helper() is unused
     fix: Remove method helper() => ""

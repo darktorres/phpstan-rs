@@ -1,2 +1,2 @@
-3:24-3:48 class.prefixed L0 f | Referencing prefixed Rector class: RectorPrefix202508Foo.
+3:24-3:48 class.prefixed L0 | Referencing prefixed Rector class: RectorPrefix202508Foo.
     non-ignorable

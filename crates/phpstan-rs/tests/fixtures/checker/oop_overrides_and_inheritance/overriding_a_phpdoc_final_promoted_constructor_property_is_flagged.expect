@@ -1,1 +1,1 @@
-9:45-9:62 property.parentPropertyFinalByPhpDoc L0 Child | Property Child::$x overrides @final property Base::$x.
+9:45-9:62 property.parentPropertyFinalByPhpDoc L0 | Property Child::$x overrides @final property Base::$x.

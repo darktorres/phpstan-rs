@@ -1,2 +1,2 @@
-4:17-4:24 expr.resultUnused L4 test | Expression "$x > $f" on a separate line does not do anything.
-4:17-4:19 greater.invalid L2 test | Comparison operation ">" between float and Foo|null results in an error.
+4:17-4:24 expr.resultUnused L4 | Expression "$x > $f" on a separate line does not do anything.
+4:17-4:19 greater.invalid L2 | Comparison operation ">" between float and Foo|null results in an error.

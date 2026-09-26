@@ -1,1 +1,1 @@
-9:5-9:20 staticMethod.notFound L0 f | call to undefined static method Foo::nope()
+9:5-9:20 staticMethod.notFound L0 | call to undefined static method Foo::nope()

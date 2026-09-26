@@ -1,1 +1,1 @@
-5:13-9:14 throws.unusedType L2 f | Function f() has UnhandledMatchError in PHPDoc @throws tag but it's not thrown.
+5:13-9:14 throws.unusedType L2 | Function f() has UnhandledMatchError in PHPDoc @throws tag but it's not thrown.

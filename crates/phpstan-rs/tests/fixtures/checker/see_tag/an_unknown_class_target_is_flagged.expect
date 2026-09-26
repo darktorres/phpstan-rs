@@ -1,1 +1,1 @@
-3:22-3:23 phpDoc.seeTag L2 f | PHPDoc tag @see contains unknown class TotallyMadeUpClass
+3:22-3:23 phpDoc.seeTag L2 | PHPDoc tag @see contains unknown class TotallyMadeUpClass

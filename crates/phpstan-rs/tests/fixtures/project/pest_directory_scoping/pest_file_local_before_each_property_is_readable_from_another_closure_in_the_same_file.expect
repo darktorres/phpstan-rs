@@ -1,7 +1,7 @@
-tests/FooTest.php:2:13-2:46 missingType.return L6 beforeEach | Function beforeEach() has no return type specified.
-tests/FooTest.php:2:33-2:42 missingType.parameter L6 beforeEach | Function beforeEach() has parameter $callback with no type specified.
-tests/FooTest.php:3:13-3:52 missingType.return L6 it | Function it() has no return type specified.
-tests/FooTest.php:3:25-3:37 missingType.parameter L6 it | Function it() has parameter $description with no type specified.
-tests/FooTest.php:3:39-3:48 missingType.parameter L6 it | Function it() has parameter $callback with no type specified.
-tests/FooTest.php:4:13-4:65 function.resultUnused L4 <main> | Call to function beforeEach() on a separate line has no effect.
-tests/FooTest.php:5:13-5:65 function.resultUnused L4 <main> | Call to function it() on a separate line has no effect.
+tests/FooTest.php:2:13-2:46 missingType.return L6 | Function beforeEach() has no return type specified.
+tests/FooTest.php:2:33-2:42 missingType.parameter L6 | Function beforeEach() has parameter $callback with no type specified.
+tests/FooTest.php:3:13-3:52 missingType.return L6 | Function it() has no return type specified.
+tests/FooTest.php:3:25-3:37 missingType.parameter L6 | Function it() has parameter $description with no type specified.
+tests/FooTest.php:3:39-3:48 missingType.parameter L6 | Function it() has parameter $callback with no type specified.
+tests/FooTest.php:4:13-4:65 function.resultUnused L4 | Call to function beforeEach() on a separate line has no effect.
+tests/FooTest.php:5:13-5:65 function.resultUnused L4 | Call to function it() on a separate line has no effect.

@@ -1,2 +1,2 @@
-6:28-6:50 return.type L3 Suit::bad | return type mismatch: expected string, got int
-6:37-6:49 argument.type L5 Suit::bad | Parameter #1 $x of function needsInt expects int, 'not an int' given.
+6:28-6:50 return.type L3 | return type mismatch: expected string, got int
+6:37-6:49 argument.type L5 | Parameter #1 $x of function needsInt expects int, 'not an int' given.

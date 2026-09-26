@@ -282,7 +282,6 @@ impl<'a> Checker<'a> {
         path_expr: &Expr,
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         if self.current_file.is_none() {
             return;
@@ -298,7 +297,6 @@ impl<'a> Checker<'a> {
                 continue;
             }
             self.report(
-                label.to_string(),
                 format!("Path in {construct}() \"{path}\" is not a file or it does not exist."),
                 span,
                 0,

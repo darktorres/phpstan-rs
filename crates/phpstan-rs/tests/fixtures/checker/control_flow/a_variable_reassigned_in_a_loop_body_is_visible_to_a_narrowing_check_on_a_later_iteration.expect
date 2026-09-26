@@ -1,2 +1,2 @@
-5:13-13:14 missingType.return L6 f | Function f() has no return type specified.
-9:25-9:44 method.notFound L0 f | call to undefined method Foo::totallyMadeUp()
+5:13-13:14 missingType.return L6 | Function f() has no return type specified.
+9:25-9:44 method.notFound L0 | call to undefined method Foo::totallyMadeUp()

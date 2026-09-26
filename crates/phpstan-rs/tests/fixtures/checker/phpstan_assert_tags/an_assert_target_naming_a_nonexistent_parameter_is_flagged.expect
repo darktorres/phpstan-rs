@@ -1,2 +1,2 @@
-3:13-3:36 parameter.notFound L0 f | Assert references unknown parameter $notAnActualParam.
-3:24-3:26 missingType.parameter L6 f | Function f() has parameter $x with no type specified.
+3:13-3:36 parameter.notFound L0 | Assert references unknown parameter $notAnActualParam.
+3:24-3:26 missingType.parameter L6 | Function f() has parameter $x with no type specified.

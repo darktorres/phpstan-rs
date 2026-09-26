@@ -1,4 +1,4 @@
-tests/Unit/FooTest.php:1:7-1:46 missingType.return L6 it | Function it() has no return type specified.
-tests/Unit/FooTest.php:1:19-1:31 missingType.parameter L6 it | Function it() has parameter $description with no type specified.
-tests/Unit/FooTest.php:1:33-1:42 missingType.parameter L6 it | Function it() has parameter $callback with no type specified.
-tests/Unit/FooTest.php:1:47-1:106 function.resultUnused L4 <main> | Call to function it() on a separate line has no effect.
+tests/Unit/FooTest.php:1:7-1:46 missingType.return L6 | Function it() has no return type specified.
+tests/Unit/FooTest.php:1:19-1:31 missingType.parameter L6 | Function it() has parameter $description with no type specified.
+tests/Unit/FooTest.php:1:33-1:42 missingType.parameter L6 | Function it() has parameter $callback with no type specified.
+tests/Unit/FooTest.php:1:47-1:106 function.resultUnused L4 | Call to function it() on a separate line has no effect.

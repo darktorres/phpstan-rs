@@ -411,12 +411,11 @@ impl<'a> Checker<'a> {
     fn report_restricted(
         &mut self,
         entry: &RestrictedSymbolEntry,
-        label: &str,
         message: String,
         span: Span,
         identifier: &'static str,
     ) {
-        self.report_restricted_with_params_gate(entry, label, message, span, identifier, None);
+        self.report_restricted_with_params_gate(entry, message, span, identifier, None);
     }
 
     /// `report_restricted`, with `params_gate` - the call site's
@@ -427,7 +426,6 @@ impl<'a> Checker<'a> {
     fn report_restricted_with_params_gate(
         &mut self,
         entry: &RestrictedSymbolEntry,
-        label: &str,
         message: String,
         span: Span,
         identifier: &'static str,
@@ -442,13 +440,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        self.report_builder(DiagnosticBuilder::new(
-            label.to_string(),
-            message,
-            span,
-            0,
-            identifier,
-        ));
+        self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier));
     }
 
     /// The checked file's path as path-scoped config spells it: relative
@@ -680,7 +672,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         if self.registry.restricted_symbols.is_empty() {
             return;
@@ -701,7 +692,6 @@ impl<'a> Checker<'a> {
         let entry = entry.clone();
         self.report_restricted_with_params_gate(
             &entry,
-            label,
             format!("Call to restricted function {bare}(): {}", entry.message),
             span,
             "restrictedSymbol.function",
@@ -718,7 +708,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         if self.registry.restricted_symbols.is_empty() {
             return;
@@ -749,7 +738,6 @@ impl<'a> Checker<'a> {
         };
         self.report_restricted_with_params_gate(
             &entry,
-            label,
             format!(
                 "Call to restricted {static_word}method {owner}::{method}(): {}",
                 entry.message
@@ -766,7 +754,6 @@ impl<'a> Checker<'a> {
         prop: &str,
         is_static: bool,
         span: Span,
-        label: &str,
     ) {
         if self.registry.restricted_symbols.is_empty() {
             return;
@@ -788,7 +775,6 @@ impl<'a> Checker<'a> {
         };
         self.report_restricted(
             &entry,
-            label,
             format!(
                 "Access to restricted {static_word}property {owner}::${prop}: {}",
                 entry.message
@@ -803,7 +789,6 @@ impl<'a> Checker<'a> {
         owner: &str,
         const_name: &str,
         span: Span,
-        label: &str,
     ) {
         if self.registry.restricted_symbols.is_empty() {
             return;
@@ -818,7 +803,6 @@ impl<'a> Checker<'a> {
         let entry = entry.clone();
         self.report_restricted(
             &entry,
-            label,
             format!(
                 "Access to restricted constant {owner}::{const_name}: {}",
                 entry.message
@@ -838,7 +822,6 @@ impl<'a> Checker<'a> {
         class: &str,
         verb_phrase: &str,
         span: Span,
-        label: &str,
         location: ClassUsageLocation,
     ) {
         if self.registry.restricted_symbols.is_empty() {
@@ -859,7 +842,6 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
         self.report_restricted(
             &entry,
-            label,
             format!(
                 "{verb_phrase} restricted {} {class}: {}",
                 type_word.to_lowercase(),
@@ -898,7 +880,6 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
         self.report_restricted(
             &entry,
-            "<main>",
             format!(
                 "Importing restricted {} {class}: {}",
                 type_word.to_lowercase(),
@@ -931,7 +912,6 @@ impl<'a> Checker<'a> {
                 parent,
                 &format!("{fqn} extends"),
                 span,
-                fqn,
                 ClassUsageLocation::Other,
             );
         }
@@ -940,7 +920,6 @@ impl<'a> Checker<'a> {
                 iface,
                 &format!("{fqn} implements"),
                 span,
-                fqn,
                 ClassUsageLocation::Other,
             );
         }
@@ -953,14 +932,12 @@ impl<'a> Checker<'a> {
         &mut self,
         f: &FunctionDecl,
         class_name: Option<&str>,
-        label: &str,
     ) {
         self.check_restricted_param_and_return_types_raw(
             &f.params,
             f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
             f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
             class_name,
-            label,
         );
     }
 
@@ -979,7 +956,6 @@ impl<'a> Checker<'a> {
         return_type: Option<&str>,
         return_type_fallback_span: Span,
         class_name: Option<&str>,
-        label: &str,
     ) {
         if self.registry.restricted_symbols.is_empty() {
             return;
@@ -998,7 +974,6 @@ impl<'a> Checker<'a> {
                     &class,
                     &format!("Parameter ${} references", p.name),
                     p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.name_span),
-                    label,
                     ClassUsageLocation::ParamType,
                 );
             }
@@ -1016,7 +991,6 @@ impl<'a> Checker<'a> {
                     &class,
                     "Return type references",
                     return_type_fallback_span,
-                    label,
                     ClassUsageLocation::ReturnType,
                 );
             }

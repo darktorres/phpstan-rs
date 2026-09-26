@@ -1,1 +1,1 @@
-2:13-2:39 function.notFound L0 <main> | call to undefined function totallyUndefinedFunction()
+2:13-2:39 function.notFound L0 | call to undefined function totallyUndefinedFunction()

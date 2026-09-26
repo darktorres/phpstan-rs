@@ -1,1 +1,1 @@
-4:35-4:46 argument.type L5 f | Parameter #1 $string of function strtoupper expects string, string|false given.
+4:35-4:46 argument.type L5 | Parameter #1 $string of function strtoupper expects string, string|false given.

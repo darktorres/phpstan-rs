@@ -1,1 +1,1 @@
-7:17-7:34 method.deprecated L0 f | Call to deprecated method oldMethod() of class Foo.
+7:17-7:34 method.deprecated L0 | Call to deprecated method oldMethod() of class Foo.

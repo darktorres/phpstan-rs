@@ -236,17 +236,17 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         let ty = self.check_expr_impl(e, locals, label);
         if !self.external_rules.is_empty() {
-            self.dispatch_expr_rules(e, locals, label, &ty);
+            self.dispatch_expr_rules(e, locals, &ty);
         }
         ty
     }
 
-    fn dispatch_expr_rules(&mut self, e: &Expr, locals: &Locals, label: &str, ty: &Type) {
+    fn dispatch_expr_rules(&mut self, e: &Expr, locals: &Locals, ty: &Type) {
         let rules = self.external_rules;
         let mut found = Vec::new();
         for rule in rules {
             if rule.wants_expr(&e.kind) {
-                let scope = crate::rule::Scope::new(self, locals, label);
+                let scope = crate::rule::Scope::new(self, locals);
                 found.extend(rule.check_expr(&scope, e, ty));
             }
         }
@@ -269,18 +269,18 @@ impl<'a> Checker<'a> {
             || self.registry.check_enum_exhaustiveness
             || self.registry.check_identity_vs_equals
         {
-            self.check_strict_expression_idioms(e, locals, label);
+            self.check_strict_expression_idioms(e, locals);
         }
         if self.registry.check_magic_numbers {
-            self.check_magic_numbers_expression(e, label);
+            self.check_magic_numbers_expression(e);
         }
         if self.registry.check_current_time_dependence {
-            self.check_current_time_expression(e, locals, label);
+            self.check_current_time_expression(e, locals);
         }
         if (self.registry.check_psr3_logging || self.registry.check_psr3_exception_context)
             && matches!(e.kind, ExprKind::MethodCall(..) | ExprKind::StaticCall(..))
         {
-            self.check_psr3_call(e, locals, label);
+            self.check_psr3_call(e, locals);
         }
         if self.registry.check_illegal_constructor_calls
             || self.registry.check_dynamic_static_calls
@@ -289,10 +289,10 @@ impl<'a> Checker<'a> {
             || self.registry.check_mixed_type_operands
             || self.registry.check_implicit_array_creation
         {
-            self.check_strict_rules_expression(e, locals, label);
+            self.check_strict_rules_expression(e, locals);
         }
         if !is_bare_statement && let ExprKind::Match { arms, default, .. } = &e.kind {
-            self.check_void_match_usage(arms, default.as_deref(), locals, e.span, label);
+            self.check_void_match_usage(arms, default.as_deref(), locals, e.span);
         }
         match &e.kind {
             ExprKind::Call(callee, args) => {
@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
                     && let Some(kind) = crate::checker::includes::include_kind(name)
                     && let [arg] = args.as_slice()
                 {
-                    self.check_include_path(kind, &arg.value, locals, e.span, label);
+                    self.check_include_path(kind, &arg.value, locals, e.span);
                 }
                 // `unset($x)` genuinely removes `$x` from scope in real
                 // PHP - a real bug if it's used afterward. Checked before
@@ -344,7 +344,7 @@ impl<'a> Checker<'a> {
                 {
                     let actual = self.infer_expr(&actual_arg.value, locals).to_string();
                     if *actual != **expected {
-                        self.report(label.to_string(), format!(
+                        self.report(format!(
                                 "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
                             ), actual_arg.value.span, 0, "phpstanRs.assertType");
                     }
@@ -385,8 +385,8 @@ impl<'a> Checker<'a> {
                     && let [arg] = args.as_slice()
                 {
                     let arg_ty = self.check_expr(&arg.value, locals, label);
-                    self.check_print_validity(&arg_ty, arg.value.span, label);
-                    self.check_implicit_tostring_usage(&arg_ty, arg.value.span, label);
+                    self.check_print_validity(&arg_ty, arg.value.span);
+                    self.check_implicit_tostring_usage(&arg_ty, arg.value.span);
                     return Type::IntLiteral(1);
                 }
                 // Resolved once up front (namespace/`use`-import rules
@@ -429,7 +429,6 @@ impl<'a> Checker<'a> {
                     && canonical != resolved.as_ref()
                 {
                     let mut builder = DiagnosticBuilder::new(
-                        label.to_string(),
                         format!("Function {canonical} used with incorrect case: {resolved}."),
                         callee.span,
                         0,
@@ -612,7 +611,6 @@ impl<'a> Checker<'a> {
                         let spread_ty = self.infer_expr(&a.value, locals);
                         if self.type_confirmed_not_iterable(&spread_ty) {
                             self.report(
-                                label.to_string(),
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
                                 3,
@@ -647,12 +645,7 @@ impl<'a> Checker<'a> {
                         if self.registry.check_risky_tests
                             && let Some(name) = pest_call_name
                         {
-                            self.check_pest_risky_test(
-                                name,
-                                unwrap_grouping(&a.value),
-                                e.span,
-                                label,
-                            );
+                            self.check_pest_risky_test(name, unwrap_grouping(&a.value), e.span);
                         }
                     } else if is_existence_probe {
                         self.check_expr_quiet_root(&a.value, locals, label);
@@ -662,7 +655,6 @@ impl<'a> Checker<'a> {
                             self.check_pointless_null_probe(
                                 &a.value,
                                 locals,
-                                label,
                                 identifier_prefix,
                                 operator_description,
                                 verdict_fn,
@@ -670,7 +662,6 @@ impl<'a> Checker<'a> {
                             self.check_pointless_offset_or_property_probe(
                                 &a.value,
                                 locals,
-                                label,
                                 identifier_prefix,
                                 operator_description,
                                 verdict_fn,
@@ -764,7 +755,6 @@ impl<'a> Checker<'a> {
                     locals,
                     is_exempt_last_condition,
                     e.span,
-                    label,
                 );
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
@@ -777,47 +767,40 @@ impl<'a> Checker<'a> {
                             .to_ascii_lowercase();
                         let dynamic_throw = self.dynamic_function_throw_type(&bare, args, locals);
                         self.record_call_throw_point(dynamic_throw, Some(sig));
-                        self.check_internal_function_call(name, sig, e.span, label);
-                        self.check_restricted_function_call(name, args, locals, e.span, label);
-                        self.check_deprecated_function_call(name, sig, e.span, label);
+                        self.check_internal_function_call(name, sig, e.span);
+                        self.check_restricted_function_call(name, args, locals, e.span);
+                        self.check_deprecated_function_call(name, sig, e.span);
                         if self.registry.check_current_time_dependence {
                             self.check_current_time_call(
                                 &name.to_ascii_lowercase(),
                                 args,
                                 locals,
                                 e.span,
-                                label,
                             );
                         }
                         self.record_function_usage_token(name, sig, callee.span);
                         match name.as_ref() {
                             "array_filter" => {
-                                self.check_array_filter_no_op(args, locals, label, e.span);
+                                self.check_array_filter_no_op(args, locals, e.span);
                                 if self.registry.check_strict_array_filter {
-                                    self.check_strict_array_filter(
-                                        sig, args, locals, e.span, label,
-                                    );
+                                    self.check_strict_array_filter(sig, args, locals, e.span);
                                 }
                             }
-                            "array_values" => {
-                                self.check_array_values_no_op(args, locals, label, e.span)
-                            }
+                            "array_values" => self.check_array_values_no_op(args, locals, e.span),
                             "ini_get" | "ini_set" | "ini_alter" | "ini_restore" | "get_cfg_var" => {
-                                self.check_ini_directive_call(name, args, locals, label)
+                                self.check_ini_directive_call(name, args, locals)
                             }
                             "in_array" | "array_search" | "array_keys" | "base64_decode"
                             | "iterator_to_array"
                                 if self.registry.check_strict_function_calls =>
                             {
-                                self.check_strict_function_call(
-                                    name, sig, args, locals, e.span, label,
-                                )
+                                self.check_strict_function_call(name, sig, args, locals, e.span)
                             }
                             "in_array" | "array_search" | "array_keys"
                                 if self.registry.check_loose_haystack_comparison =>
                             {
                                 self.check_loose_haystack_comparison(
-                                    name, sig, args, locals, e.span, label,
+                                    name, sig, args, locals, e.span,
                                 )
                             }
                             _ => {}
@@ -838,23 +821,19 @@ impl<'a> Checker<'a> {
                             sig,
                             args,
                             locals,
-                            label,
                             defining_class: None,
                             is_builtin: self.registry.is_builtin_function(name),
                             span: e.span,
                         });
-                        self.check_castable_array_arguments(
-                            name, sig, args, &resolved, locals, label,
-                        );
-                        self.check_impossible_haystack_values(name, args, locals, e.span, label);
+                        self.check_castable_array_arguments(name, sig, args, &resolved, locals);
+                        self.check_impossible_haystack_values(name, args, locals, e.span);
                         if name.eq_ignore_ascii_case("define") {
-                            self.check_define_value(args, locals, e.span, label);
+                            self.check_define_value(args, locals, e.span);
                         }
                         self.check_format_string_call(
                             &name.to_ascii_lowercase(),
                             args,
                             locals,
-                            label,
                             e.span,
                         );
                         // Real PHP resolves `define` case-insensitively
@@ -867,7 +846,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or(name)
                             .eq_ignore_ascii_case("define")
                         {
-                            self.check_define_third_argument(args, e.span, label);
+                            self.check_define_third_argument(args, e.span);
                         }
                         if name
                             .rsplit('\\')
@@ -875,7 +854,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or(name)
                             .eq_ignore_ascii_case("random_int")
                         {
-                            self.check_random_int_call(args, locals, label);
+                            self.check_random_int_call(args, locals);
                         }
                         if name
                             .rsplit('\\')
@@ -884,7 +863,7 @@ impl<'a> Checker<'a> {
                             .eq_ignore_ascii_case("filter_var")
                             && args.len() >= 3
                         {
-                            self.check_filter_var_flag_conflict(args, e.span, label);
+                            self.check_filter_var_flag_conflict(args, e.span);
                         }
                         if name
                             .rsplit('\\')
@@ -892,25 +871,25 @@ impl<'a> Checker<'a> {
                             .unwrap_or(name)
                             .eq_ignore_ascii_case("simplexml_load_string")
                         {
-                            self.check_simplexml_load_string_call(args, e.span, label);
+                            self.check_simplexml_load_string_call(args, e.span);
                         }
-                        self.check_preg_pattern_validity(name, args, label);
+                        self.check_preg_pattern_validity(name, args);
                         {
                             let bare = name.rsplit('\\').next().unwrap_or(name);
                             if bare.eq_ignore_ascii_case("sscanf")
                                 || bare.eq_ignore_ascii_case("fscanf")
                             {
-                                self.check_scanf_argument_count(bare, args, label, e.span);
+                                self.check_scanf_argument_count(bare, args, e.span);
                             }
                             if bare.eq_ignore_ascii_case("call_user_func")
                                 || bare.eq_ignore_ascii_case("call_user_func_array")
                             {
-                                self.check_call_user_func(bare, args, locals, label, e.span);
+                                self.check_call_user_func(bare, args, locals, e.span);
                             }
-                            self.check_preg_quote_delimiter(bare, args, label);
+                            self.check_preg_quote_delimiter(bare, args);
                         }
                         if !is_bare_statement {
-                            self.check_useless_return_value_call(name, args, locals, e.span, label);
+                            self.check_useless_return_value_call(name, args, locals, e.span);
                         }
                     } else if locals.guarded_functions.is_empty()
                         || !locals.guarded_functions.contains(
@@ -934,7 +913,6 @@ impl<'a> Checker<'a> {
                         // never happens for a guarded, still-genuinely-
                         // unresolvable call.
                         self.report(
-                            label.to_string(),
                             format!("call to undefined function {name}()"),
                             e.span,
                             0,
@@ -957,7 +935,6 @@ impl<'a> Checker<'a> {
                     // shape this branch covers.
                     if self.type_confirmed_not_callable(&callee_ty) {
                         self.report(
-                            label.to_string(),
                             format!("Trying to invoke {callee_ty} but it's not a callable."),
                             callee.span,
                             2,
@@ -965,17 +942,9 @@ impl<'a> Checker<'a> {
                         );
                     }
                     if let Some(callable_sig) = callee_ty.callable_sig().cloned() {
-                        self.check_dynamic_callable_args(
-                            &callable_sig,
-                            args,
-                            locals,
-                            label,
-                            e.span,
-                        );
+                        self.check_dynamic_callable_args(&callable_sig, args, locals, e.span);
                     } else {
-                        self.check_named_callable_invocation(
-                            &callee_ty, args, locals, e.span, label,
-                        );
+                        self.check_named_callable_invocation(&callee_ty, args, locals, e.span);
                     }
                     // A `Closure(...)`-shaped PHPDoc callable carries no
                     // `@throws` info of its own, and any other dynamic-
@@ -1189,9 +1158,7 @@ impl<'a> Checker<'a> {
                     && !matches!(&recv.kind, ExprKind::Variable(n) if self.static_var_names.contains(n.as_ref()))
                     && type_definitely_excludes_null(&recv_ty)
                 {
-                    self.report(
-                        label.to_string(),
-                        format!(
+                    self.report(format!(
                             "Using nullsafe method call on non-nullable type {recv_ty}. Use -> instead."
                         ),
                         e.span,
@@ -1240,7 +1207,6 @@ impl<'a> Checker<'a> {
                 };
                 if type_can_never_call_methods(&nonobject_ty) {
                     self.report(
-                        label.to_string(),
                         format!("call to method {method}() on a non-object type {recv_ty}"),
                         e.span,
                         0,
@@ -1253,7 +1219,6 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(level) = self.registry.strict_mixed_receiver_level(&nonobject_ty) {
                     self.report(
-                        label.to_string(),
                         format!("Cannot call method {method}() on mixed."),
                         e.span,
                         level,
@@ -1294,10 +1259,10 @@ impl<'a> Checker<'a> {
                 if let Some((_, _, owner, _)) = &receiver
                     && let Some(s) = sig
                 {
-                    self.check_phpstan_api_method_call(owner, method, s, e.span, label);
+                    self.check_phpstan_api_method_call(owner, method, s, e.span);
                 }
                 if let Some(class) = &recv_class {
-                    self.check_node_connecting_attribute(class, method, args, e.span, label);
+                    self.check_node_connecting_attribute(class, method, args, e.span);
                 }
                 // This method call's own throw contribution.
                 if let Some((class, _, _, _)) = &receiver {
@@ -1320,7 +1285,6 @@ impl<'a> Checker<'a> {
                         let spread_ty = self.infer_expr(&a.value, locals);
                         if self.type_confirmed_not_iterable(&spread_ty) {
                             self.report(
-                                label.to_string(),
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
                                 3,
@@ -1391,7 +1355,6 @@ impl<'a> Checker<'a> {
                         })
                     {
                         let mut builder = DiagnosticBuilder::new(
-                            label.to_string(),
                             format!("call to undefined method {recv_ty}::{method}()"),
                             e.span,
                             0,
@@ -1418,13 +1381,12 @@ impl<'a> Checker<'a> {
                             visibility: &sig.visibility,
                             describe: &format!("method {owner}::{method}()"),
                             span: e.span,
-                            label,
                         });
-                        self.check_internal_method_call(owner, method, sig, false, e.span, label);
+                        self.check_internal_method_call(owner, method, sig, false, e.span);
                         self.check_restricted_method_call(
-                            owner, method, false, args, locals, e.span, label,
+                            owner, method, false, args, locals, e.span,
                         );
-                        self.check_deprecated_method_call(owner, method, sig, false, e.span, label);
+                        self.check_deprecated_method_call(owner, method, sig, false, e.span);
                         self.record_member_usage_token(
                             UsageTokenKind::Method,
                             owner,
@@ -1441,18 +1403,17 @@ impl<'a> Checker<'a> {
                                 start: recv.span.end,
                                 end: e.span.end,
                             },
-                            label,
                         );
                         // `DOMDocument::createElement()`'s tag-name
                         // validation - independent of the internal/
                         // deprecated checks above.
-                        self.check_dom_create_element(class, method, args, e.span, label);
+                        self.check_dom_create_element(class, method, args, e.span);
                         // Sub-phase E of the live SQL query reflection
                         // phase (see delegated-tumbling-dongarra.md) -
                         // independent of the internal/deprecated checks
                         // above too.
                         self.check_dbal_parameter_binding(
-                            class, method, recv, args, locals, e.span, label,
+                            class, method, recv, args, locals, e.span,
                         );
                         // Phase 82's named-argument-rename feature -
                         // see `checker::named_argument_renames`'s own
@@ -1480,7 +1441,6 @@ impl<'a> Checker<'a> {
                             sig,
                             args,
                             locals,
-                            label,
                             defining_class: Some(class),
                             is_builtin: self.registry.is_builtin_class(owner),
                             span: e.span,
@@ -1535,7 +1495,6 @@ impl<'a> Checker<'a> {
                     sigil,
                     "left",
                     "booleanAnd.leftNotBoolean",
-                    label,
                 );
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
@@ -1546,7 +1505,6 @@ impl<'a> Checker<'a> {
                     sigil,
                     "right",
                     "booleanAnd.rightNotBoolean",
-                    label,
                 );
                 // Mirrors real PHPStan's `BooleanAndConstantConditionRule` -
                 // see `check_boolean_and_or`'s doc comment. Passes the
@@ -1564,7 +1522,6 @@ impl<'a> Checker<'a> {
                     r,
                     e,
                     locals,
-                    label,
                     is_condition_position || is_bare_statement,
                 );
                 merge_new_variable_definitions(locals, &narrowed);
@@ -1579,7 +1536,6 @@ impl<'a> Checker<'a> {
                     sigil,
                     "left",
                     "booleanOr.leftNotBoolean",
-                    label,
                 );
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
@@ -1590,7 +1546,6 @@ impl<'a> Checker<'a> {
                     sigil,
                     "right",
                     "booleanOr.rightNotBoolean",
-                    label,
                 );
                 // Mirrors real PHPStan's `BooleanOrConstantConditionRule` -
                 // same reasoning as `&&` above.
@@ -1600,7 +1555,6 @@ impl<'a> Checker<'a> {
                     r,
                     e,
                     locals,
-                    label,
                     is_condition_position || is_bare_statement,
                 );
                 merge_new_variable_definitions(locals, &narrowed);
@@ -1624,7 +1578,6 @@ impl<'a> Checker<'a> {
                 self.check_pointless_null_probe(
                     l,
                     locals,
-                    label,
                     "nullCoalesce",
                     "on left side of ??",
                     null_probe_verdict,
@@ -1632,7 +1585,6 @@ impl<'a> Checker<'a> {
                 self.check_pointless_offset_or_property_probe(
                     l,
                     locals,
-                    label,
                     "nullCoalesce",
                     "on left side of ??",
                     null_probe_verdict,
@@ -1643,12 +1595,12 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(op, l, r) => {
                 let l_ty = self.check_expr(l, locals, label);
                 let r_ty = self.check_expr(r, locals, label);
-                self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span, label);
-                self.check_comparison_validity(op, &l_ty, &r_ty, l.span, label);
-                self.check_duplicate_operands(op, l, r, label);
-                self.check_division_by_literal_zero(op, r, &r_ty, r.span, label);
-                self.check_constant_loose_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
-                self.check_constant_numeric_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
+                self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span);
+                self.check_comparison_validity(op, &l_ty, &r_ty, l.span);
+                self.check_duplicate_operands(op, l, r);
+                self.check_division_by_literal_zero(op, r, &r_ty, r.span);
+                self.check_constant_loose_comparison(op, l, r, &l_ty, &r_ty, e.span);
+                self.check_constant_numeric_comparison(op, l, r, &l_ty, &r_ty, e.span);
                 self.check_strict_comparison_of_different_types(
                     op,
                     l,
@@ -1657,7 +1609,6 @@ impl<'a> Checker<'a> {
                     &r_ty,
                     e.span,
                     is_exempt_last_condition,
-                    label,
                 );
                 // Mirrors real PHPStan's `LogicalXorConstantConditionRule` -
                 // see `check_logical_xor`'s doc comment. `BinOp::And`/`Or`
@@ -1666,17 +1617,16 @@ impl<'a> Checker<'a> {
                 // (short-circuit-narrowing-aware), which this generic arm
                 // never reaches for them.
                 if *op == BinOp::LogicalXor {
-                    self.check_logical_xor(l, r, locals, label);
+                    self.check_logical_xor(l, r, locals);
                 }
                 if *op == BinOp::Pipe {
-                    self.check_pipe_byref(r, locals, label);
+                    self.check_pipe_byref(r, locals);
                 }
                 self.infer_binary(op, l, r, locals)
             }
             ExprKind::Variable(name) => {
                 if !locals.contains_key(name) && !is_superglobal(name) {
                     self.report(
-                        label.to_string(),
                         format!("undefined variable ${name}"),
                         e.span,
                         0,
@@ -1705,7 +1655,7 @@ impl<'a> Checker<'a> {
                 inner,
             ) => {
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_incdec_validity(op, inner, &inner_ty, e.span, label);
+                self.check_incdec_validity(op, inner, &inner_ty, e.span);
                 // See `advance_incdec_type`'s doc comment for the real
                 // PHP null/bool/string semantics this computes.
                 //
@@ -1738,7 +1688,6 @@ impl<'a> Checker<'a> {
                     &inner_ty,
                     "a negated boolean",
                     "booleanNot.exprNotBoolean",
-                    label,
                 );
                 // Mirrors real PHPStan's `BooleanNotConstantConditionRule` -
                 // fires anywhere `!expr` appears, not just as a condition
@@ -1756,7 +1705,6 @@ impl<'a> Checker<'a> {
                     let result_value = !inner_value;
                     if !(result_value && is_exempt_last_condition) {
                         self.report(
-                            label.to_string(),
                             format!(
                                 "Negated boolean expression is always {}.",
                                 if result_value { "true" } else { "false" }
@@ -1779,7 +1727,7 @@ impl<'a> Checker<'a> {
             // apply generally.
             ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_unary_operand_validity(op, &inner_ty, inner.span, label);
+                self.check_unary_operand_validity(op, &inner_ty, inner.span);
                 if is_string_shaped(&inner_ty) {
                     Type::Int
                 } else if *op == UnaryOp::Neg {
@@ -1796,29 +1744,29 @@ impl<'a> Checker<'a> {
             // `~"hello"` is a real, still-string byte complement).
             ExprKind::Unary(op @ UnaryOp::BitNot, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_unary_operand_validity(op, &inner_ty, inner.span, label);
+                self.check_unary_operand_validity(op, &inner_ty, inner.span);
                 inner_ty.to_bitwise_not().unwrap_or(inner_ty)
             }
             ExprKind::Grouping(inner) => self.check_expr(inner, locals, label),
             ExprKind::Cast(cast, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_cast_validity(cast.kind(), &inner_ty, inner.span, label);
+                self.check_cast_validity(cast.kind(), &inner_ty, inner.span);
                 if cast.kind() == CastKind::Unset {
-                    self.check_unset_cast_supported(e.span, label);
+                    self.check_unset_cast_supported(e.span);
                 }
                 if cast.kind() == CastKind::Void {
-                    self.check_void_cast(e.span, label, is_bare_statement);
+                    self.check_void_cast(e.span, is_bare_statement);
                 }
-                self.check_deprecated_cast_spelling(*cast, e.span, label);
+                self.check_deprecated_cast_spelling(*cast, e.span);
                 // An implicit `(string)` cast of an object triggers a
                 // real `__toString()` call - see
                 // `check_implicit_tostring_usage`'s doc comment.
                 if cast.kind() == CastKind::String {
-                    self.check_implicit_tostring_usage(&inner_ty, e.span, label);
+                    self.check_implicit_tostring_usage(&inner_ty, e.span);
                 }
                 let cast_ty = cast_result_type(cast.kind());
                 if self.registry.check_useless_casts && cast.kind() != CastKind::Void {
-                    self.check_useless_cast(&cast_ty, &inner_ty, e.span, label);
+                    self.check_useless_cast(&cast_ty, &inner_ty, e.span);
                 }
                 cast_ty
             }
@@ -1827,7 +1775,7 @@ impl<'a> Checker<'a> {
             // invocation would itself produce, so every consumer besides
             // this one new check just delegates straight through.
             ExprKind::ShellExec(inner) => {
-                self.check_backtick_deprecation(e.span, label);
+                self.check_backtick_deprecation(e.span);
                 self.check_expr(inner, locals, label)
             }
             // A throw expression never actually produces a value - Never
@@ -1843,7 +1791,6 @@ impl<'a> Checker<'a> {
                 let inner_ty = self.check_expr(inner, locals, label);
                 if let Some(class) = self.thrown_value_not_throwable(&inner_ty) {
                     self.report(
-                        label.to_string(),
                         format!("cannot throw {class}: it does not implement Throwable"),
                         inner.span,
                         0,
@@ -1864,7 +1811,6 @@ impl<'a> Checker<'a> {
                     &inner_ty,
                     &result_ty,
                     e.span,
-                    label,
                     is_bare_statement,
                 );
                 result_ty
@@ -1882,7 +1828,6 @@ impl<'a> Checker<'a> {
                 // `canCallMethods()`) has no `stdClass` exception.
                 if type_can_never_be_object(&inner_ty) {
                     self.report(
-                        label.to_string(),
                         format!("Cannot clone non-object variable of type {inner_ty}."),
                         inner.span,
                         3,
@@ -1924,7 +1869,6 @@ impl<'a> Checker<'a> {
                         if let Type::Object(class, _) = self.resolve_name_expr(name) {
                             if !self.class_name_exists(&class) {
                                 self.report(
-                                    label.to_string(),
                                     format!("instanceof check target class {class} not found"),
                                     e.span,
                                     0,
@@ -1934,13 +1878,12 @@ impl<'a> Checker<'a> {
                                 // `class.nameCase` - `name` is the raw,
                                 // as-written text, still a bare string
                                 // right here in the AST.
-                                self.check_class_name_case(label, name, *name_span);
-                                self.check_internal_instanceof(&class, e.span, label);
+                                self.check_class_name_case(name, *name_span);
+                                self.check_internal_instanceof(&class, e.span);
                                 self.check_restricted_class_name_usage(
                                     &class,
                                     "Instanceof references",
                                     e.span,
-                                    label,
                                     crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
                                 );
                             }
@@ -1952,17 +1895,16 @@ impl<'a> Checker<'a> {
                     target,
                     e.span,
                     locals,
-                    label,
                     is_exempt_last_condition,
                 );
                 Type::Mixed(false)
             }
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-                self.check_nullsafe_assignment_target(lhs, label);
-                self.check_assignable_target(lhs, label);
+                self.check_nullsafe_assignment_target(lhs);
+                self.check_assignable_target(lhs);
                 if matches!(&e.kind, ExprKind::AssignRef(..)) {
-                    self.check_nullsafe_byref_target(rhs, label);
-                    self.check_property_assign_by_ref(rhs, locals, label);
+                    self.check_nullsafe_byref_target(rhs);
+                    self.check_property_assign_by_ref(rhs, locals);
                 }
                 // `$r = &$a[];` legally creates the new element it refers to.
                 let rhs_ty = match &rhs.kind {
@@ -1980,14 +1922,13 @@ impl<'a> Checker<'a> {
                 if let ExprKind::ArrayLiteral(items) = &lhs.kind
                     && !self.type_confirmed_not_destructurable(&rhs_ty)
                 {
-                    self.check_destructuring_offsets(items, &rhs_ty, locals, label);
+                    self.check_destructuring_offsets(items, &rhs_ty, locals);
                 }
-                self.check_offset_assignment(lhs, &rhs_ty, false, locals, label);
+                self.check_offset_assignment(lhs, &rhs_ty, false, locals);
                 if matches!(&lhs.kind, ExprKind::ArrayLiteral(_))
                     && self.type_confirmed_not_destructurable(&rhs_ty)
                 {
                     self.report(
-                        label.to_string(),
                         format!("Cannot use array destructuring on {rhs_ty}."),
                         rhs.span,
                         3,
@@ -1999,7 +1940,6 @@ impl<'a> Checker<'a> {
                 // unconditional fatal error ("Cannot re-assign $this.").
                 if matches!(&lhs.kind, ExprKind::Variable(v) if **v == *"this") {
                     self.report(
-                        label.to_string(),
                         "cannot re-assign $this".to_string(),
                         lhs.span,
                         0,
@@ -2014,14 +1954,14 @@ impl<'a> Checker<'a> {
                 // still need their *base* checked (`$obj->prop = ...`
                 // reads $obj).
                 self.check_assignment_target(lhs, locals, label);
-                self.check_self_assignment(lhs, rhs, label);
-                self.check_property_assignment(lhs, rhs, locals, label);
+                self.check_self_assignment(lhs, rhs);
+                self.check_property_assignment(lhs, rhs, locals);
                 // A bare by-ref-parameter variable directly assigned a
                 // value its declared type can't hold. Also covers a
                 // destructured by-ref target (`[$byRef] = $arr;`) - see
                 // `check_by_ref_destructuring`'s own doc comment.
-                self.check_param_out_assignment(lhs, &rhs_ty, label);
-                self.check_by_ref_destructuring(lhs, &rhs_ty, label);
+                self.check_param_out_assignment(lhs, &rhs_ty);
+                self.check_by_ref_destructuring(lhs, &rhs_ty);
                 let native = match (&e.kind, &lhs.kind) {
                     (ExprKind::Assign(..), ExprKind::Variable(name)) => {
                         Some((name.clone(), self.native_expr_type(rhs, locals)))
@@ -2056,8 +1996,8 @@ impl<'a> Checker<'a> {
                 rhs_ty
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {
-                self.check_nullsafe_assignment_target(lhs, label);
-                self.check_assignable_target(lhs, label);
+                self.check_nullsafe_assignment_target(lhs);
+                self.check_assignable_target(lhs);
                 // `$x ??= $default;` is defined as exactly
                 // `$x = $x ?? $default;` - the same quiet-left-side
                 // exemption as plain `??` applies to its own left side.
@@ -2065,7 +2005,6 @@ impl<'a> Checker<'a> {
                     if matches!(lhs.kind, ExprKind::Index(_, None)) {
                         self.report_builder(
                             DiagnosticBuilder::new(
-                                label.to_string(),
                                 "Cannot use [] for reading.".to_string(),
                                 lhs.span,
                                 0,
@@ -2078,7 +2017,6 @@ impl<'a> Checker<'a> {
                     self.check_pointless_null_probe(
                         lhs,
                         locals,
-                        label,
                         "nullCoalesce",
                         "on left side of ??=",
                         null_probe_verdict,
@@ -2086,7 +2024,6 @@ impl<'a> Checker<'a> {
                     self.check_pointless_offset_or_property_probe(
                         lhs,
                         locals,
-                        label,
                         "nullCoalesce",
                         "on left side of ??=",
                         null_probe_verdict,
@@ -2096,10 +2033,10 @@ impl<'a> Checker<'a> {
                     self.check_expr(lhs, locals, label)
                 };
                 let rhs_ty = self.check_expr(rhs, locals, label);
-                self.check_offset_assignment(lhs, &rhs_ty, true, locals, label);
+                self.check_offset_assignment(lhs, &rhs_ty, true, locals);
                 if *op != BinOp::Coalesce {
-                    self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span, label);
-                    self.check_division_by_literal_zero(op, rhs, &rhs_ty, rhs.span, label);
+                    self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span);
+                    self.check_division_by_literal_zero(op, rhs, &rhs_ty, rhs.span);
                 }
                 // `$x += 1`/`$x ??= ...` is a real rebind of `$x` -
                 // routes through the same `bind_assignment_target` every
@@ -2110,7 +2047,7 @@ impl<'a> Checker<'a> {
                 let ty = self.infer_binary(op, lhs, rhs, locals);
                 // Same by-ref-parameter check as plain `=`, against the
                 // compound operation's own real result.
-                self.check_param_out_assignment(lhs, &ty, label);
+                self.check_param_out_assignment(lhs, &ty);
                 let native = match &lhs.kind {
                     ExprKind::Variable(name) => {
                         Some((name.clone(), self.native_expr_type(e, locals)))
@@ -2136,7 +2073,6 @@ impl<'a> Checker<'a> {
                         &cond_ty,
                         "a ternary operator condition",
                         "ternary.condNotBoolean",
-                        label,
                     );
                 }
                 // Mirrors real PHPStan's `TernaryOperatorConstantConditionRule`,
@@ -2146,7 +2082,6 @@ impl<'a> Checker<'a> {
                 // `isLast`/first-level-statement complexity.
                 if let Some(value) = self.inferred_constant_condition(cond, locals) {
                     self.report(
-                        label.to_string(),
                         format!(
                             "Ternary operator condition is always {}.",
                             if value { "true" } else { "false" }
@@ -2203,7 +2138,7 @@ impl<'a> Checker<'a> {
                 for item in items {
                     if let Some(k) = &item.key {
                         self.check_expr(k, locals, label);
-                        self.check_array_item_key_type(k, locals, label);
+                        self.check_array_item_key_type(k, locals);
                     }
                     let value_ty = self.check_expr(&item.value, locals, label);
                     // `arrayUnpacking.nonIterable` - `[...$x]` where
@@ -2211,7 +2146,6 @@ impl<'a> Checker<'a> {
                     // Shares `foreach.nonIterable`'s own classifier.
                     if item.spread && self.type_confirmed_not_iterable(&value_ty) {
                         self.report(
-                            label.to_string(),
                             format!("Only iterables can be unpacked, {value_ty} given."),
                             item.value.span,
                             3,
@@ -2219,10 +2153,10 @@ impl<'a> Checker<'a> {
                         );
                     }
                     if item.spread {
-                        self.check_unpacked_string_keys(&value_ty, item.value.span, label);
+                        self.check_unpacked_string_keys(&value_ty, item.value.span);
                     }
                 }
-                self.check_array_literal_duplicate_keys(items, locals, label);
+                self.check_array_literal_duplicate_keys(items, locals);
                 self.infer_array_literal_type(items, locals)
             }
             ExprKind::Index(base, idx) => {
@@ -2230,9 +2164,9 @@ impl<'a> Checker<'a> {
                 match idx {
                     Some(i) => {
                         self.check_expr(i, locals, label);
-                        self.check_offset_accessibility(&base_ty, i, label);
-                        self.check_offset_existence(base, i, locals, label);
-                        self.check_dim_fetch_key_type(base, i, locals, label);
+                        self.check_offset_accessibility(&base_ty, i);
+                        self.check_offset_existence(base, i, locals);
+                        self.check_dim_fetch_key_type(base, i, locals);
                         // The `Index` counterpart of `PropertyAccess`'s
                         // "check the narrowed key first" handling above -
                         // without this, `check_expr` (unlike `infer_expr`,
@@ -2267,7 +2201,6 @@ impl<'a> Checker<'a> {
                         }
                         self.report_builder(
                             DiagnosticBuilder::new(
-                                label.to_string(),
                                 "Cannot use [] for reading.".to_string(),
                                 e.span,
                                 0,
@@ -2324,7 +2257,6 @@ impl<'a> Checker<'a> {
                         let spread_ty = self.infer_expr(&a.value, locals);
                         if self.type_confirmed_not_iterable(&spread_ty) {
                             self.report(
-                                label.to_string(),
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
                                 3,
@@ -2368,32 +2300,31 @@ impl<'a> Checker<'a> {
                     // source string right here in the AST, exactly like
                     // `instanceof`/`catch` below.
                     if let ExprKind::Name(raw) = &class_expr.kind {
-                        self.check_class_name_case(label, raw, class_expr.span);
+                        self.check_class_name_case(raw, class_expr.span);
                     }
                     // Called before the borrow just below (this check
                     // does its own, separate registry lookup) since it
                     // needs `&mut self`.
-                    self.check_internal_instantiation(class, e.span, label);
+                    self.check_internal_instantiation(class, e.span);
                     self.check_restricted_class_name_usage(
                         class,
                         "Instantiation of",
                         e.span,
-                        label,
                         crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
                     );
-                    self.check_deprecated_instantiation(class, e.span, label);
+                    self.check_deprecated_instantiation(class, e.span);
                     self.record_instantiation_usage_token(class, class_expr.span);
                     // `DateInterval`'s duration-string constructor
                     // validation - independent of whether the class is
                     // otherwise instantiable, so this runs unconditionally
                     // before that dispatch.
-                    self.check_date_interval_constructor(class, args, e.span, label, locals);
+                    self.check_date_interval_constructor(class, args, e.span, locals);
                     // `DateTime`/`DateTimeImmutable`'s own constructor-
                     // string validation - same shape.
-                    self.check_date_time_constructor(class, args, e.span, label, locals);
+                    self.check_date_time_constructor(class, args, e.span, locals);
                     // `SimpleXMLElement`'s construction well-formedness
                     // validation - same shape.
-                    self.check_simplexml_element_constructor(class, args, e.span, label);
+                    self.check_simplexml_element_constructor(class, args, e.span);
                     // This constructor's own throw contribution.
                     let dynamic_throw = self.dynamic_new_throw_type(class, args);
                     self.record_call_throw_point(dynamic_throw, ctor_sig);
@@ -2408,7 +2339,6 @@ impl<'a> Checker<'a> {
                             is_static,
                             !args.is_empty(),
                             e.span,
-                            label,
                         ) && let Some(sig) = ctor_sig
                         {
                             // See the identical comment on the plain-
@@ -2420,7 +2350,6 @@ impl<'a> Checker<'a> {
                                 sig,
                                 args,
                                 locals,
-                                label,
                                 defining_class: Some(class),
                                 is_builtin: self.registry.is_builtin_class(class),
                                 span: e.span,
@@ -2428,7 +2357,6 @@ impl<'a> Checker<'a> {
                         }
                     } else {
                         self.report(
-                            label.to_string(),
                             format!("instantiated class {class} not found"),
                             e.span,
                             0,
@@ -2438,18 +2366,18 @@ impl<'a> Checker<'a> {
                 } else {
                     match &class_expr.kind {
                         ExprKind::Name(raw) => {
-                            self.check_new_pseudo_target(raw, class_expr.span, label);
+                            self.check_new_pseudo_target(raw, class_expr.span);
                         }
                         _ => {
                             let target_ty = self.infer_expr(class_expr, locals);
-                            self.check_new_on_non_class_name(&target_ty, class_expr.span, label);
+                            self.check_new_on_non_class_name(&target_ty, class_expr.span);
                         }
                     }
                 }
                 new_ty
             }
             ExprKind::NewAnonymousClass(decl, args) => {
-                self.check_enum_cases_outside_enum(&decl.enum_cases, label);
+                self.check_enum_cases_outside_enum(&decl.enum_cases);
                 let ctor_params = decl
                     .methods
                     .iter()
@@ -2493,8 +2421,8 @@ impl<'a> Checker<'a> {
                     self.anonymous_class_names.get(&e.span).cloned(),
                 );
                 if let Some(name) = self.current_anonymous_class.clone() {
-                    self.check_inheritance_target_kinds(&name, true, label, e.span);
-                    self.check_magic_serialization_methods(&name, "anonymous class", label, e.span);
+                    self.check_inheritance_target_kinds(&name, true, e.span);
+                    self.check_magic_serialization_methods(&name, "anonymous class", e.span);
                 }
                 let registry_name = self
                     .current_anonymous_class
@@ -2508,7 +2436,7 @@ impl<'a> Checker<'a> {
                     &decl.properties,
                     &decl.methods,
                 );
-                self.check_readonly_class_version(decl.is_readonly, true, label, e.span);
+                self.check_readonly_class_version(decl.is_readonly, true, e.span);
                 for m in &decl.methods {
                     let ancestor_sig =
                         decl.extends
@@ -2532,12 +2460,7 @@ impl<'a> Checker<'a> {
                 // `check_function` above.
                 for p in &decl.properties {
                     self.check_attributes(&p.attrs, &decl.name);
-                    self.check_attribute_targets(
-                        &p.attrs,
-                        ATTRIBUTE_TARGET_PROPERTY,
-                        "property",
-                        &decl.name,
-                    );
+                    self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
                 }
                 for cc in &decl.consts {
                     self.check_attributes(&cc.attrs, &decl.name);
@@ -2545,7 +2468,6 @@ impl<'a> Checker<'a> {
                         &cc.attrs,
                         ATTRIBUTE_TARGET_CLASS_CONSTANT,
                         "class constant",
-                        &decl.name,
                     );
                 }
                 self.anonymous_class_type(e.span)
@@ -2634,7 +2556,6 @@ impl<'a> Checker<'a> {
                             let spread_ty = self.infer_expr(&a.value, locals);
                             if self.type_confirmed_not_iterable(&spread_ty) {
                                 self.report(
-                                    label.to_string(),
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
                                     a.value.span,
                                     3,
@@ -2651,7 +2572,6 @@ impl<'a> Checker<'a> {
                             let spread_ty = self.infer_expr(&a.value, locals);
                             if self.type_confirmed_not_iterable(&spread_ty) {
                                 self.report(
-                                    label.to_string(),
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
                                     a.value.span,
                                     3,
@@ -2691,7 +2611,7 @@ impl<'a> Checker<'a> {
                     // registry lookup harmlessly no-ops for a pseudo-
                     // keyword like `self` or a genuinely undefined class).
                     if let Some(raw) = target.as_name() {
-                        self.check_class_name_case(label, raw, e.span);
+                        self.check_class_name_case(raw, e.span);
                     }
                     if let Some(sig) = sig {
                         if let Some((owner, _)) = &sig_with_owner {
@@ -2702,17 +2622,12 @@ impl<'a> Checker<'a> {
                                 visibility: &sig.visibility,
                                 describe: &format!("static method {owner}::{method}()"),
                                 span: e.span,
-                                label,
                             });
-                            self.check_internal_method_call(
-                                owner, method, sig, true, e.span, label,
-                            );
+                            self.check_internal_method_call(owner, method, sig, true, e.span);
                             self.check_restricted_method_call(
-                                owner, method, true, args, locals, e.span, label,
+                                owner, method, true, args, locals, e.span,
                             );
-                            self.check_deprecated_method_call(
-                                owner, method, sig, true, e.span, label,
-                            );
+                            self.check_deprecated_method_call(owner, method, sig, true, e.span);
                             self.record_member_usage_token(
                                 UsageTokenKind::Method,
                                 owner,
@@ -2721,9 +2636,7 @@ impl<'a> Checker<'a> {
                                 e.span,
                             );
                             self.record_member_ref(e.span, owner, method);
-                            self.check_static_call_context(
-                                target, class, owner, method, e.span, label,
-                            );
+                            self.check_static_call_context(target, class, owner, method, e.span);
                             // Mirrors real PHPStan's
                             // `CallPrivateMethodThroughStaticRule` - same
                             // late-static-binding unsafety as the
@@ -2732,9 +2645,7 @@ impl<'a> Checker<'a> {
                             if target.as_name() == Some("static")
                                 && sig.visibility == Visibility::Private
                             {
-                                self.check_static_private_method_access(
-                                    owner, method, e.span, label,
-                                );
+                                self.check_static_private_method_access(owner, method, e.span);
                             }
                         }
                         self.check_call_site_method_name_case(
@@ -2745,7 +2656,6 @@ impl<'a> Checker<'a> {
                                 start: static_target_end(target),
                                 end: e.span.end,
                             },
-                            label,
                         );
                         // See the identical comment on the plain-
                         // function Call arm above - `check_args` is
@@ -2770,7 +2680,6 @@ impl<'a> Checker<'a> {
                             sig,
                             args,
                             locals,
-                            label,
                             defining_class: Some(class),
                             is_builtin: self.registry.is_builtin_class(&owner),
                             span: e.span,
@@ -2784,7 +2693,6 @@ impl<'a> Checker<'a> {
                         // static equivalent of __call) suppresses it
                         // entirely, matching real PHPStan.
                         self.report(
-                            label.to_string(),
                             format!("call to undefined static method {class}::{method}()"),
                             e.span,
                             0,
@@ -2798,7 +2706,6 @@ impl<'a> Checker<'a> {
                         // `contains_key` guard on the undefined-method
                         // branch correctly excludes it too).
                         self.report(
-                            label.to_string(),
                             format!("static method call target class {class} not found"),
                             e.span,
                             0,
@@ -2806,7 +2713,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                 } else {
-                    self.check_unresolved_static_call_target(target, method, locals, e.span, label);
+                    self.check_unresolved_static_call_target(target, method, locals, e.span);
                 }
                 match (&resolved_class, sig) {
                     (Some(class), Some(s)) => {
@@ -2840,7 +2747,7 @@ impl<'a> Checker<'a> {
                     }
                 };
                 let name_ty = self.check_expr(name, locals, label);
-                self.check_dynamic_class_constant_fetch(&name_ty, e.span, label);
+                self.check_dynamic_class_constant_fetch(&name_ty, e.span);
                 let literal_names: Option<Vec<String>> = match &name_ty {
                     Type::StringLiteral(s) => Some(vec![s.clone()]),
                     Type::Union(members) => members
@@ -2867,7 +2774,7 @@ impl<'a> Checker<'a> {
                                     Vec::new(),
                                 )))
                             } else {
-                                self.static_member_of_class(e, &class, None, &n, false, label)
+                                self.static_member_of_class(e, &class, None, &n, false)
                             }
                         })
                         .reduce(types::union_types)
@@ -2943,9 +2850,7 @@ impl<'a> Checker<'a> {
                     && !matches!(&base.kind, ExprKind::Variable(n) if self.static_var_names.contains(n.as_ref()))
                     && type_definitely_excludes_null(&base_ty)
                 {
-                    self.report(
-                        label.to_string(),
-                        format!(
+                    self.report(format!(
                             "Using nullsafe property access on non-nullable type {base_ty}. Use -> instead."
                         ),
                         e.span,
@@ -2994,7 +2899,6 @@ impl<'a> Checker<'a> {
                 };
                 if type_can_never_be_object(&nonobject_ty) {
                     self.report(
-                        label.to_string(),
                         format!("access to property ${prop} on a non-object type {base_ty}"),
                         e.span,
                         0,
@@ -3003,7 +2907,6 @@ impl<'a> Checker<'a> {
                 } else if let Some(level) = self.registry.strict_mixed_receiver_level(&nonobject_ty)
                 {
                     self.report(
-                        label.to_string(),
                         format!("Cannot access property ${prop} on mixed."),
                         e.span,
                         level,
@@ -3018,7 +2921,6 @@ impl<'a> Checker<'a> {
                     })
                 {
                     self.report(
-                        label.to_string(),
                         format!("access to undefined property {base_ty}::${prop}"),
                         e.span,
                         2,
@@ -3048,22 +2950,20 @@ impl<'a> Checker<'a> {
                         visibility: &p.visibility,
                         describe: &format!("property {owner}::${prop}"),
                         span: e.span,
-                        label,
                     });
                     if !p.is_readable()
                         && self.is_member_access_visible(&owner, &p.visibility, prop, "property")
                     {
                         self.report(
-                            label.to_string(),
                             format!("Property {owner}::${prop} is not readable."),
                             e.span,
                             0,
                             "property.writeOnly",
                         );
                     }
-                    self.check_internal_property_access(&owner, prop, p, e.span, label);
-                    self.check_restricted_property_access(&owner, prop, false, e.span, label);
-                    self.check_deprecated_property_access(&owner, prop, p, e.span, label);
+                    self.check_internal_property_access(&owner, prop, p, e.span);
+                    self.check_restricted_property_access(&owner, prop, false, e.span);
+                    self.check_deprecated_property_access(&owner, prop, p, e.span);
                     self.record_member_usage_token(
                         UsageTokenKind::Property,
                         &owner,
@@ -3182,10 +3082,9 @@ impl<'a> Checker<'a> {
                     if matches!(&p.kind, ExprKind::Literal(Literal::String(_))) {
                         continue;
                     }
-                    self.check_implicit_tostring_usage(&part_ty, p.span, label);
+                    self.check_implicit_tostring_usage(&part_ty, p.span);
                     if part_ty.to_string_type(self.registry).is_none() {
                         self.report(
-                            label.to_string(),
                             format!(
                                 "Part of encapsed string ({part_ty}) cannot be cast to string."
                             ),
@@ -3300,9 +3199,7 @@ impl<'a> Checker<'a> {
                                 continue;
                             };
                             if !outcome {
-                                self.report(
-                                    label.to_string(),
-                                    format!(
+                                self.report(format!(
                                         "Match arm comparison between {remaining_subject_ty} and {cond_ty} is always false."
                                     ),
                                     c.span,
@@ -3324,9 +3221,7 @@ impl<'a> Checker<'a> {
                             // followed only by an unreachable `default`
                             // would wrongly go unreported.
                             if i != arms_count - 1 || default.is_some() {
-                                self.report(
-                                    label.to_string(),
-                                    format!(
+                                self.report(format!(
                                         "Match arm comparison between {remaining_subject_ty} and {cond_ty} is always true."
                                     ),
                                     c.span,
@@ -3402,7 +3297,6 @@ impl<'a> Checker<'a> {
                             // degenerate-but-accurate "true" regardless
                             // of which arm(s) are actually unhandled.
                             self.report(
-                                label.to_string(),
                                 "Match expression does not handle remaining value: true"
                                     .to_string(),
                                 e.span,
@@ -3445,7 +3339,6 @@ impl<'a> Checker<'a> {
                         }
                         if remaining != Type::Never {
                             self.report(
-                                label.to_string(),
                                 format!(
                                     "Match expression does not handle remaining value: {remaining}"
                                 ),
@@ -3497,7 +3390,7 @@ impl<'a> Checker<'a> {
                 // existence plus target-validity for a closure
                 // expression's own `#[Attr]` group.
                 self.check_attributes(attrs, label);
-                self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function", label);
+                self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function");
                 // Unlike an arrow function, a plain closure does NOT
                 // automatically see the enclosing scope - only variables
                 // explicitly named in `use (...)` are captured (by value
@@ -3518,7 +3411,6 @@ impl<'a> Checker<'a> {
                     if u.name == "this".into() {
                         self.report_builder(
                             DiagnosticBuilder::new(
-                                label.to_string(),
                                 "Cannot use $this as lexical variable.".to_string(),
                                 u.span,
                                 0,
@@ -3529,7 +3421,6 @@ impl<'a> Checker<'a> {
                     } else if is_superglobal(&u.name) {
                         self.report_builder(
                             DiagnosticBuilder::new(
-                                label.to_string(),
                                 format!(
                                     "Cannot use superglobal variable ${} as lexical variable.",
                                     u.name
@@ -3542,9 +3433,7 @@ impl<'a> Checker<'a> {
                         );
                     } else if params.iter().any(|p| p.name == u.name) {
                         self.report_builder(
-                            DiagnosticBuilder::new(
-                                label.to_string(),
-                                format!(
+                            DiagnosticBuilder::new(format!(
                                     "Cannot use lexical variable ${} since a parameter with the same name already exists.",
                                     u.name
                                 ),
@@ -3556,7 +3445,6 @@ impl<'a> Checker<'a> {
                         );
                     } else if !u.by_ref && !locals.contains_key(&u.name) {
                         self.report(
-                            label.to_string(),
                             format!("undefined variable ${}", u.name),
                             u.span,
                             0,
@@ -3640,16 +3528,14 @@ impl<'a> Checker<'a> {
                         &ty,
                         &format!("parameter ${} of anonymous function", p.name),
                         p.span,
-                        &closure_label,
                     );
                     self.check_type_trait_refs(
                         &ty,
                         &format!("parameter ${} of anonymous function", p.name),
                         p.span,
-                        &closure_label,
                         "parameter.trait",
                     );
-                    self.check_type_class_name_case(&case_refs, &closure_label, p.span);
+                    self.check_type_class_name_case(&case_refs, p.span);
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
@@ -3667,16 +3553,14 @@ impl<'a> Checker<'a> {
                     declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                     "return type of anonymous function",
                     e.span,
-                    &closure_label,
                 );
                 self.check_type_trait_refs(
                     declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                     "return type of anonymous function",
                     e.span,
-                    &closure_label,
                     "return.trait",
                 );
-                self.check_type_class_name_case(&declared_return_case_refs, &closure_label, e.span);
+                self.check_type_class_name_case(&declared_return_case_refs, e.span);
                 // `return.noParent` - `declared_return` above never went
                 // through `resolve_pseudo` (unlike `current_declared_
                 // return_type` further down), so a fresh, one-off resolve
@@ -3693,7 +3577,6 @@ impl<'a> Checker<'a> {
                         &resolved_return,
                         "return type of anonymous function",
                         e.span,
-                        &closure_label,
                         "return.noParent",
                     );
                 }
@@ -3713,7 +3596,6 @@ impl<'a> Checker<'a> {
                     return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     e.span,
                     current_class_for_internal_check.as_deref(),
-                    &closure_label,
                 );
                 // A generator-returning closure needs the same
                 // current_function_is_generator save/set/restore
@@ -3793,7 +3675,7 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_return_points);
                 let previous_saw_explicit_return =
                     std::mem::take(&mut self.current_function_saw_explicit_return);
-                self.check_generator_return_type(declared_return.as_ref(), e.span, &closure_label);
+                self.check_generator_return_type(declared_return.as_ref(), e.span);
                 // A closure literal may run zero-to-many times (any
                 // callback-accepting builtin, or simply being called more
                 // than once through an ordinary variable) - a single
@@ -3854,7 +3736,6 @@ impl<'a> Checker<'a> {
                     declared_return.as_ref(),
                     &closure_locals,
                     e.span,
-                    &closure_label,
                 );
                 // Captured before the restore below overwrites the live
                 // field back to the *outer* scope's own snapshots - the
@@ -3881,7 +3762,7 @@ impl<'a> Checker<'a> {
                 // own (see its doc comment), so every finding here
                 // anchors to the whole closure expression's span instead
                 // of the specific `$x` token.
-                self.check_unused_closure_uses(uses, body, &closure_label, e.span);
+                self.check_unused_closure_uses(uses, body, e.span);
                 // A `use (&$x)` capture is a real reference - any
                 // mutation the closure body makes to `$x` is visible in
                 // the declaring scope too, from the closure literal's
@@ -3962,7 +3843,7 @@ impl<'a> Checker<'a> {
                 // Mirrors real PHPStan's `ArrowFunctionAttributesRule` -
                 // see the `Closure` arm's identical comment above.
                 self.check_attributes(attrs, label);
-                self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function", label);
+                self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function");
                 // An arrow function DOES automatically capture the whole
                 // enclosing scope by value (implicit, no `use (...)`
                 // needed) - a plain clone of `locals` is exactly that.
@@ -3979,16 +3860,14 @@ impl<'a> Checker<'a> {
                         &ty,
                         &format!("parameter ${} of arrow function", p.name),
                         p.span,
-                        label,
                     );
                     self.check_type_trait_refs(
                         &ty,
                         &format!("parameter ${} of arrow function", p.name),
                         p.span,
-                        label,
                         "parameter.trait",
                     );
-                    self.check_type_class_name_case(&case_refs, label, p.span);
+                    self.check_type_class_name_case(&case_refs, p.span);
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
@@ -4042,7 +3921,7 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
                 let previous_by_ref_params_with_tag =
                     std::mem::take(&mut self.current_function_by_ref_params_with_tag);
-                self.check_generator_return_type(declared_return.as_ref(), e.span, label);
+                self.check_generator_return_type(declared_return.as_ref(), e.span);
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
@@ -4065,14 +3944,12 @@ impl<'a> Checker<'a> {
                         &expected,
                         "return type of arrow function",
                         e.span,
-                        label,
                     );
-                    self.check_type_class_name_case(&expected_case_refs, label, e.span);
+                    self.check_type_class_name_case(&expected_case_refs, e.span);
                     self.check_type_trait_refs(
                         &expected,
                         "return type of arrow function",
                         e.span,
-                        label,
                         "return.trait",
                     );
                     if let Some(c) = self.current_class.clone() {
@@ -4081,7 +3958,6 @@ impl<'a> Checker<'a> {
                             &resolved_return,
                             "return type of arrow function",
                             e.span,
-                            label,
                             "return.noParent",
                         );
                     }
@@ -4091,7 +3967,6 @@ impl<'a> Checker<'a> {
                     // PHPStan's own level 9/10.
                     if !self.registry.rule_level_accepts(&expected, &body_ty).yes() {
                         self.report(
-                            label.to_string(),
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             body.span,
                             3,
@@ -4114,7 +3989,6 @@ impl<'a> Checker<'a> {
                     return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     e.span,
                     current_class_for_internal_check.as_deref(),
-                    label,
                 );
                 self.closure_literal_type(
                     params,
@@ -4150,7 +4024,6 @@ impl<'a> Checker<'a> {
                 {
                     self.report_builder(
                         DiagnosticBuilder::new(
-                            label.to_string(),
                             "First-class callables are supported only on PHP 8.1 and later."
                                 .to_string(),
                             e.span,
@@ -4183,7 +4056,6 @@ impl<'a> Checker<'a> {
                                             &resolved_name,
                                             sig,
                                             e.span,
-                                            label,
                                         );
                                         // Closes a real, live bypass: a
                                         // banned function's own
@@ -4197,13 +4069,11 @@ impl<'a> Checker<'a> {
                                             &[],
                                             locals,
                                             e.span,
-                                            label,
                                         );
                                         self.check_deprecated_function_call(
                                             &resolved_name,
                                             sig,
                                             e.span,
-                                            label,
                                         );
                                         self.record_function_usage_token(
                                             &resolved_name,
@@ -4226,7 +4096,6 @@ impl<'a> Checker<'a> {
                                             );
                                         if !guarded {
                                             self.report(
-                                                label.to_string(),
                                                 format!("call to undefined function {primary}()"),
                                                 e.span,
                                                 0,
@@ -4260,7 +4129,6 @@ impl<'a> Checker<'a> {
                                     || self.registry.lookup_method(c, "__call").is_some()
                             }) {
                                 let mut builder = DiagnosticBuilder::new(
-                                    label.to_string(),
                                     format!("call to undefined method {recv_ty}::{method}()"),
                                     e.span,
                                     0,
@@ -4283,11 +4151,8 @@ impl<'a> Checker<'a> {
                                     visibility: &sig.visibility,
                                     describe: &format!("method {owner}::{method}()"),
                                     span: e.span,
-                                    label,
                                 });
-                                self.check_internal_method_call(
-                                    &owner, method, sig, false, e.span, label,
-                                );
+                                self.check_internal_method_call(&owner, method, sig, false, e.span);
                                 self.check_restricted_method_call(
                                     &owner,
                                     method,
@@ -4295,10 +4160,9 @@ impl<'a> Checker<'a> {
                                     &[],
                                     locals,
                                     e.span,
-                                    label,
                                 );
                                 self.check_deprecated_method_call(
-                                    &owner, method, sig, false, e.span, label,
+                                    &owner, method, sig, false, e.span,
                                 );
                                 self.record_member_usage_token(
                                     UsageTokenKind::Method,
@@ -4315,7 +4179,6 @@ impl<'a> Checker<'a> {
                                         start: recv.span.end,
                                         end: e.span.end,
                                     },
-                                    label,
                                 );
                             }
                         }
@@ -4332,7 +4195,6 @@ impl<'a> Checker<'a> {
                                     start: static_target_end(target),
                                     end: e.span.end,
                                 },
-                                label,
                             );
                             if self.registry.lookup_method(&class, method).is_none()
                                 && self
@@ -4341,7 +4203,6 @@ impl<'a> Checker<'a> {
                                     .is_none()
                             {
                                 self.report(
-                                    label.to_string(),
                                     format!("call to undefined static method {class}::{method}()"),
                                     e.span,
                                     0,
@@ -4357,11 +4218,8 @@ impl<'a> Checker<'a> {
                                     visibility: &sig.visibility,
                                     describe: &format!("static method {owner}::{method}()"),
                                     span: e.span,
-                                    label,
                                 });
-                                self.check_internal_method_call(
-                                    &owner, method, sig, true, e.span, label,
-                                );
+                                self.check_internal_method_call(&owner, method, sig, true, e.span);
                                 self.check_restricted_method_call(
                                     &owner,
                                     method,
@@ -4369,10 +4227,9 @@ impl<'a> Checker<'a> {
                                     &[],
                                     locals,
                                     e.span,
-                                    label,
                                 );
                                 self.check_deprecated_method_call(
-                                    &owner, method, sig, true, e.span, label,
+                                    &owner, method, sig, true, e.span,
                                 );
                                 self.record_member_usage_token(
                                     UsageTokenKind::Method,
@@ -4384,9 +4241,7 @@ impl<'a> Checker<'a> {
                                 if target.as_name() == Some("static")
                                     && sig.visibility == Visibility::Private
                                 {
-                                    self.check_static_private_method_access(
-                                        &owner, method, e.span, label,
-                                    );
+                                    self.check_static_private_method_access(&owner, method, e.span);
                                 }
                             }
                         }
@@ -4402,7 +4257,6 @@ impl<'a> Checker<'a> {
                     ExprKind::New(..) => {
                         self.report_builder(
                             DiagnosticBuilder::new(
-                                label.to_string(),
                                 "Cannot create callable from the new operator.".to_string(),
                                 e.span,
                                 0,
@@ -4426,11 +4280,11 @@ impl<'a> Checker<'a> {
                 Literal::Null => Type::Null,
             },
             ExprKind::Name(name) => {
-                self.check_magic_constant_context(name, e.span, label);
+                self.check_magic_constant_context(name, e.span);
                 match self.global_constant_type(name) {
                     Some(ty) => ty,
                     None => {
-                        self.check_unknown_global_constant(name, locals, e.span, label);
+                        self.check_unknown_global_constant(name, locals, e.span);
                         bare_name_literal_type(name)
                     }
                 }
@@ -6363,7 +6217,7 @@ impl<'a> Checker<'a> {
                 let Some(class) = receiver_class(self.check_expr(receiver, locals, label)) else {
                     return Type::Mixed(false);
                 };
-                return self.static_member_of_class(e, &class, None, member, is_property, label);
+                return self.static_member_of_class(e, &class, None, member, is_property);
             }
         };
         // A static property (`self::$prop`) can be narrowed the
@@ -6379,7 +6233,7 @@ impl<'a> Checker<'a> {
         let Some(class) = self.resolve_static_class_name(class_name) else {
             return Type::Mixed(false);
         };
-        self.static_member_of_class(e, &class, Some(class_name), member, is_property, label)
+        self.static_member_of_class(e, &class, Some(class_name), member, is_property)
     }
 
     /// `check_static_member_fetch` once the class is known; `written` is
@@ -6391,7 +6245,6 @@ impl<'a> Checker<'a> {
         written: Option<&str>,
         member: &str,
         is_property: bool,
-        label: &str,
     ) -> Type {
         let class = class.to_string();
         // Rebind to the registry's canonical-case spelling up
@@ -6417,7 +6270,6 @@ impl<'a> Checker<'a> {
                 "class constant access"
             };
             self.report(
-                label.to_string(),
                 format!("{subject} target class {class} not found"),
                 e.span,
                 0,
@@ -6427,7 +6279,7 @@ impl<'a> Checker<'a> {
         }
         // `class.nameCase`, against the class name as written.
         if let Some(written) = written {
-            self.check_class_name_case(label, written, e.span);
+            self.check_class_name_case(written, e.span);
         }
         if is_property {
             let prop_name = member;
@@ -6446,16 +6298,15 @@ impl<'a> Checker<'a> {
                 .is_some_and(|(_, sig)| sig.is_static);
             if !is_valid_static {
                 self.report(
-                    label.to_string(),
                     format!("access to undefined static property {class}::${prop_name}"),
                     e.span,
                     0,
                     "staticProperty.notFound",
                 );
             } else if let Some((owner, sig)) = &prop_with_owner {
-                self.check_internal_property_access(owner, prop_name, sig, e.span, label);
-                self.check_restricted_property_access(owner, prop_name, true, e.span, label);
-                self.check_deprecated_property_access(owner, prop_name, sig, e.span, label);
+                self.check_internal_property_access(owner, prop_name, sig, e.span);
+                self.check_restricted_property_access(owner, prop_name, true, e.span);
+                self.check_deprecated_property_access(owner, prop_name, sig, e.span);
                 self.record_member_usage_token(
                     UsageTokenKind::Property,
                     owner,
@@ -6475,14 +6326,13 @@ impl<'a> Checker<'a> {
                     visibility: &sig.visibility,
                     describe: &format!("static property {owner}::${prop_name}"),
                     span: e.span,
-                    label,
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivatePropertyThroughStaticRule` - same
                 // late-static-binding unsafety as the identical
                 // class-constant rule above.
                 if written == Some("static") && sig.visibility == Visibility::Private {
-                    self.check_static_private_property_access(owner, prop_name, e.span, label);
+                    self.check_static_private_property_access(owner, prop_name, e.span);
                 }
             }
             prop_with_owner
@@ -6497,16 +6347,15 @@ impl<'a> Checker<'a> {
             });
             if const_ty.is_none() {
                 self.report(
-                    label.to_string(),
                     format!("access to undefined constant {class}::{member}"),
                     e.span,
                     0,
                     "classConstant.notFound",
                 );
             } else if let Some((owner, cs)) = &const_with_owner {
-                self.check_internal_class_constant_access(owner, member, cs, e.span, label);
-                self.check_restricted_class_constant_access(owner, member, e.span, label);
-                self.check_deprecated_class_constant_access(owner, member, cs, e.span, label);
+                self.check_internal_class_constant_access(owner, member, cs, e.span);
+                self.check_restricted_class_constant_access(owner, member, e.span);
+                self.check_deprecated_class_constant_access(owner, member, cs, e.span);
                 self.record_member_usage_token(
                     UsageTokenKind::ClassConstant,
                     owner,
@@ -6522,12 +6371,11 @@ impl<'a> Checker<'a> {
                     visibility: &cs.visibility,
                     describe: &format!("constant {owner}::{member}"),
                     span: e.span,
-                    label,
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivateConstantThroughStaticRule`.
                 if written == Some("static") && cs.visibility == Visibility::Private {
-                    self.check_static_private_constant_access(owner, member, e.span, label);
+                    self.check_static_private_constant_access(owner, member, e.span);
                 }
             }
             const_ty

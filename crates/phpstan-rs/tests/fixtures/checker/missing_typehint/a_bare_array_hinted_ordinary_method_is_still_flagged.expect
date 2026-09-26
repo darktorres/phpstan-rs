@@ -1,2 +1,2 @@
-3:24-5:18 missingType.iterableValue L6 C::notMagic | Method C::notMagic() return type has no value type specified in iterable type array.
+3:24-5:18 missingType.iterableValue L6 | Method C::notMagic() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

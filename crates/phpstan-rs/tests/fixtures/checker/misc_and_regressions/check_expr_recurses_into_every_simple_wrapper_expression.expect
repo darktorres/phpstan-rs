@@ -1,9 +1,9 @@
-2:13-9:14 missingType.return L6 f | Function f() has no return type specified.
-3:18-3:38 expr.resultUnused L4 f | Expression "$undefinedInGrouping" on a separate line does not do anything.
-3:18-3:38 variable.undefined L0 f | undefined variable $undefinedInGrouping
-4:23-4:40 variable.undefined L0 f | undefined variable $undefinedInClone
-5:36-5:57 variable.undefined L0 f | undefined variable $undefinedInThrowExpr
-6:27-6:43 variable.undefined L0 f | undefined variable $undefinedInCast
-7:18-7:38 variable.undefined L0 f | undefined variable $undefinedDynVarName
-8:17-8:50 expr.resultUnused L4 f | Expression ""interpolated {$undefinedInInterp}"" on a separate line does not do anything.
-8:17-8:50 variable.undefined L0 f | undefined variable $undefinedInInterp
+2:13-9:14 missingType.return L6 | Function f() has no return type specified.
+3:18-3:38 expr.resultUnused L4 | Expression "$undefinedInGrouping" on a separate line does not do anything.
+3:18-3:38 variable.undefined L0 | undefined variable $undefinedInGrouping
+4:23-4:40 variable.undefined L0 | undefined variable $undefinedInClone
+5:36-5:57 variable.undefined L0 | undefined variable $undefinedInThrowExpr
+6:27-6:43 variable.undefined L0 | undefined variable $undefinedInCast
+7:18-7:38 variable.undefined L0 | undefined variable $undefinedDynVarName
+8:17-8:50 expr.resultUnused L4 | Expression ""interpolated {$undefinedInInterp}"" on a separate line does not do anything.
+8:17-8:50 variable.undefined L0 | undefined variable $undefinedInInterp

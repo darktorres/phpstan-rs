@@ -1,1 +1,1 @@
-4:48-4:56 property.readOnlyAssignNotInConstructor L0 Immutable::bump | Readonly property Immutable::$v is assigned outside of the constructor.
+4:48-4:56 property.readOnlyAssignNotInConstructor L0 | Readonly property Immutable::$v is assigned outside of the constructor.

@@ -1,1 +1,1 @@
-b.php:1:38-1:55 missingType.return L6 foo | Function foo() has no return type specified.
+b.php:1:38-1:55 missingType.return L6 | Function foo() has no return type specified.

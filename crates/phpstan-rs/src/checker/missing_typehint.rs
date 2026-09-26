@@ -409,7 +409,6 @@ impl<'a> Checker<'a> {
     /// template can't cover all six).
     pub(crate) fn report_missing_typehint_findings(
         &mut self,
-        location: &str,
         span: Span,
         iterable_message: impl Fn(&str) -> String,
         generics_message: impl Fn(&str, &str) -> String,
@@ -421,7 +420,6 @@ impl<'a> Checker<'a> {
         for desc in iterable {
             self.report_builder(
                 DiagnosticBuilder::new(
-                    location.to_string(),
                     iterable_message(&desc),
                     span,
                     6,
@@ -434,7 +432,6 @@ impl<'a> Checker<'a> {
         self.collect_non_generic_generic_class(ty, &mut generics);
         for (class_desc, list) in generics {
             self.report(
-                location.to_string(),
                 generics_message(&class_desc, &list),
                 span,
                 6,
@@ -452,13 +449,7 @@ impl<'a> Checker<'a> {
             for desc in callables {
                 let message = iterable_message(&desc)
                     .replace("no value type specified in", "no signature specified for");
-                self.report(
-                    location.to_string(),
-                    message,
-                    span,
-                    6,
-                    "missingType.callable",
-                );
+                self.report(message, span, 6, "missingType.callable");
             }
         }
     }
@@ -497,7 +488,6 @@ impl<'a> Checker<'a> {
                 doc_var_type.as_ref(),
             ) {
                 self.report(
-                    fqn.to_string(),
                     format!("Property {fqn}::${} has no type specified.", p.name),
                     p.span,
                     6,
@@ -507,10 +497,10 @@ impl<'a> Checker<'a> {
             }
             let name = p.name.clone();
             self.report_missing_typehint_findings(
-                fqn,
                 p.span,
                 |desc| format!("Property {fqn}::${name} type has no value type specified in {desc}."),
-                |class_desc, list| {
+                |class_desc,
+                list| {
                     format!(
                         "Property {fqn}::${name} with generic {class_desc} does not specify its types: {list}"
                     )
@@ -559,10 +549,10 @@ impl<'a> Checker<'a> {
             };
             let name = c.name.clone();
             self.report_missing_typehint_findings(
-                fqn,
                 c.span,
                 |desc| format!("Constant {fqn}::{name} type has no value type specified in {desc}."),
-                |class_desc, list| {
+                |class_desc,
+                list| {
                     format!(
                         "Constant {fqn}::{name} with generic {class_desc} does not specify its types: {list}"
                     )
@@ -652,7 +642,6 @@ impl<'a> Checker<'a> {
             };
             if *ty == Type::Mixed(false) && !explicit_mixed {
                 self.report(
-                    label.to_string(),
                     format!("{kind_word} {label}() has parameter ${name} with no type specified."),
                     *span,
                     6,
@@ -661,14 +650,14 @@ impl<'a> Checker<'a> {
                 continue;
             }
             self.report_missing_typehint_findings(
-                label,
                 *span,
                 |desc| {
                     format!(
                         "{kind_word} {label}() has parameter ${name} with no value type specified in {desc}."
                     )
                 },
-                |class_desc, list| {
+                |class_desc,
+                list| {
                     format!(
                         "{kind_word} {label}() has parameter ${name} with generic {class_desc} but does not specify its types: {list}"
                     )
@@ -732,7 +721,6 @@ impl<'a> Checker<'a> {
         let return_ty = declared_return.cloned().unwrap_or(Type::Mixed(false));
         if return_ty == Type::Mixed(false) && !return_explicit_mixed {
             self.report(
-                label.to_string(),
                 format!("{kind_word} {label}() has no return type specified."),
                 f.span,
                 6,
@@ -741,10 +729,10 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report_missing_typehint_findings(
-            label,
             f.span,
             |desc| format!("{kind_word} {label}() return type has no value type specified in {desc}."),
-            |class_desc, list| {
+            |class_desc,
+            list| {
                 format!(
                     "{kind_word} {label}() return type with generic {class_desc} does not specify its types: {list}"
                 )

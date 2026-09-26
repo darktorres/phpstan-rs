@@ -1,1 +1,1 @@
-6:13-6:42 class.disallowedSubtype L0 ChildC | Type ChildC is not allowed to be a subtype of Shape.
+6:13-6:42 class.disallowedSubtype L0 | Type ChildC is not allowed to be a subtype of Shape.

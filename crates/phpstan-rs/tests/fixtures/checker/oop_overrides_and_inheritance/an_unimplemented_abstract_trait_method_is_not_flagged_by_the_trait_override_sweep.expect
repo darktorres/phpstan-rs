@@ -1,2 +1,2 @@
-8:13-10:14 class.abstractMethodNotImplemented L0 Impl | class Impl does not implement abstract method(s): foo
+8:13-10:14 class.abstractMethodNotImplemented L0 | class Impl does not implement abstract method(s): foo
     tip: either implement every method listed above, or declare this class itself abstract

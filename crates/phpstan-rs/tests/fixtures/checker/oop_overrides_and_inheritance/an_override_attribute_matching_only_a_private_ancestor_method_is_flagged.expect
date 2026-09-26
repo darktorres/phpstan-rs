@@ -1,4 +1,4 @@
-3:25-3:48 method.unused L4 Base | private method Base::foo() is unused
+3:25-3:48 method.unused L4 | private method Base::foo() is unused
     fix: Remove method foo() => ""
-6:17-7:47 method.override L0 Child | Child::foo() has #[\\Override] attribute but does not override any method
+6:17-7:47 method.override L0 | Child::foo() has #[\\Override] attribute but does not override any method
     fix: Remove #[\\Override] => ""

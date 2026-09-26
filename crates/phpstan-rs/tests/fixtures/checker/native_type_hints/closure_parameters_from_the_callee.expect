@@ -1,4 +1,4 @@
-3:25-3:39 missingType.iterableValue L6 f | Function f() has parameter $unknown with no value type specified in iterable type array.
+3:25-3:39 missingType.iterableValue L6 | Function f() has parameter $unknown with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-4:19-4:21 missingNativeType.parameter L0 f | Parameter $i of the closure can be declared natively as int.
-5:25-5:27 missingNativeType.parameter L0 f | Parameter $i of the closure can be declared natively as int.
+4:19-4:21 missingNativeType.parameter L0 | Parameter $i of the closure can be declared natively as int.
+5:25-5:27 missingNativeType.parameter L0 | Parameter $i of the closure can be declared natively as int.

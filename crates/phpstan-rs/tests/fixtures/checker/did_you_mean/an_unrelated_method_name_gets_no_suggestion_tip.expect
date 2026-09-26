@@ -1,1 +1,1 @@
-6:24-6:51 method.notFound L0 test | call to undefined method Point::totallyUnrelatedThing()
+6:24-6:51 method.notFound L0 | call to undefined method Point::totallyUnrelatedThing()

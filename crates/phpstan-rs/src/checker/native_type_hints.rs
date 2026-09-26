@@ -246,7 +246,6 @@ impl<'a> Checker<'a> {
                 }
             }
             self.report(
-                label.to_string(),
                 format!(
                     "{kind_word} {label}() parameter ${} can be declared natively as {suggested}.",
                     param.name
@@ -282,7 +281,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("{kind_word} {label}() return type can be declared natively as {suggested}."),
             f.name_span,
             0,
@@ -290,12 +288,7 @@ impl<'a> Checker<'a> {
         );
     }
 
-    pub(crate) fn suggest_closure_native_params(
-        &mut self,
-        params: &[Param],
-        contextual: &[Type],
-        label: &str,
-    ) {
+    pub(crate) fn suggest_closure_native_params(&mut self, params: &[Param], contextual: &[Type]) {
         for (param, ty) in params.iter().zip(contextual) {
             if param.type_hint.is_some() || contains_mixed_or_template(ty) {
                 continue;
@@ -308,7 +301,6 @@ impl<'a> Checker<'a> {
                 continue;
             };
             self.report(
-                label.to_string(),
                 format!(
                     "Parameter ${} of the closure can be declared natively as {suggested}.",
                     param.name
@@ -368,7 +360,6 @@ impl<'a> Checker<'a> {
                 continue;
             }
             self.report(
-                fqn.to_string(),
                 format!(
                     "Constant {fqn}::{} can be declared natively as {suggested}.",
                     constant.name

@@ -66,11 +66,11 @@ impl<'a> Checker<'a> {
     /// variable (destructuring/`foreach`-rebind targets are handled at
     /// their own separate call sites - see this module's sibling
     /// functions below).
-    pub(crate) fn check_param_out_assignment(&mut self, lhs: &Expr, actual: &Type, label: &str) {
+    pub(crate) fn check_param_out_assignment(&mut self, lhs: &Expr, actual: &Type) {
         let ExprKind::Variable(name) = &lhs.kind else {
             return;
         };
-        self.check_by_ref_value(name, actual, lhs.span, label);
+        self.check_by_ref_value(name, actual, lhs.span);
     }
 
     /// The shared "does this by-ref parameter's own declared type accept
@@ -86,7 +86,6 @@ impl<'a> Checker<'a> {
         name: &str,
         actual: &Type,
         span: syntax::token::Span,
-        label: &str,
     ) {
         let Some(declared) = self.current_function_by_ref_params.get(name).cloned() else {
             return;
@@ -98,7 +97,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("by-ref parameter ${name} expects {declared}, {actual} given"),
             span,
             3,
@@ -149,7 +147,7 @@ impl<'a> Checker<'a> {
     /// `@param-out int|string` accepts the union; only a genuinely
     /// unacceptable exit state should ever be reported, not "some path
     /// disagreed with another."
-    pub(crate) fn check_by_ref_execution_end(&mut self, label: &str, span: syntax::token::Span) {
+    pub(crate) fn check_by_ref_execution_end(&mut self, span: syntax::token::Span) {
         let out_types: Vec<(std::sync::Arc<str>, Type)> = self
             .current_function_by_ref_params_with_tag
             .iter()
@@ -165,9 +163,7 @@ impl<'a> Checker<'a> {
             if self.registry.rule_level_accepts(&declared, &actual).yes() {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "by-ref parameter ${name} expects {declared} at the end of execution, {actual} given"
                 ),
                 span,
@@ -185,7 +181,7 @@ impl<'a> Checker<'a> {
     /// too_wide_by_ref_type` (mirroring `should_check_too_wide_method_
     /// return_type`'s own visibility/finality gate) - callers must check
     /// that before calling this.
-    pub(crate) fn check_too_wide_by_ref_type(&mut self, label: &str, span: syntax::token::Span) {
+    pub(crate) fn check_too_wide_by_ref_type(&mut self, span: syntax::token::Span) {
         let params: Vec<(std::sync::Arc<str>, Type)> = self
             .current_function_by_ref_params
             .iter()
@@ -220,9 +216,7 @@ impl<'a> Checker<'a> {
             if too_wide.is_empty() {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "by-ref parameter ${name}'s declared type {declared} is never narrower than {actual} at the end of execution - consider narrowing it"
                 ),
                 span,

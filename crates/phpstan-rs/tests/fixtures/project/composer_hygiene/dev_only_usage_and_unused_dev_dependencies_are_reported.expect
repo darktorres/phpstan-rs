@@ -1,2 +1,2 @@
-composer.json:3:1-3:1 devOnly.composerDependency L0 composer.json | Package acme/assert is in require, but only code autoloaded through autoload-dev uses it; it belongs in require-dev.
-composer.json:4:1-4:1 unused.composerDependency L0 composer.json | Package acme/tool is in require-dev, but the analysed code uses none of its symbols.
+composer.json:3:1-3:1 devOnly.composerDependency L0 | Package acme/assert is in require, but only code autoloaded through autoload-dev uses it; it belongs in require-dev.
+composer.json:4:1-4:1 unused.composerDependency L0 | Package acme/tool is in require-dev, but the analysed code uses none of its symbols.

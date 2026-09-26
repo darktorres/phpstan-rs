@@ -1,3 +1,3 @@
-3:24-3:36 missingType.iterableValue L6 f | Function f() has parameter $items with no value type specified in iterable type array.
+3:24-3:36 missingType.iterableValue L6 | Function f() has parameter $items with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-5:17-7:18 varTag.noVariable L2 f | PHPDoc tag @var above foreach loop does not specify variable name.
+5:17-7:18 varTag.noVariable L2 | PHPDoc tag @var above foreach loop does not specify variable name.

@@ -1,2 +1,2 @@
-1:7-1:47 missingType.return L6 f | Function f() has no return type specified.
-1:40-1:44 booleanAnd.rightAlwaysTrue L4 f | Right side of && is always true.
+1:7-1:47 missingType.return L6 | Function f() has no return type specified.
+1:40-1:44 booleanAnd.rightAlwaysTrue L4 | Right side of && is always true.

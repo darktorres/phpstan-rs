@@ -1,1 +1,1 @@
-5:22-5:26 offsetAccess.invalidOffset L3 test | Invalid array key type Foo.
+5:22-5:26 offsetAccess.invalidOffset L3 | Invalid array key type Foo.

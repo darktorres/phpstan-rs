@@ -1,2 +1,2 @@
-4:17-4:29 enum.duplicateEnumCase L0 Status | Cannot redeclare enum case Status::Active.
+4:17-4:29 enum.duplicateEnumCase L0 | Cannot redeclare enum case Status::Active.
     non-ignorable

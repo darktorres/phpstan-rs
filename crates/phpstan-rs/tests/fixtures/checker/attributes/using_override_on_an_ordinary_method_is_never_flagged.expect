@@ -1,2 +1,2 @@
-3:17-4:38 method.override L0 C | C::f() has #[\\Override] attribute but does not override any method
+3:17-4:38 method.override L0 | C::f() has #[\\Override] attribute but does not override any method
     fix: Remove #[\\Override] => ""

@@ -113,9 +113,7 @@ impl<'a> Checker<'a> {
                 if is_used {
                     continue;
                 }
-                self.report(
-                    location.clone(),
-                    format!(
+                self.report(format!(
                         "{location} is never assigned {member} so it can be removed from the property type."
                     ),
                     p.span,

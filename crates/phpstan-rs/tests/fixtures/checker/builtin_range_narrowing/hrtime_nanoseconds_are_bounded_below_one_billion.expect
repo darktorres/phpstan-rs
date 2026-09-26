@@ -1,1 +1,1 @@
-6:31-6:34 argument.type L5 test | Parameter #1 $ns of function needsNarrower expects int<0, 999999998>, int<0, 999999999> given.
+6:31-6:34 argument.type L5 | Parameter #1 $ns of function needsNarrower expects int<0, 999999998>, int<0, 999999999> given.

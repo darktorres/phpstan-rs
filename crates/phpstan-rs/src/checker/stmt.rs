@@ -65,7 +65,6 @@ impl<'a> Checker<'a> {
                 && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.contains(name.as_ref()))
             {
                 self.report(
-                    label.to_string(),
                     "Unreachable statement - code above always terminates.".to_string(),
                     next.span,
                     4,
@@ -87,18 +86,18 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         if self.registry.check_enum_exhaustiveness {
-            self.check_strict_statement_idioms(stmt, locals, label);
+            self.check_strict_statement_idioms(stmt, locals);
         }
         if self.registry.check_magic_numbers {
-            self.check_magic_numbers_statement(stmt, label);
+            self.check_magic_numbers_statement(stmt);
         }
         if self.registry.check_loop_variable_overwrite || self.registry.check_switch_case_types {
-            self.check_strict_rules_statement(stmt, locals, label);
+            self.check_strict_rules_statement(stmt, locals);
         }
         self.check_stmt_impl(stmt, locals, declared_return, label);
         self.record_type_dump(stmt, locals);
         if !self.external_rules.is_empty() {
-            self.dispatch_stmt_rules(stmt, locals, label);
+            self.dispatch_stmt_rules(stmt, locals);
         }
     }
 
@@ -109,7 +108,7 @@ impl<'a> Checker<'a> {
     /// statement's docblock except an expression statement that isn't an
     /// assignment; a function/class/enum declaration's own docblock is
     /// skipped here, since the declaration-level half already covers it.
-    fn check_statement_doc_tag_values(&mut self, stmt: &Stmt, label: &str) {
+    fn check_statement_doc_tag_values(&mut self, stmt: &Stmt) {
         let Some(doc) = stmt.doc_comment.as_deref() else {
             return;
         };
@@ -125,7 +124,7 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        self.report_invalid_doc_tag_values(label, doc, stmt.span);
+        self.report_invalid_doc_tag_values(doc, stmt.span);
     }
 
     /// Real PHPStan's `WrongVariableNameInVarTagRule`: a statement's
@@ -339,7 +338,7 @@ impl<'a> Checker<'a> {
         }
         let ok = found.is_empty();
         for (message, identifier) in found {
-            self.report(label.to_string(), message, span, 2, identifier);
+            self.report(message, span, 2, identifier);
         }
         ok
     }
@@ -347,7 +346,7 @@ impl<'a> Checker<'a> {
     /// `InvalidPhpDocVarTagTypeRule`'s unresolvable half: every `@var` on
     /// a statement (not a declaration, whose own rules check its tags),
     /// reported on the comment's own line.
-    fn check_statement_var_tags_resolvable(&mut self, stmt: &Stmt, label: &str) {
+    fn check_statement_var_tags_resolvable(&mut self, stmt: &Stmt) {
         let Some(doc) = stmt.doc_comment.as_deref() else {
             return;
         };
@@ -375,7 +374,6 @@ impl<'a> Checker<'a> {
                     None => "PHPDoc tag @var".to_string(),
                 };
                 self.report(
-                    label.to_string(),
                     format!("{subject} contains unresolvable type."),
                     span,
                     2,
@@ -385,12 +383,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn dispatch_stmt_rules(&mut self, stmt: &Stmt, locals: &Locals, label: &str) {
+    fn dispatch_stmt_rules(&mut self, stmt: &Stmt, locals: &Locals) {
         let rules = self.external_rules;
         let mut found = Vec::new();
         for rule in rules {
             if rule.wants_stmt(&stmt.kind) {
-                let scope = crate::rule::Scope::new(self, locals, label);
+                let scope = crate::rule::Scope::new(self, locals);
                 found.extend(rule.check_stmt(&scope, stmt));
             }
         }
@@ -405,13 +403,13 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        self.check_statement_doc_tag_values(stmt, label);
-        self.check_statement_var_tags_resolvable(stmt, label);
+        self.check_statement_doc_tag_values(stmt);
+        self.check_statement_var_tags_resolvable(stmt);
         let names_ok = self.check_statement_var_tag_names(stmt, locals, label);
         let var_tags = self.statement_var_tags_of(stmt);
         if !var_tags.is_empty() {
-            self.check_statement_var_tag_classes(stmt, &var_tags, label);
-            self.check_statement_var_tag_types(stmt, &var_tags, names_ok, locals, label);
+            self.check_statement_var_tag_classes(stmt, &var_tags);
+            self.check_statement_var_tag_types(stmt, &var_tags, names_ok, locals);
         }
         // A lone nameless `/** @var T */` on `return expr;` types the
         // returned value itself.
@@ -443,13 +441,13 @@ impl<'a> Checker<'a> {
                 {
                     self.inlay_local_type_hints.push((lhs.span, ty.clone()));
                 }
-                self.check_no_discard_statement(e, locals, label);
-                self.check_new_exception_discarded(e, locals, label);
+                self.check_no_discard_statement(e, locals);
+                self.check_new_exception_discarded(e, locals);
                 // NoopRule's own supported slice - see `checker::noop`'s
                 // module doc comment.
-                self.check_noop_statement(e, locals, label);
+                self.check_noop_statement(e, locals);
                 // A bare call to a now-known-pure declaration.
-                self.check_pure_call_without_effect(e, locals, label);
+                self.check_pure_call_without_effect(e, locals);
                 // `assert($cond)` is a real, common narrowing idiom real
                 // PHPStan explicitly documents support for - if execution
                 // continues past this statement, `$cond` held, so it's
@@ -562,7 +560,6 @@ impl<'a> Checker<'a> {
                     // this identically to any other type mismatch.
                     if expected == Type::Never {
                         self.report(
-                            label.to_string(),
                             "should never return, but a return statement was reached".to_string(),
                             e.span,
                             3,
@@ -584,7 +581,6 @@ impl<'a> Checker<'a> {
                         // without it, every such delegation would report
                         // the nonsensical "expected void, got void".
                         self.report(
-                            label.to_string(),
                             format!("return type mismatch: expected void, got {actual}"),
                             e.span,
                             3,
@@ -611,7 +607,6 @@ impl<'a> Checker<'a> {
                             .is_some_and(|r| self.registry.rule_level_accepts(&expected, &r).yes());
                         if !passes_via_reconstruction {
                             self.report(
-                                label.to_string(),
                                 format!("return type mismatch: expected {expected}, got {actual}"),
                                 e.span,
                                 3,
@@ -674,7 +669,6 @@ impl<'a> Checker<'a> {
                     // surely as one with a value does.
                     if expected == Type::Never {
                         self.report(
-                            label.to_string(),
                             "should never return, but a return statement was reached".to_string(),
                             stmt.span,
                             3,
@@ -705,7 +699,6 @@ impl<'a> Checker<'a> {
                     // either) are exempt.
                     } else if !matches!(expected, Type::Void | Type::Mixed(_)) {
                         self.report(
-                            label.to_string(),
                             format!("should return {expected} but empty return statement found"),
                             stmt.span,
                             3,
@@ -717,11 +710,11 @@ impl<'a> Checker<'a> {
             StmtKind::Echo(exprs) => {
                 for (i, e) in exprs.iter().enumerate() {
                     let ty = self.check_expr(e, locals, label);
-                    self.check_echo_validity(&ty, i, e.span, label);
+                    self.check_echo_validity(&ty, i, e.span);
                     // `echo` implicitly invokes `__toString()` on an
                     // object argument - see
                     // `check_implicit_tostring_usage`'s doc comment.
-                    self.check_implicit_tostring_usage(&ty, e.span, label);
+                    self.check_implicit_tostring_usage(&ty, e.span);
                 }
             }
             StmtKind::Block(stmts) => self.check_block(stmts, locals, declared_return, label),
@@ -799,7 +792,6 @@ impl<'a> Checker<'a> {
                     // fatal error.
                     if &**name == "this" {
                         self.report(
-                            label.to_string(),
                             "cannot use $this as global variable".to_string(),
                             stmt.span,
                             0,
@@ -833,7 +825,6 @@ impl<'a> Checker<'a> {
                     // use $this as static variable."
                     if **name == *"this" {
                         self.report(
-                            label.to_string(),
                             "cannot use $this as static variable".to_string(),
                             stmt.span,
                             0,
@@ -872,27 +863,16 @@ impl<'a> Checker<'a> {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 self.check_nested_class_declaration(&fqn, c);
                 if self.registry.check_magic_numbers {
-                    self.check_magic_numbers_in_properties(&c.properties, &fqn);
+                    self.check_magic_numbers_in_properties(&c.properties);
                 }
                 self.check_attributes(&c.attrs, &fqn);
-                self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
-                self.check_self_attribute_class_declaration(
-                    &c.attrs,
-                    &fqn,
-                    c.kind,
-                    c.is_abstract,
-                    &fqn,
-                );
+                self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                self.check_self_attribute_class_declaration(&c.attrs, &fqn, c.kind, c.is_abstract);
                 self.check_class_like_marker_attributes(&c.attrs, c.kind, c.is_readonly, &fqn);
-                self.check_enum_cases_outside_enum(&c.enum_cases, &fqn);
+                self.check_enum_cases_outside_enum(&c.enum_cases);
                 for p in &c.properties {
                     self.check_attributes(&p.attrs, &fqn);
-                    self.check_attribute_targets(
-                        &p.attrs,
-                        ATTRIBUTE_TARGET_PROPERTY,
-                        "property",
-                        &fqn,
-                    );
+                    self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
                 }
                 for cc in &c.consts {
                     self.check_attributes(&cc.attrs, &fqn);
@@ -900,7 +880,6 @@ impl<'a> Checker<'a> {
                         &cc.attrs,
                         ATTRIBUTE_TARGET_CLASS_CONSTANT,
                         "class constant",
-                        &fqn,
                     );
                 }
                 // A conditionally-declared trait (the common `if
@@ -932,14 +911,8 @@ impl<'a> Checker<'a> {
                 let fqn = self.name_ctx.declared_name(&e.name);
                 self.check_nested_enum_declaration(&fqn, e);
                 self.check_attributes(&e.attrs, &fqn);
-                self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
-                self.check_self_attribute_class_declaration(
-                    &e.attrs,
-                    &fqn,
-                    ClassKind::Enum,
-                    false,
-                    &fqn,
-                );
+                self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                self.check_self_attribute_class_declaration(&e.attrs, &fqn, ClassKind::Enum, false);
                 self.check_class_like_marker_attributes(&e.attrs, ClassKind::Enum, false, &fqn);
                 for case in &e.cases {
                     self.check_attributes(&case.attrs, &fqn);
@@ -947,7 +920,6 @@ impl<'a> Checker<'a> {
                         &case.attrs,
                         ATTRIBUTE_TARGET_CLASS_CONSTANT,
                         "class constant",
-                        &fqn,
                     );
                 }
                 for cc in &e.consts {
@@ -956,7 +928,6 @@ impl<'a> Checker<'a> {
                         &cc.attrs,
                         ATTRIBUTE_TARGET_CLASS_CONSTANT,
                         "class constant",
-                        &fqn,
                     );
                 }
                 for m in &e.methods {
@@ -1004,7 +975,6 @@ impl<'a> Checker<'a> {
                         &value,
                         "constant.value",
                         c.span,
-                        label,
                     );
                 }
             }
@@ -1157,13 +1127,11 @@ impl<'a> Checker<'a> {
             } else {
                 "if.condNotBoolean"
             },
-            label,
         );
         if let Some(value) = self.inferred_constant_condition(cond, locals) {
             if is_elseif {
                 if !(value && is_last_without_else) {
                     self.report(
-                        label.to_string(),
                         format!(
                             "Elseif condition is always {}.",
                             if value { "true" } else { "false" }
@@ -1179,7 +1147,6 @@ impl<'a> Checker<'a> {
                 }
             } else {
                 self.report(
-                    label.to_string(),
                     format!(
                         "If condition is always {}.",
                         if value { "true" } else { "false" }

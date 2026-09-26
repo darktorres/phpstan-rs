@@ -1,2 +1,2 @@
-3:23-3:32 classConstant.class L0 Foo | a class constant must not be called 'class'; it is reserved for class name fetching
+3:23-3:32 classConstant.class L0 | a class constant must not be called 'class'; it is reserved for class name fetching
     non-ignorable

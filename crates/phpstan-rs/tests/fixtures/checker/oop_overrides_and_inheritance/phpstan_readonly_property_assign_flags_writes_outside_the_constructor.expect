@@ -1,1 +1,1 @@
-4:54-4:62 property.readOnlyAssignNotInConstructor L0 Foo::setX | Readonly property Foo::$x is assigned outside of the constructor.
+4:54-4:62 property.readOnlyAssignNotInConstructor L0 | Readonly property Foo::$x is assigned outside of the constructor.

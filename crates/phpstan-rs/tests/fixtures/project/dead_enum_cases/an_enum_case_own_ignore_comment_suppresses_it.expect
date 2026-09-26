@@ -1,1 +1,1 @@
-a.php:3:10-3:16 enumCase.unused L5 Suit | Enum case Suit::Spades is never used.
+a.php:3:10-3:16 enumCase.unused L5 | Enum case Suit::Spades is never used.

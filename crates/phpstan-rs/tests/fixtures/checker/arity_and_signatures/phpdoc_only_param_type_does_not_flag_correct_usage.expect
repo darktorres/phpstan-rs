@@ -1,1 +1,1 @@
-7:13-7:22 function.resultUnused L4 <main> | Call to function double() on a separate line has no effect.
+7:13-7:22 function.resultUnused L4 | Call to function double() on a separate line has no effect.

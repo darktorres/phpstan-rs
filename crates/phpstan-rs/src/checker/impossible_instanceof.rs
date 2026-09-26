@@ -20,7 +20,6 @@ impl<'a> Checker<'a> {
         target: &InstanceofTarget,
         span: Span,
         locals: &Locals,
-        label: &str,
         is_exempt_last_condition: bool,
     ) {
         let expr_ty = self.infer_expr(inner, locals);
@@ -32,7 +31,6 @@ impl<'a> Checker<'a> {
                 let target_ty = self.infer_expr(target_expr, locals);
                 if type_can_never_name_a_class(&target_ty) {
                     self.report(
-                        label.to_string(),
                         format!(
                             "Instanceof between {expr_ty} and {target_ty} results in an error."
                         ),
@@ -81,7 +79,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("Instanceof between {expr_ty} and {class} will always evaluate to {always}."),
             span,
             4,

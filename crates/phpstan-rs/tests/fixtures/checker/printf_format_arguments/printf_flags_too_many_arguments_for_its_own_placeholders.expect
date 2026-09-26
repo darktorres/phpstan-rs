@@ -1,1 +1,1 @@
-1:7-1:29 argument.printf L0 <main> | Call to printf contains 1 placeholder, 2 values given.
+1:7-1:29 argument.printf L0 | Call to printf contains 1 placeholder, 2 values given.

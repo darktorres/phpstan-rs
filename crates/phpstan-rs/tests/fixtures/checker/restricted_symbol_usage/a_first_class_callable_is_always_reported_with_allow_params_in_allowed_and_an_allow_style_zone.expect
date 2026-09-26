@@ -1,1 +1,1 @@
-4:65-4:77 restrictedSymbol.method L0 Foo::allowed | Call to restricted method Logger::log(): use our own logger instead
+4:65-4:77 restrictedSymbol.method L0 | Call to restricted method Logger::log(): use our own logger instead

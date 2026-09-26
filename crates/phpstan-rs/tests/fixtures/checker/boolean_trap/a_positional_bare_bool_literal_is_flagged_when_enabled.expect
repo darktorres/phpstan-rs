@@ -1,1 +1,1 @@
-3:24-3:28 argument.booleanTrap L0 <main> | setVisible() argument #1 ($visible) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead
+3:24-3:28 argument.booleanTrap L0 | setVisible() argument #1 ($visible) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead

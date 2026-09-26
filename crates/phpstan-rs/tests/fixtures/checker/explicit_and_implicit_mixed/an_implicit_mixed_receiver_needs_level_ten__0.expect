@@ -1,1 +1,1 @@
-2:20-2:22 missingType.parameter L6 f | Function f() has parameter $m with no type specified.
+2:20-2:22 missingType.parameter L6 | Function f() has parameter $m with no type specified.

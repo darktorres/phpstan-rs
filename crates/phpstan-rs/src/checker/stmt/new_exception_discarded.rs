@@ -10,7 +10,7 @@ impl<'a> Checker<'a> {
     /// `new Foo();` for a class with a constructor side effect, which
     /// this deliberately never touches - only a genuine `Throwable`
     /// qualifies).
-    pub(crate) fn check_new_exception_discarded(&mut self, e: &Expr, locals: &Locals, label: &str) {
+    pub(crate) fn check_new_exception_discarded(&mut self, e: &Expr, locals: &Locals) {
         if !self.registry.check_new_exception_discarded {
             return;
         }
@@ -24,7 +24,6 @@ impl<'a> Checker<'a> {
             && self.registry.is_subclass_of(class, "Throwable")
         {
             self.report(
-                label.to_string(),
                 format!("Construction of {class} is discarded - did you forget the throw keyword?"),
                 e.span,
                 5,

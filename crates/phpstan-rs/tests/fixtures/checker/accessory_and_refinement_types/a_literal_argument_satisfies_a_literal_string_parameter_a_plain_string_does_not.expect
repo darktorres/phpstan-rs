@@ -1,1 +1,1 @@
-8:22-8:24 argument.type L5 g | Parameter #1 $x of function sink expects literal-string, string given.
+8:22-8:24 argument.type L5 | Parameter #1 $x of function sink expects literal-string, string given.

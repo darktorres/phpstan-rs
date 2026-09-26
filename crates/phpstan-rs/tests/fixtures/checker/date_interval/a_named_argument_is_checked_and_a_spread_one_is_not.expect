@@ -1,1 +1,1 @@
-2:13-2:50 new.dateInterval L5 <main> | Instantiating DateInterval with garbage produces an error: Unknown or bad format (garbage)
+2:13-2:50 new.dateInterval L5 | Instantiating DateInterval with garbage produces an error: Unknown or bad format (garbage)

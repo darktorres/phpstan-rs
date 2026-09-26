@@ -1,2 +1,2 @@
-2:21-4:22 missingType.return L6 f | Function f() has no return type specified.
-3:25-3:34 method.nonObject L0 f | call to method foo() on a non-object type int
+2:21-4:22 missingType.return L6 | Function f() has no return type specified.
+3:25-3:34 method.nonObject L0 | call to method foo() on a non-object type int

@@ -1,2 +1,2 @@
-4:13-4:25 class.nameInUse L0 <main> | Cannot declare class Piwigo\\Foo\\Bar because the name is already in use.
+4:13-4:25 class.nameInUse L0 | Cannot declare class Piwigo\\Foo\\Bar because the name is already in use.
     non-ignorable

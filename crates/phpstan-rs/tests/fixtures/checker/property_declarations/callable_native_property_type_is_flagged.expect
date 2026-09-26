@@ -1,9 +1,9 @@
-3:33-3:35 property.callableType L0 Holder | Property Holder::$a cannot have callable in its type declaration.
+3:33-3:35 property.callableType L0 | Property Holder::$a cannot have callable in its type declaration.
     non-ignorable
-4:34-4:36 property.callableType L0 Holder | Property Holder::$b cannot have callable in its type declaration.
+4:34-4:36 property.callableType L0 | Property Holder::$b cannot have callable in its type declaration.
     non-ignorable
-5:42-5:44 property.callableType L0 Holder | Property Holder::$c cannot have callable in its type declaration.
+5:42-5:44 property.callableType L0 | Property Holder::$c cannot have callable in its type declaration.
     non-ignorable
-7:45-7:64 property.callableType L0 Holder | Property Holder::$d cannot have callable in its type declaration.
+7:45-7:64 property.callableType L0 | Property Holder::$d cannot have callable in its type declaration.
     non-ignorable
-7:45-7:64 property.onlyWritten L4 Holder | private property Holder::$d is never read, only written
+7:45-7:64 property.onlyWritten L4 | private property Holder::$d is never read, only written

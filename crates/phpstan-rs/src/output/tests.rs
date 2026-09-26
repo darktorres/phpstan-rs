@@ -4,12 +4,11 @@ use std::path::PathBuf;
 use super::*;
 use syntax::token::{Position, Span};
 
-fn diag(location: &str, message: &str, line: u32, col: u32, level: u8) -> Diagnostic {
-    diag_with_identifier(location, message, line, col, level, "variable.undefined")
+fn diag(message: &str, line: u32, col: u32, level: u8) -> Diagnostic {
+    diag_with_identifier(message, line, col, level, "variable.undefined")
 }
 
 fn diag_with_identifier(
-    location: &str,
     message: &str,
     line: u32,
     col: u32,
@@ -17,7 +16,6 @@ fn diag_with_identifier(
     identifier: &str,
 ) -> Diagnostic {
     Diagnostic {
-        location: location.to_string(),
         message: message.to_string(),
         span: Span {
             start: Position { line, col },
@@ -27,17 +25,16 @@ fn diag_with_identifier(
         identifier: identifier.to_string(),
         tip: None,
         non_ignorable: false,
-        metadata: FxHashMap::default(),
         fix: None,
     }
 }
 
 #[test]
 fn diagnostic_line_matches_this_projects_original_text_shape() {
-    let d = diag("f", "undefined variable: $x", 3, 12, 0);
+    let d = diag("undefined variable: $x", 3, 12, 0);
     assert_eq!(
         diagnostic_line(&d),
-        "3:12: f: undefined variable: $x (variable.undefined)"
+        "3:12: undefined variable: $x (variable.undefined)"
     );
 }
 
@@ -46,7 +43,7 @@ fn render_json_includes_totals_and_per_file_messages() {
     let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("src/bad.php"),
-        vec![diag("f", "undefined variable: $x", 3, 12, 0)],
+        vec![diag("undefined variable: $x", 3, 12, 0)],
     );
 
     let json = render_json(&results, 1);
@@ -60,7 +57,7 @@ fn render_json_includes_totals_and_per_file_messages() {
     assert_eq!(file["messages"][0]["line"], 3);
     assert_eq!(file["messages"][0]["column"], 12);
     assert_eq!(file["messages"][0]["level"], 0);
-    assert_eq!(file["messages"][0]["location"], "f");
+    assert!(file["messages"][0].get("location").is_none());
     assert_eq!(file["messages"][0]["identifier"], "variable.undefined");
     // tip is omitted entirely (not even `null`) when there isn't one.
     assert!(file["messages"][0].get("tip").is_none());
@@ -72,7 +69,7 @@ fn render_json_omits_clean_files_but_counts_them_in_files_checked() {
     results.insert(PathBuf::from("src/clean.php"), vec![]);
     results.insert(
         PathBuf::from("src/bad.php"),
-        vec![diag("f", "undefined variable: $x", 1, 1, 0)],
+        vec![diag("undefined variable: $x", 1, 1, 0)],
     );
 
     let json = render_json(&results, 2);
@@ -105,9 +102,8 @@ fn render_checkstyle_produces_well_formed_xml_with_one_error_per_diagnostic() {
     results.insert(
         PathBuf::from("src/bad.php"),
         vec![
-            diag("f", "undefined variable: $x", 3, 12, 0),
+            diag("undefined variable: $x", 3, 12, 0),
             diag_with_identifier(
-                "f",
                 "return type mismatch: expected int, got string",
                 4,
                 5,
@@ -123,11 +119,11 @@ fn render_checkstyle_produces_well_formed_xml_with_one_error_per_diagnostic() {
     assert!(xml.contains("<file name=\"src/bad.php\">"));
     assert!(xml.contains(
         "<error line=\"3\" column=\"12\" severity=\"error\" \
-         message=\"f: undefined variable: $x\" source=\"phpstan-rs.variable.undefined\"/>"
+         message=\"undefined variable: $x\" source=\"phpstan-rs.variable.undefined\"/>"
     ));
     assert!(xml.contains(
         "<error line=\"4\" column=\"5\" severity=\"error\" \
-         message=\"f: return type mismatch: expected int, got string\" \
+         message=\"return type mismatch: expected int, got string\" \
          source=\"phpstan-rs.return.type\"/>"
     ));
     assert!(xml.trim_end().ends_with("</checkstyle>"));
@@ -139,7 +135,6 @@ fn render_checkstyle_escapes_special_characters_in_messages() {
     results.insert(
         PathBuf::from("src/bad.php"),
         vec![diag(
-            "f",
             r#"expects array<int> but got "foo" & 'bar' <baz>"#,
             1,
             1,
@@ -170,10 +165,10 @@ fn output_format_default_is_text() {
 
 #[test]
 fn a_multi_line_message_stays_one_line_in_text_but_intact_in_json_and_checkstyle() {
-    let d = diag("f", "value (first\nsecond\r\nthird): bad", 1, 1, 2);
+    let d = diag("value (first\nsecond\r\nthird): bad", 1, 1, 2);
     assert_eq!(
         diagnostic_line(&d),
-        "1:1: f: value (first second third): bad (variable.undefined)"
+        "1:1: value (first second third): bad (variable.undefined)"
     );
     let mut results = FxHashMap::default();
     results.insert(PathBuf::from("a.php"), vec![d]);
@@ -187,7 +182,6 @@ fn junit_reports_each_diagnostic_as_a_failing_case_and_clean_files_as_passing() 
     results.insert(
         PathBuf::from("src/a.php"),
         vec![diag_with_identifier(
-            "f",
             "Bad <thing> & more",
             3,
             5,
@@ -202,7 +196,7 @@ fn junit_reports_each_diagnostic_as_a_failing_case_and_clean_files_as_passing() 
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 <testsuite name=\"phpstan-rs\" tests=\"2\" failures=\"1\" errors=\"0\" time=\"0\">\n  \
 <testcase name=\"src/a.php:3\" classname=\"phpstan-rs.argument.type\">\n    \
-<failure type=\"argument.type\" message=\"Bad &lt;thing&gt; &amp; more\">f: Bad &lt;thing&gt; &amp; more</failure>\n  \
+<failure type=\"argument.type\" message=\"Bad &lt;thing&gt; &amp; more\">Bad &lt;thing&gt; &amp; more</failure>\n  \
 </testcase>\n  \
 <testcase name=\"src/b.php\"/>\n\
 </testsuite>\n"
@@ -225,13 +219,13 @@ fn friendly_fixture(name: &str) -> PathBuf {
 #[test]
 fn friendly_frames_the_reported_line_with_its_span_underlined() {
     let path = friendly_fixture("plain");
-    let mut d = diag_with_identifier("f", "Wrong return.", 4, 12, 0, "return.type");
+    let mut d = diag_with_identifier("Wrong return.", 4, 12, 0, "return.type");
     d.span.end = Position { line: 4, col: 18 };
     d.tip = Some("Return a string.".to_string());
     let results = FxHashMap::from_iter([(path.clone(), vec![d])]);
     let text = render_friendly(&results, false);
     let expected = format!(
-        " ✖ Wrong return.\n  {}:4:12 · f · return.type\n    2 | // note\n    3 | function f(int $x): string {{\n  > 4 |     return $x + 1;\n      |            ^^^^^^\n    5 | }}\n  💡 Return a string.\n\n",
+        " ✖ Wrong return.\n  {}:4:12 · return.type\n    2 | // note\n    3 | function f(int $x): string {{\n  > 4 |     return $x + 1;\n      |            ^^^^^^\n    5 | }}\n  💡 Return a string.\n\n",
         path.display()
     );
     assert_eq!(text, expected);
@@ -244,7 +238,6 @@ fn friendly_highlights_code_when_colour_is_on() {
     let results = FxHashMap::from_iter([(
         path.clone(),
         vec![diag_with_identifier(
-            "f",
             "Wrong return.",
             4,
             12,

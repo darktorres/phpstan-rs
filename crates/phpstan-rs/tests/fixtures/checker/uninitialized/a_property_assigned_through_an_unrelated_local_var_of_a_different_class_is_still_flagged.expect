@@ -1,1 +1,1 @@
-6:28-6:30 property.uninitialized L2 Node | Node has an uninitialized property $x. Give it a default value or assign it in the constructor.
+6:28-6:30 property.uninitialized L2 | Node has an uninitialized property $x. Give it a default value or assign it in the constructor.

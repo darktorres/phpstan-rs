@@ -1,2 +1,2 @@
-6:19-6:20 phpDoc.parseError L2 C | PHPDoc tag @phpstan-type Row has invalid value: expected '>'
-8:13-8:28 missingType.return L6 f | Function f() has no return type specified.
+6:19-6:20 phpDoc.parseError L2 | PHPDoc tag @phpstan-type Row has invalid value: expected '>'
+8:13-8:28 missingType.return L6 | Function f() has no return type specified.

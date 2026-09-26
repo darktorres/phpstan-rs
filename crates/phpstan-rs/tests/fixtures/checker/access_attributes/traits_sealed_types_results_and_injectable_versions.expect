@@ -1,11 +1,11 @@
-8:68-8:82 missingType.iterableValue L6 Dave\Liddament\PhpLanguageExtensions\Attributes\Sealed::__construct | Method Dave\\Liddament\\PhpLanguageExtensions\\Attributes\\Sealed::__construct() has parameter $classes with no value type specified in iterable type array.
+8:68-8:82 missingType.iterableValue L6 | Method Dave\\Liddament\\PhpLanguageExtensions\\Attributes\\Sealed::__construct() has parameter $classes with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-19:26-19:33 attribute.restrictTraitTo L2 App\Mailer | Trait App\\Renders can only be used by App\\Controller and their subclasses, not App\\Mailer.
-23:1-23:36 class.disallowedSubtype L0 App\Square | Type App\\Square is not allowed to be a subtype of App\\Shape.
-29:33-29:45 attribute.injectableVersion L2 App\UsesRepo | Parameter $repo of App\\UsesRepo::__construct() is type-hinted with App\\DbRepo; inject its #[InjectableVersion] App\\Repo instead.
-29:33-29:45 constructor.unusedParameter L1 App\UsesRepo::__construct | Constructor of class App\\UsesRepo has an unused parameter $repo.
-29:47-29:55 constructor.unusedParameter L1 App\UsesRepo::__construct | Constructor of class App\\UsesRepo has an unused parameter $ok.
-31:25-31:34 attribute.injectableVersion L2 App\UsesRepo | Parameter $r of App\\UsesRepo::set() is type-hinted with App\\DbRepo; inject its #[InjectableVersion] App\\Repo instead.
-34:31-34:41 method.resultDiscarded L0 run | Call to App\\Calc::add() on a separate line discards its return value.
+19:26-19:33 attribute.restrictTraitTo L2 | Trait App\\Renders can only be used by App\\Controller and their subclasses, not App\\Mailer.
+23:1-23:36 class.disallowedSubtype L0 | Type App\\Square is not allowed to be a subtype of App\\Shape.
+29:33-29:45 attribute.injectableVersion L2 | Parameter $repo of App\\UsesRepo::__construct() is type-hinted with App\\DbRepo; inject its #[InjectableVersion] App\\Repo instead.
+29:33-29:45 constructor.unusedParameter L1 | Constructor of class App\\UsesRepo has an unused parameter $repo.
+29:47-29:55 constructor.unusedParameter L1 | Constructor of class App\\UsesRepo has an unused parameter $ok.
+31:25-31:34 attribute.injectableVersion L2 | Parameter $r of App\\UsesRepo::set() is type-hinted with App\\DbRepo; inject its #[InjectableVersion] App\\Repo instead.
+34:31-34:41 method.resultDiscarded L0 | Call to App\\Calc::add() on a separate line discards its return value.
     non-ignorable
-34:31-34:41 method.resultUnused L4 run | Call to method App\\Calc::add() on a separate line has no effect.
+34:31-34:41 method.resultUnused L4 | Call to method App\\Calc::add() on a separate line has no effect.

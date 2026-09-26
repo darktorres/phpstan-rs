@@ -47,7 +47,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         resolved: &[Option<&Expr>],
         locals: &Locals,
-        label: &str,
     ) {
         let function = function.trim_start_matches('\\').to_ascii_lowercase();
         match function.as_str() {
@@ -57,21 +56,14 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     let name = self.castable_parameter_name(sig, args, i);
-                    self.check_castable_array(
-                        &function,
-                        &name,
-                        &arg.value,
-                        Cast::String,
-                        locals,
-                        label,
-                    );
+                    self.check_castable_array(&function, &name, &arg.value, Cast::String, locals);
                 }
             }
             "array_combine" | "natcasesort" | "natsort" | "array_count_values"
             | "array_fill_keys" => {
                 if let Some(value) = resolved.first().copied().flatten() {
                     let name = self.castable_parameter_name(sig, args, 0);
-                    self.check_castable_array(&function, &name, value, Cast::String, locals, label);
+                    self.check_castable_array(&function, &name, value, Cast::String, locals);
                 }
             }
             "array_sum" | "array_product" => {
@@ -79,14 +71,7 @@ impl<'a> Checker<'a> {
                     && !arg.spread
                 {
                     let name = self.castable_parameter_name(sig, args, 0);
-                    self.check_castable_array(
-                        &function,
-                        &name,
-                        &arg.value,
-                        Cast::Number,
-                        locals,
-                        label,
-                    );
+                    self.check_castable_array(&function, &name, &arg.value, Cast::Number, locals);
                 }
             }
             "implode" | "join" => {
@@ -114,14 +99,7 @@ impl<'a> Checker<'a> {
                 } else {
                     format!("#{} $array", index + 1)
                 };
-                self.check_castable_array(
-                    &function,
-                    &name,
-                    value,
-                    Cast::ImplodeString,
-                    locals,
-                    label,
-                );
+                self.check_castable_array(&function, &name, value, Cast::ImplodeString, locals);
             }
             "array_unique" | "sort" | "rsort" | "asort" | "arsort" => {
                 let Some(value) = resolved.first().copied().flatten() else {
@@ -163,7 +141,7 @@ impl<'a> Checker<'a> {
                     (false, false) => return,
                 };
                 let name = self.castable_parameter_name(sig, args, 0);
-                self.check_castable_array(&function, &name, value, cast, locals, label);
+                self.check_castable_array(&function, &name, value, cast, locals);
             }
             _ => {}
         }
@@ -192,7 +170,6 @@ impl<'a> Checker<'a> {
         value: &Expr,
         cast: Cast,
         locals: &Locals,
-        label: &str,
     ) {
         let array_ty = self.infer_expr(value, locals);
         let Some(element_ty) = Self::array_element_type(&array_ty) else {
@@ -213,7 +190,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!(
                 "Parameter {param_name} of function {function} expects {}, {array_ty} given.",
                 cast.expectation()
@@ -258,7 +234,6 @@ impl<'a> Checker<'a> {
         &mut self,
         value_ty: &Type,
         span: syntax::token::Span,
-        label: &str,
     ) {
         if !self.registry.php_version.is_some_and(|v| {
             !types::php_version::PhpFeature::ArrayUnpackingWithStringKeys.is_available(v)
@@ -278,7 +253,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!(
                 "Array unpacking cannot be used on an array with {}string keys: {value_ty}",
                 if definitely { "" } else { "potential " }

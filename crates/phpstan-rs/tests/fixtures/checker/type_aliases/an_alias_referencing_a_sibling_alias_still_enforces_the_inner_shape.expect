@@ -1,1 +1,1 @@
-17:30-17:47 argument.type L5 run | Parameter #1 $x of function needsInt expects int, string given.
+17:30-17:47 argument.type L5 | Parameter #1 $x of function needsInt expects int, string given.

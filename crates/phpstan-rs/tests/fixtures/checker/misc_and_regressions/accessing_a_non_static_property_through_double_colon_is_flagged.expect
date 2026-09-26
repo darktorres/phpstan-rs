@@ -1,1 +1,1 @@
-5:43-5:64 staticProperty.notFound L0 test | access to undefined static property Config::$instanceOnly
+5:43-5:64 staticProperty.notFound L0 | access to undefined static property Config::$instanceOnly

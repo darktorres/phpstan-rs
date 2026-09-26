@@ -1,2 +1,2 @@
-10:13-12:14 missingType.return L6 process | Function process() has no return type specified.
-11:33-11:48 argument.type L5 process | Parameter #1 $x of function needsInt expects int, string given.
+10:13-12:14 missingType.return L6 | Function process() has no return type specified.
+11:33-11:48 argument.type L5 | Parameter #1 $x of function needsInt expects int, string given.

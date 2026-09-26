@@ -1,1 +1,1 @@
-4:13-4:39 trait.methodConflict L0 C2 | T2a and T2b define the same method (foo) with an incompatible signature in the composition of C2
+4:13-4:39 trait.methodConflict L0 | T2a and T2b define the same method (foo) with an incompatible signature in the composition of C2

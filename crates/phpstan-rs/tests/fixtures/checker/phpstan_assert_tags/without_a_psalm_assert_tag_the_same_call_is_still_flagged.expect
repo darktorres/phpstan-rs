@@ -1,1 +1,1 @@
-14:29-14:35 argument.type L5 test | Parameter #1 $s of function takesString expects string, int|string given.
+14:29-14:35 argument.type L5 | Parameter #1 $s of function takesString expects string, int|string given.

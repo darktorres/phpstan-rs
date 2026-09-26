@@ -1,1 +1,1 @@
-3:24-3:31 return.type L3 f | return type mismatch: expected int, got int|float
+3:24-3:31 return.type L3 | return type mismatch: expected int, got int|float

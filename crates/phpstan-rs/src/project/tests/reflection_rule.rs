@@ -10,14 +10,12 @@ impl ReflectionRule for FlagsEveryPublicClass {
     fn check_class(&self, class: &ClassInfo, fqn: &str) -> Vec<Diagnostic> {
         let _ = class;
         vec![Diagnostic {
-            location: fqn.to_string(),
             message: format!("saw class {fqn}"),
             span: syntax::token::Span::default(),
             level: 0,
             identifier: "test.sawClass".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: rustc_hash::FxHashMap::default(),
             fix: None,
         }]
     }
@@ -28,14 +26,12 @@ impl ReflectionRule for FlagsEveryFunction {
     fn check_function(&self, sig: &FunctionSig, fqn: &str) -> Vec<Diagnostic> {
         let _ = sig;
         vec![Diagnostic {
-            location: fqn.to_string(),
             message: format!("saw function {fqn}"),
             span: syntax::token::Span::default(),
             level: 0,
             identifier: "test.sawFunction".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: rustc_hash::FxHashMap::default(),
             fix: None,
         }]
     }

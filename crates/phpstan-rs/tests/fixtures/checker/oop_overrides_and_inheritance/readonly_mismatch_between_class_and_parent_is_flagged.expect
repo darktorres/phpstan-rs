@@ -1,2 +1,2 @@
-4:13-4:57 class.readOnly L0 FrozenSub | readonly class FrozenSub cannot extend non-readonly class Mutable1
-5:13-5:48 class.nonReadOnly L0 MutableSub | non-readonly class MutableSub cannot extend readonly class Frozen1
+4:13-4:57 class.readOnly L0 | readonly class FrozenSub cannot extend non-readonly class Mutable1
+5:13-5:48 class.nonReadOnly L0 | non-readonly class MutableSub cannot extend readonly class Frozen1

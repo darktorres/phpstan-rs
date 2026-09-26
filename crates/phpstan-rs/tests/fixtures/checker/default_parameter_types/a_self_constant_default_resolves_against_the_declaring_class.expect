@@ -1,1 +1,1 @@
-9:62-9:72 parameter.defaultValue L2 C::f | Default value of the parameter #2 $b ('n') of method C::f() is incompatible with type int.
+9:62-9:72 parameter.defaultValue L2 | Default value of the parameter #2 $b ('n') of method C::f() is incompatible with type int.

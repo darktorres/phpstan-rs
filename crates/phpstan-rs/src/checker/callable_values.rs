@@ -105,7 +105,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         let Some(named) = self.resolve_named_callable(callee_ty) else {
             return;
@@ -120,7 +119,6 @@ impl<'a> Checker<'a> {
                 "protected"
             };
             self.report(
-                label.to_string(),
                 format!("Call to {word} method {method}() of class {owner}."),
                 span,
                 2,
@@ -133,7 +131,6 @@ impl<'a> Checker<'a> {
             sig: named.sig,
             args,
             locals,
-            label,
             defining_class: named.defining_class.as_deref(),
             is_builtin: false,
             span,

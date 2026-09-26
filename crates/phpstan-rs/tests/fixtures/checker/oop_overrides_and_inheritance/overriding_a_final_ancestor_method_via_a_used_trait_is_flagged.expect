@@ -1,2 +1,2 @@
-8:13-10:14 method.parentMethodFinal L0 Impl | Method Impl::foo() overrides final method Base::foo().
+8:13-10:14 method.parentMethodFinal L0 | Method Impl::foo() overrides final method Base::foo().
     non-ignorable

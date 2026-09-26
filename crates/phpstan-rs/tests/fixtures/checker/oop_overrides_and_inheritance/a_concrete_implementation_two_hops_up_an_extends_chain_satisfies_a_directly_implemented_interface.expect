@@ -1,2 +1,2 @@
-4:24-4:43 missingType.return L6 Throwable2::getCode | Method Throwable2::getCode() has no return type specified.
-8:24-8:45 missingType.return L6 Exception2::getCode | Method Exception2::getCode() has no return type specified.
+4:24-4:43 missingType.return L6 | Method Throwable2::getCode() has no return type specified.
+8:24-8:45 missingType.return L6 | Method Exception2::getCode() has no return type specified.

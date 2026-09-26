@@ -47,6 +47,9 @@ enum Command {
     /// dumps tokens/AST/resolved signatures/diagnostics - a debug tool,
     /// not the normal way to use this checker.
     Demo { file: Option<PathBuf> },
+    /// Rewrites a baseline file, and every file it includes, in the
+    /// current baseline format.
+    ConvertBaseline { path: PathBuf },
 }
 
 #[hotpath::main]
@@ -78,6 +81,13 @@ fn main() {
             }
         }
         Command::Demo { file } => demo::run_demo(file.as_deref()),
+        Command::ConvertBaseline { path } => match phpstan_rs::baseline::convert(&path) {
+            Ok(files) => eprintln!("converted {files} baseline file(s)"),
+            Err(e) => {
+                eprintln!("error: converting {}: {e}", path.display());
+                std::process::exit(1);
+            }
+        },
     }
 }
 

@@ -1,1 +1,1 @@
-5:17-5:26 function.deprecated L0 caller | Call to deprecated function oldFunc().
+5:17-5:26 function.deprecated L0 | Call to deprecated function oldFunc().

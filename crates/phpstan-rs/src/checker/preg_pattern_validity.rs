@@ -56,7 +56,7 @@ fn as_string_literal(e: &Expr) -> Option<&str> {
 }
 
 impl<'a> Checker<'a> {
-    pub(crate) fn check_preg_pattern_validity(&mut self, name: &str, args: &[Arg], label: &str) {
+    pub(crate) fn check_preg_pattern_validity(&mut self, name: &str, args: &[Arg]) {
         let Some(shape) = pattern_arg_shape(name) else {
             return;
         };
@@ -69,16 +69,16 @@ impl<'a> Checker<'a> {
         match shape {
             PatternArgShape::Plain => {
                 if let Some(s) = as_string_literal(&pattern_arg.value) {
-                    self.report_if_invalid_pattern(s, pattern_arg.value.span, label);
+                    self.report_if_invalid_pattern(s, pattern_arg.value.span);
                 }
             }
             PatternArgShape::PlainOrArrayValues => {
                 if let Some(s) = as_string_literal(&pattern_arg.value) {
-                    self.report_if_invalid_pattern(s, pattern_arg.value.span, label);
+                    self.report_if_invalid_pattern(s, pattern_arg.value.span);
                 } else if let ExprKind::ArrayLiteral(items) = &pattern_arg.value.kind {
                     for item in items {
                         if let Some(s) = as_string_literal(&item.value) {
-                            self.report_if_invalid_pattern(s, item.value.span, label);
+                            self.report_if_invalid_pattern(s, item.value.span);
                         }
                     }
                 }
@@ -89,7 +89,7 @@ impl<'a> Checker<'a> {
                         if let Some(key) = &item.key
                             && let Some(s) = as_string_literal(key)
                         {
-                            self.report_if_invalid_pattern(s, key.span, label);
+                            self.report_if_invalid_pattern(s, key.span);
                         }
                     }
                 }
@@ -97,12 +97,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_if_invalid_pattern(&mut self, pattern_literal: &str, span: Span, label: &str) {
+    fn report_if_invalid_pattern(&mut self, pattern_literal: &str, span: Span) {
         let Some(detail) = validate_pattern(pattern_literal) else {
             return;
         };
         self.report(
-            label.to_string(),
             format!("Regex pattern is invalid: {detail}"),
             span,
             0,

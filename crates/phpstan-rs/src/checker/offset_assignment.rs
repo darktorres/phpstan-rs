@@ -50,7 +50,6 @@ impl<'a> Checker<'a> {
         value: &Type,
         is_assign_op: bool,
         locals: &Locals,
-        label: &str,
     ) {
         let ExprKind::Index(base, idx) = &lhs.kind else {
             return;
@@ -93,7 +92,7 @@ impl<'a> Checker<'a> {
                 Some(d) => format!("Cannot assign offset {d} to {container}."),
             }
         };
-        self.report(label.to_string(), message, lhs.span, level, identifier);
+        self.report(message, lhs.span, level, identifier);
     }
 
     /// Why writing `value` at `dim` into one container type fails, if

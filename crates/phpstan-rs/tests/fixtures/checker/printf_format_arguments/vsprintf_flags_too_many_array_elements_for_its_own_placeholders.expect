@@ -1,1 +1,1 @@
-1:7-1:33 argument.vsprintf L0 <main> | Call to vsprintf contains 1 placeholder, 2 values given.
+1:7-1:33 argument.vsprintf L0 | Call to vsprintf contains 1 placeholder, 2 values given.

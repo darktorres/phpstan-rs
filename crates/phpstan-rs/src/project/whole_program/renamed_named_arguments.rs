@@ -27,7 +27,7 @@ pub(crate) type NamedArgumentCallFactsWithPath =
 pub(crate) fn find_renamed_named_argument_collisions(
     calls: &NamedArgumentCallFactsWithPath,
     overrides: &RenamedParameterOverrideFacts,
-) -> Vec<(PathBuf, Span, String, String)> {
+) -> Vec<(PathBuf, Span, String)> {
     let mut collisions = Vec::new();
     for RenamedParameterOverride {
         prototype_class,
@@ -44,12 +44,10 @@ pub(crate) fn find_renamed_named_argument_collisions(
         )) else {
             continue;
         };
-        let location = format!("{prototype_class}::{method}");
         for (path, span) in sites {
             collisions.push((
                 path.clone(),
                 *span,
-                location.clone(),
                 format!(
                     "Call to {prototype_class}::{method}() uses named argument for parameter \
                      ${prototype_param}, but {overriding_class} renames it to ${overriding_param}."

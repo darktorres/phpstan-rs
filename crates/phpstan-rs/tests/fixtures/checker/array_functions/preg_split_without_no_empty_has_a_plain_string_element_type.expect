@@ -1,1 +1,1 @@
-9:30-9:35 argument.type L5 f | Parameter #1 $x of function wantsIntList expects list<int>, list<string> given.
+9:30-9:35 argument.type L5 | Parameter #1 $x of function wantsIntList expects list<int>, list<string> given.

@@ -86,7 +86,6 @@ impl<'a> Checker<'a> {
         fqn: &str,
         sig: &FunctionSig,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.check_internal_usage || !sig.is_internal {
             return;
@@ -100,7 +99,7 @@ impl<'a> Checker<'a> {
                 format!("Call to internal function {fqn}() from outside its root namespace {ns}.")
             }
         };
-        self.report(label.to_string(), message, span, 0, "function.internal");
+        self.report(message, span, 0, "function.internal");
     }
 
     /// `RestrictedInternalMethodUsageExtension` -
@@ -116,14 +115,12 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         is_static: bool,
         span: Span,
-        label: &str,
     ) {
         self.check_access_attributes(
             owner,
             method_name,
             sig.visibility == syntax::ast::Visibility::Public,
             span,
-            label,
         );
         if !self.registry.check_internal_usage {
             return;
@@ -168,7 +165,7 @@ impl<'a> Checker<'a> {
                 format!("{kind_word}.internal"),
             ),
         };
-        self.report(label.to_string(), message, span, 0, &identifier);
+        self.report(message, span, 0, &identifier);
     }
 
     /// `RestrictedInternalPropertyUsageExtension` - same four-branch
@@ -180,7 +177,6 @@ impl<'a> Checker<'a> {
         prop_name: &str,
         sig: &PropertySig,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.check_internal_usage {
             return;
@@ -229,7 +225,7 @@ impl<'a> Checker<'a> {
                 format!("{kind_word}.internal"),
             ),
         };
-        self.report(label.to_string(), message, span, 0, &identifier);
+        self.report(message, span, 0, &identifier);
     }
 
     /// `RestrictedInternalClassConstantUsageExtension`: a constant's
@@ -242,7 +238,6 @@ impl<'a> Checker<'a> {
         const_name: &str,
         sig: &ConstSig,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.check_internal_usage {
             return;
@@ -285,7 +280,7 @@ impl<'a> Checker<'a> {
                 "classConstant.internal".to_string(),
             ),
         };
-        self.report(label.to_string(), message, span, 0, &identifier);
+        self.report(message, span, 0, &identifier);
     }
 
     /// `RestrictedInternalClassNameUsageExtension`, narrowed to
@@ -293,36 +288,30 @@ impl<'a> Checker<'a> {
     /// `ClassNameUsageLocation` variants that extension covers
     /// (`extends`/`implements`/param-and-return-type-hints/first-class-
     /// callables aren't checked here).
-    pub(crate) fn check_internal_instantiation(&mut self, class: &str, span: Span, label: &str) {
+    pub(crate) fn check_internal_instantiation(&mut self, class: &str, span: Span) {
         if let Some((canonical, _)) = self.registry.lookup_class(class) {
             let canonical = canonical.to_string();
             let is_public = self
                 .registry
                 .lookup_method(&canonical, "__construct")
                 .is_none_or(|sig| sig.visibility == syntax::ast::Visibility::Public);
-            self.check_access_attributes(&canonical, "__construct", is_public, span, label);
+            self.check_access_attributes(&canonical, "__construct", is_public, span);
         }
-        self.check_internal_class_name_usage(class, "Instantiation of", "new", span, label);
+        self.check_internal_class_name_usage(class, "Instantiation of", "new", span);
     }
 
     /// `RestrictedInternalClassNameUsageExtension`, narrowed to
     /// `instanceof`'s own target class.
-    pub(crate) fn check_internal_instanceof(&mut self, class: &str, span: Span, label: &str) {
-        self.check_internal_class_name_usage(
-            class,
-            "Instanceof references",
-            "instanceof",
-            span,
-            label,
-        );
+    pub(crate) fn check_internal_instanceof(&mut self, class: &str, span: Span) {
+        self.check_internal_class_name_usage(class, "Instanceof references", "instanceof", span);
     }
 
     /// `RestrictedInternalClassNameUsageExtension`, narrowed to a `catch`
     /// clause's own caught type - fires independently of, and in addition
     /// to, `catch.notThrowable` (a real Throwable-implementing class can
     /// still be `@internal`).
-    pub(crate) fn check_internal_catch(&mut self, class: &str, span: Span, label: &str) {
-        self.check_internal_class_name_usage(class, "Catching", "catch", span, label);
+    pub(crate) fn check_internal_catch(&mut self, class: &str, span: Span) {
+        self.check_internal_class_name_usage(class, "Catching", "catch", span);
     }
 
     /// Shared by `check_internal_instantiation`/`check_internal_instanceof`/
@@ -347,14 +336,13 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_type_internal_usage(
         &mut self,
         case_refs: &[(std::sync::Arc<str>, std::sync::Arc<str>)],
-        label: &str,
         span: Span,
     ) {
         if !self.registry.check_internal_usage {
             return;
         }
         for (_, resolved) in case_refs {
-            self.check_internal_class_name_usage(resolved, "Referencing", "type", span, label);
+            self.check_internal_class_name_usage(resolved, "Referencing", "type", span);
         }
     }
 
@@ -364,7 +352,6 @@ impl<'a> Checker<'a> {
         verb_phrase: &str,
         identifier_prefix: &str,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.check_internal_usage {
             return;
@@ -384,7 +371,6 @@ impl<'a> Checker<'a> {
             type_word.to_lowercase()
         );
         self.report(
-            label.to_string(),
             message,
             span,
             0,
@@ -466,7 +452,6 @@ impl<'a> Checker<'a> {
         }
         let type_word = class_type_word(info.kind);
         self.report(
-            fqn.to_string(),
             format!(
                 "{subject} {fqn} {verb} internal {} {target}.",
                 type_word.to_lowercase()
@@ -486,7 +471,6 @@ impl<'a> Checker<'a> {
         }
         let type_word = class_type_word(info.kind);
         self.report(
-            fqn.to_string(),
             format!(
                 "Usage of internal {} {target} in class {fqn}.",
                 type_word.to_lowercase()
@@ -569,7 +553,6 @@ impl<'a> Checker<'a> {
                     &context,
                     "parameter",
                     p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.name_span),
-                    label,
                 );
             }
         }
@@ -588,7 +571,6 @@ impl<'a> Checker<'a> {
                     &context,
                     "return",
                     return_type_fallback_span,
-                    label,
                 );
             }
         }
@@ -601,7 +583,6 @@ impl<'a> Checker<'a> {
         context: &str,
         id_prefix: &str,
         span: Span,
-        label: &str,
     ) {
         let Some(info) = self.registry.classes.get(class) else {
             return;
@@ -611,7 +592,6 @@ impl<'a> Checker<'a> {
         }
         let type_word = class_type_word(info.kind);
         self.report(
-            label.to_string(),
             format!(
                 "{subject} of {context} has typehint with internal {} {class}.",
                 type_word.to_lowercase()

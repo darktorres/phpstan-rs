@@ -1,2 +1,2 @@
-4:45-4:60 class.duplicateProperty L0 Z | Cannot redeclare property Z::$val.
+4:45-4:60 class.duplicateProperty L0 | Cannot redeclare property Z::$val.
     non-ignorable

@@ -56,7 +56,6 @@ impl<'a> Checker<'a> {
                 match self.registry.lookup_function_with_name(fqn) {
                     None => {
                         self.report(
-                            "<main>".to_string(),
                             format!("used function {fqn} not found"),
                             stmt.span,
                             0,
@@ -75,7 +74,6 @@ impl<'a> Checker<'a> {
                             && real_name != fqn =>
                     {
                         let mut builder = DiagnosticBuilder::new(
-                            "<main>".to_string(),
                             format!("Function {real_name} used with incorrect case: {fqn}."),
                             stmt.span,
                             0,
@@ -125,7 +123,6 @@ impl<'a> Checker<'a> {
                 let fqn = import.path.trim_start_matches('\\');
                 if !self.registry.global_constants.contains_key(fqn) {
                     self.report(
-                        "<main>".to_string(),
                         format!("used constant {fqn} not found"),
                         stmt.span,
                         0,
@@ -174,7 +171,6 @@ impl<'a> Checker<'a> {
                     if path.starts_with(prefix) {
                         self.report_builder(
                             DiagnosticBuilder::new(
-                                "<main>".to_string(),
                                 format!("Referencing prefixed {project} class: {path}."),
                                 stmt.span,
                                 0,
@@ -235,9 +231,7 @@ impl<'a> Checker<'a> {
                             .or_default();
                         if !scope.insert(alias.to_ascii_lowercase()) {
                             self.report_builder(
-                                DiagnosticBuilder::new(
-                                    "<main>".to_string(),
-                                    format!(
+                                DiagnosticBuilder::new(format!(
                                         "Cannot use {path} as {alias} because the name is already in use."
                                     ),
                                     stmt.span,
@@ -261,9 +255,7 @@ impl<'a> Checker<'a> {
                             format!("{current_namespace}\\{}", c.name)
                         };
                         self.report_builder(
-                            DiagnosticBuilder::new(
-                                "<main>".to_string(),
-                                format!(
+                            DiagnosticBuilder::new(format!(
                                     "Cannot declare {kind} {qualified} because the name is already in use."
                                 ),
                                 c.span,
@@ -285,9 +277,7 @@ impl<'a> Checker<'a> {
                             format!("{current_namespace}\\{}", e.name)
                         };
                         self.report_builder(
-                            DiagnosticBuilder::new(
-                                "<main>".to_string(),
-                                format!(
+                            DiagnosticBuilder::new(format!(
                                     "Cannot declare enum {qualified} because the name is already in use."
                                 ),
                                 e.span,

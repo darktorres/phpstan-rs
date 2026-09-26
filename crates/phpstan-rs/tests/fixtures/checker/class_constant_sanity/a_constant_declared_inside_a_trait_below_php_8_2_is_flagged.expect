@@ -1,2 +1,2 @@
-3:23-3:28 classConstant.inTrait L0 Foo | Constant is declared inside a trait but is only supported on PHP 8.2 and later.
+3:23-3:28 classConstant.inTrait L0 | Constant is declared inside a trait but is only supported on PHP 8.2 and later.
     non-ignorable

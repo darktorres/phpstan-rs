@@ -1,2 +1,2 @@
-5:28-5:34 property.override L0 Child | Property Child::$x has #[\\Override] attribute, but no matching parent property exists
+5:28-5:34 property.override L0 | Property Child::$x has #[\\Override] attribute, but no matching parent property exists
     fix: Remove #[\\Override] => ""

@@ -1,1 +1,1 @@
-3:30-3:32 doWhile.condNotBoolean L5 f | Only booleans are allowed in a do-while condition, int given.
+3:30-3:32 doWhile.condNotBoolean L5 | Only booleans are allowed in a do-while condition, int given.

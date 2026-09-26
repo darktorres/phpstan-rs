@@ -1,1 +1,1 @@
-5:13-5:24 function.resultUnused L4 <main> | Call to function needsInt() on a separate line has no effect.
+5:13-5:24 function.resultUnused L4 | Call to function needsInt() on a separate line has no effect.

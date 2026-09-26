@@ -150,7 +150,6 @@ impl<'a> Checker<'a> {
         let premature_reads = ctx.premature_reads;
         for (prop, span) in premature_reads {
             self.report(
-                fqn.to_string(),
                 format!("Access to an uninitialized property {fqn}::${prop}."),
                 span,
                 2,

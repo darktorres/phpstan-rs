@@ -1,3 +1,3 @@
-2:57-2:63 constructor.unusedParameter L1 Point40::__construct | Constructor of class Point40 has an unused parameter $x.
-2:65-2:71 constructor.unusedParameter L1 Point40::__construct | Constructor of class Point40 has an unused parameter $y.
-3:47-3:73 arguments.count L1 test | Class Point40 constructor invoked with 5 parameters, 2 required.
+2:57-2:63 constructor.unusedParameter L1 | Constructor of class Point40 has an unused parameter $x.
+2:65-2:71 constructor.unusedParameter L1 | Constructor of class Point40 has an unused parameter $y.
+3:47-3:73 arguments.count L1 | Class Point40 constructor invoked with 5 parameters, 2 required.

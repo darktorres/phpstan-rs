@@ -1,1 +1,1 @@
-a.php:1:28-1:29 namespace.circularDependency L5 NsA\A | Circular namespace dependency: NsA, NsB.
+a.php:1:28-1:29 namespace.circularDependency L5 | Circular namespace dependency: NsA, NsB.

@@ -1,2 +1,2 @@
-a.php:1:7-1:37 missingType.return L6 __autoload | Function __autoload() has no return type specified.
-a.php:1:27-1:33 missingType.parameter L6 __autoload | Function __autoload() has parameter $class with no type specified.
+a.php:1:7-1:37 missingType.return L6 | Function __autoload() has no return type specified.
+a.php:1:27-1:33 missingType.parameter L6 | Function __autoload() has parameter $class with no type specified.

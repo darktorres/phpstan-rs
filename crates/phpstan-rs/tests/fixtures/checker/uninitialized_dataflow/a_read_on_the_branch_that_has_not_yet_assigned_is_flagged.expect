@@ -1,1 +1,1 @@
-8:30-8:38 property.uninitialized L2 Foo | Access to an uninitialized property Foo::$x.
+8:30-8:38 property.uninitialized L2 | Access to an uninitialized property Foo::$x.

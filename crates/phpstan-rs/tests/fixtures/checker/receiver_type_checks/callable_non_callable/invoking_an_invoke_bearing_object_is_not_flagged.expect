@@ -1,2 +1,2 @@
-3:21-3:43 missingType.return L6 Invokable::__invoke | Method Invokable::__invoke() has no return type specified.
-5:17-7:18 missingType.return L6 f | Function f() has no return type specified.
+3:21-3:43 missingType.return L6 | Method Invokable::__invoke() has no return type specified.
+5:17-7:18 missingType.return L6 | Function f() has no return type specified.

@@ -1,2 +1,2 @@
-4:23-4:33 attribute.target L0 C::$x (get hook) | Attribute class NoDiscard cannot be used on property hooks.
+4:23-4:33 attribute.target L0 | Attribute class NoDiscard cannot be used on property hooks.
     non-ignorable

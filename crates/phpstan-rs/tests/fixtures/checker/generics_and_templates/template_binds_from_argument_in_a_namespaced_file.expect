@@ -1,1 +1,1 @@
-10:22-10:39 argument.type L5 <main> | Parameter #1 $x of function App\\needsInt expects int, 'wrong' given.
+10:22-10:39 argument.type L5 | Parameter #1 $x of function App\\needsInt expects int, 'wrong' given.

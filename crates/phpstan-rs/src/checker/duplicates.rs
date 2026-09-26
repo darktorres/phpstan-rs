@@ -52,7 +52,6 @@ impl<'a> Checker<'a> {
             if !seen.insert(case.name.as_ref()) {
                 self.report_builder(
                     DiagnosticBuilder::new(
-                        fqn.to_string(),
                         format!("Cannot redeclare enum case {fqn}::{}.", case.name),
                         case.span,
                         0,
@@ -66,7 +65,6 @@ impl<'a> Checker<'a> {
             if !seen.insert(c.name.as_ref()) {
                 self.report_builder(
                     DiagnosticBuilder::new(
-                        fqn.to_string(),
                         format!("Cannot redeclare constant {fqn}::{}.", c.name),
                         c.span,
                         0,
@@ -92,7 +90,6 @@ impl<'a> Checker<'a> {
             {
                 self.report_builder(
                     DiagnosticBuilder::new(
-                        fqn.to_string(),
                         format!("Cannot redeclare property {fqn}::${}.", p.name),
                         p.span,
                         0,
@@ -120,7 +117,6 @@ impl<'a> Checker<'a> {
                 if seen.contains_key(param.name.as_ref()) {
                     self.report_builder(
                         DiagnosticBuilder::new(
-                            fqn.to_string(),
                             format!("Cannot redeclare property {fqn}::${}.", param.name),
                             param.span,
                             0,
@@ -135,7 +131,6 @@ impl<'a> Checker<'a> {
                 {
                     self.report_builder(
                         DiagnosticBuilder::new(
-                            fqn.to_string(),
                             format!("Cannot redeclare property {fqn}::${}.", param.name),
                             param.span,
                             0,
@@ -159,7 +154,6 @@ impl<'a> Checker<'a> {
             {
                 self.report_builder(
                     DiagnosticBuilder::new(
-                        fqn.to_string(),
                         format!("Cannot redeclare method {fqn}::{}().", m.function.name),
                         m.span,
                         0,

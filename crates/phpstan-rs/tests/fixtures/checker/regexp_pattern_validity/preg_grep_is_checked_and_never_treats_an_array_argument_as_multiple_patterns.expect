@@ -1,1 +1,1 @@
-2:23-2:31 regexp.pattern L0 <main> | Regex pattern is invalid: Unknown modifier 'y'
+2:23-2:31 regexp.pattern L0 | Regex pattern is invalid: Unknown modifier 'y'

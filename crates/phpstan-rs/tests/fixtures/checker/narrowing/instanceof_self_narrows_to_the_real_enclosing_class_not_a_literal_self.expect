@@ -1,2 +1,2 @@
-4:41-4:47 missingType.parameter L6 App\Box::useSame | Method App\\Box::useSame() has parameter $other with no type specified.
-6:32-6:55 method.notFound L0 App\Box::useSame | call to undefined method App\\Box::totallyMadeUp()
+4:41-4:47 missingType.parameter L6 | Method App\\Box::useSame() has parameter $other with no type specified.
+6:32-6:55 method.notFound L0 | call to undefined method App\\Box::totallyMadeUp()

@@ -1,5 +1,5 @@
-4:11-4:16 missingNativeType.classConstant L0 Base | Constant Base::LIMIT can be declared natively as int.
-5:11-5:16 missingNativeType.classConstant L0 Base | Constant Base::NAMES can be declared natively as array.
-8:11-8:16 missingNativeType.classConstant L0 Base | Constant Base::LABEL can be declared natively as string.
-9:11-9:15 missingNativeType.classConstant L0 Base | Constant Base::SUIT can be declared natively as Suit.
-13:11-13:21 missingNativeType.classConstant L0 Child | Constant Child::REDECLARED can be declared natively as int.
+4:11-4:16 missingNativeType.classConstant L0 | Constant Base::LIMIT can be declared natively as int.
+5:11-5:16 missingNativeType.classConstant L0 | Constant Base::NAMES can be declared natively as array.
+8:11-8:16 missingNativeType.classConstant L0 | Constant Base::LABEL can be declared natively as string.
+9:11-9:15 missingNativeType.classConstant L0 | Constant Base::SUIT can be declared natively as Suit.
+13:11-13:21 missingNativeType.classConstant L0 | Constant Child::REDECLARED can be declared natively as int.

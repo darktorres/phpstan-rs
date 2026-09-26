@@ -1,7 +1,7 @@
-5:25-5:51 method.unused L4 Svc | private method Svc::secret() is unused
+5:25-5:51 method.unused L4 | private method Svc::secret() is unused
     fix: Remove method secret() => ""
-10:17-10:21 arguments.count L0 f | Callable 'strlen' invoked with 0 parameters, 1 required.
-12:20-12:23 argument.type L5 f | Parameter #1 $n of callable array{0: Svc, 1: 'run'} expects int, 'x' given.
-14:17-14:21 arguments.count L0 f | Callable 'Svc::make' invoked with 0 parameters, 1 required.
-18:17-18:21 callable.inaccessibleMethod L2 f | Call to private method secret() of class Svc.
-19:22-19:28 argument.type L5 f | Parameter #1 $x of callable Svc expects int, 'nope' given.
+10:17-10:21 arguments.count L0 | Callable 'strlen' invoked with 0 parameters, 1 required.
+12:20-12:23 argument.type L5 | Parameter #1 $n of callable array{0: Svc, 1: 'run'} expects int, 'x' given.
+14:17-14:21 arguments.count L0 | Callable 'Svc::make' invoked with 0 parameters, 1 required.
+18:17-18:21 callable.inaccessibleMethod L2 | Call to private method secret() of class Svc.
+19:22-19:28 argument.type L5 | Parameter #1 $x of callable Svc expects int, 'nope' given.

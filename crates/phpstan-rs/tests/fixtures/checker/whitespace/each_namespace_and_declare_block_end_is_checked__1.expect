@@ -1,1 +1,1 @@
-5:1-6:6 whitespace.fileEnd L0 <main> | File ends with a trailing whitespace. This may cause problems when running the code in the web browser. Remove the closing ?> mark or remove the whitespace.
+5:1-6:6 whitespace.fileEnd L0 | File ends with a trailing whitespace. This may cause problems when running the code in the web browser. Remove the closing ?> mark or remove the whitespace.

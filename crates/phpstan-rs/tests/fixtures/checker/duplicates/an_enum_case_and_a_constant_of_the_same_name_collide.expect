@@ -1,2 +1,2 @@
-4:23-4:33 enum.duplicateConstant L0 Status | Cannot redeclare constant Status::Active.
+4:23-4:33 enum.duplicateConstant L0 | Cannot redeclare constant Status::Active.
     non-ignorable

@@ -78,13 +78,7 @@ impl<'a> Checker<'a> {
     /// `current_function_throw_points`/`current_function_has_
     /// unannotated_call` are fully populated), and before either resets
     /// for the next declaration.
-    pub(crate) fn check_too_wide_throw_type(
-        &mut self,
-        throws: &Type,
-        subject: &str,
-        span: Span,
-        label: &str,
-    ) {
+    pub(crate) fn check_too_wide_throw_type(&mut self, throws: &Type, subject: &str, span: Span) {
         if *throws == Type::Void || self.current_function_has_unannotated_call {
             return;
         }
@@ -117,7 +111,6 @@ impl<'a> Checker<'a> {
                 continue;
             }
             self.report(
-                label.to_string(),
                 format!("{subject} has {declared} in PHPDoc @throws tag but it's not thrown."),
                 span,
                 2,

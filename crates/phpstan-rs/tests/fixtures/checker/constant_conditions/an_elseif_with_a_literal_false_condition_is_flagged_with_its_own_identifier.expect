@@ -1,2 +1,2 @@
-2:13-8:14 missingType.return L6 f | Function f() has no return type specified.
-5:27-5:32 elseif.alwaysFalse L4 f | Elseif condition is always false.
+2:13-8:14 missingType.return L6 | Function f() has no return type specified.
+5:27-5:32 elseif.alwaysFalse L4 | Elseif condition is always false.

@@ -45,7 +45,6 @@ impl<'a> Checker<'a> {
                     None,
                     hooks.get_doc.as_deref(),
                     p.span,
-                    &format!("{fqn}::${} (get hook)", p.name),
                 );
                 self.check_get_hook(
                     fqn,
@@ -95,7 +94,6 @@ impl<'a> Checker<'a> {
                         None,
                         hooks.get_doc.as_deref(),
                         param.span,
-                        &format!("{fqn}::${} (get hook)", param.name),
                     );
                     self.check_get_hook(
                         fqn,
@@ -132,7 +130,7 @@ impl<'a> Checker<'a> {
     /// directly callable).
     fn check_hook_attributes(&mut self, attrs: &[Attribute], label: &str) {
         self.check_attributes(attrs, label);
-        self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_METHOD, "method", label);
+        self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_METHOD, "method");
         if let Some(nodiscard) = attrs
             .iter()
             .find(|a| registry::is_no_discard_attribute_name(&a.name))
@@ -140,7 +138,6 @@ impl<'a> Checker<'a> {
             let fqn = self.name_ctx.resolve(&nodiscard.name);
             self.report_builder(
                 DiagnosticBuilder::new(
-                    label.to_string(),
                     format!("Attribute class {fqn} cannot be used on property hooks."),
                     nodiscard.span,
                     0,
@@ -213,7 +210,7 @@ impl<'a> Checker<'a> {
         // need a real body to compare against.
         let throws = self.resolve_hook_throws(doc);
         if let Some(throws) = &throws {
-            self.check_throws_tag_validity(throws, span, &label);
+            self.check_throws_tag_validity(throws, span);
             // `ThrowsVoidPropertyHookWithExplicitThrowPointRule`, same
             // simplified wording as `check_function_with_ancestor_hint`.
             if *throws == Type::Void {
@@ -223,9 +220,7 @@ impl<'a> Checker<'a> {
                     PropertyHookBody::Abstract => None,
                 };
                 if let Some(throw_span) = throw_span {
-                    self.report(
-                        label.clone(),
-                        format!(
+                    self.report(format!(
                             "Get hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
                         ),
                         throw_span,
@@ -245,7 +240,6 @@ impl<'a> Checker<'a> {
         // forgot to.
         if !prop_sig.is_virtual && !registry::hook_body_references_property(body, name) {
             self.report(
-                fqn.to_string(),
                 format!(
                     "Get hook for non-virtual property {fqn}::${name} does not read its value."
                 ),
@@ -294,7 +288,7 @@ impl<'a> Checker<'a> {
                 None
             }
         };
-        self.check_generator_return_type(declared_return.as_ref(), span, &label);
+        self.check_generator_return_type(declared_return.as_ref(), span);
         match body {
             PropertyHookBody::Arrow(e) => {
                 let body_ty = self.check_expr(e, &mut locals, &label);
@@ -302,7 +296,6 @@ impl<'a> Checker<'a> {
                     && !self.registry.accepts(&prop_sig.ty, &body_ty).yes()
                 {
                     self.report(
-                        label.clone(),
                         format!(
                             "return type mismatch: expected {}, got {body_ty}",
                             prop_sig.ty
@@ -327,7 +320,6 @@ impl<'a> Checker<'a> {
                     )
                 {
                     let mut builder = DiagnosticBuilder::new(
-                        label.clone(),
                         format!(
                             "should return {} but return statement is missing",
                             prop_sig.ty
@@ -357,9 +349,9 @@ impl<'a> Checker<'a> {
                 hook_final,
             )
         {
-            self.check_too_wide_throw_type(throws, &subject, span, &label);
+            self.check_too_wide_throw_type(throws, &subject, span);
         }
-        self.check_missing_checked_exceptions(throws.as_ref(), &subject, &label);
+        self.check_missing_checked_exceptions(throws.as_ref(), &subject);
         self.current_function_is_generator = previous_generator_flag;
         self.current_declared_return_type = previous_declared_return_type;
         self.current_function_throw_points = previous_throw_points;
@@ -388,11 +380,11 @@ impl<'a> Checker<'a> {
     ) {
         let label = format!("{fqn}::${name} (set hook)");
         self.check_hook_attributes(attrs, &label);
-        self.check_hook_phpdoc_types(fqn, type_hint, Some(param), doc, span, &label);
+        self.check_hook_phpdoc_types(fqn, type_hint, Some(param), doc, span);
         // See `check_get_hook` - runs regardless of body.
         let throws = self.resolve_hook_throws(doc);
         if let Some(throws) = &throws {
-            self.check_throws_tag_validity(throws, span, &label);
+            self.check_throws_tag_validity(throws, span);
             if *throws == Type::Void {
                 let throw_span = match body {
                     PropertyHookBody::Arrow(e) => expr_contains_explicit_throw(e),
@@ -400,9 +392,7 @@ impl<'a> Checker<'a> {
                     PropertyHookBody::Abstract => None,
                 };
                 if let Some(throw_span) = throw_span {
-                    self.report(
-                        label.clone(),
-                        format!(
+                    self.report(format!(
                             "Set hook for property {fqn}::${name} throws exception but the PHPDoc contains @throws void."
                         ),
                         throw_span,
@@ -420,7 +410,6 @@ impl<'a> Checker<'a> {
             && !registry::hook_body_references_property(body, name)
         {
             self.report(
-                fqn.to_string(),
                 format!(
                     "Set hook for non-virtual property {fqn}::${name} does not assign value to it."
                 ),
@@ -439,9 +428,7 @@ impl<'a> Checker<'a> {
         match (prop_has_native, param_has_native) {
             (false, true) => {
                 self.report_builder(
-                    DiagnosticBuilder::new(
-                        fqn.to_string(),
-                        format!(
+                    DiagnosticBuilder::new(format!(
                             "Parameter ${} of set hook has a native type but the property {fqn}::${name} does not.",
                             param.map(|p| p.name.as_ref()).unwrap_or("value"),
                         ),
@@ -454,9 +441,7 @@ impl<'a> Checker<'a> {
             }
             (true, false) => {
                 self.report_builder(
-                    DiagnosticBuilder::new(
-                        fqn.to_string(),
-                        format!(
+                    DiagnosticBuilder::new(format!(
                             "Parameter ${} of set hook does not have a native type but the property {fqn}::${name} does.",
                             param.map(|p| p.name.as_ref()).unwrap_or("value"),
                         ),
@@ -478,9 +463,7 @@ impl<'a> Checker<'a> {
                     self.resolve_type_hint(type_hint.map(TypeHint::to_string).as_deref());
                 if !self.registry.accepts(&param_ty, &prop_native_ty).yes() {
                     self.report_builder(
-                        DiagnosticBuilder::new(
-                            fqn.to_string(),
-                            format!(
+                        DiagnosticBuilder::new(format!(
                                 "Native type {param_ty} of set hook parameter ${} is not contravariant with native type {prop_native_ty} of property {fqn}::${name}.",
                                 param.map(|p| p.name.as_ref()).unwrap_or("value"),
                             ),
@@ -505,7 +488,6 @@ impl<'a> Checker<'a> {
                     param.map(|p| p.name.as_ref()).unwrap_or("value"),
                 ),
                 span,
-                &label,
             );
             // Real PHPStan also checks `parameter.trait` here, not
             // `property.trait`.
@@ -516,11 +498,10 @@ impl<'a> Checker<'a> {
                     param.map(|p| p.name.as_ref()).unwrap_or("value"),
                 ),
                 span,
-                &label,
                 "parameter.trait",
             );
             // `class.nameCase` for the set hook's parameter type.
-            self.check_type_class_name_case(&prop_sig.set_case_refs, &label, span);
+            self.check_type_class_name_case(&prop_sig.set_case_refs, span);
         }
 
         // `ExistingClassesInPropertyHookTypehintsRule`'s native-union-
@@ -540,7 +521,6 @@ impl<'a> Checker<'a> {
                     "Set hook for property {fqn}::${name} uses native union types but they're supported only on PHP 8.0 and later."
                 ),
                 p.name_span,
-                &label,
             );
             // `ExistingClassesInPropertyHookTypehintsRule`'s
             // `parameter.unresolvableNativeType` half - real PHP hooks
@@ -554,7 +534,6 @@ impl<'a> Checker<'a> {
                 ),
                 "parameter.unresolvableNativeType",
                 p.name_span,
-                &label,
             );
         }
 
@@ -604,7 +583,7 @@ impl<'a> Checker<'a> {
                 None
             }
         };
-        self.check_generator_return_type(declared_return.as_ref(), span, &label);
+        self.check_generator_return_type(declared_return.as_ref(), span);
         match body {
             PropertyHookBody::Arrow(e) => {
                 self.check_expr(e, &mut locals, &label);
@@ -626,10 +605,10 @@ impl<'a> Checker<'a> {
                 hook_final,
             )
         {
-            self.check_too_wide_throw_type(throws, &subject, span, &label);
+            self.check_too_wide_throw_type(throws, &subject, span);
         }
         if !matches!(body, PropertyHookBody::Abstract) {
-            self.check_missing_checked_exceptions(throws.as_ref(), &subject, &label);
+            self.check_missing_checked_exceptions(throws.as_ref(), &subject);
         }
         self.current_function_is_generator = previous_generator_flag;
         self.current_declared_return_type = previous_declared_return_type;

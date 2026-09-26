@@ -1,1 +1,1 @@
-3:28-3:34 restrictedSymbol.class L0 <main> (closure) | Parameter $x references restricted class Banned: do not use Banned
+3:28-3:34 restrictedSymbol.class L0 | Parameter $x references restricted class Banned: do not use Banned

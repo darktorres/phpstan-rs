@@ -1,2 +1,2 @@
-3:13-5:14 throws.unusedType L2 f | Function f() has JsonException in PHPDoc @throws tag but it's not thrown.
-3:24-3:26 missingType.parameter L6 f | Function f() has parameter $x with no type specified.
+3:13-5:14 throws.unusedType L2 | Function f() has JsonException in PHPDoc @throws tag but it's not thrown.
+3:24-3:26 missingType.parameter L6 | Function f() has parameter $x with no type specified.

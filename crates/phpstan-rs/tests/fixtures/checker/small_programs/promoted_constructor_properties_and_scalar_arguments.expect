@@ -1,4 +1,4 @@
-19:15-19:29 assign.propertyType L3 <main> | Box::$value expects int, 'not a number' given
-22:9-22:21 assign.propertyType L3 <main> | Point::$x expects int, 'also wrong' given
-24:1-24:22 function.resultUnused L4 <main> | Call to function needsInt() on a separate line has no effect.
-24:10-24:21 argument.type L5 <main> | Parameter #1 $x of function needsInt expects int, 'not a number' given.
+19:15-19:29 assign.propertyType L3 | Box::$value expects int, 'not a number' given
+22:9-22:21 assign.propertyType L3 | Point::$x expects int, 'also wrong' given
+24:1-24:22 function.resultUnused L4 | Call to function needsInt() on a separate line has no effect.
+24:10-24:21 argument.type L5 | Parameter #1 $x of function needsInt expects int, 'not a number' given.

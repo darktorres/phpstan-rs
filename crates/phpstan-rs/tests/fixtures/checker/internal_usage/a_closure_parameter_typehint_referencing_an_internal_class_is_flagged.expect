@@ -1,1 +1,1 @@
-7:28-7:48 parameter.internalClass L0 <main> (closure) | Parameter $x of function <main> (closure)() has typehint with internal class Vendor\\Internal\\Foo.
+7:28-7:48 parameter.internalClass L0 | Parameter $x of function <main> (closure)() has typehint with internal class Vendor\\Internal\\Foo.

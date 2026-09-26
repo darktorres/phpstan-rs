@@ -1,1 +1,1 @@
-9:13-9:56 missingType.generics L6 PlainCollection | Class PlainCollection extends generic class Collection but does not specify its types: T
+9:13-9:56 missingType.generics L6 | Class PlainCollection extends generic class Collection but does not specify its types: T

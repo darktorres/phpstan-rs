@@ -1,1 +1,1 @@
-5:28-5:44 staticClassAccess.privateMethod L0 Foo::get | unsafe call to private method Foo::secret() through static::
+5:28-5:44 staticClassAccess.privateMethod L0 | unsafe call to private method Foo::secret() through static::

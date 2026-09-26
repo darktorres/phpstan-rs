@@ -1,2 +1,2 @@
-4:24-4:51 missingType.return L6 C::f | Method C::f() has no return type specified.
-4:33-4:34 phpDoc.parseError L2 C | PHPDoc tag @return has invalid value ($url embellished): Unexpected token "$url", expected type
+4:24-4:51 missingType.return L6 | Method C::f() has no return type specified.
+4:33-4:34 phpDoc.parseError L2 | PHPDoc tag @return has invalid value ($url embellished): Unexpected token "$url", expected type

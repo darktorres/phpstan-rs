@@ -1,1 +1,1 @@
-8:13-10:14 method.visibility L0 Impl | Impl::foo() overriding public method Iface::foo() must not reduce visibility
+8:13-10:14 method.visibility L0 | Impl::foo() overriding public method Iface::foo() must not reduce visibility

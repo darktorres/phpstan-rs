@@ -1,1 +1,1 @@
-2:13-4:14 trait.notFound L0 C | C uses unknown trait TotallyMadeUpTrait
+2:13-4:14 trait.notFound L0 | C uses unknown trait TotallyMadeUpTrait

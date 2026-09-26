@@ -1,3 +1,3 @@
-2:13-4:14 missingType.return L6 test | Function test() has no return type specified.
-3:17-3:37 expr.resultUnused L4 test | Expression "$x |> fn(&$y) => $y" on a separate line does not do anything.
-3:23-3:37 pipe.byRef L0 test | Parameter #1 of callable on the right side of pipe operator is passed by reference.
+2:13-4:14 missingType.return L6 | Function test() has no return type specified.
+3:17-3:37 expr.resultUnused L4 | Expression "$x |> fn(&$y) => $y" on a separate line does not do anything.
+3:23-3:37 pipe.byRef L0 | Parameter #1 of callable on the right side of pipe operator is passed by reference.

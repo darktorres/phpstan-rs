@@ -58,9 +58,7 @@ impl<'a> Checker<'a> {
             } else {
                 "Property"
             };
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "{kind} {fqn}::${} ({property_ty}) does not accept default value of type {default_ty}.",
                     p.name,
                 ),

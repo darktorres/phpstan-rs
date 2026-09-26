@@ -34,12 +34,11 @@ use types::Type;
 
 impl<'a> Checker<'a> {
     /// `pipe.byRef` - see this module's own doc comment for scope.
-    pub(crate) fn check_pipe_byref(&mut self, rhs: &Expr, locals: &Locals, label: &str) {
+    pub(crate) fn check_pipe_byref(&mut self, rhs: &Expr, locals: &Locals) {
         let Some(true) = self.pipe_target_first_param_is_by_ref(rhs, locals) else {
             return;
         };
         self.report_builder(DiagnosticBuilder::new(
-            label.to_string(),
             "Parameter #1 of callable on the right side of pipe operator is passed by reference."
                 .to_string(),
             rhs.span,

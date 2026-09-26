@@ -1,1 +1,1 @@
-4:33-4:36 cast.string L2 test | Cannot cast array<(int|string), int> to string.
+4:33-4:36 cast.string L2 | Cannot cast array<(int|string), int> to string.

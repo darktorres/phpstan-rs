@@ -118,18 +118,10 @@ impl<'a> Checker<'a> {
         (!inside_equals).then(|| class.to_string())
     }
 
-    fn nullable_operand(
-        &mut self,
-        operand: &Expr,
-        locals: &Locals,
-        context: &str,
-        id: &str,
-        label: &str,
-    ) {
+    fn nullable_operand(&mut self, operand: &Expr, locals: &Locals, context: &str, id: &str) {
         let ty = self.infer_expr(operand, locals);
         if is_nullable(&ty) {
             self.report(
-                label.to_string(),
                 format!("A possibly-null value ({ty}) is silently coerced {context}."),
                 operand.span,
                 0,
@@ -139,12 +131,7 @@ impl<'a> Checker<'a> {
     }
 
     /// The expression-level checks, before `e` itself is checked.
-    pub(crate) fn check_strict_expression_idioms(
-        &mut self,
-        e: &Expr,
-        locals: &Locals,
-        label: &str,
-    ) {
+    pub(crate) fn check_strict_expression_idioms(&mut self, e: &Expr, locals: &Locals) {
         if self.registry.check_null_coercion {
             match &e.kind {
                 ExprKind::Call(callee, args) => {
@@ -170,7 +157,6 @@ impl<'a> Checker<'a> {
                                     "instanceof"
                                 };
                                 self.report(
-                                    label.to_string(),
                                     format!(
                                         "{which}() on an object ({ty}) says less than {instead}."
                                     ),
@@ -190,7 +176,6 @@ impl<'a> Checker<'a> {
                                 locals,
                                 "to \"\" in a string",
                                 "interpolation.nullable",
-                                label,
                             );
                         }
                     }
@@ -202,7 +187,6 @@ impl<'a> Checker<'a> {
                             locals,
                             "to \"\" by concatenation",
                             "concat.nullable",
-                            label,
                         );
                     }
                 }
@@ -217,7 +201,6 @@ impl<'a> Checker<'a> {
                             locals,
                             "to 0 by arithmetic",
                             "binaryOp.nullable",
-                            label,
                         );
                     }
                 }
@@ -228,7 +211,6 @@ impl<'a> Checker<'a> {
                             locals,
                             "by a compound assignment",
                             "assignOp.nullable",
-                            label,
                         );
                     }
                 }
@@ -252,9 +234,7 @@ impl<'a> Checker<'a> {
                 } else {
                     ("!==", "!")
                 };
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "{operator} between {class} objects compares identity; {class} defines equals() to compare values, use {negation}{}->equals({}).",
                         syntax::printer::print_expr(receiver),
                         syntax::printer::print_expr(argument)
@@ -273,9 +253,7 @@ impl<'a> Checker<'a> {
             } = &e.kind
             && let Some(enum_name) = self.enum_of(&self.infer_expr(subject, locals))
         {
-            self.report(
-                label.to_string(),
-                format!("match over enum {enum_name} has a default arm; a newly added case would be absorbed instead of flagged as unhandled."),
+            self.report(format!("match over enum {enum_name} has a default arm; a newly added case would be absorbed instead of flagged as unhandled."),
                 default.span,
                 0,
                 "match.enumDefault",
@@ -284,21 +262,14 @@ impl<'a> Checker<'a> {
     }
 
     /// The statement-level checks, before `stmt` itself is checked.
-    pub(crate) fn check_strict_statement_idioms(
-        &mut self,
-        stmt: &Stmt,
-        locals: &Locals,
-        label: &str,
-    ) {
+    pub(crate) fn check_strict_statement_idioms(&mut self, stmt: &Stmt, locals: &Locals) {
         if !self.registry.check_enum_exhaustiveness {
             return;
         }
         match &stmt.kind {
             StmtKind::Switch { subject, .. } => {
                 if let Some(enum_name) = self.enum_of(&self.infer_expr(subject, locals)) {
-                    self.report(
-                        label.to_string(),
-                        format!("switch over enum {enum_name}; a match would be checked for exhaustiveness."),
+                    self.report(format!("switch over enum {enum_name}; a match would be checked for exhaustiveness."),
                         stmt.span,
                         0,
                         "enum.switch",
@@ -334,9 +305,7 @@ impl<'a> Checker<'a> {
                 if compared.len() >= 2 && compared.windows(2).all(|w| w[0] == w[1]) {
                     self.enum_chain_tails.extend(chain_ifs);
                     let enum_name = &compared[0].1;
-                    self.report(
-                        label.to_string(),
-                        format!("if/elseif chain over cases of enum {enum_name}; a match would be checked for exhaustiveness."),
+                    self.report(format!("if/elseif chain over cases of enum {enum_name}; a match would be checked for exhaustiveness."),
                         stmt.span,
                         0,
                         "enum.ifChain",

@@ -1,2 +1,2 @@
-2:15-2:38 class.allowDynamicPropertiesReadonly L0 Foo | Attribute class AllowDynamicProperties cannot be used with readonly class.
+2:15-2:38 class.allowDynamicPropertiesReadonly L0 | Attribute class AllowDynamicProperties cannot be used with readonly class.
     non-ignorable

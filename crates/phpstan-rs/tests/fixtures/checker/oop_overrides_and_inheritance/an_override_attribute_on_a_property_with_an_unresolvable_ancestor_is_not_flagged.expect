@@ -1,1 +1,1 @@
-2:13-5:14 class.notFound L0 Child | Child extends unknown class TotallyUnknownBaseClass1234
+2:13-5:14 class.notFound L0 | Child extends unknown class TotallyUnknownBaseClass1234

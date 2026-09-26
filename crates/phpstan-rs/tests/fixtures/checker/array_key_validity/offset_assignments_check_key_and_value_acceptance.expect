@@ -1,9 +1,9 @@
-5:69-5:70 return.type L3 Bag::offsetGet | return type mismatch: expected string, got 1
-9:13-14:14 missingType.generics L6 IntBag | Class IntBag implements generic interface ArrayAccess but does not specify its types: TKey, TValue
-15:24-15:34 missingType.iterableValue L6 f | Function f() has parameter $arr with no value type specified in iterable type array.
+5:69-5:70 return.type L3 | return type mismatch: expected string, got 1
+9:13-14:14 missingType.generics L6 | Class IntBag implements generic interface ArrayAccess but does not specify its types: TKey, TValue
+15:24-15:34 missingType.iterableValue L6 | Function f() has parameter $arr with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-16:22-16:25 offsetAccess.invalidOffset L3 f | Invalid array key type array.
-18:17-18:21 offsetAssign.dimType L3 f | Cannot assign new offset to string.
-19:17-19:24 offsetAssign.dimType L3 f | Cannot assign offset 'a' to string.
-21:17-21:26 offsetAssign.dimType L3 f | Cannot assign offset 'k' to IntBag.
-22:17-22:24 offsetAssign.valueType L3 f | IntBag does not accept 5.
+16:22-16:25 offsetAccess.invalidOffset L3 | Invalid array key type array.
+18:17-18:21 offsetAssign.dimType L3 | Cannot assign new offset to string.
+19:17-19:24 offsetAssign.dimType L3 | Cannot assign offset 'a' to string.
+21:17-21:26 offsetAssign.dimType L3 | Cannot assign offset 'k' to IntBag.
+22:17-22:24 offsetAssign.valueType L3 | IntBag does not accept 5.

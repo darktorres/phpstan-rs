@@ -1,1 +1,1 @@
-6:17-6:28 method.notFound L0 <main> (closure) | call to undefined method Foo::paint()
+6:17-6:28 method.notFound L0 | call to undefined method Foo::paint()

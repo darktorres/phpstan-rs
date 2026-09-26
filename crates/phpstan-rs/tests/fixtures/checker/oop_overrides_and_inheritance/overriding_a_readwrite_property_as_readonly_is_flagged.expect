@@ -1,1 +1,1 @@
-4:45-4:67 property.readOnly L0 Child | Readonly property Child::$x overrides readwrite property Base::$x
+4:45-4:67 property.readOnly L0 | Readonly property Child::$x overrides readwrite property Base::$x

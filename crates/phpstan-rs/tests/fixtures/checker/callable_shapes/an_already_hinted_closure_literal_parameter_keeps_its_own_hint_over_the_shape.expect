@@ -1,1 +1,1 @@
-5:19-7:14 argument.type L5 <main> | Parameter #1 $fn of function apply expects Closure(int): void, Closure(string): void given.
+5:19-7:14 argument.type L5 | Parameter #1 $fn of function apply expects Closure(int): void, Closure(string): void given.

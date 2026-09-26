@@ -1,1 +1,1 @@
-4:24-4:26 generics.notGeneric L6 f | PHPDoc tag @param for parameter $p contains generic type Plain<int> but class Plain is not generic.
+4:24-4:26 generics.notGeneric L6 | PHPDoc tag @param for parameter $p contains generic type Plain<int> but class Plain is not generic.

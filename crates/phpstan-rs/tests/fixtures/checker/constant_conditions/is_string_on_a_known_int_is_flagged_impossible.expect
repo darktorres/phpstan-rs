@@ -1,2 +1,2 @@
-1:7-1:60 missingType.return L6 f | Function f() has no return type specified.
-1:32-1:45 function.impossibleType L4 f | Call to function is_string() with int will always evaluate to false.
+1:7-1:60 missingType.return L6 | Function f() has no return type specified.
+1:32-1:45 function.impossibleType L4 | Call to function is_string() with int will always evaluate to false.

@@ -60,10 +60,10 @@ impl<'a> Checker<'a> {
         check_arity: bool,
     ) {
         if check_arity {
-            self.check_generic_reference_arity(ty, location, label, span);
+            self.check_generic_reference_arity(ty, location, span);
         }
         if check_arity && let Type::Object(class, args) = ty {
-            self.check_call_site_variance(class, args, location, label, span);
+            self.check_call_site_variance(class, args, location, span);
         }
         match ty {
             Type::Object(class, args) => {
@@ -127,9 +127,7 @@ impl<'a> Checker<'a> {
                             && !self.registry.accepts(&bound, checked_arg).yes()
                         {
                             let kind = class_kind_identifier(&info.kind);
-                            self.report(
-                                label.to_string(),
-                                format!(
+                            self.report(format!(
                                     "Type {arg} in generic type {ty} in {location} is not subtype of template type {name} of {kind} {class}."
                                 ),
                                 span,
@@ -215,7 +213,6 @@ impl<'a> Checker<'a> {
                     &checked,
                     &format!("property {fqn}::${}", p.name),
                     p.span,
-                    fqn,
                 );
                 // `property.trait` - see `check_type_trait_refs`'s
                 // own doc comment.
@@ -223,12 +220,11 @@ impl<'a> Checker<'a> {
                     &prop_sig.ty,
                     &format!("property {fqn}::${}", p.name),
                     p.span,
-                    fqn,
                     "property.trait",
                 );
                 // `class.nameCase` for this PHPDoc-typed property position.
-                self.check_type_class_name_case(&prop_sig.case_refs, fqn, p.span);
-                self.check_type_internal_usage(&prop_sig.case_refs, fqn, p.span);
+                self.check_type_class_name_case(&prop_sig.case_refs, p.span);
+                self.check_type_internal_usage(&prop_sig.case_refs, p.span);
             }
         }
         self.check_property_tag_types(fqn, c);
@@ -257,7 +253,6 @@ impl<'a> Checker<'a> {
                 TemplateSubject::Declared {
                     display_name: &display_name,
                 },
-                fqn,
                 c.span,
             );
         }
@@ -311,11 +306,10 @@ impl<'a> Checker<'a> {
                 &prop_sig.ty,
                 &format!("PHPDoc tag {tag_name} for property {fqn}::${}", tag.name),
                 c.span,
-                fqn,
             );
             // `class.nameCase` for this `@property`-tag target.
-            self.check_type_class_name_case(&prop_sig.case_refs, fqn, c.span);
-            self.check_type_internal_usage(&prop_sig.case_refs, fqn, c.span);
+            self.check_type_class_name_case(&prop_sig.case_refs, c.span);
+            self.check_type_internal_usage(&prop_sig.case_refs, c.span);
         }
     }
 
@@ -334,7 +328,7 @@ impl<'a> Checker<'a> {
         label: &str,
         span: Span,
     ) {
-        self.check_generic_reference_arity(ty, location, label, span);
+        self.check_generic_reference_arity(ty, location, span);
         self.check_generic_bounds_and_arity(ty, location, label, span, false);
     }
 
@@ -374,13 +368,7 @@ impl<'a> Checker<'a> {
     /// never runs any rule against that file's own content either - only
     /// ordinary application code, whose registry state already reflects
     /// every stub-granted template correctly, ever reaches this check.
-    fn check_generic_reference_arity(
-        &mut self,
-        ty: &Type,
-        location: &str,
-        label: &str,
-        span: Span,
-    ) {
+    fn check_generic_reference_arity(&mut self, ty: &Type, location: &str, span: Span) {
         let Type::Object(class, args) = ty else {
             return;
         };
@@ -393,7 +381,6 @@ impl<'a> Checker<'a> {
         let kind = class_kind_identifier(&info.kind);
         if info.templates.is_empty() {
             self.report(
-                label.to_string(),
                 format!("{location} contains generic type {ty} but {kind} {class} is not generic."),
                 span,
                 6,
@@ -440,9 +427,7 @@ impl<'a> Checker<'a> {
             } else {
                 format!("{list} ({required}-{total} required).")
             };
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Generic type {ty} in {location} does not specify all template types of {kind} {class}: {list}"
                 ),
                 span,
@@ -455,9 +440,7 @@ impl<'a> Checker<'a> {
             } else {
                 format!("{list} ({required}-{total} required)")
             };
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Generic type {ty} in {location} specifies {} template types, but {kind} {class} supports only {total}: {list}",
                     args.len()
                 ),
@@ -490,14 +473,7 @@ impl<'a> Checker<'a> {
     /// with a plain `@template T of object`, not `@template-covariant`,
     /// so the carve-out's gating condition can never be reached against
     /// this project's actual data.
-    fn check_call_site_variance(
-        &mut self,
-        class: &str,
-        args: &[Type],
-        location: &str,
-        label: &str,
-        span: Span,
-    ) {
+    fn check_call_site_variance(&mut self, class: &str, args: &[Type], location: &str, span: Span) {
         let Some(info) = self.registry.classes.get(class) else {
             return;
         };
@@ -522,9 +498,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if declared == call_site {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Call-site variance of {arg} in generic type {ty} in {location} is redundant, template type {template_name} of {kind} {class} has the same variance."
                     ),
                     span,
@@ -539,9 +513,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "contravariant"
                 };
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Call-site variance of {arg} in generic type {ty} in {location} is in conflict with {declared_word} template type {template_name} of {kind} {class}."
                     ),
                     span,
@@ -584,14 +556,12 @@ impl<'a> Checker<'a> {
         defaults: &FxHashMap<std::sync::Arc<str>, Type>,
         type_aliases: &FxHashMap<std::sync::Arc<str>, Type>,
         subject: TemplateSubject<'_>,
-        label: &str,
         span: Span,
     ) {
         let mut template_with_default: Option<&std::sync::Arc<str>> = None;
         for name in templates {
             if self.class_name_exists(name) {
                 self.report(
-                    label.to_string(),
                     subject.existing_class(name),
                     span,
                     6,
@@ -600,7 +570,6 @@ impl<'a> Checker<'a> {
             }
             if type_aliases.contains_key(name) {
                 self.report(
-                    label.to_string(),
                     subject.existing_type_alias(name),
                     span,
                     6,
@@ -611,7 +580,6 @@ impl<'a> Checker<'a> {
                 && !is_supported_generic_bound(bound)
             {
                 self.report(
-                    label.to_string(),
                     subject.unsupported_bound(name, bound),
                     span,
                     6,
@@ -622,7 +590,6 @@ impl<'a> Checker<'a> {
                 None => {
                     if let Some(prev) = template_with_default {
                         self.report(
-                            label.to_string(),
                             subject.required_after_optional(name, prev),
                             span,
                             6,
@@ -638,7 +605,6 @@ impl<'a> Checker<'a> {
                         && !self.registry.accepts(bound, default).yes()
                     {
                         self.report(
-                            label.to_string(),
                             subject.default_out_of_bounds(name, default, bound),
                             span,
                             6,

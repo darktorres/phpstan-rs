@@ -54,9 +54,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_magic_number(&mut self, span: Span, id: &str, place: &str, label: &str) {
+    fn report_magic_number(&mut self, span: Span, id: &str, place: &str) {
         self.report(
-            label.to_string(),
             format!("Do not use magic number {place}. Move to constant with a suitable name."),
             span,
             0,
@@ -64,47 +63,28 @@ impl<'a> Checker<'a> {
         );
     }
 
-    fn check_magic_operand_pair(
-        &mut self,
-        l: &Expr,
-        r: &Expr,
-        span: Span,
-        id: &str,
-        place: &str,
-        label: &str,
-    ) {
+    fn check_magic_operand_pair(&mut self, l: &Expr, r: &Expr, span: Span, id: &str, place: &str) {
         if self.magic_number(l).is_some() || self.magic_number(r).is_some() {
-            self.report_magic_number(span, id, place, label);
+            self.report_magic_number(span, id, place);
         }
     }
 
-    pub(crate) fn check_magic_numbers_in_params(&mut self, params: &[Param], label: &str) {
+    pub(crate) fn check_magic_numbers_in_params(&mut self, params: &[Param]) {
         for param in params {
             if let Some(default) = &param.default
                 && self.magic_number(default).is_some()
             {
-                self.report_magic_number(
-                    default.span,
-                    "defaultParameter",
-                    "as default parameter",
-                    label,
-                );
+                self.report_magic_number(default.span, "defaultParameter", "as default parameter");
             }
         }
     }
 
-    pub(crate) fn check_magic_numbers_in_properties(
-        &mut self,
-        properties: &[PropertyDecl],
-        label: &str,
-    ) {
+    pub(crate) fn check_magic_numbers_in_properties(&mut self, properties: &[PropertyDecl]) {
         for property in properties {
             if let Some(default) = &property.default
                 && self.magic_number(default).is_some()
             {
-                self.report(
-                    label.to_string(),
-                    "Do not assign magic number to property. Move to constant with a suitable name.".to_string(),
+                self.report("Do not assign magic number to property. Move to constant with a suitable name.".to_string(),
                     default.span,
                     0,
                     "magicNumber.property",
@@ -113,13 +93,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn check_magic_numbers_expression(&mut self, e: &Expr, label: &str) {
+    pub(crate) fn check_magic_numbers_expression(&mut self, e: &Expr) {
         match &e.kind {
             ExprKind::Call(callee, args) => {
                 let is_define = matches!(&callee.kind, ExprKind::Name(name)
                     if name.trim_start_matches('\\').eq_ignore_ascii_case("define"));
                 if !is_define {
-                    self.check_magic_arguments(args, label);
+                    self.check_magic_arguments(args);
                 }
             }
             ExprKind::MethodCall(_, _, args, _)
@@ -127,14 +107,14 @@ impl<'a> Checker<'a> {
             | ExprKind::DynamicMethodCall(_, _, args)
             | ExprKind::DynamicStaticCall(_, _, args)
             | ExprKind::New(_, args) => {
-                self.check_magic_arguments(args, label);
+                self.check_magic_arguments(args);
             }
             ExprKind::NewAnonymousClass(decl, args) => {
-                self.check_magic_arguments(args, label);
-                self.check_magic_numbers_in_properties(&decl.properties, label);
+                self.check_magic_arguments(args);
+                self.check_magic_numbers_in_properties(&decl.properties);
             }
             ExprKind::Closure { params, .. } | ExprKind::ArrowFn { params, .. } => {
-                self.check_magic_numbers_in_params(params, label);
+                self.check_magic_numbers_in_params(params);
             }
             ExprKind::Binary(op, l, r) => {
                 let (id, place) = match op {
@@ -158,21 +138,19 @@ impl<'a> Checker<'a> {
                     }
                     _ => return,
                 };
-                self.check_magic_operand_pair(l, r, e.span, id, place, label);
+                self.check_magic_operand_pair(l, r, e.span, id, place);
             }
             ExprKind::Ternary(_, then, otherwise) => {
                 let then_magic = then
                     .as_deref()
                     .is_some_and(|t| self.magic_number(t).is_some());
                 if then_magic || self.magic_number(otherwise).is_some() {
-                    self.report_magic_number(e.span, "ternary", "in ternary operator", label);
+                    self.report_magic_number(e.span, "ternary", "in ternary operator");
                 }
             }
             ExprKind::Assign(_, value) => {
                 if self.magic_number(value).is_some() {
-                    self.report(
-                        label.to_string(),
-                        "Do not assign magic number to variable. Move to constant with a suitable name.".to_string(),
+                    self.report("Do not assign magic number to variable. Move to constant with a suitable name.".to_string(),
                         e.span,
                         0,
                         "magicNumber.assignment",
@@ -181,7 +159,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Match { subject, arms, .. } => {
                 if self.magic_number(subject).is_some() {
-                    self.report_magic_number(subject.span, "match", "in match condition", label);
+                    self.report_magic_number(subject.span, "match", "in match condition");
                 }
                 for (conditions, _) in arms {
                     for condition in conditions {
@@ -190,7 +168,6 @@ impl<'a> Checker<'a> {
                                 condition.span,
                                 "matchArm",
                                 "in match condition statement",
-                                label,
                             );
                         }
                     }
@@ -200,24 +177,18 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_magic_arguments(&mut self, args: &[Arg], label: &str) {
+    fn check_magic_arguments(&mut self, args: &[Arg]) {
         for arg in args {
             if self.magic_number(&arg.value).is_some() {
-                self.report_magic_number(
-                    arg.value.span,
-                    "argument",
-                    "as a function argument",
-                    label,
-                );
+                self.report_magic_number(arg.value.span, "argument", "as a function argument");
             }
         }
     }
 
-    pub(crate) fn check_magic_numbers_statement(&mut self, stmt: &Stmt, label: &str) {
+    pub(crate) fn check_magic_numbers_statement(&mut self, stmt: &Stmt) {
         match &stmt.kind {
             StmtKind::Return(Some(value)) if self.magic_number(value).is_some() => {
                 self.report(
-                    label.to_string(),
                     "Do not return magic number. Move to constant with a suitable name."
                         .to_string(),
                     stmt.span,
@@ -227,7 +198,7 @@ impl<'a> Checker<'a> {
             }
             StmtKind::Switch { subject, cases } => {
                 if self.magic_number(subject).is_some() {
-                    self.report_magic_number(subject.span, "switch", "in case condition", label);
+                    self.report_magic_number(subject.span, "switch", "in case condition");
                 }
                 for case in cases {
                     if case
@@ -235,12 +206,7 @@ impl<'a> Checker<'a> {
                         .as_ref()
                         .is_some_and(|t| self.magic_number(t).is_some())
                     {
-                        self.report_magic_number(
-                            case.span,
-                            "switchCase",
-                            "in case statement",
-                            label,
-                        );
+                        self.report_magic_number(case.span, "switchCase", "in case statement");
                     }
                 }
             }

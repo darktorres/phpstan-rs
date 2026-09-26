@@ -1,21 +1,21 @@
-3:35-3:46 missingType.iterableValue L6 test | Function test() has parameter $list with no value type specified in iterable type array.
+3:35-3:46 missingType.iterableValue L6 | Function test() has parameter $list with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-4:17-4:19 expr.resultUnused L4 test | Expression "$a" on a separate line does not do anything.
-5:17-5:23 expr.resultUnused L4 test | Expression "$a + 1" on a separate line does not do anything.
-6:17-6:25 expr.resultUnused L4 test | Expression "$a === 2" on a separate line does not do anything.
-7:17-7:29 expr.resultUnused L4 test | Expression "$list['key']" on a separate line does not do anything.
-8:17-8:22 expr.resultUnused L4 test | Expression "$s[0]" on a separate line does not do anything.
-9:17-9:22 expr.resultUnused L4 test | Expression "$p->x" on a separate line does not do anything.
-10:17-10:34 expr.resultUnused L4 test | Expression "isset($list['k'])" on a separate line does not do anything.
-11:17-11:26 expr.resultUnused L4 test | Expression "empty($s)" on a separate line does not do anything.
-12:17-12:32 expr.resultUnused L4 test | Expression "[$a, 'b' => $s]" on a separate line does not do anything.
-13:17-13:25 expr.resultUnused L4 test | Expression "(int) $s" on a separate line does not do anything.
-14:17-14:20 expr.resultUnused L4 test | Expression "-$a" on a separate line does not do anything.
-15:17-15:36 expr.resultUnused L4 test | Expression "$p instanceof Point" on a separate line does not do anything.
-15:17-15:36 instanceof.alwaysTrue L4 test | Instanceof between Point and Point will always evaluate to true.
-16:17-16:24 expr.resultUnused L4 test | Expression "PHP_EOL" on a separate line does not do anything.
-17:17-17:29 expr.resultUnused L4 test | Expression "Point::class" on a separate line does not do anything.
-18:17-18:26 expr.resultUnused L4 test | Expression "fn() => 1" on a separate line does not do anything.
-19:17-19:25 expr.resultUnused L4 test | Expression ""x{$a}y"" on a separate line does not do anything.
-20:17-20:30 expr.resultUnused L4 test | Expression "$list ?? null" on a separate line does not do anything.
-20:17-20:22 nullCoalesce.variable L0 test | Variable $list on left side of ?? always exists and is not nullable.
+4:17-4:19 expr.resultUnused L4 | Expression "$a" on a separate line does not do anything.
+5:17-5:23 expr.resultUnused L4 | Expression "$a + 1" on a separate line does not do anything.
+6:17-6:25 expr.resultUnused L4 | Expression "$a === 2" on a separate line does not do anything.
+7:17-7:29 expr.resultUnused L4 | Expression "$list['key']" on a separate line does not do anything.
+8:17-8:22 expr.resultUnused L4 | Expression "$s[0]" on a separate line does not do anything.
+9:17-9:22 expr.resultUnused L4 | Expression "$p->x" on a separate line does not do anything.
+10:17-10:34 expr.resultUnused L4 | Expression "isset($list['k'])" on a separate line does not do anything.
+11:17-11:26 expr.resultUnused L4 | Expression "empty($s)" on a separate line does not do anything.
+12:17-12:32 expr.resultUnused L4 | Expression "[$a, 'b' => $s]" on a separate line does not do anything.
+13:17-13:25 expr.resultUnused L4 | Expression "(int) $s" on a separate line does not do anything.
+14:17-14:20 expr.resultUnused L4 | Expression "-$a" on a separate line does not do anything.
+15:17-15:36 expr.resultUnused L4 | Expression "$p instanceof Point" on a separate line does not do anything.
+15:17-15:36 instanceof.alwaysTrue L4 | Instanceof between Point and Point will always evaluate to true.
+16:17-16:24 expr.resultUnused L4 | Expression "PHP_EOL" on a separate line does not do anything.
+17:17-17:29 expr.resultUnused L4 | Expression "Point::class" on a separate line does not do anything.
+18:17-18:26 expr.resultUnused L4 | Expression "fn() => 1" on a separate line does not do anything.
+19:17-19:25 expr.resultUnused L4 | Expression ""x{$a}y"" on a separate line does not do anything.
+20:17-20:30 expr.resultUnused L4 | Expression "$list ?? null" on a separate line does not do anything.
+20:17-20:22 nullCoalesce.variable L0 | Variable $list on left side of ?? always exists and is not nullable.

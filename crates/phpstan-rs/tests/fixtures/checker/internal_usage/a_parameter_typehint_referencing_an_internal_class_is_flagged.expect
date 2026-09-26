@@ -1,2 +1,2 @@
-7:24-7:44 parameter.internalClass L0 f | Parameter $x of function f() has typehint with internal class Vendor\\Internal\\Foo.
-7:24-7:47 type.internalClass L0 f | Referencing internal class Vendor\\Internal\\Foo.
+7:24-7:44 parameter.internalClass L0 | Parameter $x of function f() has typehint with internal class Vendor\\Internal\\Foo.
+7:24-7:47 type.internalClass L0 | Referencing internal class Vendor\\Internal\\Foo.

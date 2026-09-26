@@ -1,1 +1,1 @@
-7:24-7:37 property.deprecated L0 f | Access to deprecated property $oldProp of class Foo.
+7:24-7:37 property.deprecated L0 | Access to deprecated property $oldProp of class Foo.

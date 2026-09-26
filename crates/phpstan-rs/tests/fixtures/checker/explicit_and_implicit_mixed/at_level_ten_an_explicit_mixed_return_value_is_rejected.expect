@@ -1,1 +1,1 @@
-3:24-3:26 return.type L3 f | return type mismatch: expected string, got mixed
+3:24-3:26 return.type L3 | return type mismatch: expected string, got mixed

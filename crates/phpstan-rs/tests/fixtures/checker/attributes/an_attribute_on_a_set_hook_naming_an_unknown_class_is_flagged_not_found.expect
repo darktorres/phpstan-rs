@@ -1,1 +1,1 @@
-4:23-4:33 attribute.notFound L0 C::$x (set hook) | attribute class NoSuchAttr does not exist
+4:23-4:33 attribute.notFound L0 | attribute class NoSuchAttr does not exist

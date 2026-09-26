@@ -1,2 +1,2 @@
-3:17-3:20 expr.resultUnused L4 f | Expression "~$n" on a separate line does not do anything.
-3:18-3:20 unaryOp.invalid L2 f | Unary operation "~" on BcMath\\Number results in an error.
+3:17-3:20 expr.resultUnused L4 | Expression "~$n" on a separate line does not do anything.
+3:18-3:20 unaryOp.invalid L2 | Unary operation "~" on BcMath\\Number results in an error.

@@ -1,2 +1,2 @@
-3:17-3:33 enum.caseWithValue L0 Status | Enum Status is not backed, but case Active has value 1.
+3:17-3:33 enum.caseWithValue L0 | Enum Status is not backed, but case Active has value 1.
     non-ignorable

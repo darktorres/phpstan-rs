@@ -1,3 +1,3 @@
-5:18-5:27 classConstant.nameType L0 f | Class constant name in dynamic fetch can only be a string, int given.
-6:18-6:27 classConstant.nameType L7 f | Class constant name in dynamic fetch can only be a string, int|string given.
-7:24-7:38 variable.undefined L0 f | undefined variable $undefinedName
+5:18-5:27 classConstant.nameType L0 | Class constant name in dynamic fetch can only be a string, int given.
+6:18-6:27 classConstant.nameType L7 | Class constant name in dynamic fetch can only be a string, int|string given.
+7:24-7:38 variable.undefined L0 | undefined variable $undefinedName

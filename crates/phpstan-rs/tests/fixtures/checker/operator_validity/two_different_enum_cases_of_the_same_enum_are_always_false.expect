@@ -1,1 +1,1 @@
-4:21-4:44 identical.alwaysFalse L4 f | Strict comparison using === between Status::A and Status::B will always evaluate to false.
+4:21-4:44 identical.alwaysFalse L4 | Strict comparison using === between Status::A and Status::B will always evaluate to false.

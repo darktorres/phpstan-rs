@@ -1,2 +1,2 @@
-4:17-4:27 class.notFound L0 test | PHPDoc tag @var for variable $mask contains unknown class Some\\Unresolvable\\IntMask.
-4:17-4:26 expr.resultUnused L4 test | Expression "$mask | 1" on a separate line does not do anything.
+4:17-4:27 class.notFound L0 | PHPDoc tag @var for variable $mask contains unknown class Some\\Unresolvable\\IntMask.
+4:17-4:26 expr.resultUnused L4 | Expression "$mask | 1" on a separate line does not do anything.

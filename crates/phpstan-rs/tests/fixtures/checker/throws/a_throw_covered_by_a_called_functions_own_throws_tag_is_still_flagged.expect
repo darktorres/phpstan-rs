@@ -1,1 +1,1 @@
-7:23-7:75 throws.missing L2 outer | Function outer() throws RuntimeException but it's not covered by any @throws tag.
+7:23-7:75 throws.missing L2 | Function outer() throws RuntimeException but it's not covered by any @throws tag.

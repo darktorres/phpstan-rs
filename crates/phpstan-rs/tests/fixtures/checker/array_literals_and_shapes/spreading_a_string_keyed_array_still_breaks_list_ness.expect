@@ -1,1 +1,1 @@
-6:24-6:31 return.type L3 f | return type mismatch: expected list<int>, got array<int>
+6:24-6:31 return.type L3 | return type mismatch: expected list<int>, got array<int>

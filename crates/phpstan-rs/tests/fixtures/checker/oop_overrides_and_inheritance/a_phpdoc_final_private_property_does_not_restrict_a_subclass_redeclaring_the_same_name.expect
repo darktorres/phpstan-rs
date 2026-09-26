@@ -1,1 +1,1 @@
-4:29-4:35 property.onlyWritten L4 Base | private property Base::$x is never read, only written
+4:29-4:35 property.onlyWritten L4 | private property Base::$x is never read, only written

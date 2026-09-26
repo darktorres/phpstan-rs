@@ -1,2 +1,2 @@
-2:15-2:26 trait.deprecatedAttribute L0 Foo | Attribute class Deprecated can be used with traits only on PHP 8.5 and later.
+2:15-2:26 trait.deprecatedAttribute L0 | Attribute class Deprecated can be used with traits only on PHP 8.5 and later.
     non-ignorable

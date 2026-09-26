@@ -1,1 +1,1 @@
-5:15-5:24 attribute.target L0 <main> | Attribute class OnlyClass does not have the constant target.
+5:15-5:24 attribute.target L0 | Attribute class OnlyClass does not have the constant target.

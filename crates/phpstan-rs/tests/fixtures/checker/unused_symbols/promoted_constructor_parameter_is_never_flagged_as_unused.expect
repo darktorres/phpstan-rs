@@ -1,1 +1,1 @@
-3:45-3:72 property.onlyWritten L4 Wrapper | private property Wrapper::$value is never read, only written
+3:45-3:72 property.onlyWritten L4 | private property Wrapper::$value is never read, only written

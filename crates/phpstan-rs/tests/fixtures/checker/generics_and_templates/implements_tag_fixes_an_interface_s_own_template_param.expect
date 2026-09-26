@@ -1,4 +1,4 @@
-17:13-17:58 class.abstractMethodNotImplemented L0 UserComparator | class UserComparator does not implement abstract method(s): compareTo
+17:13-17:58 class.abstractMethodNotImplemented L0 | class UserComparator does not implement abstract method(s): compareTo
     tip: either implement every method listed above, or declare this class itself abstract
-18:13-20:14 missingType.return L6 f | Function f() has no return type specified.
-19:31-19:41 argument.type L5 f | Parameter #1 $other of method Comparator::compareTo() expects User, Post given.
+18:13-20:14 missingType.return L6 | Function f() has no return type specified.
+19:31-19:41 argument.type L5 | Parameter #1 $other of method Comparator::compareTo() expects User, Post given.

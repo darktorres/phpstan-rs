@@ -1,1 +1,1 @@
-8:13-8:42 generics.existingClass L6 f | PHPDoc tag @template for function f() cannot have existing class t as its name.
+8:13-8:42 generics.existingClass L6 | PHPDoc tag @template for function f() cannot have existing class t as its name.

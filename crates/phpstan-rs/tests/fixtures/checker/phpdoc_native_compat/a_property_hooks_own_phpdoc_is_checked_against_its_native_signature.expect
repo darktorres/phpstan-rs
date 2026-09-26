@@ -1,7 +1,7 @@
-3:28-8:18 parameter.phpDocType L2 C::$a (set hook) | PHPDoc tag @param for parameter $value with type string is incompatible with native type int.
-3:28-8:18 propertyGetHook.noRead L3 C | Get hook for non-virtual property C::$a does not read its value.
-3:28-8:18 return.phpDocType L2 C::$a (get hook) | PHPDoc tag @return with type string is incompatible with native type int.
-9:28-16:18 parameter.notByRef L2 C::$b (set hook) | Parameter $value for PHPDoc tag @param-out is not passed by reference.
-9:28-16:18 parameter.notFound L2 C::$b (set hook) | PHPDoc tag @param references unknown parameter: $other
-9:28-16:18 propertySetHook.nativeParameterType L0 C | Parameter $value of set hook does not have a native type but the property C::$b does.
+3:28-8:18 parameter.phpDocType L2 | PHPDoc tag @param for parameter $value with type string is incompatible with native type int.
+3:28-8:18 propertyGetHook.noRead L3 | Get hook for non-virtual property C::$a does not read its value.
+3:28-8:18 return.phpDocType L2 | PHPDoc tag @return with type string is incompatible with native type int.
+9:28-16:18 parameter.notByRef L2 | Parameter $value for PHPDoc tag @param-out is not passed by reference.
+9:28-16:18 parameter.notFound L2 | PHPDoc tag @param references unknown parameter: $other
+9:28-16:18 propertySetHook.nativeParameterType L0 | Parameter $value of set hook does not have a native type but the property C::$b does.
     non-ignorable

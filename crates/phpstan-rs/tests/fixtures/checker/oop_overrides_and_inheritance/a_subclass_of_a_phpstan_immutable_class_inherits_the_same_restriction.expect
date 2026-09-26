@@ -1,1 +1,1 @@
-13:54-13:62 property.readOnlyByPhpDocAssignNotInConstructor L0 Point3D::setZ | @readonly property Point3D::$z is assigned outside of the constructor.
+13:54-13:62 property.readOnlyByPhpDocAssignNotInConstructor L0 | @readonly property Point3D::$z is assigned outside of the constructor.

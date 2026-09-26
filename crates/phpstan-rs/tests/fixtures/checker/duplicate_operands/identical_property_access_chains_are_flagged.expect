@@ -1,1 +1,1 @@
-4:24-4:31 expr.duplicateOperands L5 f | Both sides of this expression are the same.
+4:24-4:31 expr.duplicateOperands L5 | Both sides of this expression are the same.

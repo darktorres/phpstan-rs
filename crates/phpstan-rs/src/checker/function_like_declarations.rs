@@ -70,7 +70,6 @@ impl<'a> Checker<'a> {
                     PromotionSite::NotConstructor,
                     f.by_ref,
                     Some(ReturnSource::Body(&f.body)),
-                    &f.name,
                 );
                 self.walk_promoted_in_body(&f.body, &f.name);
             }
@@ -122,9 +121,8 @@ impl<'a> Checker<'a> {
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Body(body)),
-                    label,
                 );
-                self.check_literal_default_parameter_types(params, "anonymous function", label);
+                self.check_literal_default_parameter_types(params, "anonymous function");
                 self.walk_promoted_in_body(body, label);
             }
             ExprKind::ArrowFn {
@@ -143,9 +141,8 @@ impl<'a> Checker<'a> {
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Arrow(body)),
-                    label,
                 );
-                self.check_literal_default_parameter_types(params, "arrow function", label);
+                self.check_literal_default_parameter_types(params, "arrow function");
                 self.walk_promoted_in_expr(body, label);
             }
             ExprKind::NewAnonymousClass(decl, args) => {
@@ -202,7 +199,6 @@ impl<'a> Checker<'a> {
                 site,
                 m.function.by_ref,
                 returns,
-                &label,
             );
             self.walk_promoted_in_body(&m.function.body, &label);
         }
@@ -215,7 +211,7 @@ impl<'a> Checker<'a> {
             };
             let label = format!("{fqn}::${}", p.name);
             if let Some((Some(param), _)) = &hooks.set {
-                self.check_parameter_name(param, &label);
+                self.check_parameter_name(param);
             }
             let bodies = hooks
                 .get
@@ -256,27 +252,24 @@ impl<'a> Checker<'a> {
         site: PromotionSite,
         by_ref: bool,
         returns: Option<ReturnSource>,
-        label: &str,
     ) {
-        self.check_promoted_params(params, site, label);
+        self.check_promoted_params(params, site);
         for p in params {
             self.check_type_declaration(
                 p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                 TypePosition::Parameter,
                 p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.span),
-                label,
             );
         }
-        self.check_type_declaration(return_type.0, TypePosition::Return, return_type.1, label);
+        self.check_type_declaration(return_type.0, TypePosition::Return, return_type.1);
         if let Some(ReturnSource::Body(body)) = &returns {
-            self.check_statement_keywords(body, label);
+            self.check_statement_keywords(body);
         }
         let mut seen: Vec<&str> = Vec::new();
         for (i, p) in params.iter().enumerate() {
-            self.check_parameter_name(p, label);
+            self.check_parameter_name(p);
             if seen.contains(&p.name.as_ref()) {
                 self.report_declaration(
-                    label,
                     &format!("Redefinition of parameter ${}.", p.name),
                     p.span,
                     "parameter.duplicate",
@@ -286,7 +279,6 @@ impl<'a> Checker<'a> {
             }
             if p.variadic && i + 1 != params.len() {
                 self.report_declaration(
-                    label,
                     "Only the last parameter can be variadic.",
                     p.span,
                     "parameter.variadicNotLast",
@@ -303,7 +295,6 @@ impl<'a> Checker<'a> {
             for e in return_exprs {
                 if contains_nullsafe_access(e) {
                     self.report_declaration(
-                        label,
                         "Nullsafe cannot be returned by reference.",
                         e.span,
                         "nullsafe.byRef",
@@ -319,7 +310,7 @@ impl<'a> Checker<'a> {
     /// hint is resolved here. A `null` default makes a typed parameter
     /// implicitly nullable, and a default of unknown type is always
     /// accepted, so neither is a mismatch.
-    fn check_literal_default_parameter_types(&mut self, params: &[Param], kind: &str, label: &str) {
+    fn check_literal_default_parameter_types(&mut self, params: &[Param], kind: &str) {
         for (i, p) in params.iter().enumerate() {
             let Some(default) = &p.default else {
                 continue;
@@ -346,9 +337,7 @@ impl<'a> Checker<'a> {
             {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Default value of the parameter #{} ${} ({default_ty}) of {kind} is incompatible with type {param_ty}.",
                     i + 1,
                     p.name,
@@ -360,10 +349,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_parameter_name(&mut self, p: &Param, label: &str) {
+    fn check_parameter_name(&mut self, p: &Param) {
         if SUPERGLOBALS.contains(&p.name.as_ref()) {
             self.report_declaration(
-                label,
                 &format!(
                     "Superglobal variable ${} cannot be used as a parameter.",
                     p.name
@@ -372,16 +360,11 @@ impl<'a> Checker<'a> {
                 "parameter.superglobal",
             );
         } else if p.name.as_ref() == "this" {
-            self.report_declaration(
-                label,
-                "Cannot use $this as parameter.",
-                p.span,
-                "parameter.this",
-            );
+            self.report_declaration("Cannot use $this as parameter.", p.span, "parameter.this");
         }
     }
 
-    fn check_promoted_params(&mut self, params: &[Param], site: PromotionSite, label: &str) {
+    fn check_promoted_params(&mut self, params: &[Param], site: PromotionSite) {
         let Some(first) = params.iter().find(|p| is_promoted(p)) else {
             return;
         };
@@ -390,7 +373,6 @@ impl<'a> Checker<'a> {
         let first_span = first.span;
         if unavailable(PhpFeature::PromotedProperties) {
             self.report_declaration(
-                label,
                 "Promoted properties are supported only on PHP 8.0 and later.",
                 first_span,
                 "property.promotedNotSupported",
@@ -400,7 +382,6 @@ impl<'a> Checker<'a> {
         match site {
             PromotionSite::NotConstructor => {
                 self.report_declaration(
-                    label,
                     "Promoted properties can be in constructor only.",
                     first_span,
                     "property.invalidPromoted",
@@ -409,7 +390,6 @@ impl<'a> Checker<'a> {
             }
             PromotionSite::AbstractConstructor => {
                 self.report_declaration(
-                    label,
                     "Promoted properties are not allowed in abstract constructors.",
                     first_span,
                     "property.invalidPromoted",
@@ -422,7 +402,6 @@ impl<'a> Checker<'a> {
         for p in params.iter().filter(|p| p.promoted_visibility.is_some()) {
             if p.promoted_final && final_unavailable {
                 self.report_declaration(
-                    label,
                     "Final promoted properties are supported only on PHP 8.5 and later.",
                     p.span,
                     "property.invalidPromoted",
@@ -430,7 +409,6 @@ impl<'a> Checker<'a> {
             }
             if p.variadic {
                 self.report_declaration(
-                    label,
                     &format!(
                         "Promoted property parameter ${} can not be variadic.",
                         p.name
@@ -442,10 +420,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_declaration(&mut self, label: &str, message: &str, span: Span, identifier: &str) {
+    fn report_declaration(&mut self, message: &str, span: Span, identifier: &str) {
         self.report_builder(
-            DiagnosticBuilder::new(label.to_string(), message.to_string(), span, 0, identifier)
-                .non_ignorable(),
+            DiagnosticBuilder::new(message.to_string(), span, 0, identifier).non_ignorable(),
         );
     }
 }

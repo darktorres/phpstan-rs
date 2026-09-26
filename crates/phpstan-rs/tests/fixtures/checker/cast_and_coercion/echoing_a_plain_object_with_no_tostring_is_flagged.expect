@@ -1,1 +1,1 @@
-4:22-4:24 echo.nonString L2 test | Parameter #1 (Foo) of echo cannot be converted to string.
+4:22-4:24 echo.nonString L2 | Parameter #1 (Foo) of echo cannot be converted to string.

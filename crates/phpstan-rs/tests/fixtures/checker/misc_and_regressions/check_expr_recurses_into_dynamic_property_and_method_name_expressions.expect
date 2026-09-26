@@ -1,5 +1,5 @@
-2:13-6:14 missingType.return L6 f | Function f() has no return type specified.
-2:24-2:28 missingType.parameter L6 f | Function f() has parameter $obj with no type specified.
-3:24-3:48 variable.undefined L0 f | undefined variable $undefinedInDynPropBrace
-4:23-4:48 variable.undefined L0 f | undefined variable $undefinedInDynPropSingle
-5:24-5:57 variable.undefined L0 f | undefined variable $undefinedInDynMethodDollarDollar
+2:13-6:14 missingType.return L6 | Function f() has no return type specified.
+2:24-2:28 missingType.parameter L6 | Function f() has parameter $obj with no type specified.
+3:24-3:48 variable.undefined L0 | undefined variable $undefinedInDynPropBrace
+4:23-4:48 variable.undefined L0 | undefined variable $undefinedInDynPropSingle
+5:24-5:57 variable.undefined L0 | undefined variable $undefinedInDynMethodDollarDollar

@@ -1,1 +1,1 @@
-12:13-18:14 missingType.return L6 make | Function make() has no return type specified.
+12:13-18:14 missingType.return L6 | Function make() has no return type specified.

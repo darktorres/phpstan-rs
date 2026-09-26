@@ -1,1 +1,1 @@
-7:24-7:43 classConstant.notFound L0 f | access to undefined constant Config::MISSING
+7:24-7:43 classConstant.notFound L0 | access to undefined constant Config::MISSING

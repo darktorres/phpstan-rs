@@ -1,1 +1,1 @@
-composer.json:10:1-10:1 unused.composerDependency L0 composer.json | Package acme/dev-tool is in require-dev, but the analysed code uses none of its symbols.
+composer.json:10:1-10:1 unused.composerDependency L0 | Package acme/dev-tool is in require-dev, but the analysed code uses none of its symbols.

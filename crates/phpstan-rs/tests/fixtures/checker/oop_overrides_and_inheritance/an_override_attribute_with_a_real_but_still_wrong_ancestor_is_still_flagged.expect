@@ -1,2 +1,2 @@
-6:17-7:47 method.override L0 Child | Child::bar() has #[\\Override] attribute but does not override any method
+6:17-7:47 method.override L0 | Child::bar() has #[\\Override] attribute but does not override any method
     fix: Remove #[\\Override] => ""

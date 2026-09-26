@@ -1,2 +1,2 @@
-2:15-2:24 attribute.abstract L0 MyAttr | Abstract class MyAttr cannot be an Attribute class.
-5:15-5:21 attribute.abstract L0 Foo | Attribute class MyAttr is abstract.
+2:15-2:24 attribute.abstract L0 | Abstract class MyAttr cannot be an Attribute class.
+5:15-5:21 attribute.abstract L0 | Attribute class MyAttr is abstract.

@@ -1,1 +1,1 @@
-5:28-5:37 staticClassAccess.privateConstant L0 Foo::get | unsafe access to private constant Foo::X through static::
+5:28-5:37 staticClassAccess.privateConstant L0 | unsafe access to private constant Foo::X through static::

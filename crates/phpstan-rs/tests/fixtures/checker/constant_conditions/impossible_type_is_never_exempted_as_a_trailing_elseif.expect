@@ -1,2 +1,2 @@
-2:13-8:14 missingType.return L6 f | Function f() has no return type specified.
-5:27-5:40 function.impossibleType L4 f | Call to function is_string() with int<min, 5> will always evaluate to false.
+2:13-8:14 missingType.return L6 | Function f() has no return type specified.
+5:27-5:40 function.impossibleType L4 | Call to function is_string() with int<min, 5> will always evaluate to false.

@@ -1,4 +1,4 @@
-2:33-2:41 missingType.iterableValue L6 needsArray | Function needsArray() has parameter $a with no value type specified in iterable type array.
+2:33-2:41 missingType.iterableValue L6 | Function needsArray() has parameter $a with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-3:24-3:32 missingType.parameter L6 f | Function f() has parameter $subject with no type specified.
-5:32-5:43 argument.type L5 f | Parameter #1 $a of function needsArray expects array, 'a' given.
+3:24-3:32 missingType.parameter L6 | Function f() has parameter $subject with no type specified.
+5:32-5:43 argument.type L5 | Parameter #1 $a of function needsArray expects array, 'a' given.

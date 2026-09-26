@@ -490,7 +490,6 @@ impl<'a> Checker<'a> {
         method: &str,
         sig: &FunctionSig,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.phpstan_api_check_enabled
             || sig.is_api
@@ -504,9 +503,7 @@ impl<'a> Checker<'a> {
         if owner_info.is_api && method != "__construct" {
             return;
         }
-        self.report(
-            label.to_string(),
-            format!(
+        self.report(format!(
                 "calling {owner}::{method}() is not covered by PHPStan's backward compatibility promise (missing @api on {owner})"
             ),
             span,
@@ -530,7 +527,6 @@ impl<'a> Checker<'a> {
         method: &str,
         args: &[Arg],
         span: Span,
-        label: &str,
     ) {
         if !self.registry.phpstan_api_check_enabled {
             return;
@@ -557,7 +553,6 @@ impl<'a> Checker<'a> {
         }
         self.report_builder(
             DiagnosticBuilder::new(
-                label.to_string(),
                 format!("Node attribute '{name}' is no longer available."),
                 span,
                 0,
@@ -677,7 +672,7 @@ impl<'a> Walker<'a> {
     /// whole family, not just the bare marker interface, however
     /// counterintuitive that looks against the same family's own
     /// individual table entries).
-    fn check_instanceof_deprecated(&mut self, fqn: &str, span: Span, label: &str) {
+    fn check_instanceof_deprecated(&mut self, fqn: &str, span: Span) {
         let Some((_, hint)) = INSTANCEOF_DEPRECATED_CLASSES
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(fqn))
@@ -704,7 +699,6 @@ impl<'a> Walker<'a> {
             None => format!("Doing instanceof {fqn} is error-prone and deprecated."),
         };
         self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
             message,
             span,
             level: 0,
@@ -714,7 +708,6 @@ impl<'a> Walker<'a> {
                     .to_string(),
             ),
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -735,7 +728,6 @@ impl<'a> Walker<'a> {
         fqn: &str,
         action: &str,
         span: Span,
-        label: &str,
         identifier: &str,
         ctx: &NameContext,
     ) {
@@ -749,7 +741,6 @@ impl<'a> Walker<'a> {
             return;
         }
         self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
             message: format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
             ),
@@ -758,7 +749,6 @@ impl<'a> Walker<'a> {
             identifier: identifier.to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -789,7 +779,6 @@ impl<'a> Walker<'a> {
         class: &str,
         method: &str,
         span: Span,
-        label: &str,
         ctx: &NameContext,
     ) {
         let Some((owner, sig)) = self.registry.lookup_method_with_owner(class, method) else {
@@ -809,7 +798,6 @@ impl<'a> Walker<'a> {
         }
         let action = format!("calling {owner}::{method}()");
         self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
             message: format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {owner})"
             ),
@@ -818,7 +806,6 @@ impl<'a> Walker<'a> {
             identifier: "phpstanApi.method".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -834,7 +821,6 @@ impl<'a> Walker<'a> {
         fqn: &str,
         action: &str,
         span: Span,
-        label: &str,
         identifier: &str,
         ctx: &NameContext,
     ) {
@@ -842,7 +828,6 @@ impl<'a> Walker<'a> {
             return;
         }
         self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
             message: format!(
                 "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
             ),
@@ -851,7 +836,6 @@ impl<'a> Walker<'a> {
             identifier: identifier.to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -876,7 +860,6 @@ impl<'a> Walker<'a> {
         fqn: &str,
         action: &str,
         span: Span,
-        label: &str,
         identifier: &str,
         check_do_not_implement: bool,
         ctx: &NameContext,
@@ -889,7 +872,6 @@ impl<'a> Walker<'a> {
         };
         if check_do_not_implement && info.is_api_do_not_implement {
             self.diagnostics.push(Diagnostic {
-                location: label.to_string(),
                 message: format!(
                     "{action} is not supported: {fqn} is marked @api-do-not-implement and may gain new members in a minor version"
                 ),
@@ -898,14 +880,12 @@ impl<'a> Walker<'a> {
                 identifier: identifier.to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: FxHashMap::default(),
                 fix: None,
             });
             return;
         }
         if !info.is_api {
             self.diagnostics.push(Diagnostic {
-                location: label.to_string(),
                 message: format!(
                     "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
                 ),
@@ -914,7 +894,6 @@ impl<'a> Walker<'a> {
                 identifier: identifier.to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: FxHashMap::default(),
                 fix: None,
             });
         }
@@ -964,7 +943,6 @@ impl<'a> Walker<'a> {
                     &pfqn,
                     &action,
                     c.span,
-                    &fqn,
                     identifier,
                     c.kind != ClassKind::Class,
                     ctx,
@@ -974,15 +952,7 @@ impl<'a> Walker<'a> {
         for iface in &c.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(
-                    &ifqn,
-                    &action,
-                    c.span,
-                    &fqn,
-                    "phpstanApi.interface",
-                    true,
-                    ctx,
-                );
+                self.report_inheritance(&ifqn, &action, c.span, "phpstanApi.interface", true, ctx);
             }
         }
         for used in &c.uses {
@@ -993,7 +963,7 @@ impl<'a> Walker<'a> {
                 // unconditionally - no `@api`/`@api-do-not-implement`
                 // exemption of any kind, unlike extends/implements.
                 let action = format!("using trait {ufqn}");
-                self.report_always(&ufqn, &action, c.span, &fqn, "phpstanApi.trait", ctx);
+                self.report_always(&ufqn, &action, c.span, "phpstanApi.trait", ctx);
             }
         }
         let empty = ParamTypes::default();
@@ -1023,15 +993,7 @@ impl<'a> Walker<'a> {
         for iface in &e.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
-                self.report_inheritance(
-                    &ifqn,
-                    &action,
-                    e.span,
-                    &fqn,
-                    "phpstanApi.interface",
-                    true,
-                    ctx,
-                );
+                self.report_inheritance(&ifqn, &action, e.span, "phpstanApi.interface", true, ctx);
             }
         }
         for used in &e.uses {
@@ -1039,7 +1001,7 @@ impl<'a> Walker<'a> {
                 && self.registry.classes.contains_key(ufqn.as_str())
             {
                 let action = format!("using trait {ufqn}");
-                self.report_always(&ufqn, &action, e.span, &fqn, "phpstanApi.trait", ctx);
+                self.report_always(&ufqn, &action, e.span, "phpstanApi.trait", ctx);
             }
         }
         let empty = ParamTypes::default();
@@ -1069,7 +1031,7 @@ impl<'a> Walker<'a> {
     /// phpstan_interface` at all - a bare `namespace PHPStan\...;`
     /// declaration is the thing being checked, independent of whatever
     /// classes the file goes on to declare inside it.
-    fn check_namespace_declaration(&mut self, ns: &str, span: Span, label: &str) {
+    fn check_namespace_declaration(&mut self, ns: &str, span: Span) {
         if !is_phpstan_namespace(ns) {
             return;
         }
@@ -1082,7 +1044,6 @@ impl<'a> Walker<'a> {
             return;
         }
         self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
             message: "Declaring PHPStan namespace is not allowed in 3rd party packages."
                 .to_string(),
             span,
@@ -1093,7 +1054,6 @@ impl<'a> Walker<'a> {
                     .to_string(),
             ),
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -1102,7 +1062,7 @@ impl<'a> Walker<'a> {
     /// name-mapping lookup itself lives in `OLD_PHP_PARSER_4_CLASS_NAMES`.
     /// `name` is the as-written reference text (matches real PHPStan's
     /// own `$node->toString()` in the reported message).
-    fn check_old_php_parser4_class(&mut self, name: &str, span: Span, label: &str) {
+    fn check_old_php_parser4_class(&mut self, name: &str, span: Span) {
         if !self.current_class_implements_phpstan_interface {
             return;
         }
@@ -1114,7 +1074,6 @@ impl<'a> Walker<'a> {
             return;
         };
         self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
             message: format!(
                 "Class {name} not found. It has been renamed to {new_name} in PHP-Parser v5."
             ),
@@ -1123,13 +1082,12 @@ impl<'a> Walker<'a> {
             identifier: "phpParser.classRenamed".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         });
     }
 
     /// `RuntimeReflectionFunctionRule`'s own reporting half.
-    fn check_runtime_reflection_function(&mut self, name: &str, span: Span, label: &str) {
+    fn check_runtime_reflection_function(&mut self, name: &str, span: Span) {
         if !self.current_class_implements_phpstan_interface {
             return;
         }
@@ -1141,7 +1099,6 @@ impl<'a> Walker<'a> {
             return;
         };
         self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
             message: format!(
                 "Function {matched}() is a runtime reflection concept that might not work in PHPStan because it uses fully static reflection engine. Use objects retrieved from ReflectionProvider instead."
             ),
@@ -1150,7 +1107,6 @@ impl<'a> Walker<'a> {
             identifier: "phpstanApi.runtimeReflection".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -1161,7 +1117,6 @@ impl<'a> Walker<'a> {
         name: &str,
         ctx: &NameContext,
         span: Span,
-        label: &str,
     ) {
         if !self.current_class_implements_phpstan_interface {
             return;
@@ -1174,7 +1129,6 @@ impl<'a> Walker<'a> {
             return;
         };
         self.diagnostics.push(Diagnostic {
-            location: label.to_string(),
             message: format!(
                 "Creating new {matched} is a runtime reflection concept that might not work in PHPStan because it uses fully static reflection engine. Use objects retrieved from ReflectionProvider instead."
             ),
@@ -1183,7 +1137,6 @@ impl<'a> Walker<'a> {
             identifier: "phpstanApi.runtimeReflection".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -1212,7 +1165,7 @@ impl<'a> Walker<'a> {
             | StmtKind::Goto(_)
             | StmtKind::Label(_)
             | StmtKind::Declare { .. } => {}
-            StmtKind::Namespace(ns) => self.check_namespace_declaration(ns, stmt.span, label),
+            StmtKind::Namespace(ns) => self.check_namespace_declaration(ns, stmt.span),
             StmtKind::Expression(e) | StmtKind::Throw(e) => {
                 self.check_expr(e, ctx, param_types, label)
             }
@@ -1291,7 +1244,7 @@ impl<'a> Walker<'a> {
         match &e.kind {
             ExprKind::Call(callee, args) => {
                 if let ExprKind::Name(n) = &callee.kind {
-                    self.check_runtime_reflection_function(n, e.span, label);
+                    self.check_runtime_reflection_function(n, e.span);
                 }
                 self.check_expr(callee, ctx, param_types, label);
                 for a in args {
@@ -1300,8 +1253,8 @@ impl<'a> Walker<'a> {
             }
             ExprKind::New(callee, args) => {
                 if let ExprKind::Name(n) = &callee.kind {
-                    self.check_old_php_parser4_class(n, e.span, label);
-                    self.check_runtime_reflection_instantiation(n, ctx, e.span, label);
+                    self.check_old_php_parser4_class(n, e.span);
+                    self.check_runtime_reflection_instantiation(n, ctx, e.span);
                     if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
                         && let Some(info) = self.registry.classes.get(fqn.as_str())
                     {
@@ -1322,7 +1275,6 @@ impl<'a> Walker<'a> {
                                 &fqn,
                                 &action,
                                 e.span,
-                                label,
                                 "phpstanApi.constructor",
                                 ctx,
                             );
@@ -1349,7 +1301,7 @@ impl<'a> Walker<'a> {
                 // "unresolvable" outcome the parser's old permanent `"?"`
                 // sentinel already produced for this exact case.
                 if let Some(fqn) = self.resolve_class_name(target.as_name().unwrap_or("?"), ctx) {
-                    self.report_static_method_not_covered(&fqn, method, e.span, label, ctx);
+                    self.report_static_method_not_covered(&fqn, method, e.span, ctx);
                 }
                 for a in args {
                     self.check_expr(&a.value, ctx, param_types, label);
@@ -1360,7 +1312,7 @@ impl<'a> Walker<'a> {
             // for why - but is still a real bare name reference, so
             // `OldPhpParser4ClassRule` still applies to it.
             ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
-                self.check_old_php_parser4_class(class_name, e.span, label);
+                self.check_old_php_parser4_class(class_name, e.span);
             }
             ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), member)
             | ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), member) => {
@@ -1371,14 +1323,7 @@ impl<'a> Walker<'a> {
                 };
                 if let Some(fqn) = self.resolve_if_phpstan(class_name, ctx) {
                     let action = format!("accessing {fqn}::{sigil}{member}");
-                    self.report_not_covered(
-                        &fqn,
-                        &action,
-                        e.span,
-                        label,
-                        "phpstanApi.classConstant",
-                        ctx,
-                    );
+                    self.report_not_covered(&fqn, &action, e.span, "phpstanApi.classConstant", ctx);
                 }
             }
             // `phpstanApi.method`/`phpParser.
@@ -1399,7 +1344,7 @@ impl<'a> Walker<'a> {
                 }
             }
             ExprKind::Instanceof(inner, InstanceofTarget::Name(n, _)) => {
-                self.check_old_php_parser4_class(n, e.span, label);
+                self.check_old_php_parser4_class(n, e.span);
                 // Real PHPStan's own `ApiInstanceofRule` - two
                 // genuinely different diagnostics depending on whether the
                 // class is `@api` at all, not one identifier reused for
@@ -1416,7 +1361,7 @@ impl<'a> Walker<'a> {
                 if let Some(fqn) = self.resolve_if_phpstan(n, ctx) {
                     // Independent of `@api` status entirely -
                     // see `check_instanceof_deprecated`'s own doc comment.
-                    self.check_instanceof_deprecated(&fqn, e.span, label);
+                    self.check_instanceof_deprecated(&fqn, e.span);
                 }
                 if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
                     && let Some(info) = self.registry.classes.get(fqn.as_str())
@@ -1425,10 +1370,9 @@ impl<'a> Walker<'a> {
                         let action = format!("instanceof {fqn}");
                         let identifier =
                             format!("phpstanApi.{}", class_type_word(info.kind).to_lowercase());
-                        self.report_always(&fqn, &action, e.span, label, &identifier, ctx);
+                        self.report_always(&fqn, &action, e.span, &identifier, ctx);
                     } else if fqn != "PHPStan\\Type\\Type" && info.kind != ClassKind::Interface {
                         self.diagnostics.push(Diagnostic {
-                            location: label.to_string(),
                             message: format!(
                                 "Although {fqn} is covered by backward compatibility promise, this instanceof assumption might break in a minor PHPStan version."
                             ),
@@ -1437,7 +1381,6 @@ impl<'a> Walker<'a> {
                             identifier: "phpstanApi.instanceofAssumption".to_string(),
                             tip: None,
                             non_ignorable: false,
-                            metadata: FxHashMap::default(),
                             fix: None,
                         });
                     }

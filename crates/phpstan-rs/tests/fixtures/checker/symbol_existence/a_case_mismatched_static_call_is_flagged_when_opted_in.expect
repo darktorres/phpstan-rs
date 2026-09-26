@@ -1,2 +1,2 @@
-6:17-6:31 method.nameCase L0 f | Call to method Foo::doStuff() with incorrect case: DoStuff.
+6:17-6:31 method.nameCase L0 | Call to method Foo::doStuff() with incorrect case: DoStuff.
     fix: Use doStuff => "doStuff"

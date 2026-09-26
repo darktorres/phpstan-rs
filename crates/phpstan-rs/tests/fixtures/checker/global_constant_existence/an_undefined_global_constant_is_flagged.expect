@@ -1,2 +1,2 @@
-6:84-6:93 magicConstant.outOfClass L0 f | Magic constant __CLASS__ is always empty outside a class.
-7:22-7:26 constant.notFound L1 f | Constant NOPE not found.
+6:84-6:93 magicConstant.outOfClass L0 | Magic constant __CLASS__ is always empty outside a class.
+7:22-7:26 constant.notFound L1 | Constant NOPE not found.

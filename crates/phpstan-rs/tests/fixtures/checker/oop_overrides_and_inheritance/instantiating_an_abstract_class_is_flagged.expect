@@ -1,2 +1,2 @@
-3:53-3:72 new.abstract L0 test | cannot instantiate abstract class AbstractThing
+3:53-3:72 new.abstract L0 | cannot instantiate abstract class AbstractThing
     tip: either implement every inherited abstract method, or instantiate a concrete subclass instead

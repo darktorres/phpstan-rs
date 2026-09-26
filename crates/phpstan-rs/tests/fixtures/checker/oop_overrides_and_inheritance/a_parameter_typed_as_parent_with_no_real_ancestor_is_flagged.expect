@@ -1,1 +1,1 @@
-3:35-3:44 parameter.noParent L0 Standalone::f | parameter $p of Standalone::f() has invalid type parent
+3:35-3:44 parameter.noParent L0 | parameter $p of Standalone::f() has invalid type parent

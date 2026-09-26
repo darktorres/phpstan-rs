@@ -81,7 +81,6 @@ impl<'a> Checker<'a> {
         method: &str,
         is_public: bool,
         span: Span,
-        label: &str,
     ) {
         let Some(info) = self.registry.classes.get(owner) else {
             return;
@@ -116,7 +115,6 @@ impl<'a> Checker<'a> {
                 .clone()
                 .unwrap_or_else(|| "code outside a class".to_string());
             self.report(
-                label.to_string(),
                 format!(
                     "{target} can only be called by its friends ({}), not by {caller}.",
                     friends.join(", ")
@@ -144,7 +142,6 @@ impl<'a> Checker<'a> {
                     format!("namespace {} and below", visibility.namespace)
                 };
                 self.report(
-                    label.to_string(),
                     format!("{target} is only visible from {scope}."),
                     span,
                     2,
@@ -156,7 +153,6 @@ impl<'a> Checker<'a> {
             own.is_some_and(|a| a.test_only) || class_level.is_some_and(|a| a.test_only);
         if test_only && !self.in_test_code() {
             self.report(
-                label.to_string(),
                 format!("{target} is marked #[TestTag] and can only be used from test code."),
                 span,
                 2,
@@ -201,9 +197,7 @@ impl<'a> Checker<'a> {
                     })
                     .and_then(|i| c.uses_spans.get(i).copied())
                     .unwrap_or(c.name_span);
-                self.report(
-                    fqn.to_string(),
-                    format!(
+                self.report(format!(
                         "Trait {trait_name} can only be used by {} and their subclasses, not {fqn}.",
                         allowed.iter().map(|a| a.as_ref()).collect::<Vec<_>>().join(", ")
                     ),
@@ -245,9 +239,7 @@ impl<'a> Checker<'a> {
                 })
                 .collect();
             for (span, param, used, injectable) in findings {
-                self.report(
-                    fqn.to_string(),
-                    format!(
+                self.report(format!(
                         "Parameter ${param} of {fqn}::{}() is type-hinted with {used}; inject its #[InjectableVersion] {injectable} instead.",
                         m.function.name
                     ),

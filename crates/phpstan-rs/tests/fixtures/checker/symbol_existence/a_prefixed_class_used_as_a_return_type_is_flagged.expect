@@ -1,2 +1,2 @@
-3:13-3:43 class.prefixed L0 f | Referencing prefixed PHP-Scoper class: _PhpScoperFoo.
+3:13-3:43 class.prefixed L0 | Referencing prefixed PHP-Scoper class: _PhpScoperFoo.
     non-ignorable

@@ -1,1 +1,1 @@
-5:13-5:25 class.notFound L0 Foo | PHPDoc tag @phpstan-type MyAlias for class Foo has invalid type NoSuchClass
+5:13-5:25 class.notFound L0 | PHPDoc tag @phpstan-type MyAlias for class Foo has invalid type NoSuchClass

@@ -1,4 +1,4 @@
-3:60-3:72 missingType.iterableValue L6 ArrayShape::__construct | Method ArrayShape::__construct() has parameter $shape with no value type specified in iterable type array.
+3:60-3:72 missingType.iterableValue L6 | Method ArrayShape::__construct() has parameter $shape with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-7:13-9:14 missingType.iterableValue L6 pixel | Function pixel() return type has no value type specified in iterable type array.
+7:13-9:14 missingType.iterableValue L6 | Function pixel() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

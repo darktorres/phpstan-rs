@@ -1,1 +1,1 @@
-6:31-6:33 argument.type L5 f | Parameter #1 $string of function strlen expects string, string|null given.
+6:31-6:33 argument.type L5 | Parameter #1 $string of function strlen expects string, string|null given.

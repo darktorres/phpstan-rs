@@ -1,2 +1,2 @@
-7:13-7:30 missingType.return L6 f | Function f() has no return type specified.
-7:24-7:26 generics.lessTypes L6 f | Generic type Map<string> in PHPDoc tag @param for parameter $m does not specify all template types of class Map: K, V
+7:13-7:30 missingType.return L6 | Function f() has no return type specified.
+7:24-7:26 generics.lessTypes L6 | Generic type Map<string> in PHPDoc tag @param for parameter $m does not specify all template types of class Map: K, V

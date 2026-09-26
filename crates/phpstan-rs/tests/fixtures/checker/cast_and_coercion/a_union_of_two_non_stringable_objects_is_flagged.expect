@@ -1,1 +1,1 @@
-5:33-5:35 cast.string L2 test | Cannot cast Foo|Bar to string.
+5:33-5:35 cast.string L2 | Cannot cast Foo|Bar to string.

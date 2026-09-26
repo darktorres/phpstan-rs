@@ -1,21 +1,21 @@
-13:20-13:115 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAssociative | Method Doctrine\\DBAL\\Connection::fetchAssociative() return type has no value type specified in iterable type array.
+13:20-13:115 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Connection::fetchAssociative() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-13:61-13:79 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAssociative | Method Doctrine\\DBAL\\Connection::fetchAssociative() has parameter $params with no value type specified in iterable type array.
+13:61-13:79 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Connection::fetchAssociative() has parameter $params with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-13:81-13:98 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAssociative | Method Doctrine\\DBAL\\Connection::fetchAssociative() has parameter $types with no value type specified in iterable type array.
+13:81-13:98 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Connection::fetchAssociative() has parameter $types with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-14:55-14:73 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeQuery | Method Doctrine\\DBAL\\Connection::executeQuery() has parameter $params with no value type specified in iterable type array.
+14:55-14:73 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Connection::executeQuery() has parameter $params with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-14:75-14:92 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeQuery | Method Doctrine\\DBAL\\Connection::executeQuery() has parameter $types with no value type specified in iterable type array.
+14:75-14:92 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Connection::executeQuery() has parameter $types with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-15:59-15:77 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeStatement | Method Doctrine\\DBAL\\Connection::executeStatement() has parameter $params with no value type specified in iterable type array.
+15:59-15:77 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Connection::executeStatement() has parameter $params with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-15:79-15:96 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeStatement | Method Doctrine\\DBAL\\Connection::executeStatement() has parameter $types with no value type specified in iterable type array.
+15:79-15:96 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Connection::executeStatement() has parameter $types with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-33:43-33:56 missingType.iterableValue L6 Doctrine\DBAL\Query\QueryBuilder::setParameters | Method Doctrine\\DBAL\\Query\\QueryBuilder::setParameters() has parameter $params with no value type specified in iterable type array.
+33:43-33:56 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Query\\QueryBuilder::setParameters() has parameter $params with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-33:58-33:75 missingType.iterableValue L6 Doctrine\DBAL\Query\QueryBuilder::setParameters | Method Doctrine\\DBAL\\Query\\QueryBuilder::setParameters() has parameter $types with no value type specified in iterable type array.
+33:58-33:75 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Query\\QueryBuilder::setParameters() has parameter $types with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-34:20-34:63 missingType.iterableValue L6 Doctrine\DBAL\Query\QueryBuilder::fetchAssociative | Method Doctrine\\DBAL\\Query\\QueryBuilder::fetchAssociative() return type has no value type specified in iterable type array.
+34:20-34:63 missingType.iterableValue L6 | Method Doctrine\\DBAL\\Query\\QueryBuilder::fetchAssociative() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-44:13-44:94 sqlReflection.missingParameter L0 f | Doctrine\\DBAL\\Connection::fetchAssociative() call's own SQL references parameter ?#1 with no bound value
+44:13-44:94 sqlReflection.missingParameter L0 | Doctrine\\DBAL\\Connection::fetchAssociative() call's own SQL references parameter ?#1 with no bound value

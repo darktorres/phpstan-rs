@@ -1,1 +1,1 @@
-5:13-5:50 class.disallowedSubtype L0 NotAllowed | Type NotAllowed is not allowed to be a subtype of Sealed.
+5:13-5:50 class.disallowedSubtype L0 | Type NotAllowed is not allowed to be a subtype of Sealed.

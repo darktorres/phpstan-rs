@@ -1,2 +1,2 @@
-3:45-3:47 class.prefixed L0 C | Referencing prefixed PHPUnit class: PHPUnitPHARFoo.
+3:45-3:47 class.prefixed L0 | Referencing prefixed PHPUnit class: PHPUnitPHARFoo.
     non-ignorable

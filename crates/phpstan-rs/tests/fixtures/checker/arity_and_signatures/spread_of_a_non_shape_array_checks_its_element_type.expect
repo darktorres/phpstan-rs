@@ -1,1 +1,1 @@
-5:22-5:29 argument.type L5 test | Parameter #1 $a of function f expects int, string given.
+5:22-5:29 argument.type L5 | Parameter #1 $a of function f expects int, string given.

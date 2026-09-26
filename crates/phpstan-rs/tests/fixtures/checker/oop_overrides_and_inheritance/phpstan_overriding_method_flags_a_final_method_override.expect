@@ -1,2 +1,2 @@
-6:17-6:49 method.parentMethodFinal L0 Bar | Method Bar::doFoo() overrides final method Foo::doFoo().
+6:17-6:49 method.parentMethodFinal L0 | Method Bar::doFoo() overrides final method Foo::doFoo().
     non-ignorable

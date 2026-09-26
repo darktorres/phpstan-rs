@@ -1,4 +1,4 @@
-2:31-2:61 missingType.return L6 Db::query | Method Db::query() has no return type specified.
-6:19-6:32 attribute.notFound L0 Repo::checkThis | attribute class AllowedLegacy does not exist
-7:25-7:54 method.unused L4 Repo | private method Repo::checkThis() is unused
+2:31-2:61 missingType.return L6 | Method Db::query() has no return type specified.
+6:19-6:32 attribute.notFound L0 | attribute class AllowedLegacy does not exist
+7:25-7:54 method.unused L4 | private method Repo::checkThis() is unused
     fix: Remove method checkThis() => ""

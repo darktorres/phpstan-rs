@@ -1,2 +1,2 @@
-3:35-3:49 missingType.iterableValue L6 f | Function f() has parameter $dynamic with no value type specified in iterable type array.
+3:35-3:49 missingType.iterableValue L6 | Function f() has parameter $dynamic with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

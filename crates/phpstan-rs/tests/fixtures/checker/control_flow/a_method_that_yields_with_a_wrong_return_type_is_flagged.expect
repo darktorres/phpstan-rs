@@ -1,1 +1,1 @@
-3:24-5:18 generator.returnType L0 Foo::f | yields, but its declared return type int is not a supertype of Generator, Iterator, Traversable, or iterable
+3:24-5:18 generator.returnType L0 | yields, but its declared return type int is not a supertype of Generator, Iterator, Traversable, or iterable

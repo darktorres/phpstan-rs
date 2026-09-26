@@ -1,2 +1,2 @@
-1:7-1:26 missingType.return L6 greet | Function greet() has no return type specified.
-1:27-1:34 function.resultUnused L4 <main> | Call to function greet() on a separate line has no effect.
+1:7-1:26 missingType.return L6 | Function greet() has no return type specified.
+1:27-1:34 function.resultUnused L4 | Call to function greet() on a separate line has no effect.

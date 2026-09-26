@@ -1,1 +1,1 @@
-5:37-5:53 new.resultUnused L4 test | Call to new Widget() on a separate line has no effect.
+5:37-5:53 new.resultUnused L4 | Call to new Widget() on a separate line has no effect.

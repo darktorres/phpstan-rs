@@ -1,1 +1,1 @@
-5:28-5:38 staticClassAccess.privateProperty L0 Foo::get | unsafe access to private property Foo::$x through static::
+5:28-5:38 staticClassAccess.privateProperty L0 | unsafe access to private property Foo::$x through static::

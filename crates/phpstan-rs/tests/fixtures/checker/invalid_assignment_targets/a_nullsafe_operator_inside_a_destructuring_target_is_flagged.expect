@@ -1,5 +1,5 @@
-3:13-5:14 missingType.return L6 test | Function test() has no return type specified.
-3:36-3:44 missingType.iterableValue L6 test | Function test() has parameter $x with no value type specified in iterable type array.
+3:13-5:14 missingType.return L6 | Function test() has no return type specified.
+3:36-3:44 missingType.iterableValue L6 | Function test() has parameter $x with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-4:17-4:27 nullsafe.assign L0 test | Nullsafe operator cannot be on left side of assignment.
+4:17-4:27 nullsafe.assign L0 | Nullsafe operator cannot be on left side of assignment.
     non-ignorable

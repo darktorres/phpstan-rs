@@ -1,2 +1,2 @@
-3:17-3:70 missingType.return L6 C::f | Method C::f() has no return type specified.
-3:30-3:55 attribute.notFound L0 C::f | attribute class TotallyUndefinedAttribute does not exist
+3:17-3:70 missingType.return L6 | Method C::f() has no return type specified.
+3:30-3:55 attribute.notFound L0 | attribute class TotallyUndefinedAttribute does not exist

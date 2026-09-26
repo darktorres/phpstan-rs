@@ -1,4 +1,4 @@
-3:37-3:42 classConstant.finalPrivate L0 Foo | Private constant Foo::X cannot be final as it is never overridden by other classes.
+3:37-3:42 classConstant.finalPrivate L0 | Private constant Foo::X cannot be final as it is never overridden by other classes.
     non-ignorable
-3:37-3:42 classConstant.unused L4 Foo | private constant Foo::X is unused
+3:37-3:42 classConstant.unused L4 | private constant Foo::X is unused
     fix: Remove constant X => ""

@@ -1,1 +1,1 @@
-6:29-6:32 argument.type L5 test | Parameter #1 $fn of function needsOneArg expects Closure(int): void, Closure(int, int): void given.
+6:29-6:32 argument.type L5 | Parameter #1 $fn of function needsOneArg expects Closure(int): void, Closure(int, int): void given.

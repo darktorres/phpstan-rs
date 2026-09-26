@@ -1,3 +1,3 @@
-4:24-4:59 missingType.return L6 Iter::current | Method Iter::current() has no return type specified.
-9:21-9:25 if.alwaysTrue L4 f | If condition is always true.
-11:17-11:39 method.notFound L0 f | call to undefined method FakeFileInfo9921::missingMethod()
+4:24-4:59 missingType.return L6 | Method Iter::current() has no return type specified.
+9:21-9:25 if.alwaysTrue L4 | If condition is always true.
+11:17-11:39 method.notFound L0 | call to undefined method FakeFileInfo9921::missingMethod()

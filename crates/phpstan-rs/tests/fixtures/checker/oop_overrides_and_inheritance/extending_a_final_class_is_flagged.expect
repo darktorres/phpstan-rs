@@ -1,1 +1,1 @@
-3:13-3:42 class.extendsFinal L0 Sub5 | class Sub5 cannot extend final class Sealed5
+3:13-3:42 class.extendsFinal L0 | class Sub5 cannot extend final class Sealed5

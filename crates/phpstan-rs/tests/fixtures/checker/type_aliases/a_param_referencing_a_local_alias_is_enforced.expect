@@ -1,1 +1,1 @@
-12:25-12:45 argument.type L5 run | Parameter #1 $options of method Runner::run() expects array{verbose: bool}, array{verbose: 'yes'} given.
+12:25-12:45 argument.type L5 | Parameter #1 $options of method Runner::run() expects array{verbose: bool}, array{verbose: 'yes'} given.

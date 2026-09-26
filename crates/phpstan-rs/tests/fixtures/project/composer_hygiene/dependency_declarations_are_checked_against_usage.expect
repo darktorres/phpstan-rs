@@ -1,3 +1,3 @@
-composer.json:6:1-6:1 unused.composerDependency L0 composer.json | Package acme/unused is in require, but the analysed code uses none of its symbols.
-src/Service.php:8:13-8:19 undeclared.composerDependency L0 <main> | Class Acme\\Transitive\\Helper is declared in package acme/transitive, which composer.json doesn't require; it's only installed as another package's dependency.
-src/Service.php:10:13-10:17 misplaced.composerDependency L0 <main> | Class Acme\\DevTool\\Tool is declared in package acme/dev-tool, which composer.json only requires in require-dev, but this file is autoloaded in production.
+composer.json:6:1-6:1 unused.composerDependency L0 | Package acme/unused is in require, but the analysed code uses none of its symbols.
+src/Service.php:8:13-8:19 undeclared.composerDependency L0 | Class Acme\\Transitive\\Helper is declared in package acme/transitive, which composer.json doesn't require; it's only installed as another package's dependency.
+src/Service.php:10:13-10:17 misplaced.composerDependency L0 | Class Acme\\DevTool\\Tool is declared in package acme/dev-tool, which composer.json only requires in require-dev, but this file is autoloaded in production.

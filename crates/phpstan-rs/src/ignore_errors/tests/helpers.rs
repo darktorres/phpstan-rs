@@ -4,7 +4,6 @@ use syntax::token::{Position, Span};
 
 pub(super) fn diag(identifier: &str, message: &str) -> Diagnostic {
     DiagnosticBuilder::new(
-        "<main>".to_string(),
         message.to_string(),
         Span {
             start: Position { line: 1, col: 1 },
@@ -18,7 +17,6 @@ pub(super) fn diag(identifier: &str, message: &str) -> Diagnostic {
 
 pub(super) fn non_ignorable_diag(identifier: &str, message: &str) -> Diagnostic {
     DiagnosticBuilder::new(
-        "<main>".to_string(),
         message.to_string(),
         Span {
             start: Position { line: 1, col: 1 },

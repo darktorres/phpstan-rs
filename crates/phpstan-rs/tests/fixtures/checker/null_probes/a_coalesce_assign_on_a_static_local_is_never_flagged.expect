@@ -1,2 +1,2 @@
-2:13-2:58 missingType.iterableValue L6 curl_version | Function curl_version() return type has no value type specified in iterable type array.
+2:13-2:58 missingType.iterableValue L6 | Function curl_version() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

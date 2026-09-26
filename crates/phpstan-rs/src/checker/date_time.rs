@@ -26,7 +26,6 @@ impl<'a> Checker<'a> {
         class: &str,
         args: &[Arg],
         span: Span,
-        label: &str,
         locals: &Locals,
     ) {
         let identifier = match class {
@@ -40,9 +39,7 @@ impl<'a> Checker<'a> {
             if validate_date_time_string(spec) != Some(false) {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "{class}::__construct() date string '{spec}' is malformed and will throw at runtime"
                 ),
                 span,

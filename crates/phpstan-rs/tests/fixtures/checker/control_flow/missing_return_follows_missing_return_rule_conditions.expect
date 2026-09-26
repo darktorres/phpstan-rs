@@ -1,7 +1,7 @@
-2:13-2:77 return.missing L0 nativeNullable | should return int|null but return statement is missing
+2:13-2:77 return.missing L0 | should return int|null but return statement is missing
     non-ignorable
-4:13-4:68 return.missing L2 docNullable | should return int|null but return statement is missing
-5:13-5:75 return.missing L0 nativeMixed | should return mixed but return statement is missing
+4:13-4:68 return.missing L2 | should return int|null but return statement is missing
+5:13-5:75 return.missing L0 | should return mixed but return statement is missing
     non-ignorable
-9:24-9:73 return.missing L0 <main> (closure) | should return int but return statement is missing
+9:24-9:73 return.missing L0 | should return int but return statement is missing
     non-ignorable

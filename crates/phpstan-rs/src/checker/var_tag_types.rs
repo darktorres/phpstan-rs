@@ -367,7 +367,6 @@ impl<'a> Checker<'a> {
         &mut self,
         stmt: &Stmt,
         tags: &[(Option<String>, Type)],
-        label: &str,
     ) {
         for (name, ty) in tags {
             let subject = match name {
@@ -382,7 +381,6 @@ impl<'a> Checker<'a> {
             for class in traits {
                 if seen.insert(class.clone()) {
                     self.report(
-                        label.to_string(),
                         format!("{subject} has invalid type {class}."),
                         stmt.span,
                         2,
@@ -390,11 +388,10 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            self.check_type_prefixed_class_names(ty, stmt.span, label);
+            self.check_type_prefixed_class_names(ty, stmt.span);
             for class in unknown {
                 if seen.insert(class.clone()) {
                     self.report(
-                        label.to_string(),
                         format!("{subject} contains unknown class {class}."),
                         stmt.span,
                         0,
@@ -416,7 +413,6 @@ impl<'a> Checker<'a> {
         tags: &[(Option<String>, Type)],
         names_ok: bool,
         locals: &Locals,
-        label: &str,
     ) {
         let unnamed: Vec<&Type> = tags
             .iter()
@@ -581,7 +577,7 @@ impl<'a> Checker<'a> {
             ));
         }
         for (tag, described) in checks {
-            self.check_var_tag_against(&tag, &described, stmt.span, label);
+            self.check_var_tag_against(&tag, &described, stmt.span);
         }
     }
 
@@ -650,7 +646,7 @@ impl<'a> Checker<'a> {
     /// the tag isn't a subtype of the value's native type; otherwise
     /// `varTag.type` when it can't describe the PHPDoc type at all, and
     /// `phpstanApi.varTagAssumption` for a narrowed PHPStan `Type`.
-    fn check_var_tag_against(&mut self, tag: &Type, value: &Described, span: Span, label: &str) {
+    fn check_var_tag_against(&mut self, tag: &Type, value: &Described, span: Span) {
         // An unknown class or a trait is reported on its own.
         let mut unusable = Vec::new();
         self.collect_unknown_class_names(tag, &mut unusable);
@@ -662,7 +658,6 @@ impl<'a> Checker<'a> {
             && !self.var_tag_fits_value(&value.native, tag, value.shape)
         {
             self.report(
-                label.to_string(),
                 format!(
                     "PHPDoc tag @var with type {tag} is not subtype of native type {}.",
                     value.native
@@ -679,7 +674,6 @@ impl<'a> Checker<'a> {
         if self.contains_phpstan_type(tag) {
             if !self.var_tag_fits_value(&value.doc, tag, value.shape) {
                 self.report(
-                    label.to_string(),
                     format!(
                         "PHPDoc tag @var with type {tag} is not subtype of type {}.",
                         value.doc
@@ -689,9 +683,7 @@ impl<'a> Checker<'a> {
                     "varTag.type",
                 );
             } else if value.doc != *tag {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "PHPDoc tag @var assumes the expression with type {} is always {tag} but it's error-prone and dangerous.",
                         value.doc
                     ),
@@ -708,7 +700,6 @@ impl<'a> Checker<'a> {
             && self.registry.is_super_type_of(tag, &value.doc) == TrinaryLogic::No
         {
             self.report(
-                label.to_string(),
                 format!(
                     "PHPDoc tag @var with type {tag} is incompatible with type {}.",
                     value.doc

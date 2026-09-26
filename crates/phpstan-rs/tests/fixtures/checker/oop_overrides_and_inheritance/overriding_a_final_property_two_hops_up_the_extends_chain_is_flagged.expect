@@ -1,2 +1,2 @@
-4:53-4:59 property.parentPropertyFinal L0 Child | Property Child::$x overrides final property Base::$x.
+4:53-4:59 property.parentPropertyFinal L0 | Property Child::$x overrides final property Base::$x.
     non-ignorable

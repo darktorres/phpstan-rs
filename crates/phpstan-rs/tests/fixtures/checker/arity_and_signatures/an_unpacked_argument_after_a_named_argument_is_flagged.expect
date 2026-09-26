@@ -1,4 +1,4 @@
-3:27-3:38 missingType.iterableValue L6 test | Function test() has parameter $rest with no value type specified in iterable type array.
+3:27-3:38 missingType.iterableValue L6 | Function test() has parameter $rest with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-3:61-3:66 argument.unpackAfterNamed L0 test | Named argument cannot be followed by an unpacked (...) argument.
+3:61-3:66 argument.unpackAfterNamed L0 | Named argument cannot be followed by an unpacked (...) argument.
     non-ignorable

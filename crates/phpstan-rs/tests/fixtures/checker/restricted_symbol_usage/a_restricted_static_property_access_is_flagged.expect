@@ -1,1 +1,1 @@
-3:43-3:60 restrictedSymbol.staticProperty L0 f | Access to restricted static property Legacy::$password: do not read this directly
+3:43-3:60 restrictedSymbol.staticProperty L0 | Access to restricted static property Legacy::$password: do not read this directly

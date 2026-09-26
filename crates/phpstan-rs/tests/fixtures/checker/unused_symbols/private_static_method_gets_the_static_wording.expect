@@ -1,2 +1,2 @@
-3:32-3:70 method.unused L4 Service | private static method Service::deadCode() is unused
+3:32-3:70 method.unused L4 | private static method Service::deadCode() is unused
     fix: Remove method deadCode() => ""

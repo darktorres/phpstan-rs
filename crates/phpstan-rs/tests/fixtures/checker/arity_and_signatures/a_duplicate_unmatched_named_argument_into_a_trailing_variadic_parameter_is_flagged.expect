@@ -1,2 +1,2 @@
-2:34-2:42 missingType.parameter L6 f27 | Function f27() has parameter $rest with no type specified.
-3:53-3:54 argument.duplicate L0 test | Named parameter $x overwrites previous argument.
+2:34-2:42 missingType.parameter L6 | Function f27() has parameter $rest with no type specified.
+3:53-3:54 argument.duplicate L0 | Named parameter $x overwrites previous argument.

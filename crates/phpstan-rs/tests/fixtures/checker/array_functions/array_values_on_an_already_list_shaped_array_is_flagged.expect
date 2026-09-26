@@ -1,3 +1,3 @@
-3:13-5:14 missingType.iterableValue L6 f | Function f() return type has no value type specified in iterable type array.
+3:13-5:14 missingType.iterableValue L6 | Function f() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-4:24-4:40 arrayValues.list L0 f | call to array_values() on list<int>, which is already a list, has no effect
+4:24-4:40 arrayValues.list L0 | call to array_values() on list<int>, which is already a list, has no effect

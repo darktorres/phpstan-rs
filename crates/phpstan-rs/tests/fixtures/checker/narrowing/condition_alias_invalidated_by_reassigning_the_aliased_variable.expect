@@ -1,1 +1,1 @@
-11:21-11:40 method.notFound L0 f | call to undefined method Base1::fooOnlyMethod()
+11:21-11:40 method.notFound L0 | call to undefined method Base1::fooOnlyMethod()

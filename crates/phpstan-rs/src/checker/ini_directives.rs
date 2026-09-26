@@ -154,7 +154,6 @@ impl<'a> Checker<'a> {
         function: &str,
         args: &[Arg],
         locals: &Locals,
-        label: &str,
     ) {
         let Some(version) = self.registry.php_version else {
             return;
@@ -184,9 +183,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "it always returns false"
                 };
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Call to {function}() with ini directive {directive}, removed in PHP {removed}; {outcome}."
                     ),
                     arg.value.span,
@@ -209,7 +206,6 @@ impl<'a> Checker<'a> {
                     "Ini directive"
                 };
                 self.report(
-                    label.to_string(),
                     format!(
                         "Call to {function}(): {what} {directive} is deprecated since PHP {since}."
                     ),

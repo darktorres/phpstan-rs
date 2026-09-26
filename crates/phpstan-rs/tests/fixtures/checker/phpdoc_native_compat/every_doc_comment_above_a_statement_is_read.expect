@@ -1,2 +1,2 @@
-4:13-4:31 varTag.variableNotFound L2 <main> | Variable $content in PHPDoc tag @var does not exist.
-4:13-4:31 varTag.variableNotFound L2 <main> | Variable $type in PHPDoc tag @var does not exist.
+4:13-4:31 varTag.variableNotFound L2 | Variable $content in PHPDoc tag @var does not exist.
+4:13-4:31 varTag.variableNotFound L2 | Variable $type in PHPDoc tag @var does not exist.

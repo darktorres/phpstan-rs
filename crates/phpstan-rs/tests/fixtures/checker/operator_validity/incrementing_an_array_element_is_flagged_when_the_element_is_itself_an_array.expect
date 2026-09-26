@@ -1,1 +1,1 @@
-6:17-6:29 postInc.type L0 test | Cannot use ++ on array<(int|string), int>.
+6:17-6:29 postInc.type L0 | Cannot use ++ on array<(int|string), int>.

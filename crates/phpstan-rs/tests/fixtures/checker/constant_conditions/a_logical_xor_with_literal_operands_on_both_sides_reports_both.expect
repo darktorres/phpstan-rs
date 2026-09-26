@@ -1,5 +1,5 @@
-1:7-1:44 missingType.return L6 f | Function f() has no return type specified.
-1:22-1:31 logicalXor.leftAlwaysTrue L4 f | Left side of xor is always true.
-1:22-1:41 logicalXor.resultUnused L4 f | Unused result of "xor" operator.
+1:7-1:44 missingType.return L6 | Function f() has no return type specified.
+1:22-1:31 logicalXor.leftAlwaysTrue L4 | Left side of xor is always true.
+1:22-1:41 logicalXor.resultUnused L4 | Unused result of "xor" operator.
     tip: This operator has unexpected precedence, try disambiguating the logic with parentheses ().
-1:36-1:41 logicalXor.rightAlwaysFalse L4 f | Right side of xor is always false.
+1:36-1:41 logicalXor.rightAlwaysFalse L4 | Right side of xor is always false.

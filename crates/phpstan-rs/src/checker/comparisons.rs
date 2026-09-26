@@ -53,7 +53,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         let function = function.trim_start_matches('\\').to_ascii_lowercase();
         let (needle_index, haystack_index) = match function.as_str() {
@@ -130,9 +129,7 @@ impl<'a> Checker<'a> {
             if any_possible_match && another_value_of_needle {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Value {value} in the haystack passed to {function}() can never be {verb} the needle type {needle}."
                 ),
                 span,
@@ -151,7 +148,6 @@ impl<'a> Checker<'a> {
         default: Option<&syntax::ast::Expr>,
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         let mut saw_void = false;
         for result in arms.iter().map(|(_, r)| r).chain(default) {
@@ -163,7 +159,6 @@ impl<'a> Checker<'a> {
         }
         if saw_void {
             self.report(
-                label.to_string(),
                 "Result of match expression (void) is used.".to_string(),
                 span,
                 2,
@@ -266,7 +261,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         if args.iter().any(|a| a.spread) {
             return;
@@ -317,9 +311,7 @@ impl<'a> Checker<'a> {
                     .any(|v| self.loose_comparison_differs(n, v))
             });
             if hazard {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Loose comparison in {function}() between needle {needle_ty} and haystack value {value} can match values that are not identical; pass true as the strict argument."
                     ),
                     span,

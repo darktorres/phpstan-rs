@@ -1,1 +1,1 @@
-9:13-9:30 missingType.return L6 f | Function f() has no return type specified.
+9:13-9:30 missingType.return L6 | Function f() has no return type specified.

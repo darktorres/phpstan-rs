@@ -1,1 +1,1 @@
-6:25-6:65 throws.void L3 Widget::$x (get hook) | Get hook for property Widget::$x throws exception but the PHPDoc contains @throws void.
+6:25-6:65 throws.void L3 | Get hook for property Widget::$x throws exception but the PHPDoc contains @throws void.

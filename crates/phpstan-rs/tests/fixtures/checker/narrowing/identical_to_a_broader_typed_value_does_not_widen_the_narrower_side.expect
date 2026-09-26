@@ -1,1 +1,1 @@
-5:13-5:64 return.unusedType L4 getRefererImageId | Function getRefererImageId() never returns int so it can be removed from the return type.
+5:13-5:64 return.unusedType L4 | Function getRefererImageId() never returns int so it can be removed from the return type.

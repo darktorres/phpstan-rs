@@ -1,1 +1,1 @@
-5:54-5:94 method.childParameterType L0 DogOnlyHandler2 | DogOnlyHandler2::handle() parameter #1 ($a) narrows the inherited parameter type: expects Dog2, ancestor expects Animal2
+5:54-5:94 method.childParameterType L0 | DogOnlyHandler2::handle() parameter #1 ($a) narrows the inherited parameter type: expects Dog2, ancestor expects Animal2

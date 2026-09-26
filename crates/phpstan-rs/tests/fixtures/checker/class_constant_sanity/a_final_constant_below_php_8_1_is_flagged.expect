@@ -1,2 +1,2 @@
-3:29-3:34 classConstant.finalNotSupported L0 Foo | Final class constants are supported only on PHP 8.1 and later.
+3:29-3:34 classConstant.finalNotSupported L0 | Final class constants are supported only on PHP 8.1 and later.
     non-ignorable

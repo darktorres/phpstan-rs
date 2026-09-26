@@ -1,3 +1,3 @@
-a.php:1:37-1:43 enumCase.unused L5 Suit | Enum case Suit::Spades is never used.
-a.php:1:47-1:120 missingType.return L6 f | Function f() has no return type specified.
-a.php:1:58-1:60 missingType.parameter L6 f | Function f() has parameter $x with no type specified.
+a.php:1:37-1:43 enumCase.unused L5 | Enum case Suit::Spades is never used.
+a.php:1:47-1:120 missingType.return L6 | Function f() has no return type specified.
+a.php:1:58-1:60 missingType.parameter L6 | Function f() has parameter $x with no type specified.

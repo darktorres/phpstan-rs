@@ -757,7 +757,6 @@ impl Project {
                 let at = syntax::token::Position { line, col: 1 };
                 unmatched.push(
                     diagnostic::DiagnosticBuilder::new(
-                        "<main>".to_string(),
                         message,
                         Span { start: at, end: at },
                         0,
@@ -1669,7 +1668,6 @@ impl Project {
             };
             diagnostics.push(
                 diagnostic::DiagnosticBuilder::new(
-                    "<main>".to_string(),
                     format!("Parse error in @phpstan-ignore: {message}"),
                     Span { start: at, end: at },
                     0,
@@ -1994,7 +1992,6 @@ impl Project {
         &self,
         path: &Path,
         span: Span,
-        location: String,
         message: String,
         identifier: &'static str,
     ) -> Option<Diagnostic> {
@@ -2013,14 +2010,12 @@ impl Project {
             return None;
         }
         Some(Diagnostic {
-            location,
             message,
             span,
             level: 5,
             identifier: identifier.to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: FxHashMap::default(),
             fix: None,
         })
     }
@@ -2077,7 +2072,6 @@ impl Project {
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     *span,
-                    fqn.clone(),
                     format!("Enum case {fqn}::{case} is never used."),
                     "enumCase.unused",
                 ) {
@@ -2097,7 +2091,6 @@ impl Project {
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     *span,
-                    name.clone(),
                     format!("Function {name} is never referenced."),
                     "function.unused",
                 ) {
@@ -2114,7 +2107,6 @@ impl Project {
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     *span,
-                    name.clone(),
                     format!("Class {name} is never referenced."),
                     "class.unused",
                 ) {
@@ -2137,7 +2129,6 @@ impl Project {
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     *span,
-                    cycle.representative_class.clone(),
                     format!("Circular namespace dependency: {namespaces}."),
                     "namespace.circularDependency",
                 ) {
@@ -2157,7 +2148,6 @@ impl Project {
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     *span,
-                    name.clone(),
                     format!(
                         "Abstract class {name} has no concrete subclass anywhere in the project."
                     ),
@@ -2196,7 +2186,6 @@ impl Project {
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     *span,
-                    owner.clone(),
                     format!("{noun} {owner}::{name} is never used."),
                     identifier,
                 ) {
@@ -2211,11 +2200,10 @@ impl Project {
                 whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
                     &calls, &overrides,
                 );
-            for (path, span, location, message) in collisions {
+            for (path, span, message) in collisions {
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
                     span,
-                    location,
                     message,
                     "argument.parameterRenamedInSubtype",
                 ) {

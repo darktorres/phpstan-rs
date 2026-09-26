@@ -1,1 +1,1 @@
-2:18-2:31 restrictedSymbol.function L0 <main> | Call to restricted function var_dump(): no debug dumps
+2:18-2:31 restrictedSymbol.function L0 | Call to restricted function var_dump(): no debug dumps

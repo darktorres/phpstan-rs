@@ -1,1 +1,1 @@
-4:23-4:45 throw.notThrowable L0 test | cannot throw InvalidException: it does not implement Throwable
+4:23-4:45 throw.notThrowable L0 | cannot throw InvalidException: it does not implement Throwable

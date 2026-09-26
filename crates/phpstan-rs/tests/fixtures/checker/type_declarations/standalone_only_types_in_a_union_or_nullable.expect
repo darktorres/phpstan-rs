@@ -1,10 +1,10 @@
-2:24-2:33 unionType.mixed L0 a | Type mixed cannot be part of a union type declaration.
+2:24-2:33 unionType.mixed L0 | Type mixed cannot be part of a union type declaration.
     non-ignorable
-2:39-2:47 unionType.void L0 a | Type void cannot be part of a union type declaration.
+2:39-2:47 unionType.void L0 | Type void cannot be part of a union type declaration.
     non-ignorable
-3:24-3:30 nullableType.mixed L0 b | Type mixed cannot be part of a nullable type declaration.
+3:24-3:30 nullableType.mixed L0 | Type mixed cannot be part of a nullable type declaration.
     non-ignorable
-3:36-3:42 nullableType.never L0 b | Type never cannot be part of a nullable type declaration.
+3:36-3:42 nullableType.never L0 | Type never cannot be part of a nullable type declaration.
     non-ignorable
-4:27-4:32 nullableType.void L0 c | Type VOID cannot be part of a nullable type declaration.
+4:27-4:32 nullableType.void L0 | Type VOID cannot be part of a nullable type declaration.
     non-ignorable

@@ -1,2 +1,2 @@
-4:30-4:37 isset.offset L0 f | Offset 'b' on array{a: string} in isset() does not exist.
-4:48-4:55 empty.offset L0 f | Offset 'c' on array{a: string} in empty() does not exist.
+4:30-4:37 isset.offset L0 | Offset 'b' on array{a: string} in isset() does not exist.
+4:48-4:55 empty.offset L0 | Offset 'c' on array{a: string} in empty() does not exist.

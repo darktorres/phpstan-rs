@@ -1,2 +1,2 @@
-3:17-5:18 missingType.return L6 f | Function f() has no return type specified.
-4:32-4:40 offsetAccess.nonArray L3 f | Cannot use array destructuring on void.
+3:17-5:18 missingType.return L6 | Function f() has no return type specified.
+4:32-4:40 offsetAccess.nonArray L3 | Cannot use array destructuring on void.

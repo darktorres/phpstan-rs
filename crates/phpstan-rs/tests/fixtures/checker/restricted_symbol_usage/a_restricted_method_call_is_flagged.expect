@@ -1,2 +1,2 @@
-2:31-2:61 missingType.return L6 Db::query | Method Db::query() has no return type specified.
-3:40-3:62 restrictedSymbol.method L0 f | Call to restricted method Db::query(): use the connection service
+2:31-2:61 missingType.return L6 | Method Db::query() has no return type specified.
+3:40-3:62 restrictedSymbol.method L0 | Call to restricted method Db::query(): use the connection service

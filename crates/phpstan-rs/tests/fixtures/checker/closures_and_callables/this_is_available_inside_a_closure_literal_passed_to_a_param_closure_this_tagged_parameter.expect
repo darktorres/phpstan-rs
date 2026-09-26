@@ -1,1 +1,1 @@
-6:13-6:64 missingType.return L6 withSecret5 | Function withSecret5() has no return type specified.
+6:13-6:64 missingType.return L6 | Function withSecret5() has no return type specified.

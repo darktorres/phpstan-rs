@@ -1,1 +1,1 @@
-5:13-5:25 class.notFound L0 Foo | PHPDoc tag @mixin references unknown class NoSuchClass.
+5:13-5:25 class.notFound L0 | PHPDoc tag @mixin references unknown class NoSuchClass.

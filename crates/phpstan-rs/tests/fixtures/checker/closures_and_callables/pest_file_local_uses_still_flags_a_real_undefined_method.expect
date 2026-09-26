@@ -1,8 +1,8 @@
-2:13-2:37 missingType.return L6 uses | Function uses() has no return type specified.
-2:27-2:33 missingType.parameter L6 uses | Function uses() has parameter $class with no type specified.
-3:13-3:52 missingType.return L6 it | Function it() has no return type specified.
-3:25-3:37 missingType.parameter L6 it | Function it() has parameter $description with no type specified.
-3:39-3:48 missingType.parameter L6 it | Function it() has parameter $callback with no type specified.
-7:13-7:38 function.resultUnused L4 <main> | Call to function uses() on a separate line has no effect.
-8:13-10:15 function.resultUnused L4 <main> | Call to function it() on a separate line has no effect.
-9:24-9:55 method.notFound L0 <main> (closure) | call to undefined method RealTestBase::totallyUndefinedMethod()
+2:13-2:37 missingType.return L6 | Function uses() has no return type specified.
+2:27-2:33 missingType.parameter L6 | Function uses() has parameter $class with no type specified.
+3:13-3:52 missingType.return L6 | Function it() has no return type specified.
+3:25-3:37 missingType.parameter L6 | Function it() has parameter $description with no type specified.
+3:39-3:48 missingType.parameter L6 | Function it() has parameter $callback with no type specified.
+7:13-7:38 function.resultUnused L4 | Call to function uses() on a separate line has no effect.
+8:13-10:15 function.resultUnused L4 | Call to function it() on a separate line has no effect.
+9:24-9:55 method.notFound L0 | call to undefined method RealTestBase::totallyUndefinedMethod()

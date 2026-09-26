@@ -1,2 +1,2 @@
-4:13-4:36 assert.trait L0 f | PHPDoc tag @phpstan-assert for $x has invalid type T
-4:24-4:26 missingType.parameter L6 f | Function f() has parameter $x with no type specified.
+4:13-4:36 assert.trait L0 | PHPDoc tag @phpstan-assert for $x has invalid type T
+4:24-4:26 missingType.parameter L6 | Function f() has parameter $x with no type specified.

@@ -1,1 +1,1 @@
-4:24-4:31 arguments.possiblySwapped L5 f | resize() arguments #1 ($height) and #2 ($width) may be swapped - their variable names match the reversed parameter order ($width, $height)
+4:24-4:31 arguments.possiblySwapped L5 | resize() arguments #1 ($height) and #2 ($width) may be swapped - their variable names match the reversed parameter order ($width, $height)

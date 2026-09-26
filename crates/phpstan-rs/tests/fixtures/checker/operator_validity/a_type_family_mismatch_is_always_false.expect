@@ -1,2 +1,2 @@
-1:7-1:61 missingType.return L6 f | Function f() has no return type specified.
-1:32-1:46 identical.alwaysFalse L4 f | Strict comparison using === between int and 'hello' will always evaluate to false.
+1:7-1:61 missingType.return L6 | Function f() has no return type specified.
+1:32-1:46 identical.alwaysFalse L4 | Strict comparison using === between int and 'hello' will always evaluate to false.

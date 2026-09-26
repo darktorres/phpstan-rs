@@ -1,1 +1,1 @@
-13:25-13:40 function.impossibleType L4 Handle::dead | Call to function is_resource() with closed-resource will always evaluate to false.
+13:25-13:40 function.impossibleType L4 | Call to function is_resource() with closed-resource will always evaluate to false.

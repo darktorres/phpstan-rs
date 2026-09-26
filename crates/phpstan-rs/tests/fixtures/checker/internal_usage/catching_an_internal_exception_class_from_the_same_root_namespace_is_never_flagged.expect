@@ -1,2 +1,2 @@
-8:13-13:14 missingType.return L6 f | Function f() has no return type specified.
-10:21-10:30 function.notFound L0 f | call to undefined function Vendor\\App\\doStuff()
+8:13-13:14 missingType.return L6 | Function f() has no return type specified.
+10:21-10:30 function.notFound L0 | call to undefined function Vendor\\App\\doStuff()

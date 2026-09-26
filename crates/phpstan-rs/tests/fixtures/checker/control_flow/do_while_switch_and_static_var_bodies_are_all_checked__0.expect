@@ -1,3 +1,3 @@
-2:13-6:14 missingType.return L6 f | Function f() has no return type specified.
-4:26-4:45 variable.undefined L0 f | undefined variable $undefinedInDoWhile
-5:26-5:30 doWhile.alwaysTrue L4 f | Do-while loop condition is always true.
+2:13-6:14 missingType.return L6 | Function f() has no return type specified.
+4:26-4:45 variable.undefined L0 | undefined variable $undefinedInDoWhile
+5:26-5:30 doWhile.alwaysTrue L4 | Do-while loop condition is always true.

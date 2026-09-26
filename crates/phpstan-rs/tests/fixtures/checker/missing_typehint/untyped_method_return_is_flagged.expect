@@ -1,1 +1,1 @@
-3:24-3:47 missingType.return L6 C::foo | Method C::foo() has no return type specified.
+3:24-3:47 missingType.return L6 | Method C::foo() has no return type specified.

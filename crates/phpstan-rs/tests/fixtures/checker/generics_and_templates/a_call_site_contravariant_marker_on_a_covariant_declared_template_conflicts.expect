@@ -1,2 +1,2 @@
-6:13-6:30 missingType.return L6 f | Function f() has no return type specified.
-6:24-6:26 generics.callSiteVarianceConflict L6 f | Call-site variance of contravariant Animal in generic type Collection<contravariant Animal> in PHPDoc tag @param for parameter $c is in conflict with covariant template type T of class Collection.
+6:13-6:30 missingType.return L6 | Function f() has no return type specified.
+6:24-6:26 generics.callSiteVarianceConflict L6 | Call-site variance of contravariant Animal in generic type Collection<contravariant Animal> in PHPDoc tag @param for parameter $c is in conflict with covariant template type T of class Collection.

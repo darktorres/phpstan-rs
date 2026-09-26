@@ -21,7 +21,6 @@ impl<'a> Checker<'a> {
         class: &str,
         args: &[Arg],
         span: Span,
-        label: &str,
         locals: &Locals,
     ) {
         if class != "DateInterval" {
@@ -33,9 +32,7 @@ impl<'a> Checker<'a> {
             if is_valid_date_interval_spec(spec) {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Instantiating DateInterval with {spec} produces an error: Unknown or bad format ({spec})"
                 ),
                 span,

@@ -1,1 +1,1 @@
-a.php:1:22-1:26 class.deadAbstract L5 Base | Abstract class Base has no concrete subclass anywhere in the project.
+a.php:1:22-1:26 class.deadAbstract L5 | Abstract class Base has no concrete subclass anywhere in the project.

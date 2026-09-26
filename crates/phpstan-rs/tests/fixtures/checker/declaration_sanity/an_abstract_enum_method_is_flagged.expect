@@ -1,4 +1,4 @@
-2:13-5:14 class.abstractMethodNotImplemented L0 Status | class Status does not implement abstract method(s): bar
+2:13-5:14 class.abstractMethodNotImplemented L0 | class Status does not implement abstract method(s): bar
     tip: either implement every method listed above, or declare this class itself abstract
-4:17-4:54 method.abstract L0 Status | Enum Status contains abstract method bar()
+4:17-4:54 method.abstract L0 | Enum Status contains abstract method bar()
     non-ignorable

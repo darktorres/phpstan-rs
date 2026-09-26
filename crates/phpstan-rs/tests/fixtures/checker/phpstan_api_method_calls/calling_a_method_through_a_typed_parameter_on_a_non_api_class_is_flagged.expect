@@ -1,5 +1,5 @@
-test.php:2:9-2:34 phpstanApi.phpstanNamespace L0 <main> | Declaring PHPStan namespace is not allowed in 3rd party packages.
+test.php:2:9-2:34 phpstanApi.phpstanNamespace L0 | Declaring PHPStan namespace is not allowed in 3rd party packages.
     tip: See:\n   https://phpstan.org/developing-extensions/backward-compatibility-promise
-test.php:4:20-4:41 missingType.return L6 PHPStan\FakeNs\Widget::getType | Method PHPStan\\FakeNs\\Widget::getType() has no return type specified.
-test.php:8:20-10:14 missingType.return L6 App\Rules\SomeRule::processNode | Method App\\Rules\\SomeRule::processNode() has no return type specified.
-test.php:9:17-9:34 phpstanApi.method L0 App\Rules\SomeRule::processNode | calling PHPStan\\FakeNs\\Widget::getType() is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\FakeNs\\Widget)
+test.php:4:20-4:41 missingType.return L6 | Method PHPStan\\FakeNs\\Widget::getType() has no return type specified.
+test.php:8:20-10:14 missingType.return L6 | Method App\\Rules\\SomeRule::processNode() has no return type specified.
+test.php:9:17-9:34 phpstanApi.method L0 | calling PHPStan\\FakeNs\\Widget::getType() is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\FakeNs\\Widget)

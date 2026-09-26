@@ -53,11 +53,9 @@ pub enum OutputFormat {
     Friendly,
 }
 
-/// One diagnostic in this project's original text format, *without* the
-/// leading file path - shared by every printing path (`check-project`'s
-/// own `Text` format, `incremental-bench`, and `demo`) so the three don't
-/// drift out of sync as independently hand-written `println!`s. Matches
-/// what all three already printed before this module existed.
+/// One diagnostic in the text format, *without* the leading file path -
+/// `line:column: message (identifier)`, shared by every printing path
+/// (`check-project`'s own `Text` format, `incremental-bench`, and `demo`).
 /// `check-project` (the only one of the three that reports on more than
 /// one file) prepends the path itself. Always exactly one line: a message
 /// that itself spans lines (a `phpDoc.parseError` quoting a wrapped tag's
@@ -66,10 +64,9 @@ pub enum OutputFormat {
 /// problem matchers. The JSON and checkstyle formats keep it intact.
 pub fn diagnostic_line(d: &Diagnostic) -> String {
     format!(
-        "{}:{}: {}: {} ({})",
+        "{}:{}: {} ({})",
         d.span.start.line,
         d.span.start.col,
-        d.location,
         single_line(&d.message),
         d.identifier
     )
@@ -90,7 +87,6 @@ struct JsonMessage<'a> {
     line: u32,
     column: u32,
     level: u8,
-    location: &'a str,
     identifier: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     tip: Option<&'a str>,
@@ -149,7 +145,6 @@ pub fn render_json(results: &FxHashMap<PathBuf, Vec<Diagnostic>>, files_checked:
                 line: d.span.start.line,
                 column: d.span.start.col,
                 level: d.level,
-                location: &d.location,
                 identifier: &d.identifier,
                 tip: d.tip.as_deref(),
             })
@@ -201,7 +196,7 @@ pub fn render_checkstyle(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Strin
                 "    <error line=\"{}\" column=\"{}\" severity=\"error\" message=\"{}\" source=\"phpstan-rs.{}\"/>\n",
                 d.span.start.line,
                 d.span.start.col,
-                xml_escape(&format!("{}: {}", d.location, d.message)),
+                xml_escape(&d.message),
                 xml_escape(&d.identifier),
             ));
         }
@@ -238,7 +233,7 @@ pub fn render_junit(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> String {
                 d.span.start.line,
                 xml_escape(&d.identifier),
             ));
-            let mut body = format!("{}: {}", d.location, d.message);
+            let mut body = d.message.clone();
             if let Some(tip) = &d.tip {
                 body.push_str(&format!("\n{tip}"));
             }

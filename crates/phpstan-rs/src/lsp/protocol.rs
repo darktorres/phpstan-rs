@@ -225,23 +225,21 @@ fn percent_encode_path(s: &str) -> String {
     out
 }
 
-/// One diagnostic's LSP shape. `location` (a symbolic label like
-/// `"ClassName::methodName"`, not a position) is folded into the message
-/// text instead of dropped - `lsp_types::Diagnostic` has no field for
-/// it. `Span`'s 1-indexed line/col become LSP's 0-indexed line/character.
+/// One diagnostic's LSP shape. `Span`'s 1-indexed line/col become LSP's
+/// 0-indexed line/character.
 ///
 /// `identifier` maps to LSP's own `code` field, exactly what an editor's
 /// "quick fix"/problem-matcher tooling expects a stable per-diagnostic-
-/// kind string in. `tip`, when present, is appended to the message text
-/// the same way `location` already is - LSP has no separate field for a
+/// kind string in. `tip`, when present, is appended to the message text -
+/// LSP has no separate field for a
 /// secondary hint either. `severity` comes from `level_to_severity` - see
 /// `Diagnostic::level`'s own doc comment (checker.rs) for the tier
 /// semantics this mirrors (low number = more certain/severe, not a
 /// per-finding confidence score).
 pub(crate) fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
     let message = match &d.tip {
-        Some(tip) => format!("{}: {}\n💡 {tip}", d.location, d.message),
-        None => format!("{}: {}", d.location, d.message),
+        Some(tip) => format!("{}\n💡 {tip}", d.message),
+        None => d.message.clone(),
     };
     LspDiagnostic {
         range: to_lsp_range(d.span),

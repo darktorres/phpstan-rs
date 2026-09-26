@@ -31,9 +31,8 @@
 //! fields (`checker.rs`'s own `Locals` struct) plus `current_class`/
 //! `current_method`. This facade exposes the ones a general-purpose
 //! third-party rule plausibly needs, each a real, disclosed decision:
-//! - `label`, `current_class`, `current_method` - a rule's own
-//!   "where am I" identity, exactly what every first-party check
-//!   already threads through as `label` for its own diagnostics.
+//! - `current_class`, `current_method` - a rule's own "where am I"
+//!   identity.
 //! - `local_type` - the single most useful piece: a variable's own
 //!   currently-inferred type on this exact control-flow path.
 //! - `is_function_guarded`/`is_method_guarded`/`is_property_guarded` -
@@ -108,24 +107,11 @@ pub trait Rule: Send + Sync {
 pub struct Scope<'s, 'r> {
     checker: &'s Checker<'r>,
     locals: &'s Locals,
-    label: &'s str,
 }
 
 impl<'s, 'r> Scope<'s, 'r> {
-    pub(crate) fn new(checker: &'s Checker<'r>, locals: &'s Locals, label: &'s str) -> Self {
-        Scope {
-            checker,
-            locals,
-            label,
-        }
-    }
-
-    /// This node's own enclosing declaration, human-readable
-    /// (`"Foo::bar"`, or a bare function/file-level name) - exactly the
-    /// string every first-party check already uses as a diagnostic's
-    /// own `location`.
-    pub fn label(&self) -> &str {
-        self.label
+    pub(crate) fn new(checker: &'s Checker<'r>, locals: &'s Locals) -> Self {
+        Scope { checker, locals }
     }
 
     /// The class whose method body this node is inside, if any.
@@ -134,8 +120,7 @@ impl<'s, 'r> Scope<'s, 'r> {
     }
 
     /// The method whose body this node is inside, if any (`None` for a
-    /// top-level function or file-level code - see `label` for that
-    /// case's own identity instead).
+    /// top-level function or file-level code).
     pub fn current_method(&self) -> Option<&str> {
         self.checker.current_method.as_deref()
     }

@@ -1,3 +1,3 @@
-8:68-8:82 missingType.iterableValue L6 Dave\Liddament\PhpLanguageExtensions\Attributes\Sealed::__construct | Method Dave\\Liddament\\PhpLanguageExtensions\\Attributes\\Sealed::__construct() has parameter $classes with no value type specified in iterable type array.
+8:68-8:82 missingType.iterableValue L6 | Method Dave\\Liddament\\PhpLanguageExtensions\\Attributes\\Sealed::__construct() has parameter $classes with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-16:59-16:71 attribute.testTag L2 App\Service::f | App\\Clock::freeze() is marked #[TestTag] and can only be used from test code.
+16:59-16:71 attribute.testTag L2 | App\\Clock::freeze() is marked #[TestTag] and can only be used from test code.

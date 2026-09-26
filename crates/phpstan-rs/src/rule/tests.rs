@@ -16,17 +16,15 @@ impl Rule for FlagsVariableNamed {
         matches!(kind, ExprKind::Variable(name) if name.as_ref() == self.0)
     }
 
-    fn check_expr(&self, scope: &Scope, expr: &Expr, ty: &Type) -> Vec<Diagnostic> {
+    fn check_expr(&self, _scope: &Scope, expr: &Expr, ty: &Type) -> Vec<Diagnostic> {
         vec![
             Diagnostic {
-                location: scope.label().to_string(),
                 message: format!("flagged ${} (inferred {ty})", self.0),
                 span: expr.span,
                 level: 6,
                 identifier: "test.flagged".to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: rustc_hash::FxHashMap::default(),
                 fix: None,
             };
             1
@@ -42,16 +40,14 @@ impl Rule for FlagsEchoStatements {
         matches!(kind, StmtKind::Echo(_))
     }
 
-    fn check_stmt(&self, scope: &Scope, stmt: &Stmt) -> Vec<Diagnostic> {
+    fn check_stmt(&self, _scope: &Scope, stmt: &Stmt) -> Vec<Diagnostic> {
         vec![Diagnostic {
-            location: scope.label().to_string(),
             message: "flagged an echo".to_string(),
             span: stmt.span,
             level: 6,
             identifier: "test.echoFlagged".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: rustc_hash::FxHashMap::default(),
             fix: None,
         }]
     }
@@ -135,7 +131,6 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
 
         fn check_expr(&self, scope: &Scope, expr: &Expr, _ty: &Type) -> Vec<Diagnostic> {
             vec![Diagnostic {
-                location: scope.label().to_string(),
                 message: format!(
                     "class={:?} method={:?} local_type={:?}",
                     scope.current_class(),
@@ -147,7 +142,6 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
                 identifier: "test.scope".to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: rustc_hash::FxHashMap::default(),
                 fix: None,
             }]
         }
@@ -184,14 +178,12 @@ fn is_function_guarded_reflects_a_real_function_exists_narrowing() {
 
         fn check_expr(&self, scope: &Scope, expr: &Expr, _ty: &Type) -> Vec<Diagnostic> {
             vec![Diagnostic {
-                location: scope.label().to_string(),
                 message: format!("guarded={}", scope.is_function_guarded("maybe_missing")),
                 span: expr.span,
                 level: 6,
                 identifier: "test.guard".to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: rustc_hash::FxHashMap::default(),
                 fix: None,
             }]
         }

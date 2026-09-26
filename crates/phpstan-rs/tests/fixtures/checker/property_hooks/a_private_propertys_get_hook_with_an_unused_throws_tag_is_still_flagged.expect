@@ -1,3 +1,3 @@
-3:29-8:18 property.unused L4 Widget | private property Widget::$x is unused
+3:29-8:18 property.unused L4 | private property Widget::$x is unused
     fix: Remove property $x => ""
-3:29-8:18 throws.unusedType L2 Widget::$x (get hook) | Get hook for property Widget::$x has RuntimeException in PHPDoc @throws tag but it's not thrown.
+3:29-8:18 throws.unusedType L2 | Get hook for property Widget::$x has RuntimeException in PHPDoc @throws tag but it's not thrown.

@@ -37,11 +37,10 @@ pub(crate) fn is_magic_method_name(lower: &str) -> bool {
 impl<'a> Checker<'a> {
     /// `EnumCaseOutsideEnumRule`: a `case` in a class, interface, trait
     /// or anonymous class body - PHP parses it, then refuses to compile it.
-    pub(crate) fn check_enum_cases_outside_enum(&mut self, cases: &[EnumCase], label: &str) {
+    pub(crate) fn check_enum_cases_outside_enum(&mut self, cases: &[EnumCase]) {
         for case in cases {
             self.report_builder(
                 DiagnosticBuilder::new(
-                    label.to_string(),
                     "Enum case can only be used in enums.".to_string(),
                     case.span,
                     0,
@@ -71,7 +70,7 @@ impl<'a> Checker<'a> {
                 _ => continue,
             };
             if let Some(first_case) = seen.get(&key) {
-                self.report(fqn.to_string(), format!(
+                self.report(format!(
                         "duplicate value in enum {fqn} for case {} (already used by case {first_case})",
                         case.name
                     ), case.span, 0, "enum.duplicateValue");
@@ -95,7 +94,6 @@ impl<'a> Checker<'a> {
         }
         let plural = if block.templates.len() == 1 { "" } else { "s" };
         self.report(
-            fqn.to_string(),
             format!("Enum {fqn} has PHPDoc @template tag{plural} but enums cannot be generic."),
             e.span,
             2,
@@ -124,7 +122,6 @@ impl<'a> Checker<'a> {
                 if lower == "__construct" {
                     self.report_builder(
                         DiagnosticBuilder::new(
-                            fqn.to_string(),
                             format!("Enum {fqn} contains constructor."),
                             m.span,
                             0,
@@ -135,7 +132,6 @@ impl<'a> Checker<'a> {
                 } else if lower == "__destruct" {
                     self.report_builder(
                         DiagnosticBuilder::new(
-                            fqn.to_string(),
                             format!("Enum {fqn} contains destructor."),
                             m.span,
                             0,
@@ -146,7 +142,6 @@ impl<'a> Checker<'a> {
                 } else if !matches!(lower.as_str(), "__call" | "__callstatic" | "__invoke") {
                     self.report_builder(
                         DiagnosticBuilder::new(
-                            fqn.to_string(),
                             format!("Enum {fqn} contains magic method {}().", m.function.name),
                             m.span,
                             0,
@@ -161,7 +156,6 @@ impl<'a> Checker<'a> {
             if redeclares_native {
                 self.report_builder(
                     DiagnosticBuilder::new(
-                        fqn.to_string(),
                         format!(
                             "Enum {fqn} cannot redeclare native method {}().",
                             m.function.name
@@ -181,7 +175,6 @@ impl<'a> Checker<'a> {
             if !expects_int && !expects_string {
                 self.report_builder(
                     DiagnosticBuilder::new(
-                        fqn.to_string(),
                         format!("Backed enum {fqn} can have only \"int\" or \"string\" type."),
                         e.span,
                         0,
@@ -195,7 +188,6 @@ impl<'a> Checker<'a> {
         if self.registry.is_subclass_of(fqn, "Serializable") {
             self.report_builder(
                 DiagnosticBuilder::new(
-                    fqn.to_string(),
                     format!("Enum {fqn} cannot implement the Serializable interface."),
                     e.span,
                     0,
@@ -223,7 +215,6 @@ impl<'a> Checker<'a> {
                     let ty = registry::infer_const_type(value);
                     self.report_builder(
                         DiagnosticBuilder::new(
-                            fqn.to_string(),
                             format!(
                                 "Enum {fqn} is not backed, but case {} has value {ty}.",
                                 case.name
@@ -237,9 +228,7 @@ impl<'a> Checker<'a> {
                 }
                 (Some(_), None) => {
                     self.report_builder(
-                        DiagnosticBuilder::new(
-                            fqn.to_string(),
-                            format!(
+                        DiagnosticBuilder::new(format!(
                                 "Enum case {fqn}::{} does not have a value but the enum is backed with the \"{}\" type.",
                                 case.name,
                                 backing_type_word.unwrap_or("string")
@@ -267,9 +256,7 @@ impl<'a> Checker<'a> {
                     };
                     if !matches_backing {
                         self.report_builder(
-                            DiagnosticBuilder::new(
-                                fqn.to_string(),
-                                format!(
+                            DiagnosticBuilder::new(format!(
                                     "Enum case {fqn}::{} value {ty} does not match the \"{}\" type.",
                                     case.name,
                                     backing_type_word.unwrap_or("string")

@@ -1,2 +1,2 @@
-6:13-10:14 missingType.return L6 test | Function test() has no return type specified.
-8:28-8:49 method.notFound L0 test (closure) | call to undefined method Foo::undefinedMethod()
+6:13-10:14 missingType.return L6 | Function test() has no return type specified.
+8:28-8:49 method.notFound L0 | call to undefined method Foo::undefinedMethod()

@@ -1,2 +1,2 @@
-3:13-5:14 parameterByRef.tooWide L5 f | by-ref parameter $x's declared type int|string is never narrower than 'now a string' at the end of execution - consider narrowing it
-3:22-3:23 parameter.phpDocType L2 f | PHPDoc tag @param-out for parameter $x with type int|string is not subtype of native type int.
+3:13-5:14 parameterByRef.tooWide L5 | by-ref parameter $x's declared type int|string is never narrower than 'now a string' at the end of execution - consider narrowing it
+3:22-3:23 parameter.phpDocType L2 | PHPDoc tag @param-out for parameter $x with type int|string is not subtype of native type int.

@@ -1,1 +1,1 @@
-3:45-3:52 constructor.unusedParameter L1 C::__construct | Constructor of class C has an unused parameter $id.
+3:45-3:52 constructor.unusedParameter L1 | Constructor of class C has an unused parameter $id.

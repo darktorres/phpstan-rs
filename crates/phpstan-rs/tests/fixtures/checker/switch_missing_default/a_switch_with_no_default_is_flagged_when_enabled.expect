@@ -1,1 +1,1 @@
-3:17-6:18 switch.missingDefault L5 f | Switch has no default branch.
+3:17-6:18 switch.missingDefault L5 | Switch has no default branch.

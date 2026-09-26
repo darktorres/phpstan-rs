@@ -1,1 +1,1 @@
-2:13-4:14 generator.returnType L0 f | yields, but its declared return type void is not a supertype of Generator, Iterator, Traversable, or iterable
+2:13-4:14 generator.returnType L0 | yields, but its declared return type void is not a supertype of Generator, Iterator, Traversable, or iterable

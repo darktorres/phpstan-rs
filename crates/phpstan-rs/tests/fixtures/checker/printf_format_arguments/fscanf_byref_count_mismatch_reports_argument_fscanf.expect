@@ -1,3 +1,3 @@
-3:13-6:14 missingType.return L6 f | Function f() has no return type specified.
-5:17-5:53 argument.fscanf L0 f | Call to fscanf contains 2 placeholders, 3 values given.
-5:17-5:53 argument.fscanf L0 f | Call to fscanf() contains 2 placeholder(s), 3 value(s) given.
+3:13-6:14 missingType.return L6 | Function f() has no return type specified.
+5:17-5:53 argument.fscanf L0 | Call to fscanf contains 2 placeholders, 3 values given.
+5:17-5:53 argument.fscanf L0 | Call to fscanf() contains 2 placeholder(s), 3 value(s) given.

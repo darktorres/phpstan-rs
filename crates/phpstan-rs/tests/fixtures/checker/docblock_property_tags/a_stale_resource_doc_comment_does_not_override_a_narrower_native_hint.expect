@@ -1,1 +1,1 @@
-4:22-4:43 return.phpDocType L2 imagecreatefromstring | PHPDoc tag @return with type resource|GdImage|false is not subtype of native type GdImage|false.
+4:22-4:43 return.phpDocType L2 | PHPDoc tag @return with type resource|GdImage|false is not subtype of native type GdImage|false.

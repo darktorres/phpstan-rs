@@ -1,1 +1,1 @@
-7:39-7:51 argument.type L5 Cache2::reset | Parameter #1 $string of function strlen expects string, null given.
+7:39-7:51 argument.type L5 | Parameter #1 $string of function strlen expects string, null given.

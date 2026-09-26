@@ -1,2 +1,2 @@
-9:21-9:34 property.private L0 f | access to private property Foo::$secret
-9:37-9:49 assign.propertyType L3 f | Foo::$secret expects int, 'not an int' given
+9:21-9:34 property.private L0 | access to private property Foo::$secret
+9:37-9:49 assign.propertyType L3 | Foo::$secret expects int, 'not an int' given

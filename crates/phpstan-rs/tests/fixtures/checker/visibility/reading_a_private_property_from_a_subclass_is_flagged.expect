@@ -1,2 +1,2 @@
-3:29-3:35 property.onlyWritten L4 Base | private property Base::$x is never read, only written
-7:28-7:36 property.private L0 Child::getX | access to private property Base::$x
+3:29-3:35 property.onlyWritten L4 | private property Base::$x is never read, only written
+7:28-7:36 property.private L0 | access to private property Base::$x

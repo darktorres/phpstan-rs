@@ -1,1 +1,1 @@
-11:28-11:56 staticMethod.notFound L0 Child::useMadeUp | call to undefined static method Base::madeUpParentMethod()
+11:28-11:56 staticMethod.notFound L0 | call to undefined static method Base::madeUpParentMethod()

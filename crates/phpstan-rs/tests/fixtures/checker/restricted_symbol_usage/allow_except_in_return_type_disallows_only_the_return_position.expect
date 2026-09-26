@@ -1,1 +1,1 @@
-5:42-5:49 restrictedSymbol.class L0 Processor::fetch | Return type references restricted class RawData: do not expose RawData as a return type
+5:42-5:49 restrictedSymbol.class L0 | Return type references restricted class RawData: do not expose RawData as a return type

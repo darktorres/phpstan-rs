@@ -1,1 +1,1 @@
-a.php:9:9-9:22 argument.parameterRenamedInSubtype L5 Base::f | Call to Base::f() uses named argument for parameter $old, but Sub renames it to $new.
+a.php:9:9-9:22 argument.parameterRenamedInSubtype L5 | Call to Base::f() uses named argument for parameter $old, but Sub renames it to $new.

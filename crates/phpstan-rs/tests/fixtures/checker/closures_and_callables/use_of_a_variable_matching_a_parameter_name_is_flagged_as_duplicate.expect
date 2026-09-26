@@ -1,2 +1,2 @@
-4:42-4:44 closure.useDuplicate L0 test | Cannot use lexical variable $x since a parameter with the same name already exists.
+4:42-4:44 closure.useDuplicate L0 | Cannot use lexical variable $x since a parameter with the same name already exists.
     non-ignorable

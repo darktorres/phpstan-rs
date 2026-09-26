@@ -1,1 +1,1 @@
-a.php:4:29-4:31 property.onlyWritten L4 Foo | private property Foo::$x is never read, only written
+a.php:4:29-4:31 property.onlyWritten L4 | private property Foo::$x is never read, only written

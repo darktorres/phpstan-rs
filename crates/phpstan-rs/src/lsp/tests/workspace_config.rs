@@ -303,16 +303,13 @@ fn baseline_entries_from_a_root_relative_baseline_file_suppress_matching_diagnos
         )],
     );
     let control_diags = diagnostics_for(&control_messages, &control_uri);
-    let wire_message = control_diags
+    let message = control_diags
         .iter()
         .find(|d| d["code"] == "function.deprecated")
         .unwrap_or_else(|| panic!("expected function.deprecated in {control_diags:?}"))["message"]
         .as_str()
         .unwrap()
         .to_string();
-    let (location, message) = wire_message
-        .split_once(": ")
-        .unwrap_or_else(|| panic!("expected a \"location: message\" shape, got {wire_message:?}"));
 
     let dir = TempDir::new("baseline_config");
     dir.write(
@@ -322,7 +319,7 @@ fn baseline_entries_from_a_root_relative_baseline_file_suppress_matching_diagnos
     dir.write(
         "baseline.json",
         &serde_json::to_string(
-            &json!([{"file": "a.php", "location": location, "message": message}]),
+            &json!({"version": 2, "entries": [{"file": "a.php", "message": message}]}),
         )
         .unwrap(),
     );

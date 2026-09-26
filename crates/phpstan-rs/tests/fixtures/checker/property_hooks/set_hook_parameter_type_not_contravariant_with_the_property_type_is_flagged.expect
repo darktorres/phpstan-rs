@@ -1,2 +1,2 @@
-3:31-7:18 propertySetHook.nativeParameterType L0 ContravarianceBad | Native type int of set hook parameter $value is not contravariant with native type string of property ContravarianceBad::$w.
+3:31-7:18 propertySetHook.nativeParameterType L0 | Native type int of set hook parameter $value is not contravariant with native type string of property ContravarianceBad::$w.
     non-ignorable

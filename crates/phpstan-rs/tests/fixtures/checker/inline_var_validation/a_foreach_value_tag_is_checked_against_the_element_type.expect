@@ -1,1 +1,1 @@
-5:17-5:39 varTag.type L2 f | PHPDoc tag @var with type string is incompatible with type int.
+5:17-5:39 varTag.type L2 | PHPDoc tag @var with type string is incompatible with type int.

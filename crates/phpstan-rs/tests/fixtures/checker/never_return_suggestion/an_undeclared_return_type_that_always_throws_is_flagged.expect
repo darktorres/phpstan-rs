@@ -1,2 +1,2 @@
-2:13-4:14 missingType.return L6 f | Function f() has no return type specified.
-2:13-4:14 return.neverCandidate L5 f | could be declared to return never - it never returns normally
+2:13-4:14 missingType.return L6 | Function f() has no return type specified.
+2:13-4:14 return.neverCandidate L5 | could be declared to return never - it never returns normally

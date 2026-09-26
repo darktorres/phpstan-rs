@@ -1,2 +1,2 @@
-2:13-2:32 missingType.return L6 greet | Function greet() has no return type specified.
-3:13-3:46 missingType.return L6 f | Function f() has no return type specified.
+2:13-2:32 missingType.return L6 | Function greet() has no return type specified.
+3:13-3:46 missingType.return L6 | Function f() has no return type specified.

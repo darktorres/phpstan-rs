@@ -26,7 +26,6 @@ impl<'a> Checker<'a> {
         method: &str,
         args: &[Arg],
         span: Span,
-        label: &str,
     ) {
         if class != "DOMDocument" || method != "createElement" {
             return;
@@ -41,9 +40,7 @@ impl<'a> Checker<'a> {
         if is_valid_xml_name(name) {
             return;
         }
-        self.report(
-            label.to_string(),
-            format!("DOMDocument::createElement() name '{name}' is not a valid XML element name and will throw at runtime"),
+        self.report(format!("DOMDocument::createElement() name '{name}' is not a valid XML element name and will throw at runtime"),
             span,
             0,
             "argument.type",

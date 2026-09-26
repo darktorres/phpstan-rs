@@ -1,2 +1,2 @@
-3:24-3:43 missingType.return L6 X::fetch | Method X::fetch() has no return type specified.
-4:24-4:50 missingType.return L6 X::fetch | Method X::fetch() has no return type specified.
+3:24-3:43 missingType.return L6 | Method X::fetch() has no return type specified.
+4:24-4:50 missingType.return L6 | Method X::fetch() has no return type specified.

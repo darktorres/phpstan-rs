@@ -1,2 +1,2 @@
-6:13-6:39 missingType.return L6 f | Function f() has no return type specified.
-6:29-6:35 parameter.defaultValue L2 f | Default value of the parameter #1 $x ('oops') of function f() is incompatible with type int.
+6:13-6:39 missingType.return L6 | Function f() has no return type specified.
+6:29-6:35 parameter.defaultValue L2 | Default value of the parameter #1 $x ('oops') of function f() is incompatible with type int.

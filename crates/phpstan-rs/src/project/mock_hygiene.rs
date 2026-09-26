@@ -146,7 +146,7 @@ fn collect_origins(stmts: &[Stmt], out: &mut FxHashMap<String, bool>) {
 impl<'a> Walker<'a> {
     fn report(&mut self, span: Span, message: String, id: &str) {
         self.out
-            .push(DiagnosticBuilder::new("<main>".to_string(), message, span, 2, id).build());
+            .push(DiagnosticBuilder::new(message, span, 2, id).build());
     }
 
     fn class(&mut self, c: &ClassDecl) {

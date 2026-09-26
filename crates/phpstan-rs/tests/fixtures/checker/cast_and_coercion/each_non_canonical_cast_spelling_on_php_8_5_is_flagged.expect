@@ -1,6 +1,6 @@
-2:13-7:14 missingType.return L6 test | Function test() has no return type specified.
-2:27-2:29 missingType.parameter L6 test | Function test() has parameter $x with no type specified.
-3:22-3:34 cast.deprecated L0 test | Non-standard (integer) cast is deprecated in PHP 8.5. Use (int) instead.
-4:22-4:34 cast.deprecated L0 test | Non-standard (boolean) cast is deprecated in PHP 8.5. Use (bool) instead.
-5:22-5:33 cast.deprecated L0 test | Non-standard (double) cast is deprecated in PHP 8.5. Use (float) instead.
-6:22-6:33 cast.deprecated L0 test | Non-standard (binary) cast is deprecated in PHP 8.5. Use (string) instead.
+2:13-7:14 missingType.return L6 | Function test() has no return type specified.
+2:27-2:29 missingType.parameter L6 | Function test() has parameter $x with no type specified.
+3:22-3:34 cast.deprecated L0 | Non-standard (integer) cast is deprecated in PHP 8.5. Use (int) instead.
+4:22-4:34 cast.deprecated L0 | Non-standard (boolean) cast is deprecated in PHP 8.5. Use (bool) instead.
+5:22-5:33 cast.deprecated L0 | Non-standard (double) cast is deprecated in PHP 8.5. Use (float) instead.
+6:22-6:33 cast.deprecated L0 | Non-standard (binary) cast is deprecated in PHP 8.5. Use (string) instead.

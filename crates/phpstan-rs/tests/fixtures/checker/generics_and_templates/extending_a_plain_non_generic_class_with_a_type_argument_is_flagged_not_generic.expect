@@ -1,1 +1,1 @@
-6:13-6:39 generics.notGeneric L6 Sub | PHPDoc tag @extends contains generic type Plain<int> but class Plain is not generic.
+6:13-6:39 generics.notGeneric L6 | PHPDoc tag @extends contains generic type Plain<int> but class Plain is not generic.

@@ -1,10 +1,10 @@
-3:1-7:2 missingType.return L6 usesGlobal | Function usesGlobal() has no return type specified.
-9:1-15:2 missingType.return L6 outputParam | Function outputParam() has no return type specified.
-17:1-21:2 missingType.return L6 chainedAssign | Function chainedAssign() has no return type specified.
-23:1-27:2 missingType.return L6 keyedDestructure | Function keyedDestructure() has no return type specified.
-23:27-23:38 missingType.iterableValue L6 keyedDestructure | Function keyedDestructure() has parameter $data with no value type specified in iterable type array.
+3:1-7:2 missingType.return L6 | Function usesGlobal() has no return type specified.
+9:1-15:2 missingType.return L6 | Function outputParam() has no return type specified.
+17:1-21:2 missingType.return L6 | Function chainedAssign() has no return type specified.
+23:1-27:2 missingType.return L6 | Function keyedDestructure() has no return type specified.
+23:27-23:38 missingType.iterableValue L6 | Function keyedDestructure() has parameter $data with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-29:1-37:2 missingType.return L6 fullyDefinedBothBranches | Function fullyDefinedBothBranches() has no return type specified.
-39:1-43:2 missingType.return L6 withExtract | Function withExtract() has no return type specified.
-39:22-39:33 missingType.iterableValue L6 withExtract | Function withExtract() has parameter $data with no value type specified in iterable type array.
+29:1-37:2 missingType.return L6 | Function fullyDefinedBothBranches() has no return type specified.
+39:1-43:2 missingType.return L6 | Function withExtract() has no return type specified.
+39:22-39:33 missingType.iterableValue L6 | Function withExtract() has parameter $data with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

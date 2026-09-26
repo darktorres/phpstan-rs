@@ -1,1 +1,1 @@
-2:13-5:14 interface.notFound L0 Impl | Impl implements unknown interface TotallyUnknownInterface
+2:13-5:14 interface.notFound L0 | Impl implements unknown interface TotallyUnknownInterface

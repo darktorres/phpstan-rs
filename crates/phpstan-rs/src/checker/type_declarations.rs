@@ -86,10 +86,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_type_declaration(&mut self, label: &str, message: String, span: Span, id: String) {
-        self.report_builder(
-            DiagnosticBuilder::new(label.to_string(), message, span, 0, id).non_ignorable(),
-        );
+    fn report_type_declaration(&mut self, message: String, span: Span, id: String) {
+        self.report_builder(DiagnosticBuilder::new(message, span, 0, id).non_ignorable());
     }
 
     pub(crate) fn check_type_declaration(
@@ -97,32 +95,29 @@ impl<'a> Checker<'a> {
         hint: Option<&str>,
         position: TypePosition,
         span: Span,
-        label: &str,
     ) {
         let Some(hint) = hint else {
             return;
         };
-        self.check_type_version_support(hint, span, label);
+        self.check_type_version_support(hint, span);
         match parse_shape(hint) {
-            Shape::Single(name) => self.check_type_position(name, position, span, label),
+            Shape::Single(name) => self.check_type_position(name, position, span),
             Shape::Nullable(inner) => {
                 let inner_lower = lower(inner);
                 if ONLY_STANDALONE.contains(&inner_lower.as_str()) {
                     self.report_type_declaration(
-                        label,
                         format!("Type {inner} cannot be part of a nullable type declaration."),
                         span,
                         format!("nullableType.{inner_lower}"),
                     );
                 } else if inner_lower == "null" {
                     self.report_type_declaration(
-                        label,
                         "Type null cannot be marked as nullable.".to_string(),
                         span,
                         "nullableType.null".to_string(),
                     );
                 } else {
-                    self.check_type_position(inner, position, span, label);
+                    self.check_type_position(inner, position, span);
                 }
             }
             Shape::Union(members) => {
@@ -132,26 +127,25 @@ impl<'a> Checker<'a> {
                 });
                 if let Some(name) = standalone {
                     self.report_type_declaration(
-                        label,
                         format!("Type {name} cannot be part of a union type declaration."),
                         span,
                         format!("unionType.{}", lower(name)),
                     );
                     return;
                 }
-                self.check_union_redundancy(hint, &members, span, label);
+                self.check_union_redundancy(hint, &members, span);
                 for member in &members {
                     match member {
-                        Member::Name(n) => self.check_type_position(n, position, span, label),
-                        Member::Group(names) => self.check_intersection(names, span, label),
+                        Member::Name(n) => self.check_type_position(n, position, span),
+                        Member::Group(names) => self.check_intersection(names, span),
                     }
                 }
             }
-            Shape::Intersection(names) => self.check_intersection(&names, span, label),
+            Shape::Intersection(names) => self.check_intersection(&names, span),
         }
     }
 
-    fn check_type_version_support(&mut self, hint: &str, span: Span, label: &str) {
+    fn check_type_version_support(&mut self, hint: &str, span: Span) {
         let Some(version) = self.registry.php_version else {
             return;
         };
@@ -172,7 +166,6 @@ impl<'a> Checker<'a> {
             && members.iter().any(|m| matches!(m, Member::Group(_)))
         {
             self.report_type_declaration(
-                label,
                 "Disjunctive normal form types are supported only on PHP 8.2 and later."
                     .to_string(),
                 span,
@@ -184,7 +177,6 @@ impl<'a> Checker<'a> {
         }
         if names.iter().any(|n| n.eq_ignore_ascii_case("true")) {
             self.report_type_declaration(
-                label,
                 "Type true is supported only on PHP 8.2 and later.".to_string(),
                 span,
                 "trueType.notSupported".to_string(),
@@ -204,7 +196,6 @@ impl<'a> Checker<'a> {
                 "null"
             };
             self.report_type_declaration(
-                label,
                 format!("Type {hint} uses {which} as a standalone type, which is supported only on PHP 8.2 and later."),
                 span,
                 format!("{which}Type.standaloneNotSupported"),
@@ -212,7 +203,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_union_redundancy(&mut self, hint: &str, members: &[Member], span: Span, label: &str) {
+    fn check_union_redundancy(&mut self, hint: &str, members: &[Member], span: Span) {
         let mut seen: Vec<String> = Vec::new();
         let mut has_class = false;
         for member in members {
@@ -222,7 +213,6 @@ impl<'a> Checker<'a> {
             let canonical = self.canonical_type_name(name);
             if seen.contains(&canonical) {
                 self.report_type_declaration(
-                    label,
                     format!("Duplicate type {name} is redundant."),
                     span,
                     "unionType.duplicate".to_string(),
@@ -264,17 +254,16 @@ impl<'a> Checker<'a> {
             None
         };
         if let Some((message, id)) = redundancy {
-            self.report_type_declaration(label, message, span, id.to_string());
+            self.report_type_declaration(message, span, id.to_string());
         }
     }
 
-    fn check_intersection(&mut self, names: &[&str], span: Span, label: &str) {
+    fn check_intersection(&mut self, names: &[&str], span: Span) {
         let mut seen: Vec<String> = Vec::new();
         for name in names {
             let name_lower = lower(name);
             if is_builtin(name) && !["self", "parent"].contains(&name_lower.as_str()) {
                 self.report_type_declaration(
-                    label,
                     format!("Type {name} cannot be part of an intersection type."),
                     span,
                     format!("intersectionType.{name_lower}"),
@@ -284,7 +273,6 @@ impl<'a> Checker<'a> {
             let canonical = self.canonical_type_name(name);
             if seen.contains(&canonical) {
                 self.report_type_declaration(
-                    label,
                     format!("Duplicate type {name} is redundant."),
                     span,
                     "intersectionType.duplicate".to_string(),
@@ -296,7 +284,7 @@ impl<'a> Checker<'a> {
     }
 
     /// `void`/`never`/`static` outside the positions that allow them.
-    fn check_type_position(&mut self, name: &str, position: TypePosition, span: Span, label: &str) {
+    fn check_type_position(&mut self, name: &str, position: TypePosition, span: Span) {
         let name_lower = lower(name);
         let (message, id) = match (position, name_lower.as_str()) {
             (TypePosition::Parameter, t @ ("void" | "never" | "static")) => (
@@ -316,6 +304,6 @@ impl<'a> Checker<'a> {
             ),
             _ => return,
         };
-        self.report_type_declaration(label, message, span, id);
+        self.report_type_declaration(message, span, id);
     }
 }

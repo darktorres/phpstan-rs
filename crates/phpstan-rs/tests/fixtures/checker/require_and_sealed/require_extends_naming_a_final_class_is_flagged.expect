@@ -1,1 +1,1 @@
-4:13-4:23 requireExtends.finalClass L0 T | PHPDoc tag @phpstan-require-extends cannot contain final class Locked.
+4:13-4:23 requireExtends.finalClass L0 | PHPDoc tag @phpstan-require-extends cannot contain final class Locked.

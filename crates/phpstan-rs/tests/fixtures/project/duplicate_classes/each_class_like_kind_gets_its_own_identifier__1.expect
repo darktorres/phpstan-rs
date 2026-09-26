@@ -1,2 +1,2 @@
-a.php:1:13-1:16 trait.duplicate L0 Foo | Trait Foo declared multiple times:\n- a.php:1\n- b.php:1
+a.php:1:13-1:16 trait.duplicate L0 | Trait Foo declared multiple times:\n- a.php:1\n- b.php:1
     non-ignorable

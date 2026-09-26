@@ -1,1 +1,1 @@
-4:27-4:36 isset.offset L0 test | Offset 'key' on array{other: int} in isset() does not exist.
+4:27-4:36 isset.offset L0 | Offset 'key' on array{other: int} in isset() does not exist.

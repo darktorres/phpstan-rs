@@ -1,5 +1,5 @@
-c.php:8:7-8:21 architecture.attribute L0 App\Http\HomeController | Class App\\Http\\HomeController should apply attribute App\\Http\\Route (architecture rule "#1").
-c.php:8:7-8:21 architecture.extends L0 App\Http\HomeController | Class App\\Http\\HomeController should not extend App\\Http\\Base (architecture rule "#1").
-c.php:8:7-8:21 architecture.final L0 App\Http\HomeController | Class App\\Http\\HomeController should be final (architecture rule "#1").
-c.php:8:7-8:21 architecture.publicMethods L0 App\Http\HomeController | Class App\\Http\\HomeController should have exactly one public method, but has 2 (architecture rule "#1").
-c.php:8:7-8:21 architecture.usesTrait L0 App\Http\HomeController | Class App\\Http\\HomeController should not use App\\Http\\Loggable (architecture rule "#1").
+c.php:8:7-8:21 architecture.attribute L0 | Class App\\Http\\HomeController should apply attribute App\\Http\\Route (architecture rule "#1").
+c.php:8:7-8:21 architecture.extends L0 | Class App\\Http\\HomeController should not extend App\\Http\\Base (architecture rule "#1").
+c.php:8:7-8:21 architecture.final L0 | Class App\\Http\\HomeController should be final (architecture rule "#1").
+c.php:8:7-8:21 architecture.publicMethods L0 | Class App\\Http\\HomeController should have exactly one public method, but has 2 (architecture rule "#1").
+c.php:8:7-8:21 architecture.usesTrait L0 | Class App\\Http\\HomeController should not use App\\Http\\Loggable (architecture rule "#1").

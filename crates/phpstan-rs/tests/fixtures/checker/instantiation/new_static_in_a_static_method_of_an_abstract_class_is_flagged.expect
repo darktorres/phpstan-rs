@@ -1,2 +1,2 @@
-4:64-4:76 new.staticInAbstractClassStaticMethod L0 AbsFactory::make | unsafe usage of new static() in abstract class AbsFactory in static method make()
+4:64-4:76 new.staticInAbstractClassStaticMethod L0 | unsafe usage of new static() in abstract class AbsFactory in static method make()
     tip: Direct call to AbsFactory::make() would crash because an abstract class cannot be instantiated.

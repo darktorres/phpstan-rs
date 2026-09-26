@@ -1,1 +1,1 @@
-7:22-7:34 argument.type L5 Foo | Parameter #1 $a of attribute class MyAttr constructor expects int, 'not an int' given.
+7:22-7:34 argument.type L5 | Parameter #1 $a of attribute class MyAttr constructor expects int, 'not an int' given.

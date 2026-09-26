@@ -1,1 +1,1 @@
-5:13-5:23 class.notFound L0 A | PHPDoc tag @property-write for property A::$thing has invalid type TotallyMadeUp
+5:13-5:23 class.notFound L0 | PHPDoc tag @property-write for property A::$thing has invalid type TotallyMadeUp

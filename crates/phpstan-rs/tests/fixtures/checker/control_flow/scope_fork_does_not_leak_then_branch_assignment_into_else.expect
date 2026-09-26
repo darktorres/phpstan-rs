@@ -1,2 +1,2 @@
-3:13-10:14 missingType.return L6 f | Function f() has no return type specified.
-8:21-8:33 function.resultUnused L4 f | Call to function needsInt() on a separate line has no effect.
+3:13-10:14 missingType.return L6 | Function f() has no return type specified.
+8:21-8:33 function.resultUnused L4 | Call to function needsInt() on a separate line has no effect.

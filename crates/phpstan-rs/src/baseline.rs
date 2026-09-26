@@ -4,16 +4,14 @@
 //! out anything already recorded, so existing debt doesn't block CI while
 //! new issues are still caught.
 //!
-//! Keyed by `(file, location, message)` - deliberately not by line/column,
-//! so a baselined finding survives incidental code shifts elsewhere in the
-//! same file (matching real PHPStan's own rationale for not just diffing
-//! raw diagnostic output). `location` alone isn't enough: many diagnostics
-//! share the generic `"<main>"` label for top-level script code across
-//! different files, so the file path has to be part of the key too.
+//! Keyed like PHPStan's: `(file, message)`, with the identifier and an
+//! occurrence count - deliberately not by line/column, so a baselined
+//! finding survives incidental code shifts elsewhere in the same file.
 //!
-//! Stored as JSON via `serde_json` (already a real dependency from the LSP
-//! work, so this needed no new one) rather than a `.neon` file - this
-//! project doesn't have a NEON parser and one isn't otherwise justified.
+//! Stored as JSON rather than a `.neon` file - this project doesn't have a
+//! NEON parser and one isn't otherwise justified. The format is versioned
+//! (`VERSION`); a version-1 file (keyed by a symbolic `location` as well)
+//! still loads, its entries merged per new key, and `convert` rewrites it.
 
 use rustc_hash::FxHashMap;
 use std::fs;
@@ -23,10 +21,12 @@ use std::path::{Path, PathBuf};
 use crate::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 
+/// The current on-disk format version.
+const VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 struct Entry {
     file: String,
-    location: String,
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     identifier: Option<String>,
@@ -44,34 +44,120 @@ fn is_one(n: &usize) -> bool {
     *n == 1
 }
 
+/// A version-1 entry: keyed by a symbolic `location` (`Class::method`,
+/// `<main>`) as well.
+#[derive(Deserialize)]
+struct EntryV1 {
+    file: String,
+    #[allow(dead_code)]
+    location: String,
+    message: String,
+    #[serde(default)]
+    identifier: Option<String>,
+    #[serde(default = "one")]
+    count: usize,
+}
+
+impl From<EntryV1> for Entry {
+    fn from(e: EntryV1) -> Entry {
+        Entry {
+            file: e.file,
+            message: e.message,
+            identifier: e.identifier,
+            count: e.count,
+        }
+    }
+}
+
 /// How a diagnostic finds its baseline entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MatchMode {
-    /// `(file, location, message)`.
+    /// `(file, message)`.
     #[default]
     Message,
-    /// `(file, location, message)` first, then `(file, location,
-    /// identifier)`, so an entry keeps matching after its message's
-    /// wording changes.
+    /// `(file, message)` first, then `(file, identifier)`, so an entry
+    /// keeps matching after its message's wording changes.
     Identifier,
 }
 
-/// The on-disk shapes: a list of entries, or an index of other baseline
-/// files (paths relative to the index) plus optional entries of its own.
+/// The on-disk shapes: entries, or an index of other baseline files
+/// (paths relative to the index) plus optional entries of its own.
+#[derive(Serialize, Deserialize)]
+struct BaselineFile {
+    version: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    includes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    entries: Vec<Entry>,
+}
+
+/// The version-1 shapes, which carried no version: a list of entries, or
+/// an index.
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum BaselineFile {
-    Entries(Vec<Entry>),
+enum BaselineFileV1 {
+    Entries(Vec<EntryV1>),
     Index {
         includes: Vec<String>,
         #[serde(default)]
-        entries: Vec<Entry>,
+        entries: Vec<EntryV1>,
     },
 }
 
-#[derive(Serialize)]
-struct IndexFile<'a> {
-    includes: &'a [String],
+/// Reads one baseline file, of either version, as the current shape.
+fn read_file(path: &Path) -> io::Result<BaselineFile> {
+    let json = fs::read_to_string(path)?;
+    let invalid = |e: serde_json::Error| io::Error::new(io::ErrorKind::InvalidData, e);
+    let value: serde_json::Value = serde_json::from_str(&json).map_err(invalid)?;
+    match value.get("version").and_then(serde_json::Value::as_u64) {
+        Some(v) if v == u64::from(VERSION) => serde_json::from_value(value).map_err(invalid),
+        Some(v) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported baseline version {v}"),
+        )),
+        None => {
+            let (includes, entries) = match serde_json::from_value(value).map_err(invalid)? {
+                BaselineFileV1::Entries(entries) => (Vec::new(), entries),
+                BaselineFileV1::Index { includes, entries } => (includes, entries),
+            };
+            Ok(BaselineFile {
+                version: VERSION,
+                includes,
+                entries: merge(entries.into_iter().map(Entry::from).collect()),
+            })
+        }
+    }
+}
+
+/// Entries with the same key folded into one, their counts added, in
+/// first-seen order.
+fn merge(entries: Vec<Entry>) -> Vec<Entry> {
+    let mut merged: FxHashMap<Entry, usize> = FxHashMap::default();
+    let mut order: Vec<Entry> = Vec::new();
+    for entry in entries {
+        let count = entry.count;
+        let key = Entry { count: 1, ..entry };
+        match merged.get_mut(&key) {
+            Some(total) => *total += count,
+            None => {
+                merged.insert(key.clone(), count);
+                order.push(key);
+            }
+        }
+    }
+    order
+        .into_iter()
+        .map(|key| {
+            let count = merged[&key];
+            Entry { count, ..key }
+        })
+        .collect()
+}
+
+fn write_file(path: &Path, file: &BaselineFile) -> io::Result<()> {
+    let json =
+        serde_json::to_string_pretty(file).expect("a baseline is always representable as JSON");
+    fs::write(path, json)
 }
 
 /// A baseline entry's own `file` key must not depend on whatever
@@ -106,7 +192,7 @@ fn normalize_path(path: &Path) -> PathBuf {
     result
 }
 
-/// One entry per distinct `(file, location, message, identifier)`, with
+/// One entry per distinct `(file, message, identifier)`, with
 /// its occurrence count, sorted so regenerating an unchanged codebase is
 /// byte-identical.
 fn entries_for(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
@@ -116,7 +202,6 @@ fn entries_for(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
         for d in diagnostics {
             let key = Entry {
                 file: file.clone(),
-                location: d.location.clone(),
                 message: d.message.clone(),
                 identifier: (!d.identifier.is_empty()).then(|| d.identifier.clone()),
                 count: 1,
@@ -132,20 +217,20 @@ fn entries_for(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
         })
         .collect();
     entries.sort_by(|a, b| {
-        (&a.file, &a.location, &a.message, &a.identifier).cmp(&(
-            &b.file,
-            &b.location,
-            &b.message,
-            &b.identifier,
-        ))
+        (&a.file, &a.message, &a.identifier).cmp(&(&b.file, &b.message, &b.identifier))
     });
     entries
 }
 
 fn write_entries(path: &Path, entries: &[Entry]) -> io::Result<()> {
-    let json =
-        serde_json::to_string_pretty(entries).expect("Entry is always representable as JSON");
-    fs::write(path, json)
+    write_file(
+        path,
+        &BaselineFile {
+            version: VERSION,
+            includes: Vec::new(),
+            entries: entries.to_vec(),
+        },
+    )
 }
 
 /// Writes every diagnostic in `results` to `path` as a baseline file and
@@ -196,11 +281,14 @@ pub fn generate_per_identifier(
         write_entries(&dir.join(&file_name), group)?;
         includes.push(format!("{stem}/{file_name}"));
     }
-    let json = serde_json::to_string_pretty(&IndexFile {
-        includes: &includes,
-    })
-    .expect("an index is always representable as JSON");
-    fs::write(path, json)?;
+    write_file(
+        path,
+        &BaselineFile {
+            version: VERSION,
+            includes,
+            entries: Vec::new(),
+        },
+    )?;
     Ok(entries.iter().map(|e| e.count).sum())
 }
 
@@ -211,8 +299,8 @@ pub struct Baseline {
     mode: MatchMode,
 }
 
-type MessageKey = (String, String, String);
-type IdentifierKey = (String, String, String);
+type MessageKey = (String, String);
+type IdentifierKey = (String, String);
 
 impl Baseline {
     /// Reads a baseline file, following an index's `includes`. Entries
@@ -220,28 +308,8 @@ impl Baseline {
     pub fn load(path: &Path) -> io::Result<Baseline> {
         let mut entries = Vec::new();
         load_into(path, &mut entries, 0)?;
-        let mut merged: FxHashMap<Entry, usize> = FxHashMap::default();
-        let mut order: Vec<Entry> = Vec::new();
-        for entry in entries {
-            let count = entry.count;
-            let key = Entry { count: 1, ..entry };
-            match merged.get_mut(&key) {
-                Some(total) => *total += count,
-                None => {
-                    merged.insert(key.clone(), count);
-                    order.push(key);
-                }
-            }
-        }
-        let entries = order
-            .into_iter()
-            .map(|key| {
-                let count = merged[&key];
-                Entry { count, ..key }
-            })
-            .collect();
         Ok(Baseline {
-            entries,
+            entries: merge(entries),
             mode: MatchMode::Message,
         })
     }
@@ -259,27 +327,44 @@ fn load_into(path: &Path, out: &mut Vec<Entry>, depth: usize) -> io::Result<()> 
             "baseline includes nest too deeply",
         ));
     }
-    let json = fs::read_to_string(path)?;
-    let file: BaselineFile =
-        serde_json::from_str(&json).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    match file {
-        BaselineFile::Entries(entries) => out.extend(entries),
-        BaselineFile::Index { includes, entries } => {
-            out.extend(entries);
-            let base = path.parent().unwrap_or(Path::new(""));
-            for include in includes {
-                load_into(&base.join(include), out, depth + 1)?;
-            }
-        }
+    let file = read_file(path)?;
+    out.extend(file.entries);
+    let base = path.parent().unwrap_or(Path::new(""));
+    for include in file.includes {
+        load_into(&base.join(include), out, depth + 1)?;
     }
     Ok(())
+}
+
+/// Rewrites the baseline file at `path`, and every file it includes, in
+/// the current format, keeping the include structure. Returns how many
+/// files were rewritten.
+pub fn convert(path: &Path) -> io::Result<usize> {
+    convert_into(path, 0)
+}
+
+fn convert_into(path: &Path, depth: usize) -> io::Result<usize> {
+    if depth > 16 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "baseline includes nest too deeply",
+        ));
+    }
+    let file = read_file(path)?;
+    write_file(path, &file)?;
+    let base = path.parent().unwrap_or(Path::new(""));
+    let mut converted = 1;
+    for include in &file.includes {
+        converted += convert_into(&base.join(include), depth + 1)?;
+    }
+    Ok(converted)
 }
 
 /// Drops every diagnostic `baseline` absorbs from `results`, each entry
 /// absorbing at most its recorded count; a diagnostic beyond that stays.
 ///
 /// Returns the entries that absorbed fewer diagnostics than recorded,
-/// formatted `file:location: message` (with the expected and actual
+/// formatted `file: message` (with the expected and actual
 /// counts when some but not all occurred) - so an entry left behind by
 /// fixed code is reported instead of silently masking nothing.
 pub fn filter(
@@ -290,12 +375,12 @@ pub fn filter(
     let mut by_identifier: FxHashMap<IdentifierKey, Vec<usize>> = FxHashMap::default();
     for (i, e) in baseline.entries.iter().enumerate() {
         by_message
-            .entry((e.file.clone(), e.location.clone(), e.message.clone()))
+            .entry((e.file.clone(), e.message.clone()))
             .or_default()
             .push(i);
         if let Some(id) = &e.identifier {
             by_identifier
-                .entry((e.file.clone(), e.location.clone(), id.clone()))
+                .entry((e.file.clone(), id.clone()))
                 .or_default()
                 .push(i);
         }
@@ -322,17 +407,12 @@ pub fn filter(
                 remaining[slot] -= 1;
                 true
             };
-            let by_text =
-                by_message.get(&(normalized.clone(), d.location.clone(), d.message.clone()));
+            let by_text = by_message.get(&(normalized.clone(), d.message.clone()));
             if take(by_text) {
                 return false;
             }
             if baseline.mode == MatchMode::Identifier
-                && take(by_identifier.get(&(
-                    normalized.clone(),
-                    d.location.clone(),
-                    d.identifier.clone(),
-                )))
+                && take(by_identifier.get(&(normalized.clone(), d.identifier.clone())))
             {
                 return false;
             }
@@ -347,11 +427,11 @@ pub fn filter(
         .map(|(e, left)| {
             let occurred = e.count - left;
             if occurred == 0 {
-                format!("{}:{}: {}", e.file, e.location, e.message)
+                format!("{}: {}", e.file, e.message)
             } else {
                 format!(
-                    "{}:{}: {} (expected {} occurrence(s), found {occurred})",
-                    e.file, e.location, e.message, e.count
+                    "{}: {} (expected {} occurrence(s), found {occurred})",
+                    e.file, e.message, e.count
                 )
             }
         })

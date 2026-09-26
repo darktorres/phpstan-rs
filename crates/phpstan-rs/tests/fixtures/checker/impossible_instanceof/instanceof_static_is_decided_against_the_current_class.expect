@@ -1,2 +1,2 @@
-5:25-5:45 instanceof.alwaysFalse L4 Node::eq | Instanceof between Unrelated and Node will always evaluate to false.
-12:25-12:45 instanceof.alwaysTrue L4 Leaf::eq | Instanceof between Leaf and Leaf will always evaluate to true.
+5:25-5:45 instanceof.alwaysFalse L4 | Instanceof between Unrelated and Node will always evaluate to false.
+12:25-12:45 instanceof.alwaysTrue L4 | Instanceof between Leaf and Leaf will always evaluate to true.

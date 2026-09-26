@@ -1,1 +1,1 @@
-6:25-6:34 continue.switch L2 f | Keyword continue targeting switch is equivalent to break.
+6:25-6:34 continue.switch L2 | Keyword continue targeting switch is equivalent to break.

@@ -1,2 +1,2 @@
-2:13-4:14 missingType.return L6 f | Function f() has no return type specified.
-3:17-3:34 argument.type L5 f | Parameter #2 of function sprintf is expected to be int by placeholder #1 ("%d"), float given.
+2:13-4:14 missingType.return L6 | Function f() has no return type specified.
+3:17-3:34 argument.type L5 | Parameter #2 of function sprintf is expected to be int by placeholder #1 ("%d"), float given.

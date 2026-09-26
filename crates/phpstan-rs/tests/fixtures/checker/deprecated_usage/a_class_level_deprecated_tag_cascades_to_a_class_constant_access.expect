@@ -1,1 +1,1 @@
-7:24-7:33 classConstant.deprecatedClass L0 f | Fetching class constant X of deprecated class OldFoo.
+7:24-7:33 classConstant.deprecatedClass L0 | Fetching class constant X of deprecated class OldFoo.

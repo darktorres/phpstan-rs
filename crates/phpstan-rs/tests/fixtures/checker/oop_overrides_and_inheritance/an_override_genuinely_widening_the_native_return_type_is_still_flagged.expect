@@ -1,1 +1,1 @@
-3:42-3:88 method.childReturnType L0 Sub14 | Sub14::make() return type string is not compatible with the inherited return type int
+3:42-3:88 method.childReturnType L0 | Sub14::make() return type string is not compatible with the inherited return type int

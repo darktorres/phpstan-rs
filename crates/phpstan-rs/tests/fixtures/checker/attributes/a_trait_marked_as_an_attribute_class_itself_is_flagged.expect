@@ -1,1 +1,1 @@
-2:15-2:25 attribute.trait L0 Foo | Trait cannot be an Attribute class.
+2:15-2:25 attribute.trait L0 | Trait cannot be an Attribute class.

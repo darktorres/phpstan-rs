@@ -1,1 +1,1 @@
-3:43-3:56 staticProperty.notFound L0 f | access to undefined static property Bar::$missing
+3:43-3:56 staticProperty.notFound L0 | access to undefined static property Bar::$missing

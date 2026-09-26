@@ -1,3 +1,3 @@
-5:17-5:41 new.abstract L0 test | cannot instantiate abstract class LoremInstantiation
+5:17-5:41 new.abstract L0 | cannot instantiate abstract class LoremInstantiation
     tip: either implement every inherited abstract method, or instantiate a concrete subclass instead
-6:17-6:41 new.interface L0 test | cannot instantiate interface IpsumInstantiation
+6:17-6:41 new.interface L0 | cannot instantiate interface IpsumInstantiation

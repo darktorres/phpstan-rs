@@ -116,7 +116,6 @@ impl<'a> Checker<'a> {
         name: &str,
         locals: &crate::checker::Locals,
         span: Span,
-        label: &str,
     ) {
         let bare = name.trim_start_matches('\\');
         let unqualified = bare.rsplit('\\').next().unwrap_or(bare);
@@ -138,7 +137,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("Constant {bare} not found."),
             span,
             1,
@@ -149,7 +147,7 @@ impl<'a> Checker<'a> {
     /// `MagicConstantContextRule`: `__CLASS__` outside a class,
     /// `__TRAIT__` outside a trait, `__FUNCTION__`/`__METHOD__` outside
     /// any function-like, `__NAMESPACE__` in the global namespace.
-    pub(crate) fn check_magic_constant_context(&mut self, name: &str, span: Span, label: &str) {
+    pub(crate) fn check_magic_constant_context(&mut self, name: &str, span: Span) {
         let upper = name.trim_start_matches('\\').to_ascii_uppercase();
         let (message, identifier) = match upper.as_str() {
             "__CLASS__" if self.current_class.is_none() => (
@@ -176,7 +174,6 @@ impl<'a> Checker<'a> {
             _ => return,
         };
         self.report(
-            label.to_string(),
             format!("Magic constant {upper} {message}."),
             span,
             0,
@@ -195,7 +192,6 @@ impl<'a> Checker<'a> {
         value: &types::Type,
         identifier: &str,
         span: Span,
-        label: &str,
     ) {
         let Some(configured) = self.registry.configured_constant_type(class, name).cloned() else {
             return;
@@ -209,9 +205,7 @@ impl<'a> Checker<'a> {
             Some(class) => format!("{class}::{name}"),
             None => name.trim_start_matches('\\').to_string(),
         };
-        self.report(
-            label.to_string(),
-            format!(
+        self.report(format!(
                 "Configuration defined type for constant {display} ({configured}) does not accept value {value}."
             ),
             span,
@@ -226,7 +220,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &crate::checker::Locals,
         span: Span,
-        label: &str,
     ) {
         let [name_arg, value_arg, ..] = args else {
             return;
@@ -235,34 +228,20 @@ impl<'a> Checker<'a> {
             return;
         };
         let value = self.infer_expr(&value_arg.value, locals);
-        self.check_configured_constant_value(
-            None,
-            &name,
-            &value,
-            "constant.defineValue",
-            span,
-            label,
-        );
+        self.check_configured_constant_value(None, &name, &value, "constant.defineValue", span);
     }
 
     /// `DynamicClassConstantFetchRule`: `Foo::{$expr}` needs PHP 8.3+
     /// (`classConstant.dynamicFetch`), and its name must be a string
     /// (`classConstant.nameType`; level 7 when only some union members
     /// aren't).
-    pub(crate) fn check_dynamic_class_constant_fetch(
-        &mut self,
-        name_ty: &types::Type,
-        span: Span,
-        label: &str,
-    ) {
+    pub(crate) fn check_dynamic_class_constant_fetch(&mut self, name_ty: &types::Type, span: Span) {
         use types::Type;
         if self.registry.php_version.is_some_and(|v| {
             !types::php_version::PhpFeature::DynamicClassConstantFetch.is_available(v)
         }) {
             self.report_builder(
-                DiagnosticBuilder::new(
-                    label.to_string(),
-                    "Fetching class constants with a dynamic name is supported only on PHP 8.3 and later."
+                DiagnosticBuilder::new("Fetching class constants with a dynamic name is supported only on PHP 8.3 and later."
                         .to_string(),
                     span,
                     0,
@@ -290,7 +269,6 @@ impl<'a> Checker<'a> {
             _ => 0,
         };
         self.report(
-            label.to_string(),
             format!("Class constant name in dynamic fetch can only be a string, {name_ty} given."),
             span,
             level,

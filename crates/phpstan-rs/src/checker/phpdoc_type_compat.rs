@@ -21,7 +21,6 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         sig: &FunctionSig,
         class_name: Option<&str>,
-        label: &str,
     ) {
         let Some(doc) = f.doc_comment.as_deref() else {
             return;
@@ -48,7 +47,6 @@ impl<'a> Checker<'a> {
             for name in &names {
                 let Some(i) = f.params.iter().position(|p| *p.name == **name) else {
                     self.report(
-                        label.to_string(),
                         format!("PHPDoc tag {tag} references unknown parameter: ${name}"),
                         f.name_span,
                         2,
@@ -66,7 +64,6 @@ impl<'a> Checker<'a> {
                 };
                 if node.is_some_and(|n| self.type_node_unresolvable(n, class_name)) {
                     self.report(
-                        label.to_string(),
                         format!(
                             "PHPDoc tag {tag} for parameter ${name} contains unresolvable type."
                         ),
@@ -79,7 +76,6 @@ impl<'a> Checker<'a> {
                 let doc_ty = if tag == "@param-out" {
                     if !param.by_ref {
                         self.report(
-                            label.to_string(),
                             format!(
                                 "Parameter ${name} for PHPDoc tag {tag} is not passed by reference."
                             ),
@@ -113,7 +109,6 @@ impl<'a> Checker<'a> {
                     &doc_ty,
                     &native,
                     f.name_span,
-                    label,
                     "parameter.phpDocType",
                 );
                 self.check_generic_callables(
@@ -122,7 +117,6 @@ impl<'a> Checker<'a> {
                     Some((f.name.as_ref(), block.templates.as_slice())),
                     class_name,
                     f.name_span,
-                    label,
                 );
             }
         }
@@ -132,7 +126,6 @@ impl<'a> Checker<'a> {
             .is_some_and(|n| self.type_node_unresolvable(n, class_name))
         {
             self.report(
-                label.to_string(),
                 "PHPDoc tag @return contains unresolvable type.".to_string(),
                 f.name_span,
                 2,
@@ -146,7 +139,6 @@ impl<'a> Checker<'a> {
                 &doc_ty,
                 &native,
                 f.name_span,
-                label,
                 "return.phpDocType",
             );
             self.check_generic_callables(
@@ -155,7 +147,6 @@ impl<'a> Checker<'a> {
                 Some((f.name.as_ref(), block.templates.as_slice())),
                 class_name,
                 f.name_span,
-                label,
             );
         }
     }
@@ -172,7 +163,6 @@ impl<'a> Checker<'a> {
         function: Option<(&str, &[String])>,
         class: Option<&str>,
         span: Span,
-        label: &str,
     ) {
         fn collect(ty: &Type, out: &mut Vec<Type>) {
             if let Some(sig) = ty.callable_sig()
@@ -234,7 +224,6 @@ impl<'a> Checker<'a> {
                     location,
                     description: &description,
                 },
-                label,
                 span,
             );
             let mut shadowed = Vec::new();
@@ -261,13 +250,7 @@ impl<'a> Checker<'a> {
                 }
             }
             for message in shadowed {
-                self.report(
-                    label.to_string(),
-                    message,
-                    span,
-                    2,
-                    "callable.shadowTemplate",
-                );
+                self.report(message, span, 2, "callable.shadowTemplate");
             }
         }
     }
@@ -285,7 +268,6 @@ impl<'a> Checker<'a> {
         set_param: Option<Option<&Param>>,
         doc: Option<&str>,
         span: Span,
-        label: &str,
     ) {
         let Some(doc) = doc else {
             return;
@@ -351,7 +333,7 @@ impl<'a> Checker<'a> {
             Visibility::Public,
         );
         let sig = self.registry.finalize_standalone_sig(sig);
-        self.check_phpdoc_types_against_native(&decl, &sig, Some(fqn), label);
+        self.check_phpdoc_types_against_native(&decl, &sig, Some(fqn));
     }
 
     pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDecl) {
@@ -394,7 +376,6 @@ impl<'a> Checker<'a> {
             let subject = format!("{description} for property {fqn}::${name}");
             if node.is_some_and(|n| self.type_node_unresolvable(&n, Some(fqn))) {
                 self.report(
-                    fqn.to_string(),
                     format!("{subject} contains unresolvable type."),
                     span,
                     2,
@@ -424,7 +405,7 @@ impl<'a> Checker<'a> {
             checks.push((doc, prop.ty_native.clone(), subject, span));
         }
         for (doc, span) in callables {
-            self.check_generic_callables(&doc, "@var", None, Some(fqn), span, fqn);
+            self.check_generic_callables(&doc, "@var", None, Some(fqn), span);
         }
         for (doc, native, subject, span) in checks {
             let doc = self.resolve_pseudo(&doc, fqn);
@@ -434,7 +415,6 @@ impl<'a> Checker<'a> {
                 &doc,
                 &native,
                 span,
-                fqn,
                 "property.phpDocType",
             );
         }
@@ -450,7 +430,6 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         sig: &FunctionSig,
         class_name: Option<&str>,
-        label: &str,
     ) {
         // Only this declaration's own PHPDoc: an inherited conditional is
         // checked once, where it's written, with its own templates.
@@ -487,9 +466,7 @@ impl<'a> Checker<'a> {
                 let inherited = find_template_param(sig, subject);
                 if !templates.contains(subject) && inherited.is_none() {
                     let shown = self.resolve_type_hint(Some(subject));
-                    self.report(
-                        label.to_string(),
-                        format!(
+                    self.report(format!(
                             "Conditional return type uses subject type {shown} which is not part of PHPDoc @template tags."
                         ),
                         f.name_span,
@@ -507,7 +484,6 @@ impl<'a> Checker<'a> {
                     Some(p) => p.ty.clone(),
                     None => {
                         self.report(
-                            label.to_string(),
                             format!(
                                 "Conditional return type references unknown parameter ${subject}."
                             ),
@@ -530,9 +506,7 @@ impl<'a> Checker<'a> {
             };
             let always = holds != *negated;
             let word = if *negated { "is not" } else { "is" };
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Condition \"{subject_ty} {word} {target}\" in conditional return type is always {always}."
                 ),
                 f.name_span,
@@ -573,7 +547,6 @@ impl<'a> Checker<'a> {
             && self.registry.is_super_type_of(&class_ty, &resolved) != TrinaryLogic::Yes
         {
             self.report(
-                label.to_string(),
                 format!(
                     "Self-out type {resolved} of method {class}::{} is not subtype of {class}.",
                     f.name
@@ -584,9 +557,7 @@ impl<'a> Checker<'a> {
             );
         }
         if is_static {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "PHPDoc tag @phpstan-self-out is not supported above static method {class}::{}().",
                     f.name
                 ),
@@ -596,9 +567,7 @@ impl<'a> Checker<'a> {
             );
         }
         if unresolvable {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "PHPDoc tag @phpstan-self-out for method {class}::{}() contains unresolvable type.",
                     f.name
                 ),
@@ -622,7 +591,6 @@ impl<'a> Checker<'a> {
         doc: Option<&str>,
         description: &str,
         span: Span,
-        label: &str,
     ) {
         let Some(doc) = doc else {
             return;
@@ -631,7 +599,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("PHPDoc tag @var above {description} has no effect."),
             span,
             2,
@@ -660,7 +627,6 @@ impl<'a> Checker<'a> {
         doc_ty: &Type,
         native: &Type,
         span: Span,
-        label: &str,
         identifier: &'static str,
     ) {
         let doc_ty = &self.registry.absorb_union_subtypes(doc_ty);
@@ -670,7 +636,6 @@ impl<'a> Checker<'a> {
             TrinaryLogic::Maybe => "is not subtype of",
         };
         self.report(
-            label.to_string(),
             format!("{subject} with type {doc_ty} {verdict} native type {native}."),
             span,
             2,

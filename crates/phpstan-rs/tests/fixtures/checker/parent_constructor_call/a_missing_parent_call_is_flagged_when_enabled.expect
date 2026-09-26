@@ -1,2 +1,2 @@
-4:24-4:49 constructor.missingParentCall L4 Child | Child::__construct() does not call parent constructor from Base.
+4:24-4:49 constructor.missingParentCall L4 | Child::__construct() does not call parent constructor from Base.
     fix: Call parent::__construct() => "{\n                    parent::__construct();\n                }"

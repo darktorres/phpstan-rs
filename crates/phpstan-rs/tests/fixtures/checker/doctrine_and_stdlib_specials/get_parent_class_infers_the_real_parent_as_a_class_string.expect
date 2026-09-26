@@ -1,1 +1,1 @@
-16:28-16:81 return.type L3 Bottom::make | return type mismatch: expected int, got Mid
+16:28-16:81 return.type L3 | return type mismatch: expected int, got Mid

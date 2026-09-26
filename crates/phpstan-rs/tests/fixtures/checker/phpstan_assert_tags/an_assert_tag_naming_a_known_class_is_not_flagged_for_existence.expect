@@ -1,1 +1,1 @@
-4:38-4:40 missingType.parameter L6 assertRealClass | Function assertRealClass() has parameter $x with no type specified.
+4:38-4:40 missingType.parameter L6 | Function assertRealClass() has parameter $x with no type specified.

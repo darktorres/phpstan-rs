@@ -75,13 +75,12 @@ impl<'a> Checker<'a> {
     /// `check_nullsafe_byref_target` (nullsafe on an assign-by-ref's own
     /// RHS) and `check_assignable_target` (a non-assignable LHS),
     /// both just below.
-    pub(crate) fn check_nullsafe_assignment_target(&mut self, target: &Expr, label: &str) {
+    pub(crate) fn check_nullsafe_assignment_target(&mut self, target: &Expr) {
         if !contains_nullsafe(target) {
             return;
         }
         self.report_builder(
             DiagnosticBuilder::new(
-                label.to_string(),
                 "Nullsafe operator cannot be on left side of assignment.".to_string(),
                 target.span,
                 0,
@@ -98,13 +97,12 @@ impl<'a> Checker<'a> {
     /// `check_nullsafe_assignment_target` just above. Only ever called
     /// for `ExprKind::AssignRef`'s own RHS - a plain `Assign`'s RHS is an
     /// ordinary read, never checked this way.
-    pub(crate) fn check_nullsafe_byref_target(&mut self, target: &Expr, label: &str) {
+    pub(crate) fn check_nullsafe_byref_target(&mut self, target: &Expr) {
         if !contains_nullsafe(target) {
             return;
         }
         self.report_builder(
             DiagnosticBuilder::new(
-                label.to_string(),
                 "Nullsafe operator cannot be on right side of assignment by reference.".to_string(),
                 target.span,
                 0,
@@ -121,13 +119,12 @@ impl<'a> Checker<'a> {
     /// (needed for the guard-clause idiom documented on `parse_
     /// assignment_tail` itself), so `foo() = 1;`/`1 = 2;` genuinely
     /// reach here rather than already being a parse error.
-    pub(crate) fn check_assignable_target(&mut self, target: &Expr, label: &str) {
+    pub(crate) fn check_assignable_target(&mut self, target: &Expr) {
         if !is_non_assignable_target(target) {
             return;
         }
         self.report_builder(
             DiagnosticBuilder::new(
-                label.to_string(),
                 "Expression on left side of assignment is not assignable.".to_string(),
                 target.span,
                 0,
@@ -219,7 +216,7 @@ impl<'a> Checker<'a> {
                     // it), a key's own *illegal type* is exactly as real
                     // a `TypeError` on a write as a read - `$arr[new
                     // Foo()] = 1` fails before the array ever grows.
-                    self.check_dim_fetch_key_type(base, i, locals, label);
+                    self.check_dim_fetch_key_type(base, i, locals);
                 }
             }
             _ => {
@@ -240,7 +237,7 @@ impl<'a> Checker<'a> {
     /// per-position/per-key element-type resolution exactly, so a
     /// destructured `Type::ArrayShape` source still checks each element
     /// against its own real per-slot type, not a blanket `Mixed`.
-    pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &Expr, ty: &Type, label: &str) {
+    pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &Expr, ty: &Type) {
         let ExprKind::ArrayLiteral(items) = &lhs.kind else {
             return;
         };
@@ -257,21 +254,21 @@ impl<'a> Checker<'a> {
                         .and_then(|k| shape.field(&k))
                         .map(|f| f.ty.clone())
                         .unwrap_or(Type::Mixed(false));
-                    self.check_param_out_assignment(&item.value, &element_ty, label);
-                    self.check_by_ref_destructuring(&item.value, &element_ty, label);
+                    self.check_param_out_assignment(&item.value, &element_ty);
+                    self.check_by_ref_destructuring(&item.value, &element_ty);
                 }
             }
             Type::Array(..) | Type::Intersection(_) => {
                 let element_ty = Self::array_element_type(ty).unwrap_or(Type::Mixed(false));
                 for item in items {
-                    self.check_param_out_assignment(&item.value, &element_ty, label);
-                    self.check_by_ref_destructuring(&item.value, &element_ty, label);
+                    self.check_param_out_assignment(&item.value, &element_ty);
+                    self.check_by_ref_destructuring(&item.value, &element_ty);
                 }
             }
             _ => {
                 for item in items {
-                    self.check_param_out_assignment(&item.value, &Type::Mixed(false), label);
-                    self.check_by_ref_destructuring(&item.value, &Type::Mixed(false), label);
+                    self.check_param_out_assignment(&item.value, &Type::Mixed(false));
+                    self.check_by_ref_destructuring(&item.value, &Type::Mixed(false));
                 }
             }
         }
@@ -645,16 +642,10 @@ impl<'a> Checker<'a> {
     /// array's key type rules out (a
     /// non-numeric string on int keys or a list, an int on string keys,
     /// a negative int on a list).
-    pub(crate) fn check_offset_existence(
-        &mut self,
-        base: &Expr,
-        idx: &Expr,
-        locals: &Locals,
-        label: &str,
-    ) {
+    pub(crate) fn check_offset_existence(&mut self, base: &Expr, idx: &Expr, locals: &Locals) {
         let container = self.infer_expr(base, locals);
         let dim = self.infer_expr(idx, locals);
-        self.report_missing_offset(&container, &dim, idx.span, label);
+        self.report_missing_offset(&container, &dim, idx.span);
     }
 
     /// `ArrayDestructuringRule`'s per-key half: every destructured key
@@ -665,7 +656,6 @@ impl<'a> Checker<'a> {
         items: &[ArrayItem],
         container: &Type,
         locals: &Locals,
-        label: &str,
     ) {
         let mut position: i64 = 0;
         for item in items {
@@ -683,14 +673,14 @@ impl<'a> Checker<'a> {
                     (Type::IntLiteral(position - 1), item.value.span)
                 }
             };
-            if self.report_missing_offset(container, &dim, span, label) {
+            if self.report_missing_offset(container, &dim, span) {
                 continue;
             }
             if let ExprKind::ArrayLiteral(inner) = &item.value.kind {
                 let key = normalized_literal_key(&dim).map(|(k, _)| k);
                 let inner_container =
                     crate::checker::expr::index_result_type(container.clone(), key.as_deref());
-                self.check_destructuring_offsets(inner, &inner_container, locals, label);
+                self.check_destructuring_offsets(inner, &inner_container, locals);
             }
         }
     }
@@ -702,13 +692,11 @@ impl<'a> Checker<'a> {
         container: &Type,
         dim: &Type,
         span: syntax::token::Span,
-        label: &str,
     ) -> bool {
         if offset_verdict(container, dim) != Some(false) {
             return false;
         }
         self.report(
-            label.to_string(),
             format!("Offset {dim} does not exist on {container}."),
             span,
             3,
@@ -724,10 +712,9 @@ impl<'a> Checker<'a> {
     /// exclusion: `$x = null; $x['a'] = 1;` legally auto-vivifies `$x`
     /// into an array on write, so this is only ever wired into a read
     /// site, never `check_assignment_target`'s.
-    pub(crate) fn check_offset_accessibility(&mut self, base_ty: &Type, idx: &Expr, label: &str) {
+    pub(crate) fn check_offset_accessibility(&mut self, base_ty: &Type, idx: &Expr) {
         if self.type_confirmed_not_offset_accessible(base_ty) {
             self.report(
-                label.to_string(),
                 format!("Cannot access offset on {base_ty}."),
                 idx.span,
                 3,
@@ -735,7 +722,6 @@ impl<'a> Checker<'a> {
             );
         } else if let Some(level) = self.registry.strict_mixed_receiver_level(base_ty) {
             self.report(
-                label.to_string(),
                 "Cannot access offset on mixed.".to_string(),
                 idx.span,
                 level,

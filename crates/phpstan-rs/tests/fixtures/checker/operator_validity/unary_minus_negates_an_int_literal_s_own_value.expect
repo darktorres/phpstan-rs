@@ -1,1 +1,1 @@
-3:24-3:31 equal.alwaysFalse L4 f | Loose comparison using == between -5 and 5 will always evaluate to false.
+3:24-3:31 equal.alwaysFalse L4 | Loose comparison using == between -5 and 5 will always evaluate to false.

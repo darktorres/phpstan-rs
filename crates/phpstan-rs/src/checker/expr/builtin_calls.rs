@@ -1817,13 +1817,7 @@ impl<'a> Checker<'a> {
     /// touches. Reuses `parse_sscanf_format` as a placeholder-count
     /// source, rather than reimplementing real PHPStan's live-`sscanf()`-
     /// shell-out counting, which this project has no PHP runtime for.
-    pub(crate) fn check_scanf_argument_count(
-        &mut self,
-        name: &str,
-        args: &[Arg],
-        label: &str,
-        span: Span,
-    ) {
+    pub(crate) fn check_scanf_argument_count(&mut self, name: &str, args: &[Arg], span: Span) {
         if args.len() < 3 || args.iter().any(|a| a.spread) {
             return;
         }
@@ -1836,7 +1830,6 @@ impl<'a> Checker<'a> {
         let given = args.len() - 2;
         if specs.len() != given {
             self.report(
-                label.to_string(),
                 format!(
                     "Call to {name}() contains {} placeholder(s), {given} value(s) given.",
                     specs.len()
@@ -1855,7 +1848,7 @@ impl<'a> Checker<'a> {
     /// combination is nonsensical. Gated on a configured `php_version` -
     /// with none configured, this stays silent rather than assume PHP 8.5
     /// is intended.
-    pub(crate) fn check_filter_var_flag_conflict(&mut self, args: &[Arg], span: Span, label: &str) {
+    pub(crate) fn check_filter_var_flag_conflict(&mut self, args: &[Arg], span: Span) {
         let Some(version) = self.registry.php_version else {
             return;
         };
@@ -1869,7 +1862,6 @@ impl<'a> Checker<'a> {
             && contains_flag_name_with_options(&flags_arg.value, "FILTER_THROW_ON_FAILURE")
         {
             self.report(
-                label.to_string(),
                 "Cannot use both FILTER_NULL_ON_FAILURE and FILTER_THROW_ON_FAILURE.".to_string(),
                 span,
                 0,

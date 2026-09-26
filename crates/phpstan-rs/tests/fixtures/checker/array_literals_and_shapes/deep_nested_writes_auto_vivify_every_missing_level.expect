@@ -1,2 +1,2 @@
-7:29-7:41 missingType.iterableValue L6 nested | Function nested() has parameter $items with no value type specified in iterable type array.
+7:29-7:41 missingType.iterableValue L6 | Function nested() has parameter $items with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

@@ -1,1 +1,1 @@
-4:22-4:33 new.noConstructor L0 f | class Bare does not have a constructor and must be instantiated without any parameters
+4:22-4:33 new.noConstructor L0 | class Bare does not have a constructor and must be instantiated without any parameters

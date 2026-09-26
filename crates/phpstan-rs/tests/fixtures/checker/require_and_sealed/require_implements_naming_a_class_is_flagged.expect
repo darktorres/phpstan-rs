@@ -1,1 +1,1 @@
-4:13-4:23 requireImplements.class L0 T | PHPDoc tag @phpstan-require-implements cannot contain non-interface type SomeClass.
+4:13-4:23 requireImplements.class L0 | PHPDoc tag @phpstan-require-implements cannot contain non-interface type SomeClass.

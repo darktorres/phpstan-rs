@@ -1,1 +1,1 @@
-3:54-3:80 function.notFound L0 Orphaned::boom | call to undefined function thisFunctionDoesNotExist()
+3:54-3:80 function.notFound L0 | call to undefined function thisFunctionDoesNotExist()

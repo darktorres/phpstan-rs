@@ -1,18 +1,18 @@
-6:25-6:26 magicNumber.property L0 Box | Do not assign magic number to property. Move to constant with a suitable name.
-8:33-8:53 property.onlyWritten L4 Box | private property Box::$max is never read, only written
-8:52-8:53 magicNumber.defaultParameter L0 Box::__construct | Do not use magic number as default parameter. Move to constant with a suitable name.
-10:9-10:16 magicNumber.assignment L0 Box::run | Do not assign magic number to variable. Move to constant with a suitable name.
-11:14-11:20 magicNumber.arithmetic L0 Box::run | Do not use magic number in arithmetic operations. Move to constant with a suitable name.
-12:14-12:27 magicNumber.bitwise L0 Box::run | Do not use magic number in bitwise operations. Move to constant with a suitable name.
-13:16-13:24 magicNumber.comparison L0 Box::run | Do not use magic number in comparison operations. Move to constant with a suitable name.
-14:14-14:33 magicNumber.ternary L0 Box::run | Do not use magic number in ternary operator. Move to constant with a suitable name.
-15:9-15:18 magicNumber.assignment L0 Box::run | Do not assign magic number to variable. Move to constant with a suitable name.
-16:9-16:18 magicNumber.assignment L0 Box::run | Do not assign magic number to variable. Move to constant with a suitable name.
-17:9-17:23 magicNumber.assignment L0 Box::run | Do not assign magic number to variable. Move to constant with a suitable name.
-18:9-18:25 arguments.count L1 Box::run | Function strlen invoked with 2 parameters, 1 required.
-18:23-18:24 magicNumber.argument L0 Box::run | Do not use magic number as a function argument. Move to constant with a suitable name.
-19:27-19:28 magicNumber.matchArm L0 Box::run | Do not use magic number in match condition statement. Move to constant with a suitable name.
-20:27-20:37 magicNumber.switchCase L0 Box::run | Do not use magic number in case statement. Move to constant with a suitable name.
-22:9-22:19 magicNumber.return L0 Box::run | Do not return magic number. Move to constant with a suitable name.
-25:5-25:9 if.alwaysTrue L4 <main> | If condition is always true.
-26:40-26:42 magicNumber.property L0 Nested | Do not assign magic number to property. Move to constant with a suitable name.
+6:25-6:26 magicNumber.property L0 | Do not assign magic number to property. Move to constant with a suitable name.
+8:33-8:53 property.onlyWritten L4 | private property Box::$max is never read, only written
+8:52-8:53 magicNumber.defaultParameter L0 | Do not use magic number as default parameter. Move to constant with a suitable name.
+10:9-10:16 magicNumber.assignment L0 | Do not assign magic number to variable. Move to constant with a suitable name.
+11:14-11:20 magicNumber.arithmetic L0 | Do not use magic number in arithmetic operations. Move to constant with a suitable name.
+12:14-12:27 magicNumber.bitwise L0 | Do not use magic number in bitwise operations. Move to constant with a suitable name.
+13:16-13:24 magicNumber.comparison L0 | Do not use magic number in comparison operations. Move to constant with a suitable name.
+14:14-14:33 magicNumber.ternary L0 | Do not use magic number in ternary operator. Move to constant with a suitable name.
+15:9-15:18 magicNumber.assignment L0 | Do not assign magic number to variable. Move to constant with a suitable name.
+16:9-16:18 magicNumber.assignment L0 | Do not assign magic number to variable. Move to constant with a suitable name.
+17:9-17:23 magicNumber.assignment L0 | Do not assign magic number to variable. Move to constant with a suitable name.
+18:9-18:25 arguments.count L1 | Function strlen invoked with 2 parameters, 1 required.
+18:23-18:24 magicNumber.argument L0 | Do not use magic number as a function argument. Move to constant with a suitable name.
+19:27-19:28 magicNumber.matchArm L0 | Do not use magic number in match condition statement. Move to constant with a suitable name.
+20:27-20:37 magicNumber.switchCase L0 | Do not use magic number in case statement. Move to constant with a suitable name.
+22:9-22:19 magicNumber.return L0 | Do not return magic number. Move to constant with a suitable name.
+25:5-25:9 if.alwaysTrue L4 | If condition is always true.
+26:40-26:42 magicNumber.property L0 | Do not assign magic number to property. Move to constant with a suitable name.

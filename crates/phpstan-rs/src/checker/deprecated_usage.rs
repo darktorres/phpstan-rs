@@ -31,7 +31,6 @@ impl<'a> Checker<'a> {
         fqn: &str,
         sig: &FunctionSig,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
             return;
@@ -40,7 +39,7 @@ impl<'a> Checker<'a> {
             return;
         };
         let message = with_reason(&format!("Call to deprecated function {fqn}()."), reason);
-        self.report(label.to_string(), message, span, 0, "function.deprecated");
+        self.report(message, span, 0, "function.deprecated");
     }
 
     /// `method.deprecated`/`staticMethod.deprecated` - an instance or
@@ -62,7 +61,6 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         is_static: bool,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
             return;
@@ -80,7 +78,6 @@ impl<'a> Checker<'a> {
                 reason,
             );
             self.report(
-                label.to_string(),
                 message,
                 span,
                 0,
@@ -98,13 +95,7 @@ impl<'a> Checker<'a> {
             } else {
                 format!("Casting class {owner} to string is deprecated.:\n{reason}")
             };
-            self.report(
-                label.to_string(),
-                message,
-                span,
-                0,
-                "class.toStringDeprecated",
-            );
+            self.report(message, span, 0, "class.toStringDeprecated");
             return;
         }
         let message = with_reason(
@@ -114,13 +105,7 @@ impl<'a> Checker<'a> {
             ),
             reason,
         );
-        self.report(
-            label.to_string(),
-            message,
-            span,
-            0,
-            &format!("{kind_word}.deprecated"),
-        );
+        self.report(message, span, 0, &format!("{kind_word}.deprecated"));
     }
 
     /// `property.deprecated`/`staticProperty.deprecated` - an instance or
@@ -132,7 +117,6 @@ impl<'a> Checker<'a> {
         prop_name: &str,
         sig: &PropertySig,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
             return;
@@ -155,7 +139,6 @@ impl<'a> Checker<'a> {
                 reason,
             );
             self.report(
-                label.to_string(),
                 message,
                 span,
                 0,
@@ -174,13 +157,7 @@ impl<'a> Checker<'a> {
             ),
             reason,
         );
-        self.report(
-            label.to_string(),
-            message,
-            span,
-            0,
-            &format!("{kind_word}.deprecated"),
-        );
+        self.report(message, span, 0, &format!("{kind_word}.deprecated"));
     }
 
     /// `classConstant.deprecated` - a class-constant access. Same
@@ -191,7 +168,6 @@ impl<'a> Checker<'a> {
         const_name: &str,
         sig: &ConstSig,
         span: Span,
-        label: &str,
     ) {
         if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
             return;
@@ -208,7 +184,6 @@ impl<'a> Checker<'a> {
                 reason,
             );
             self.report(
-                label.to_string(),
                 message,
                 span,
                 0,
@@ -226,13 +201,7 @@ impl<'a> Checker<'a> {
             ),
             reason,
         );
-        self.report(
-            label.to_string(),
-            message,
-            span,
-            0,
-            "classConstant.deprecated",
-        );
+        self.report(message, span, 0, "classConstant.deprecated");
     }
 
     /// `new.deprecatedClass` - instantiation (`new Foo()`) of a class whose
@@ -240,7 +209,7 @@ impl<'a> Checker<'a> {
     /// rules' `RestrictedDeprecatedClassNameUsageExtension` does.
     /// Independent of whether any of its members are individually tagged
     /// too.
-    pub(crate) fn check_deprecated_instantiation(&mut self, class: &str, span: Span, label: &str) {
+    pub(crate) fn check_deprecated_instantiation(&mut self, class: &str, span: Span) {
         if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
             return;
         }
@@ -254,7 +223,7 @@ impl<'a> Checker<'a> {
             &format!("Instantiation of deprecated class {class}."),
             reason,
         );
-        self.report(label.to_string(), message, span, 0, "new.deprecatedClass");
+        self.report(message, span, 0, "new.deprecatedClass");
     }
 }
 

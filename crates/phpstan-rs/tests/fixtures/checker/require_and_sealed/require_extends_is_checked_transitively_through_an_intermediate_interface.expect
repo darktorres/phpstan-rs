@@ -1,1 +1,1 @@
-6:13-6:46 class.missingExtends L0 Bad | Interface Marker requires implementing class to extend Base, but Bad does not.
+6:13-6:46 class.missingExtends L0 | Interface Marker requires implementing class to extend Base, but Bad does not.

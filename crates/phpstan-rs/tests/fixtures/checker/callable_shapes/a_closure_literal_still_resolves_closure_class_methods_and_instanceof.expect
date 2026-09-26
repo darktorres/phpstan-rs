@@ -1,1 +1,1 @@
-11:21-11:42 instanceof.alwaysTrue L4 test | Instanceof between Closure(): 1 and Closure will always evaluate to true.
+11:21-11:42 instanceof.alwaysTrue L4 | Instanceof between Closure(): 1 and Closure will always evaluate to true.

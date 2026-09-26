@@ -177,7 +177,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Called from `StmtKind::Expression` after `e` itself was checked.
-    pub(crate) fn check_noop_statement(&mut self, e: &Expr, locals: &Locals, label: &str) {
+    pub(crate) fn check_noop_statement(&mut self, e: &Expr, locals: &Locals) {
         let e = match &e.kind {
             ExprKind::Grouping(inner) => inner.as_ref(),
             _ => e,
@@ -195,7 +195,6 @@ impl<'a> Checker<'a> {
         if let Some((sigil, identifier)) = word_operator {
             self.report_builder(
                 DiagnosticBuilder::new(
-                    label.to_string(),
                     format!("Unused result of \"{sigil}\" operator."),
                     e.span,
                     4,
@@ -230,7 +229,7 @@ impl<'a> Checker<'a> {
                 "expr.resultUnused",
             ),
         };
-        self.report(label.to_string(), message, e.span, 4, identifier);
+        self.report(message, e.span, 4, identifier);
     }
 
     /// The transitive-purity payoff: a bare, statement-level
@@ -249,12 +248,7 @@ impl<'a> Checker<'a> {
     /// this reads `is_transitively_pure` straight off whatever
     /// `FunctionSig` the call actually, concretely resolves to, with no
     /// need to reconstruct a `PurityDependency` key at all.
-    pub(crate) fn check_pure_call_without_effect(
-        &mut self,
-        e: &Expr,
-        locals: &Locals,
-        label: &str,
-    ) {
+    pub(crate) fn check_pure_call_without_effect(&mut self, e: &Expr, locals: &Locals) {
         let (message, identifier) = match &e.kind {
             ExprKind::Call(callee, _) => {
                 let ExprKind::Name(name) = &callee.kind else {
@@ -357,7 +351,7 @@ impl<'a> Checker<'a> {
             }
             _ => return,
         };
-        self.report(label.to_string(), message, e.span, 4, identifier);
+        self.report(message, e.span, 4, identifier);
     }
 
     /// `@phpstan-pure`/`@phpstan-impure` tag validation - real PHPStan's
@@ -410,7 +404,6 @@ impl<'a> Checker<'a> {
             ("Function", "impureFunction.pure")
         };
         self.report(
-            label.to_string(),
             format!(
                 "{description} {label}() is marked as impure but does not have any side effects."
             ),
@@ -485,7 +478,6 @@ impl<'a> Checker<'a> {
         for param in &f.params {
             if param.by_ref {
                 self.report(
-                    label.to_string(),
                     format!(
                         "Parameter ${} of pure {} {label}() is passed by reference.",
                         param.name,
@@ -505,7 +497,6 @@ impl<'a> Checker<'a> {
             && sig.assert_if_false.is_empty()
         {
             self.report(
-                label.to_string(),
                 format!("{kind_word} {label}() is pure but has no return value."),
                 f.name_span,
                 0,
@@ -527,7 +518,6 @@ impl<'a> Checker<'a> {
                 )
             };
             self.report(
-                label.to_string(),
                 format!(
                     "{verb} {} in pure {} {label}().",
                     occ.description,
@@ -553,7 +543,7 @@ impl<'a> Checker<'a> {
     /// former, `$this`-injection for the latter) are unrelated to this
     /// function - see `registry::function_sig::ParamSig::
     /// closure_this_type` for the latter's own runtime half.
-    pub(crate) fn check_declared_param_callable_tags(&mut self, f: &FunctionDecl, label: &str) {
+    pub(crate) fn check_declared_param_callable_tags(&mut self, f: &FunctionDecl) {
         let Some(doc) = f.doc_comment.as_deref() else {
             return;
         };
@@ -567,9 +557,7 @@ impl<'a> Checker<'a> {
         for (name, immediately) in &block.param_immediately_invoked_callable {
             let tag = if *immediately { "immediately" } else { "later" };
             let Some(param) = f.params.iter().find(|p| *p.name == **name) else {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "PHPDoc tag @param-{tag}-invoked-callable references unknown parameter: ${name}"
                     ),
                     f.name_span,
@@ -586,9 +574,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "paramLaterInvokedCallable.nonCallable"
                 };
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "PHPDoc tag @param-{tag}-invoked-callable is for parameter ${name} with non-callable type {native_ty}."
                     ),
                     f.name_span,
@@ -600,7 +586,6 @@ impl<'a> Checker<'a> {
         for name in block.param_closure_this.keys() {
             let Some(param) = f.params.iter().find(|p| *p.name == **name) else {
                 self.report(
-                    label.to_string(),
                     format!("PHPDoc tag @param-closure-this references unknown parameter: ${name}"),
                     f.name_span,
                     2,
@@ -612,9 +597,7 @@ impl<'a> Checker<'a> {
                 .resolve_type_hint(param.type_hint.as_ref().map(TypeHint::to_string).as_deref());
             let closure_ty = Type::Object("Closure".into(), Vec::new());
             if !self.param_type_could_satisfy(&native_ty, &closure_ty) {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "PHPDoc tag @param-closure-this is for parameter ${name} with non-Closure type {native_ty}."
                     ),
                     f.name_span,

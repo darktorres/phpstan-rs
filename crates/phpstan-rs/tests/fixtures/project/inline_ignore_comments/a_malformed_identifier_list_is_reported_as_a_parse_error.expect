@@ -1,3 +1,3 @@
-f.php:3:1-3:1 ignore.parseError L0 <main> | Parse error in @phpstan-ignore: Unexpected end after comma (,), expected identifier
+f.php:3:1-3:1 ignore.parseError L0 | Parse error in @phpstan-ignore: Unexpected end after comma (,), expected identifier
     non-ignorable
-f.php:3:5-3:31 function.notFound L0 f | call to undefined function totallyUndefinedFunction()
+f.php:3:5-3:31 function.notFound L0 | call to undefined function totallyUndefinedFunction()

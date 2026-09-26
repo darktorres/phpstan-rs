@@ -1,7 +1,7 @@
-11:10-11:11 missingNativeType.return L0 f | Function f() return type can be declared natively as void.
-11:12-11:14 missingNativeType.parameter L0 f | Function f() parameter $a can be declared natively as int.
-11:16-11:18 missingNativeType.parameter L0 f | Function f() parameter $b can be declared natively as array.
-11:24-11:26 missingNativeType.parameter L0 f | Function f() parameter $d can be declared natively as ?int.
-11:46-11:48 missingNativeType.parameter L0 f | Function f() parameter $f can be declared natively as int.
-13:1-13:27 return.unusedType L4 g | Function g() never returns false so it can be removed from the return type.
-19:26-19:29 parameter.defaultValue L2 badDefault | Default value of the parameter #1 $x ('a') of function badDefault() is incompatible with type int.
+11:10-11:11 missingNativeType.return L0 | Function f() return type can be declared natively as void.
+11:12-11:14 missingNativeType.parameter L0 | Function f() parameter $a can be declared natively as int.
+11:16-11:18 missingNativeType.parameter L0 | Function f() parameter $b can be declared natively as array.
+11:24-11:26 missingNativeType.parameter L0 | Function f() parameter $d can be declared natively as ?int.
+11:46-11:48 missingNativeType.parameter L0 | Function f() parameter $f can be declared natively as int.
+13:1-13:27 return.unusedType L4 | Function g() never returns false so it can be removed from the return type.
+19:26-19:29 parameter.defaultValue L2 | Default value of the parameter #1 $x ('a') of function badDefault() is incompatible with type int.

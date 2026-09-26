@@ -1,1 +1,1 @@
-3:24-3:48 return.type L3 f | return type mismatch: expected string|false, got string|array|false
+3:24-3:48 return.type L3 | return type mismatch: expected string|false, got string|array|false

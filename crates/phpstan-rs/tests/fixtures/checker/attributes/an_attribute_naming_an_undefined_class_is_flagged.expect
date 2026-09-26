@@ -1,1 +1,1 @@
-2:15-2:40 attribute.notFound L0 Foo | attribute class TotallyUndefinedAttribute does not exist
+2:15-2:40 attribute.notFound L0 | attribute class TotallyUndefinedAttribute does not exist

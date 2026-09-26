@@ -1,2 +1,2 @@
-3:33-3:37 class.nameCase L0 Child | Class referenced with incorrect case: base.
+3:33-3:37 class.nameCase L0 | Class referenced with incorrect case: base.
     fix: Use Base => "Base"

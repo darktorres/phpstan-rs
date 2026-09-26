@@ -1,2 +1,2 @@
-2:21-4:22 missingType.return L6 f | Function f() has no return type specified.
-3:25-3:27 callable.nonCallable L2 f | Trying to invoke int but it's not a callable.
+2:21-4:22 missingType.return L6 | Function f() has no return type specified.
+3:25-3:27 callable.nonCallable L2 | Trying to invoke int but it's not a callable.

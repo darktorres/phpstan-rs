@@ -1,2 +1,2 @@
-4:5-4:38 method.nameCase L4 C | Method C::DoWork() overrides P::doWork() with different letter casing
+4:5-4:38 method.nameCase L4 | Method C::DoWork() overrides P::doWork() with different letter casing
     fix: Use doWork => "doWork"

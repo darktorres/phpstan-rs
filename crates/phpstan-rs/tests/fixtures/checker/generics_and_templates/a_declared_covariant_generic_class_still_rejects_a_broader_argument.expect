@@ -1,4 +1,4 @@
-9:13-9:40 missingType.return L6 needsCatBox | Function needsCatBox() has no return type specified.
-11:13-13:14 missingType.return L6 f | Function f() has no return type specified.
-12:17-12:32 function.resultUnused L4 f | Call to function needsCatBox() on a separate line has no effect.
-12:29-12:31 argument.type L5 f | Parameter #1 $b of function needsCatBox expects Box<Cat>, Box<Animal> given.
+9:13-9:40 missingType.return L6 | Function needsCatBox() has no return type specified.
+11:13-13:14 missingType.return L6 | Function f() has no return type specified.
+12:17-12:32 function.resultUnused L4 | Call to function needsCatBox() on a separate line has no effect.
+12:29-12:31 argument.type L5 | Parameter #1 $b of function needsCatBox expects Box<Cat>, Box<Animal> given.

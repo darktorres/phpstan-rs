@@ -1,1 +1,1 @@
-4:13-4:48 class.extendsFinalByPhpDoc L0 SoftSub | class SoftSub extends @final class SoftSealed
+4:13-4:48 class.extendsFinalByPhpDoc L0 | class SoftSub extends @final class SoftSealed

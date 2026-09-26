@@ -1,3 +1,3 @@
-3:56-3:66 missingType.iterableValue L6 FuncCall | Property FuncCall::$args type has no value type specified in iterable type array.
+3:56-3:66 missingType.iterableValue L6 | Property FuncCall::$args type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-4:13-7:14 missingType.return L6 mutate | Function mutate() has no return type specified.
+4:13-7:14 missingType.return L6 | Function mutate() has no return type specified.

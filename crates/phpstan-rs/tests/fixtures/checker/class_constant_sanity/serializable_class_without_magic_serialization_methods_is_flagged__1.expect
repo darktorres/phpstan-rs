@@ -1,2 +1,2 @@
-10:43-10:54 missingType.iterableValue L6 Modern::__unserialize | Method Modern::__unserialize() has parameter $data with no value type specified in iterable type array.
+10:43-10:54 missingType.iterableValue L6 | Method Modern::__unserialize() has parameter $data with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

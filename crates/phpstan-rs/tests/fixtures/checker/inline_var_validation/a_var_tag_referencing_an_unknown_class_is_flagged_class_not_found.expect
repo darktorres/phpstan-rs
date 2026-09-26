@@ -1,1 +1,1 @@
-4:17-4:27 class.notFound L0 f | PHPDoc tag @var for variable $x contains unknown class NoSuchClass.
+4:17-4:27 class.notFound L0 | PHPDoc tag @var for variable $x contains unknown class NoSuchClass.

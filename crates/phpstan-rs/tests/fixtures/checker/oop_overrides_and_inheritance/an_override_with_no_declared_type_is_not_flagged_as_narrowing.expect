@@ -1,1 +1,1 @@
-3:49-3:78 missingType.return L6 Sub11::make | Method Sub11::make() has no return type specified.
+3:49-3:78 missingType.return L6 | Method Sub11::make() has no return type specified.

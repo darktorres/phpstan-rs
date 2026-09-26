@@ -1,2 +1,2 @@
-2:42-2:54 property.inInterface L0 Shape | Interfaces can include properties only on PHP 8.4 and later.
+2:42-2:54 property.inInterface L0 | Interfaces can include properties only on PHP 8.4 and later.
     non-ignorable

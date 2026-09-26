@@ -1,2 +1,2 @@
-3:13-3:50 missingType.return L6 f | Function f() has no return type specified.
-3:35-3:47 class.notFound L0 f | instantiated class App\\Domain\\Widget not found
+3:13-3:50 missingType.return L6 | Function f() has no return type specified.
+3:35-3:47 class.notFound L0 | instantiated class App\\Domain\\Widget not found

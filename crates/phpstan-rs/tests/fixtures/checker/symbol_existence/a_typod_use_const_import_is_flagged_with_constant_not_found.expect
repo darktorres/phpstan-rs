@@ -1,1 +1,1 @@
-2:13-2:49 constant.notFound L0 <main> | used constant TotallyMadeUpConstantName not found
+2:13-2:49 constant.notFound L0 | used constant TotallyMadeUpConstantName not found

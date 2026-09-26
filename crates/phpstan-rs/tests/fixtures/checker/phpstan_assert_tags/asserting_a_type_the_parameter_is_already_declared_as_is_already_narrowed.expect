@@ -1,1 +1,1 @@
-3:13-3:40 assert.alreadyNarrowedType L0 f | Asserted type int for $x with type int does not narrow down the type.
+3:13-3:40 assert.alreadyNarrowedType L0 | Asserted type int for $x with type int does not narrow down the type.

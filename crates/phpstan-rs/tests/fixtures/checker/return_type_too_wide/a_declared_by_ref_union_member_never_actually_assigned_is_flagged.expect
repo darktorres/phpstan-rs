@@ -1,1 +1,1 @@
-2:13-4:14 parameterByRef.tooWide L5 f | by-ref parameter $x's declared type int|string is never narrower than 1 at the end of execution - consider narrowing it
+2:13-4:14 parameterByRef.tooWide L5 | by-ref parameter $x's declared type int|string is never narrower than 1 at the end of execution - consider narrowing it

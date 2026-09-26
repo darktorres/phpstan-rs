@@ -1,2 +1,2 @@
-3:49-3:86 method.abstractOverridingNonAbstract L0 Child | Cannot make non-abstract method Base::foo() abstract in class Child
+3:49-3:86 method.abstractOverridingNonAbstract L0 | Cannot make non-abstract method Base::foo() abstract in class Child
     non-ignorable

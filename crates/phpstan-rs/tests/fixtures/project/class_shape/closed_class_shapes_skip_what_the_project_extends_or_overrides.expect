@@ -1,8 +1,8 @@
-a.php:2:7-2:11 class.notFinal L0 Open | Class Open is not final.
-a.php:4:7-4:12 class.notFinal L0 Child | Class Child is not final.
-a.php:6:19-6:25 property.protectedInFinalClass L0 Sealed | Property Sealed::$count is protected, but since the containing class is final, it can be private.
-a.php:7:24-7:30 method.protectedInFinalClass L0 Sealed | Method Sealed::helper() is protected, but since the containing class is final, it can be private.
-a.php:8:21-8:26 classConstant.protectedInFinalClass L0 Sealed | Constant Sealed::LIMIT is protected, but since the containing class is final, it can be private.
-a.php:11:21-11:24 method.notFinalInAbstractClass L0 Base | Method Base::run() is not final, but since the containing class is abstract, it should be.
-a.php:15:13-15:41 method.unused L4 Base | private method Base::internal() is unused
+a.php:2:7-2:11 class.notFinal L0 | Class Open is not final.
+a.php:4:7-4:12 class.notFinal L0 | Class Child is not final.
+a.php:6:19-6:25 property.protectedInFinalClass L0 | Property Sealed::$count is protected, but since the containing class is final, it can be private.
+a.php:7:24-7:30 method.protectedInFinalClass L0 | Method Sealed::helper() is protected, but since the containing class is final, it can be private.
+a.php:8:21-8:26 classConstant.protectedInFinalClass L0 | Constant Sealed::LIMIT is protected, but since the containing class is final, it can be private.
+a.php:11:21-11:24 method.notFinalInAbstractClass L0 | Method Base::run() is not final, but since the containing class is abstract, it should be.
+a.php:15:13-15:41 method.unused L4 | private method Base::internal() is unused
     fix: Remove method internal() => ""

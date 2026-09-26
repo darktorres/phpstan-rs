@@ -1,1 +1,1 @@
-4:28-9:18 throws.notThrowable L2 Widget::$x (get hook) | PHPDoc tag @throws with type NotAThrowable is not subtype of Throwable
+4:28-9:18 throws.notThrowable L2 | PHPDoc tag @throws with type NotAThrowable is not subtype of Throwable

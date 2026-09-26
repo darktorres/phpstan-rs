@@ -286,9 +286,7 @@ impl<'a> Checker<'a> {
             .collect();
         missing.sort();
         for name in missing {
-            self.report(
-                label.to_string(),
-                format!("Template type {name} of {kind_word} {label}() is not referenced in a parameter."),
+            self.report(format!("Template type {name} of {kind_word} {label}() is not referenced in a parameter."),
                 span,
                 0,
                 "method.templateTypeNotInParameter",
@@ -476,7 +474,7 @@ impl<'a> Checker<'a> {
         Some((span, replacement, description))
     }
 
-    pub(crate) fn check_class_name_case(&mut self, fqn: &str, raw: &str, span: Span) {
+    pub(crate) fn check_class_name_case(&mut self, raw: &str, span: Span) {
         let mut segments = raw.trim_start_matches('\\').splitn(2, '\\');
         let first_segment = segments.next().unwrap_or(raw);
         if self.name_ctx.is_use_imported(first_segment) {
@@ -492,7 +490,6 @@ impl<'a> Checker<'a> {
         if canonical != resolved {
             let type_word = class_type_word(info.kind);
             let mut builder = DiagnosticBuilder::new(
-                fqn.to_string(),
                 format!("{type_word} referenced with incorrect case: {resolved}."),
                 span,
                 0,
@@ -522,11 +519,10 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_type_class_name_case(
         &mut self,
         case_refs: &[(std::sync::Arc<str>, std::sync::Arc<str>)],
-        label: &str,
         span: Span,
     ) {
         for (raw, _resolved) in case_refs {
-            self.check_class_name_case(label, raw, span);
+            self.check_class_name_case(raw, span);
         }
     }
 
@@ -543,7 +539,6 @@ impl<'a> Checker<'a> {
         method: &str,
         span: Span,
         name_region: Span,
-        label: &str,
     ) {
         if !self.registry.check_function_name_case {
             return;
@@ -553,7 +548,6 @@ impl<'a> Checker<'a> {
         };
         if canonical != method {
             let mut builder = DiagnosticBuilder::new(
-                label.to_string(),
                 format!("Call to method {class}::{canonical}() with incorrect case: {method}."),
                 span,
                 0,
@@ -679,14 +673,12 @@ impl<'a> Checker<'a> {
         ty: &Type,
         subject: &str,
         span: Span,
-        label: &str,
         identifier: &'static str,
     ) {
         let mut traits = Vec::new();
         self.collect_trait_class_names(ty, &mut traits);
         for name in traits {
             self.report(
-                label.to_string(),
                 format!("{subject} has invalid type {name}"),
                 span,
                 0,
@@ -739,14 +731,12 @@ impl<'a> Checker<'a> {
         ty: &Type,
         subject: &str,
         span: Span,
-        label: &str,
         identifier: &'static str,
     ) {
         let mut found = false;
         self.collect_bare_parent_refs(ty, &mut found);
         if found {
             self.report(
-                label.to_string(),
                 format!("{subject} has invalid type parent"),
                 span,
                 0,
@@ -763,31 +753,24 @@ impl<'a> Checker<'a> {
     /// distinct unresolvable name `ty` references, mirroring the message
     /// `checker/expr.rs`'s `ExprKind::New` arm uses the same identifier
     /// for.
-    pub(crate) fn check_type_class_names_exist(
-        &mut self,
-        ty: &Type,
-        subject: &str,
-        span: Span,
-        label: &str,
-    ) {
+    pub(crate) fn check_type_class_names_exist(&mut self, ty: &Type, subject: &str, span: Span) {
         let mut unknown = Vec::new();
         self.collect_unknown_class_names(ty, &mut unknown);
         let mut seen = rustc_hash::FxHashSet::default();
         unknown.retain(|n| seen.insert(n.clone()));
         for name in unknown {
             self.report(
-                label.to_string(),
                 format!("{subject} has invalid type {name}"),
                 span,
                 0,
                 "class.notFound",
             );
         }
-        self.check_type_prefixed_class_names(ty, span, label);
+        self.check_type_prefixed_class_names(ty, span);
     }
 
     /// `class.prefixed` for every class `ty` names.
-    pub(crate) fn check_type_prefixed_class_names(&mut self, ty: &Type, span: Span, label: &str) {
+    pub(crate) fn check_type_prefixed_class_names(&mut self, ty: &Type, span: Span) {
         // `class.prefixed`: checked on the *successfully-resolved* name
         // too, unlike the `class.notFound` loop above (which only sees a
         // name `collect_unknown_class_names` couldn't find) - a leaked
@@ -801,7 +784,6 @@ impl<'a> Checker<'a> {
         for (name, project) in prefixed {
             self.report_builder(
                 DiagnosticBuilder::new(
-                    label.to_string(),
                     format!("Referencing prefixed {project} class: {name}."),
                     span,
                     0,

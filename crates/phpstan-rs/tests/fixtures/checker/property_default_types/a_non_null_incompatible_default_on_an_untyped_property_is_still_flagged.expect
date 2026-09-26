@@ -1,1 +1,1 @@
-4:29-4:40 property.defaultValue L3 Foo | Property Foo::$x (int) does not accept default value of type 'still bad'.
+4:29-4:40 property.defaultValue L3 | Property Foo::$x (int) does not accept default value of type 'still bad'.

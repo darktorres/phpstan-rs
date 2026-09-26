@@ -1634,20 +1634,13 @@ impl<'a> Checker<'a> {
     /// is `&str` here, not `impl Into<String>` like `DiagnosticBuilder::new`
     /// takes it, so call sites can pass a `&'static str` literal without an
     /// extra `.to_string()`.
-    pub(crate) fn report(
-        &mut self,
-        location: String,
-        message: String,
-        span: Span,
-        level: u8,
-        identifier: &str,
-    ) {
+    pub(crate) fn report(&mut self, message: String, span: Span, level: u8, identifier: &str) {
         self.diagnostics
-            .push(DiagnosticBuilder::new(location, message, span, level, identifier).build());
+            .push(DiagnosticBuilder::new(message, span, level, identifier).build());
     }
 
     /// The builder path - for a call site that also wants a `tip`, a
-    /// `fix`, `metadata`, or `non_ignorable`, none of which `report`'s own
+    /// `fix`, or `non_ignorable`, none of which `report`'s own
     /// positional signature has room for without every plain call site
     /// paying for arguments it never uses.
     pub(crate) fn report_builder(&mut self, builder: DiagnosticBuilder) {
@@ -1664,7 +1657,7 @@ impl<'a> Checker<'a> {
     /// `ImplicitToStringCallHelper`). Uses the same "first Object member"
     /// representative-class extraction `ExprKind::MethodCall`'s own
     /// `recv_class` uses for a Union/Intersection operand.
-    pub(crate) fn check_implicit_tostring_usage(&mut self, ty: &Type, span: Span, label: &str) {
+    pub(crate) fn check_implicit_tostring_usage(&mut self, ty: &Type, span: Span) {
         let class = match ty {
             Type::Object(class, _) => Some(class.clone()),
             Type::EnumCase(fqn, _) => Some(fqn.clone()),
@@ -1682,8 +1675,8 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        self.check_internal_method_call(&owner, "__toString", sig, false, span, label);
-        self.check_deprecated_method_call(&owner, "__toString", sig, false, span, label);
+        self.check_internal_method_call(&owner, "__toString", sig, false, span);
+        self.check_deprecated_method_call(&owner, "__toString", sig, false, span);
     }
 
     pub fn into_diagnostics(mut self) -> Vec<Diagnostic> {
@@ -1723,7 +1716,7 @@ impl<'a> Checker<'a> {
             }
             self.check_declare_directives(program);
             self.check_file_whitespace(program);
-            self.check_statement_keywords(program, "<main>");
+            self.check_statement_keywords(program);
         }
         if !self.facts_only {
             self.check_use_function_imports(program);
@@ -1801,28 +1794,27 @@ impl<'a> Checker<'a> {
                                 c.doc_comment.as_deref(),
                                 description,
                                 c.name_span,
-                                &fqn,
                             );
                         }
                         self.check_class_completeness(&fqn, c.span);
-                        self.check_inheritance_target_kinds(&fqn, false, &fqn, c.span);
-                        self.check_readonly_class_version(c.is_readonly, false, &fqn, c.name_span);
-                        self.check_enum_cases_outside_enum(&c.enum_cases, &fqn);
-                        self.check_magic_serialization_methods(&fqn, &fqn, &fqn, c.name_span);
+                        self.check_inheritance_target_kinds(&fqn, false, c.span);
+                        self.check_readonly_class_version(c.is_readonly, false, c.name_span);
+                        self.check_enum_cases_outside_enum(&c.enum_cases);
+                        self.check_magic_serialization_methods(&fqn, &fqn, c.name_span);
                         self.check_class_references_exist(&fqn, c.span);
                         self.check_internal_inheritance(&fqn, c.kind, c.span);
                         self.check_restricted_class_inheritance(&fqn, c.span);
                         for (i, parent) in c.extends.iter().enumerate() {
                             let span = c.extends_spans.get(i).copied().unwrap_or(c.span);
-                            self.check_class_name_case(&fqn, parent, span);
+                            self.check_class_name_case(parent, span);
                         }
                         for (i, iface) in c.implements.iter().enumerate() {
                             let span = c.implements_spans.get(i).copied().unwrap_or(c.span);
-                            self.check_class_name_case(&fqn, iface, span);
+                            self.check_class_name_case(iface, span);
                         }
                         for (i, used) in c.uses.iter().enumerate() {
                             let span = c.uses_spans.get(i).copied().unwrap_or(c.span);
-                            self.check_class_name_case(&fqn, used, span);
+                            self.check_class_name_case(used, span);
                         }
                         self.check_method_tag_types(&fqn, c.span);
                         self.check_method_tag_templates(&fqn, c.doc_comment.as_deref(), c.span);
@@ -1831,12 +1823,12 @@ impl<'a> Checker<'a> {
                         self.check_method_overrides(&fqn, c);
                         self.check_property_overrides(&fqn, c);
                         self.check_require_tags(&fqn, c.span);
-                        self.check_require_tag_types(&fqn, c);
+                        self.check_require_tag_types(c);
                         self.check_sealed_hierarchy(&fqn, c.span);
-                        self.check_sealed_tag_types(&fqn, c.doc_comment.as_deref(), c.span, false);
-                        self.check_unknown_phpstan_tags_in_class(&fqn, c);
+                        self.check_sealed_tag_types(c.doc_comment.as_deref(), c.span, false);
+                        self.check_unknown_phpstan_tags_in_class(c);
                         if self.registry.check_magic_numbers {
-                            self.check_magic_numbers_in_properties(&c.properties, &fqn);
+                            self.check_magic_numbers_in_properties(&c.properties);
                         }
                         self.check_property_hooks(&fqn, c);
                         self.check_property_variances(&fqn, c);
@@ -1862,7 +1854,7 @@ impl<'a> Checker<'a> {
                             &c.properties,
                             &c.methods,
                         );
-                        self.check_reserved_class_constant_name(&fqn, &c.consts);
+                        self.check_reserved_class_constant_name(&c.consts);
                         self.check_typed_class_constant_values(&fqn, &c.consts);
                         self.check_class_constant_modifiers(&fqn, c.kind, &c.consts);
                         self.check_constant_overrides(&fqn, &c.consts);
@@ -1875,18 +1867,12 @@ impl<'a> Checker<'a> {
                         // here, or via `check_trait_methods`'s per-host loop
                         // for a trait).
                         self.check_attributes(&c.attrs, &fqn);
-                        self.check_attribute_targets(
-                            &c.attrs,
-                            ATTRIBUTE_TARGET_CLASS,
-                            "class",
-                            &fqn,
-                        );
+                        self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class");
                         self.check_self_attribute_class_declaration(
                             &c.attrs,
                             &fqn,
                             c.kind,
                             c.is_abstract,
-                            &fqn,
                         );
                         self.check_class_like_marker_attributes(
                             &c.attrs,
@@ -1900,7 +1886,6 @@ impl<'a> Checker<'a> {
                                 &p.attrs,
                                 ATTRIBUTE_TARGET_PROPERTY,
                                 "property",
-                                &fqn,
                             );
                         }
                         for cc in &c.consts {
@@ -1909,7 +1894,6 @@ impl<'a> Checker<'a> {
                                 &cc.attrs,
                                 ATTRIBUTE_TARGET_CLASS_CONSTANT,
                                 "class constant",
-                                &fqn,
                             );
                         }
                         // A property/const's missing-typehint completeness is
@@ -1962,26 +1946,25 @@ impl<'a> Checker<'a> {
                     if !self.facts_only {
                         self.check_class_completeness(&fqn, e.span);
                         self.check_class_references_exist(&fqn, e.span);
-                        self.check_inheritance_target_kinds(&fqn, false, &fqn, e.span);
+                        self.check_inheritance_target_kinds(&fqn, false, e.span);
                         self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
                         self.check_restricted_class_inheritance(&fqn, e.span);
                         for (i, iface) in e.implements.iter().enumerate() {
                             let span = e.implements_spans.get(i).copied().unwrap_or(e.span);
-                            self.check_class_name_case(&fqn, iface, span);
+                            self.check_class_name_case(iface, span);
                         }
                         for (i, used) in e.uses.iter().enumerate() {
                             let span = e.uses_spans.get(i).copied().unwrap_or(e.span);
-                            self.check_class_name_case(&fqn, used, span);
+                            self.check_class_name_case(used, span);
                         }
                         self.check_ancestor_generic_bounds(&fqn, e.span);
                         self.check_enum_template_tag(&fqn, e);
                         self.check_enum_ancestors(&fqn, e);
-                        self.check_sealed_tag_types(&fqn, e.doc_comment.as_deref(), e.span, true);
+                        self.check_sealed_tag_types(e.doc_comment.as_deref(), e.span, true);
                         self.check_misplaced_var_tag(
                             e.doc_comment.as_deref(),
                             "an enum",
                             e.name_span,
-                            &fqn,
                         );
                         self.check_enum_case_values(&fqn, e);
                         self.check_enum_sanity(&fqn, e);
@@ -1993,24 +1976,18 @@ impl<'a> Checker<'a> {
                             false,
                             &e.methods,
                         );
-                        self.check_reserved_class_constant_name(&fqn, &e.consts);
+                        self.check_reserved_class_constant_name(&e.consts);
                         self.check_typed_class_constant_values(&fqn, &e.consts);
                         self.check_class_constant_modifiers(&fqn, ClassKind::Enum, &e.consts);
                         self.check_constant_overrides(&fqn, &e.consts);
                         self.check_trait_constant_conflicts(&fqn, &e.consts);
                         self.check_attributes(&e.attrs, &fqn);
-                        self.check_attribute_targets(
-                            &e.attrs,
-                            ATTRIBUTE_TARGET_CLASS,
-                            "class",
-                            &fqn,
-                        );
+                        self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class");
                         self.check_self_attribute_class_declaration(
                             &e.attrs,
                             &fqn,
                             ClassKind::Enum,
                             false,
-                            &fqn,
                         );
                         self.check_class_like_marker_attributes(
                             &e.attrs,
@@ -2024,7 +2001,6 @@ impl<'a> Checker<'a> {
                                 &case.attrs,
                                 ATTRIBUTE_TARGET_CLASS_CONSTANT,
                                 "class constant",
-                                &fqn,
                             );
                         }
                         for cc in &e.consts {
@@ -2033,7 +2009,6 @@ impl<'a> Checker<'a> {
                                 &cc.attrs,
                                 ATTRIBUTE_TARGET_CLASS_CONSTANT,
                                 "class constant",
-                                &fqn,
                             );
                         }
                         // An enum can't declare instance properties at all

@@ -1,1 +1,1 @@
-3:17-3:25 booleanOr.resultUnused L4 test | Unused result of "||" operator.
+3:17-3:25 booleanOr.resultUnused L4 | Unused result of "||" operator.

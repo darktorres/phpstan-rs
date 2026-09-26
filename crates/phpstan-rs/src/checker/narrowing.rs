@@ -1454,12 +1454,7 @@ impl<'a> Checker<'a> {
     /// plumbing change to `report_missing_typehint_findings`). Called
     /// once per declaration, alongside `check_declared_purity_tag`/
     /// `check_declared_param_callable_tags` (`function_decl.rs`).
-    pub(crate) fn check_assert_tag_types(
-        &mut self,
-        sig: Option<&FunctionSig>,
-        span: Span,
-        label: &str,
-    ) {
+    pub(crate) fn check_assert_tag_types(&mut self, sig: Option<&FunctionSig>, span: Span) {
         let Some(sig) = sig else {
             return;
         };
@@ -1469,7 +1464,7 @@ impl<'a> Checker<'a> {
             ("@phpstan-assert-if-false", &sig.assert_if_false),
         ] {
             for info in infos {
-                self.check_one_assert_tag(info, tag_name, sig, span, label);
+                self.check_one_assert_tag(info, tag_name, sig, span);
             }
         }
     }
@@ -1490,7 +1485,6 @@ impl<'a> Checker<'a> {
         tag_name: &str,
         sig: &FunctionSig,
         span: Span,
-        label: &str,
     ) {
         let target_desc = match &info.target {
             AssertTarget::Param(name) => format!("${name}"),
@@ -1498,7 +1492,6 @@ impl<'a> Checker<'a> {
             AssertTarget::ThisProp(prop) => format!("$this->{prop}"),
             AssertTarget::NotFound(name) => {
                 self.report(
-                    label.to_string(),
                     format!("Assert references unknown parameter ${name}."),
                     span,
                     0,
@@ -1508,7 +1501,6 @@ impl<'a> Checker<'a> {
             }
             AssertTarget::Unknown(raw) => {
                 self.report(
-                    label.to_string(),
                     format!("Assert references unknown {raw}."),
                     span,
                     0,
@@ -1521,7 +1513,6 @@ impl<'a> Checker<'a> {
         let class = self.current_class.clone();
         if self.type_node_unresolvable(&info.written_ty, class.as_deref()) {
             self.report(
-                label.to_string(),
                 format!("{subject} contains unresolvable type."),
                 span,
                 2,
@@ -1533,7 +1524,6 @@ impl<'a> Checker<'a> {
         // type itself.
         let explicit_mixed = crate::registry::mentions_mixed(&info.written_ty);
         self.report_missing_typehint_findings(
-            label,
             span,
             |desc| format!("{subject} has no value type specified in {desc}."),
             |class_desc, list| {
@@ -1544,9 +1534,9 @@ impl<'a> Checker<'a> {
             &info.ty,
             explicit_mixed,
         );
-        self.check_type_class_names_exist(&info.ty, &subject, span, label);
-        self.check_type_trait_refs(&info.ty, &subject, span, label, "assert.trait");
-        self.check_type_class_name_case(&info.case_refs, label, span);
+        self.check_type_class_names_exist(&info.ty, &subject, span);
+        self.check_type_trait_refs(&info.ty, &subject, span, "assert.trait");
+        self.check_type_class_name_case(&info.case_refs, span);
 
         let AssertTarget::Param(name) = &info.target else {
             return;
@@ -1563,9 +1553,7 @@ impl<'a> Checker<'a> {
             (is_disjoint, is_super)
         };
         if impossible {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Asserted {negated_prefix}type {} for {target_desc} with type {} can never happen.",
                     info.ty, param.ty
                 ),
@@ -1574,9 +1562,7 @@ impl<'a> Checker<'a> {
                 "assert.impossibleType",
             );
         } else if already_narrowed {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Asserted {negated_prefix}type {} for {target_desc} with type {} does not narrow down the type.",
                     info.ty, param.ty
                 ),

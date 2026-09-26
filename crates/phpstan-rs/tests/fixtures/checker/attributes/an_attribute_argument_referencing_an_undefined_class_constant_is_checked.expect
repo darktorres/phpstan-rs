@@ -1,2 +1,2 @@
-6:45-6:54 missingType.parameter L6 MyAttr::__construct | Method MyAttr::__construct() has parameter $a with no type specified.
-9:22-9:43 classConstant.notFound L0 Foo | access to undefined constant Real::UNDEFINED_CONST
+6:45-6:54 missingType.parameter L6 | Method MyAttr::__construct() has parameter $a with no type specified.
+9:22-9:43 classConstant.notFound L0 | access to undefined constant Real::UNDEFINED_CONST

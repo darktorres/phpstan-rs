@@ -1,1 +1,1 @@
-6:19-6:27 attribute.target L0 C::f | Attribute class PropOnly does not have the method target.
+6:19-6:27 attribute.target L0 | Attribute class PropOnly does not have the method target.

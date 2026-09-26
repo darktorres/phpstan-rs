@@ -36,13 +36,7 @@ impl<'a> Checker<'a> {
     /// type needs different position logic entirely (`Position::Out` when
     /// write access is restricted, `Position::Inv` otherwise, not a
     /// param/return split), see `check_property_variances` below.
-    pub(crate) fn check_variance(
-        &mut self,
-        sig: &FunctionSig,
-        class_name: &str,
-        label: &str,
-        span: Span,
-    ) {
+    pub(crate) fn check_variance(&mut self, sig: &FunctionSig, class_name: &str, span: Span) {
         let Some(info) = self.registry.classes.get(class_name) else {
             return;
         };
@@ -65,7 +59,7 @@ impl<'a> Checker<'a> {
         violations.sort();
         violations.dedup();
         for message in violations {
-            self.report(label.to_string(), message, span, 6, "generics.variance");
+            self.report(message, span, 6, "generics.variance");
         }
     }
 
@@ -126,9 +120,7 @@ impl<'a> Checker<'a> {
             .collect();
         names.sort();
         for name in names {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Variance annotation is only allowed for type parameters of classes and interfaces, but occurs in template type {name} in {kind_word} {label}()."
                 ),
                 span,
@@ -196,7 +188,7 @@ impl<'a> Checker<'a> {
             violations.sort();
             violations.dedup();
             for message in violations {
-                self.report(fqn.to_string(), message, p.span, 6, "generics.variance");
+                self.report(message, p.span, 6, "generics.variance");
             }
         }
         // A promoted constructor property (readonly or
@@ -235,7 +227,7 @@ impl<'a> Checker<'a> {
                 violations.sort();
                 violations.dedup();
                 for message in violations {
-                    self.report(fqn.to_string(), message, param.span, 6, "generics.variance");
+                    self.report(message, param.span, 6, "generics.variance");
                 }
             }
         }

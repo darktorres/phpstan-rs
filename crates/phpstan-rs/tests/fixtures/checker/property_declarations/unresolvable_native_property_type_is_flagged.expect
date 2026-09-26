@@ -1,6 +1,6 @@
-5:32-5:34 property.unresolvableNativeType L0 Impossible | Property Impossible::$a has unresolvable native type.
+5:32-5:34 property.unresolvableNativeType L0 | Property Impossible::$a has unresolvable native type.
     non-ignorable
-7:45-7:62 property.unresolvableNativeType L0 Impossible | Property Impossible::$b has unresolvable native type.
+7:45-7:62 property.unresolvableNativeType L0 | Property Impossible::$b has unresolvable native type.
     non-ignorable
-7:60-7:62 parameter.unresolvableNativeType L0 Impossible::__construct | Parameter $b of Impossible::__construct() has unresolvable native type.
+7:60-7:62 parameter.unresolvableNativeType L0 | Parameter $b of Impossible::__construct() has unresolvable native type.
     non-ignorable

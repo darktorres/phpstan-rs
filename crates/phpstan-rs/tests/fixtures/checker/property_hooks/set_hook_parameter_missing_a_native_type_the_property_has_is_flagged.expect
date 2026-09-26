@@ -1,2 +1,2 @@
-3:31-7:18 propertySetHook.nativeParameterType L0 MissingParamType | Parameter $value of set hook does not have a native type but the property MissingParamType::$w does.
+3:31-7:18 propertySetHook.nativeParameterType L0 | Parameter $value of set hook does not have a native type but the property MissingParamType::$w does.
     non-ignorable

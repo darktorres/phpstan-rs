@@ -1,1 +1,1 @@
-4:22-4:25 argument.type L5 <main> | Parameter #1 $x of function needsInt expects int, 'hello' given.
+4:22-4:25 argument.type L5 | Parameter #1 $x of function needsInt expects int, 'hello' given.

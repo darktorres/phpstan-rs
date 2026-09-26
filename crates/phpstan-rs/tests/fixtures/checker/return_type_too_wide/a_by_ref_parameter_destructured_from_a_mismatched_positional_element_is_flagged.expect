@@ -1,1 +1,1 @@
-3:18-3:20 parameterByRef.type L3 f | by-ref parameter $x expects int, 'not an int' given
+3:18-3:20 parameterByRef.type L3 | by-ref parameter $x expects int, 'not an int' given

@@ -1,2 +1,2 @@
-4:27-4:39 missingType.iterableValue L6 test | Function test() has parameter $other with no value type specified in iterable type array.
+4:27-4:39 missingType.iterableValue L6 | Function test() has parameter $other with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

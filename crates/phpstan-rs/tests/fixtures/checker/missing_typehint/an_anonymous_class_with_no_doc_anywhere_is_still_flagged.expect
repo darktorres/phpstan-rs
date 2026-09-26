@@ -1,4 +1,4 @@
-3:41-3:49 missingType.iterableValue L6 UndocumentedComparator::compare | Method UndocumentedComparator::compare() has parameter $a with no value type specified in iterable type array.
+3:41-3:49 missingType.iterableValue L6 | Method UndocumentedComparator::compare() has parameter $a with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-7:45-7:53 missingType.iterableValue L6 class@anonymous::compare | Method class@anonymous::compare() has parameter $a with no value type specified in iterable type array.
+7:45-7:53 missingType.iterableValue L6 | Method class@anonymous::compare() has parameter $a with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

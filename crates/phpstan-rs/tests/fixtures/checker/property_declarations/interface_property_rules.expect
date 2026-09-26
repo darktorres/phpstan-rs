@@ -1,14 +1,14 @@
-3:28-3:34 property.nonHookedInInterface L0 Shape | Interfaces can only include hooked properties.
+3:28-3:34 property.nonHookedInInterface L0 | Interfaces can only include hooked properties.
     non-ignorable
-4:31-4:47 property.nonPublicInInterface L0 Shape | Interfaces cannot include non-public properties.
+4:31-4:47 property.nonPublicInInterface L0 | Interfaces cannot include non-public properties.
     non-ignorable
-6:37-6:49 property.readOnlyInInterface L0 Shape | Interfaces cannot include readonly hooked properties.
+6:37-6:49 property.readOnlyInInterface L0 | Interfaces cannot include readonly hooked properties.
     non-ignorable
-7:35-7:47 property.hookedStatic L0 Shape | Hooked properties cannot be static.
+7:35-7:47 property.hookedStatic L0 | Hooked properties cannot be static.
     non-ignorable
-8:34-8:47 property.finalInInterface L0 Shape | Interfaces cannot include final properties.
+8:34-8:47 property.finalInInterface L0 | Interfaces cannot include final properties.
     non-ignorable
-9:28-9:47 property.hookBodyInInterface L0 Shape | Interfaces cannot include property hooks with bodies.
+9:28-9:47 property.hookBodyInInterface L0 | Interfaces cannot include property hooks with bodies.
     non-ignorable
-10:28-10:53 property.abstractFinalHook L0 Shape | Property hook cannot be both abstract and final.
+10:28-10:53 property.abstractFinalHook L0 | Property hook cannot be both abstract and final.
     non-ignorable

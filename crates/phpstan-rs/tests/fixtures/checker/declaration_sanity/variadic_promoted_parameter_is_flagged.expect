@@ -1,3 +1,3 @@
-3:45-3:59 property.onlyWritten L4 VarHost | private property VarHost::$a is never read, only written
-3:61-3:80 property.invalidPromoted L0 VarHost::__construct | Promoted property parameter $rest can not be variadic.
+3:45-3:59 property.onlyWritten L4 | private property VarHost::$a is never read, only written
+3:61-3:80 property.invalidPromoted L0 | Promoted property parameter $rest can not be variadic.
     non-ignorable

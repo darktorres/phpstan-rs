@@ -59,7 +59,6 @@ impl<'a> Checker<'a> {
             // is simultaneously flagging as wrong.
             let Some((canonical, info)) = self.registry.lookup_class(&fqn) else {
                 self.report(
-                    label.to_string(),
                     format!("attribute class {fqn} does not exist"),
                     attr.span,
                     0,
@@ -72,10 +71,9 @@ impl<'a> Checker<'a> {
             // real PHPStan's `AttributesCheck`, which runs its identical
             // `ClassNameCheck::checkClassNames` call right here too,
             // immediately after confirming the name resolves.
-            self.check_class_name_case(label, &attr.name, attr.span);
+            self.check_class_name_case(&attr.name, attr.span);
             if info.is_abstract {
                 self.report(
-                    label.to_string(),
                     format!("Attribute class {canonical} is abstract."),
                     attr.span,
                     0,
@@ -91,9 +89,7 @@ impl<'a> Checker<'a> {
             let ctor_sig = self.registry.lookup_method(&canonical, "__construct");
             let Some(ctor_sig) = ctor_sig else {
                 if !attr.args.is_empty() {
-                    self.report(
-                        label.to_string(),
-                        format!(
+                    self.report(format!(
                             "Attribute class {canonical} does not have a constructor and must be instantiated without any parameters."
                         ),
                         attr.span,
@@ -105,7 +101,6 @@ impl<'a> Checker<'a> {
             };
             if ctor_sig.visibility != Visibility::Public {
                 self.report(
-                    label.to_string(),
                     format!("Constructor of attribute class {canonical} is not public."),
                     attr.span,
                     0,
@@ -122,7 +117,6 @@ impl<'a> Checker<'a> {
                 sig: ctor_sig,
                 args: &attr.args,
                 locals: &mut locals,
-                label,
                 defining_class: Some(&canonical),
                 is_builtin: self.registry.is_builtin_class(&canonical),
                 span: attr.span,
@@ -157,7 +151,6 @@ impl<'a> Checker<'a> {
         attrs: &[Attribute],
         required_target: u32,
         target_name: &str,
-        label: &str,
     ) {
         let mut seen_non_repeatable: FxHashSet<String> = FxHashSet::default();
         for attr in attrs {
@@ -167,7 +160,6 @@ impl<'a> Checker<'a> {
             };
             let Some(flags) = info.attribute_targets else {
                 self.report(
-                    label.to_string(),
                     format!(
                         "{} {fqn} is not an Attribute class.",
                         class_type_word(info.kind)
@@ -180,7 +172,6 @@ impl<'a> Checker<'a> {
             };
             if flags & required_target == 0 {
                 self.report(
-                    label.to_string(),
                     format!("Attribute class {fqn} does not have the {target_name} target."),
                     attr.span,
                     0,
@@ -190,9 +181,7 @@ impl<'a> Checker<'a> {
             if flags & ATTRIBUTE_IS_REPEATABLE == 0
                 && !seen_non_repeatable.insert(fqn.to_lowercase())
             {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Attribute class {fqn} is not repeatable but is already present above the {target_name}."
                     ),
                     attr.span,
@@ -209,13 +198,7 @@ impl<'a> Checker<'a> {
                 } else {
                     format!("Attribute class {fqn} is deprecated: {desc}")
                 };
-                self.report(
-                    label.to_string(),
-                    message,
-                    attr.span,
-                    0,
-                    "attribute.deprecated",
-                );
+                self.report(message, attr.span, 0, "attribute.deprecated");
             }
         }
     }
@@ -253,7 +236,6 @@ impl<'a> Checker<'a> {
         {
             self.report_builder(
                 DiagnosticBuilder::new(
-                    label.to_string(),
                     "Attributes on global constants are supported only on PHP 8.5 and later."
                         .to_string(),
                     stmt_span,
@@ -265,7 +247,7 @@ impl<'a> Checker<'a> {
             return;
         }
         self.check_attributes(&first.attrs, label);
-        self.check_attribute_targets(&first.attrs, ATTRIBUTE_TARGET_CONSTANT, "constant", label);
+        self.check_attribute_targets(&first.attrs, ATTRIBUTE_TARGET_CONSTANT, "constant");
     }
 
     /// Mirrors real PHPStan's `NonClassAttributeClassRule` - a
@@ -287,7 +269,6 @@ impl<'a> Checker<'a> {
         fqn: &str,
         kind: ClassKind,
         is_abstract: bool,
-        label: &str,
     ) {
         let Some(attr) = attrs
             .iter()
@@ -298,7 +279,6 @@ impl<'a> Checker<'a> {
         match kind {
             ClassKind::Trait => {
                 self.report(
-                    label.to_string(),
                     "Trait cannot be an Attribute class.".to_string(),
                     attr.span,
                     0,
@@ -308,7 +288,6 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Interface => {
                 self.report(
-                    label.to_string(),
                     "Interface cannot be an Attribute class.".to_string(),
                     attr.span,
                     0,
@@ -318,7 +297,6 @@ impl<'a> Checker<'a> {
             }
             ClassKind::Enum => {
                 self.report(
-                    label.to_string(),
                     "Enum cannot be an Attribute class.".to_string(),
                     attr.span,
                     0,
@@ -330,7 +308,6 @@ impl<'a> Checker<'a> {
         }
         if is_abstract {
             self.report(
-                label.to_string(),
                 format!("Abstract class {fqn} cannot be an Attribute class."),
                 attr.span,
                 0,
@@ -342,7 +319,6 @@ impl<'a> Checker<'a> {
             && ctor.visibility != Visibility::Public
         {
             self.report(
-                label.to_string(),
                 format!("Attribute class {fqn} constructor must be public."),
                 attr.span,
                 0,
@@ -381,9 +357,7 @@ impl<'a> Checker<'a> {
                         .is_some_and(|v| !PhpFeature::DeprecatedAttributeOnTraits.is_available(v))
                     {
                         self.report_builder(
-                            DiagnosticBuilder::new(
-                                label.to_string(),
-                                "Attribute class Deprecated can be used with traits only on PHP 8.5 and later."
+                            DiagnosticBuilder::new("Attribute class Deprecated can be used with traits only on PHP 8.5 and later."
                                     .to_string(),
                                 attr.span,
                                 0,
@@ -394,9 +368,7 @@ impl<'a> Checker<'a> {
                     }
                 } else {
                     self.report_builder(
-                        DiagnosticBuilder::new(
-                            label.to_string(),
-                            format!(
+                        DiagnosticBuilder::new(format!(
                                 "Attribute class Deprecated cannot be used with {type_word} {label}."
                             ),
                             attr.span,
@@ -428,7 +400,6 @@ impl<'a> Checker<'a> {
                 };
                 self.report_builder(
                     DiagnosticBuilder::new(
-                        label.to_string(),
                         format!(
                             "Attribute class AllowDynamicProperties cannot be used with {subject}."
                         ),

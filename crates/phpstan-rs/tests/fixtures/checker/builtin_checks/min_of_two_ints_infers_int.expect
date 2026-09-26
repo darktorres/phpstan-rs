@@ -1,1 +1,1 @@
-5:29-5:40 argument.type L5 f | Parameter #1 $x of function needsString expects string, int given.
+5:29-5:40 argument.type L5 | Parameter #1 $x of function needsString expects string, int given.

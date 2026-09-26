@@ -1,1 +1,1 @@
-9:17-9:34 method.notFound L0 f | call to undefined method ImageInterface5::destroy()
+9:17-9:34 method.notFound L0 | call to undefined method ImageInterface5::destroy()

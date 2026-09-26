@@ -1,4 +1,4 @@
-5:13-7:14 class.abstractMethodNotImplemented L0 C | class C does not implement abstract method(s): doStuff
+5:13-7:14 class.abstractMethodNotImplemented L0 | class C does not implement abstract method(s): doStuff
     tip: either implement every method listed above, or declare this class itself abstract
-6:17-6:51 method.nameCase L4 C | Method C::DoStuff() overrides Iface::doStuff() with different letter casing
+6:17-6:51 method.nameCase L4 | Method C::DoStuff() overrides Iface::doStuff() with different letter casing
     fix: Use doStuff => "doStuff"

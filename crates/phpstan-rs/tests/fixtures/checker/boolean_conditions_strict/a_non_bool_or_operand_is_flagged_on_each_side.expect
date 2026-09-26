@@ -1,2 +1,2 @@
-3:24-3:26 booleanOr.leftNotBoolean L5 f | Only booleans are allowed in ||, int given on the left side.
-3:30-3:32 booleanOr.rightNotBoolean L5 f | Only booleans are allowed in ||, int given on the right side.
+3:24-3:26 booleanOr.leftNotBoolean L5 | Only booleans are allowed in ||, int given on the left side.
+3:30-3:32 booleanOr.rightNotBoolean L5 | Only booleans are allowed in ||, int given on the right side.

@@ -37,7 +37,6 @@ impl<'a> Checker<'a> {
         &mut self,
         throws: Option<&Type>,
         subject: &str,
-        label: &str,
     ) {
         if !self.registry.check_missing_checked_exceptions {
             return;
@@ -54,7 +53,6 @@ impl<'a> Checker<'a> {
                 continue;
             }
             self.report(
-                label.to_string(),
                 format!("{subject} throws {class} but it's not covered by any @throws tag."),
                 span,
                 2,

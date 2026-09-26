@@ -1,2 +1,2 @@
-3:45-3:59 property.invalidPromoted L0 Hooked::$n | Promoted properties can be in constructor only.
+3:45-3:59 property.invalidPromoted L0 | Promoted properties can be in constructor only.
     non-ignorable

@@ -1,1 +1,1 @@
-7:13-7:63 interface.extendsInternalInterface L0 Other\App\IChild | Interface Other\\App\\IChild extends internal interface Vendor\\Internal\\IBase.
+7:13-7:63 interface.extendsInternalInterface L0 | Interface Other\\App\\IChild extends internal interface Vendor\\Internal\\IBase.

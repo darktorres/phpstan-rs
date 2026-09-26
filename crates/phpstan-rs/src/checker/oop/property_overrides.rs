@@ -94,9 +94,7 @@ impl<'a> Checker<'a> {
             && !PhpFeature::OverrideAttributeOnProperty.is_available(version)
         {
             self.report_builder(
-                DiagnosticBuilder::new(
-                    fqn.to_string(),
-                    "Attribute class Override can be used with properties only on PHP 8.5 and later."
+                DiagnosticBuilder::new("Attribute class Override can be used with properties only on PHP 8.5 and later."
                         .to_string(),
                     span,
                     0,
@@ -114,9 +112,7 @@ impl<'a> Checker<'a> {
             .is_some_and(|(_, sig)| sig.visibility != Visibility::Private);
         if !has_real_ancestor {
             self.report_builder(
-                DiagnosticBuilder::new(
-                    fqn.to_string(),
-                    format!(
+                DiagnosticBuilder::new(format!(
                         "Property {fqn}::${name} has #[\\Override] attribute, but no matching parent property exists"
                     ),
                     span,
@@ -153,11 +149,10 @@ impl<'a> Checker<'a> {
             let message =
                 format!("Property {fqn}::${name} overrides {verb} property {ancestor}::${name}.");
             if is_by_phpdoc {
-                self.report(fqn.to_string(), message, span, 0, identifier);
+                self.report(message, span, 0, identifier);
             } else {
                 self.report_builder(
-                    DiagnosticBuilder::new(fqn.to_string(), message, span, 0, identifier)
-                        .non_ignorable(),
+                    DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable(),
                 );
             }
         }
@@ -173,9 +168,7 @@ impl<'a> Checker<'a> {
             return;
         }
         if ancestor_sig.is_static && !own_sig.is_static {
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "Non-static property {fqn}::${name} overrides static property {ancestor_owner}::${name}"
                 ),
                 span,
@@ -183,9 +176,7 @@ impl<'a> Checker<'a> {
                 "property.nonStatic",
             );
         } else if !ancestor_sig.is_static && own_sig.is_static {
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "Static property {fqn}::${name} overrides non-static property {ancestor_owner}::${name}"
                 ),
                 span,
@@ -194,9 +185,7 @@ impl<'a> Checker<'a> {
             );
         }
         if ancestor_sig.is_readonly && !own_sig.is_readonly {
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "Readwrite property {fqn}::${name} overrides readonly property {ancestor_owner}::${name}"
                 ),
                 span,
@@ -204,9 +193,7 @@ impl<'a> Checker<'a> {
                 "property.readWrite",
             );
         } else if !ancestor_sig.is_readonly && own_sig.is_readonly {
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "Readonly property {fqn}::${name} overrides readwrite property {ancestor_owner}::${name}"
                 ),
                 span,
@@ -222,9 +209,7 @@ impl<'a> Checker<'a> {
             Visibility::Private => false,
         };
         if narrows_visibility {
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "{fqn}::${name} overriding {} property {ancestor_owner}::${name} must not reduce visibility",
                     visibility_word(&ancestor_sig.visibility)
                 ),
@@ -276,9 +261,7 @@ impl<'a> Checker<'a> {
             if own_sig.has_native_type {
                 let own_ty = self.resolve_pseudo(&own_sig.ty_native, fqn);
                 self.report_builder(
-                    DiagnosticBuilder::new(
-                        fqn.to_string(),
-                        format!(
+                    DiagnosticBuilder::new(format!(
                             "Property {fqn}::${name} ({own_ty}) overriding property {ancestor_owner}::${name} should not have a native type."
                         ),
                         span,
@@ -293,9 +276,7 @@ impl<'a> Checker<'a> {
         let ancestor_ty = self.resolve_pseudo(&ancestor_sig.ty_native, ancestor_owner);
         if !own_sig.has_native_type {
             self.report_builder(
-                DiagnosticBuilder::new(
-                    fqn.to_string(),
-                    format!(
+                DiagnosticBuilder::new(format!(
                         "Property {fqn}::${name} overriding property {ancestor_owner}::${name} ({ancestor_ty}) should also have native type {ancestor_ty}."
                     ),
                     span,
@@ -313,9 +294,7 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report_builder(
-            DiagnosticBuilder::new(
-                fqn.to_string(),
-                format!(
+            DiagnosticBuilder::new(format!(
                     "Type {own_ty} of property {fqn}::${name} is not the same as type {ancestor_ty} of overridden property {ancestor_owner}::${name}."
                 ),
                 span,
@@ -347,9 +326,7 @@ impl<'a> Checker<'a> {
         let ancestor_readable = !ancestor_sig.is_virtual || ancestor_sig.has_get_hook;
         let own_readable = !own_sig.is_virtual || own_sig.has_get_hook;
         if ancestor_readable && !own_readable {
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "Property {fqn}::${name} does not have `get` hook and is not readable, but is required to be readable by property {ancestor_owner}::${name}."
                 ),
                 span,
@@ -360,9 +337,7 @@ impl<'a> Checker<'a> {
         let ancestor_writable = !ancestor_sig.is_virtual || ancestor_sig.has_set_hook;
         let own_writable = !own_sig.is_virtual || own_sig.has_set_hook;
         if ancestor_writable && !own_writable {
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "Property {fqn}::${name} does not have `set` hook and is not writable, but is required to be writable by property {ancestor_owner}::${name}."
                 ),
                 span,
@@ -375,9 +350,7 @@ impl<'a> Checker<'a> {
         // real PHP's own rule only fires on that exact overlap.
         if own_sig.is_abstract && !ancestor_sig.is_abstract {
             if own_sig.has_get_hook && ancestor_sig.has_get_hook {
-                self.report(
-                    fqn.to_string(),
-                    format!(
+                self.report(format!(
                         "Cannot make non abstract method {ancestor_owner}::${name}::get() abstract in class {fqn}"
                     ),
                     span,
@@ -386,9 +359,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if own_sig.has_set_hook && ancestor_sig.has_set_hook {
-                self.report(
-                    fqn.to_string(),
-                    format!(
+                self.report(format!(
                         "Cannot make non abstract method {ancestor_owner}::${name}::set() abstract in class {fqn}"
                     ),
                     span,

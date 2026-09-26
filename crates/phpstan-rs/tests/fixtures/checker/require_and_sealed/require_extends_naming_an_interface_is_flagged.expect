@@ -1,2 +1,2 @@
-4:13-4:23 requireExtends.interface L0 T | PHPDoc tag @phpstan-require-extends cannot contain an interface SomeInterface, expected a class.
+4:13-4:23 requireExtends.interface L0 | PHPDoc tag @phpstan-require-extends cannot contain an interface SomeInterface, expected a class.
     tip: If you meant an interface, use @phpstan-require-implements instead.

@@ -1,1 +1,1 @@
-5:24-5:41 instanceof.alwaysTrue L4 handle | Instanceof between Cat and Cat will always evaluate to true.
+5:24-5:41 instanceof.alwaysTrue L4 | Instanceof between Cat and Cat will always evaluate to true.

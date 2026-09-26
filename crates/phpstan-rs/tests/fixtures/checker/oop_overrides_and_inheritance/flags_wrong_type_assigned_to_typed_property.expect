@@ -1,1 +1,1 @@
-4:27-4:41 assign.propertyType L3 <main> | Box::$value expects int, 'not a number' given
+4:27-4:41 assign.propertyType L3 | Box::$value expects int, 'not a number' given

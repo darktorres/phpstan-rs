@@ -1,3 +1,3 @@
-2:13-4:14 missingType.callable L6 test | Function test() return type has no signature specified for callable.
-2:27-2:39 missingType.callable L6 test | Function test() has parameter $cb with no signature specified for callable.
-2:41-2:53 missingType.callable L6 test | Function test() has parameter $fn with no signature specified for Closure.
+2:13-4:14 missingType.callable L6 | Function test() return type has no signature specified for callable.
+2:27-2:39 missingType.callable L6 | Function test() has parameter $cb with no signature specified for callable.
+2:41-2:53 missingType.callable L6 | Function test() has parameter $fn with no signature specified for Closure.

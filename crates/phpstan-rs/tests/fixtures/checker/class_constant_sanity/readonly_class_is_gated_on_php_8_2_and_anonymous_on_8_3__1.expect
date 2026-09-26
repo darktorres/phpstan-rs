@@ -1,2 +1,2 @@
-4:20-4:41 classConstant.nativeTypeNotSupported L0 make | Anonymous readonly classes are supported only on PHP 8.3 and later.
+4:20-4:41 classConstant.nativeTypeNotSupported L0 | Anonymous readonly classes are supported only on PHP 8.3 and later.
     non-ignorable

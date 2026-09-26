@@ -1,1 +1,1 @@
-4:52-4:78 property.notFound L2 test (closure) | access to undefined property Empty4841::$totallyUndefinedVar
+4:52-4:78 property.notFound L2 | access to undefined property Empty4841::$totallyUndefinedVar

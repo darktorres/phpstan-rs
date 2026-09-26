@@ -1,2 +1,2 @@
-a.php:1:12-1:15 enum.duplicate L0 Foo | Enum Foo declared multiple times:\n- a.php:1\n- b.php:1
+a.php:1:12-1:15 enum.duplicate L0 | Enum Foo declared multiple times:\n- a.php:1\n- b.php:1
     non-ignorable

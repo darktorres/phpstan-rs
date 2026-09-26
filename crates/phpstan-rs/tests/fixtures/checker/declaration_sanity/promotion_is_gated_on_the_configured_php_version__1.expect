@@ -1,3 +1,3 @@
-3:41-3:55 property.onlyWritten L4 GateHost | private property GateHost::$a is never read, only written
-3:57-3:76 property.invalidPromoted L0 GateHost::__construct | Final promoted properties are supported only on PHP 8.5 and later.
+3:41-3:55 property.onlyWritten L4 | private property GateHost::$a is never read, only written
+3:57-3:76 property.invalidPromoted L0 | Final promoted properties are supported only on PHP 8.5 and later.
     non-ignorable

@@ -1,11 +1,11 @@
-7:21-7:33 missingNativeType.return L0 Base::untypedParam | Method Base::untypedParam() return type can be declared natively as int.
-7:34-7:36 missingNativeType.parameter L0 Base::untypedParam | Method Base::untypedParam() parameter $x can be declared natively as int.
-8:12-8:63 missingType.iterableValue L6 Base::typedParam | Method Base::typedParam() return type has no value type specified in iterable type array.
+7:21-7:33 missingNativeType.return L0 | Method Base::untypedParam() return type can be declared natively as int.
+7:34-7:36 missingNativeType.parameter L0 | Method Base::untypedParam() parameter $x can be declared natively as int.
+8:12-8:63 missingType.iterableValue L6 | Method Base::typedParam() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-8:32-8:40 missingType.iterableValue L6 Base::typedParam | Method Base::typedParam() has parameter $x with no value type specified in iterable type array.
+8:32-8:40 missingType.iterableValue L6 | Method Base::typedParam() has parameter $x with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-12:21-12:36 missingNativeType.return L0 Base::overriddenTyped | Method Base::overriddenTyped() return type can be declared natively as string.
-14:21-14:27 missingNativeType.return L0 Base::fluent | Method Base::fluent() return type can be declared natively as static.
-22:12-22:57 missingType.iterableValue L6 Child::typedParam | Method Child::typedParam() return type has no value type specified in iterable type array.
+12:21-12:36 missingNativeType.return L0 | Method Base::overriddenTyped() return type can be declared natively as string.
+14:21-14:27 missingNativeType.return L0 | Method Base::fluent() return type can be declared natively as static.
+22:12-22:57 missingType.iterableValue L6 | Method Child::typedParam() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-22:32-22:34 missingNativeType.parameter L0 Child::typedParam | Method Child::typedParam() parameter $x can be declared natively as array.
+22:32-22:34 missingNativeType.parameter L0 | Method Child::typedParam() parameter $x can be declared natively as array.

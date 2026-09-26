@@ -67,7 +67,6 @@ impl<'a> Checker<'a> {
         is_private: bool,
         subject: &str,
         span: Span,
-        label: &str,
     ) {
         // Only acts when the declared type is literally a `Union`; any
         // other single declared type (a bare class, a `list<int>`-shaped
@@ -127,7 +126,6 @@ impl<'a> Checker<'a> {
                 continue;
             }
             self.report(
-                label.to_string(),
                 format!(
                     "{subject} never returns {member} so it can be removed from the return type."
                 ),

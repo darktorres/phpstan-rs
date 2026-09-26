@@ -1,1 +1,1 @@
-11:29-11:32 argument.type L5 test2 | Parameter #1 $fn of function needsShaped expects Closure(int): string, callable given.
+11:29-11:32 argument.type L5 | Parameter #1 $fn of function needsShaped expects Closure(int): string, callable given.

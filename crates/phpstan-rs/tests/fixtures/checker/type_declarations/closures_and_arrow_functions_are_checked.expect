@@ -1,6 +1,6 @@
-2:18-2:46 nullableType.mixed L0 <main> | Type mixed cannot be part of a nullable type declaration.
+2:18-2:46 nullableType.mixed L0 | Type mixed cannot be part of a nullable type declaration.
     non-ignorable
-2:21-2:28 unionType.duplicate L0 <main> | Duplicate type int is redundant.
+2:21-2:28 unionType.duplicate L0 | Duplicate type int is redundant.
     non-ignorable
-3:28-3:32 parameter.void L0 <main> | void cannot be used as a parameter type.
+3:28-3:32 parameter.void L0 | void cannot be used as a parameter type.
     non-ignorable

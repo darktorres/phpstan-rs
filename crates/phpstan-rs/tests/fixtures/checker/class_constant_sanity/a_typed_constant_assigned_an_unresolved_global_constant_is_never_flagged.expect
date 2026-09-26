@@ -1,2 +1,2 @@
-3:35-3:72 classConstant.unused L4 Foo | private constant Foo::OPTIONS is unused
+3:35-3:72 classConstant.unused L4 | private constant Foo::OPTIONS is unused
     fix: Remove constant OPTIONS => ""

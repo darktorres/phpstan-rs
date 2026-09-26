@@ -1,1 +1,1 @@
-4:13-4:42 generics.notGeneric L6 Derived | PHPDoc tag @extends contains generic type Base<int, string, bool> but class Base is not generic.
+4:13-4:42 generics.notGeneric L6 | PHPDoc tag @extends contains generic type Base<int, string, bool> but class Base is not generic.

@@ -2,9 +2,8 @@ use super::super::*;
 use crate::diagnostic::DiagnosticBuilder;
 use syntax::token::{Position, Span};
 
-pub(super) fn diag(location: &str, message: &str) -> Diagnostic {
+pub(super) fn diag(message: &str) -> Diagnostic {
     DiagnosticBuilder::new(
-        location.to_string(),
         message.to_string(),
         Span {
             start: Position { line: 1, col: 1 },
@@ -24,9 +23,8 @@ pub(super) fn temp_path(label: &str) -> PathBuf {
     ))
 }
 
-pub(super) fn diag_with(location: &str, message: &str, identifier: &str) -> Diagnostic {
+pub(super) fn diag_with(message: &str, identifier: &str) -> Diagnostic {
     DiagnosticBuilder::new(
-        location.to_string(),
         message.to_string(),
         Span {
             start: Position { line: 1, col: 1 },

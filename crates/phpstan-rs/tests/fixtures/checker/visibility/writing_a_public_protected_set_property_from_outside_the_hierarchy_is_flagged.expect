@@ -1,1 +1,1 @@
-6:17-6:22 assign.propertyProtectedSet L0 test | Assign to protected(set) property Foo::$x.
+6:17-6:22 assign.propertyProtectedSet L0 | Assign to protected(set) property Foo::$x.

@@ -84,14 +84,12 @@ pub(crate) fn check_duplicate_function_declarations(
                     continue;
                 }
                 diagnostics.push(Diagnostic {
-                    location: name.clone(),
                     message: message.clone(),
                     span: s.span,
                     level: 0,
                     identifier: "function.duplicate".to_string(),
                     tip: None,
                     non_ignorable: true,
-                    metadata: rustc_hash::FxHashMap::default(),
                     fix: None,
                 });
             }

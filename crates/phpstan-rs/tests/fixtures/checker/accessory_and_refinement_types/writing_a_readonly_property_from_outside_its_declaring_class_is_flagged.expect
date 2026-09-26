@@ -1,1 +1,1 @@
-5:56-5:61 assign.propertyProtectedSet L0 mutateReadonly | Assign to protected(set) property Point1::$x.
+5:56-5:61 assign.propertyProtectedSet L0 | Assign to protected(set) property Point1::$x.

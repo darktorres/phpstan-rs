@@ -1,1 +1,1 @@
-4:24-4:33 nullCoalesce.offset L0 test | Offset 'key' on array{key: int} on left side of ?? always exists and is not nullable.
+4:24-4:33 nullCoalesce.offset L0 | Offset 'key' on array{key: int} on left side of ?? always exists and is not nullable.

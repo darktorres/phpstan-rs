@@ -41,8 +41,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_current_time(&mut self, message: String, span: Span, id: &str, label: &str) {
-        self.report(label.to_string(), message, span, 0, id);
+    fn report_current_time(&mut self, message: String, span: Span, id: &str) {
+        self.report(message, span, 0, id);
     }
 
     /// `function` is the resolved, lowercase function name.
@@ -52,7 +52,6 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         if args.iter().any(|a| a.spread || a.name.is_some()) {
             return;
@@ -63,7 +62,6 @@ impl<'a> Checker<'a> {
                     format!("Calling {function}() reads the current time; {CLOCK_TIP}."),
                     span,
                     "currentTime.time",
-                    label,
                 );
                 return;
             }
@@ -75,7 +73,6 @@ impl<'a> Checker<'a> {
                         format!("Calling {function}() with fewer than 6 arguments takes the missing components from the current time; {CLOCK_TIP}."),
                         span,
                         "currentTime.defaultTimestamp",
-                        label,
                     );
                 }
                 return;
@@ -88,7 +85,6 @@ impl<'a> Checker<'a> {
                         format!("Calling strtotime() with {relative} and no base timestamp reads the current time; {CLOCK_TIP}."),
                         span,
                         "currentTime.relative",
-                        label,
                     );
                 }
                 return;
@@ -99,13 +95,12 @@ impl<'a> Checker<'a> {
                         format!("Calling {function}() with {relative} reads the current time; {CLOCK_TIP}."),
                         span,
                         "currentTime.relative",
-                        label,
                     );
                 }
                 return;
             }
             "date_create_from_format" | "date_create_immutable_from_format" => {
-                self.check_create_from_format(args.first(), locals, span, label);
+                self.check_create_from_format(args.first(), locals, span);
                 return;
             }
             _ => return,
@@ -121,18 +116,11 @@ impl<'a> Checker<'a> {
                 ),
                 span,
                 "currentTime.defaultTimestamp",
-                label,
             );
         }
     }
 
-    fn check_create_from_format(
-        &mut self,
-        format: Option<&Arg>,
-        locals: &Locals,
-        span: Span,
-        label: &str,
-    ) {
+    fn check_create_from_format(&mut self, format: Option<&Arg>, locals: &Locals, span: Span) {
         let Some(format) = format else {
             return;
         };
@@ -157,12 +145,11 @@ impl<'a> Checker<'a> {
                 format!("createFromFormat() with format \"{text}\" takes every field it doesn't parse from the current time; start the format with ! or end it with |."),
                 span,
                 "currentTime.createFromFormat",
-                label,
             );
         }
     }
 
-    pub(crate) fn check_current_time_expression(&mut self, e: &Expr, locals: &Locals, label: &str) {
+    pub(crate) fn check_current_time_expression(&mut self, e: &Expr, locals: &Locals) {
         match &e.kind {
             ExprKind::New(class, args) => {
                 let ExprKind::Name(name) = &class.kind else {
@@ -181,7 +168,6 @@ impl<'a> Checker<'a> {
                         format!("Instantiating {class} with {relative} reads the current time; {CLOCK_TIP}."),
                         e.span,
                         "currentTime.relative",
-                        label,
                     );
                 }
             }
@@ -192,7 +178,7 @@ impl<'a> Checker<'a> {
                     return;
                 };
                 if self.registry.is_subclass_of(&class, "DateTimeInterface") {
-                    self.check_create_from_format(args.first(), locals, e.span, label);
+                    self.check_create_from_format(args.first(), locals, e.span);
                 }
             }
             ExprKind::Index(base, Some(key)) => {
@@ -204,7 +190,6 @@ impl<'a> Checker<'a> {
                         format!("Reading $_SERVER['{key}'] depends on the current request's time; {CLOCK_TIP}."),
                         e.span,
                         "currentTime.requestTime",
-                        label,
                     );
                 }
             }

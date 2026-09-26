@@ -1,1 +1,1 @@
-3:13-3:31 restrictedSymbol.class L0 <main> | Importing restricted class Vendor\\Banned: do not use Banned
+3:13-3:31 restrictedSymbol.class L0 | Importing restricted class Vendor\\Banned: do not use Banned

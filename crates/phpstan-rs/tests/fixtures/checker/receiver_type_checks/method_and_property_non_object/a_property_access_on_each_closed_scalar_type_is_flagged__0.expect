@@ -1,2 +1,2 @@
-2:21-4:22 missingType.return L6 f | Function f() has no return type specified.
-3:30-3:37 property.nonObject L0 f | access to property $foo on a non-object type string
+2:21-4:22 missingType.return L6 | Function f() has no return type specified.
+3:30-3:37 property.nonObject L0 | access to property $foo on a non-object type string

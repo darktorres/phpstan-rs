@@ -1,1 +1,1 @@
-5:24-6:18 catch.notThrowable L0 test | cannot catch FooCatch: it does not implement Throwable
+5:24-6:18 catch.notThrowable L0 | cannot catch FooCatch: it does not implement Throwable

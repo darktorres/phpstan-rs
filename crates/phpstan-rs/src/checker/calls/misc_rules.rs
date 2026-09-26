@@ -27,7 +27,7 @@ impl<'a> Checker<'a> {
     /// other cast target yet; a `(void)`-cast `NoDiscard` call is simply
     /// not flagged at all, the safe (false-negative, never false-
     /// positive) direction to skip in.
-    pub(crate) fn check_no_discard_statement(&mut self, e: &Expr, locals: &Locals, label: &str) {
+    pub(crate) fn check_no_discard_statement(&mut self, e: &Expr, locals: &Locals) {
         let (sig, callee_desc, identifier) = match &e.kind {
             ExprKind::Call(callee, _) => {
                 let ExprKind::Name(name) = &callee.kind else {
@@ -87,7 +87,6 @@ impl<'a> Checker<'a> {
         }
         self.report_builder(
             DiagnosticBuilder::new(
-                label.to_string(),
                 format!("Call to {callee_desc} on a separate line discards its return value."),
                 e.span,
                 0,
@@ -104,7 +103,7 @@ impl<'a> Checker<'a> {
     /// `random_int(10, 1)` throws an unconditional `ValueError` at call
     /// time whenever `$min` is greater than `$max` - `$min == $max` is
     /// fine (a degenerate but legal single-value range).
-    pub(crate) fn check_random_int_call(&mut self, args: &[Arg], locals: &Locals, label: &str) {
+    pub(crate) fn check_random_int_call(&mut self, args: &[Arg], locals: &Locals) {
         if args.len() < 2 {
             return;
         }
@@ -113,9 +112,7 @@ impl<'a> Checker<'a> {
         if let (Type::IntLiteral(min), Type::IntLiteral(max)) = (min_ty, max_ty)
             && min > max
         {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "random_int(): parameter #1 ($min = {min}) must be less than or equal to parameter #2 ($max = {max})"
                 ),
                 args[0].value.span,
@@ -135,7 +132,7 @@ impl<'a> Checker<'a> {
     /// 8.0: with no configured version, this project has nothing to
     /// check against, matching every other `PhpFeature`-gated rule's
     /// "unset means unconfigured, stay silent" convention.
-    pub(crate) fn check_define_third_argument(&mut self, args: &[Arg], span: Span, label: &str) {
+    pub(crate) fn check_define_third_argument(&mut self, args: &[Arg], span: Span) {
         let Some(version) = self.registry.php_version else {
             return;
         };
@@ -145,9 +142,7 @@ impl<'a> Checker<'a> {
         if args.len() < 3 {
             return;
         }
-        self.report(
-            label.to_string(),
-            "Argument #3 ($case_insensitive) is ignored since declaration of case-insensitive constants is no longer supported.".to_string(),
+        self.report("Argument #3 ($case_insensitive) is ignored since declaration of case-insensitive constants is no longer supported.".to_string(),
             span,
             0,
             "argument.unused",

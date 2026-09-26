@@ -1,2 +1,2 @@
-3:13-3:44 class.abstractMethodNotImplemented L0 Circle2 | class Circle2 does not implement abstract method(s): area
+3:13-3:44 class.abstractMethodNotImplemented L0 | class Circle2 does not implement abstract method(s): area
     tip: either implement every method listed above, or declare this class itself abstract

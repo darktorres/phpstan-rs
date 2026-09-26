@@ -1,1 +1,1 @@
-4:45-4:60 staticClassAccess.privateMethod L0 Service::run | unsafe call to private method Service::other() through static::
+4:45-4:60 staticClassAccess.privateMethod L0 | unsafe call to private method Service::other() through static::

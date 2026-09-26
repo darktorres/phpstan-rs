@@ -1,1 +1,1 @@
-5:27-5:34 argument.type L5 test | Parameter #1 $x of function needsFour expects 4, 5 given.
+5:27-5:34 argument.type L5 | Parameter #1 $x of function needsFour expects 4, 5 given.

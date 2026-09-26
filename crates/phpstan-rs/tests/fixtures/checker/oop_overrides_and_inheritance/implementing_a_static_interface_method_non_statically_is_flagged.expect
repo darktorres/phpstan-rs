@@ -1,2 +1,2 @@
-3:44-3:74 method.nonStatic L0 Impl | Non-static method Impl::foo() overrides static method HasFoo::foo()
+3:44-3:74 method.nonStatic L0 | Non-static method Impl::foo() overrides static method HasFoo::foo()
     non-ignorable

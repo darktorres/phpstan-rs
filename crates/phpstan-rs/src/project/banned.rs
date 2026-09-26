@@ -55,7 +55,6 @@ impl<'a> Walker<'a> {
     fn ban(&mut self, construct: BannedConstruct, span: Span, what: String) {
         if self.constructs.contains(&construct) {
             let mut builder = DiagnosticBuilder::new(
-                "<main>".to_string(),
                 format!("{what} is banned by this project's configuration."),
                 span,
                 0,
@@ -73,7 +72,6 @@ impl<'a> Walker<'a> {
             if type_mentions(ty, name) {
                 self.out.push(
                     DiagnosticBuilder::new(
-                        "<main>".to_string(),
                         format!("{subject} uses banned type {name}."),
                         span,
                         0,
@@ -350,7 +348,6 @@ impl<'a> Walker<'a> {
             ExprKind::Literal(Literal::Float(f)) if self.float_banned() => {
                 self.out.push(
                     DiagnosticBuilder::new(
-                        "<main>".to_string(),
                         format!("Float literal {f} uses banned type float."),
                         e.span,
                         0,
@@ -362,7 +359,6 @@ impl<'a> Walker<'a> {
             ExprKind::Cast(cast, _) if cast.kind() == CastKind::Float && self.float_banned() => {
                 self.out.push(
                     DiagnosticBuilder::new(
-                        "<main>".to_string(),
                         "A (float) cast uses banned type float.".to_string(),
                         e.span,
                         0,

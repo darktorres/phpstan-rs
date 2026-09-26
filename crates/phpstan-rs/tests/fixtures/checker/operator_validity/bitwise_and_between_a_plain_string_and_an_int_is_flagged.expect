@@ -1,2 +1,2 @@
-3:17-3:19 binaryOp.invalid L2 test | Binary operation "&" between string and 5 results in an error.
-3:17-3:23 expr.resultUnused L4 test | Expression "$s & 5" on a separate line does not do anything.
+3:17-3:19 binaryOp.invalid L2 | Binary operation "&" between string and 5 results in an error.
+3:17-3:23 expr.resultUnused L4 | Expression "$s & 5" on a separate line does not do anything.

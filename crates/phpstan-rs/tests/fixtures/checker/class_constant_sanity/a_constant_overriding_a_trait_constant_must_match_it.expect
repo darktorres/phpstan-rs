@@ -1,14 +1,14 @@
-13:33-13:36 classConstant.visibility L0 Host | Protected constant Host::VIS overriding public constant Outer::VIS should also be public.
+13:33-13:36 classConstant.visibility L0 | Protected constant Host::VIS overriding public constant Outer::VIS should also be public.
     non-ignorable
-14:30-14:33 classConstant.nonFinal L0 Host | Non-final constant Host::FIN overriding final constant Outer::FIN should also be final.
+14:30-14:33 classConstant.nonFinal L0 | Non-final constant Host::FIN overriding final constant Outer::FIN should also be final.
     non-ignorable
-15:30-15:35 classConstant.missingNativeType L0 Host | Constant Host::TYPED overriding constant Outer::TYPED (int) should also have native type int.
+15:30-15:35 classConstant.missingNativeType L0 | Constant Host::TYPED overriding constant Outer::TYPED (int) should also have native type int.
     non-ignorable
-16:30-16:35 classConstant.value L0 Host | Constant Host::VALUE with value 2 overriding constant Outer::VALUE with different value 1 should have the same value.
+16:30-16:35 classConstant.value L0 | Constant Host::VALUE with value 2 overriding constant Outer::VALUE with different value 1 should have the same value.
     non-ignorable
-18:36-18:40 classConstant.final L0 Host | Final constant Host::DEEP overriding non-final constant Inner::DEEP should also be non-final.
+18:36-18:40 classConstant.final L0 | Final constant Host::DEEP overriding non-final constant Inner::DEEP should also be non-final.
     non-ignorable
-18:36-18:40 classConstant.final L0 Host | Final constant Host::DEEP overriding non-final constant Outer::DEEP should also be non-final.
+18:36-18:40 classConstant.final L0 | Final constant Host::DEEP overriding non-final constant Outer::DEEP should also be non-final.
     non-ignorable
-18:36-18:40 classConstant.value L0 Host | Constant Host::DEEP with value 5 overriding constant Outer::DEEP with different value 1 should have the same value.
+18:36-18:40 classConstant.value L0 | Constant Host::DEEP with value 5 overriding constant Outer::DEEP with different value 1 should have the same value.
     non-ignorable

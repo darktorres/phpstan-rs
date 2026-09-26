@@ -39,9 +39,7 @@ impl<'a> Checker<'a> {
             if body_has_assertion(&f.body) {
                 continue;
             }
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "Test {fqn}::{}() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.",
                     f.name
                 ),
@@ -63,13 +61,7 @@ impl<'a> Checker<'a> {
     /// here to just the two real test-body functions (`describe`/
     /// `beforeEach`/etc. are structural grouping/hooks, never a test
     /// body of their own).
-    pub(crate) fn check_pest_risky_test(
-        &mut self,
-        name: &str,
-        closure: &Expr,
-        span: Span,
-        label: &str,
-    ) {
+    pub(crate) fn check_pest_risky_test(&mut self, name: &str, closure: &Expr, span: Span) {
         if name != "it" && name != "test" {
             return;
         }
@@ -81,9 +73,7 @@ impl<'a> Checker<'a> {
         if has_assertion {
             return;
         }
-        self.report(
-            label.to_string(),
-            "Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.".to_string(),
+        self.report("Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.".to_string(),
             span,
             4,
             "test.risky",

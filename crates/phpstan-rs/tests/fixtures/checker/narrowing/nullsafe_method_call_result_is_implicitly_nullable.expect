@@ -1,1 +1,1 @@
-5:57-5:72 argument.type L5 test | Parameter #1 $x of function needsFoo expects Foo, Foo|null given.
+5:57-5:72 argument.type L5 | Parameter #1 $x of function needsFoo expects Foo, Foo|null given.

@@ -1,2 +1,2 @@
-3:46-3:75 missingType.iterableValue L6 HasPageAssets::pageAssets | Method HasPageAssets::pageAssets() return type has no value type specified in iterable type array.
+3:46-3:75 missingType.iterableValue L6 | Method HasPageAssets::pageAssets() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

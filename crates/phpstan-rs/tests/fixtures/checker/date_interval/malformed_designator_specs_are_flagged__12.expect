@@ -1,1 +1,1 @@
-1:7-1:32 new.dateInterval L5 <main> | Instantiating DateInterval with P1W2M produces an error: Unknown or bad format (P1W2M)
+1:7-1:32 new.dateInterval L5 | Instantiating DateInterval with P1W2M produces an error: Unknown or bad format (P1W2M)

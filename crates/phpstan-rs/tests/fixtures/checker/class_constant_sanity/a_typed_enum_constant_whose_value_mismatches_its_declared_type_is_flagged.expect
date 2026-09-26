@@ -1,1 +1,1 @@
-4:27-4:45 classConstant.value L0 Status | constant Status::BAD (int) does not accept value 'not an int'
+4:27-4:45 classConstant.value L0 | constant Status::BAD (int) does not accept value 'not an int'

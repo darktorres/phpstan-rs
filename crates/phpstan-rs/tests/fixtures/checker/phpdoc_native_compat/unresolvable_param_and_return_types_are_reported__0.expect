@@ -1,14 +1,14 @@
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param for parameter $a contains unresolvable type.
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param for parameter $b contains unresolvable type.
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param for parameter $c contains unresolvable type.
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param for parameter $d contains unresolvable type.
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param for parameter $e contains unresolvable type.
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param for parameter $f contains unresolvable type.
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param for parameter $g contains unresolvable type.
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param for parameter $h contains unresolvable type.
-16:22-16:23 parameter.unresolvableType L2 f | PHPDoc tag @param-out for parameter $i contains unresolvable type.
-16:22-16:23 return.unresolvableType L2 f | PHPDoc tag @return contains unresolvable type.
-16:24-16:26 missingType.parameter L6 f | Function f() has parameter $a with no type specified.
-16:32-16:34 missingType.parameter L6 f | Function f() has parameter $c with no type specified.
-16:52-16:54 class.notFound L0 f | parameter $h of f() has invalid type App\\non-empty-foo
-16:56-16:59 missingType.parameter L6 f | Function f() has parameter $i with no type specified.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param for parameter $a contains unresolvable type.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param for parameter $b contains unresolvable type.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param for parameter $c contains unresolvable type.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param for parameter $d contains unresolvable type.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param for parameter $e contains unresolvable type.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param for parameter $f contains unresolvable type.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param for parameter $g contains unresolvable type.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param for parameter $h contains unresolvable type.
+16:22-16:23 parameter.unresolvableType L2 | PHPDoc tag @param-out for parameter $i contains unresolvable type.
+16:22-16:23 return.unresolvableType L2 | PHPDoc tag @return contains unresolvable type.
+16:24-16:26 missingType.parameter L6 | Function f() has parameter $a with no type specified.
+16:32-16:34 missingType.parameter L6 | Function f() has parameter $c with no type specified.
+16:52-16:54 class.notFound L0 | parameter $h of f() has invalid type App\\non-empty-foo
+16:56-16:59 missingType.parameter L6 | Function f() has parameter $i with no type specified.

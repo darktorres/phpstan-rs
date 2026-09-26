@@ -218,7 +218,6 @@ impl<'a> Checker<'a> {
         r_ty: &Type,
         is_compound_assign: bool,
         span: Span,
-        label: &str,
     ) {
         // Don't guess: a bare `Mixed` operand might be anything at
         // runtime, on either side, for any operator here - matches real
@@ -247,7 +246,6 @@ impl<'a> Checker<'a> {
             (sigil.to_string(), "binaryOp.invalid")
         };
         self.report(
-            label.to_string(),
             format!("Binary operation \"{op_str}\" between {l_ty} and {r_ty} results in an error."),
             span,
             2,
@@ -267,7 +265,6 @@ impl<'a> Checker<'a> {
         ty: &Type,
         context: &str,
         identifier: &'static str,
-        label: &str,
     ) {
         if !self.registry.check_boolean_conditions {
             return;
@@ -276,7 +273,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("Only booleans are allowed in {context}, {ty} given."),
             e.span,
             5,
@@ -296,7 +292,6 @@ impl<'a> Checker<'a> {
         sigil: &str,
         side: &str,
         identifier: &'static str,
-        label: &str,
     ) {
         if !self.registry.check_boolean_conditions {
             return;
@@ -305,7 +300,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("Only booleans are allowed in {sigil}, {ty} given on the {side} side."),
             e.span,
             5,
@@ -318,7 +312,7 @@ impl<'a> Checker<'a> {
     /// on whether the result is always true/false/zero (a float `NAN`
     /// makes `$x === $x` false) - just that comparing/subtracting an
     /// expression from itself is almost always a copy-paste mistake.
-    pub(crate) fn check_duplicate_operands(&mut self, op: &BinOp, l: &Expr, r: &Expr, label: &str) {
+    pub(crate) fn check_duplicate_operands(&mut self, op: &BinOp, l: &Expr, r: &Expr) {
         if !matches!(
             op,
             BinOp::Identical
@@ -338,7 +332,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             "Both sides of this expression are the same.".to_string(),
             l.span,
             5,
@@ -350,12 +343,11 @@ impl<'a> Checker<'a> {
     /// identity helper. A compound-assign self-target (`$x += $x`) is a
     /// real, meaningful operation (doubling), not a no-op, so it's
     /// deliberately not covered here.
-    pub(crate) fn check_self_assignment(&mut self, lhs: &Expr, rhs: &Expr, label: &str) {
+    pub(crate) fn check_self_assignment(&mut self, lhs: &Expr, rhs: &Expr) {
         if !is_duplicate_side_effect_free_operand(lhs, rhs) {
             return;
         }
         self.report(
-            label.to_string(),
             "This assignment has no effect, both sides are the same.".to_string(),
             lhs.span,
             5,
@@ -394,7 +386,6 @@ impl<'a> Checker<'a> {
         divisor: &Expr,
         divisor_ty: &Type,
         span: Span,
-        label: &str,
     ) {
         let (op_word, identifier) = match op {
             BinOp::Div => ("Division", "division.byZero"),
@@ -409,13 +400,7 @@ impl<'a> Checker<'a> {
         if !is_zero {
             return;
         }
-        self.report(
-            label.to_string(),
-            format!("{op_word} by zero."),
-            span,
-            0,
-            identifier,
-        );
+        self.report(format!("{op_word} by zero."), span, 0, identifier);
     }
 
     /// `None` = this operator's operand legality isn't modeled here:
@@ -477,7 +462,6 @@ impl<'a> Checker<'a> {
         l_ty: &Type,
         r_ty: &Type,
         span: Span,
-        label: &str,
     ) {
         let Some(identifier) = comparison_identifier(op) else {
             return;
@@ -497,7 +481,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!(
                 "Comparison operation \"{}\" between {l_ty} and {r_ty} results in an error.",
                 binop_sigil(op)
@@ -528,7 +511,6 @@ impl<'a> Checker<'a> {
         op: &UnaryOp,
         inner_ty: &Type,
         span: Span,
-        label: &str,
     ) {
         let valid = match op {
             UnaryOp::Neg | UnaryOp::Plus => self.is_number_operand(inner_ty),
@@ -544,7 +526,6 @@ impl<'a> Checker<'a> {
             _ => "~",
         };
         self.report(
-            label.to_string(),
             format!("Unary operation \"{sigil}\" on {inner_ty} results in an error."),
             span,
             2,
@@ -569,7 +550,6 @@ impl<'a> Checker<'a> {
         target: &syntax::ast::Expr,
         inner_ty: &Type,
         span: Span,
-        label: &str,
     ) {
         use syntax::ast::ExprKind;
 
@@ -596,7 +576,6 @@ impl<'a> Checker<'a> {
                 | ExprKind::DynamicStaticPropertyFetch(..)
         ) {
             self.report(
-                label.to_string(),
                 format!("Cannot use {symbol} on a non-variable."),
                 span,
                 0,
@@ -608,7 +587,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("Cannot use {symbol} on {inner_ty}."),
             span,
             0,

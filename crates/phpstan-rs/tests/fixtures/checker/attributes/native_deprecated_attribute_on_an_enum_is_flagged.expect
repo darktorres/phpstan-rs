@@ -1,2 +1,2 @@
-2:15-2:26 enum.deprecatedAttribute L0 Foo | Attribute class Deprecated cannot be used with enum Foo.
+2:15-2:26 enum.deprecatedAttribute L0 | Attribute class Deprecated cannot be used with enum Foo.
     non-ignorable

@@ -1,3 +1,3 @@
-3:25-3:61 method.unused L4 Foo | private method Foo::secret() is unused
+3:25-3:61 method.unused L4 | private method Foo::secret() is unused
     fix: Remove method secret() => ""
-6:24-6:36 method.private L0 test | access to private method Foo::secret()
+6:24-6:36 method.private L0 | access to private method Foo::secret()

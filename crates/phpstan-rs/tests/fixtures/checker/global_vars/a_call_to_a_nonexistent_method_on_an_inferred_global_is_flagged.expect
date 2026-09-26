@@ -1,6 +1,6 @@
-3:17-3:50 missingType.return L6 Template::assign | Method Template::assign() has no return type specified.
-3:33-3:38 missingType.parameter L6 Template::assign | Method Template::assign() has parameter $name with no type specified.
-3:40-3:46 missingType.parameter L6 Template::assign | Method Template::assign() has parameter $value with no type specified.
-6:13-9:14 missingType.return L6 render | Function render() has no return type specified.
-8:17-8:42 method.notFound L0 render | call to undefined method Template::assing()
+3:17-3:50 missingType.return L6 | Method Template::assign() has no return type specified.
+3:33-3:38 missingType.parameter L6 | Method Template::assign() has parameter $name with no type specified.
+3:40-3:46 missingType.parameter L6 | Method Template::assign() has parameter $value with no type specified.
+6:13-9:14 missingType.return L6 | Function render() has no return type specified.
+8:17-8:42 method.notFound L0 | call to undefined method Template::assing()
     tip: Did you mean assign()?

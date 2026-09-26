@@ -1,1 +1,1 @@
-4:24-4:26 class.nameCase L0 f | Class referenced with incorrect case: foo.
+4:24-4:26 class.nameCase L0 | Class referenced with incorrect case: foo.

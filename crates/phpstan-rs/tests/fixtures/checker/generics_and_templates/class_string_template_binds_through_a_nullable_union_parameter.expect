@@ -1,1 +1,1 @@
-15:24-15:63 return.type L3 f | return type mismatch: expected int, got Derived
+15:24-15:63 return.type L3 | return type mismatch: expected int, got Derived

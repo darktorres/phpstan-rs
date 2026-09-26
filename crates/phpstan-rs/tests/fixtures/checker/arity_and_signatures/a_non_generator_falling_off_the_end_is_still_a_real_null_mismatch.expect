@@ -1,2 +1,2 @@
-2:13-4:14 return.missing L0 notAGenerator | should return int but return statement is missing
+2:13-4:14 return.missing L0 | should return int but return statement is missing
     non-ignorable

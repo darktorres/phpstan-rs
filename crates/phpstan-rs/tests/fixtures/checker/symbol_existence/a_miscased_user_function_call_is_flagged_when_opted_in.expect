@@ -1,2 +1,2 @@
-3:13-3:20 function.nameCase L0 <main> | Function doStuff used with incorrect case: DOSTUFF.
+3:13-3:20 function.nameCase L0 | Function doStuff used with incorrect case: DOSTUFF.
     fix: Use doStuff => "doStuff"

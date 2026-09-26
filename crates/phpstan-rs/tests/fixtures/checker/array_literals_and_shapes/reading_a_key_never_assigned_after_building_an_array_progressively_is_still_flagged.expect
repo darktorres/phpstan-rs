@@ -1,1 +1,1 @@
-5:25-5:28 offsetAccess.notFound L3 test | Offset 'b' does not exist on array{a: 'hello'}.
+5:25-5:28 offsetAccess.notFound L3 | Offset 'b' does not exist on array{a: 'hello'}.

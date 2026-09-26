@@ -1,1 +1,1 @@
-6:24-6:29 return.type L3 test | return type mismatch: expected int, got string
+6:24-6:29 return.type L3 | return type mismatch: expected int, got string

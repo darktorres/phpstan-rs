@@ -1,7 +1,7 @@
-3:54-3:68 property.invalidPromoted L0 AbsHost::__construct | Promoted properties are not allowed in abstract constructors.
+3:54-3:68 property.invalidPromoted L0 | Promoted properties are not allowed in abstract constructors.
     non-ignorable
-3:54-3:68 property.onlyWritten L4 AbsHost | private property AbsHost::$a is never read, only written
-6:45-6:58 property.invalidPromoted L0 IfaceHost::__construct | Promoted properties are not allowed in abstract constructors.
+3:54-3:68 property.onlyWritten L4 | private property AbsHost::$a is never read, only written
+6:45-6:58 property.invalidPromoted L0 | Promoted properties are not allowed in abstract constructors.
     non-ignorable
-6:45-6:58 property.nonHookedInInterface L0 IfaceHost | Interfaces can only include hooked properties.
+6:45-6:58 property.nonHookedInInterface L0 | Interfaces can only include hooked properties.
     non-ignorable

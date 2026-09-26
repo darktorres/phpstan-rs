@@ -1,2 +1,2 @@
-4:17-4:47 trait.duplicateMethod L0 T | Cannot redeclare method T::bar().
+4:17-4:47 trait.duplicateMethod L0 | Cannot redeclare method T::bar().
     non-ignorable

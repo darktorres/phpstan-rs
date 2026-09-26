@@ -1,2 +1,2 @@
-3:17-3:33 enum.caseType L0 Status | Enum case Status::Active value 1 does not match the "string" type.
+3:17-3:33 enum.caseType L0 | Enum case Status::Active value 1 does not match the "string" type.
     non-ignorable

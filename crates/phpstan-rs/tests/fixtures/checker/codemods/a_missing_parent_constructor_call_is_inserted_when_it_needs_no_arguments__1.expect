@@ -1,2 +1,2 @@
-2:39-2:45 constructor.unusedParameter L1 P::__construct | Constructor of class P has an unused parameter $x.
-4:12-4:37 constructor.missingParentCall L4 C | C::__construct() does not call parent constructor from P.
+2:39-2:45 constructor.unusedParameter L1 | Constructor of class P has an unused parameter $x.
+4:12-4:37 constructor.missingParentCall L4 | C::__construct() does not call parent constructor from P.

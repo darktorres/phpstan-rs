@@ -1,1 +1,1 @@
-4:24-7:18 match.unhandled L4 color | Match expression does not handle remaining value: Suit::Spades
+4:24-7:18 match.unhandled L4 | Match expression does not handle remaining value: Suit::Spades

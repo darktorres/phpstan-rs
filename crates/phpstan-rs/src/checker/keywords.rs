@@ -151,7 +151,7 @@ fn is_prefix(prefix: &[usize], of: &[usize]) -> bool {
 
 impl<'a> Checker<'a> {
     /// One function-like body, or the file's top-level statements.
-    pub(crate) fn check_statement_keywords(&mut self, body: &[Stmt], label: &str) {
+    pub(crate) fn check_statement_keywords(&mut self, body: &[Stmt]) {
         let mut scope = Scope::default();
         scope.walk(body);
         for (kind, span, message) in std::mem::take(&mut scope.jumps) {
@@ -161,13 +161,8 @@ impl<'a> Checker<'a> {
                 "break"
             };
             let level = if kind == "switch" { 2 } else { 0 };
-            let mut builder = DiagnosticBuilder::new(
-                label.to_string(),
-                message,
-                span,
-                level,
-                format!("{keyword}.{kind}"),
-            );
+            let mut builder =
+                DiagnosticBuilder::new(message, span, level, format!("{keyword}.{kind}"));
             if kind != "switch" {
                 builder = builder.non_ignorable();
             }
@@ -175,7 +170,6 @@ impl<'a> Checker<'a> {
         }
         for (name, span) in &scope.duplicate_labels {
             self.report_keyword(
-                label,
                 format!("Label '{name}' is already defined."),
                 *span,
                 "label.duplicate",
@@ -185,7 +179,6 @@ impl<'a> Checker<'a> {
         for (name, goto) in &scope.gotos {
             let Some(target) = scope.labels.get(name) else {
                 self.report_keyword(
-                    label,
                     format!("Goto to undefined label '{name}'."),
                     goto.span,
                     "goto.labelUndefined",
@@ -195,21 +188,18 @@ impl<'a> Checker<'a> {
             used.insert(name.clone());
             if !is_prefix(&target.frames, &goto.frames) {
                 self.report_keyword(
-                    label,
                     format!("Goto to label '{name}' jumps into a loop or switch statement."),
                     goto.span,
                     "goto.intoLoop",
                 );
             } else if !is_prefix(&goto.finallies, &target.finallies) {
                 self.report_keyword(
-                    label,
                     format!("Goto to label '{name}' jumps out of a finally block."),
                     goto.span,
                     "goto.outOfFinally",
                 );
             } else if !is_prefix(&target.finallies, &goto.finallies) {
                 self.report_keyword(
-                    label,
                     format!("Goto to label '{name}' jumps into a finally block."),
                     goto.span,
                     "goto.intoFinally",
@@ -221,7 +211,6 @@ impl<'a> Checker<'a> {
         for (name, placement) in labels {
             if !used.contains(name) {
                 self.report(
-                    label.to_string(),
                     format!("Label '{name}' is unused."),
                     placement.span,
                     4,
@@ -255,7 +244,6 @@ impl<'a> Checker<'a> {
                     "strict_types" => {
                         if !matches!(literal_int, Some(0 | 1)) {
                             self.report_keyword(
-                                "<main>",
                                 format!(
                                     "Declare strict_types must have 0 or 1 as its value, {} given.",
                                     describe_literal(value)
@@ -265,14 +253,12 @@ impl<'a> Checker<'a> {
                             );
                         } else if *block_mode {
                             self.report_keyword(
-                                "<main>",
                                 "Declare strict_types must not use block mode.".to_string(),
                                 stmt.span,
                                 "declareStrictTypes.blockMode",
                             );
                         } else if !is_first {
                             self.report_keyword(
-                                "<main>",
                                 "Declare strict_types must be the very first statement."
                                     .to_string(),
                                 stmt.span,
@@ -281,7 +267,6 @@ impl<'a> Checker<'a> {
                         }
                     }
                     "ticks" if literal_int.is_none() => self.report_keyword(
-                        "<main>",
                         format!(
                             "Declare ticks must have an integer value, {} given.",
                             describe_literal(value)
@@ -291,7 +276,6 @@ impl<'a> Checker<'a> {
                     ),
                     "encoding" if !matches!(value.kind, ExprKind::Literal(Literal::String(_))) => {
                         self.report_keyword(
-                            "<main>",
                             format!(
                                 "Declare encoding must have a string value, {} given.",
                                 describe_literal(value)
@@ -302,7 +286,6 @@ impl<'a> Checker<'a> {
                     }
                     "ticks" | "encoding" => {}
                     _ => self.report_keyword(
-                        "<main>",
                         format!("Unsupported declare '{name}'."),
                         *name_span,
                         "declare.unsupported",
@@ -312,10 +295,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_keyword(&mut self, label: &str, message: String, span: Span, identifier: &str) {
-        self.report_builder(
-            DiagnosticBuilder::new(label.to_string(), message, span, 0, identifier).non_ignorable(),
-        );
+    fn report_keyword(&mut self, message: String, span: Span, identifier: &str) {
+        self.report_builder(DiagnosticBuilder::new(message, span, 0, identifier).non_ignorable());
     }
 }
 

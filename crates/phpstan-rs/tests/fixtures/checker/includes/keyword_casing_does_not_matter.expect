@@ -1,1 +1,1 @@
-main.php:2:1-2:35 requireOnce.fileNotFound L0 <main> | Path in require_once() "<fixture>/nope.php" is not a file or it does not exist.
+main.php:2:1-2:35 requireOnce.fileNotFound L0 | Path in require_once() "<fixture>/nope.php" is not a file or it does not exist.

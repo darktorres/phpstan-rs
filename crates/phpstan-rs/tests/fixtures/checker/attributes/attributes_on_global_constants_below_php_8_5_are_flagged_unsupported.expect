@@ -1,2 +1,2 @@
-2:13-3:25 constant.attributesNotSupported L0 <main> | Attributes on global constants are supported only on PHP 8.5 and later.
+2:13-3:25 constant.attributesNotSupported L0 | Attributes on global constants are supported only on PHP 8.5 and later.
     non-ignorable

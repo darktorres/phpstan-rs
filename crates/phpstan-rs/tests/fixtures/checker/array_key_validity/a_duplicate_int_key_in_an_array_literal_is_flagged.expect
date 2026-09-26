@@ -1,3 +1,3 @@
-2:13-4:14 missingType.iterableValue L6 f | Function f() return type has no value type specified in iterable type array.
+2:13-4:14 missingType.iterableValue L6 | Function f() return type has no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-3:25-3:26 array.duplicateKey L0 f | Array has duplicate key 1.
+3:25-3:26 array.duplicateKey L0 | Array has duplicate key 1.

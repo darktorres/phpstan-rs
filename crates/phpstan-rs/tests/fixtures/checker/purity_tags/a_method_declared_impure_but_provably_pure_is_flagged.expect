@@ -1,1 +1,1 @@
-4:33-4:39 impureMethod.pure L0 Calc::addOne | Method Calc::addOne() is marked as impure but does not have any side effects.
+4:33-4:39 impureMethod.pure L0 | Method Calc::addOne() is marked as impure but does not have any side effects.

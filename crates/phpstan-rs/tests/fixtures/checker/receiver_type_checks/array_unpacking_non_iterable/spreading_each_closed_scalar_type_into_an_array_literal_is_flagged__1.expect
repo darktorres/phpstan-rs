@@ -1,2 +1,2 @@
-2:21-5:22 missingType.return L6 f | Function f() has no return type specified.
-4:34-4:36 arrayUnpacking.nonIterable L3 f | Only iterables can be unpacked, string given.
+2:21-5:22 missingType.return L6 | Function f() has no return type specified.
+4:34-4:36 arrayUnpacking.nonIterable L3 | Only iterables can be unpacked, string given.

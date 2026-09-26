@@ -1,1 +1,1 @@
-2:24-2:31 regexp.pattern L0 <main> | Regex pattern is invalid: Delimiter must not be alphanumeric, backslash, or NUL byte
+2:24-2:31 regexp.pattern L0 | Regex pattern is invalid: Delimiter must not be alphanumeric, backslash, or NUL byte

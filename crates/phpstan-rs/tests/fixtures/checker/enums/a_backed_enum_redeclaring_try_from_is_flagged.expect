@@ -1,2 +1,2 @@
-4:17-4:79 enum.methodRedeclaration L0 Status | Enum Status cannot redeclare native method tryFrom().
+4:17-4:79 enum.methodRedeclaration L0 | Enum Status cannot redeclare native method tryFrom().
     non-ignorable

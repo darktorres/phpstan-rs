@@ -1,2 +1,2 @@
-3:40-3:83 method.parentMethodFinal L0 Sub4 | Method Sub4::locked() overrides final method Base4::locked().
+3:40-3:83 method.parentMethodFinal L0 | Method Sub4::locked() overrides final method Base4::locked().
     non-ignorable

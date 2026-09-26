@@ -1,2 +1,2 @@
-11:13-13:14 missingType.return L6 f | Function f() has no return type specified.
-12:25-12:37 argument.type L5 f | Parameter #1 $item of method Collection::add() expects int, 'not an int' given.
+11:13-13:14 missingType.return L6 | Function f() has no return type specified.
+12:25-12:37 argument.type L5 | Parameter #1 $item of method Collection::add() expects int, 'not an int' given.

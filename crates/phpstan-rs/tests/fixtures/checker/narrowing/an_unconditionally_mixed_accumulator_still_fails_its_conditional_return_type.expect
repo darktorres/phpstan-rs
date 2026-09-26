@@ -1,1 +1,1 @@
-13:24-13:35 return.type L3 f | return type mismatch: expected ($isActionSend is true ? list<string> : list<UserMailNotification>), got array{}|non-empty-list<UserMailNotification|'checkKey'>
+13:24-13:35 return.type L3 | return type mismatch: expected ($isActionSend is true ? list<string> : list<UserMailNotification>), got array{}|non-empty-list<UserMailNotification|'checkKey'>

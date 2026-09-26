@@ -1,2 +1,2 @@
-6:17-6:29 class.nameCase L0 f | Class referenced with incorrect case: base.
-6:17-6:29 class.notFound L0 f | static method call target class base not found
+6:17-6:29 class.nameCase L0 | Class referenced with incorrect case: base.
+6:17-6:29 class.notFound L0 | static method call target class base not found

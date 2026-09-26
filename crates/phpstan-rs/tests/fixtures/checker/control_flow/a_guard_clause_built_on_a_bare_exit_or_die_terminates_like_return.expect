@@ -1,1 +1,1 @@
-3:13-3:59 return.unusedType L4 load | Function load() never returns array<string, mixed> so it can be removed from the return type.
+3:13-3:59 return.unusedType L4 | Function load() never returns array<string, mixed> so it can be removed from the return type.

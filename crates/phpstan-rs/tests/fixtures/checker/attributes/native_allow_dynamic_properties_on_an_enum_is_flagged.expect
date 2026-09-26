@@ -1,2 +1,2 @@
-2:15-2:38 enum.allowDynamicProperties L0 Foo | Attribute class AllowDynamicProperties cannot be used with enum.
+2:15-2:38 enum.allowDynamicProperties L0 | Attribute class AllowDynamicProperties cannot be used with enum.
     non-ignorable

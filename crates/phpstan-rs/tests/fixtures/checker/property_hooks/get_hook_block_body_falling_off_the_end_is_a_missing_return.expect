@@ -1,3 +1,3 @@
-3:31-9:18 return.missing L0 MissingReturn::$m (get hook) | should return string but return statement is missing
+3:31-9:18 return.missing L0 | should return string but return statement is missing
     non-ignorable
-5:29-5:33 if.alwaysTrue L4 MissingReturn::$m (get hook) | If condition is always true.
+5:29-5:33 if.alwaysTrue L4 | If condition is always true.

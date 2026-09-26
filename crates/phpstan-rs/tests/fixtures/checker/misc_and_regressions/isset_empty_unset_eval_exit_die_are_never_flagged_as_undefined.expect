@@ -1,6 +1,6 @@
-3:13-3:22 expr.resultUnused L4 <main> | Expression "isset($x)" on a separate line does not do anything.
-3:19-3:21 isset.variable L0 <main> | Variable $x in isset() always exists and is not nullable.
-4:13-4:22 expr.resultUnused L4 <main> | Expression "empty($x)" on a separate line does not do anything.
-4:19-4:21 empty.variable L0 <main> | Variable $x in empty() always exists and is not falsy.
-6:17-6:22 if.alwaysFalse L4 <main> | If condition is always false.
-7:17-7:22 if.alwaysFalse L4 <main> | If condition is always false.
+3:13-3:22 expr.resultUnused L4 | Expression "isset($x)" on a separate line does not do anything.
+3:19-3:21 isset.variable L0 | Variable $x in isset() always exists and is not nullable.
+4:13-4:22 expr.resultUnused L4 | Expression "empty($x)" on a separate line does not do anything.
+4:19-4:21 empty.variable L0 | Variable $x in empty() always exists and is not falsy.
+6:17-6:22 if.alwaysFalse L4 | If condition is always false.
+7:17-7:22 if.alwaysFalse L4 | If condition is always false.

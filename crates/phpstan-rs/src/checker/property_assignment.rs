@@ -8,7 +8,6 @@ impl<'a> Checker<'a> {
         lhs: &Expr,
         rhs: &Expr,
         locals: &mut Locals,
-        label: &str,
     ) {
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             return;
@@ -36,7 +35,6 @@ impl<'a> Checker<'a> {
         let not_writable = can_write && !prop_sig.is_writable();
         if not_writable {
             self.report(
-                label.to_string(),
                 format!("Property {owner}::${prop} is not writable."),
                 lhs.span,
                 0,
@@ -52,16 +50,16 @@ impl<'a> Checker<'a> {
                 None
             };
             if let Some((message, identifier)) = fact {
-                self.report(label.to_string(), message, lhs.span, 0, identifier);
+                self.report(message, lhs.span, 0, identifier);
             }
         }
         // `@internal`/`@deprecated`: `check_assignment_target`'s own
         // `PropertyAccess` arm deliberately only checks the *base* (to
         // avoid misflagging dynamic-property creation), so these checks
         // must run here for the write side instead.
-        self.check_internal_property_access(&owner, prop, prop_sig, lhs.span, label);
-        self.check_restricted_property_access(&owner, prop, false, lhs.span, label);
-        self.check_deprecated_property_access(&owner, prop, prop_sig, lhs.span, label);
+        self.check_internal_property_access(&owner, prop, prop_sig, lhs.span);
+        self.check_restricted_property_access(&owner, prop, false, lhs.span);
+        self.check_deprecated_property_access(&owner, prop, prop_sig, lhs.span);
         self.record_member_usage_token(
             UsageTokenKind::Property,
             &owner,
@@ -84,7 +82,6 @@ impl<'a> Checker<'a> {
                 _ => ("protected(set)", "assign.propertyProtectedSet"),
             };
             self.report(
-                label.to_string(),
                 format!("Assign to {word} property {class}::${prop}."),
                 lhs.span,
                 0,
@@ -98,7 +95,6 @@ impl<'a> Checker<'a> {
                 visibility: &write_visibility,
                 describe: &format!("property {owner}::${prop}"),
                 span: lhs.span,
-                label,
             });
         }
         let bindings = self.class_template_bindings(&class, &type_args, &owner);
@@ -135,7 +131,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("{class}::${prop} expects {expected}, {actual} given"),
             rhs.span,
             3,
@@ -273,12 +268,7 @@ impl<'a> Checker<'a> {
     /// property the current scope can't write (`property.assignByRef`,
     /// PHP 8.4+ asymmetric visibility), or to a readonly one
     /// (`property.readOnlyAssignByRef`/`property.readOnlyByPhpDocAssignByRef`).
-    pub(crate) fn check_property_assign_by_ref(
-        &mut self,
-        rhs: &Expr,
-        locals: &Locals,
-        label: &str,
-    ) {
+    pub(crate) fn check_property_assign_by_ref(&mut self, rhs: &Expr, locals: &Locals) {
         let (owner, prop, sig, is_static_fetch) = match &rhs.kind {
             ExprKind::PropertyAccess(base, prop, _) => {
                 let base_ty = self.infer_expr(base, locals);
@@ -320,9 +310,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "protected"
                 };
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Property {owner}::${prop} with {description} visibility is assigned by reference."
                     ),
                     rhs.span,
@@ -334,7 +322,6 @@ impl<'a> Checker<'a> {
         }
         if sig.is_readonly && !sig.readonly_by_phpdoc && !sig.tag_read_only && !is_static_fetch {
             self.report(
-                label.to_string(),
                 format!("Readonly property {owner}::${prop} is assigned by reference."),
                 rhs.span,
                 3,
@@ -342,7 +329,6 @@ impl<'a> Checker<'a> {
             );
         } else if sig.readonly_by_phpdoc {
             self.report(
-                label.to_string(),
                 format!("@readonly property {owner}::${prop} is assigned by reference."),
                 rhs.span,
                 3,

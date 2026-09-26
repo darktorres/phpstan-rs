@@ -1,2 +1,2 @@
-4:1-4:25 function.nameCase L0 <main> | Function Lib\\helper used with incorrect case: lib\\HELPER.
+4:1-4:25 function.nameCase L0 | Function Lib\\helper used with incorrect case: lib\\HELPER.
     fix: Use Lib\\helper => "Lib\\helper"

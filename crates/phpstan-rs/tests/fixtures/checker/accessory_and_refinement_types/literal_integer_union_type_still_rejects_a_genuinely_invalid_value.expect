@@ -1,1 +1,1 @@
-4:39-4:40 argument.type L5 test | Parameter #1 $level of function f expects 1|2|3, 5 given.
+4:39-4:40 argument.type L5 | Parameter #1 $level of function f expects 1|2|3, 5 given.

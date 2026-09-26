@@ -1,3 +1,3 @@
-4:24-4:32 missingType.iterableValue L6 f | Function f() has parameter $x with no value type specified in iterable type array.
+4:24-4:32 missingType.iterableValue L6 | Function f() has parameter $x with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-7:26-7:28 argument.type L5 f | Parameter #1 $x of function sink expects non-empty-array<int>, array given.
+7:26-7:28 argument.type L5 | Parameter #1 $x of function sink expects non-empty-array<int>, array given.

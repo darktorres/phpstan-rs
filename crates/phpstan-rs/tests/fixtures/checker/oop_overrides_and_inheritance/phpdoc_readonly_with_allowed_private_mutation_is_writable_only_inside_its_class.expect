@@ -1,2 +1,2 @@
-11:21-11:34 property.readOnlyByPhpDocAssignNotInConstructor L0 Counter::bump | @readonly property Counter::$strict is assigned outside of the constructor.
-14:50-14:59 property.readOnlyByPhpDocAssignOutOfClass L0 outside | @readonly property Counter::$count is assigned outside of its declaring class.
+11:21-11:34 property.readOnlyByPhpDocAssignNotInConstructor L0 | @readonly property Counter::$strict is assigned outside of the constructor.
+14:50-14:59 property.readOnlyByPhpDocAssignOutOfClass L0 | @readonly property Counter::$count is assigned outside of its declaring class.

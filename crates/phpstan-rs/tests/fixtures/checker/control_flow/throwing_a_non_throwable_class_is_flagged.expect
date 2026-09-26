@@ -1,1 +1,1 @@
-3:43-3:64 throw.notThrowable L0 test | cannot throw NotAnException2: it does not implement Throwable
+3:43-3:64 throw.notThrowable L0 | cannot throw NotAnException2: it does not implement Throwable

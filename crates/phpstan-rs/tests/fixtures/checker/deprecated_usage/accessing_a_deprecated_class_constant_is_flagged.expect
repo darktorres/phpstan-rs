@@ -1,1 +1,1 @@
-7:24-7:38 classConstant.deprecated L0 f | Fetching deprecated class constant OLD_CONST of class Foo:\nuse NEW_CONST instead
+7:24-7:38 classConstant.deprecated L0 | Fetching deprecated class constant OLD_CONST of class Foo:\nuse NEW_CONST instead

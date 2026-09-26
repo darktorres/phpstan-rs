@@ -1,1 +1,1 @@
-6:17-6:77 method.childParameterType L0 Lorem | Lorem::doFoo() parameter #1 ($e) narrows the inherited parameter type: expects InvalidArgumentException, ancestor expects Exception
+6:17-6:77 method.childParameterType L0 | Lorem::doFoo() parameter #1 ($e) narrows the inherited parameter type: expects InvalidArgumentException, ancestor expects Exception

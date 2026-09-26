@@ -1,5 +1,5 @@
-2:61-2:73 new.static L0 Base::make | unsafe usage of new static()
+2:61-2:73 new.static L0 | unsafe usage of new static()
     tip: See: https://phpstan.org/blog/solving-phpstan-error-unsafe-usage-of-new-static
-5:9-5:22 staticMethod.dynamicCall L0 Child::go | Dynamic call to static method Base::make().
-8:9-8:24 staticMethod.dynamicCall L0 Child::go | Dynamic call to static method Base::make().
-9:14-9:30 staticMethod.dynamicCall L0 Child::go | Dynamic call to static method Base::make().
+5:9-5:22 staticMethod.dynamicCall L0 | Dynamic call to static method Base::make().
+8:9-8:24 staticMethod.dynamicCall L0 | Dynamic call to static method Base::make().
+9:14-9:30 staticMethod.dynamicCall L0 | Dynamic call to static method Base::make().

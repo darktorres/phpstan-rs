@@ -1,3 +1,3 @@
-4:21-4:35 property.onlyWritten L4 OkHost | private property OkHost::$a is never read, only written
-7:21-7:34 constructor.unusedParameter L1 OkHost::__construct | Constructor of class OkHost has an unused parameter $plain.
-11:24-11:56 missingType.return L6 AliasHost::init | Method AliasHost::init() has no return type specified.
+4:21-4:35 property.onlyWritten L4 | private property OkHost::$a is never read, only written
+7:21-7:34 constructor.unusedParameter L1 | Constructor of class OkHost has an unused parameter $plain.
+11:24-11:56 missingType.return L6 | Method AliasHost::init() has no return type specified.

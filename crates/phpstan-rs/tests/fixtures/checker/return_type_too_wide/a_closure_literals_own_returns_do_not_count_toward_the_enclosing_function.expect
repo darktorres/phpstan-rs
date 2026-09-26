@@ -1,1 +1,1 @@
-3:25-6:18 return.unusedType L4 C::f | Method C::f() never returns string so it can be removed from the return type.
+3:25-6:18 return.unusedType L4 | Method C::f() never returns string so it can be removed from the return type.

@@ -1,2 +1,2 @@
-1:14-1:32 argument.type L5 <main> | Parameter #1 $string of function strlen expects string, string|null given.
-1:14-1:32 function.uselessReturnValue L0 <main> | Return value of function var_export() is always null and the result is printed instead of being returned. Pass in true as parameter #2 $return to return the output instead.
+1:14-1:32 argument.type L5 | Parameter #1 $string of function strlen expects string, string|null given.
+1:14-1:32 function.uselessReturnValue L0 | Return value of function var_export() is always null and the result is printed instead of being returned. Pass in true as parameter #2 $return to return the output instead.

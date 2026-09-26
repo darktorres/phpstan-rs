@@ -1,4 +1,4 @@
-3:45-3:51 constructor.unusedParameter L1 Point::__construct | Constructor of class Point has an unused parameter $x.
-3:53-3:59 constructor.unusedParameter L1 Point::__construct | Constructor of class Point has an unused parameter $y.
-5:27-5:40 missingType.iterableValue L6 test | Function test() has parameter $coords with no value type specified in iterable type array.
+3:45-3:51 constructor.unusedParameter L1 | Constructor of class Point has an unused parameter $x.
+3:53-3:59 constructor.unusedParameter L1 | Constructor of class Point has an unused parameter $y.
+5:27-5:40 missingType.iterableValue L6 | Function test() has parameter $coords with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

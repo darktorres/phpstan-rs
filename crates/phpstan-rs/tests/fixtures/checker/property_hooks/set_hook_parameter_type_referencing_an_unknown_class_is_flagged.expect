@@ -1,2 +1,2 @@
-3:33-5:18 class.notFound L0 UnknownParamType::$w (set hook) | Parameter $value of set hook for property UnknownParamType::$w has invalid type Missing
-3:33-5:18 class.notFound L0 UnknownParamType | property UnknownParamType::$w has invalid type Missing
+3:33-5:18 class.notFound L0 | Parameter $value of set hook for property UnknownParamType::$w has invalid type Missing
+3:33-5:18 class.notFound L0 | property UnknownParamType::$w has invalid type Missing

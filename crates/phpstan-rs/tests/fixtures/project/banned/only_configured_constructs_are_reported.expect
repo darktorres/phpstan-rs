@@ -1,1 +1,1 @@
-a.php:3:1-3:11 banned.eval L0 <main> | eval() is banned by this project's configuration.
+a.php:3:1-3:11 banned.eval L0 | eval() is banned by this project's configuration.

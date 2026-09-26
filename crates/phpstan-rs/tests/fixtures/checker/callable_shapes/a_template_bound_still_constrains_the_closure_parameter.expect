@@ -1,1 +1,1 @@
-12:24-12:52 argument.type L5 f | Parameter #1 $handler of method Dispatcher::on() expects callable(T): void, Closure(Other): void given.
+12:24-12:52 argument.type L5 | Parameter #1 $handler of method Dispatcher::on() expects callable(T): void, Closure(Other): void given.

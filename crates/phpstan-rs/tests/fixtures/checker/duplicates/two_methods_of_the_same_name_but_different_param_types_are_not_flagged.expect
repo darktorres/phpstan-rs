@@ -1,2 +1,2 @@
-3:47-3:58 missingType.parameter L6 X::setAccessible | Method X::setAccessible() has parameter $accessible with no type specified.
-4:47-4:63 missingType.parameter L6 X::setAccessible | Method X::setAccessible() has parameter $accessible with no type specified.
+3:47-3:58 missingType.parameter L6 | Method X::setAccessible() has parameter $accessible with no type specified.
+4:47-4:63 missingType.parameter L6 | Method X::setAccessible() has parameter $accessible with no type specified.

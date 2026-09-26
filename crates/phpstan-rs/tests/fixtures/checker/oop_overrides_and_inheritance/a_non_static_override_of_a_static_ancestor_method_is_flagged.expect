@@ -1,2 +1,2 @@
-3:40-3:70 method.nonStatic L0 Child | Non-static method Child::foo() overrides static method Base::foo()
+3:40-3:70 method.nonStatic L0 | Non-static method Child::foo() overrides static method Base::foo()
     non-ignorable

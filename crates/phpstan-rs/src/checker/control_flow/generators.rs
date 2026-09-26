@@ -87,13 +87,10 @@ impl<'a> Checker<'a> {
         inner_ty: &Type,
         result_ty: &Type,
         span: Span,
-        label: &str,
         is_bare_statement: bool,
     ) {
         if yield_from_arg_not_iterable(inner_ty, self.registry) {
-            self.report(
-                label.to_string(),
-                format!("Argument of an invalid type {inner_ty} supplied for yield from, only iterables are supported."),
+            self.report(format!("Argument of an invalid type {inner_ty} supplied for yield from, only iterables are supported."),
                 span,
                 0,
                 "generator.nonIterable",
@@ -109,9 +106,7 @@ impl<'a> Checker<'a> {
         // expression's own result (the delegated generator's TReturn) is
         // `void` but consumed in a non-statement position.
         if *result_ty == Type::Void && !is_bare_statement {
-            self.report(
-                label.to_string(),
-                "Result of yield from is used but the delegated generator never returns anything, it's return type is void.".to_string(),
+            self.report("Result of yield from is used but the delegated generator never returns anything, it's return type is void.".to_string(),
                 span,
                 0,
                 "generator.void",
@@ -153,9 +148,7 @@ impl<'a> Checker<'a> {
                 .rule_level_accepts(&enclosing_key, &inner_key)
                 .yes()
         {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Key type {inner_key} of yielded generator is not assignable to key type {enclosing_key} of enclosing generator."
                 ),
                 span,
@@ -170,9 +163,7 @@ impl<'a> Checker<'a> {
                 .rule_level_accepts(&enclosing_value, &inner_value)
                 .yes()
         {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Value type {inner_value} of yielded generator is not assignable to value type {enclosing_value} of enclosing generator."
                 ),
                 span,
@@ -188,9 +179,7 @@ impl<'a> Checker<'a> {
             && inner_send != Type::Mixed(false)
             && !self.registry.accepts(&inner_send, &enclosing_send).yes()
         {
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Send type {enclosing_send} of enclosing generator is not assignable to send type {inner_send} of yielded generator."
                 ),
                 span,

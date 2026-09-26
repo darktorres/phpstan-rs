@@ -190,11 +190,10 @@ pub fn render_friendly(results: &FxHashMap<PathBuf, Vec<Diagnostic>>, colour: bo
                 painter.wrap(
                     DIM,
                     &format!(
-                        "{}:{}:{} · {} · {}",
+                        "{}:{}:{} · {}",
                         path.display(),
                         d.span.start.line,
                         d.span.start.col,
-                        d.location,
                         d.identifier
                     )
                 )

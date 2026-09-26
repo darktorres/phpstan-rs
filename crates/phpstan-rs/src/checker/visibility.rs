@@ -20,7 +20,6 @@ pub(crate) struct MemberVisibilityCheck<'a> {
     pub(crate) visibility: &'a Visibility,
     pub(crate) describe: &'a str,
     pub(crate) span: Span,
-    pub(crate) label: &'a str,
 }
 
 /// `check_static_private_member_access`'s own call bundle - same
@@ -32,7 +31,6 @@ struct StaticPrivateAccessCheck<'a> {
     owner: &'a str,
     member_display: &'a str,
     span: Span,
-    label: &'a str,
 }
 
 impl<'a> Checker<'a> {
@@ -114,7 +112,6 @@ impl<'a> Checker<'a> {
             visibility,
             describe,
             span,
-            label,
         } = check;
         let word = match visibility {
             Visibility::Public => return,
@@ -125,7 +122,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("access to {word} {describe}"),
             span,
             0,
@@ -153,7 +149,6 @@ impl<'a> Checker<'a> {
         owner: &str,
         member: &str,
         span: Span,
-        label: &str,
     ) {
         self.check_static_private_member_access(StaticPrivateAccessCheck {
             verb: "access",
@@ -162,7 +157,6 @@ impl<'a> Checker<'a> {
             owner,
             member_display: member,
             span,
-            label,
         });
     }
 
@@ -178,7 +172,6 @@ impl<'a> Checker<'a> {
         owner: &str,
         member: &str,
         span: Span,
-        label: &str,
     ) {
         self.check_static_private_member_access(StaticPrivateAccessCheck {
             verb: "access",
@@ -187,7 +180,6 @@ impl<'a> Checker<'a> {
             owner,
             member_display: &format!("${member}"),
             span,
-            label,
         });
     }
 
@@ -202,7 +194,6 @@ impl<'a> Checker<'a> {
         owner: &str,
         member: &str,
         span: Span,
-        label: &str,
     ) {
         self.check_static_private_member_access(StaticPrivateAccessCheck {
             verb: "call",
@@ -211,7 +202,6 @@ impl<'a> Checker<'a> {
             owner,
             member_display: &format!("{member}()"),
             span,
-            label,
         });
     }
 
@@ -230,7 +220,6 @@ impl<'a> Checker<'a> {
             owner,
             member_display,
             span,
-            label,
         } = check;
         let is_final = self
             .current_class
@@ -241,7 +230,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report(
-            label.to_string(),
             format!("unsafe {verb} to private {noun} {owner}::{member_display} through static::"),
             span,
             0,

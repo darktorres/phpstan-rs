@@ -1,2 +1,2 @@
-5:28-5:34 property.overrideAttribute L0 Child | Attribute class Override can be used with properties only on PHP 8.5 and later.
+5:28-5:34 property.overrideAttribute L0 | Attribute class Override can be used with properties only on PHP 8.5 and later.
     non-ignorable

@@ -1,1 +1,1 @@
-8:13-8:23 requireExtends.duplicate L0 T | PHPDoc tag @phpstan-require-extends can only be used once.
+8:13-8:23 requireExtends.duplicate L0 | PHPDoc tag @phpstan-require-extends can only be used once.

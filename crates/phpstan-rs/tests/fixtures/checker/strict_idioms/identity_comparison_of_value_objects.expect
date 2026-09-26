@@ -1,5 +1,5 @@
-3:57-3:81 booleanOr.alwaysTrue L4 Money::equals | Result of || is always true.
-3:77-3:81 booleanOr.rightAlwaysTrue L4 Money::equals | Right side of || is always true.
-8:14-8:23 identical.equalsMethod L0 f | === between Money objects compares identity; Money defines equals() to compare values, use $a->equals($b).
-9:14-9:23 identical.equalsMethod L0 f | !== between Money objects compares identity; Money defines equals() to compare values, use !$b->equals($a).
-13:14-13:23 identical.alwaysFalse L4 f | Strict comparison using === between Money and Plain will always evaluate to false.
+3:57-3:81 booleanOr.alwaysTrue L4 | Result of || is always true.
+3:77-3:81 booleanOr.rightAlwaysTrue L4 | Right side of || is always true.
+8:14-8:23 identical.equalsMethod L0 | === between Money objects compares identity; Money defines equals() to compare values, use $a->equals($b).
+9:14-9:23 identical.equalsMethod L0 | !== between Money objects compares identity; Money defines equals() to compare values, use !$b->equals($a).
+13:14-13:23 identical.alwaysFalse L4 | Strict comparison using === between Money and Plain will always evaluate to false.

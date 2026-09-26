@@ -1,1 +1,1 @@
-3:13-3:40 restrictedSymbol.class L0 Sub | Sub extends restricted class Banned: do not use Banned
+3:13-3:40 restrictedSymbol.class L0 | Sub extends restricted class Banned: do not use Banned

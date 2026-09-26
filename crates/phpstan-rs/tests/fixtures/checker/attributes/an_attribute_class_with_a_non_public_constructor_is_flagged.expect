@@ -1,2 +1,2 @@
-2:15-2:24 attribute.constructorNotPublic L0 MyAttr | Attribute class MyAttr constructor must be public.
-7:15-7:21 attribute.constructorNotPublic L0 Foo | Constructor of attribute class MyAttr is not public.
+2:15-2:24 attribute.constructorNotPublic L0 | Attribute class MyAttr constructor must be public.
+7:15-7:21 attribute.constructorNotPublic L0 | Constructor of attribute class MyAttr is not public.

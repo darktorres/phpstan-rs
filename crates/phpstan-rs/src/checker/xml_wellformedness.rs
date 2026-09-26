@@ -23,7 +23,6 @@ impl<'a> Checker<'a> {
         class: &str,
         args: &[Arg],
         span: Span,
-        label: &str,
     ) {
         if class != "SimpleXMLElement" {
             return;
@@ -36,9 +35,7 @@ impl<'a> Checker<'a> {
             return;
         };
         if let Some(detail) = is_well_formed_xml(xml) {
-            self.report(
-                label.to_string(),
-                format!("SimpleXMLElement constructor argument is not well-formed XML ({detail}) and will throw at runtime"),
+            self.report(format!("SimpleXMLElement constructor argument is not well-formed XML ({detail}) and will throw at runtime"),
                 span,
                 0,
                 "argument.type",
@@ -53,12 +50,7 @@ impl<'a> Checker<'a> {
     /// this function never touches `dynamic_new_throw_type`/`dynamic_
     /// method_throw_type`/`dynamic_function_throw_type` at all, since it
     /// has no throw type to contribute).
-    pub(crate) fn check_simplexml_load_string_call(
-        &mut self,
-        args: &[Arg],
-        span: Span,
-        label: &str,
-    ) {
+    pub(crate) fn check_simplexml_load_string_call(&mut self, args: &[Arg], span: Span) {
         let Some(arg) = args.first() else { return };
         if arg.name.is_some() || arg.spread {
             return;
@@ -67,9 +59,7 @@ impl<'a> Checker<'a> {
             return;
         };
         if let Some(detail) = is_well_formed_xml(xml) {
-            self.report(
-                label.to_string(),
-                format!("simplexml_load_string() argument is not well-formed XML ({detail}) and will return false at runtime"),
+            self.report(format!("simplexml_load_string() argument is not well-formed XML ({detail}) and will return false at runtime"),
                 span,
                 0,
                 "argument.type",

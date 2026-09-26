@@ -147,8 +147,8 @@ fn at_line(line: u32) -> Span {
     Span { start: at, end: at }
 }
 
-fn diagnostic(location: &str, message: String, span: Span, identifier: &str) -> Diagnostic {
-    DiagnosticBuilder::new(location.to_string(), message, span, 0, identifier).build()
+fn diagnostic(message: String, span: Span, identifier: &str) -> Diagnostic {
+    DiagnosticBuilder::new(message, span, 0, identifier).build()
 }
 
 /// What an analysed file's code mentions besides resolved references:
@@ -439,7 +439,6 @@ impl Project {
                         continue;
                     }
                     diagnostics.push(diagnostic(
-                        "<main>",
                         format!(
                             "{kind} {display} belongs to the {extension} extension, but composer.json doesn't require {requirement}."
                         ),
@@ -460,7 +459,6 @@ impl Project {
                         && reported_dev_symbols.insert(display.clone())
                     {
                         diagnostics.push(diagnostic(
-                            "<main>",
                             format!(
                                 "Class {display} is only autoloaded through autoload-dev, but this file is autoloaded in production; `composer install --no-dev` can't load it."
                             ),
@@ -493,7 +491,6 @@ impl Project {
                 if !in_require && !in_require_dev && !manifest.suggests(&package_name) {
                     if reported_packages.insert(package_name.clone()) {
                         diagnostics.push(diagnostic(
-                            "<main>",
                             format!(
                                 "{kind} {display} is declared in package {package_name}, which composer.json doesn't require; it's only installed as another package's dependency."
                             ),
@@ -506,7 +503,6 @@ impl Project {
                     && reported_packages.insert(package_name.clone())
                 {
                     diagnostics.push(diagnostic(
-                        "<main>",
                         format!(
                             "{kind} {display} is declared in package {package_name}, which composer.json only requires in require-dev, but this file is autoloaded in production."
                         ),
@@ -544,7 +540,6 @@ impl Project {
                         continue;
                     }
                     manifest_diagnostics.push(diagnostic(
-                        "composer.json",
                         format!(
                             "Package {} is in {section}, but the analysed code uses none of its symbols.",
                             entry.value
@@ -557,7 +552,6 @@ impl Project {
                     && !manifest.autoload_dev.psr4.is_empty()
                 {
                     manifest_diagnostics.push(diagnostic(
-                        "composer.json",
                         format!(
                             "Package {} is in require, but only code autoloaded through autoload-dev uses it; it belongs in require-dev.",
                             entry.value
@@ -628,7 +622,6 @@ impl Project {
                     .find(|(_, dirs)| dirs.iter().any(|d| path_starts_with(path, d)))
                 {
                     diagnostics.push(diagnostic(
-                        &fqn,
                         format!(
                             "Class {fqn} is declared under the PSR-4 root of prefix {prefix}, but its namespace doesn't start with that prefix; the autoloader can't find it."
                         ),
@@ -652,7 +645,6 @@ impl Project {
                 .find(|(_, e)| normalized(e).eq_ignore_ascii_case(&actual))
             {
                 diagnostics.push(diagnostic(
-                    &fqn,
                     format!(
                         "Class {fqn} is declared in {}, whose letter case differs from {} that PSR-4 prefix {prefix} maps it to; a case-sensitive filesystem won't find it.",
                         shown.display(),
@@ -664,7 +656,6 @@ impl Project {
                 continue;
             }
             diagnostics.push(diagnostic(
-                &fqn,
                 format!(
                     "Class {fqn} is declared in {}, but PSR-4 prefix {prefix} maps it to {}.",
                     shown.display(),
@@ -714,7 +705,6 @@ impl Project {
                 continue;
             }
             diagnostics.push(diagnostic(
-                "composer.json",
                 format!(
                     "composer.json provides {}, but no class implements {}.",
                     entry.value,
@@ -748,7 +738,6 @@ impl Project {
             let span = at_line(entry.line);
             let Some((canonical, info)) = self.registry.lookup_class(class) else {
                 diagnostics.push(diagnostic(
-                    "composer.json",
                     format!(
                         "Composer script {script} calls {command}, but class {class} doesn't exist."
                     ),
@@ -782,7 +771,6 @@ impl Project {
                     continue;
                 }
                 diagnostics.push(diagnostic(
-                    "composer.json",
                     format!("Composer script {script} calls {command}, but method {canonical}::{method}() doesn't exist."),
                     span,
                     "composerScript.notFound",
@@ -809,7 +797,6 @@ impl Project {
                 _ => "not static",
             };
             diagnostics.push(diagnostic(
-                "composer.json",
                 format!(
                     "Composer script {script} calls {command}, but {owner}::{method}() is {problem}; Composer calls it statically from outside the class."
                 ),
@@ -829,7 +816,6 @@ fn check_platform_php(manifest: &ComposerManifest, diagnostics: &mut Vec<Diagnos
     };
     if constraint::satisfies(required, &platform.value) == Some(false) {
         diagnostics.push(diagnostic(
-            "composer.json",
             format!(
                 "config.platform.php {} doesn't satisfy require.php {required}; Composer resolves dependencies for a PHP version the package doesn't support.",
                 platform.value

@@ -1,2 +1,2 @@
-4:32-4:34 parameter.unresolvableNativeType L0 f | Parameter $x of f() has unresolvable native type.
+4:32-4:34 parameter.unresolvableNativeType L0 | Parameter $x of f() has unresolvable native type.
     non-ignorable

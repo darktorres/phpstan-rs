@@ -1,2 +1,2 @@
-3:24-3:54 missingType.return L6 Foo::bar | Method Foo::bar() has no return type specified.
-3:49-3:50 parameter.defaultValue L2 Foo::bar | Default value of the parameter #1 $s (5) of method Foo::bar() is incompatible with type string.
+3:24-3:54 missingType.return L6 | Method Foo::bar() has no return type specified.
+3:49-3:50 parameter.defaultValue L2 | Default value of the parameter #1 $s (5) of method Foo::bar() is incompatible with type string.

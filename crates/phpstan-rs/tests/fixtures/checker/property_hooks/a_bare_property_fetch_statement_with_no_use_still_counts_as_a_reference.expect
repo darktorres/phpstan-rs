@@ -1,1 +1,1 @@
-3:31-9:18 propertySetHook.noAssign L3 BareRead | Set hook for non-virtual property BareRead::$o does not assign value to it.
+3:31-9:18 propertySetHook.noAssign L3 | Set hook for non-virtual property BareRead::$o does not assign value to it.

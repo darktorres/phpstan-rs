@@ -1,1 +1,1 @@
-2:81-2:83 phpstanRs.assertType L0 test | assertType() mismatch: expected type "string", actual type "int"
+2:81-2:83 phpstanRs.assertType L0 | assertType() mismatch: expected type "string", actual type "int"

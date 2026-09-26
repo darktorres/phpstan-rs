@@ -1,1 +1,1 @@
-10:40-10:41 conditionalType.alwaysFalse L2 S::g | Condition "int|string is array" in conditional return type is always false.
+10:40-10:41 conditionalType.alwaysFalse L2 | Condition "int|string is array" in conditional return type is always false.

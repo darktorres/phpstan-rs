@@ -1,1 +1,1 @@
-3:24-3:26 missingType.property L6 X | Property X::$a has no type specified.
+3:24-3:26 missingType.property L6 | Property X::$a has no type specified.

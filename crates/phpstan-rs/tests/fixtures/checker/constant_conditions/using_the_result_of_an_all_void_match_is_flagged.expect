@@ -1,2 +1,2 @@
-6:22-6:61 match.void L2 f | Result of match expression (void) is used.
-8:22-8:80 match.void L2 f | Result of match expression (void) is used.
+6:22-6:61 match.void L2 | Result of match expression (void) is used.
+8:22-8:80 match.void L2 | Result of match expression (void) is used.

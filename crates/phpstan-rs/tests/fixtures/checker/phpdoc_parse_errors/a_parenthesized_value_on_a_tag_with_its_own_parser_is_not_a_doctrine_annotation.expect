@@ -1,1 +1,1 @@
-6:13-6:39 return.unusedType L4 f | Function f() never returns string so it can be removed from the return type.
+6:13-6:39 return.unusedType L4 | Function f() never returns string so it can be removed from the return type.

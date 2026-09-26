@@ -1,1 +1,1 @@
-4:49-4:58 constructor.unusedParameter L1 class@anonymous::__construct | Constructor of an anonymous class has an unused parameter $seed.
+4:49-4:58 constructor.unusedParameter L1 | Constructor of an anonymous class has an unused parameter $seed.

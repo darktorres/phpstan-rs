@@ -78,7 +78,6 @@ impl<'a> Checker<'a> {
         r: &Expr,
         whole: &Expr,
         locals: &Locals,
-        label: &str,
         is_first_level: bool,
     ) {
         let is_and = matches!(op, BinOp::And | BinOp::LogicalAnd);
@@ -94,7 +93,6 @@ impl<'a> Checker<'a> {
         let symbol = crate::checker::binop_sigil(op);
         if let Some(value) = self.inferred_constant_condition(l, locals) {
             self.report(
-                label.to_string(),
                 format!(
                     "Left side of {symbol} is always {}.",
                     if value { "true" } else { "false" }
@@ -111,7 +109,6 @@ impl<'a> Checker<'a> {
         self.apply_narrowing(l, &mut narrowed, is_and);
         if let Some(value) = self.inferred_constant_condition(r, &narrowed) {
             self.report(
-                label.to_string(),
                 format!(
                     "Right side of {symbol} is always {}.",
                     if value { "true" } else { "false" }
@@ -137,7 +134,6 @@ impl<'a> Checker<'a> {
         };
         if let Some(value) = whole_value {
             self.report(
-                label.to_string(),
                 format!(
                     "Result of {symbol} is always {}.",
                     if value { "true" } else { "false" }
@@ -154,10 +150,9 @@ impl<'a> Checker<'a> {
     /// `||`) - `xor` doesn't short-circuit, so there's no "already
     /// covered by the enclosing if/while's own check" overlap to avoid,
     /// and no real rule for it exists to model that overlap regardless.
-    pub(crate) fn check_logical_xor(&mut self, l: &Expr, r: &Expr, locals: &Locals, label: &str) {
+    pub(crate) fn check_logical_xor(&mut self, l: &Expr, r: &Expr, locals: &Locals) {
         if let Some(value) = self.inferred_constant_condition(l, locals) {
             self.report(
-                label.to_string(),
                 format!(
                     "Left side of xor is always {}.",
                     if value { "true" } else { "false" }
@@ -172,7 +167,6 @@ impl<'a> Checker<'a> {
         }
         if let Some(value) = self.inferred_constant_condition(r, locals) {
             self.report(
-                label.to_string(),
                 format!(
                     "Right side of xor is always {}.",
                     if value { "true" } else { "false" }

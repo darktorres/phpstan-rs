@@ -1,1 +1,1 @@
-7:24-7:37 class.toStringDeprecated L0 f | Casting class Foo to string is deprecated.
+7:24-7:37 class.toStringDeprecated L0 | Casting class Foo to string is deprecated.

@@ -144,12 +144,11 @@ impl<'a> Checker<'a> {
     /// declaration - checked once, at the declaration site, from
     /// `check_function`'s own "one choke point every function-shaped
     /// declaration passes through" comment.
-    pub(crate) fn check_throws_tag_validity(&mut self, throws: &Type, span: Span, label: &str) {
+    pub(crate) fn check_throws_tag_validity(&mut self, throws: &Type, span: Span) {
         if throws_is_valid(throws, self.registry) {
             return;
         }
         self.report(
-            label.to_string(),
             format!("PHPDoc tag @throws with type {throws} is not subtype of Throwable"),
             span,
             2,

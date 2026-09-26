@@ -1,11 +1,11 @@
-7:24-7:56 missingType.return L6 Magic::__get | Method Magic::__get() has no return type specified.
-7:39-7:41 missingType.parameter L6 Magic::__get | Method Magic::__get() has parameter $n with no type specified.
-8:24-8:49 missingType.return L6 Magic::__set | Method Magic::__set() has no return type specified.
-8:39-8:41 missingType.parameter L6 Magic::__set | Method Magic::__set() has parameter $n with no type specified.
-8:43-8:45 missingType.parameter L6 Magic::__set | Method Magic::__set() has parameter $v with no type specified.
-10:28-10:61 propertySetHook.nativeParameterType L0 Magic | Parameter $value of set hook does not have a native type but the property Magic::$setOnly does.
+7:24-7:56 missingType.return L6 | Method Magic::__get() has no return type specified.
+7:39-7:41 missingType.parameter L6 | Method Magic::__get() has parameter $n with no type specified.
+8:24-8:49 missingType.return L6 | Method Magic::__set() has no return type specified.
+8:39-8:41 missingType.parameter L6 | Method Magic::__set() has parameter $n with no type specified.
+8:43-8:45 missingType.parameter L6 | Method Magic::__set() has parameter $v with no type specified.
+10:28-10:61 propertySetHook.nativeParameterType L0 | Parameter $value of set hook does not have a native type but the property Magic::$setOnly does.
     non-ignorable
-13:17-13:32 assign.propertyReadOnly L0 f | Property Magic::$readOnlyTag is not writable.
-14:22-14:38 property.writeOnly L0 f | Property Magic::$writeOnlyTag is not readable.
-15:17-15:28 assign.propertyReadOnly L0 f | Property Magic::$getOnly is not writable.
-16:22-16:33 property.writeOnly L0 f | Property Magic::$setOnly is not readable.
+13:17-13:32 assign.propertyReadOnly L0 | Property Magic::$readOnlyTag is not writable.
+14:22-14:38 property.writeOnly L0 | Property Magic::$writeOnlyTag is not readable.
+15:17-15:28 assign.propertyReadOnly L0 | Property Magic::$getOnly is not writable.
+16:22-16:33 property.writeOnly L0 | Property Magic::$setOnly is not readable.

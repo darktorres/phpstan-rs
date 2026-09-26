@@ -177,7 +177,6 @@ impl<'a> Checker<'a> {
         &mut self,
         declared_return: Option<&Type>,
         span: Span,
-        label: &str,
     ) {
         if !self.current_function_is_generator {
             return;
@@ -192,9 +191,7 @@ impl<'a> Checker<'a> {
         if type_allows_generator_return(&resolved, self.registry) {
             return;
         }
-        self.report(
-            label.to_string(),
-            format!(
+        self.report(format!(
                 "yields, but its declared return type {resolved} is not a supertype of Generator, Iterator, Traversable, or iterable"
             ),
             span,
@@ -321,17 +318,17 @@ impl<'a> Checker<'a> {
         // needs it here, or every method would get double-checked.
         if !self.facts_only {
             if class_name.is_none() {
-                self.check_unknown_phpstan_tags_on(&label, f.doc_comment.as_deref(), f.name_span);
+                self.check_unknown_phpstan_tags_on(f.doc_comment.as_deref(), f.name_span);
             }
             if self.registry.check_magic_numbers {
-                self.check_magic_numbers_in_params(&f.params, &label);
+                self.check_magic_numbers_in_params(&f.params);
             }
             self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
             self.check_purity_impure_points(f, sig, class_name.is_some(), &label);
-            self.check_declared_param_callable_tags(f, &label);
+            self.check_declared_param_callable_tags(f);
             self.check_internal_param_and_return_types(f, class_name, &label);
-            self.check_restricted_param_and_return_types(f, class_name, &label);
-            self.check_assert_tag_types(sig, f.span, &label);
+            self.check_restricted_param_and_return_types(f, class_name);
+            self.check_assert_tag_types(sig, f.span);
             // `method.templateTypeNotInParameter` - neither a closure nor an
             // arrow-fn is indexed into the registry at all (see
             // `check_template_type_not_in_parameter`'s doc comment), so this
@@ -348,25 +345,20 @@ impl<'a> Checker<'a> {
             // targeting a modern PHP version.
             self.check_native_union_types_supported(f, class_name.is_some(), &label);
             self.check_unresolvable_native_types(f, &label);
-            self.check_implicitly_nullable_params(f, &label);
-            self.check_required_parameter_after_optional(f, &label);
+            self.check_implicitly_nullable_params(f);
+            self.check_required_parameter_after_optional(f);
             if let Some(sig) = sig {
                 let previous_class =
                     std::mem::replace(&mut self.current_class, class_name.map(str::to_string));
-                self.check_default_parameter_types(f, sig, class_name, &label);
-                self.check_phpdoc_types_against_native(f, sig, class_name, &label);
-                self.check_conditional_types(f, sig, class_name, &label);
+                self.check_default_parameter_types(f, sig, class_name);
+                self.check_phpdoc_types_against_native(f, sig, class_name);
+                self.check_conditional_types(f, sig, class_name);
                 let description = if class_name.is_some() {
                     "a method"
                 } else {
                     "a function"
                 };
-                self.check_misplaced_var_tag(
-                    f.doc_comment.as_deref(),
-                    description,
-                    f.name_span,
-                    &label,
-                );
+                self.check_misplaced_var_tag(f.doc_comment.as_deref(), description, f.name_span);
                 if let Some(class) = class_name {
                     self.check_self_out(f, sig, class, is_static, &label);
                 }
@@ -439,7 +431,6 @@ impl<'a> Checker<'a> {
                     crate::checker::generics::TemplateSubject::Declared {
                         display_name: &display_name,
                     },
-                    &label,
                     f.span,
                 );
                 // `method.shadowTemplate`: a method-level `@template` reusing
@@ -454,9 +445,7 @@ impl<'a> Checker<'a> {
                         .collect();
                     shadowed.sort();
                     for name in shadowed {
-                        self.report(
-                        label.to_string(),
-                        format!(
+                        self.report(format!(
                             "PHPDoc tag @template {name} for method {c}::{}() shadows @template {name} for class {c}.",
                             f.name
                         ),
@@ -520,24 +509,12 @@ impl<'a> Checker<'a> {
                         Some(doc) => Type::Union(vec![ty.clone(), doc.clone()]),
                         None => ty.clone(),
                     };
-                    self.check_type_class_names_exist(&checked, &subject, ast_param.span, &label);
-                    self.check_type_trait_refs(
-                        &ty,
-                        &subject,
-                        ast_param.span,
-                        &label,
-                        "parameter.trait",
-                    );
+                    self.check_type_class_names_exist(&checked, &subject, ast_param.span);
+                    self.check_type_trait_refs(&ty, &subject, ast_param.span, "parameter.trait");
                     // `ty` above is already `resolve_pseudo`'d.
-                    self.check_no_parent_ref(
-                        &ty,
-                        &subject,
-                        ast_param.span,
-                        &label,
-                        "parameter.noParent",
-                    );
-                    self.check_type_class_name_case(&param.case_refs, &label, ast_param.span);
-                    self.check_type_internal_usage(&param.case_refs, &label, ast_param.span);
+                    self.check_no_parent_ref(&ty, &subject, ast_param.span, "parameter.noParent");
+                    self.check_type_class_name_case(&param.case_refs, ast_param.span);
+                    self.check_type_internal_usage(&param.case_refs, ast_param.span);
                     resolved_params.push((param.name.to_string(), ty.clone(), ast_param.span));
                     // `ParamSig::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
@@ -667,11 +644,11 @@ impl<'a> Checker<'a> {
                         None => ty,
                     };
                     let subject = format!("parameter ${} of {label}()", p.name);
-                    self.check_type_class_names_exist(&ty, &subject, p.span, &label);
-                    self.check_type_trait_refs(&ty, &subject, p.span, &label, "parameter.trait");
-                    self.check_no_parent_ref(&ty, &subject, p.span, &label, "parameter.noParent");
-                    self.check_type_class_name_case(&case_refs, &label, p.span);
-                    self.check_type_internal_usage(&case_refs, &label, p.span);
+                    self.check_type_class_names_exist(&ty, &subject, p.span);
+                    self.check_type_trait_refs(&ty, &subject, p.span, "parameter.trait");
+                    self.check_no_parent_ref(&ty, &subject, p.span, "parameter.noParent");
+                    self.check_type_class_name_case(&case_refs, p.span);
+                    self.check_type_internal_usage(&case_refs, p.span);
                     resolved_params.push((p.name.to_string(), ty.clone(), p.span));
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
@@ -802,14 +779,13 @@ impl<'a> Checker<'a> {
             Some(doc) => Type::Union(vec![declared, doc.clone()]),
             None => declared,
         };
-        self.check_type_class_names_exist(&checked, &subject, f.span, &label);
-        self.check_type_class_name_case(&declared_return_case_refs, &label, f.span);
-        self.check_type_internal_usage(&declared_return_case_refs, &label, f.span);
+        self.check_type_class_names_exist(&checked, &subject, f.span);
+        self.check_type_class_name_case(&declared_return_case_refs, f.span);
+        self.check_type_internal_usage(&declared_return_case_refs, f.span);
         self.check_type_trait_refs(
             declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
             &subject,
             f.span,
-            &label,
             "return.trait",
         );
         // `return.noParent` - `declared_return` above is deliberately
@@ -820,13 +796,7 @@ impl<'a> Checker<'a> {
         if let Some(c) = class_name {
             let resolved_return =
                 self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed(false)), c);
-            self.check_no_parent_ref(
-                &resolved_return,
-                &subject,
-                f.span,
-                &label,
-                "return.noParent",
-            );
+            self.check_no_parent_ref(&resolved_return, &subject, f.span, "return.noParent");
         }
         // `@throws` tag validity - see `checker::throws`'s module doc
         // comment.
@@ -834,7 +804,7 @@ impl<'a> Checker<'a> {
             && let Some(sig) = sig
             && let Some(throws) = &sig.throws
         {
-            self.check_throws_tag_validity(throws, f.span, &label);
+            self.check_throws_tag_validity(throws, f.span);
             // Mirrors real PHPStan's
             // `ThrowsVoidFunctionWithExplicitThrowPointRule`/
             // `ThrowsVoidMethodWithExplicitThrowPointRule` - needs no
@@ -849,9 +819,7 @@ impl<'a> Checker<'a> {
                 } else {
                     "Function"
                 };
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "{kind_word} {label}() throws exception but the PHPDoc contains @throws void."
                     ),
                     throw_span,
@@ -873,14 +841,9 @@ impl<'a> Checker<'a> {
             // `MethodAttributesRule`/`FunctionAttributesRule` (one or the
             // other, never both, for this same choke point).
             if class_name.is_some() {
-                self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_METHOD, "method", &label);
+                self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_METHOD, "method");
             } else {
-                self.check_attribute_targets(
-                    &f.attrs,
-                    ATTRIBUTE_TARGET_FUNCTION,
-                    "function",
-                    &label,
-                );
+                self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_FUNCTION, "function");
             }
             for p in &f.params {
                 self.check_attributes(&p.attrs, &label);
@@ -896,7 +859,7 @@ impl<'a> Checker<'a> {
                 } else {
                     (ATTRIBUTE_TARGET_PARAMETER, "parameter")
                 };
-                self.check_attribute_targets(&p.attrs, target, target_name, &label);
+                self.check_attribute_targets(&p.attrs, target, target_name);
             }
         }
 
@@ -936,7 +899,7 @@ impl<'a> Checker<'a> {
             if let (Some(sig), Some(c)) = (sig, class_name)
                 && f.name != "__construct".into()
             {
-                self.check_variance(sig, c, &label, f.span);
+                self.check_variance(sig, c, f.span);
             }
             // `function.variance`/`method.variance` - the own-declaration
             // half, unlike `check_variance` above, runs unconditionally
@@ -1075,7 +1038,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        self.check_generator_return_type(native_return.as_ref(), f.span, &label);
+        self.check_generator_return_type(native_return.as_ref(), f.span);
 
         // `check_block`, not a bare loop over `check_stmt`: a function's
         // top-level body is exactly as eligible for `deadCode.unreachable`
@@ -1158,7 +1121,6 @@ impl<'a> Checker<'a> {
                 // shapes identically.
                 if expected == Type::Never {
                     self.report(
-                        label.clone(),
                         "should never return, but a return statement was reached".to_string(),
                         f.span,
                         3,
@@ -1168,7 +1130,6 @@ impl<'a> Checker<'a> {
                     missing_return_level(&expected, f.return_type.is_some(), is_generator_treturn)
                 {
                     let mut builder = DiagnosticBuilder::new(
-                        label.clone(),
                         format!("should return {expected} but return statement is missing"),
                         f.span,
                         level,
@@ -1193,7 +1154,6 @@ impl<'a> Checker<'a> {
                 && matches!(declared_return, Some(Type::Void) | Some(Type::Mixed(_)))
             {
                 self.report(
-                    label.clone(),
                     "could be declared to return never - it never returns normally".to_string(),
                     f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
                     5,
@@ -1206,7 +1166,7 @@ impl<'a> Checker<'a> {
             // below (rather than after) so a constructor that calls
             // extract()/eval() has this diagnostic discarded along with
             // every other one from its own body.
-            self.check_unused_constructor_parameters(f, class_name, &label);
+            self.check_unused_constructor_parameters(f, class_name);
 
             // Both run once the whole body (every real throw point it
             // contains) has been checked, still ahead of the
@@ -1243,10 +1203,10 @@ impl<'a> Checker<'a> {
                         _ => true,
                     };
                     if should_check {
-                        self.check_too_wide_throw_type(throws, &subject, f.span, &label);
+                        self.check_too_wide_throw_type(throws, &subject, f.span);
                     }
                 }
-                self.check_missing_checked_exceptions(throws_tag, &subject, &label);
+                self.check_missing_checked_exceptions(throws_tag, &subject);
 
                 // Same "has a real body at all" gate, same choke point as
                 // the throw-type check above.
@@ -1278,7 +1238,6 @@ impl<'a> Checker<'a> {
                             is_private,
                             &subject,
                             f.span,
-                            &label,
                         );
                     }
                 }
@@ -1286,7 +1245,7 @@ impl<'a> Checker<'a> {
                 // visibility/finality gate of its own (unlike the two
                 // too-wide rules) - runs whenever a by-ref parameter
                 // actually declares `@param-out` at all.
-                self.check_by_ref_execution_end(&label, f.span);
+                self.check_by_ref_execution_end(f.span);
                 let should_check_by_ref_too_wide = match (class_name, sig) {
                     (Some(c), Some(s)) => {
                         self.should_check_too_wide_by_ref_type(c, &f.name, s.visibility.clone())
@@ -1294,7 +1253,7 @@ impl<'a> Checker<'a> {
                     _ => true,
                 };
                 if should_check_by_ref_too_wide {
-                    self.check_too_wide_by_ref_type(&label, f.span);
+                    self.check_too_wide_by_ref_type(f.span);
                 }
             }
         }
@@ -1346,7 +1305,6 @@ impl<'a> Checker<'a> {
             f.return_type.as_ref(),
             &message,
             f.span,
-            label,
         );
     }
 
@@ -1367,7 +1325,6 @@ impl<'a> Checker<'a> {
         return_hint: Option<&TypeHint>,
         message: &str,
         span: Span,
-        label: &str,
     ) {
         let Some(version) = self.registry.php_version else {
             return;
@@ -1378,7 +1335,6 @@ impl<'a> Checker<'a> {
         for hint in param_hints {
             if is_bare_native_union(hint) {
                 self.report(
-                    label.to_string(),
                     message.to_string(),
                     span,
                     0,
@@ -1388,13 +1344,7 @@ impl<'a> Checker<'a> {
             }
         }
         if is_bare_native_union(return_hint) {
-            self.report(
-                label.to_string(),
-                message.to_string(),
-                span,
-                0,
-                "return.unionTypeNotSupported",
-            );
+            self.report(message.to_string(), span, 0, "return.unionTypeNotSupported");
         }
     }
 
@@ -1413,7 +1363,6 @@ impl<'a> Checker<'a> {
                 ),
                 "parameter.unresolvableNativeType",
                 p.name_span,
-                label,
             );
         }
         self.check_unresolvable_native_type(
@@ -1421,7 +1370,6 @@ impl<'a> Checker<'a> {
             &format!("{label}() has unresolvable native return type."),
             "return.unresolvableNativeType",
             f.span,
-            label,
         );
     }
 
@@ -1443,7 +1391,6 @@ impl<'a> Checker<'a> {
         message: &str,
         identifier: &'static str,
         span: Span,
-        label: &str,
     ) {
         let Some(version) = self.registry.php_version else {
             return;
@@ -1471,8 +1418,7 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report_builder(
-            DiagnosticBuilder::new(label.to_string(), message.to_string(), span, 0, identifier)
-                .non_ignorable(),
+            DiagnosticBuilder::new(message.to_string(), span, 0, identifier).non_ignorable(),
         );
     }
 
@@ -1483,7 +1429,7 @@ impl<'a> Checker<'a> {
     /// `FunctionDefinitionCheck::checkImplicitlyNullableType` is the
     /// parameter's 1-based position among every parameter, typed or not -
     /// `i` below mirrors that exactly, not a typed-only counter.
-    fn check_implicitly_nullable_params(&mut self, f: &FunctionDecl, label: &str) {
+    fn check_implicitly_nullable_params(&mut self, f: &FunctionDecl) {
         let Some(version) = self.registry.php_version else {
             return;
         };
@@ -1517,9 +1463,7 @@ impl<'a> Checker<'a> {
             if !is_default_null {
                 continue;
             }
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Deprecated in PHP 8.4: Parameter #{} ${} ({hint}) is implicitly nullable via default value null.",
                     i + 1,
                     p.name,
@@ -1540,7 +1484,7 @@ impl<'a> Checker<'a> {
     /// 8.1/8.3 special cases (a typed, `= null`-defaulted parameter only
     /// sometimes counting as "optional," depending on whether its type
     /// is nullable/a union naming `null`/`mixed`) are left unbuilt.
-    fn check_required_parameter_after_optional(&mut self, f: &FunctionDecl, label: &str) {
+    fn check_required_parameter_after_optional(&mut self, f: &FunctionDecl) {
         let Some(version) = self.registry.php_version else {
             return;
         };
@@ -1553,9 +1497,7 @@ impl<'a> Checker<'a> {
                 && p.default.is_none()
                 && !p.variadic
             {
-                self.report(
-                    label.to_string(),
-                    format!(
+                self.report(format!(
                         "Deprecated in PHP 8.0: Required parameter ${} follows optional parameter ${optional}.",
                         p.name,
                     ),
@@ -1606,7 +1548,6 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         sig: &FunctionSig,
         class_name: Option<&str>,
-        label: &str,
     ) {
         for (i, p) in f.params.iter().enumerate() {
             let Some(default) = &p.default else {
@@ -1632,9 +1573,7 @@ impl<'a> Checker<'a> {
                 Some(c) => format!("method {c}::{}()", f.name),
                 None => format!("function {}()", f.name),
             };
-            self.report(
-                label.to_string(),
-                format!(
+            self.report(format!(
                     "Default value of the parameter #{} ${} ({default_ty}) of {target} is incompatible with type {param_ty}.",
                     i + 1,
                     p.name,
@@ -1659,7 +1598,6 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         locals: &Locals,
         span: Span,
-        label: &str,
     ) {
         if !has_native_return || self.current_function_is_generator {
             return;
@@ -1677,7 +1615,6 @@ impl<'a> Checker<'a> {
         if expected == Type::Never {
             self.report_builder(
                 DiagnosticBuilder::new(
-                    label.to_string(),
                     "should never return, but a return statement was reached".to_string(),
                     span,
                     3,
@@ -1692,7 +1629,6 @@ impl<'a> Checker<'a> {
         };
         self.report_builder(
             DiagnosticBuilder::new(
-                label.to_string(),
                 format!("should return {expected} but return statement is missing"),
                 span,
                 level,

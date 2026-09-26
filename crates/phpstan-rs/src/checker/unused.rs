@@ -40,7 +40,6 @@ impl<'a> Checker<'a> {
         &mut self,
         f: &FunctionDecl,
         class_name: Option<&str>,
-        label: &str,
     ) {
         let Some(fqn) = class_name else {
             return;
@@ -81,13 +80,7 @@ impl<'a> Checker<'a> {
                     p.name
                 )
             };
-            self.report(
-                label.to_string(),
-                message,
-                p.span,
-                1,
-                "constructor.unusedParameter",
-            );
+            self.report(message, p.span, 1, "constructor.unusedParameter");
         }
     }
 
@@ -123,7 +116,6 @@ impl<'a> Checker<'a> {
         &mut self,
         uses: &[ClosureUse],
         body: &[Stmt],
-        label: &str,
         span: Span,
     ) {
         if uses.is_empty() {
@@ -135,7 +127,6 @@ impl<'a> Checker<'a> {
                 continue;
             }
             self.report(
-                label.to_string(),
                 format!("closure has an unused use (${})", u.name),
                 span,
                 1,
@@ -234,7 +225,6 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let mut builder = DiagnosticBuilder::new(
-                fqn.to_string(),
                 format!("private constant {fqn}::{} is unused", c.name),
                 c.span,
                 4,
@@ -260,7 +250,6 @@ impl<'a> Checker<'a> {
                 "private method"
             };
             let mut builder = DiagnosticBuilder::new(
-                fqn.to_string(),
                 format!("{kind_word} {fqn}::{}() is unused", m.function.name),
                 m.function.span,
                 4,
@@ -297,9 +286,7 @@ impl<'a> Checker<'a> {
             } else {
                 "property"
             };
-            self.report(
-                fqn.to_string(),
-                format!(
+            self.report(format!(
                     "{kind_word} {fqn}::${} has private(set) visibility but is never written from within the declaring class",
                     p.name
                 ),
@@ -416,7 +403,7 @@ impl<'a> Checker<'a> {
         } else {
             return;
         };
-        let mut builder = DiagnosticBuilder::new(fqn.to_string(), message, span, 4, identifier);
+        let mut builder = DiagnosticBuilder::new(message, span, 4, identifier);
         if identifier == "property.unused"
             && let Some(removal) = removal
         {

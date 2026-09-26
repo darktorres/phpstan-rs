@@ -1,8 +1,8 @@
-6:5-6:17 enum.caseOutsideOfEnum L0 EnumCaseOutsideEnum\Foo | Enum case can only be used in enums.
+6:5-6:17 enum.caseOutsideOfEnum L0 | Enum case can only be used in enums.
     non-ignorable
-11:5-11:17 enum.caseOutsideOfEnum L0 EnumCaseOutsideEnum\Bar | Enum case can only be used in enums.
+11:5-11:17 enum.caseOutsideOfEnum L0 | Enum case can only be used in enums.
     non-ignorable
-16:5-16:17 enum.caseOutsideOfEnum L0 EnumCaseOutsideEnum\Baz | Enum case can only be used in enums.
+16:5-16:17 enum.caseOutsideOfEnum L0 | Enum case can only be used in enums.
     non-ignorable
-32:9-32:21 enum.caseOutsideOfEnum L0 f | Enum case can only be used in enums.
+32:9-32:21 enum.caseOutsideOfEnum L0 | Enum case can only be used in enums.
     non-ignorable
