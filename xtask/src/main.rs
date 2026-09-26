@@ -616,6 +616,16 @@ fn compared_artifacts(full: bool) -> Vec<(String, &'static str)> {
     names
 }
 
+/// Whether `artifact` has any snapshot besides `hash`'s: one that doesn't
+/// is first recorded at `hash`, with nothing older to compare against.
+fn artifact_recorded_before(artifact: &str, hash: &str) -> bool {
+    std::fs::read_dir(gate_dir().join(artifact)).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| !e.file_name().to_string_lossy().starts_with(hash))
+    })
+}
+
 fn compare(args: &[String]) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
     let against = match args.iter().position(|a| a == "--against") {
@@ -628,14 +638,23 @@ fn compare(args: &[String]) -> Result<(), String> {
     let hash = head_hash()?;
     let mut failures = Vec::new();
     for (artifact, ext) in &compared_artifacts(full) {
-        let (Some(old), Some(new)) = (
+        let (old, new) = (
             read_snapshot(artifact, &against, ext)?,
             read_snapshot(artifact, &hash, ext)?,
-        ) else {
-            failures.push(format!(
-                "{artifact}: missing snapshot for {against} or {hash}"
-            ));
-            continue;
+        );
+        let (old, new) = match (old, new) {
+            (Some(old), Some(new)) => (old, new),
+            // An artifact the older commit predates starts here.
+            (None, Some(_)) if !artifact_recorded_before(artifact, &hash) => {
+                eprintln!("{artifact}: first recorded at {hash}");
+                continue;
+            }
+            _ => {
+                failures.push(format!(
+                    "{artifact}: missing snapshot for {against} or {hash}"
+                ));
+                continue;
+            }
         };
         if old == new {
             continue;
