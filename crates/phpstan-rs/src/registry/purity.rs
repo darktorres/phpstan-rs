@@ -465,7 +465,7 @@ fn expr_disqualifies(
             resolve_static_call(class, target, name, registry, deps)
         }
         // A computed method name: any method, so unresolvable.
-        ExprKind::DynamicStaticCall(..) => true,
+        ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) => true,
         ExprKind::New(callee, args) => {
             if args
                 .iter()
@@ -942,6 +942,19 @@ fn collect_expr_impure_points(
                 description: "call to unknown method",
                 certain: false,
             });
+            for a in args {
+                collect_expr_impure_points(&a.value, declaring_class, registry, out);
+            }
+        }
+        ExprKind::DynamicMethodCall(recv, name, args, ..) => {
+            out.push(ImpurePointOccurrence {
+                span: e.span,
+                identifier: "methodCall",
+                description: "call to unknown method",
+                certain: false,
+            });
+            collect_expr_impure_points(recv, declaring_class, registry, out);
+            collect_expr_impure_points(name, declaring_class, registry, out);
             for a in args {
                 collect_expr_impure_points(&a.value, declaring_class, registry, out);
             }

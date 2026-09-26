@@ -1,0 +1,1 @@
+16:5-16:15 possiblyImpure.methodCall L0 | Possibly impure call to unknown method in pure function pureInvoke().
