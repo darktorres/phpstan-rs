@@ -63,3 +63,22 @@ fn unused_private_members_are_deleted_with_their_doc_comments() {
         "a constant sharing its declaration has no fix: {d:?}"
     );
 }
+
+#[test]
+fn a_missing_parent_constructor_call_is_inserted_when_it_needs_no_arguments() {
+    let enable = |r: &mut crate::registry::Registry| r.check_parent_constructor_call = true;
+    let src = "<?php\nclass P { public function __construct(int $x = 0) {} }\nclass C extends P {\n    public function __construct() {\n        $this->ready();\n    }\n    private function ready(): void {}\n}\nclass E extends P {\n    public function __construct() {}\n}\n";
+    let out = fixed(src, "constructor.missingParentCall", enable);
+    assert_eq!(
+        out,
+        "<?php\nclass P { public function __construct(int $x = 0) {} }\nclass C extends P {\n    public function __construct() {\n        parent::__construct();\n        $this->ready();\n    }\n    private function ready(): void {}\n}\nclass E extends P {\n    public function __construct() {\n        parent::__construct();\n    }\n}\n"
+    );
+
+    let required = "<?php\nclass P { public function __construct(int $x) {} }\nclass C extends P {\n    public function __construct() {}\n}\n";
+    let d = all_diagnostics_for_with(required, enable);
+    let finding = d
+        .iter()
+        .find(|x| x.identifier == "constructor.missingParentCall")
+        .expect("reported");
+    assert!(finding.fix.is_none(), "no fix when arguments are required");
+}
