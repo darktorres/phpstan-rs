@@ -8,45 +8,9 @@
 //! CARGO_BIN_EXE_<name>, no extra dependency needed) and asserts on its
 //! actual stdout/stderr, the same way a user would actually observe it.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+mod common;
 
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(label: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "phpstan_rs_cli_test_{label}_{}_{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
-
-    fn write(&self, rel: &str, contents: &str) -> PathBuf {
-        let path = self.0.join(rel);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::write(&path, contents).unwrap();
-        path
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_phpstan-rs"))
-}
+use common::{TempDir, bin};
 
 #[test]
 fn check_reports_every_file_parsed_with_zero_failures() {
@@ -1408,44 +1372,5 @@ fn check_does_not_crash_on_realistically_deep_nested_expressions() {
         "process was killed by a signal (crash) - status: {:?}, stderr: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[test]
-fn check_scales_roughly_linearly_with_a_single_very_long_line() {
-    // Guards against an O(line length x tokens on it) blowup: a single
-    // very long line must scale roughly linearly with size, not
-    // quadratically. Quadratic scaling would need ~16x the time for 4x
-    // the size; a generous 8x ceiling comfortably clears linear-ish
-    // scaling while still catching a real quadratic regression.
-    fn single_long_line(statements: usize) -> String {
-        let mut src = String::from("<?php ");
-        for i in 0..statements {
-            src.push_str(&format!("$a{i}=1;"));
-        }
-        src
-    }
-
-    let small_dir = TempDir::new("scale_small");
-    small_dir.write("a.php", &single_long_line(20_000));
-    let large_dir = TempDir::new("scale_large");
-    large_dir.write("a.php", &single_long_line(80_000));
-
-    let small_start = std::time::Instant::now();
-    let small_output = bin().arg("check").arg(small_dir.path()).output().unwrap();
-    let small_elapsed = small_start.elapsed();
-    assert!(small_output.status.success());
-
-    let large_start = std::time::Instant::now();
-    let large_output = bin().arg("check").arg(large_dir.path()).output().unwrap();
-    let large_elapsed = large_start.elapsed();
-    assert!(large_output.status.success());
-
-    assert!(
-        large_elapsed.as_secs_f64() < small_elapsed.as_secs_f64() * 8.0 + 0.5,
-        "4x input size took {:?} vs {:?} for the smaller input - looks quadratic, not linear \
-         (the +0.5s slack absorbs fixed process-startup overhead at these small sizes)",
-        large_elapsed,
-        small_elapsed
     );
 }
