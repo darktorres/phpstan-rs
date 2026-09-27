@@ -1499,8 +1499,12 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
                 "--quiet",
             ]))
         })?;
+        // cargo-machete takes itself for a `cargo run` binary, and its own
+        // name for a path, while `CARGO_PKG_NAME` is set.
         timings.time("machete", |_| {
-            run(cargo().args(["machete", "crates", "tools", "xtask", "fuzz"]))
+            run(cargo()
+                .args(["machete", "crates", "tools", "xtask", "fuzz"])
+                .env_remove("CARGO_PKG_NAME"))
         })?;
         timings.time("deny", |_| run(cargo().args(["deny", "check"])))?;
     }
