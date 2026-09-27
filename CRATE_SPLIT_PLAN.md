@@ -1012,6 +1012,10 @@ arguments, provenance, no AST bodies.
   so a session's names are reclaimed with it;
 - the three staleness fixes (approved deltas).
 
+Gate: the fixture suite's and the lib tests' wall times (`gatetime`) are
+recorded and lower than at the phase's start; per-class resolution no
+longer re-runs every pass over the stub classes for each project.
+
 **C5. Locator chain and stub layer**, one commit each:
 - locator order;
 - the lazy composer locator;
@@ -1022,7 +1026,10 @@ arguments, provenance, no AST bodies.
 - version-dependent signature selection (approved delta);
 - a panic-injection test.
 
-Gate: the union of all lazily resolved symbols equals today's
+Gate: the fixture suite's, the lib tests' and the cli tests' wall times
+(`gatetime`) are recorded and lower than at the phase's start; the stub
+layer replaces the per-project stub clone and the per-process stub
+parse. And the union of all lazily resolved symbols equals today's
 `generated_stub_data()`, extension maps included.
 
 **C6. Overlay layer**, one commit each:
