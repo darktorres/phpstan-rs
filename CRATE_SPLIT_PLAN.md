@@ -2090,6 +2090,9 @@ deleted; the file-size gate.
     first): `int|float * 2` and `int|float + 1` are `int` today, so
     `is_float($n * 2)` is reported always false; integer overflow is a
     float. A float literal types as its value; `1.5` is `float` today.
+    `%` on ranges follows PHP's sign rule: `int<0, 30> % -9` and
+    `int<-30, 30> % -9` are `never` today where PHPStan has `int<0, 8>` and
+    `int<-8, 8>`, and a range divisor gives `int` (nsrt `bug-15242.php`).
   - **Type-check calls** type as the constant the impossible-check logic
     decides: `is_string($s)` with a `string` is `true`, `is_string($i)`
     with an `int` is `false`, and `!`/`method_exists` follow. Today they are
@@ -2143,6 +2146,9 @@ deleted; the file-size gate.
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
       `if ($e === E::A) { return; }` and in a `match` `default` arm;
     - `!empty($v)` on an `int` leaves `int`;
+    - `gettype($y)` compared with a type name narrows, in `===` and in a
+      `switch`: `case "integer"` leaves `$y` as the whole union today (nsrt
+      `bug-6901.php`);
     - loose `==` with a constant narrows (`specifyTypesForEqual`):
       `$x == false` on `0|1|''|'x'|null|bool` leaves the whole union today
       instead of `0|''|false|null`;
@@ -2233,7 +2239,8 @@ assignments inside `assert()`.
 - conditional holders with `mergeWith`: `ScopeOps::createConditionalExpressions`,
   including the holders that record a variable as undefined on the other
   side, `preserveVacuousConditionals` and `withoutPreciseClassConstantFetches`;
-  they replace `discriminant_array_facts`. A variable defined under one
+  they replace `discriminant_array_facts` (nsrt `bug-5051.php` checks the
+  flag-correlation cases). A variable defined under one
   condition and read under a correlated one is `variable.undefined` today:
   `symfony/filesystem/Filesystem.php:190` reads `$origFile`, which only the
   `$isRecursive`-dependent branch defines;
@@ -2338,6 +2345,10 @@ assignments inside `assert()`.
   - After `$b = &$a; $b = 'x';`, `$a` is still `1`, and
     `if ($a === 'x')` is reported `identical.alwaysFalse`.
   - After `$b = &$a[0]; $b = 'x';`, `$a` is still `array{1, 2}`.
+  - References inside array literals (`processArrayByRefItems`): after
+    `$b = ['key' => &$a]; $b['key'] = 42;`, `$a` is still `'hello'`, and
+    `$a = [1, 2, &$x]; $x = 5;` leaves `array{1, 2, 0}` (nsrt
+    `bug-14333.php`, `bug-15246.php`).
   - `$block = &$this->blocks[$l][$n]` types `$block` as the element type,
     although a reference to a missing offset creates it as `null`, so
     `$block ??= new Block()` is `nullCoalesce.variable` today
