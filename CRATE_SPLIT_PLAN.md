@@ -2054,6 +2054,15 @@ deleted; the file-size gate.
     first): `int|float * 2` and `int|float + 1` are `int` today, so
     `is_float($n * 2)` is reported always false; integer overflow is a
     float. A float literal types as its value; `1.5` is `float` today.
+  - **Type-check calls** type as the constant the impossible-check logic
+    decides: `is_string($s)` with a `string` is `true`, `is_string($i)`
+    with an `int` is `false`, and `!`/`method_exists` follow. Today they are
+    `bool` although the rules report them, so `!is_int($c) &&
+    !is_string($c)` on `int|string` isn't `booleanAnd.alwaysFalse` (105
+    oracle findings phpstan-rs misses in snapshot 0a8fe69, e.g.
+    `nyholm/psr7/src/Response.php:75`), and the `throw` after an exhausted
+    `if` chain isn't `deadCode.unreachable` (57, e.g.
+    `nikic/php-parser/BuilderFactory.php:373`).
   - **Identical** follows `resolveIdenticalType`: operand types that don't
     intersect make `===` constant false. `identical_result` tests type
     families only, so `1|2 === 7` isn't reported today.
@@ -2228,7 +2237,12 @@ assignments inside `assert()`.
     (`MethodCallHandler`); a static call through `self`/`static`/`parent`
     drops `$this`'s. Today `if ($p->v !== null) { $p->reset(); }` keeps
     `$p->v` as `int`, and the same holds on `$this`, after
-    `parent::reset()` and after `self::reset()`.
+    `parent::reset()` and after `self::reset()`. On ordinary code this is
+    `$this->hasChanged = false; $this->refactorCall($node);
+    if ($this->hasChanged)` reported `if.alwaysFalse`: ten in rector's rules
+    (e.g. `rector/rules/Arguments/Rector/ClassMethod/ArgumentAdderRector.php:120`),
+    none of which the oracle reports. Fixed first: before D5, a call on
+    `$this` not known to be pure drops the `$this->…` narrowing entries.
   - A closure's property writes invalidate the outer scope where it is
     called immediately (`InvalidateExprNode`): after
     `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
@@ -2867,8 +2881,9 @@ its owner. Non-Registry keys follow the table.
   commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2),
   C3a's `property.unused` delta, `int|float` arithmetic (D3), top-level
   variables as maybe-defined (D5), loop/switch termination (D2) and
-  `is_resource()` never always true (D3), each a false positive on
-  ordinary code; D2 and D5 name the interim fix.
+  `is_resource()` never always true (D3) and impure `$this` calls
+  dropping `$this->…` narrowing (D5), each a false positive on ordinary
+  code; D2 and D5 name the interim fix.
 - **Stage D order.** Structure before semantics: holders (D1), statement
   results and handlers (D2), one inference path with the TypeSpecifier
   (D3), the sink (D4), then the semantics (D5) and the public APIs (D6).
