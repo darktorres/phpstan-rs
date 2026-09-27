@@ -2286,7 +2286,10 @@ deleted; the file-size gate.
 - isset/`empty`/`??` resolve through one issetability descriptor, which the
   engine and the isset rules share. On a constant array, `empty($a['nope'])`
   and `empty($a[3])` for a falsy value are `true` (`bool` today; nsrt
-  `isset-coalesce-empty-type.php`).
+  `isset-coalesce-empty-type.php`). The isset rules read the same
+  certainty: `isset($bar)`, `empty($foo)` and `$baz ?? 1` on a variable
+  that is never defined are `isset.variable`/`empty.variable`/
+  `nullCoalesce.variable` "is never defined", unreported today.
 - AST names read their parse-time resolution; `name_ctx` is deleted.
 - **Disagreements.** `check_expr` and `infer_expr` compute the same
   expression twice. Before the merge, a commit instruments both paths to
@@ -2598,6 +2601,11 @@ building on the previous one:
       at level 1 as "Variable $x might not be defined."
     - A merge keeps a Maybe holder only for variables, function calls and
       virtual keys, and drops superglobals.
+    - `isset()`/`empty()` in a condition don't define the variable: after
+      `if (empty($foo)) {…} else {…}` or `if (isset($bar)) {…}` on a
+      variable never assigned, `echo $foo` is unreported today where PHP
+      warns (nsrt `falsey-empty-certainty.php`, `falsey-isset-certainty.php`:
+      part of the 112 `No`/`Maybe` certainty assertions left unreported).
     - A truthy `??` proves its left side defined and non-null in that branch,
       as `isset()` already does: after `if ($c) { $foo = 'bar'; }`,
       `if ($foo ?? null) { return $foo; }` reports `$foo` undefined today
