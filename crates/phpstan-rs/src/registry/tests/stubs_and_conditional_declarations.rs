@@ -127,7 +127,7 @@ fn re_indexing_an_unconditional_class_after_removal_does_not_panic() {
     r.remove_declarations(&[], &["X".to_string()]);
     assert!(!r.classes.contains_key("X"));
 
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert!(r.classes["X"].methods.contains_key("original"));
 }
 
@@ -198,7 +198,7 @@ fn re_indexing_an_unconditional_function_after_removal_does_not_panic() {
     r.remove_declarations(&["f".to_string()], &[]);
     assert!(!r.functions.contains_key("f"));
 
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert_eq!(r.functions["f"].params[0].ty, Type::Int);
 }
 
@@ -226,6 +226,7 @@ fn merge_stubs_does_not_override_user_functions() {
     r.merge_stubs(vec![(
         "strlen",
         FunctionSig {
+            provenance: crate::registry::provenance::Provenance::default(),
             params: vec![],
             return_type: Type::Bool,
             return_type_native: Type::Bool,
@@ -286,7 +287,7 @@ fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
 
     assert_eq!(
         r.functions["str_contains"].params[0].ty,
@@ -324,7 +325,7 @@ fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert_eq!(
         r.functions["grapheme_strrev"].params.len(),
         1,
@@ -340,7 +341,7 @@ fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert_eq!(
         r.functions["grapheme_strrev"].params.len(),
         1,
@@ -375,7 +376,7 @@ fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert_eq!(r.functions["trigger_deprecation"].params.len(), 0);
 
     let tokens = Lexer::new(
@@ -387,7 +388,7 @@ fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert_eq!(
         r.functions["trigger_deprecation"].params.len(),
         4,
@@ -405,7 +406,7 @@ fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert_eq!(
         r.functions["trigger_deprecation"].params.len(),
         4,
@@ -443,7 +444,7 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert_eq!(
         r.functions["ctype_punct"].return_type,
         Type::Bool,
@@ -460,7 +461,7 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
     assert_eq!(r.functions["ctype_punct"].return_type, Type::Bool);
     assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::Mixed(false));
 }
@@ -489,7 +490,7 @@ fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
         Lexer::new("<?php function str_contains(string $haystack, string $needle): bool {}")
             .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
 
     // The real polyfill: conditional, nullable native params.
     let tokens = Lexer::new(
@@ -501,7 +502,7 @@ fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
 
     assert_eq!(
         r.functions["str_contains"].params[0].ty,
@@ -542,7 +543,7 @@ fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
 
     assert!(
         r.classes["Imagick"].methods.contains_key("getImageWidth"),
@@ -586,7 +587,7 @@ fn an_analyzed_files_redeclaration_of_a_built_in_stub_class_still_keeps_its_gene
         Lexer::new("<?php class ArrayIterator implements SeekableIterator, ArrayAccess {}")
             .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, true);
+    r.index(&program, &Origin::Unknown, true);
 
     assert_eq!(
         r.classes["ArrayIterator"].templates,
@@ -631,7 +632,7 @@ fn a_conditional_declaration_merges_onto_a_built_in_stub_class() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
 
     assert!(
         r.classes["ReflectionConstant"]
@@ -694,7 +695,7 @@ fn a_conditional_declaration_s_extends_never_leaks_onto_a_built_in_stub() {
     )
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    r.index(&program, false);
+    r.index(&program, &Origin::Unknown, false);
 
     assert!(
         r.classes["PhpToken"].extends.is_empty(),

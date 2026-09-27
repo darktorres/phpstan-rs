@@ -12,7 +12,7 @@ use crate::deps;
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
-use crate::registry::Registry;
+use crate::registry::{Origin, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use syntax::lexer::{LexWarning, Lexer};
@@ -26,7 +26,6 @@ mod architecture;
 mod banned;
 mod class_shape;
 mod composer_hygiene;
-mod decl_locations;
 pub(crate) mod duplicate_class_sites;
 mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
@@ -36,7 +35,6 @@ pub mod session;
 pub(crate) mod use_sites;
 mod whole_program;
 
-use decl_locations::DeclLocations;
 use duplicate_class_sites::DuplicateClassSites;
 use duplicate_fn_sites::DuplicateFunctionSites;
 use use_sites::UseSiteIndex;
@@ -128,21 +126,9 @@ pub struct Project {
     // editor's `didChange` most recently sent - not necessarily what's on
     // disk.
     retain_source: bool,
-    // See `DeclLocations`'s own doc comment. Populated/pruned alongside
-    // `registry.index`/`remove_declarations` in `load_file`/
-    // `update_file`, unconditionally - unlike `FileState.source`/Tier-1
-    // `use_sites`, this needs no retained source text at all (`index`
-    // takes only `&ast`/`&path`), so there's no reason to gate it behind
-    // `retain_source` too. Was gated behind it until `check_whole_
-    // program` (`Project`'s own doc comment) started needing a batch
-    // `check-project` run to resolve a whole-program fact's own
-    // declaring file/span - the "a batch run never does a position- or
-    // name-based lookup" assumption this comment used to make no longer
-    // holds.
-    decl_locations: DeclLocations,
     // Every top-level function's own unconditional declaration site(s) -
-    // always populated (no `retain_source` gate, same as `decl_locations`
-    // above), the same indexing-side/check-side split
+    // always populated (no `retain_source` gate), the same indexing-side/
+    // check-side split
     // `duplicate_class_sites` below uses: its own gate is at the check
     // side, `RulesSettings::check_duplicate_function_declarations`, not the
     // indexing side. See `DuplicateFunctionSites`'s own doc comment.
@@ -162,7 +148,7 @@ pub struct Project {
     // `check-project` run with no retained source; real but less
     // narrowly-scoped AST-node spans instead - see `use_sites::
     // index_class_fn_refs_without_source`'s own doc comment) - NOT
-    // unconditionally, unlike `decl_locations` above: measured on a real
+    // unconditionally: measured on a real
     // corpus, this walk is too expensive to run for every loaded file
     // when nothing in batch mode consumes it. Tier 2 (member references)
     // is NOT populated by ordinary indexing at all - see
@@ -302,7 +288,6 @@ impl Project {
             settings: CheckSettings::default(),
             defer_inline_ignores: false,
             retain_source: false,
-            decl_locations: DeclLocations::default(),
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
@@ -548,11 +533,6 @@ impl Project {
         self.files.get(path)?.source.as_deref()
     }
 
-    /// See `DeclLocations`'s own doc comment.
-    pub(crate) fn decl_locations(&self) -> &DeclLocations {
-        &self.decl_locations
-    }
-
     /// The AST of a currently-loaded file, if any - the position-walker's
     /// (`lsp::navigation`) own entry point.
     pub(crate) fn ast(&self, path: &Path) -> Option<&[Stmt]> {
@@ -631,15 +611,13 @@ impl Project {
         for decl in built_decls.into_iter().chain(anonymous_class_decls) {
             self.registry.insert_built_decl(decl, analyzed);
         }
-        self.decl_locations
-            .index(&ast, &mut NameContext::default(), &path);
         // Real source text (`retain_source`) buys narrower per-identifier
         // spans (`use_sites::index_class_fn_refs`'s own doc comment) - a
         // batch run with no retained source can still get real, just less
         // precisely-scoped, entries via `index_class_fn_refs_without_
         // source`, which `whole_program::dead_code` (existence-
         // only, never reads a use-site's span) can't tell apart from the
-        // precise version at all. But unlike `decl_locations` above, this
+        // precise version at all. But this
         // walk is NOT cheap enough to run unconditionally in batch mode -
         // measured on a real corpus (Piwigo, ~14k loaded files including
         // vendor context): running it for every loaded file regardless of
@@ -745,8 +723,6 @@ impl Project {
             return false;
         };
         self.registry
-            .remove_declarations(&old.functions, &old.classes);
-        self.decl_locations
             .remove_declarations(&old.functions, &old.classes);
         self.use_sites.remove_file(path);
         self.duplicate_fn_sites
@@ -889,7 +865,7 @@ impl Project {
     ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         // Parse BEFORE unindexing anything - on a parse failure (the
         // normal, common state while a file is mid-edit, not an edge
-        // case), this must leave every existing registry/decl_locations/
+        // case), this must leave every existing registry/
         // `self.files` entry for `path` completely untouched, not
         // half-torn-down. `unindex_file` used to run first unconditionally,
         // which meant any edit that failed to parse permanently discarded
@@ -939,7 +915,8 @@ impl Project {
             Some(existing) => existing.analyzed,
             None => !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES),
         };
-        self.registry.index(&ast, analyzed);
+        let origin = Origin::File(Arc::from(path));
+        self.registry.index(&ast, &origin, analyzed);
         // Best-effort, not full incremental invalidation: a prior version
         // of this file's own anonymous-class entries (registered under
         // synthetic names keyed by `path:line[:index]`) aren't removed
@@ -951,15 +928,13 @@ impl Project {
         // orphaned class nothing references), just imprecise, the same
         // tradeoff this path already accepts elsewhere.
         let (anonymous_class_decls, anonymous_class_names) =
-            crate::registry::collect_anonymous_classes(&ast, &path.display().to_string());
+            crate::registry::collect_anonymous_classes(&ast, &path.display().to_string(), &origin);
         for decl in anonymous_class_decls {
             self.registry.insert_built_decl(decl, analyzed);
         }
         for name in &classes {
             self.registry.record_phpstan_class_file(name, path);
         }
-        self.decl_locations
-            .index(&ast, &mut NameContext::default(), path);
         self.duplicate_fn_sites
             .index(&ast, &mut NameContext::default(), path, false);
         // `is_stub: false` - same reasoning as `load_file_impl`'s own
@@ -1682,7 +1657,7 @@ impl Project {
     /// gets for free, that a diagnostic built entirely outside
     /// `check_file_impl` would otherwise never see at all: "only report
     /// first-party files, never vendor/context ones swept in only
-    /// because `decl_locations` indexes every loaded file, analyzed or
+    /// because the registry records every loaded file's declarations, analyzed or
     /// not" (a real bug on an earlier pass of this exact method - a
     /// vendor-only dead enum case used to create a brand new, never-
     /// otherwise-checked entry in `check-project`'s own `results` map),
@@ -1760,17 +1735,13 @@ impl Project {
                 &self.escaped_enum_cases,
             );
             for (fqn, case) in dead {
-                let Some((path, span)) = self
-                    .decl_locations
-                    .members
-                    .get(&(fqn.clone(), case.clone()))
-                else {
+                let Some((path, span)) = self.registry.constant_declaration(&fqn, &case) else {
                     continue;
                 };
-                let path = path.clone();
+                let path = path.to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
-                    *span,
+                    span,
                     format!("Enum case {fqn}::{case} is never used."),
                     "enumCase.unused",
                 ) {
@@ -1783,13 +1754,13 @@ impl Project {
             let dead_functions =
                 whole_program::dead_code::find_dead_functions(&self.registry, &self.use_sites);
             for name in dead_functions {
-                let Some((path, span)) = self.decl_locations.functions.get(&name) else {
+                let Some((path, span)) = self.registry.function_declaration(&name) else {
                     continue;
                 };
-                let path = path.clone();
+                let path = path.to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
-                    *span,
+                    span,
                     format!("Function {name} is never referenced."),
                     "function.unused",
                 ) {
@@ -1799,13 +1770,13 @@ impl Project {
             let dead_classes =
                 whole_program::dead_code::find_dead_classes(&self.registry, &self.use_sites);
             for name in dead_classes {
-                let Some((path, span)) = self.decl_locations.classes.get(&name) else {
+                let Some((path, span)) = self.registry.class_declaration(&name) else {
                     continue;
                 };
-                let path = path.clone();
+                let path = path.to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
-                    *span,
+                    span,
                     format!("Class {name} is never referenced."),
                     "class.unused",
                 ) {
@@ -1819,15 +1790,15 @@ impl Project {
                 whole_program::circular_namespace_deps::find_namespace_cycles(&self.registry);
             for cycle in cycles {
                 let Some((path, span)) =
-                    self.decl_locations.classes.get(&cycle.representative_class)
+                    self.registry.class_declaration(&cycle.representative_class)
                 else {
                     continue;
                 };
-                let path = path.clone();
+                let path = path.to_path_buf();
                 let namespaces = cycle.namespaces.join(", ");
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
-                    *span,
+                    span,
                     format!("Circular namespace dependency: {namespaces}."),
                     "namespace.circularDependency",
                 ) {
@@ -1840,13 +1811,13 @@ impl Project {
             let dead_abstract_classes =
                 whole_program::dead_abstract_classes::find_dead_abstract_classes(&self.registry);
             for name in dead_abstract_classes {
-                let Some((path, span)) = self.decl_locations.classes.get(&name) else {
+                let Some((path, span)) = self.registry.class_declaration(&name) else {
                     continue;
                 };
-                let path = path.clone();
+                let path = path.to_path_buf();
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
-                    *span,
+                    span,
                     format!(
                         "Abstract class {name} has no concrete subclass anywhere in the project."
                     ),
@@ -1865,14 +1836,21 @@ impl Project {
                 &self.escaped_member_classes,
             );
             for (owner, name, kind) in dead_members {
-                let Some((path, span)) = self
-                    .decl_locations
-                    .members
-                    .get(&(owner.clone(), name.clone()))
-                else {
+                let declaration = match kind {
+                    whole_program::dead_members::MemberKind::Method => {
+                        self.registry.method_declaration(&owner, &name)
+                    }
+                    whole_program::dead_members::MemberKind::Property => {
+                        self.registry.property_declaration(&owner, &name)
+                    }
+                    whole_program::dead_members::MemberKind::Const => {
+                        self.registry.constant_declaration(&owner, &name)
+                    }
+                };
+                let Some((path, span)) = declaration else {
                     continue;
                 };
-                let path = path.clone();
+                let path = path.to_path_buf();
                 let (noun, identifier) = match kind {
                     whole_program::dead_members::MemberKind::Method => ("Method", "method.unused"),
                     whole_program::dead_members::MemberKind::Property => {
@@ -1884,7 +1862,7 @@ impl Project {
                 };
                 if let Some(d) = self.whole_program_diagnostic(
                     &path,
-                    *span,
+                    span,
                     format!("{noun} {owner}::{name} is never used."),
                     identifier,
                 ) {
@@ -2069,9 +2047,10 @@ pub fn parse_file(
     let (ast, ignores, lex_warnings) = parse_with_ignores(source, interner)?;
     let (functions, classes) = declared_names(&ast);
     let references = deps::referenced_names(&ast);
-    let built_decls = crate::registry::build_declarations(&ast);
+    let origin = Origin::File(Arc::from(path));
+    let built_decls = crate::registry::build_declarations(&ast, &origin);
     let (anonymous_class_decls, anonymous_class_names) =
-        crate::registry::collect_anonymous_classes(&ast, &path.display().to_string());
+        crate::registry::collect_anonymous_classes(&ast, &path.display().to_string(), &origin);
     let mut duplicate_fn_sites = DuplicateFunctionSites::default();
     duplicate_fn_sites.index(&ast, &mut NameContext::default(), path, false);
     let mut duplicate_class_sites = DuplicateClassSites::default();

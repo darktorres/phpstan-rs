@@ -1,18 +1,13 @@
 //! Unit tests for `workspace_symbols`, built against a real multi-file
 //! `Project` via `Project::new()` + `load_file` + `finish_loading()`
 //! (the same pattern `src/project/tests/incremental_updates.rs` already
-//! uses), plus `retain_source` - the one addition beyond that
-//! existing pattern, since `decl_locations()` needs it.
+//! uses).
 
 use super::*;
 use lsp_types::SymbolKind;
 
 fn project(files: &[(&str, &str)]) -> Project {
     let mut project = Project::new();
-    project.apply_settings(crate::project::ProjectSettings {
-        retain_source: true,
-        ..Default::default()
-    });
     for (name, src) in files {
         project
             .load_file(std::path::PathBuf::from(*name), src)
@@ -133,21 +128,26 @@ fn results_are_capped_at_the_maximum() {
 }
 
 #[test]
-fn a_method_and_a_property_with_the_same_name_collide_and_only_the_property_survives() {
-    // Documented, known limitation (see workspace_symbols's own doc
-    // comment): DeclLocations::members is a flat (owner, name) map with
-    // no kind qualifier, so a class declaring both a property and a
-    // method of the same name silently loses one to the other on
-    // insertion. This test pins the CURRENT winner (property, per
-    // DeclLocations::index's own per-class insertion order) as a
-    // regression guard, not an endorsement of the behavior.
+fn a_method_and_a_property_with_the_same_name_are_both_listed() {
     let p = project(&[(
         "a.php",
         "<?php class Foo { public $bar; function bar() {} }",
     )]);
     let matches = workspace_symbols(&p, "bar");
-    assert_eq!(matches.len(), 1, "got: {:?}", names(&matches));
-    assert_eq!(matches[0].kind, SymbolKind::PROPERTY);
+    let mut kinds: Vec<SymbolKind> = matches.iter().map(|m| m.kind).collect();
+    kinds.sort_by_key(|k| format!("{k:?}"));
+    assert_eq!(kinds, vec![SymbolKind::METHOD, SymbolKind::PROPERTY]);
+}
+
+#[test]
+fn an_inherited_member_is_listed_under_its_declaring_class_only() {
+    let p = project(&[(
+        "a.php",
+        "<?php class P { function run() {} } class C extends P {}",
+    )]);
+    let matches = workspace_symbols(&p, "run");
+    assert_eq!(names(&matches), vec!["run"]);
+    assert_eq!(matches[0].container_name, Some("P".to_string()));
 }
 
 #[test]

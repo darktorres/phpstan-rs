@@ -5,7 +5,7 @@
 //! of the end-to-end `project::tests::anonymous_class_naming` suite.
 
 use crate::registry::anonymous_class::synthetic_name;
-use crate::registry::collect_anonymous_classes;
+use crate::registry::{Origin, collect_anonymous_classes};
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 
@@ -17,7 +17,7 @@ fn parse(src: &str) -> Vec<syntax::ast::Stmt> {
 #[test]
 fn a_single_anonymous_class_on_its_own_line_gets_no_line_index() {
     let program = parse("<?php $x = new class {};");
-    let (decls, names) = collect_anonymous_classes(&program, "src/Foo.php");
+    let (decls, names) = collect_anonymous_classes(&program, "src/Foo.php", &Origin::Unknown);
     assert_eq!(decls.len(), 1);
     assert_eq!(names.len(), 1);
     let name = names.values().next().unwrap();
@@ -27,7 +27,7 @@ fn a_single_anonymous_class_on_its_own_line_gets_no_line_index() {
 #[test]
 fn two_anonymous_classes_sharing_a_line_get_document_order_line_indices() {
     let program = parse("<?php $pair = [new class {}, new class {}];");
-    let (decls, names) = collect_anonymous_classes(&program, "src/Foo.php");
+    let (decls, names) = collect_anonymous_classes(&program, "src/Foo.php", &Origin::Unknown);
     assert_eq!(decls.len(), 2);
     let mut ordered: Vec<_> = names.into_iter().collect();
     ordered.sort_by_key(|(span, _)| span.start.col);
@@ -49,7 +49,7 @@ fn an_anonymous_class_nested_inside_a_method_body_is_still_found() {
             }
         }",
     );
-    let (decls, names) = collect_anonymous_classes(&program, "src/Foo.php");
+    let (decls, names) = collect_anonymous_classes(&program, "src/Foo.php", &Origin::Unknown);
     assert_eq!(decls.len(), 1);
     assert_eq!(names.len(), 1);
 }

@@ -112,6 +112,7 @@ pub(crate) fn method_tag_sig(
         })
         .collect();
     FunctionSig {
+        provenance: crate::registry::provenance::Provenance::default(),
         params,
         return_type: return_type.clone(),
         return_type_native: return_type,

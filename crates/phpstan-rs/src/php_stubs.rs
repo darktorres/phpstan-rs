@@ -44,13 +44,14 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
+use crate::registry::{ClassInfo, FunctionSig, Origin, Registry, register_global_constant};
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 use types::{self, AccessoryKind, Shape, TemplateParam, Type};
 
 use stub_sources::{
-    PHPSTAN_SRC_SOURCES, PHPSTAN_STUB_SOURCES, PHPSTORM_STUBS_EXTENSIONS, PHPSTORM_STUBS_SOURCES,
+    PHPSTAN_SRC_PATHS, PHPSTAN_SRC_SOURCES, PHPSTAN_STUB_SOURCES, PHPSTORM_STUBS_EXTENSIONS,
+    PHPSTORM_STUBS_PATHS, PHPSTORM_STUBS_SOURCES,
 };
 
 /// phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
@@ -730,7 +731,7 @@ fn patch_phpstan_stub_classes(classes: &mut [(Arc<str>, ClassInfo)]) {
             continue;
         };
         crate::stub_attributes::apply_stub_attributes(&mut program);
-        let registry = Registry::index_and_flatten(&program);
+        let registry = Registry::index_and_flatten(&program, &Origin::Unknown);
         for (name, stub) in registry.classes {
             let Some((_, info)) = classes
                 .iter_mut()
@@ -904,14 +905,14 @@ struct StubFileDeclarations {
     constants: Vec<(Arc<str>, Type)>,
 }
 
-/// Lexes, parses and indexes one embedded stub file.
-fn index_stub_file(source: &str) -> StubFileDeclarations {
+/// Lexes, parses and indexes one embedded stub file, from `origin`.
+fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
     let tokens = Lexer::new(source).tokenize_with_spans();
     let mut program = Parser::new(tokens)
         .parse_program()
         .expect("vendored phpstorm-stubs source failed to parse");
     crate::stub_attributes::apply_stub_attributes(&mut program);
-    let registry = Registry::index_and_flatten(&program);
+    let registry = Registry::index_and_flatten(&program, origin);
     StubFileDeclarations {
         functions: registry
             .functions
@@ -951,23 +952,30 @@ fn generated_stub_data() -> &'static GeneratedStubData {
             rustc_hash::FxHashMap::default();
         let mut function_extensions = rustc_hash::FxHashMap::default();
         let mut class_extensions = rustc_hash::FxHashMap::default();
-        let extensions = PHPSTORM_STUBS_EXTENSIONS
+        let builtins = PHPSTORM_STUBS_SOURCES
             .iter()
-            .map(|e| Some(*e))
-            .chain(std::iter::repeat(None));
-        let files: Vec<(&'static str, Option<&'static str>)> = PHPSTORM_STUBS_SOURCES
+            .zip(PHPSTORM_STUBS_PATHS)
+            .zip(PHPSTORM_STUBS_EXTENSIONS)
+            .map(|((source, file), extension)| {
+                (
+                    *source,
+                    Some(*extension),
+                    Origin::Builtin { file, extension },
+                )
+            });
+        let phpstan = PHPSTAN_SRC_SOURCES
             .iter()
-            .chain(PHPSTAN_SRC_SOURCES.iter())
-            .copied()
-            .zip(extensions)
-            .collect();
+            .zip(PHPSTAN_SRC_PATHS)
+            .map(|(source, file)| (*source, None, Origin::Phpstan { file }));
+        let files: Vec<(&'static str, Option<&'static str>, Origin)> =
+            builtins.chain(phpstan).collect();
         // Each file indexes on its own; merging stays sequential, in file
         // order, so which declaration wins doesn't depend on scheduling.
         let indexed: Vec<StubFileDeclarations> = files
             .par_iter()
-            .map(|(source, _)| index_stub_file(source))
+            .map(|(source, _, origin)| index_stub_file(source, origin))
             .collect();
-        for ((_, extension), file) in files.into_iter().zip(indexed) {
+        for ((_, extension, _), file) in files.into_iter().zip(indexed) {
             for (name, sig) in file.functions {
                 if seen_functions.insert(name.clone()) {
                     if let Some(extension) = extension {

@@ -15,6 +15,7 @@ mod global_vars;
 mod hierarchy;
 mod index;
 mod name_context;
+pub mod provenance;
 mod purity;
 mod relation;
 mod resolve;
@@ -41,6 +42,7 @@ pub use function_table::FunctionTable;
 pub(crate) use function_table::{folded_key, function_key};
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
+pub use provenance::{Origin, Provenance};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
 pub(crate) use type_node::{mentions_mixed, parse_type_node};
@@ -240,7 +242,7 @@ impl Registry {
     }
 
     pub fn build(program: &[Stmt]) -> Registry {
-        let mut registry = Registry::index_and_flatten(program);
+        let mut registry = Registry::index_and_flatten(program, &Origin::Unknown);
         registry.resolve_transitive_purity();
         registry
     }
@@ -252,9 +254,9 @@ impl Registry {
     /// would wrongly mark every PHP built-in (`header()`, `exit()`, ...)
     /// as provably pure, baked permanently into the `LazyLock`-cached
     /// stub signatures every real project's registry later merges in.
-    pub(crate) fn index_and_flatten(program: &[Stmt]) -> Registry {
+    pub(crate) fn index_and_flatten(program: &[Stmt], origin: &Origin) -> Registry {
         let mut registry = Registry::default();
-        registry.index(program, false);
+        registry.index(program, origin, false);
         registry.canonicalize_class_name_case();
         registry.flatten_traits();
         registry.resolve_method_tags();

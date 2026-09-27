@@ -1,0 +1,4 @@
+project::tests::decl_locations::classes_and_members_are_indexed_without_retain_source -> project::tests::declarations::classes_and_members_are_recorded_without_retain_source
+project::tests::decl_locations::removing_a_file_drops_its_decl_locations -> project::tests::declarations::removing_a_file_drops_its_declarations
+project::tests::decl_locations::updating_a_file_reindexes_its_decl_locations -> project::tests::declarations::updating_a_file_records_its_new_declarations
+lsp::workspace_symbol::tests::a_method_and_a_property_with_the_same_name_collide_and_only_the_property_survives -> lsp::workspace_symbol::tests::a_method_and_a_property_with_the_same_name_are_both_listed

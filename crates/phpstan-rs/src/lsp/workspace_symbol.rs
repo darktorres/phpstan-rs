@@ -1,18 +1,14 @@
-//! `workspace/symbol`: project-wide fuzzy symbol search over
-//! `Project::decl_locations()` (already kept live by `update_file` - no
-//! new index needed) - classes/enums/interfaces/traits, top-level
-//! functions, and class/enum members (methods, properties, consts, enum
-//! cases). Indexing is gated by `Project::retain_source`, which
-//! `Server::new` turns on unconditionally before any request can arrive,
-//! so by the time a `workspace/symbol` request is possible, the index is
-//! already populated.
+//! `workspace/symbol`: project-wide fuzzy symbol search over the
+//! declarations the registry records for project files - classes/enums/
+//! interfaces/traits, top-level functions, and class/enum members
+//! (methods, properties, consts, enum cases), each at its own name's span.
 
 use std::path::Path;
 
 use lsp_types::SymbolKind;
 
 use crate::project::Project;
-use crate::registry::Registry;
+use crate::registry::Provenance;
 use syntax::token::Span;
 use types::Type;
 
@@ -38,83 +34,82 @@ pub(super) struct Match<'a> {
 ///
 /// A class/enum member's `container_name` is the owner's full FQN, not
 /// its short name - needed to disambiguate two identically-named classes
-/// in different namespaces that each declare a same-named member.
-///
-/// Known limitation, not fixed here: `DeclLocations::members` collapses
-/// same-named method/property/const declarations on one class into a
-/// single flat `(owner, name)` key (property beats method, const beats
-/// property, by insertion order in `DeclLocations::index`) - a class
-/// declaring both a `$bar` property and a `bar()` method will surface
-/// only one of them in every search that would otherwise match "bar".
-/// This is shared with `navigation::resolve_at`/hover/goto-definition,
-/// which discard member-kind information the same way before ever
-/// reaching this same map; a real fix means kind-qualifying that map's
-/// key and threading a member kind through every existing consumer - a
-/// cross-cutting change to already-shipped features, properly scoped as
-/// its own separate follow-up rather than folded into this read-only,
-/// additive request handler.
+/// in different namespaces that each declare a same-named member. A
+/// member is listed under the class-like declaring it only, not under
+/// every class inheriting it or taking it from a trait.
 pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Match<'a>> {
-    let locations = project.decl_locations();
     let registry = project.registry();
     let mut matches: Vec<(u8, Match<'a>)> = Vec::new();
-
-    for (fqn, (path, span)) in &locations.classes {
-        let Some(score) = match_score(short_name(fqn), query) else {
-            continue;
+    let mut push = |name: &str, kind: SymbolKind, provenance: &'a Provenance, container| {
+        let Some(path) = provenance.file() else {
+            return;
         };
-        // `DeclLocations::classes` carries no `ClassKind` (classes,
-        // interfaces, traits, and enums all share this one map) - the
-        // registry is the only source for it. `None` here means a
-        // decl_locations/registry desync (shouldn't happen, both are
-        // populated together) - skipped defensively, not panicked on.
-        let Some(info) = registry.classes.get(fqn.as_str()) else {
-            continue;
-        };
-        matches.push((
-            score,
-            Match {
-                name: short_name(fqn).to_string(),
-                kind: class_kind_symbol_kind(info.kind),
-                path: path.as_path(),
-                span: *span,
-                container_name: namespace_of(fqn),
-            },
-        ));
-    }
-
-    for (fqn, (path, span)) in &locations.functions {
-        let Some(score) = match_score(short_name(fqn), query) else {
-            continue;
-        };
-        matches.push((
-            score,
-            Match {
-                name: short_name(fqn).to_string(),
-                kind: SymbolKind::FUNCTION,
-                path: path.as_path(),
-                span: *span,
-                container_name: namespace_of(fqn),
-            },
-        ));
-    }
-
-    for ((owner, name), (path, span)) in &locations.members {
         let Some(score) = match_score(name, query) else {
-            continue;
-        };
-        let Some(kind) = member_symbol_kind(registry, owner, name) else {
-            continue;
+            return;
         };
         matches.push((
             score,
             Match {
-                name: name.clone(),
+                name: name.to_string(),
                 kind,
-                path: path.as_path(),
-                span: *span,
-                container_name: Some(owner.clone()),
+                path,
+                span: provenance.declaration_span(),
+                container_name: container,
             },
         ));
+    };
+
+    for (fqn, info) in &registry.classes {
+        push(
+            short_name(fqn),
+            class_kind_symbol_kind(info.kind),
+            &info.provenance,
+            namespace_of(fqn),
+        );
+        let declared_here = |provenance: &Provenance| {
+            provenance
+                .declaring_class()
+                .is_some_and(|c| c.eq_ignore_ascii_case(fqn))
+        };
+        for (name, sig) in &info.methods {
+            if declared_here(&sig.provenance) {
+                push(
+                    name,
+                    SymbolKind::METHOD,
+                    &sig.provenance,
+                    Some(fqn.to_string()),
+                );
+            }
+        }
+        for (name, prop) in &info.properties {
+            if declared_here(&prop.provenance) {
+                push(
+                    name,
+                    SymbolKind::PROPERTY,
+                    &prop.provenance,
+                    Some(fqn.to_string()),
+                );
+            }
+        }
+        for (name, cst) in &info.consts {
+            if declared_here(&cst.provenance) {
+                let kind = if matches!(cst.ty, Type::EnumCase(..)) {
+                    SymbolKind::ENUM_MEMBER
+                } else {
+                    SymbolKind::CONSTANT
+                };
+                push(name, kind, &cst.provenance, Some(fqn.to_string()));
+            }
+        }
+    }
+
+    for (fqn, sig) in registry.functions.iter() {
+        push(
+            short_name(fqn),
+            SymbolKind::FUNCTION,
+            &sig.provenance,
+            namespace_of(fqn),
+        );
     }
 
     matches.sort_by(|(score_a, a), (score_b, b)| {
@@ -165,34 +160,6 @@ fn is_subsequence(haystack: &str, needle: &str) -> bool {
         }
     }
     false
-}
-
-/// A class/enum member's `SymbolKind` - `None` on a `decl_locations`/
-/// `registry` desync (shouldn't happen, both populated together in
-/// `update_file`).
-///
-/// Checked in the SAME order `DeclLocations::index` inserts into its own
-/// flat `(owner, name)` map (methods, then properties, then consts/cases)
-/// but REVERSED, since a later insert there silently overwrites an
-/// earlier same-named one: the location this function's caller reports
-/// for `name` is always whichever declaration inserted last, so the kind
-/// reported here must match that same winner, not just "whichever kind
-/// happens to exist" in registry declaration order.
-fn member_symbol_kind(registry: &Registry, owner: &str, name: &str) -> Option<SymbolKind> {
-    let info = registry.classes.get(owner)?;
-    if let Some(cst) = info.consts.get(name) {
-        if matches!(cst.ty, Type::EnumCase(..)) {
-            Some(SymbolKind::ENUM_MEMBER)
-        } else {
-            Some(SymbolKind::CONSTANT)
-        }
-    } else if info.properties.contains_key(name) {
-        Some(SymbolKind::PROPERTY)
-    } else if info.methods.contains_key(name) {
-        Some(SymbolKind::METHOD)
-    } else {
-        None
-    }
 }
 
 fn short_name(fqn: &str) -> &str {

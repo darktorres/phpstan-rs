@@ -1068,8 +1068,8 @@ impl Server {
         }
     }
 
-    /// The `navigation::Resolved` symbol's own declaration site, via
-    /// `Project::decl_locations` - `None` when nothing resolved, or a
+    /// The `navigation::Resolved` symbol's own declaration site, from the
+    /// registry's provenance - `None` when nothing resolved, or a
     /// symbol resolved by name but declared nowhere this project has
     /// loaded (an undefined reference - already flagged by an ordinary
     /// diagnostic, not this method's job to report again).
@@ -1077,7 +1077,7 @@ impl Server {
         let path = uri_to_path(uri)?;
         let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
         // A local variable's own declaration site(s) are same-file and
-        // never need a `decl_locations` lookup at all, unlike every other
+        // never need a registry lookup at all, unlike every other
         // variant below.
         match &resolved {
             // The click's own position already is the answer - no probe
@@ -1114,24 +1114,24 @@ impl Server {
             }
             _ => {}
         }
-        let locations = self.project.decl_locations();
+        let registry = self.project.registry();
         match &resolved {
             navigation::Resolved::Class(fqn) => {
-                let (target_path, span) = locations.classes.get(fqn)?;
+                let (target_path, span) = registry.class_declaration(fqn)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, *span),
+                    self.location(target_path, span),
                 ))
             }
             navigation::Resolved::Function(fqn) => {
-                let (target_path, span) = locations.functions.get(fqn)?;
+                let (target_path, span) = registry.function_declaration(fqn)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, *span),
+                    self.location(target_path, span),
                 ))
             }
             navigation::Resolved::Member(owner, name) => {
-                let (target_path, span) = locations.members.get(&(owner.clone(), name.clone()))?;
+                let (target_path, span) = registry.member_declaration(owner, name)?;
                 Some(GotoDefinitionResponse::Scalar(
-                    self.location(target_path, *span),
+                    self.location(target_path, span),
                 ))
             }
             // A `Union`/`Intersection` receiver can resolve `member`
@@ -1151,13 +1151,11 @@ impl Server {
             } => {
                 let ty =
                     self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
-                let owners = resolve_member_owners(self.project.registry(), &ty, member);
+                let owners = resolve_member_owners(registry, &ty, member);
                 let mut locs: Vec<Location> = Vec::new();
                 for owner in &owners {
-                    if let Some((target_path, span)) =
-                        locations.members.get(&(owner.clone(), member.clone()))
-                    {
-                        locs.push(self.location(target_path, *span));
+                    if let Some((target_path, span)) = registry.member_declaration(owner, member) {
+                        locs.push(self.location(target_path, span));
                     }
                 }
                 match locs.len() {
@@ -1181,7 +1179,7 @@ impl Server {
     /// `format_hover`'s `Instance`/`VariableSelf`/`VariableRead` arms
     /// already use to answer "what type is at this span" - the only new
     /// work is resolving each class name the `Type` names to its own
-    /// `decl_locations` entry, instead of formatting the `Type` as text.
+    /// declaration in the registry, instead of formatting the `Type` as text.
     /// `Class`/`Function`/`Member` decline (`None`): none of them is a
     /// value with an inferred type to jump *from* (a class/function name
     /// reference already resolves to itself via ordinary
@@ -1220,11 +1218,11 @@ impl Server {
         };
         let mut classes = Vec::new();
         type_to_classes(&ty, &mut classes);
-        let locations = self.project.decl_locations();
+        let registry = self.project.registry();
         let mut locs: Vec<Location> = Vec::new();
         for class in &classes {
-            if let Some((target_path, span)) = locations.classes.get(class) {
-                locs.push(self.location(target_path, *span));
+            if let Some((target_path, span)) = registry.class_declaration(class) {
+                locs.push(self.location(target_path, span));
             }
         }
         match locs.len() {
@@ -1302,7 +1300,7 @@ impl Server {
     /// `textDocument/references` - unions every `use_sites` site across
     /// every real target `ref_targets_for` resolves to, plus (when
     /// `include_declaration` is set) each target's own declaration site
-    /// from `decl_locations` (already built for hover/definition, so no
+    /// from the registry's provenance (already recorded at indexing, so no
     /// extra work). `ensure_member_index_built` runs unconditionally,
     /// even for a Class/Function-only query - see its own doc comment:
     /// the FIRST references/rename request of any kind pays this cost
@@ -1327,17 +1325,17 @@ impl Server {
             }
         }
         if include_declaration {
-            let decl_locations = self.project.decl_locations();
+            let registry = self.project.registry();
             for target in &targets {
                 let decl = match target {
-                    use_sites::RefTarget::Class(fqn) => decl_locations.classes.get(fqn),
-                    use_sites::RefTarget::Function(fqn) => decl_locations.functions.get(fqn),
+                    use_sites::RefTarget::Class(fqn) => registry.class_declaration(fqn),
+                    use_sites::RefTarget::Function(fqn) => registry.function_declaration(fqn),
                     use_sites::RefTarget::Member(owner, name) => {
-                        decl_locations.members.get(&(owner.clone(), name.clone()))
+                        registry.member_declaration(owner, name)
                     }
                 };
                 if let Some((p, span)) = decl {
-                    locations.push(self.location(p, *span));
+                    locations.push(self.location(p, span));
                 }
             }
         }
@@ -1365,18 +1363,16 @@ impl Server {
             navigation::Resolved::Class(fqn) => (
                 use_sites::RefTarget::Class(fqn.clone()),
                 self.project
-                    .decl_locations()
-                    .classes
-                    .get(fqn)
-                    .map(|(p, s)| (p.clone(), *s)),
+                    .registry()
+                    .class_declaration(fqn)
+                    .map(|(p, s)| (p.to_path_buf(), s)),
             ),
             navigation::Resolved::Function(fqn) => (
                 use_sites::RefTarget::Function(fqn.clone()),
                 self.project
-                    .decl_locations()
-                    .functions
-                    .get(fqn)
-                    .map(|(p, s)| (p.clone(), *s)),
+                    .registry()
+                    .function_declaration(fqn)
+                    .map(|(p, s)| (p.to_path_buf(), s)),
             ),
             _ => return None,
         };

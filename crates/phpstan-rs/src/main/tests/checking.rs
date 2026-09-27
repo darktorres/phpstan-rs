@@ -23,6 +23,7 @@ fn check_chunk_reports_no_failure_for_valid_php() {
 #[test]
 fn format_signature_includes_params_variadic_marker_and_return_type() {
     let sig = registry::FunctionSig {
+        provenance: registry::Provenance::default(),
         params: vec![
             registry::ParamSig {
                 name: "x".to_string().into(),

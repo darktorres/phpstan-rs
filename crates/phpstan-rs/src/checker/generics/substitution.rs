@@ -151,6 +151,7 @@ impl<'a> Checker<'a> {
                 })
         };
         std::borrow::Cow::Owned(FunctionSig {
+            provenance: sig.provenance.clone(),
             params: sig
                 .params
                 .iter()

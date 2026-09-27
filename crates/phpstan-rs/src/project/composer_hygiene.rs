@@ -266,21 +266,27 @@ impl Project {
         let manifest = &self.packages.manifests()[root];
         let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let classes_by_lower: FxHashMap<String, (&str, &Path, Span)> = self
-            .decl_locations
+            .registry
             .classes
             .iter()
-            .map(|(name, (path, span))| {
-                (
+            .filter_map(|(name, info)| {
+                let path = info.provenance.file()?;
+                Some((
                     name.to_ascii_lowercase(),
-                    (name.as_str(), path.as_path(), *span),
-                )
+                    (name.as_ref(), path, info.provenance.declaration_span()),
+                ))
             })
             .collect();
         let functions_by_lower: FxHashMap<String, (&str, &Path)> = self
-            .decl_locations
+            .registry
             .functions
             .iter()
-            .map(|(name, (path, _))| (name.to_ascii_lowercase(), (name.as_str(), path.as_path())))
+            .filter_map(|(name, sig)| {
+                Some((
+                    name.to_ascii_lowercase(),
+                    (name.as_ref(), sig.provenance.file()?),
+                ))
+            })
             .collect();
         // The package installed under this root that `path`, a loaded
         // file, belongs to.
@@ -633,11 +639,16 @@ impl Project {
         diagnostics: &mut Vec<Diagnostic>,
     ) {
         let first_party: Vec<&str> = self
-            .decl_locations
+            .registry
             .classes
             .iter()
-            .filter(|(_, (path, _))| self.files.get(path).is_some_and(|f| f.analyzed))
-            .map(|(name, _)| name.as_str())
+            .filter(|(_, info)| {
+                info.provenance
+                    .file()
+                    .and_then(|path| self.files.get(path))
+                    .is_some_and(|f| f.analyzed)
+            })
+            .map(|(name, _)| name.as_ref())
             .filter(|name| {
                 self.registry
                     .classes

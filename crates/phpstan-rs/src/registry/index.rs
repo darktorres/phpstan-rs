@@ -2,6 +2,8 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::registry::Registry;
+use crate::registry::class_info::MemberSpans;
+use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{ClassInfo, FunctionSig, folded_key, function_key, infer_const_type};
 use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use syntax::intern::intern;
@@ -61,8 +63,8 @@ impl Registry {
     /// this way - rather than writing a second, independent tree-walker
     /// for the parallel path - matters here specifically.
     #[hotpath::measure]
-    pub(crate) fn index(&mut self, stmts: &[Stmt], analyzed: bool) {
-        for decl in build_declarations(stmts) {
+    pub(crate) fn index(&mut self, stmts: &[Stmt], origin: &Origin, analyzed: bool) {
+        for decl in build_declarations(stmts, origin) {
             self.insert_built_decl(decl, analyzed);
         }
     }
@@ -575,10 +577,10 @@ impl Registry {
 /// whole-file context would apply whichever one it saw last to both
 /// blocks, silently mis-qualifying the first one's classes.
 #[hotpath::measure]
-pub(crate) fn build_declarations(stmts: &[Stmt]) -> Vec<BuiltDecl> {
+pub(crate) fn build_declarations(stmts: &[Stmt], origin: &Origin) -> Vec<BuiltDecl> {
     let mut ctx = NameContext::default();
     let mut out = Vec::new();
-    build_declarations_with_context(stmts, &mut ctx, false, &mut out);
+    build_declarations_with_context(stmts, origin, &mut ctx, false, &mut out);
     out
 }
 
@@ -588,6 +590,7 @@ pub(crate) fn build_declarations(stmts: &[Stmt]) -> Vec<BuiltDecl> {
 /// through to each `BuiltDecl` it produces, never acts on it itself.
 fn build_declarations_with_context(
     stmts: &[Stmt],
+    origin: &Origin,
     ctx: &mut NameContext,
     conditional: bool,
     out: &mut Vec<BuiltDecl>,
@@ -601,7 +604,8 @@ fn build_declarations_with_context(
                     collect_nested_defines(&m.function.body, out);
                 }
                 let name = intern(&ctx.declared_name(&c.name));
-                let info = ClassInfo::from_decl(c, ctx);
+                let mut info = ClassInfo::from_decl(c, ctx);
+                info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
                 out.push(BuiltDecl::Class {
                     name,
                     conditional,
@@ -613,7 +617,8 @@ fn build_declarations_with_context(
                     collect_nested_defines(&m.function.body, out);
                 }
                 let name = intern(&ctx.declared_name(&e.name));
-                let info = ClassInfo::from_enum_decl(e, ctx);
+                let mut info = ClassInfo::from_enum_decl(e, ctx);
+                info.record_provenance(origin, &name, e.name_span, &MemberSpans::of_enum(e));
                 out.push(BuiltDecl::Enum {
                     name,
                     conditional,
@@ -623,13 +628,14 @@ fn build_declarations_with_context(
             StmtKind::FunctionDecl(f) => {
                 collect_nested_defines(&f.body, out);
                 let name = intern(&ctx.declared_name(&f.name));
-                let sig = FunctionSig::from_decl(
+                let mut sig = FunctionSig::from_decl(
                     f,
                     ctx,
                     &rustc_hash::FxHashMap::default(),
                     &rustc_hash::FxHashMap::default(),
                     Visibility::Public,
                 );
+                sig.provenance = Provenance::new(origin.clone(), f.name_span);
                 out.push(BuiltDecl::Function {
                     name,
                     conditional,
@@ -654,6 +660,7 @@ fn build_declarations_with_context(
             } => {
                 build_declarations_with_context(
                     std::slice::from_ref(then_branch),
+                    origin,
                     &mut ctx.clone(),
                     true,
                     out,
@@ -661,6 +668,7 @@ fn build_declarations_with_context(
                 if let Some(else_branch) = else_branch {
                     build_declarations_with_context(
                         std::slice::from_ref(else_branch),
+                        origin,
                         &mut ctx.clone(),
                         true,
                         out,
@@ -675,7 +683,9 @@ fn build_declarations_with_context(
             // `StmtKind::Namespace` resets `ctx.use_map` already ensures
             // (see `set_namespace`). Inherits whatever `conditional` its
             // enclosing context already has.
-            StmtKind::Block(inner) => build_declarations_with_context(inner, ctx, conditional, out),
+            StmtKind::Block(inner) => {
+                build_declarations_with_context(inner, origin, ctx, conditional, out)
+            }
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
                     let name = intern(&ctx.declared_name(&c.name));

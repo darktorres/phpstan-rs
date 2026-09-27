@@ -3,7 +3,7 @@ mod helpers;
 mod anonymous_class_naming;
 mod architecture;
 mod banned;
-mod decl_locations;
+mod declarations;
 mod duplicate_classes;
 mod duplicate_functions;
 mod file_discovery_and_misc;

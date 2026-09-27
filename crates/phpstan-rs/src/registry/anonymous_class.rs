@@ -23,6 +23,8 @@
 //! this walks every function/method/closure/arrow-fn body too - an
 //! anonymous class can appear anywhere an expression can.
 
+use crate::registry::class_info::MemberSpans;
+use crate::registry::provenance::Origin;
 use rustc_hash::FxHashMap;
 
 use crate::registry::{BuiltDecl, ClassInfo};
@@ -48,9 +50,12 @@ pub(crate) fn synthetic_name(
 /// `Project::check_file`'s own caller prints diagnostics against) - only
 /// needs to be stable per file across one analysis run, not to match real
 /// PHPStan's own path convention exactly, since nothing compares the two.
+/// Each class is recorded as declared at its `new class` expression in
+/// `origin`.
 pub(crate) fn collect_anonymous_classes(
     stmts: &[Stmt],
     relative_file: &str,
+    origin: &Origin,
 ) -> (Vec<BuiltDecl>, FxHashMap<Span, String>) {
     let ctx = NameContext::build(stmts);
     let mut found: Vec<(&Expr, &ClassDecl)> = Vec::new();
@@ -77,13 +82,15 @@ pub(crate) fn collect_anonymous_classes(
         };
         let name = synthetic_name(relative_file, line, line_index);
         names.insert(expr.span, name.clone());
-        let info = ClassInfo::from_decl(decl, &ctx);
+        let name: std::sync::Arc<str> = std::sync::Arc::from(name);
+        let mut info = ClassInfo::from_decl(decl, &ctx);
+        info.record_provenance(origin, &name, expr.span, &MemberSpans::of_class(decl));
         // Not `intern()`: every anonymous class in the whole corpus gets
         // its own unique md5-hashed name (file+line+index), so there is
         // no repeated text here to deduplicate - only a permanent,
         // never-evicted interner-table entry to avoid.
         decls.push(BuiltDecl::Class {
-            name: std::sync::Arc::from(name),
+            name,
             conditional: false,
             info,
         });

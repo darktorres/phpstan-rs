@@ -8,6 +8,7 @@ use crate::registry::function_sig::{
     resolve_type_with_parsed_native, substitute_type_aliases,
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
+use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
@@ -15,6 +16,7 @@ use syntax::ast::TypeHint;
 use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
+use syntax::token::Span;
 use types::{self, AccessoryKind, Name, TemplateParam, Type};
 
 mod attributes;
@@ -158,6 +160,7 @@ pub struct PropertySig {
     // `set_ty`'s case_refs equivalent - `property_hook_set_type` never
     // collected these, unlike the sibling `ty` field above.
     pub set_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub provenance: Provenance,
 }
 
 // A class constant's `public`/`private`/`protected` modifier (PHP 7.1+).
@@ -182,6 +185,7 @@ pub struct ConstSig {
     // `@deprecated` on this constant's own doc comment - direct mirror of
     // `PropertySig::deprecated`. Always `None` for an enum case.
     pub deprecated: Option<String>,
+    pub provenance: Provenance,
 }
 
 #[derive(Debug, Clone)]
@@ -424,6 +428,7 @@ pub struct ClassInfo {
     // `type_alias_case_refs`, a class can carry several `@mixin` tags
     // with no unique name to key by).
     pub mixin_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub provenance: Provenance,
 }
 
 /// See `ClassInfo::type_imports`'s own doc comment.
@@ -493,7 +498,90 @@ fn name_site(f: &syntax::ast::FunctionDecl) -> (u32, u32) {
     (f.name_span.start.line, f.name_span.start.col)
 }
 
+/// Each declared member's name span, by kind: what `ClassInfo::
+/// record_provenance` stamps the members built from one declaration with.
+#[derive(Default)]
+pub(crate) struct MemberSpans<'a> {
+    pub(crate) methods: FxHashMap<&'a str, Span>,
+    pub(crate) method_sites: FxHashMap<(u32, u32), Span>,
+    pub(crate) properties: FxHashMap<&'a str, Span>,
+    pub(crate) consts: FxHashMap<&'a str, Span>,
+}
+
+impl<'a> MemberSpans<'a> {
+    fn add_methods(&mut self, methods: &'a [syntax::ast::MethodDecl]) {
+        for m in methods {
+            self.methods.insert(&m.function.name, m.function.name_span);
+            self.method_sites
+                .insert(name_site(&m.function), m.function.name_span);
+            for p in &m.function.params {
+                if p.promoted_visibility.is_some() {
+                    self.properties.insert(&p.name, p.name_span);
+                }
+            }
+        }
+    }
+
+    fn add_consts(&mut self, consts: &'a [syntax::ast::ClassConst]) {
+        for c in consts {
+            self.consts.insert(&c.name, c.name_span);
+        }
+    }
+
+    pub(crate) fn of_class(c: &'a ClassDecl) -> MemberSpans<'a> {
+        let mut spans = MemberSpans::default();
+        spans.add_methods(&c.methods);
+        spans.add_consts(&c.consts);
+        for p in &c.properties {
+            spans.properties.insert(&p.name, p.name_span);
+        }
+        spans
+    }
+
+    pub(crate) fn of_enum(e: &'a EnumDecl) -> MemberSpans<'a> {
+        let mut spans = MemberSpans::default();
+        spans.add_methods(&e.methods);
+        spans.add_consts(&e.consts);
+        for case in &e.cases {
+            spans.consts.insert(&case.name, case.name_span);
+        }
+        spans
+    }
+}
+
 impl ClassInfo {
+    /// Records `origin` on class `class`, declared at `name_span`, and on
+    /// every member it builds, each at its own name's span from `spans`;
+    /// a member with no declaration of its own (one synthesized from a
+    /// tag, or built in) gets the class name's.
+    pub(crate) fn record_provenance(
+        &mut self,
+        origin: &Origin,
+        class: &Arc<str>,
+        name_span: Span,
+        spans: &MemberSpans,
+    ) {
+        let at = |span: Option<&Span>| {
+            Provenance::member(origin.clone(), *span.unwrap_or(&name_span), class.clone())
+        };
+        self.provenance = Provenance::new(origin.clone(), name_span);
+        for (name, sig) in self.methods.iter_mut() {
+            sig.provenance = at(spans.methods.get(name.as_ref()));
+        }
+        for (site, sig) in self.redeclared_methods.iter_mut() {
+            sig.provenance = at(spans.method_sites.get(site));
+        }
+        for (_, sig, _) in self.method_tags.iter_mut() {
+            sig.provenance = at(None);
+        }
+        for (name, sig) in self.properties.iter_mut() {
+            sig.provenance = at(spans.properties.get(name.as_ref()));
+        }
+        for (name, sig) in self.consts.iter_mut() {
+            sig.provenance = at(spans.consts.get(name.as_ref()));
+        }
+    }
+
     #[hotpath::measure]
     pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassInfo {
         let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
@@ -709,6 +797,7 @@ impl ClassInfo {
                 (
                     p.name.clone(),
                     PropertySig {
+                        provenance: Provenance::default(),
                         ty,
                         ty_native,
                         doc_ty: own_doc_ty,
@@ -832,6 +921,7 @@ impl ClassInfo {
                 properties.insert(
                     p.name.clone(),
                     PropertySig {
+                        provenance: Provenance::default(),
                         ty,
                         ty_native,
                         doc_ty: own_doc_ty,
@@ -888,6 +978,7 @@ impl ClassInfo {
                     collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                     let ty = resolve_names_in_type(ty, ctx);
                     PropertySig {
+                        provenance: Provenance::default(),
                         doc_ty: None,
                         ty,
                         // A magic `@property` tag has no native
@@ -979,6 +1070,7 @@ impl ClassInfo {
                 (
                     cc.name.clone(),
                     ConstSig {
+                        provenance: Provenance::default(),
                         ty,
                         visibility: cc.visibility.clone(),
                         is_final: cc.is_final,
@@ -1189,6 +1281,7 @@ impl ClassInfo {
         let doctrine_entity = compute_doctrine_entity(c, ctx, &properties);
 
         ClassInfo {
+            provenance: Provenance::default(),
             kind: c.kind,
             is_abstract: c.is_abstract,
             is_final: c.is_final,
@@ -1329,6 +1422,7 @@ impl ClassInfo {
         methods.insert(
             intern("cases"),
             FunctionSig {
+                provenance: Provenance::default(),
                 params: Vec::new(),
                 return_type: cases_return_ty.clone(),
                 return_type_native: cases_return_ty,
@@ -1388,6 +1482,7 @@ impl ClassInfo {
             methods.insert(
                 intern("from"),
                 FunctionSig {
+                    provenance: Provenance::default(),
                     params: vec![value_param.clone()],
                     return_type: self_ty.clone(),
                     return_type_native: self_ty.clone(),
@@ -1421,6 +1516,7 @@ impl ClassInfo {
             methods.insert(
                 intern("tryFrom"),
                 FunctionSig {
+                    provenance: Provenance::default(),
                     params: vec![value_param],
                     return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
@@ -1457,6 +1553,7 @@ impl ClassInfo {
                 (
                     cc.name.clone(),
                     ConstSig {
+                        provenance: Provenance::default(),
                         ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         visibility: cc.visibility.clone(),
                         is_final: cc.is_final,
@@ -1480,6 +1577,7 @@ impl ClassInfo {
             consts.insert(
                 case.name.clone(),
                 ConstSig {
+                    provenance: Provenance::default(),
                     ty: Type::EnumCase(Name::from(&*fqn), Name::from(&*case.name)),
                     visibility: Visibility::Public,
                     is_final: true,
@@ -1541,6 +1639,7 @@ impl ClassInfo {
         properties.insert(
             intern("name"),
             PropertySig {
+                provenance: Provenance::default(),
                 doc_ty: None,
                 ty: Type::String,
                 // Every enum case's `->name` is language-guaranteed to
@@ -1604,6 +1703,7 @@ impl ClassInfo {
             properties.insert(
                 intern("value"),
                 PropertySig {
+                    provenance: Provenance::default(),
                     doc_ty: None,
                     ty: value_ty,
                     // Same reasoning as `->name` above - language-
@@ -1696,6 +1796,7 @@ impl ClassInfo {
             .collect();
 
         ClassInfo {
+            provenance: Provenance::default(),
             kind: ClassKind::Enum,
             is_abstract: false,
             is_final: true,

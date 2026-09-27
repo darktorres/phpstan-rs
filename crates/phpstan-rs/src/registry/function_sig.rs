@@ -185,6 +185,7 @@ pub struct FunctionSig {
     // can provide). Populated the identical way `current_method_attrs`
     // already is (`f.attrs.iter().map(|a| intern(&a.name)).collect()`).
     pub attrs: Vec<Arc<str>>,
+    pub provenance: crate::registry::provenance::Provenance,
 }
 
 /// A class constant's value is almost always a literal in real code - this
@@ -598,6 +599,7 @@ impl FunctionSig {
             .unwrap_or_default();
 
         FunctionSig {
+            provenance: crate::registry::provenance::Provenance::default(),
             params,
             return_type,
             return_type_native,
@@ -721,6 +723,7 @@ impl FunctionSig {
             params.push(merged);
         }
         FunctionSig {
+            provenance: self.provenance.clone(),
             params,
             return_type,
             return_type_native,
