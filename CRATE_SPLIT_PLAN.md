@@ -998,7 +998,8 @@ repoint to it, and a new lex / parse microbench is added.
 
 Follow-ups, behaviour fixes:
 - **Interpolation.** `"${name}"` and `"${expr}"` interpolate (read as
-  literal text today).
+  literal text today; nsrt `literal-string.php` types
+  `"foo ${literalString}"` as the literal `'foo ${literalString}'`).
 - **Integer literals.** A legacy octal `0775` is 509 (775 today); a hex,
   octal or binary literal past `i64` is a float (`0xFFFFFFFFFFFFFFFF` is
   `0` today).
@@ -2231,7 +2232,8 @@ deleted; the file-size gate.
         instead of `non-empty-list<int>&hasOffsetValue(1, int)&
         hasOffsetValue(2, int)`, and `array_key_exists(1, $l)` stays
         `bool` (nsrt `bug-13747.php`);
-      - `strlen($s) === 0` → `''`;
+      - `strlen($s) === 0` → `''`, and `strlen($s) > 0` → non-empty
+        (nsrt `non-empty-string.php`);
       - `array_key_first($a) !== null` (and `array_key_last`,
         `array_find_key`) → non-empty;
       - `preg_match(…) === 1` → the matches shape;
