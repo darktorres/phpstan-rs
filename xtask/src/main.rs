@@ -1217,6 +1217,10 @@ fn buildtime() -> Result<(), String> {
         let secs = started.elapsed().as_secs_f64();
         writeln!(report, "{scenario}\ttest-no-run\t{secs:.1}").unwrap();
         eprintln!("{scenario} test-no-run: {secs:.1}s");
+        // Test builds unify dev-dependency features into their own
+        // library artifacts; the plain build's go stale with the second
+        // touch and would count against the next scenario.
+        run(cargo().args(["build", "-p", "phpstan-rs", "--quiet"]))?;
     }
     write(
         &gate_dir().join("buildtime").join(format!("{hash}.tsv")),
