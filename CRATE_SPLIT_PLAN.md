@@ -2040,6 +2040,28 @@ deleted, RefCell channels removed; the file-size gate.
   - **First-class callables** carry the callee's signature: `strlen(...)`
     is a bare `Closure` today.
   - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
+  - **Offset reads** follow `ArrayDimFetchHandler`: a constant array read
+    with a non-literal key uses the key's type. Today `$t = [10, 20];
+    $j = 1; $t[$j]` is `mixed` where PHPStan has `20`, `$t[$i]` for an
+    `int` is `mixed` where it has `10|20`, and on `array{a: int, b: string}`
+    both `$s[$v]` with `$v = 'a'` and `$s[$u]` with `'a'|'b'` are `mixed`.
+    `array_key_first()` of that shape is `string` instead of `'a'`.
+  - **Key-producing assignments** follow `AssignHandler::specifyTypes`:
+    after `$k = array_key_first($a)` (and `array_key_last`,
+    `array_search`, `array_find_key`, `array_rand`), `$a[$k]` is known to
+    exist with the element type; after `$i = array_search(5, $a, true)`
+    and `$i !== false`, `$a[$i]` is `int` today where PHPStan has `5`.
+    `$c = count($l) - 1` makes `$l[$c]` exist on a non-empty list.
+  - **Arguments** follow `processArgs`: each argument is processed on the
+    scope the previous one left, and a closure argument's parameters are
+    resolved from its sibling arguments whatever their order.
+    `apply(function ($x) { … }, 1)` for `@param callable(T): void $cb` and
+    `@param T $v` gives `$x` the unresolved `T` today where PHPStan has
+    `1`. The intrinsic callback overrides (`array_map`, `array_filter`,
+    `array_walk`, `array_find`, `curl_setopt`, `implode`, `Closure::bind`)
+    rewrite the callback's parameters from the sibling arguments;
+    `array_map(fn ($x) => $x * 2, [1, 2])` is `array<int>` today where
+    PHPStan keeps `array{2, 4}`.
   - **Closure types** follow `ClosureTypeResolver`: a closure that yields
     is `Closure(): mixed` today instead of returning a `Generator`.
   - **`new` into a generic property**: `$this->c = new Coll();` for a
@@ -2161,7 +2183,8 @@ with a fixture per transition and trigger, on D1–D4's structure:
   - An impure method call drops its receiver's holders
     (`MethodCallHandler`); a static call through `self`/`static`/`parent`
     drops `$this`'s. Today `if ($p->v !== null) { $p->reset(); }` keeps
-    `$p->v` as `int`, and the same holds on `$this`.
+    `$p->v` as `int`, and the same holds on `$this`, after
+    `parent::reset()` and after `self::reset()`.
   - A closure's property writes invalidate the outer scope where it is
     called immediately (`InvalidateExprNode`): after
     `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
