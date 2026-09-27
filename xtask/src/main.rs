@@ -1481,13 +1481,14 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
                 "check",
                 "--workspace",
                 "--each-feature",
+                "--exclude-all-features",
                 "--no-dev-deps",
-                "--mutually-exclusive-features",
-                "dhat-heap,hotpath-alloc",
                 "--quiet",
             ]))
         })?;
-        timings.time("machete", |_| run(cargo().args(["machete"])))?;
+        timings.time("machete", |_| {
+            run(cargo().args(["machete", "crates", "tools", "xtask", "fuzz"]))
+        })?;
         timings.time("deny", |_| run(cargo().args(["deny", "check"])))?;
     }
     let mut corpus_args = Vec::new();

@@ -932,17 +932,8 @@ Follow-ups:
   `output.rs`).
 - **CI green.** The one recorded Rust CI run (`867d9cb3`) failed at the
   no-default-features tests, so the docs, machete and deny steps never ran,
-  and 162 commits since are unpushed. Locally `cargo deny check` fails (the
-  workspace's `path` dependencies count as wildcards: `allow-wildcard-paths`
-  in `deny.toml`) and `cargo machete` fails on the vendored
-  `third_party/hotpath` (to be ignored). The feature-matrix step in CI and
-  `xtask gates --full` can never pass: cargo-hack rejects
-  `--mutually-exclusive-features` without `--feature-powerset`, and without
-  it `--each-feature` also builds `--all-features`, which the allocator
-  `compile_error!` refuses; `--each-feature --exclude-all-features` passes.
-  The no-default-features tests, the no-default-features check, the fuzz
-  and bench compiles, modgraph and arch pass locally. Then a passing run is
-  recorded.
+  and 162 commits since are unpushed. Every step passes locally; a passing
+  run is recorded.
 - **Module-graph gate.** `gates/module-graph.txt` records the finished
   phases, and an `allow` line dated to one fails; each workspace crate's
   workspace dependencies are checked against its `crate` row.

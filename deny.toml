@@ -48,6 +48,8 @@ ignore = true
 # not fatal.
 multiple-versions = "warn"
 wildcards = "deny"
+# The workspace's own path dependencies (all `publish = false`).
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
