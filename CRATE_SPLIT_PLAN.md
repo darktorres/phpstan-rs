@@ -1532,43 +1532,43 @@ Follow-ups:
   start. A test pins that loading a project and checking one file resolves
   no class that file doesn't reach.
 - **`ReflectionBuilder::apply` snapshots.** `apply` takes any number of
-  `FileDelta`s (a file's new declarations, or its removal); the initial
-  load is one apply, its declarations built per file in parallel as
+  `FileDelta`s (a file's new declarations, or its removal); the initial load
+  is one apply, its declarations built per file in parallel as
   `build_declarations` does today. A `FileDelta` carries the file's role
   (analysed, context, or a `stub_paths` file), which the collision policy
   reads. A name's entry is recomputed from its declaring files by the
   collision policy in a canonical order - the embedded stubs, then context
   files, then analysed files, each by path, the order `check-project` and
   the LSP's workspace load use today - not in arrival order, so a file
-  created or opened later lands where a fresh load would put it and a
-  delta gives what a fresh load gives. Declarations are shared between
-  snapshots by   `Arc`; memo cells are not: a new snapshot starts with fresh
-  cells,   seeded with every value already computed and not invalidated, so
-  a cell   an older snapshot fills after the apply never reaches the new
-  one. Each   memo records every folded class and constant   name it looked
-  up, absent ones included, through a per-resolution read   set the
-  hierarchy and the lookups append to; a delta invalidates the   transitive
-  readers of the names it changes, a change to any other   reflection input
-  invalidates everything, and the new snapshot inherits   every other memo.
-  Purity and global-variable inference rerun per snapshot   until C9.
-  Snapshots own their names: the registry's and checker's
-  `syntax::intern::intern` calls (about 100) go through the project's
-  interner; the stub layer's names stay global; `apply` sweeps the session
-  interner's entries nothing else holds. A closure gate is a test that
-  applies a sequence of deltas and compares every query on the result with a
-  fresh build of the final file set: a property test over the fixture files,
-  and one test per staleness case below. With declarations kept per file,
-  whether a declaration holds its name is a provenance comparison: the
-  checker's rebuild-and-compare (`ClassReflection::from_decl` and
-  `from_enum_decl` in `oop.rs`, `from_decl` for a trait in
-  `function_decl.rs`) and a losing duplicate function's rebuilt signature
-  read the file's own declaration instead; the builder builds property-hook
-  signatures with their property, which `check_hook_phpdoc_types` reads
-  instead of synthesizing a `FunctionDecl`. The per-file sets also answer
-  what `Project` indexes separately today: `DuplicateClassSites` and
-  `DuplicateFunctionSites` (with their own declaration walks) are deleted
-  for a query over them, and `FileState.functions`/`classes` become the
-  file's set.
+  created or opened later lands where a fresh load would put it and a delta
+  gives what a fresh load gives. Declarations are shared between snapshots
+  by `Arc`; memo cells are not: a new snapshot starts with fresh cells,
+  seeded with every value already computed and not invalidated, so a cell an
+  older snapshot fills after the apply never reaches the new one. Each memo
+  records every folded class and constant name it looked up, absent ones
+  included, through a per-resolution read set the hierarchy and the lookups
+  append to; a delta invalidates the transitive readers of the names it
+  changes, a change to any other reflection input invalidates everything,
+  and the new snapshot inherits every other memo. Purity and global-variable
+  inference rerun per snapshot until C9. Snapshots own their names: the
+  registry's and checker's `syntax::intern::intern` calls (about 100) go
+  through the project's interner; the stub layer's names stay global;
+  `apply` sweeps the session interner's entries nothing else holds. A
+  closure gate is a test that applies a sequence of deltas and compares
+  every query on the result with a fresh build of the final file set: a
+  property test over the fixture files, and one test per staleness case
+  below. With declarations kept per file, whether a declaration holds its
+  name is a provenance comparison: the checker's rebuild-and-compare
+  (`ClassReflection::from_decl` and `from_enum_decl` in `oop.rs`,
+  `from_decl` for a trait in `function_decl.rs`) and a losing duplicate
+  function's rebuilt signature read the file's own declaration instead; the
+  builder builds property-hook signatures with their property, which
+  `check_hook_phpdoc_types` reads instead of synthesizing a `FunctionDecl`.
+  The per-file sets also answer what `Project` indexes separately today:
+  `DuplicateClassSites` and `DuplicateFunctionSites` (with their own
+  declaration walks) are deleted for a query over them that groups by exact
+  spelling, as the indexes do, and `FileState.functions`/`classes` become
+  the file's set.
 
   `Registry` splits in this commit: `ReflectionBuilder` holds the per-file
   declaration sets and `apply`; `ReflectionProvider` is the snapshot, and
@@ -1620,7 +1620,7 @@ Follow-ups:
   - duplicate class-like and function declarations compare names
     case-insensitively (`class Foo` beside `class FOO`, `bar()` beside
     `BAR()` go unreported by `class.duplicate` and the function check
-    today);
+    today): the snapshot commit's duplicate query groups by folded key;
   - member names fold case everywhere: abstract-method implementation,
     final-method overrides, constructors (`__Construct` promotes its
     properties), `__toString` making a class `Stringable`, the magic-method
