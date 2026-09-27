@@ -11,6 +11,7 @@
 //! module <module::path> <crate>
 //! extern <library> <crate>
 //! allow <from::module> <to::module> <phase>
+//! finished <phase> ...
 //! ```
 //!
 //! A module belongs to the longest `module` entry that is a prefix of its
@@ -18,8 +19,12 @@
 //! names a workspace crate already extracted from the package: paths into
 //! that library count as references to the module `@<library>`, assigned
 //! to its crate. Every module must be
-//! assigned, and every `allow` line must still match an edge, so the list
-//! only shrinks.
+//! assigned, and every `allow` line must still match an edge and name a
+//! phase not yet `finished`, so the list only shrinks.
+//!
+//! The extracted crates are checked too: each crate under `crates/` has
+//! its normal and build dependencies on other workspace crates in its
+//! `crate` row (package `phpstan-rs-<name>` is row `<name>`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -41,6 +46,8 @@ struct Spec {
     allowed: BTreeMap<(ModPath, ModPath), String>,
     /// Extracted workspace libraries the package refers to by name.
     externs: BTreeSet<String>,
+    /// Phases already done.
+    finished: BTreeSet<String>,
 }
 
 struct SourceFile {
@@ -133,7 +140,14 @@ pub(crate) fn modgraph(root: &Path, args: &[String]) -> Result<(), String> {
             ));
         }
     }
-    for (from, to) in spec.allowed.keys() {
+    for ((from, to), phase) in &spec.allowed {
+        if spec.finished.contains(phase) {
+            problems.push(format!(
+                "allow {} {}: phase {phase} is finished",
+                join(from),
+                join(to)
+            ));
+        }
         if !crossings.contains_key(&(from.clone(), to.clone())) {
             problems.push(format!(
                 "allow {} {}: no such edge any more; remove the line",
@@ -142,6 +156,7 @@ pub(crate) fn modgraph(root: &Path, args: &[String]) -> Result<(), String> {
             ));
         }
     }
+    workspace_dependencies(&spec, &mut problems)?;
     if problems.is_empty() {
         eprintln!(
             "module graph: {} modules, {} references, {} listed exceptions",
@@ -156,6 +171,56 @@ pub(crate) fn modgraph(root: &Path, args: &[String]) -> Result<(), String> {
         }
         Err(format!("module graph: {} problem(s)", problems.len()))
     }
+}
+
+/// Each extracted crate's (`crates/<dir>`) dependencies on other workspace
+/// crates against its `crate` row. The package itself is checked module by
+/// module above;
+/// dev-dependencies may point up (a crate's tests may use a harness built
+/// on it).
+fn workspace_dependencies(spec: &Spec, problems: &mut Vec<String>) -> Result<(), String> {
+    const PREFIX: &str = "phpstan-rs-";
+    let metadata =
+        crate::capture(crate::cargo().args(["metadata", "--no-deps", "--format-version", "1"]))?;
+    let metadata: serde_json::Value =
+        serde_json::from_str(&metadata).map_err(|e| format!("cargo metadata: {e}"))?;
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or("cargo metadata: no packages")?;
+    for package in packages {
+        let name = package["name"].as_str().unwrap_or_default();
+        let manifest = Path::new(package["manifest_path"].as_str().unwrap_or_default());
+        let in_crates = manifest
+            .parent()
+            .and_then(Path::parent)
+            .is_some_and(|dir| dir.ends_with("crates"));
+        if !in_crates || name == "phpstan-rs" {
+            continue;
+        }
+        let Some(row) = name.strip_prefix(PREFIX) else {
+            problems.push(format!("package {name} is not named {PREFIX}<crate>"));
+            continue;
+        };
+        let Some(allowed) = spec.deps.get(row) else {
+            problems.push(format!("package {name} has no crate row {row}"));
+            continue;
+        };
+        let deps = package["dependencies"].as_array().into_iter().flatten();
+        for dep in deps {
+            let is_dev = dep["kind"].as_str() == Some("dev");
+            let dep_name = dep["name"].as_str().unwrap_or_default();
+            if is_dev || dep["path"].is_null() {
+                continue;
+            }
+            let dep_row = dep_name.strip_prefix(PREFIX).unwrap_or(dep_name);
+            if !allowed.contains(dep_row) {
+                problems.push(format!(
+                    "package {name} depends on {dep_name}, which crate {row} may not"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Spec {
@@ -175,6 +240,7 @@ fn read_spec(path: &Path) -> Result<Spec, String> {
         modules: BTreeMap::new(),
         allowed: BTreeMap::new(),
         externs: BTreeSet::new(),
+        finished: BTreeSet::new(),
     };
     let mut allows = Vec::new();
     for (i, line) in text.lines().enumerate() {
@@ -214,6 +280,9 @@ fn read_spec(path: &Path) -> Result<Spec, String> {
                     .insert(vec![format!("@{library}")], krate.to_string());
             }
             ["allow", from, to, phase] => allows.push((i + 1, *from, *to, *phase)),
+            ["finished", phases @ ..] if !phases.is_empty() => {
+                spec.finished.extend(phases.iter().map(|p| p.to_string()));
+            }
             _ => return Err(bad()),
         }
     }

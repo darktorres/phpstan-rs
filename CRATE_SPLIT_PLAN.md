@@ -928,9 +928,6 @@ Follow-ups:
   no-default-features tests, so the docs, machete and deny steps never ran,
   and 162 commits since are unpushed. Every step passes locally; a passing
   run is recorded.
-- **Module-graph gate.** `gates/module-graph.txt` records the finished
-  phases, and an `allow` line dated to one fails; each workspace crate's
-  workspace dependencies are checked against its `crate` row.
 - **Fixtures.** A `requires-feature` key; the fixtures without it also run
   under `--no-default-features` (the fixture suite never runs without
   `pcre-validate`). A fixture with an empty expectation and no inference
