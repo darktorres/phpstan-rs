@@ -4381,13 +4381,24 @@ View properties no PHP code reads; how many of them a template reads is
 (`latte-syntax`, depending on `syntax` only), following
 `TemplateLexer`/`TemplateParser`/`TemplateParserHtml`/`TagLexer`/
 `TagParser`:
-- an HTML-aware lexer: text, elements and attributes, comments,
-  `<script>`/`<style>` and attribute-value contexts, with `{...}` found in
-  each; `{* comments *}`, `{l}`/`{r}`, `{syntax}`/`n:syntax`, and a `{`
-  followed by whitespace staying literal;
+- an HTML-aware lexer: text, elements and attributes, comments, bogus
+  tags (`<!...>`, `<?...>`), raw-text elements (`<script>`, `<style>`,
+  `<textarea>`, `<title>`) and attribute-value contexts, with `{...}`
+  found in each; `{* comments *}`, `{l}`/`{r}`, `{syntax}`/`n:syntax`, and
+  a `{` followed by whitespace staying literal;
+- elements as `TemplateParserHtml` builds them: a name that may be an
+  expression (`<{$tag}>`, `<h{$level}>`), attributes produced by tags
+  (`<span {if $x}class="a"{/if}>`), void elements, a self-closed non-void
+  element (`<div/>`) read as an empty one, and an unclosed or
+  mis-closed element tolerated - closed at its parent, as Latte collapses
+  it - except under `StrictParsing` or when it carries an `n:`
+  attribute, has an expression name or is raw text, where Latte rejects
+  it;
 - tags as `(name, arguments, modifiers)`: paired and void, `{/tag}` and
   `{/}` closers, `n:` attributes including the automatic `n:inner-`/
-  `n:tag-` forms of every pair tag, and `n:else`/`n:elseif`/`n:ifcontent`;
+  `n:tag-` forms of every pair tag (neither on a void element), and
+  `n:else`/`n:elseif`/`n:ifcontent`, an `n:` attribute's value written
+  quoted, as `{...}`, or as a bare word;
 - arguments parsed by `syntax`'s expression parser in a Latte mode (a
   grammar switch in the `syntax` crate itself, so both grammars share one
   parser) whose
@@ -4526,8 +4537,11 @@ name:
   (`"true"`/`"false"`) or JSON for an array or `stdClass`, `aria-*` with
   its own `bool` rendering, any other from `string|int|float|
   Stringable|null` (`null` omitting it); `|toggle` forces the boolean
-  kind and a trailing `|json` the JSON one; a quoted value
-  (`name="{$x}"`) stays text interpolation;
+  kind and a trailing `|json` the JSON one. That's any attribute whose
+  whole value is one escaped print, quoted or not (`name={$x}`,
+  `name="{$x}"`, as `parseAttribute()` simplifies the value); a value
+  mixing text and prints, or printed with `|noescape`, is text
+  interpolation;
 - structure: `block` (named and unique in its layer, `{block local}` in
   the template's own layer that neither a layout nor an importer sees,
   and the anonymous `{block|filter}` that only filters its content),
@@ -4630,7 +4644,10 @@ twice in one layer, `n:tag` on `<script>`/`<style>`, a `|noescape` where
 no filter is expected, `{iterateWhile}` outside a `{foreach}`, `n:class`
 beside a `class` attribute, `n:ifcontent` on an empty element,
 `n:embed`, loose content beside an explicit `{block default}` in an
-`{embed}`, `{spaceless}` where it can't apply, ...) and in the
+`{embed}`, `{spaceless}` where it can't apply, an unknown `n:` attribute
+- with Latte's own "did you mean" suggestion - or one given twice, one
+inside a `{tag}`, `n:inner-`/`n:tag-` on a void element, an element name
+that's a tag rather than an expression, ...) and in the
 core passes (`$GLOBALS` and `$ʟ_*` always; `$this` and `$__*` a
 deprecation unless `StrictParsing`, an error with it; a registered
 function used as a partial `fn(...)`; a print followed by quotes inside
@@ -4667,8 +4684,9 @@ outside a `foreach`, among others), as deprecation findings. Then, with `latte.*
   parameter) while the content is HTML - Latte throws at runtime there
   (`FilterExecutor::filterContent()`: "called with incompatible content
   type", suggesting `|stripHtml` first);
-- in a sandboxed engine, a tag, filter, function, method or property its
-  `Policy` doesn't allow, as Latte's `SecurityViolationException`.
+- in a sandboxed engine, a tag, `n:` attribute, filter, function, method
+  or property its `Policy` doesn't allow, as Latte's
+  `SecurityViolationException`.
 
 Each `latte.*` identifier sits at the level of its PHP counterpart (an
 unknown filter or function where `function.notFound` does, an
