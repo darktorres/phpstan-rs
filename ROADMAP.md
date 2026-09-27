@@ -5154,6 +5154,79 @@ the scan half of 183c can start now.
 mapping).
 
 
+## Part 15: Identity
+
+### Phase 184 — Rename the project (§AV)
+
+`phpstan-rs` reads as a port of PHPStan, or as PHPStan's own Rust
+edition. It is neither: it reads PHPStan's config, comments and
+identifiers, but its checks already go past PHPStan's (the Phase 183
+oracle measures where), and it is not PHPStan's project. The name is
+cheapest to change now: the repository is private, nothing is released
+(no `v*` tag, no GitHub release, nothing on crates.io or the VS Code
+Marketplace), and no Pages site exists.
+
+**Choosing the name.** A shortlist the maintainer decides on, each
+candidate checked for:
+- a free crate name on crates.io (`/api/v1/crates/<name>` answers 404);
+- a free VS Code Marketplace publisher and extension id, and Open VSX's;
+- a free GitHub repository name, and a domain for Phase 185;
+- no PHPStan in it, and no collision with another PHP tool (PHPStan,
+  Psalm, Phan, Mago, Rector, PHP-CS-Fixer, PHP_CodeSniffer);
+- a short CLI name that types and tab-completes cleanly.
+
+**What changes.** Four tokens always mean this project: `phpstan-rs`,
+`phpstan_rs`, `PHPSTAN_RS` and `phpstanRs`. `phpstan` on its own always
+means PHPStan. So the rename is mechanical over those four tokens and
+nothing else, followed by a review of each file. Measured today:
+- the Cargo packages: the bin `phpstan-rs` and the `phpstan-rs-<name>`
+  libraries (crate-split §2's naming rule changes with them); the lib
+  crate `phpstan_rs`, which 24 sites import (the bin, benches, tests,
+  `fuzz`, `tools/gate-runner`); `[workspace.dependencies]` aliases keep
+  `syntax::`-style paths unchanged;
+- the binary, and the release assets `release.yml` and
+  `extension-ci.yml` name after it; README's install steps;
+- the config file `phpstan-rs.toml` and every discovery name crate-split
+  C1 lists. The old names stay readable for one release with a warning,
+  since Piwigo's corpus and the scratch probe projects use them;
+- the environment variables `PHPSTAN_RS_*` (`TEST_BIN`, `DUMP_TYPES`,
+  `CORPUS`, `BLESS`, `TEST_PG_*`, `TEST_SQL_PW_*`);
+- the LSP server's name ("phpstan-rs Language Server") and its log
+  prefixes;
+- the VS Code extension: `name`, `displayName`, `publisher`, the
+  `phpstan-rs.*` settings (`enable`, `configPath`, `serverPath`,
+  `trace.server`) and the `phpstan-rs.restartServer` command. A workspace
+  that still sets an old key gets it read once, with a notice;
+- the docs, where the token means this project: README, ROADMAP,
+  CRATE_SPLIT_PLAN, GATE_SPEED_PLAN, CHANGELOG (history entries keep the
+  name they were written under), `.claude/workflows`,
+  `gates/module-graph.txt`;
+- the GitHub repository (GitHub redirects the old URL) and the local
+  checkout directory. Claude Code keys a project's memory by its path, so
+  `~/.claude/projects/-home-torres-projects-phpstan-rs/` moves with it.
+
+**What stays.** The PHPStan compatibility surface keeps PHPStan's name:
+`@phpstan-ignore*` comments, `@phpstan-*` PHPDoc tags, reading
+`phpstan.neon` (Phase 183), PHPStan's error identifiers, the
+`ignoreErrors` semantics, the PHPStan-API rules on code in the `PHPStan\`
+namespace, and every reference to PHPStan itself in the docs.
+`.corpus-runs/` is keyed by commit hash and needs nothing.
+
+**Gates.** `cargo xtask gates --full` with snapshots matching the
+parent: analysis output doesn't carry the project name, so nothing
+changes except the old-config-name warning, which the Piwigo run shows
+until its toml is renamed. The VS Code extension's CI passes against the
+renamed binary. A grep gate finds none of the four tokens outside the
+compatibility shims and CHANGELOG history.
+
+**When.** Between two crate-split phases, as one commit series: every
+`Cargo.toml` changes, so it shouldn't interleave with a phase that is
+moving crates. Before Phase 185, which is published under the new name.
+
+**Depends on:** the maintainer's choice of name.
+
+**Effort: medium** (wide, but mechanical over four tokens).
+
 ---
 
 # Known limitations
