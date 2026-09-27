@@ -2814,7 +2814,9 @@ building on the previous one:
       { echo $bar; }` is `variable.undefined` today, as is `$foo =
       doesntThrow()` with `@throws void` (about 40 of nsrt's `throw-points/*`
       certainty assertions, and
-      `rector/vendor/symfony/console/Application.php:188`);
+      `rector/vendor/symfony/console/Application.php:188`). Fixed first:
+      before D5, a read in `finally` of a variable the `try` assigns is
+      reported at level 1 as "might not be defined", not at level 0;
     - exit points leave through the finally block
       (`processFinallyScope`, `ReturnAfterFinallyNode`).
   - **Expression statements** apply their `specifyTypes` with the null
@@ -3419,9 +3421,10 @@ its owner. Non-Registry keys follow the table.
   commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2),
   C3a's `property.unused` delta, `int|float` arithmetic (D3), top-level
   variables as maybe-defined (D5), loop/switch termination (D2) and
-  `is_resource()` never always true (D3) and impure `$this` calls
-  dropping `$this->…` narrowing (D5), each a false positive on ordinary
-  code; D2 and D5 name the interim fix.
+  `is_resource()` never always true (D3), impure `$this` calls
+  dropping `$this->…` narrowing (D5) and `finally` reads of variables the
+  `try` assigns (D5), each a false positive on ordinary code; D2 and D5
+  name the interim fix.
 - **Stage D order.** Structure before semantics: holders (D1), statement
   results and handlers (D2), one inference path with the TypeSpecifier
   (D3), the sink (D4), then the semantics (D5) and the public APIs (D6).
