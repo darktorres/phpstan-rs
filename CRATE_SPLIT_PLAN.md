@@ -1220,6 +1220,121 @@ Landed as C3a-C3d (`dcc67ce5`, `bfce0e9f`, `49e6d9b1`, `41874e77`,
   8.1) or concatenation become `Unsupported`. Scheduled in C8, where the
   ConstantResolver and the hierarchy are at hand.
 
+**Registry read-through (review of 2026-09-27).** Every file under
+`registry/`, `stub_attributes`, the stub-sources build script, the
+stub-index generator and the project load/update paths was read line by
+line. The bugs below were each reproduced with `check-project` (marked
+"traced" where only the code path was followed). Each reproduced one gets
+a fixture now, recording the correct behaviour; it is fixed in the phase
+named, as its own behaviour commit after that phase's structural commit
+(approved delta), since C4 rewrites most of this code.
+
+- Fixed in C4 (the builder, per-file declaration sets, lazy member
+  resolution):
+  - **Declarations below the top level are never indexed.**
+    `build_declarations` recurses only through namespaces, blocks and
+    `if`: a function or class declared inside a function body, a class in
+    a top-level `try`, a function in a `switch` case all give
+    `function.notFound`/`class.notFound`. The walk becomes a Visitor over
+    every statement, marking each such declaration conditional.
+    `project.rs`'s `declared_names` and the stub index generator walk the
+    same subset and move with it.
+  - **Member names by declared spelling** (beyond the final-method case
+    in C3's list): an interface, abstract-parent or enum method
+    implemented with other casing is `class.abstractMethodNotImplemented`
+    (three shapes reproduced); a constructor spelled `__Construct` loses
+    its promoted properties (`property.notFound`); a class declaring
+    `__tostring()` is not `Stringable` (`argument.type`); about 49 sites
+    compare magic-method names exactly. Case-folded method keys fix all.
+  - **Member resolution order.** `own_owner_names` walks `extends` and
+    `implements` breadth-first together, so for `C extends B implements I`
+    with `A::foo(): int` two levels up and `I::foo(): int|string`, `$c->foo()`
+    is `int|string`. PHP resolves the class chain first, then interfaces.
+  - **Trait composition.** `insteadof` is ignored (the first trait's method
+    wins: `TB::hello insteadof TA` still types `hello()` from `TA`, and a
+    wrong `function.alreadyNarrowedType` follows); an abstract method from
+    one trait implemented by another is `class.abstractMethodNotImplemented`;
+    `shown as protected` doesn't change visibility; a trait's `final`
+    methods don't reach the using class, so overriding one is missed (a PHP
+    fatal error); `@use Trait<int>` never binds the trait's templates
+    (`class_template_bindings` ignores `uses`).
+  - **PHPDoc inheritance carries only `@param`/`@return`.** An interface's
+    `@phpstan-assert-if-true` doesn't reach an undocumented implementation
+    (`argument.type` after the guard); `@param-out`, `@phpstan-self-out`,
+    `@throws` and method templates aren't inherited either (traced).
+  - **Mixins.** A `@mixin` brings in only the target's own members, not
+    those it inherits, so the call falls to `__call` (`return.type`); one
+    level only.
+  - **`@method` tags act as override prototypes**, their PHPDoc types
+    stored as native types: a real `items(): array` under `@method
+    list<int> items()` reports "return type list<int> is not compatible
+    with the inherited return type list<int>".
+  - **Type aliases.** `@property` and `@method` tags skip
+    `@phpstan-type` substitution (`class.notFound` twice); enums support no
+    aliases at all (`class.notFound`, `missingType.iterableValue`,
+    `return.phpDocType` on one method); an alias of an alias resolves one
+    level only (traced).
+  - **Enums** also ignore `@deprecated` on a case and `@var` on a
+    constant, and drop `@method`/`@mixin`/`@phpstan-require-*` (traced).
+  - **Promoted properties** ignore asymmetric visibility (`public
+    private(set)`: an outside write, a runtime `Error`, isn't reported) and
+    the promoted parameter's own `@deprecated`/`@internal`.
+  - **Anonymous classes** resolve names through one whole-file
+    `NameContext`, so in the first of two namespace blocks `extends Base`
+    finds the last block's `Base` (`method.notFound`); their diagnostics
+    print the internal `AnonymousClass<md5>` name where PHPStan prints
+    `class@anonymous`. `anonymous_class.rs` is one more hand-rolled walker
+    beside the Visitor (it walks `new class(...)` arguments twice).
+  - **`merge` has no single meaning.** `ClassReflection::merge` and
+    `FunctionReflection::merge` serve four cases - phpstorm-stubs overloads,
+    a `stubFiles`-style override, a polyfill onto a built-in, a duplicate
+    declaration - with per-field precedence that differs (methods unioned,
+    properties and constants later-wins, hierarchy first-wins-if-set, flag
+    sets unioned so `final`/`abstract` leak across). Each case gets its own
+    operation; `insert_built_decl`'s enum arm bypasses the collision policy
+    entirely (traced).
+  - Smaller: `method_access` is keyed lowercase (a third key convention);
+    doc comments are re-parsed per method; accessors return `&Option<T>`
+    and `&Vec<T>` rather than `Option<&T>` and `&[T]`; the stub pass runs
+    global-variable inference on each of 2,351 stub files and discards it.
+- Fixed with C2's `ConstantResolver` move: `infer_const_type` evaluates
+  only literals, negation, concatenation, arrays and class-constant
+  references - bitwise and arithmetic operators, ternaries, `??`, global
+  constants, enum cases and `new` give `mixed` (traced).
+- Fixed in C5: `stub_attributes` appends a property's or class constant's
+  `#[LanguageLevelTypeAware]` type as `@return`, which neither reads
+  (they read `@var`), so `mysqli::$affected_rows` is untyped where PHP 8.1
+  makes it `int|string` (reproduced); `newest_type` stops at the first
+  non-string entry; `FunctionReflection::merge` marks a function deprecated
+  when any version-split overload is.
+- Fixed in C7: an assert target `$param->prop`, `$param->method()` or
+  `$this->method()` is dropped as unknown; `@throws` and assert types
+  skip alias substitution; `resolve_names_in_type` never namespace-resolves
+  a written `Traversable` (traced).
+- Fixed in C8: `access_attributes` and `compute_attribute_targets` read
+  AST attributes themselves beside C3c's `ReflectionAttribute`, the first
+  matching any name containing `PhpLanguageExtensions`, the second any
+  attribute short-named `Attribute` (traced).
+- Fixed in C9:
+  - `global_vars` counts only assignment statements, so a global also
+    bound by `foreach`, destructuring or a by-reference argument keeps the
+    literal of its first assignment (`function.alreadyNarrowedType` three
+    times, reproduced); its expression typing drops unkeyed array items
+    (`['en', 'fr']` is `array{}`), takes call returns raw (templates,
+    `static`, dynamic return types unresolved) and resolves `self::` as
+    `Ns\self` (traced);
+  - purity misses backtick execution and `throw` expressions, classifies
+    calls and `new` by written name, not the resolved one (a same-named
+    global function becomes the dependency), treats a class-constant read
+    as impure, and looks method dependencies up on the named class only
+    (traced).
+- Fixed in E4: `doctrine_entity` records every property as a DQL field,
+  mapped or not, misses fields from a `#[MappedSuperclass]` parent or a
+  trait, and reads no docblock `@ORM` annotations (traced).
+- Outside Stage C, for the checker: a by-reference argument PHP creates on
+  the call is type-checked against the parameter (`preg_match('/a/', 'a',
+  $z)` reports `argument.type` "mixed given"); PHPStan skips it.
+
 **C4. Snapshots and lazy resolution**, one commit each:
 - per-class memoized resolution replacing the passes. Today's 15 passes
   (16 calls) and where each goes:
