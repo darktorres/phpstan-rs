@@ -1992,7 +1992,8 @@ fixture before its phase's structural commit.
       enum cases are all covered.
   - **Constant conditions prune branches** (`IfHandler`): an `if` whose
     condition type is `true` skips the `else`/`elseif` merge, and a
-    `false` condition drops its branch. After `$flag = true;
+    `false` condition drops its branch. The condition's type is the PHPDoc
+    type, or the native type when `treatPhpDocTypesAsCertain` is off. After `$flag = true;
     if ($flag) { $x = 1; }`, `echo $x` is `variable.undefined` today.
 
 **D3. One inference path.** ExprHandlers, per-`NodeId` results, `infer_expr`
@@ -2146,6 +2147,12 @@ with a fixture per transition and trigger, on D1–D4's structure:
     called immediately (`InvalidateExprNode`): after
     `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
     its narrowing today.
+  - Narrowing an offset narrows its container
+    (`specifyExpressionTypeInPlace`): the container gains
+    `HasOffsetValue` for a constant key and becomes offset-accessible
+    when it wasn't known to be an array. After
+    `if (is_int($a['k']))`, `$a` is still `array<string, mixed>` today,
+    and a `mixed` container stays `mixed`.
   - `unset($arr['a'])` removes the key from the shape; today the shape
     keeps `a: int`, and `$arr['a']` afterwards isn't reported.
   - Volatile expressions, dropped after an impure call, `new`, `eval` or
@@ -2237,8 +2244,13 @@ with a fixture per transition and trigger, on D1–D4's structure:
   - **Expression statements** apply their `specifyTypes` with the null
     context, so assertion calls narrow, and an equality assertion's result
     is remembered as `true`.
+  - **Class member order** follows `ClassLikeHandler`: static methods,
+    then the constructor, then instance methods, with properties and
+    their hooks last.
   - **Constructor first**: the constructor is analysed before the other
-    methods. Its end scope seeds them with readonly `$this` properties,
+    methods. A private method called on `$this` from the constructor
+    contributes the properties it initializes (`CalledMethodProcessor`,
+    `mergeInitializedProperties`). Its end scope seeds them with readonly `$this` properties,
     `PropertyInitializationExpr`, `class_exists`/`function_exists`
     holders and constants (`rememberConstructorScope`). A class with
     custom serialization is excluded. Today a `function_exists('f')` guard
@@ -2257,7 +2269,9 @@ with a fixture per transition and trigger, on D1–D4's structure:
       own body;
     - a closure's type carries its throw points, impure points and
       invalidated expressions, applied where the callee calls it
-      immediately.
+      immediately. `@param-immediately-invoked-callable`,
+      `@param-later-invoked-callable` and the built-in defaults
+      (`callCallbackImmediately`) decide which calls those are.
     - `(fn () => $this->n)->call($r)` is `undefined variable $this` today.
       Snapshot 0a8fe69 has 12 `$this` hits, among them
       `collision/ResultReflection.php:19`. The bound closure's read also
