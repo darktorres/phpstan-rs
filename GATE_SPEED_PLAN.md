@@ -513,6 +513,14 @@ After S12, `perf` with frame pointers over three workloads: 257 fixtures
   and the lib suite with `RAYON_NUM_THREADS` at 1, 2 and all cores. Adopt
   the fastest setting: the harness takes its pool size from the
   measurement, and the gate sets the lib tests' global pool size.
+- Measured after S14: the `checker/n*` fixtures (321) took 28.0/28.1 s
+  with a 1-thread pool, 27.0/28.6 s with 2 and 27.7/29.1 s with 8, so
+  the spinning costs CPU but not wall time. The lib suite took 86.7 s
+  with the global pool at all cores, 120.1 s with 2 and 203.6 s with 1.
+  No change: the harness keeps the shared all-cores pool, and the lib
+  tests keep rayon's default.
+- S13 and S14's own effect: the lib suite went from 156 s to 86.7 s, and
+  a debug `check-project` spawn on one file from 11.8 s to 3.7 s.
 
 ## 4. Deferred to Stages C–F
 
