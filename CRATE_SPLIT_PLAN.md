@@ -1104,7 +1104,12 @@ Follow-ups:
   relation.
 - **One union.** `union_of_branches` and `late::join` go through
   `union_types`. A union keeps an explicit `mixed` explicit (behaviour fix:
-  `$b ? $mixedParam : null` is reported at level 10 only, not 9).
+  `$b ? $mixedParam : null` is reported at level 10 only, not 9). It
+  follows `TypeCombinator::union` (behaviour fixes, each reproduced):
+  `never` is absorbed (`$c ? 1 : throw new E()` is `1|never` today, 48
+  nsrt mismatches), and integer ranges merge when they overlap or touch
+  (`int<10, 20>|int<5, 25>` stays unmerged today, and
+  `@param int<0, 5>|int<6, 9>` widens to `int`).
 - **Template inference** is PHPStan's structural `inferTemplateTypes`:
   through generic arguments (by ancestor bindings), callables, shapes, array
   keys and iterables, unioning every binding (behaviour fix, each case
@@ -1943,6 +1948,20 @@ function redeclaration) are excluded. For snapshot 0a8fe69 this leaves 941
 files and 784 phpstan-rs-only findings among the engine identifiers; each
 phase reruns the comparison, and every phpstan-rs-only finding it names is
 a fixture.
+
+The second oracle is PHPStan's own inference suite,
+`vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (1,688 files, 18,480
+`assertType` and 313 `assertNativeType` calls), checked by `check-project
+--php-version 8.5`. Compared after display normalization (union member
+order, benevolent parentheses, shape key order, `array<(int|string), T>`
+as `array<T>`), phpstan-rs misses 11,515 at `76e738b4`. By class: 2,099
+are `mixed` (mostly function and method return-type extensions), 900 lose
+an accessory (`non-empty-`, `non-falsy-`, `numeric-`, case), 826 are
+integer ranges, 599 expect `true`/`false` where phpstan-rs has `bool` (D3's
+type-check calls), 474 lose a shape, 476 generalize a literal, 340 expect
+`*NEVER*`, 289 expect `*ERROR*`, 48 keep `never` in a union (B4). The
+count is a tracked number: each D phase records it, and a phase that
+raises it has a named reason in its commit.
 
 **D1. Holder storage (byte-identical).**
 - Every `Locals` map moves into holder storage with its current per-kind
