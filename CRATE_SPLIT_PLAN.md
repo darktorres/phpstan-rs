@@ -2209,6 +2209,15 @@ deleted; the file-size gate.
       `never`: after a `match ($i) { 0 => … }` caught in a `try` on
       `1|2|3|4`, `$i` is `0|1|2|3|4` (nsrt `match-expr.php:19`), and
       `$i === 2` on `int<3, 5>` gives `2`;
+    - a nested write through a non-constant key is dropped: after
+      `$array = ['foo' => [], 'bar' => []]; $array[$name][] = $v;`, `$array`
+      is unchanged, so a later `count($elements) > 0` over it is reported
+      always false (`AssignHandler`; nsrt `bug-5316.php`);
+    - a by-reference argument to a closure or a variable-function call keeps
+      its value: after `$cb = function (bool &$save) {…}; $save = true;
+      $cb($save);`, and after `$f = 'h'; $f($s);` for `h(bool &$x)`, the
+      variable is still `true` and `$save === false` is reported
+      `identical.alwaysFalse` (`processArgs`; nsrt `bug-5615.php`);
     - the wrong values inside the families below land here too: `%`
       giving `never` (Arithmetic) and a pre-increment's old value
       (Increments).
