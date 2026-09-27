@@ -2108,7 +2108,10 @@ runtime version, and at least 63 of phpstan-rs's constant comparisons
 `--level 10` too: with the level unset it skips the
 level-10 implicit-`mixed` checks (§1's level row), which turned 2,519
 `offsetAccess.nonOffsetAccessible` into apparent misses. Both sides are
-filtered to the engine identifiers. Files that raise internal errors
+filtered to the engine identifiers. phpstan-rs gets the files by name
+from the corpus root, so until B8's root-autoload follow-up lands, a
+project class under `src/` that isn't named is unknown to it. Files that
+raise internal errors
 (missing optional classes, php-standard-library function redeclaration)
 are excluded, which leaves 941 files. At `76e738b4` phpstan-rs has 1,628
 findings PHPStan doesn't, 1,060 of them `offsetAccess.nonOffsetAccessible`
@@ -2342,8 +2345,7 @@ deleted; the file-size gate.
       leaves `Return_` where it is `Expression|Return_`, so a later
       `$n instanceof Expression` is `instanceof.alwaysFalse`
       (`rector/rules/DeadCode/Rector/Property/RemoveUnusedPrivatePropertyRector.php:166`,
-      through the closure parameter below); an `instanceof` expression is
-      typed `mixed` today, not `bool`;
+      where D5's closure re-entry produces the unnormalized union);
     - the wrong values inside the families below land here too: `%`
       giving `never` (Arithmetic) and a pre-increment's old value
       (Increments).
@@ -2420,8 +2422,9 @@ deleted; the file-size gate.
       `static(Base)`, and `@return $this` rejects a returned `new static()`.
     - **Type-check calls** type as the constant the impossible-check logic
       decides: `is_string($s)` with a `string` is `true`, `is_string($i)`
-      with an `int` is `false`, and `!`/`method_exists` follow. Today they are
-      `bool` although the rules report them, so `!is_int($c) &&
+      with an `int` is `false`, and `!`/`method_exists`/`instanceof` follow
+      (an `instanceof` expression is `mixed` today, not even `bool`). Today
+      the calls are `bool` although the rules report them, so `!is_int($c) &&
       !is_string($c)` on `int|string` isn't `booleanAnd.alwaysFalse` (105
       oracle findings phpstan-rs misses in snapshot 0a8fe69, e.g.
       `nyholm/psr7/src/Response.php:75`), and the `throw` after an exhausted
@@ -2851,7 +2854,11 @@ building on the previous one:
       Snapshot 0a8fe69 has 12 `$this` hits, among them
       `collision/ResultReflection.php:19`. The bound closure's read also
       leaves `property.onlyWritten` on `$n`.
-  - the PHP version via `PHP_VERSION_ID`.
+  - **PHP version** narrows in a version branch: inside `if (PHP_VERSION_ID
+    >= 80400)`, `PHP_VERSION_ID` and the scope's `php_version()` (§3.8) are
+    the configured range cut at 80400, so version-gated checks there read
+    the narrowed range. C2 first types the constant over the configured
+    range; today it is the stub's `50306` whatever the configuration.
 
 **D6. Engine APIs**, one commit each:
 - Scope API (§3.8's list);
