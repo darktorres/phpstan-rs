@@ -2195,6 +2195,12 @@ deleted; the file-size gate.
       `$v` as `int` today where PHPStan has `0` (nsrt `bug-15039.php`);
     - `$b?->c->n === 1` doesn't narrow `$b` to non-null
       (`createNullsafeTypes`);
+    - an assertion intersects with the current type and its negation
+      narrows the other branch (`specifyTypesFromAsserts`): for
+      `@phpstan-assert-if-true int $v`, the true branch on a `string $s`
+      is `int` today where PHPStan has `*NEVER*` (the assertion replaces
+      the type), and the false branch on `int|string` stays `int|string`
+      instead of `string` (nsrt `assert-docblock.php`);
     - a conditional `@phpstan-assert` type resolves against the call's
       arguments and parameter defaults (`ConditionalTypeResolver::resolveForCall`):
       `@phpstan-assert ($allow_null is true ? string|null : string) $input`
