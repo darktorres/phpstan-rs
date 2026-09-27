@@ -1367,10 +1367,17 @@ Follow-ups:
     bytes, `eq_ignore_ascii_case`), a `Name` through its stored `lower()`;
     `FunctionTable`, which lowercases into a new `String` for any name with
     an uppercase letter today, moves onto the same key type;
-  - a lookup that compares spelling today (a type's or a literal's class
-    name, a method name at the magic-method and override sites) goes
-    through an explicit exact-spelling accessor, so nothing changes until
-    the behaviour commits delete them;
+  - every lookup that compares spelling today goes through an explicit
+    exact-spelling accessor, so nothing changes until the behaviour commits
+    delete them: a type's or a literal's class name; a method name in the
+    magic-method comparisons, the override, final-method and
+    abstract-implementation checks (`final_methods`, `abstract_methods`,
+    `has_concrete_implementation`, `trait_declares_abstract_method`), and
+    purity's dependency lookup (`dependency_is_pure`), and the ancestor
+    walk behind override checks and PHPDoc inheritance
+    (`lookup_ancestor_method_with_owner`); only the lookups with a
+    case-insensitive fallback today (`lookup_class`, `lookup_method`,
+    `lookup_method_with_owner`) fold;
   - `Vec<TemplateParam>` and per-member flags (a property's finality moves
     off the class's `final_properties` set onto it), and the four places
     rebuilding `TemplateParam`s from the parallel template maps
