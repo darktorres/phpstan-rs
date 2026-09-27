@@ -1514,6 +1514,27 @@ Follow-ups:
   `DuplicateFunctionSites` (with their own declaration walks) are deleted
   for a query over them, and `FileState.functions`/`classes` become the
   file's set.
+
+  `Registry` splits in this commit: `ReflectionBuilder` holds the per-file
+  declaration sets and `apply`; `ReflectionProvider` is the snapshot, and
+  `Registry`'s query methods move onto it. Its 22 fields go:
+  - `classes`, `functions`, `global_constants`: the declaration sets plus
+    the provider's memos;
+  - `ancestor_names`, the five `*_owner_by_class` maps: memo levels;
+    `classes_lowercase`: gone with folded keys (keys commit);
+  - `unconditionally_declared_classes`/`_functions`,
+    `stub_provided_functions`, `built_in_stub_classes`: facts of the
+    declaration sets (C5 turns the last two into provenance queries);
+    `names_with_assert_tags`: derived from the sets and the assertion
+    entries; `function_decl_sites`: gone for provenance (keys commit);
+  - `doctrine_entity_table_index`: a provider memo (C8's data extension
+    takes it);
+  - `php_versions`, `configured_assertions`,
+    `configured_class_argument_returns`: reflection inputs the builder
+    holds (C6 compiles the last two to overlays);
+  - `global_variables` and the purity table: per snapshot on the provider
+    until C9's `AnalysisContext`;
+  - `phpstan_class_files`: already gone (C3's follow-up).
 - **Staleness fixes** (approved deltas), each with a closure gate, through
   the per-file declaration sets (which also hold what
   `unconditionally_declared_classes`/`_functions` record): anonymous
