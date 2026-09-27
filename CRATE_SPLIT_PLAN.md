@@ -1094,7 +1094,15 @@ Follow-ups:
   `class-string<DateTimeInterface>` are accepted.
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
   member covers (`A|B` for `B extends A` stays two members).
-- **Literal display** escapes: `'a\'b'` displays as `'a'b'`.
+- **Display is unambiguous**: a string literal escapes its quotes (`'a\'b'`
+  displays as `'a'b'`), and a callable's union return and a callable inside
+  a union are parenthesized (`Closure(int): (int|string)` displays as
+  `Closure(int): int|string`, `(callable(): void)|null` as
+  `callable(): void|null`).
+- **`iterable<K, V>`** keeps its arguments (behaviour fix). It is
+  `array<V>|Traversable` today, the key and `Traversable`'s arguments lost,
+  so a `foreach` over `iterable<int, string>` yields `mixed` key and value,
+  and a generator declared `iterable<int>` may yield `'x'` unreported.
 - **Typed templates.** `TemplateParam`'s name is a `Name` and its scope an
   enum (class, function, method, callable) instead of `Option<String>` with
   a `"callable"` sentinel; a `Conditional`'s subject is an enum (parameter
@@ -1120,6 +1128,10 @@ that parse (C4's store of parsed doc blocks holds it).
 Follow-up: **PHPDoc number literals** follow phpdoc-parser: hex, octal and
 binary, `_` separators and exponents (`int<0, 0xFF>`, `int<0, 1_000>` and
 `1e3` report `phpDoc.parseError` and read as `mixed` today).
+
+Follow-up: **type parsing is linear** in a type's length and depth-limited
+with a parse error: an `array<...>` nested 1,000 deep takes 3 s and 2,000
+deep 9 s today (20,000 deep does not finish).
 
 **B6. sql.**
 - Its own column-type model, `[sql_reflection]` parsing, and `SqlContext`
@@ -1808,6 +1820,10 @@ deleted, RefCell channels removed; the file-size gate.
   `is_float($n * 2)` is reported always false; integer overflow is a float.
 - **Short ternary** on an object keeps its type: `$a ?: null` and
   `$na ?: $a` are `mixed` today.
+- **Deep expressions** don't overflow the stack: the handlers iterate over
+  left-deep binary chains. A 32,000-term `.` chain aborts `check-project`
+  with a stack overflow today, though the parser handles it; 8,000 terms
+  take 29 s with literals and 58 s with variables (quadratic).
 
 **D5. NodeCallback sink** (approved deltas for `return.unusedType`,
 `throws.*` and `property.unusedType`).
