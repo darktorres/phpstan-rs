@@ -968,10 +968,8 @@ Follow-ups:
   (`unscoped` runs without composer, so Doctrine result typing is off), the
   A2 fixes and better inference. The review's false positives are the
   behaviour fixes below; `printf`'s doubled value report is fixed
-  (`ac70c6eb`). Each is one commit with its fixture:
-  - a `0|positive-int` parameter accepts `int<0, max>`: a union of an
-    integer and an adjacent range is one range (`composer/pcre`'s
-    `ReplaceResult`);
+  (`ac70c6eb`), and so is an integer range's union with the constants and
+  ranges touching it (`bda6df20`). Each is one commit with its fixture:
   - `parent::__construct()` binds the parent's templates through the
     class's `@extends`, not the templates' defaults (Symfony's
     `NodeDefinition`: `expects null|null, TParent|null given`);
