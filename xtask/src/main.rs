@@ -12,6 +12,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
+use std::io::BufRead as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
@@ -19,6 +20,8 @@ use std::time::Instant;
 mod arch;
 mod modgraph;
 mod stub_index;
+#[cfg(test)]
+mod tests;
 
 const LEVELS: [&str; 12] = [
     "unset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
@@ -28,7 +31,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("gates") => gates(&args[1..]),
-        Some("corpus") => corpus(&args[1..], true),
+        Some("corpus") => corpus_command(&args[1..]),
         Some("compare") => compare(&args[1..]),
         Some("perf") => perf(),
         Some("buildtime") => buildtime(),
@@ -69,7 +72,10 @@ const USAGE: &str = "usage: cargo xtask <command>
                          <commit>) to gates/approved/<slug>/ (then amend
                          them in)
   rekey <old-hash>       move <old-hash>'s snapshots to HEAD after an amend
-                         that only added gates/ files";
+                         that only added gates/ files
+
+`gates` and `corpus` write each step's wall time to
+.corpus-runs/gate/gatetime/<commit>.<command>.tsv, also when a step fails.";
 
 /// The embedded stub corpora, in index priority order.
 pub(crate) fn stub_corpora() -> Vec<stub_index::Corpus<'static>> {
@@ -201,6 +207,130 @@ fn build_gate() -> Result<(), String> {
 
 fn build_release() -> Result<(), String> {
     run(cargo().args(["build", "--release", "--bin", "phpstan-rs"]))
+}
+
+// --- step timing -----------------------------------------------------------
+
+/// The wall time of each step a command ran, in order.
+struct Timings {
+    steps: Vec<(String, f64)>,
+}
+
+impl Timings {
+    fn new() -> Self {
+        Timings { steps: Vec::new() }
+    }
+
+    /// Runs `step` and records its wall time under `name`, whether it
+    /// passes or fails. Steps it times itself are recorded before it.
+    fn time<T>(
+        &mut self,
+        name: &str,
+        step: impl FnOnce(&mut Self) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let started = Instant::now();
+        let result = step(self);
+        self.record(name, started.elapsed().as_secs_f64(), result.is_ok());
+        result
+    }
+
+    fn record(&mut self, name: &str, secs: f64, passed: bool) {
+        let name = if passed {
+            name.to_string()
+        } else {
+            format!("{name} (failed)")
+        };
+        eprintln!("[gatetime] {name}: {secs:.1}s");
+        self.steps.push((name, secs));
+    }
+
+    /// Writes `gatetime/<hash>.<command>.tsv`: one `step \t seconds` line
+    /// per step.
+    fn write(&self, hash: &str, command: &str) -> Result<(), String> {
+        let mut tsv = String::new();
+        for (name, secs) in &self.steps {
+            writeln!(tsv, "{name}\t{secs:.1}").unwrap();
+        }
+        write(
+            &gate_dir()
+                .join("gatetime")
+                .join(format!("{hash}.{command}.tsv")),
+            tsv.as_bytes(),
+        )
+    }
+}
+
+/// `cargo test <args>`, recording the build and then each test binary
+/// separately, each name prefixed with `prefix`. Cargo runs the binaries one after another and prints a
+/// `Running` (or `Doc-tests`) line before each, so a binary's time is
+/// the span from its line to the next one; that also covers binaries
+/// that print no libtest summary, such as criterion benches in test
+/// mode. Output is forwarded as it arrives.
+fn test_timed(timings: &mut Timings, prefix: &str, args: &[&str]) -> Result<(), String> {
+    let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
+    let mut cmd = cargo();
+    cmd.arg("test")
+        .args(args)
+        .stdout(writer.try_clone().map_err(|e| e.to_string())?)
+        .stderr(writer);
+    let shown = format!("{cmd:?}");
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to start {shown}: {e}"))?;
+    // The pipe reaches end of file only once every writer is closed.
+    drop(cmd);
+    let started = Instant::now();
+    let mut current: Option<(String, Instant)> = None;
+    for line in std::io::BufReader::new(reader).lines() {
+        let line = line.map_err(|e| format!("{shown}: {e}"))?;
+        eprintln!("{line}");
+        let Some(label) = test_binary_label(&line) else {
+            continue;
+        };
+        let now = Instant::now();
+        match current.take() {
+            Some((name, since)) => timings.record(&name, (now - since).as_secs_f64(), true),
+            None => timings.record(
+                &format!("{prefix}test build"),
+                (now - started).as_secs_f64(),
+                true,
+            ),
+        }
+        current = Some((format!("{prefix}{label}"), now));
+    }
+    let status = child.wait().map_err(|e| format!("{shown}: {e}"))?;
+    match current {
+        Some((name, since)) => {
+            timings.record(&name, since.elapsed().as_secs_f64(), status.success())
+        }
+        None => timings.record(
+            &format!("{prefix}test build"),
+            started.elapsed().as_secs_f64(),
+            status.success(),
+        ),
+    }
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{shown} failed: {status}"))
+    }
+}
+
+/// `test <source> (<binary>)` for cargo's `Running <kind> <source>
+/// (<path>)` line, `doc-tests <crate>` for its `Doc-tests <crate>` line.
+fn test_binary_label(line: &str) -> Option<String> {
+    let line = line.trim_start();
+    if let Some(krate) = line.strip_prefix("Doc-tests ") {
+        return Some(format!("doc-tests {}", krate.trim()));
+    }
+    let rest = line.strip_prefix("Running ")?;
+    let (source, path) = rest.rsplit_once(" (")?;
+    let source = source.strip_prefix("unittests ").unwrap_or(source);
+    let stem = Path::new(path.trim_end_matches(')'))
+        .file_name()?
+        .to_str()?;
+    let binary = stem.rsplit_once('-').map_or(stem, |(name, _)| name);
+    Some(format!("test {source} ({binary})"))
 }
 
 // --- corpus configurations -------------------------------------------------
@@ -411,62 +541,86 @@ fn run_corpus(config: &Config, level: &str, extra: &[String]) -> Result<(String,
     ))
 }
 
-/// `with_fixture_types` records `types-fixtures` too; `gates` records it
-/// from its own fixture run instead.
-fn corpus(args: &[String], with_fixture_types: bool) -> Result<(), String> {
-    let full = args.iter().any(|a| a == "--full");
+fn corpus_command(args: &[String]) -> Result<(), String> {
     require_clean_tree()?;
     let hash = head_hash()?;
-    build_gate()?;
+    let mut timings = Timings::new();
+    let result = corpus(args, true, &hash, &mut timings);
+    timings.write(&hash, "corpus")?;
+    result
+}
+
+/// `with_fixture_types` records `types-fixtures` too; `gates` records it
+/// from its own fixture run instead.
+fn corpus(
+    args: &[String],
+    with_fixture_types: bool,
+    hash: &str,
+    timings: &mut Timings,
+) -> Result<(), String> {
+    let full = args.iter().any(|a| a == "--full");
+    timings.time("gate build", |_| build_gate())?;
     write_all_on_config()?;
     for (config, level) in artifacts(full) {
-        let artifact = artifact_name(&config, level);
-        let started = Instant::now();
-        let mut extra = Vec::new();
-        let dump = level == "unset" && config.name != "unscoped";
-        let dump_file = gate_dir().join(format!(".{artifact}-types.tmp"));
-        if dump {
-            extra.push("--dump-types".to_string());
-            extra.push(dump_file.display().to_string());
-        }
-        let (stdout, stderr) = run_corpus(&config, level, &extra)?;
-        write(
-            &snapshot_path(&artifact, &hash, "txt"),
-            normalize(&stdout)?.as_bytes(),
-        )?;
-        write(&snapshot_path(&artifact, &hash, "err"), stderr.as_bytes())?;
-        if dump {
-            let target = snapshot_path(&format!("types-{artifact}"), &hash, "txt.zst");
-            std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+        record_artifact(&config, level, hash, timings)?;
+    }
+    if with_fixture_types {
+        record_fixture_types(hash, timings)?;
+    }
+    baseline_check(hash, timings)?;
+    determinism_check(full, timings)?;
+    Ok(())
+}
+
+/// Runs `config` at `level` and writes its snapshots (and, for the
+/// dumped configurations, its type snapshot) for `hash`.
+fn record_artifact(
+    config: &Config,
+    level: &str,
+    hash: &str,
+    timings: &mut Timings,
+) -> Result<(), String> {
+    let artifact = &artifact_name(config, level);
+    let mut extra = Vec::new();
+    let dump = level == "unset" && config.name != "unscoped";
+    let dump_file = gate_dir().join(format!(".{artifact}-types.tmp"));
+    if dump {
+        extra.push("--dump-types".to_string());
+        extra.push(dump_file.display().to_string());
+    }
+    let (stdout, stderr) = timings.time(&format!("corpus {artifact}"), |_| {
+        run_corpus(config, level, &extra)
+    })?;
+    write(
+        &snapshot_path(artifact, hash, "txt"),
+        normalize(&stdout)?.as_bytes(),
+    )?;
+    write(&snapshot_path(artifact, hash, "err"), stderr.as_bytes())?;
+    if dump {
+        let target = snapshot_path(&format!("types-{artifact}"), hash, "txt.zst");
+        std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+        timings.time(&format!("compress types-{artifact}"), |_| {
             run(Command::new("zstd")
                 .args(["-q", "-f", "-19", "--rm", "-T0"])
                 .arg(&dump_file)
                 .arg("-o")
-                .arg(&target))?;
-        }
-        eprintln!(
-            "recorded {artifact} in {:.1}s",
-            started.elapsed().as_secs_f64()
-        );
+                .arg(&target))
+        })?;
     }
-    if with_fixture_types {
-        record_fixture_types(&hash)?;
-    }
-    baseline_check(&hash)?;
-    determinism_check(full)?;
     Ok(())
 }
 
 /// Runs the fixture suite with each fixture's type dump on and records
 /// them, in fixture order, as the `types-fixtures` snapshot.
-fn record_fixture_types(hash: &str) -> Result<(), String> {
-    let started = Instant::now();
+fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String> {
     let dir = gate_dir().join(".fixture-types.tmp");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    run(cargo()
-        .args(["test", "--profile", "gate", "--test", "fixtures", "--quiet"])
-        .env("PHPSTAN_RS_DUMP_TYPES", &dir))?;
+    timings.time("fixtures", |_| {
+        run(cargo()
+            .args(["test", "--profile", "gate", "--test", "fixtures", "--quiet"])
+            .env("PHPSTAN_RS_DUMP_TYPES", &dir))
+    })?;
     let mut dumps: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -481,16 +635,14 @@ fn record_fixture_types(hash: &str) -> Result<(), String> {
     write(&joined, text.as_bytes())?;
     let target = snapshot_path("types-fixtures", hash, "txt.zst");
     std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-    run(Command::new("zstd")
-        .args(["-q", "-f", "-19", "-T0"])
-        .arg(&joined)
-        .arg("-o")
-        .arg(&target))?;
+    timings.time("compress types-fixtures", |_| {
+        run(Command::new("zstd")
+            .args(["-q", "-f", "-19", "-T0"])
+            .arg(&joined)
+            .arg("-o")
+            .arg(&target))
+    })?;
     std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
-    eprintln!(
-        "recorded types-fixtures in {:.1}s",
-        started.elapsed().as_secs_f64()
-    );
     Ok(())
 }
 
@@ -498,15 +650,20 @@ fn record_fixture_types(hash: &str) -> Result<(), String> {
 /// diagnostics in the order the checks produced them, no final sort) and
 /// requires identical output: the engine itself must be reproducible,
 /// not just the sorted report.
-fn determinism_check(full: bool) -> Result<(), String> {
+fn determinism_check(full: bool, timings: &mut Timings) -> Result<(), String> {
     let mut configs = vec![ALL_ON];
     if full {
         configs.push(UNSCOPED);
     }
     for config in configs {
         let flag = ["--emission-order".to_string()];
-        let (first, first_err) = run_corpus(&config, "unset", &flag)?;
-        let (second, second_err) = run_corpus(&config, "unset", &flag)?;
+        let (first, first_err) = timings.time(&format!("determinism {} 1", config.name), |_| {
+            run_corpus(&config, "unset", &flag)
+        })?;
+        let (second, second_err) = timings
+            .time(&format!("determinism {} 2", config.name), |_| {
+                run_corpus(&config, "unset", &flag)
+            })?;
         if first != second || first_err != second_err {
             let diff = unified_diff(first.as_bytes(), second.as_bytes())?;
             let shown: String = diff.lines().take(40).collect::<Vec<_>>().join("\n");
@@ -552,7 +709,7 @@ fn baseline_generate() -> Result<(), String> {
     Ok(())
 }
 
-fn baseline_check(hash: &str) -> Result<(), String> {
+fn baseline_check(hash: &str, timings: &mut Timings) -> Result<(), String> {
     for config in [SCOPED, ALL_ON] {
         let file = baseline_file(config.name);
         if !file.exists() {
@@ -562,11 +719,13 @@ fn baseline_check(hash: &str) -> Result<(), String> {
             );
             continue;
         }
-        let (stdout, stderr) = run_corpus(
-            &config,
-            "unset",
-            &["--baseline".to_string(), file.display().to_string()],
-        )?;
+        let (stdout, stderr) = timings.time(&format!("baseline {}", config.name), |_| {
+            run_corpus(
+                &config,
+                "unset",
+                &["--baseline".to_string(), file.display().to_string()],
+            )
+        })?;
         let normalized = normalize(&stdout)?;
         let artifact = format!("baseline-{}", config.name);
         write(
@@ -1147,62 +1306,93 @@ fn test_manifest() -> Result<(), String> {
 fn gates(args: &[String]) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
     require_clean_tree()?;
-    run(cargo().args(["fmt", "--all", "--check"]))?;
-    run(cargo().args([
-        "clippy",
-        "--workspace",
-        "--all-targets",
-        "--quiet",
-        "--",
-        "-D",
-        "warnings",
-    ]))?;
-    run(cargo().args(["test", "--workspace", "--all-targets", "--quiet"]))?;
-    record_fixture_types(&head_hash()?)?;
-    test_manifest()?;
-    modgraph::modgraph(&root(), &[])?;
-    arch::arch(&root())?;
-    run(cargo().args(["doc", "--workspace", "--no-deps", "--quiet"]))?;
-    run(cargo().args(["bench", "--workspace", "--no-run", "--quiet"]))?;
-    run(cargo().args([
-        "check",
-        "--quiet",
-        "--manifest-path",
-        "fuzz/Cargo.toml",
-        "--all-targets",
-    ]))?;
-    run(cargo().args([
-        "build",
-        "--quiet",
-        "--no-default-features",
-        "--bin",
-        "phpstan-rs",
-    ]))?;
-    if full {
-        run(cargo().args(["test", "--workspace", "--quiet", "--no-default-features"]))?;
+    let hash = head_hash()?;
+    let mut timings = Timings::new();
+    let started = Instant::now();
+    let result = gate_steps(full, &hash, &mut timings);
+    timings.record("total", started.elapsed().as_secs_f64(), result.is_ok());
+    timings.write(&hash, if full { "gates-full" } else { "gates" })?;
+    result?;
+    eprintln!("all gates passed");
+    Ok(())
+}
+
+fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), String> {
+    timings.time("fmt", |_| run(cargo().args(["fmt", "--all", "--check"])))?;
+    timings.time("clippy", |_| {
         run(cargo().args([
-            "hack",
-            "check",
+            "clippy",
             "--workspace",
-            "--each-feature",
-            "--no-dev-deps",
-            "--mutually-exclusive-features",
-            "dhat-heap,hotpath-alloc",
+            "--all-targets",
             "--quiet",
-        ]))?;
-        run(cargo().args(["machete"]))?;
-        run(cargo().args(["deny", "check"]))?;
+            "--",
+            "-D",
+            "warnings",
+        ]))
+    })?;
+    timings.time("tests", |t| {
+        test_timed(t, "", &["--workspace", "--all-targets", "--", "--quiet"])
+    })?;
+    record_fixture_types(hash, timings)?;
+    timings.time("test manifest", |_| test_manifest())?;
+    timings.time("module graph", |_| modgraph::modgraph(&root(), &[]))?;
+    timings.time("arch", |_| arch::arch(&root()))?;
+    timings.time("doc", |_| {
+        run(cargo().args(["doc", "--workspace", "--no-deps", "--quiet"]))
+    })?;
+    timings.time("bench compile", |_| {
+        run(cargo().args(["bench", "--workspace", "--no-run", "--quiet"]))
+    })?;
+    timings.time("fuzz check", |_| {
+        run(cargo().args([
+            "check",
+            "--quiet",
+            "--manifest-path",
+            "fuzz/Cargo.toml",
+            "--all-targets",
+        ]))
+    })?;
+    timings.time("no-default-features build", |_| {
+        run(cargo().args([
+            "build",
+            "--quiet",
+            "--no-default-features",
+            "--bin",
+            "phpstan-rs",
+        ]))
+    })?;
+    if full {
+        timings.time("no-default-features tests", |t| {
+            test_timed(
+                t,
+                "no-default-features ",
+                &["--workspace", "--no-default-features", "--", "--quiet"],
+            )
+        })?;
+        timings.time("feature matrix", |_| {
+            run(cargo().args([
+                "hack",
+                "check",
+                "--workspace",
+                "--each-feature",
+                "--no-dev-deps",
+                "--mutually-exclusive-features",
+                "dhat-heap,hotpath-alloc",
+                "--quiet",
+            ]))
+        })?;
+        timings.time("machete", |_| run(cargo().args(["machete"])))?;
+        timings.time("deny", |_| run(cargo().args(["deny", "check"])))?;
     }
     let mut corpus_args = Vec::new();
     if full {
         corpus_args.push("--full".to_string());
     }
-    corpus(&corpus_args, false)?;
-    compare(&corpus_args)?;
+    corpus(&corpus_args, false, hash, timings)?;
+    timings.time("compare", |_| compare(&corpus_args))?;
     if full {
-        perf()?;
-        buildtime()?;
+        timings.time("perf", |_| perf())?;
+        timings.time("buildtime", |_| buildtime())?;
     }
-    eprintln!("all gates passed");
     Ok(())
 }

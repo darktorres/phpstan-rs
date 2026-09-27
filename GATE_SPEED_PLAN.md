@@ -100,8 +100,10 @@ The order is the order of the sections below.
 
 ### S0. Gate step timing (xtask)
 - `gates` and `corpus` print each step's wall time and write
-  `.corpus-runs/gate/gatetime/<hash>.tsv` (step, seconds). Every later
-  step reads its before and after times from it.
+  `.corpus-runs/gate/gatetime/<hash>.<command>.tsv` (step, seconds), with
+  `gates`, `gates-full` or `corpus` as the command. The file is written
+  even when a step fails. Every later step reads its before and after
+  times from it.
 - `cargo test` runs its test binaries one after another, so each
   target's own time (lib, cli, each crate's tests, fixtures) is recorded
   separately from libtest's `finished in` summary.
