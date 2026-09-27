@@ -1501,7 +1501,12 @@ Follow-ups:
   operators, ternaries, `??`, global and class constants, enum cases and
   `new` each give `mixed` today (`const A = 2 + 3`, `const G = 1 << 2`,
   `const E = PHP_INT_SIZE`), and a backed enum's `case A = self::X` or
-  `case B = 2 + 3` types `->value` and `value-of` as `int`.
+  `case B = 2 + 3` types `->value` and `value-of` as `int`. doctrine/dbal's
+  `Converter` has `public const CASE_LOWER = CASE_LOWER;` (a `use const`
+  import; `\CASE_LOWER` is `mixed` too), so `@param
+  self::CASE_LOWER|self::CASE_UPPER|null $case` is `mixed|mixed|null` and
+  its `match` on `$case` is reported `match.unhandled`
+  (`doctrine/dbal/src/Portability/Converter.php:55`).
 - **One folded constant key.** A constant's namespace prefix folds case at
   every lookup, `checker/imports.rs`'s `use const` check and
   `dynamic_constant_names` included.
