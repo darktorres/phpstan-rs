@@ -1016,6 +1016,8 @@ Follow-ups, behaviour fixes:
 - **Assignment as an operand** at every binary operator, by one grammar rule
   instead of the per-level patches: `$a ?? $b = 1`, `1 | $g = 2` and
   `2 * $i = 3` report `assign.invalidExpr` and `variable.undefined` today.
+  Snapshot 0a8fe69 has 22 `assign.invalidExpr`, e.g. `$checkpoint ??
+  $checkpoint = $this->position` in `gettext/src/Loader/StrictPoLoader.php:122`.
 - **Trait adaptations** keep the `insteadof` choice and the `as`
   visibility, with resolved trait names (`use T { foo as private; }` leaves
   `foo` public, and `B::hello insteadof A` still picks `A`'s, today); C4's
@@ -1924,6 +1926,16 @@ behaviour commits a phase lists follow it as approved deltas. D5 is the
 semantics phase. Every behaviour bug below is reproduced and gets its
 fixture before its phase's structural commit.
 
+The oracle is real PHPStan 2.2.16 over the corpus files with
+engine-sensitive diagnostics: the phar copied outside `vendor/` (so the
+corpus's extensions don't load), Piwigo's `vendor/autoload.php` as the only
+bootstrap file, level 10, run from a directory with no `vendor/`. Files
+that raise internal errors (missing optional classes, php-standard-library
+function redeclaration) are excluded. For snapshot 0a8fe69 this leaves 941
+files and 784 phpstan-rs-only findings among the engine identifiers; each
+phase reruns the comparison, and every phpstan-rs-only finding it names is
+a fixture.
+
 **D1. Holder storage (byte-identical).**
 - Every `Locals` map moves into holder storage with its current per-kind
   merge and invalidation policy, `guarded_classes` and
@@ -1975,17 +1987,33 @@ fixture before its phase's structural commit.
       `while (true)`; `while (FOREVER)` with a `true` constant;
       `do { … } while (true)`; and a switch covering every case of an enum
       with `return`s and no `default`.
-    - About a dozen of the 70 `return.missing` in snapshot 0a8fe69 are
-      such loops, e.g. `amphp/socket/RetrySocketConnector.php:37` and
-      `psl/Str/pad_left.php:40`.
+    - The oracle reports 28 of snapshot 0a8fe69's 68 checked
+      `return.missing`; the other 40 are these shapes, among them
+      `while (\true)` with a qualified constant (four in php-cs-fixer's
+      `Tokens.php`), `while (true)` whose inner loop breaks
+      (`symfony/mailer/Transport.php:121`), `do { … } while (true)`
+      (`amphp/socket/RetrySocketConnector.php:37`), an `if` chain whose
+      last condition is always true
+      (`doctrine/migrations/InlineParameterFormatter.php:69`) and `goto`
+      (`symfony/cache/PhpArrayAdapter.php:82`).
     - The interim fix before D2: `always_terminates` gains a `DoWhile` arm;
       `while`/`for`/`do` read the condition's inferred type instead of
-      `is_truthy_literal`; a `break` counts only when its level reaches
+      `is_truthy_literal`, which misses `\true`; a `break` counts only when its level reaches
       the loop; and `Switch` without `default` counts when the subject's
       enum cases are all covered.
+  - **Last conditions** follow `LastConditionVisitor`: besides an `elseif`
+    with no `else`, an `elseif` whose `else` only throws, an `if` without
+    `else` followed by its block's final `throw`, and a `match`'s last arm
+    are last conditions, whose always-true result isn't reported. The oracle
+    finds 30 `function.alreadyNarrowedType`/`instanceof.alwaysTrue` in
+    snapshot 0a8fe69 with the `if … throw` shape, e.g.
+    `nikic/php-parser/BuilderFactory.php:369`.
   - **Constant conditions prune branches** (`IfHandler`): an `if` whose
     condition type is `true` skips the `else`/`elseif` merge, and a
-    `false` condition drops its branch. The condition's type is the PHPDoc
+    `false` condition drops its branch. An always-true `elseif` ends the
+    chain the same way: `symfony/cache/Traits/RedisTrait.php:631` reports
+    `$prefix` undefined after `if (…) {…} elseif (!$host instanceof
+    Predis) {…}` where an earlier `continue` already excluded Predis. The condition's type is the PHPDoc
     type, or the native type when `treatPhpDocTypesAsCertain` is off.
     After `$flag = true; if ($flag) { $x = 1; }`, `echo $x` is
     `variable.undefined` today.
@@ -2067,6 +2095,11 @@ deleted; the file-size gate.
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
       `if ($e === E::A) { return; }` and in a `match` `default` arm;
     - `!empty($v)` on an `int` leaves `int`;
+    - `is_resource()` on a `resource` is never always true, because a
+      resource may have been closed (fixed first). Snapshot 0a8fe69 has 52
+      `function.alreadyNarrowedType` for it that the oracle doesn't report,
+      e.g. `sebastian/environment/src/Console.php` and
+      `maxmind-db/reader/src/MaxMind/Db/Reader.php`;
     - `$b?->c->n === 1` doesn't narrow `$b` to non-null
       (`createNullsafeTypes`);
     - none of `EqualityTypeSpecifyingHelper`'s call comparisons narrow
@@ -2133,7 +2166,10 @@ assignments inside `assert()`.
 - conditional holders with `mergeWith`: `ScopeOps::createConditionalExpressions`,
   including the holders that record a variable as undefined on the other
   side, `preserveVacuousConditionals` and `withoutPreciseClassConstantFetches`;
-  they replace `discriminant_array_facts`;
+  they replace `discriminant_array_facts`. A variable defined under one
+  condition and read under a correlated one is `variable.undefined` today:
+  `symfony/filesystem/Filesystem.php:190` reads `$origFile`, which only the
+  `$isRecursive`-dependent branch defines;
 - conditional holders created at assignment (`AssignHandler`), replacing
   `condition_aliases`, its lazy AST replay and `record_if_body_flag_alias`:
   - the assigned expression's sure and sure-not types, guarded by the
@@ -2289,7 +2325,13 @@ assignments inside `assert()`.
     - `continue` inside a switch acts like `break`.
   - **Match** follows `MatchHandler`: the subject is always remembered, each
     arm's body scope is merged into the scope after the match, and a
-    non-exhaustive match adds an `UnhandledMatchError` throw point.
+    non-exhaustive match adds an `UnhandledMatchError` throw point. A
+    `match (true)` is exhaustive when its arms' falsey narrowings leave the
+    scope impossible (`isScopeConditionallyImpossible`): arms
+    `$b instanceof Pay`, `is_string($b)`, `$b === null` over
+    `Pay|string|null` report `match.unhandled` "remaining value: true"
+    today; the oracle finds nine in snapshot 0a8fe69, e.g.
+    `amphp/http-client/src/Response.php:218`.
   - **Try/catch/finally** follows `TryCatchHandler`:
     - a catch is entered from the merge of the throw points it catches;
     - its variable is the catch type minus the earlier catches;
@@ -2824,8 +2866,9 @@ its owner. Non-Registry keys follow the table.
   phase's own behaviour commit (approved delta) after its structural
   commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2),
   C3a's `property.unused` delta, `int|float` arithmetic (D3), top-level
-  variables as maybe-defined (D5) and loop/switch termination (D2), each
-  a false positive on ordinary code; D2 and D5 name the interim fix.
+  variables as maybe-defined (D5), loop/switch termination (D2) and
+  `is_resource()` never always true (D3), each a false positive on
+  ordinary code; D2 and D5 name the interim fix.
 - **Stage D order.** Structure before semantics: holders (D1), statement
   results and handlers (D2), one inference path with the TypeSpecifier
   (D3), the sink (D4), then the semantics (D5) and the public APIs (D6).
