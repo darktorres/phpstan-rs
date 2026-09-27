@@ -2569,8 +2569,9 @@ for `return.unusedType`, `throws.*` and `property.unusedType`).
 **D5. Convergence onto PHPStan semantics**, one approved-delta commit each,
 with a fixture per transition and trigger, on D1–D4's structure. Where
 PHPStan's rule is less correct at runtime, runtime correctness wins and
-the deviation is named here: eval defining variables (§3.8), and
-assignments inside `assert()`. The groups land in this order, each
+the deviation is named here: eval defining variables (§3.8), assignments
+inside `assert()`, and a by-reference `use`d variable inside a closure
+body (below). The groups land in this order, each
 building on the previous one:
 
 - **Holder model:**
@@ -2865,7 +2866,16 @@ building on the previous one:
       `(function () use (&$x) { $x = 'a'; })()`, `$x` is `0|'a'` today;
     - by-reference `use` follows `processClosureScope`: an undefined
       variable is `null` in the outer scope, and afterwards it is the
-      closure's type unioned with the previous one and generalized;
+      closure's type unioned with the previous one and generalized. Inside
+      the body, PHPStan gives such a variable its type where the closure is
+      created, but other closures and the enclosing function may assign it
+      before the call: react's `TimeoutConnector`/`TimeoutExecutor` set
+      `$timer = null`, share it with `use (&$timer)` between two
+      callbacks, and PHPStan reports `if ($timer)` in one of them
+      `if.alwaysFalse` (8 corpus findings). The deviation: inside the body
+      it is the union of its type at creation and every value the
+      enclosing function or its closures assign to it (today `null|never`,
+      and unreported);
     - a closure with by-reference uses converges like a loop; any other
       closure's body is entered once, from its declared parameter types.
       Today a closure whose body returns after `if (!$node instanceof
