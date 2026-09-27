@@ -1418,9 +1418,6 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
     timings.time("doc", |_| {
         run(cargo().args(["doc", "--workspace", "--no-deps", "--quiet"]))
     })?;
-    timings.time("bench compile", |_| {
-        run(cargo().args(["bench", "--workspace", "--no-run", "--quiet"]))
-    })?;
     timings.time("fuzz check", |_| {
         run(cargo().args([
             "check",
@@ -1430,9 +1427,9 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
             "--all-targets",
         ]))
     })?;
-    timings.time("no-default-features build", |_| {
+    timings.time("no-default-features check", |_| {
         run(cargo().args([
-            "build",
+            "check",
             "--quiet",
             "--no-default-features",
             "--bin",
@@ -1440,6 +1437,9 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
         ]))
     })?;
     if full {
+        timings.time("bench compile", |_| {
+            run(cargo().args(["bench", "--workspace", "--no-run", "--quiet"]))
+        })?;
         timings.time("no-default-features tests", |t| {
             test_timed(
                 t,

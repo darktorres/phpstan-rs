@@ -705,7 +705,9 @@ progress, feature work touching that stage's modules waits for it.
 takes ~30 s and the full per-level matrix is 25 runs:
 
 - **quick** (every commit):
-  - gates 1–3 without `cargo hack`/`machete`/`deny`;
+  - gates 1–3 without `cargo hack`/`machete`/`deny` or `cargo bench
+    --no-run` (`test --all-targets` compiles the benches), and with the
+    `--no-default-features` build checked rather than built;
   - the scoped and all-on corpus runs;
   - the type snapshots;
   - baseline compatibility.
@@ -714,7 +716,7 @@ takes ~30 s and the full per-level matrix is 25 runs:
   - everything in quick;
   - the unscoped run;
   - levels 0–10 for scoped and all-on;
-  - `cargo hack`, `machete` and `deny`;
+  - `cargo hack`, `machete`, `deny` and `cargo bench --no-run`;
   - performance and build time.
 
 CI (`.github/workflows/rust-ci.yml`) runs the build and test half. The
