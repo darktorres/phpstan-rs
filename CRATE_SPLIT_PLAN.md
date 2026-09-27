@@ -2421,7 +2421,11 @@ deleted; the file-size gate.
       `ArrayAccess<int, string>` or `ArrayObject<string, int>` is `mixed`
       today, so every nested read is a level-10
       `offsetAccess.nonOffsetAccessible` (37 in
-      `bacon-qr-code/src/Encoder/MaskUtil.php` alone).
+      `bacon-qr-code/src/Encoder/MaskUtil.php` alone). A union container
+      reads each member: `$list[$k]` on `array<string, C>|null` is `mixed`
+      today where it is `C|null` (a `null` container reads `null`), so
+      `$list[$k]->isHidden()` is `method.nonObject` "on mixed"
+      (`symfony/console/Application.php:657`, `:828`).
     - **Array literals and appends** follow `ConstantArrayType`'s next-key
       rule: after a negative key the next implicit key is the key + 1 on PHP
       8.3+ and `0` before, after `PHP_INT_MAX` there is none (the append
@@ -3039,7 +3043,10 @@ derived node, each listing its Appendix A rows:
 - (b) expression-level; the level-9/10 `mixed` checks cover every
   expression rule: a `foreach` over `mixed` (`foreach.nonIterable`) and an
   `echo` of `mixed` (`echo.nonString`) aren't reported today at
-  `--level 10` (282 and 39 corpus oracle findings phpstan-rs misses);
+  `--level 10` (282 and 39 corpus oracle findings phpstan-rs misses); a
+  non-numeric string offset on a string throws a `TypeError`, and
+  `$s['x']` on a `string` isn't reported today, nor `$d['priority']` on
+  `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
 - (c) calls and member access (a by-reference argument PHP creates on
   the call is not type-checked against the parameter);
 - (d) assignments and properties (`uninitialized` and
