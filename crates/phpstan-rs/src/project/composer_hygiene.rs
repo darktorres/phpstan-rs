@@ -33,8 +33,8 @@ use syntax::ast::*;
 use syntax::token::{Position, Span};
 use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
 
-use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
+use super::{FileState, Project};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::name_resolution::NameContext;
 
@@ -265,29 +265,25 @@ impl Project {
     pub fn check_composer_hygiene(&self, root: usize) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let manifest = &self.packages.manifests()[root];
         let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
-        let classes_by_lower: FxHashMap<String, (&str, &Path, Span)> = self
-            .registry
-            .classes
-            .iter()
-            .filter_map(|(name, info)| {
-                let path = info.provenance().file()?;
-                Some((
-                    name.to_ascii_lowercase(),
-                    (name.as_ref(), path, info.provenance().declaration_span()),
-                ))
-            })
-            .collect();
-        let functions_by_lower: FxHashMap<String, (&str, &Path)> = self
-            .registry
-            .functions
-            .iter()
-            .filter_map(|(name, sig)| {
-                Some((
-                    name.to_ascii_lowercase(),
-                    (name.as_ref(), sig.provenance().file()?),
-                ))
-            })
-            .collect();
+        // Every loaded file declaring each class and function, whichever
+        // declaration the registry keeps (a built-in stub can win a name a
+        // package also declares): the first such file by path.
+        let mut declaring_files: Vec<(&PathBuf, &FileState)> = self.files.iter().collect();
+        declaring_files.sort_by_key(|(path, _)| *path);
+        let mut classes_by_lower: FxHashMap<String, (&str, &Path)> = FxHashMap::default();
+        let mut functions_by_lower: FxHashMap<String, (&str, &Path)> = FxHashMap::default();
+        for (path, file) in &declaring_files {
+            for name in &file.classes {
+                classes_by_lower
+                    .entry(name.to_ascii_lowercase())
+                    .or_insert((name.as_str(), path.as_path()));
+            }
+            for name in &file.functions {
+                functions_by_lower
+                    .entry(name.to_ascii_lowercase())
+                    .or_insert((name.as_str(), path.as_path()));
+            }
+        }
         // The package installed under this root that `path`, a loaded
         // file, belongs to.
         let installed_owner = |path: &Path| -> Option<&InstalledPackage> {
@@ -318,7 +314,7 @@ impl Project {
             for s in &facts.strings {
                 let trimmed = s.trim_start_matches('\\');
                 if trimmed.contains('\\')
-                    && let Some((_, declared_in, _)) =
+                    && let Some((_, declared_in)) =
                         classes_by_lower.get(&trimmed.to_ascii_lowercase())
                     && let Some(package) = installed_owner(declared_in)
                 {
@@ -337,9 +333,9 @@ impl Project {
                         (
                             "Class",
                             declared
-                                .map(|(n, _, _)| n.to_string())
+                                .map(|(n, _)| n.to_string())
                                 .unwrap_or_else(|| fqn.clone()),
-                            declared.map(|(_, p, _)| *p),
+                            declared.map(|(_, p)| *p),
                             stubs::builtin_class_extension(fqn),
                         )
                     }
