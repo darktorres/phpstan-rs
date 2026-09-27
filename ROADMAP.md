@@ -4384,8 +4384,11 @@ View properties no PHP code reads; how many of them a template reads is
 - an HTML-aware lexer: text, elements and attributes, comments, bogus
   tags (`<!...>`, `<?...>`), raw-text elements (`<script>`, `<style>`,
   `<textarea>`, `<title>`) and attribute-value contexts, with `{...}`
-  found in each; `{* comments *}`, `{l}`/`{r}`, `{syntax}`/`n:syntax`, and
-  a `{` followed by whitespace staying literal;
+  found in each; `{* comments *}`, `{l}`/`{r}`, and the delimiters
+  `{syntax}`/`n:syntax` switch between (`single` `{...}`, `double`
+  `{{...}}`, `off`, each optionally until a named end tag); a `{` opens a
+  tag only when what follows isn't whitespace, a quote, `{` or `}`
+  (`TemplateLexer::setSyntax()`), and stays literal text otherwise;
 - elements as `TemplateParserHtml` builds them: a name that may be an
   expression (`<{$tag}>`, `<h{$level}>`), attributes produced by tags
   (`<span {if $x}class="a"{/if}>`), void elements, a self-closed non-void
@@ -4394,8 +4397,14 @@ View properties no PHP code reads; how many of them a template reads is
   it - except under `StrictParsing` or when it carries an `n:`
   attribute, has an expression name or is raw text, where Latte rejects
   it;
-- tags as `(name, arguments, modifiers)`: paired and void, `{/tag}` and
-  `{/}` closers, `n:` attributes including the automatic `n:inner-`/
+- the template's header as `TemplateParser::parse()` delimits it: the
+  leading run of tags that print nothing (`{varType}`, `{templateType}`,
+  `{parameters}`, `{layout}`, `{import}`, ...) and whitespace, ending at
+  the first text, element or printing tag - what the header-only tags
+  and `prepare()` (182c) refer to;
+- tags as `(name, arguments, modifiers)` - a print (`{$x}`, `{=...}`) being
+  the tag with no name - paired and void (`{tag/}`), `{/tag}` and `{/}`
+  closers, `n:` attributes including the automatic `n:inner-`/
   `n:tag-` forms of every pair tag (neither on a void element), and
   `n:else`/`n:elseif`/`n:ifcontent`, an `n:` attribute's value written
   quoted, as `{...}`, or as a bare word;
@@ -4639,8 +4648,10 @@ fixture set stands in for its oracle.
 where Latte would throw a `CompileException`: the validations in the node
 classes (`{parameters}`, `{templateType}`, `{extends}`/`{layout}` and
 `{contentType}` outside the header, an unclosed or mismatched tag, an
-unknown tag, `n:else` without its `n:if`/`n:foreach`, a block name used
-twice in one layer, `n:tag` on `<script>`/`<style>`, a `|noescape` where
+unknown tag (with Latte's own "did you mean" suggestion), `n:else` without its `n:if`/`n:foreach`, a block name used
+twice in one layer or a block or define name not starting with a letter,
+a `{/x}` closing another tag than the open one, `{tag/}` on a tag that
+takes content, `n:tag` on `<script>`/`<style>`, a `|noescape` where
 no filter is expected, `{iterateWhile}` outside a `{foreach}`, `n:class`
 beside a `class` attribute, `n:ifcontent` on an empty element,
 `n:embed`, loose content beside an explicit `{block default}` in an
