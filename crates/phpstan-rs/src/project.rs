@@ -1845,13 +1845,14 @@ impl Project {
     /// per host (`check_trait_methods`) already attributes its own
     /// contribution to each host's real fqn (see `property_assign_facts`'s
     /// own doc comment), so merging here needs no extra trait-awareness
-    /// of its own - just concatenating every file's own per-key `Vec`.
+    /// of its own - just concatenating every file's own per-key `Vec`, in
+    /// path order, so the result doesn't depend on how the file map was
+    /// built.
     pub fn collect_property_assign_facts(&self) -> PropertyAssignFacts {
         let mut merged: PropertyAssignFacts = FxHashMap::default();
-        for path in self.files.keys() {
-            let Some(file) = self.files.get(path) else {
-                continue;
-            };
+        let mut files: Vec<(&PathBuf, &FileState)> = self.files.iter().collect();
+        files.sort_by(|a, b| a.0.cmp(b.0));
+        for (_, file) in files {
             if !self.file_may_write_private_property(file) {
                 continue;
             }
