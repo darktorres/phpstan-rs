@@ -868,8 +868,9 @@ corpus, type, baseline, performance and build-time gates run locally
     - `cargo xtask oracle` runs the phar (copied out of the corpus's
       `vendor/phpstan/phpstan`) over the corpus files with
       engine-sensitive diagnostics, with the corpus autoloader as the only
-      bootstrap, runs phpstan-rs over the same files at the same level
-      (10), and lists the phpstan-rs-only and PHPStan-only findings by
+      bootstrap and `phpVersion` pinned to the composer range phpstan-rs
+      reads, runs phpstan-rs over the same files at the same level (10),
+      and lists the phpstan-rs-only and PHPStan-only findings by
       identifier; files that raise PHPStan internal errors are excluded
       and listed.
 
@@ -2023,8 +2024,13 @@ Gate 12 runs both oracles below. The oracle is real PHPStan 2.2.16 over
 the corpus files with engine-sensitive diagnostics: the phar copied
 outside `vendor/` (so the
 corpus's extensions don't load), Piwigo's `vendor/autoload.php` as the only
-bootstrap file, level 10, run from a directory with no `vendor/`.
-phpstan-rs runs at `--level 10` too: with the level unset it skips the
+bootstrap file, level 10, run from a directory with no `vendor/`, with
+`phpVersion` set to the range phpstan-rs reads from the corpus's
+`composer.json` (`min: 80500, max: 80599`). Without it the phar uses its
+runtime version, and at least 63 of phpstan-rs's constant comparisons
+(`PHP_VERSION_ID < 70400` always false, `symfony/polyfill-*`) and the
+`&&` results built on them show as phpstan-rs-only. phpstan-rs runs at
+`--level 10` too: with the level unset it skips the
 level-10 implicit-`mixed` checks (§1's level row), which turned 2,519
 `offsetAccess.nonOffsetAccessible` into apparent misses. Both sides are
 filtered to the engine identifiers. Files that raise internal errors
