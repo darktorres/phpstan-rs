@@ -79,6 +79,9 @@ User-visible changes: output, formats, flags, configuration and exit codes.
   anonymous class unused (`69b97cb1`).
 - `printf()` accepts `bool` and `null` values, and a value no printf
   function accepts is reported once instead of twice (`ac70c6eb`).
+- An integer range absorbs the integer constants and ranges it overlaps or
+  touches: `0|positive-int` is `int<0, max>` and accepts one, and a
+  variable narrowed both ways and merged is `int` again (`bda6df20`).
 
 ### Project
 - Licensed under MIT.
