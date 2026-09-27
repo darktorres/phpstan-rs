@@ -1428,7 +1428,9 @@ Follow-ups:
 - **Predefined constants over a version range** (fixed first): `PHP_VERSION_ID`
   is `int<min.id, max.id + 99>`, `PHP_MAJOR_VERSION`/`PHP_MINOR_VERSION` are
   ranges or unions over the range, and a predefined constant never falls
-  back to the stub's `define()` value.
+  back to the stub's `define()` value. The integer-size constants cover
+  32- and 64-bit builds: `PHP_INT_MAX` is `2147483647|9223372036854775807`
+  (it is the 64-bit value only today; nsrt `constant-phpdoc-type.php`).
 - **`ConstantResolver` in `reflection`**, with `dynamic_constant_names` a
   `ReflectionSettings` key; `resolve_constant_named_types` and
   class-constant initializer typing read constants through it.
@@ -1895,6 +1897,12 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
   checker (`resolve_written_type`);
 - native `TypeHint` nodes are resolved directly, not printed and re-parsed
   (about 85 sites);
+- a constant name in a PHPDoc type resolves through the name scope's
+  `use const` imports and its initializer: `@param PREG_SPLIT_NO_EMPTY_ALIAS`
+  under `use const PREG_SPLIT_NO_EMPTY as PREG_SPLIT_NO_EMPTY_ALIAS` reads
+  as a class today, and `@param COPY` for `const COPY =
+  PREG_SPLIT_NO_EMPTY` is `mixed`, where both are `1` (a class of the same
+  name still takes precedence; nsrt `constant-phpdoc-type.php`);
 - `types::parse` is deleted (`parse_type_string`,
   `parse_native_type_string`, `has_explicit_mixed_nested_somewhere`); the
   `types` tests that build types through it (about 150) use constructors,
@@ -2019,8 +2027,11 @@ union member order, benevolent parentheses, shape key order,
 (`array{0: 'a'}` is `array{'a'}`), `true|false` as `bool`, a template's
 scope suffix (`T (function f(), argument)`), an accessory string's
 combined name (`non-falsy-lowercase-string` is
-`lowercase-string&non-falsy-string`) and a small integer range against its
-literals (`int<0, 1>` is `0|1`). phpstan-rs misses 11,106 at `76e738b4`.
+`lowercase-string&non-falsy-string`), a small integer range against its
+literals (`int<0, 1>` is `0|1`) and backslashes in a string literal
+(`'A\\B'` is `'A\B'`). The files that assert an unpinned version range
+(`predefined-constants.php`, `bug-4434.php`) are the pinned version's
+approved deviations. phpstan-rs misses 11,106 at `76e738b4`.
 By asserted expression: 4,788 are variables, 3,399 are calls to functions
 PHPStan types through an extension (E2; 413 of them `mixed`, among them
 `filter_var` 191 and `min`/`max` 198), 1,016 are operators (D3), 707 are
@@ -2180,7 +2191,9 @@ deleted; the file-size gate.
     - loose comparison is evaluated with the wrong table: `'0' == null` is
       `true` and reported `equal.alwaysTrue`, where PHP 8 gives `false`
       (nsrt `loose-comparisons.php:325`, `:460`; the table's other 192
-      verdicts in the suite agree);
+      verdicts in the suite agree). The table follows the analysed PHP
+      version: before 8.0, `0 == 'php'` is `true`, and it is `bool` at 7.4
+      today (nsrt `loose-comparisons-php7.php`);
     - a string offset write doesn't change the string: `$s[6] = 'b'` on
       `'foo   '` leaves `'foo'`;
     - late static binding of a constant in an inherited method:
@@ -2705,6 +2718,10 @@ building on the previous one:
     `'one'|'two'` (nsrt `bug-14081.php`, `array-pop.php`, `array-shift.php`);
   - `gettype()` of a resource omits `'resource (closed)'`, as `is_resource`
     does (D3);
+  - `trigger_error('…', E_USER_ERROR)` is `true` where it ends the script
+    (`never`), so the code after it is reachable; before PHP 8.0 a level
+    other than `E_USER_*` returns `false` (nsrt `trigger-error-php8.php`,
+    `trigger-error-php7.php`);
   - `mb_strtolower`, `mb_strtoupper` and `mb_convert_case` fold only ASCII in
     a literal: `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` and
     `mb_convert_case('Česká republika', MB_CASE_UPPER)` is
