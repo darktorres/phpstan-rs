@@ -2684,6 +2684,37 @@ building on the previous one:
   narrowing predicates, the date / xml / DateInterval validators (as
   throw-type extensions), regex / PCRE, and the date parser.
 - `builtins` is always registered, including by the testing harness.
+- Behaviour commits, each with its fixture, after the move. Wrong values
+  first:
+  - `get_parent_class($this)` is `false` in a class with subclasses, so
+    `get_parent_class($this) === false` is `identical.alwaysTrue`; PHPStan
+    has `class-string<A>|false` (nsrt `bug-14951.php`);
+  - `array_filter` keeps a shape's keys required: with a callback,
+    `array_filter([1, 2, 3], fn ($x) => $x > rand(0, 3))` is
+    `array{0: 1, 1: 2, 2: 3}`, and without one `array{a: int}|array{b:
+    string|null}` comes back unchanged, where each key becomes optional and
+    falsy values go (nsrt `array-filter-constant.php`, `array-functions.php`);
+  - `array_combine([true, 'red', 'yellow'], …)` has the keys `0`, `1`, `2`,
+    where PHP gives `1`, `'red'`, `'yellow'`;
+  - `array_intersect_key($a, [])` is `$a` instead of `array{}`;
+  - `array_key_last`, `array_pop` and `array_shift` on a possibly empty
+    array omit `null`: on `$c ? ['one', 'two'] : []` they give `0|1` and
+    `'one'|'two'` (nsrt `bug-14081.php`, `array-pop.php`, `array-shift.php`);
+  - `gettype()` of a resource omits `'resource (closed)'`, as `is_resource`
+    does (D3);
+  - `mb_strtolower`, `mb_strtoupper` and `mb_convert_case` fold only ASCII in
+    a literal: `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` and
+    `mb_convert_case('Česká republika', MB_CASE_UPPER)` is
+    `'ČESKá REPUBLIKA'` (nsrt `str-casing.php`).
+
+  Then the functions `gates/nsrt/owners.toml` assigns to E2 (3,450 nsrt
+  mismatches on calls to functions PHPStan types through an extension),
+  by count: `filter_var`/`filter_var_array` (353, 191 of them `mixed`),
+  `array_column` (215), `min`/`max` (217, 198 `mixed`), `count` (115),
+  `array_slice` (102), `sprintf`/`vsprintf` (136), `settype`'s narrowing
+  (`set-type-type-specifying.php`, 149), the preg `$matches` shapes
+  (`preg_match_shapes.php`, 225) and the BcMath functions and
+  `BcMath\Number` operators (`bcmath-*.php`, 304).
 
 Gate: the analyser's built-in-name allowlist.
 
