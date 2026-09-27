@@ -2072,7 +2072,8 @@ union member order, benevolent parentheses, shape key order,
 scope suffix (`T (function f(), argument)`), an accessory string's
 combined name (`non-falsy-lowercase-string` is
 `lowercase-string&non-falsy-string`), a small integer range against its
-literals (`int<0, 1>` is `0|1`) and backslashes in a string literal
+literals (`int<0, 1>` is `0|1`), PHPStan's implicit `*NEVER*` against
+`never`, and backslashes in a string literal
 (`'A\\B'` is `'A\B'`). The files that assert an unpinned version range
 (`predefined-constants.php`, `bug-4434.php`) are the pinned version's
 approved deviations. phpstan-rs misses 11,106 at `76e738b4`.
@@ -2847,6 +2848,14 @@ building on the previous one:
     a literal: `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` and
     `mb_convert_case('Česká republika', MB_CASE_UPPER)` is
     `'ČESKá REPUBLIKA'` (nsrt `str-casing.php`).
+
+  - a call PHP 8 rejects with a `TypeError` or `ValueError` returns
+    `*NEVER*`, so the code after it is unreachable: `array_combine([1, 2],
+    [3])`, `array_chunk($a, 0)`, `array_flip`/`array_keys` of a non-array,
+    `round('x')` under `strict_types`; today each returns its ordinary
+    type (304 nsrt `*NEVER*` expectations, most of them in these
+    functions' `-php8` files, `round-php8*.php`, `math.php` and the BcMath
+    files).
 
   Then the functions `gates/nsrt/owners.toml` assigns to E2 (3,399 nsrt
   mismatches on calls to functions PHPStan types through an extension),
