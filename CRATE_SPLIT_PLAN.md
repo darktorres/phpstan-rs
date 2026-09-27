@@ -1303,6 +1303,22 @@ named, as its own behaviour commit after that phase's structural commit
     its promoted properties (`property.notFound`); a class declaring
     `__tostring()` is not `Stringable` (`argument.type`); about 49 sites
     compare magic-method names exactly. Case-folded method keys fix all.
+  - **Type names keep their written spelling, and exact lookups skip on
+    them.** A parameter typed `square` (class `Square`) carries
+    `Object("square")`; the member-existence checks look that up exactly
+    (`checker/expr.rs` `registry.classes.contains_key(class)` before
+    `method.notFound`/`property.notFound`) and skip on a miss, so
+    `$s->nope()` - a runtime `Error` - and `$t->missingProp` go unreported
+    (both reproduced; reported with `Square`). Messages print the written
+    spelling too ("Instanceof between App\square and App\Square"). Of the
+    126 direct `registry.classes.get`/`contains_key` sites outside the
+    registry, those keyed by a declaration or an owner lookup are canonical;
+    those keyed by a type's or a literal's name (`expr.rs` 1401/2747/2761/
+    4203/4266/6702, `operators.rs:68`, `throws.rs:196`, `visibility.rs:256`,
+    `var_tag_types.rs`, `phpdoc_unresolvable.rs`, `missing_typehint.rs`,
+    `strict_idioms.rs`) are not. `Name`-keyed lookups fix every one, and a
+    type's class name is canonicalized where the type is resolved, so
+    messages print the declared name.
   - **Member resolution order.** `own_owner_names` walks `extends` and
     `implements` breadth-first together, so for `C extends B implements I`
     with `A::foo(): int` two levels up and `I::foo(): int|string`, `$c->foo()`
@@ -1598,6 +1614,22 @@ registry build) and three inside `types`, whose API takes a
 (`types/src/conditional.rs`; `($x is Foo ? A : B)` with `$x` bound to a
 subclass of `Foo` doesn't pick `A`), `intersection.rs`'s `narrower`
 (`Foo&SubFoo` isn't collapsed) and `coercion.rs`'s string check.
+The delta, predicted site by site (the scalar-only sites change nothing:
+`operators.rs`, `accessory_range.rs`, `assignment.rs`, `builtin_calls.rs`,
+`coercion.rs`, and `type_resolution.rs`, whose object members return
+before reaching the relation):
+- `narrow_instanceof_true` (`type_ops.rs`) narrows `Base` by `instanceof
+  Child` to `Base&Child` instead of `Child` (reproduced);
+- `narrow_type_excluding` keeps `Child` in `Child|Other` after `!$x
+  instanceof Base`, so `$x->only()` there reports `method.notFound` on
+  `Child|Other` (reproduced);
+- `conditional_branch` doesn't pick `int` from `($x is Base ? int :
+  string)` for a `Child` argument, a false `return.type` at the caller
+  (reproduced);
+- `intersection.rs`'s `narrower` leaves `Foo&SubFoo` uncollapsed;
+- the DQL entity-field refinement in `sql_reflection/resolve.rs` compares
+  object field types structurally.
+
 `ClassHierarchy` gains the enum-cases query §3.2 lists, with the first
 relation that needs it. The trait itself is redone for the reflection
 it now fronts: it takes `&str` names where §3.2 has `Name`; it allocates
