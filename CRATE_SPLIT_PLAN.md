@@ -1392,8 +1392,10 @@ Follow-ups:
     outside `registry/` is converted (about 280, 23 of them in tests);
   - the builders read the AST's parse-time `QualifiedName::resolved`
     (`extends`, `implements`, `use`, native type hints) instead of
-    re-resolving it through a `NameContext`; PHPDoc names, which are text,
-    keep the file's name scope until C7's one scope;
+    re-resolving it through a `NameContext`, except the anonymous-class
+    builder, whose whole-file context disagrees with it and stays until its
+    behaviour fix; PHPDoc names, which are text, keep the file's name scope
+    until C7's one scope;
   - no result depends on the class map's iteration order, which folded
     keys change: `classes_using_trait` returns its hosts sorted (they
     order the per-host trait checks), and `doctrine_entity_for_table`
@@ -1557,13 +1559,14 @@ Follow-ups:
   closure gate is a test that applies a sequence of deltas and compares
   every query on the result with a fresh build of the final file set: a
   property test over the fixture files, and one test per staleness case
-  below. With declarations kept per file, whether a declaration holds its
-  name is a provenance comparison: the checker's rebuild-and-compare
+  below. With declarations kept per file, the checker stops rebuilding
+  reflection from the AST: the rebuild-and-compare sites
   (`ClassReflection::from_decl` and `from_enum_decl` in `oop.rs`,
   `from_decl` for a trait in `function_decl.rs`) and a losing duplicate
-  function's rebuilt signature read the file's own declaration instead; the
-  builder builds property-hook signatures with their property, which
-  `check_hook_phpdoc_types` reads instead of synthesizing a `FunctionDecl`.
+  function's rebuilt signature read the file's own declaration, comparing
+  as today; the builder builds property-hook signatures with their
+  property, the same signature `check_hook_phpdoc_types` synthesizes a
+  `FunctionDecl` for today.
   The per-file sets also answer what `Project` indexes separately today:
   `DuplicateClassSites` and `DuplicateFunctionSites` (with their own
   declaration walks) are deleted for a query over them that groups by exact
@@ -1617,6 +1620,10 @@ Follow-ups:
     `Square`; a written union collapses members naming one class
     (`@param Foo|foo` is `Foo|foo` today); the exact class accessors are
     deleted;
+  - a conditional or duplicate class-like declaration is checked against
+    its own declaration's hierarchy, not only when its edges happen to
+    match the declaration holding the name (`oop.rs`'s
+    `registry_matches`);
   - duplicate class-like and function declarations compare names
     case-insensitively (`class Foo` beside `class FOO`, `bar()` beside
     `BAR()` go unreported by `class.duplicate` and the function check
