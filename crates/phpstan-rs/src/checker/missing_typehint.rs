@@ -9,7 +9,7 @@
 //! element type, and a bare reference to a class with its own required
 //! `@template`s given no type arguments. A fourth shape, a `callable`/
 //! `Closure` with no signature (`missingType.callable`), is opt-in
-//! (`Registry::check_missing_callable_signature`), matching real
+//! (`RulesSettings::check_missing_callable_signature`), matching real
 //! PHPStan's own `checkMissingCallableSignature`, `false` by default in
 //! its own `conf/config.neon`.
 //!
@@ -447,7 +447,7 @@ impl<'a> Checker<'a> {
                 "missingType.generics",
             );
         }
-        if self.registry.check_missing_callable_signature {
+        if self.settings.rules.check_missing_callable_signature {
             let mut callables = Vec::new();
             collect_callables_with_missing_signature(ty, &mut callables);
             // Real PHPStan's own `missingType.callable` wording is each

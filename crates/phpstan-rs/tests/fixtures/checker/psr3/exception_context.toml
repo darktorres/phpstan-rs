@@ -1,1 +1,2 @@
+[ext.psr3]
 check_psr3_exception_context = true

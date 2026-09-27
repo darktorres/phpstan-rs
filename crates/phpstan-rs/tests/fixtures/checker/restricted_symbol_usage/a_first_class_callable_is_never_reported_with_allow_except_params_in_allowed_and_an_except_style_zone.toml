@@ -1,10 +1,10 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 allow_except_in_instance_of = ["HandlerInterface"]
 class = "Dispatcher"
 kind = "method"
 message = "use the module-specific handler instead"
 name = "dispatch"
 
-[[restricted_symbols.allow_except_params_in_allowed]]
+[[ext.disallowed-calls.restricted_symbols.allow_except_params_in_allowed]]
 position = 1
 value = "dangerous"

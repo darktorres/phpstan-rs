@@ -22,6 +22,15 @@
 
 use serde::Deserialize;
 
+/// `[[rules.architecture]]`: every rule, in order.
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct ArchitectureSettings(pub Vec<ArchitectureRule>);
+
+impl config::Section for ArchitectureSettings {
+    const PATH: &'static [&'static str] = &["rules", "architecture"];
+}
+
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Selector {

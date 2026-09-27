@@ -1,1 +1,2 @@
+[ext.strict-rules]
 check_parent_constructor_call = true

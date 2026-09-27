@@ -10,7 +10,7 @@
 //! PHPStan already closes elsewhere.
 //!
 //! Unlike the function-side check, this one is opt-in
-//! (`Registry::check_duplicate_class_declarations`, default `false`): its
+//! (`RulesSettings::check_duplicate_class_declarations`, default `false`): its
 //! one known corpus false-positive shape (a vendored built-in stub
 //! override, e.g. `Imagick.stub.php`, colliding with the real PHP
 //! extension's own class) can only be defused by a project's

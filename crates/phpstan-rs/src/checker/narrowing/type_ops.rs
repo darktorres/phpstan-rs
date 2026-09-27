@@ -1,6 +1,5 @@
 use crate::checker::narrowing::accessory_range::upgrade_array_to_non_empty;
-use crate::registry::Registry;
-use types::{AccessoryKind, Type};
+use types::{AccessoryKind, Relation, Type};
 
 /// Narrows `original` to `target` along the branch where a check for
 /// `target` succeeded: if `original` is a union, keep only the member(s)
@@ -82,24 +81,24 @@ fn is_object_like(ty: &Type) -> bool {
     }
 }
 
-/// `registry` is needed for the `Union` arm's own member filter below -
-/// plain `Relation::subtype` has no class-hierarchy awareness at all
-/// (`types.rs` doesn't depend on `registry.rs`), so it only ever matches
+/// `relation` (the checker's, over the registry's classes) is needed for
+/// the `Union` arm's own member filter below - plain `Relation::subtype`
+/// has no class-hierarchy awareness at all, so it only ever matches
 /// a union member against `target` by exact structural equality. An
 /// interface a concrete class implements only transitively (through an
 /// intermediate abstract class) would otherwise narrow the whole union
 /// down to zero matching members, falling through to the
 /// `target.clone()` case below and discarding every member's own
-/// additional properties/methods entirely - `Registry::accepts`
+/// additional properties/methods entirely - `Relation::accepts`
 /// is the identical hierarchy-aware check `subtype` is documented as
 /// a non-hierarchy-aware subset of, so using it here can only keep
 /// strictly more genuinely-compatible members than before, never fewer.
-pub(crate) fn narrow_type_to(registry: &Registry, original: &Type, target: &Type) -> Type {
+pub(crate) fn narrow_type_to(relation: &Relation, original: &Type, target: &Type) -> Type {
     match original {
         Type::Union(members) | Type::BenevolentUnion(members) => {
             let kept: Vec<Type> = members
                 .iter()
-                .filter(|m| registry.accepts(target, m).yes())
+                .filter(|m| relation.accepts(target, m).yes())
                 .cloned()
                 .collect();
             match kept.len() {
@@ -125,7 +124,7 @@ pub(crate) fn narrow_type_to(registry: &Registry, original: &Type, target: &Type
         // interface inherited from an ancestor, not declared directly)
         // must still keep its own, more specific type here rather than
         // needlessly widening to the bare interface.
-        _ if registry.accepts(target, original).yes() => original.clone(),
+        _ if relation.accepts(target, original).yes() => original.clone(),
         _ => target.clone(),
     }
 }

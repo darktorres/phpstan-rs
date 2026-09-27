@@ -17,7 +17,7 @@
 //! `NameContext`-resolved canonical FQNs instead).
 //!
 //! Real, disclosed false-positive risks (ship opt-in, per this project's
-//! own convention - see `Registry::check_dead_code`'s own doc comment):
+//! own convention - see `RulesSettings::check_dead_code`'s own doc comment):
 //! a function/class that's this project's own public API, called only by
 //! code outside the analyzed set (a library, not an application - real
 //! PHPStan has no such rule at all, for exactly this open-world reason);

@@ -155,7 +155,7 @@ fn check_project_level_flag_filters_out_higher_level_diagnostics() {
 fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
     // A literal array's element types are real (an ArrayShape, not
     // always Array(Mixed)), so a genuinely wrong literal element is
-    // caught by ordinary, non-strict checking - what --strict-mixed-arrays
+    // caught by ordinary, non-strict checking - what `--set rules.strict_mixed_arrays=true`
     // adds is catching a genuinely unknown (Mixed-element) array, such
     // as one read back out of an untyped parameter.
     let dir = TempDir::new("check_project_strict");
@@ -176,7 +176,7 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
     // `--level 5` here only keeps this assertion focused on
     // `strict_mixed_arrays`'s own point (whether an unknown-element
     // array is reported by default) - it doesn't change whether the
-    // check itself runs (that's gated by `--strict-mixed-arrays` alone,
+    // check itself runs (that's gated by `--set rules.strict_mixed_arrays=true` alone,
     // not by level), just excludes the unrelated level-6
     // `missingType.iterableValue` finding on `$untyped`'s deliberately-bare
     // `array` parameter, which this test needs to stay bare to exercise
@@ -196,7 +196,7 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
 
     let strict = bin()
         .arg("check-project")
-        .arg("--strict-mixed-arrays")
+        .args(["--set", "rules.strict_mixed_arrays=true"])
         .arg("--level")
         .arg("5")
         .arg(dir.path())
@@ -216,9 +216,9 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
 #[test]
 fn check_project_check_uninitialized_properties_flag_opts_into_the_extra_check() {
     // Off by default (mirroring PHPStan's own opt-in
-    // `checkUninitializedProperties`, see `registry::Registry::
+    // `checkUninitializedProperties`, see `RulesSettings::
     // check_uninitialized_properties`'s own doc comment) - only
-    // `--check-uninitialized-properties` turns it on.
+    // `--set rules.check_uninitialized_properties=true` turns it on.
     let dir = TempDir::new("check_project_uninit");
     dir.write(
         "foo.php",
@@ -238,7 +238,7 @@ fn check_project_check_uninitialized_properties_flag_opts_into_the_extra_check()
 
     let enabled = bin()
         .arg("check-project")
-        .arg("--check-uninitialized-properties")
+        .args(["--set", "rules.check_uninitialized_properties=true"])
         .arg(dir.path())
         .output()
         .unwrap();
@@ -251,8 +251,8 @@ fn check_project_check_uninitialized_properties_flag_opts_into_the_extra_check()
 
 #[test]
 fn check_project_check_dead_enum_cases_flag_opts_into_the_extra_check() {
-    // Off by default (see `registry::Registry::check_dead_enum_cases`'s
-    // own doc comment) - only `--check-dead-enum-cases` turns it on.
+    // Off by default (see `RulesSettings::check_dead_enum_cases`'s
+    // own doc comment) - only `--set rules.check_dead_enum_cases=true` turns it on.
     // Also exercises the real end-to-end path: `check_whole_program`
     // wired into `check-project`'s own primary loop, not just the
     // library-level `Project::check_whole_program` unit tests.
@@ -276,7 +276,7 @@ fn check_project_check_dead_enum_cases_flag_opts_into_the_extra_check() {
 
     let enabled = bin()
         .arg("check-project")
-        .arg("--check-dead-enum-cases")
+        .args(["--set", "rules.check_dead_enum_cases=true"])
         .arg(dir.path())
         .output()
         .unwrap();
@@ -289,8 +289,8 @@ fn check_project_check_dead_enum_cases_flag_opts_into_the_extra_check() {
 
 #[test]
 fn check_project_check_dead_code_flag_opts_into_the_extra_check() {
-    // Off by default (see `registry::Registry::check_dead_code`'s own
-    // doc comment) - only `--check-dead-code` turns it on. Also
+    // Off by default (see `RulesSettings::check_dead_code`'s own
+    // doc comment) - only `--set rules.check_dead_code=true` turns it on. Also
     // exercises the real end-to-end path: `check_whole_program` wired
     // into `check-project`'s own primary loop, not just the
     // library-level `Project::check_whole_program` unit tests.
@@ -313,7 +313,7 @@ fn check_project_check_dead_code_flag_opts_into_the_extra_check() {
 
     let enabled = bin()
         .arg("check-project")
-        .arg("--check-dead-code")
+        .args(["--set", "rules.check_dead_code=true"])
         .arg(dir.path())
         .output()
         .unwrap();
@@ -330,9 +330,9 @@ fn check_project_check_dead_code_flag_opts_into_the_extra_check() {
 
 #[test]
 fn check_project_check_circular_dependencies_flag_opts_into_the_extra_check() {
-    // Off by default (see `registry::Registry::check_circular_
+    // Off by default (see `RulesSettings::check_circular_
     // dependencies`'s own doc comment) - only
-    // `--check-circular-dependencies` turns it on. Two different class
+    // `--set rules.check_circular_dependencies=true` turns it on. Two different class
     // pairs, each edge one-directional, so no single pair has a
     // (necessarily-invalid-PHP) class-level cycle - only NsA and NsB
     // depend on each other in aggregate.
@@ -363,7 +363,7 @@ fn check_project_check_circular_dependencies_flag_opts_into_the_extra_check() {
 
     let enabled = bin()
         .arg("check-project")
-        .arg("--check-circular-dependencies")
+        .args(["--set", "rules.check_circular_dependencies=true"])
         .arg(dir.path())
         .output()
         .unwrap();
@@ -378,8 +378,8 @@ fn check_project_check_circular_dependencies_flag_opts_into_the_extra_check() {
 
 #[test]
 fn check_project_check_dead_abstract_classes_flag_opts_into_the_extra_check() {
-    // Off by default (see `registry::Registry::check_dead_abstract_
-    // classes`'s own doc comment) - only `--check-dead-abstract-classes`
+    // Off by default (see `RulesSettings::check_dead_abstract_
+    // classes`'s own doc comment) - only `--set rules.check_dead_abstract_classes=true`
     // turns it on.
     let dir = TempDir::new("check_project_dead_abstract");
     dir.write(
@@ -396,7 +396,7 @@ fn check_project_check_dead_abstract_classes_flag_opts_into_the_extra_check() {
 
     let enabled = bin()
         .arg("check-project")
-        .arg("--check-dead-abstract-classes")
+        .args(["--set", "rules.check_dead_abstract_classes=true"])
         .arg(dir.path())
         .output()
         .unwrap();
@@ -409,8 +409,8 @@ fn check_project_check_dead_abstract_classes_flag_opts_into_the_extra_check() {
 
 #[test]
 fn check_project_check_dead_members_flag_opts_into_the_extra_check() {
-    // Off by default (see `registry::Registry::check_dead_members`'s
-    // own doc comment) - only `--check-dead-members` turns it on.
+    // Off by default (see `RulesSettings::check_dead_members`'s
+    // own doc comment) - only `--set rules.check_dead_members=true` turns it on.
     let dir = TempDir::new("check_project_dead_members");
     dir.write(
         "foo.php",
@@ -430,7 +430,7 @@ fn check_project_check_dead_members_flag_opts_into_the_extra_check() {
 
     let enabled = bin()
         .arg("check-project")
-        .arg("--check-dead-members")
+        .args(["--set", "rules.check_dead_members=true"])
         .arg(dir.path())
         .output()
         .unwrap();
@@ -444,9 +444,9 @@ fn check_project_check_dead_members_flag_opts_into_the_extra_check() {
 #[test]
 fn check_project_check_internal_usage_flag_opts_into_the_extra_check() {
     // Off by default (mirroring PHPStan's own opt-in
-    // `featureToggles.internalTag`, see `registry::Registry::
+    // `featureToggles.internalTag`, see `RulesSettings::
     // check_internal_usage`'s own doc comment) - only
-    // `--check-internal-usage` turns it on.
+    // `--set rules.check_internal_usage=true` turns it on.
     let dir = TempDir::new("check_project_internal_usage");
     dir.write(
         "foo.php",
@@ -471,7 +471,7 @@ fn check_project_check_internal_usage_flag_opts_into_the_extra_check() {
 
     let enabled = bin()
         .arg("check-project")
-        .arg("--check-internal-usage")
+        .args(["--set", "rules.check_internal_usage=true"])
         .arg(dir.path())
         .output()
         .unwrap();

@@ -1,3 +1,5 @@
-check_composer_hygiene = true
 no_composer = false
 paths = ["src/Ext.php"]
+
+[rules]
+check_composer_hygiene = true

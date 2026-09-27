@@ -1,3 +1,5 @@
+paths = ["a.php"]
+
+[rules.class_shape]
 check_closed_classes = true
 default_parent_calls = false
-paths = ["a.php"]

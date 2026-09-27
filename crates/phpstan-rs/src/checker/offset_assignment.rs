@@ -121,12 +121,11 @@ impl<'a> Checker<'a> {
             return None;
         };
         let offset_ty = dim.cloned().unwrap_or(Type::Null);
-        if !matches!(offset_ty, Type::Mixed(_))
-            && !self.registry.accepts(&offset_param.ty, &offset_ty).yes()
+        if !matches!(offset_ty, Type::Mixed(_)) && !self.accepts(&offset_param.ty, &offset_ty).yes()
         {
             return Some("offsetAssign.dimType");
         }
-        (!matches!(value, Type::Mixed(_)) && !self.registry.accepts(&value_param.ty, value).yes())
+        (!matches!(value, Type::Mixed(_)) && !self.accepts(&value_param.ty, value).yes())
             .then_some("offsetAssign.valueType")
     }
 }

@@ -4,9 +4,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use config::ConfigFile;
+
 use crate::baseline::{self, Baseline};
-use crate::config::Config;
-use crate::project::session::{Finalize, Overrides, Session};
+use crate::project::session::{Finalize, Overrides, Session, SessionSettings};
 
 /// What a `check-project` run asks for, after its command line is parsed.
 #[derive(Default, Clone)]
@@ -14,6 +15,8 @@ pub struct CheckRequest {
     /// The TOML config file; its directory is what the config's relative
     /// paths resolve against.
     pub config_file: Option<PathBuf>,
+    /// `key=value` assignments over the config's keys (`--set`).
+    pub sets: Vec<String>,
     pub paths: Vec<PathBuf>,
     pub scan_paths: Vec<PathBuf>,
     pub stub_paths: Vec<PathBuf>,
@@ -27,12 +30,19 @@ pub struct CheckRequest {
     pub baseline_per_identifier: bool,
 }
 
-/// `request`'s config file loaded, or the default config without one.
-pub fn load_config(request: &CheckRequest) -> Result<Config, String> {
-    match &request.config_file {
-        Some(path) => Config::load(path),
-        None => Ok(Config::default()),
+/// `request`'s config file (or none) with its `--set` assignments
+/// applied, checked against every owner's section.
+pub fn load_config(request: &CheckRequest) -> Result<ConfigFile, String> {
+    let schema = super::config_schema();
+    let mut config = match &request.config_file {
+        Some(path) => ConfigFile::load(path, &schema)?,
+        None => ConfigFile::empty(),
+    };
+    for assignment in &request.sets {
+        config.set(&schema, assignment)?;
     }
+    config.validate(&schema)?;
+    Ok(config)
 }
 
 /// A resolved `check-project` run.
@@ -45,34 +55,29 @@ pub struct CheckRun {
     pub baseline_per_identifier: bool,
 }
 
-/// Resolves `request` with `config` (already overlaid with whatever the
-/// command line sets) into a run on `pool`, rooted at the working
-/// directory.
+/// Resolves `request` with `config` (`load_config`) into a run on `pool`,
+/// rooted at the working directory.
 pub fn prepare(
     request: &CheckRequest,
-    config: Config,
+    config: &ConfigFile,
     pool: Arc<rayon::ThreadPool>,
 ) -> Result<CheckRun, String> {
-    let config_dir = request
-        .config_file
-        .as_deref()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf);
+    let config_dir = config.dir().map(Path::to_path_buf);
+    let session = config.section::<SessionSettings>()?;
     let baseline_path = request
         .baseline
         .clone()
-        .or(config.baseline.clone().map(|p| match &config_dir {
+        .or(session.baseline.map(|p| match &config_dir {
             Some(dir) => dir.join(p),
             None => p,
         }));
-    let baseline_mode =
-        if request.baseline_match_identifier || config.baseline_match_identifier.unwrap_or(false) {
-            baseline::MatchMode::Identifier
-        } else {
-            baseline::MatchMode::Message
-        };
+    let baseline_mode = if request.baseline_match_identifier || session.baseline_match_identifier {
+        baseline::MatchMode::Identifier
+    } else {
+        baseline::MatchMode::Message
+    };
     let baseline_per_identifier =
-        request.baseline_per_identifier || config.baseline_per_identifier.unwrap_or(false);
+        request.baseline_per_identifier || session.baseline_per_identifier;
     let overrides = Overrides {
         paths: request.paths.clone(),
         scan_paths: request.scan_paths.clone(),

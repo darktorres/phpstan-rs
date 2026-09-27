@@ -1,2 +1,4 @@
-check_dead_members = true
 paths = ["a.php", "b.php"]
+
+[rules]
+check_dead_members = true

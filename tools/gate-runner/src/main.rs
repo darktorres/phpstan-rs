@@ -2,8 +2,8 @@
 //! analysis of a gate configuration, finalized into every view the gate
 //! snapshots, through the same library calls `check-project` makes.
 //!
-//! `gate-runner [--config <file>] [--no-composer] [--level <n>]
-//! [--baseline <file>] [--dump-types] --out <dir> [<path>...]` writes to
+//! `gate-runner [--config <file>] [--set <key=value>]... [--no-composer]
+//! [--level <n>] [--baseline <file>] [--dump-types] --out <dir> [<path>...]` writes to
 //! `<dir>`:
 //! - `report.json`/`report.err`: `check-project --format json`'s stdout
 //!   and stderr;
@@ -36,6 +36,7 @@ fn parse_args() -> Result<Args, String> {
         let mut value = || args.next().ok_or(format!("{arg} needs a value"));
         match arg.as_str() {
             "--config" => request.config_file = Some(PathBuf::from(value()?)),
+            "--set" => request.sets.push(value()?),
             "--no-composer" => request.no_composer = true,
             "--level" => {
                 let level = value()?;
@@ -70,7 +71,7 @@ fn run() -> Result<(), String> {
     let args = parse_args()?;
     std::fs::create_dir_all(&args.out).map_err(|e| e.to_string())?;
     let config = check_project::load_config(&args.request)?;
-    let run = check_project::prepare(&args.request, config, phpstan_rs::project::worker_pool())?;
+    let run = check_project::prepare(&args.request, &config, phpstan_rs::project::worker_pool())?;
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let analysis = run.session.run(args.dump_types);

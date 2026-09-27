@@ -82,7 +82,7 @@ impl<'a> Checker<'a> {
             }
             _ => return,
         };
-        if !sig.no_discard {
+        if !sig.no_discard && !(sig.must_use_result && self.settings.language_extensions) {
             return;
         }
         self.report_builder(

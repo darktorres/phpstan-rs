@@ -31,7 +31,7 @@ fn flatten_union(ty: &Type) -> Vec<&Type> {
 impl<'a> Checker<'a> {
     /// Mirrors `should_check_too_wide_method_return_type`'s gate exactly
     /// (`checker/return_type_too_wide.rs`) - private/final/first-
-    /// declaration, else opt-in via `Registry::check_too_wide_by_ref_type_in_protected_and_public_methods`.
+    /// declaration, else opt-in via `RulesSettings::check_too_wide_by_ref_type_in_protected_and_public_methods`.
     pub(crate) fn should_check_too_wide_by_ref_type(
         &self,
         class_name: &str,
@@ -48,7 +48,8 @@ impl<'a> Checker<'a> {
             return true;
         }
         if !self
-            .registry
+            .settings
+            .rules
             .check_too_wide_by_ref_type_in_protected_and_public_methods
         {
             return false;
@@ -93,7 +94,7 @@ impl<'a> Checker<'a> {
         // See `checker::calls`' own identical comment: `accepts_at_
         // configured_level` already accepts a `Mixed` actual value
         // unconditionally below real PHPStan's own level 9/10.
-        if self.registry.rule_level_accepts(&declared, actual).yes() {
+        if self.rule_level_accepts(&declared, actual).yes() {
             return;
         }
         self.report(
@@ -160,7 +161,7 @@ impl<'a> Checker<'a> {
             let Some(actual) = snapshots.iter().cloned().reduce(union_types) else {
                 continue;
             };
-            if self.registry.rule_level_accepts(&declared, &actual).yes() {
+            if self.rule_level_accepts(&declared, &actual).yes() {
                 continue;
             }
             self.report(format!(
@@ -209,7 +210,7 @@ impl<'a> Checker<'a> {
                 .filter(|m| {
                     !actual_members
                         .iter()
-                        .any(|a| **a == Type::Mixed(false) || self.registry.accepts(m, a).yes())
+                        .any(|a| **a == Type::Mixed(false) || self.accepts(m, a).yes())
                 })
                 .map(|m| m.to_string())
                 .collect();

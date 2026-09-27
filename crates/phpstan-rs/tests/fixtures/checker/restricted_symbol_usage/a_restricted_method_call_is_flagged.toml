@@ -1,4 +1,4 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 class = "Db"
 kind = "method"
 message = "use the connection service"

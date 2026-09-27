@@ -32,7 +32,7 @@ impl<'a> Checker<'a> {
     /// not merely imported. `use const`'s own half
     /// (`check_use_const_imports`, below) is a separate function; this
     /// one is the `use function` half, also covering its own
-    /// `function.nameCase` check (opt-in, `Registry::
+    /// `function.nameCase` check (opt-in, `RulesSettings::
     /// check_function_name_case`, mirroring real PHPStan's own
     /// `checkFunctionNameCase`-gated half of the same rule, default
     /// `false` at every level).
@@ -62,14 +62,14 @@ impl<'a> Checker<'a> {
                             "function.notFound",
                         );
                     }
-                    // Opt-in (`Registry::check_function_name_case`,
+                    // Opt-in (`RulesSettings::check_function_name_case`,
                     // default `false`), mirroring real PHPStan's own
                     // `checkFunctionNameCase`-gated half of
                     // `ExistingNamesInUseRule::checkFunctions` -
                     // case-insensitive-equal but not identical, matching
                     // that rule's own condition exactly.
                     Some((real_name, _))
-                        if self.registry.check_function_name_case
+                        if self.settings.rules.check_function_name_case
                             && real_name.eq_ignore_ascii_case(fqn)
                             && real_name != fqn =>
                     {

@@ -1,4 +1,3 @@
-
-[sql_reflection]
+[ext.sql.reflection]
 driver = "mysql"
 schema_file = "query_builder_fetch_associative_resolves_the_chain_folded_sql.sql"

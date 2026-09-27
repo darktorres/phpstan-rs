@@ -479,12 +479,13 @@ fn scalar_result_flattens_entity_fields_under_alias_prefixed_keys() {
 
 #[test]
 fn a_declared_custom_function_resolves_to_its_own_category_type() {
-    let mut registry = build(ENTITIES);
-    registry.doctrine_custom_functions.insert(
+    let registry = build(ENTITIES);
+    let mut settings = crate::checker::settings::CheckSettings::default();
+    settings.doctrine_custom_functions.insert(
         "date_format_year_month".to_string(),
         crate::doctrine_functions::DoctrineFunctionKind::String,
     );
-    let checker = Checker::new(&registry);
+    let checker = Checker::new(&registry).with_settings(&settings);
     let chain = QueryBuilderChain {
         from: Some(("TagEntity".to_string(), "t".to_string())),
         joins: Vec::new(),

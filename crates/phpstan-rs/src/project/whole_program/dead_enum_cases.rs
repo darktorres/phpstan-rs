@@ -20,7 +20,7 @@
 //! for the exact hooks.
 //!
 //! Real, disclosed false-positive risks (ship opt-in, per this project's
-//! own convention - see `Registry::check_dead_enum_cases`'s own doc
+//! own convention - see `RulesSettings::check_dead_enum_cases`'s own doc
 //! comment): a case reachable only through framework magic/reflection; a
 //! case referenced only from inside a `Closure`/`ArrowFn` literal's own
 //! default parameter value (inherited from `collect_default_and_const_

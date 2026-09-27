@@ -108,7 +108,7 @@ impl<'a> Checker<'a> {
                 {
                     return false;
                 }
-                if self.registry.check_native_type_hints {
+                if self.settings.extras.check_native_type_hints {
                     self.suggest_closure_native_params(params, param_overrides);
                 }
                 let mut arrow_locals = locals.clone();
@@ -162,7 +162,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                     if body_ty != Type::Mixed(false)
-                        && !self.registry.rule_level_accepts(&expected, &body_ty).yes()
+                        && !self.rule_level_accepts(&expected, &body_ty).yes()
                     {
                         self.report(
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
@@ -187,7 +187,7 @@ impl<'a> Checker<'a> {
                 {
                     return false;
                 }
-                if self.registry.check_native_type_hints {
+                if self.settings.extras.check_native_type_hints {
                     self.suggest_closure_native_params(params, param_overrides);
                 }
                 let mut closure_locals: Locals = locals.closure_scope();

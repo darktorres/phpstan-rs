@@ -13,7 +13,8 @@ use types::Type;
 impl<'a> Checker<'a> {
     /// Looks up a bare global-constant reference (`ExprKind::Name`,
     /// already excluding `true`/`false`/`null` - see `bare_name_literal_
-    /// type`'s own doc comment) against `Registry::global_constants`.
+    /// type`'s own doc comment) through the `ConstantResolver`, against
+    /// `Registry::global_constants`.
     /// Constants share the identical "check the current namespace first,
     /// fall back to the global namespace for an unqualified reference"
     /// resolution rule real PHP functions do (unlike class names, which
@@ -25,39 +26,9 @@ impl<'a> Checker<'a> {
     /// `bare_name_literal_type`'s existing `Mixed` fallback in place.
     pub(crate) fn global_constant_type(&self, name: &str) -> Option<Type> {
         let (primary, fallback) = self.name_ctx.resolve_constant_candidates(name);
-        let predefined = |n: &str| {
-            self.registry.php_version_consensus(|v| {
-                crate::checker::predefined_constants::predefined_constant_type(n, v)
-            })
-        };
-        if let Some(ty) = predefined(&primary).or_else(|| fallback.as_deref().and_then(predefined))
-        {
-            return Some(ty);
-        }
-        let found = self
-            .registry
-            .global_constants
-            .get(primary.as_str())
-            .map(|ty| (primary.as_str(), ty))
-            .or_else(|| {
-                fallback
-                    .as_deref()
-                    .and_then(|f| self.registry.global_constants.get(f).map(|ty| (f, ty)))
-            });
-        // A `dynamicConstantNames` entry reads as its configured or
-        // general type, and is known even when nothing declares it.
-        let dynamic = match found {
-            Some((name, ty)) => self.registry.dynamic_global_constant_type(name, Some(ty)),
-            None => self
-                .registry
-                .dynamic_global_constant_type(&primary, None)
-                .or_else(|| {
-                    fallback
-                        .as_deref()
-                        .and_then(|f| self.registry.dynamic_global_constant_type(f, None))
-                }),
-        };
-        dynamic.or_else(|| found.map(|(_, ty)| ty.clone()))
+        self.settings
+            .constants
+            .global_constant_type(self.registry, &primary, fallback.as_deref())
     }
 
     /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks
@@ -107,7 +78,7 @@ impl<'a> Checker<'a> {
                 // `guarded_properties`/Pest-hook/visibility exemptions -
                 // this is a narrower, opt-in-only re-check, not a full
                 // duplicate of the real property-access rule.
-                if self.registry.check_dynamic_properties {
+                if self.settings.rules.check_dynamic_properties {
                     let base_ty = self.infer_expr(base, locals);
                     if self.member_confirmed_missing(&base_ty, |c| {
                         c == "stdClass"

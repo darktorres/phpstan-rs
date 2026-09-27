@@ -1,4 +1,3 @@
-
-[sql_reflection]
+[ext.sql.reflection]
 driver = "mysql"
 schema_file = "iterate_key_value_resolves_a_traversable_keyed_by_the_first_column.sql"

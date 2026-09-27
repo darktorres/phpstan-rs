@@ -20,7 +20,10 @@ use super::super::*;
 
 fn project_with_retained_source() -> Project {
     let mut project = Project::new();
-    project.set_retain_source(true);
+    project.apply_settings(ProjectSettings {
+        retain_source: true,
+        ..ProjectSettings::default()
+    });
     project
 }
 
@@ -108,7 +111,13 @@ fn tier_1_stays_empty_without_retain_source_or_check_dead_code() {
 #[test]
 fn tier_1_is_indexed_without_retain_source_when_check_dead_code_is_on() {
     let mut project = Project::new();
-    project.set_check_dead_code(true);
+    project.apply_settings(ProjectSettings {
+        rules: crate::rules_settings::RulesSettings {
+            check_dead_code: true,
+            ..Default::default()
+        },
+        ..ProjectSettings::default()
+    });
     project
         .load_file(
             PathBuf::from("a.php"),

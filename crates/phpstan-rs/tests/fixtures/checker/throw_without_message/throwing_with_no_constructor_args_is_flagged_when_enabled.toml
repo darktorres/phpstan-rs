@@ -1,1 +1,2 @@
+[ext.extras]
 check_throw_without_message = true

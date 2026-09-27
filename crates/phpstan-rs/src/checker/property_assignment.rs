@@ -127,7 +127,7 @@ impl<'a> Checker<'a> {
         // unconditionally below real PHPStan's own level 9/10, so no
         // separate bail-out is needed (and one here would wrongly skip
         // this check once either is enabled).
-        if self.registry.rule_level_accepts(&expected, &actual).yes() {
+        if self.rule_level_accepts(&expected, &actual).yes() {
             return;
         }
         self.report(

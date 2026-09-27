@@ -1,5 +1,6 @@
-//! The `check-project` pipeline as a library: a `Config` (plus command-line
-//! overrides) resolved against an explicit root directory, loaded into a
+//! The `check-project` pipeline as a library: a config file's sections
+//! (plus command-line overrides) resolved against an explicit root
+//! directory, loaded into a
 //! `Project`, checked in parallel into an `AnalysisResult`, which
 //! `finalize` post-processes into the per-file diagnostics a consumer
 //! reports. The CLI and the fixture harness both drive it, so a fixture
@@ -13,19 +14,54 @@ use syntax::name::Interner;
 
 use rayon::prelude::*;
 
-use crate::config::{self, Config};
-use crate::{
-    architecture, assertion_tables, banned, doctrine_functions, ignore_errors, parent_calls,
-    restricted_symbols,
-};
+use config::ConfigFile;
+use serde::Deserialize;
+
+use crate::architecture::{self, ArchitectureSettings};
+use crate::assertion_tables::OverlaySettings;
+use crate::banned::{self, BannedSettings};
+use crate::checker::settings::EngineSettings;
+use crate::ext::disallowed_calls::DisallowedCallsSettings;
+use crate::ext::mockstan::MockstanSettings;
+use crate::ext::sql::SqlSettings;
+use crate::parent_calls::{self, ClassShapeSettings};
+use crate::registry::settings::ReflectionSettings;
+use crate::rules_settings::RulesSettings;
+use crate::{ext, ignore_errors};
 
 use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
-use super::{FileCheck, ParsedFile, Project};
+use super::{FileCheck, ParsedFile, Project, ProjectSettings};
 use diagnostics::{self, Diagnostic};
 
 /// The level reported when neither the command line nor the config sets
 /// one: every level this project's diagnostics are tagged with.
 pub const DEFAULT_REPORT_LEVEL: u8 = 6;
+
+/// The run's own top-level keys: what's analysed, at which level, and how
+/// the report is post-processed.
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct SessionSettings {
+    pub paths: Option<Vec<PathBuf>>,
+    pub level: Option<u8>,
+    pub baseline: Option<PathBuf>,
+    /// Match baseline entries by identifier when their message no longer
+    /// matches (`baseline::MatchMode::Identifier`).
+    pub baseline_match_identifier: bool,
+    /// Write `--generate-baseline` as one file per identifier plus an
+    /// index (`baseline::generate_per_identifier`).
+    pub baseline_per_identifier: bool,
+    /// PHPStan's `ignoreErrors`, re-typed by hand (see
+    /// `ignore_errors::IgnoreErrorEntry`).
+    pub ignore_errors: Vec<ignore_errors::IgnoreErrorEntry>,
+    /// Report inline `@phpstan-ignore*` comments that suppress nothing
+    /// (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`).
+    pub report_unmatched_ignored_errors: bool,
+}
+
+impl config::Section for SessionSettings {
+    const PATH: &'static [&'static str] = &[];
+}
 
 /// Command-line values that replace the config's. Paths given here are
 /// used as given (relative to the root), not resolved against the
@@ -55,33 +91,24 @@ pub struct Session {
     /// parallel parse and check runs on.
     pool: Arc<rayon::ThreadPool>,
     root: PathBuf,
-    config: Config,
+    session: SessionSettings,
+    /// What the project is configured with.
+    settings: ProjectSettings,
     dirs: Vec<PathBuf>,
     scan_dirs: Vec<PathBuf>,
     scan_files: Vec<PathBuf>,
     stub_dirs: Vec<PathBuf>,
     level: u8,
-    configured_level: Option<u8>,
     emission_order: bool,
-    php_versions: Option<types::PhpVersions>,
-    psr3_context_key_pattern: Option<regex::Regex>,
-    restricted_symbol_entries: Vec<restricted_symbols::RestrictedSymbolEntry>,
     banned_constructs: Vec<banned::BannedConstruct>,
+    banned_types: Vec<String>,
+    check_closed_classes: bool,
     parent_call_rules: Vec<parent_calls::ParentCallRule>,
     architecture_rules: Vec<architecture::ArchitectureRule>,
-    assertion_entries: Vec<assertion_tables::AssertionEntry>,
-    class_argument_returns: Vec<assertion_tables::ClassArgumentReturn>,
-    dynamic_constant_names: Vec<(String, Option<String>)>,
-    doctrine_custom_function_entries: Vec<doctrine_functions::DoctrineCustomFunctionEntry>,
-    sql_reflection_config: Option<sql::config::SqlReflectionConfig>,
-    sql_reflection_schema: Option<sql::schema::SchemaCatalog>,
-    /// Every composer root's manifest, and which directories each
-    /// package owns.
-    packages: composer::PackageIndex,
-    /// The root canonicalized, which analysed paths resolve against.
-    absolute_root: PathBuf,
-    phpstan_api_check_enabled: bool,
-    /// Non-fatal problems found while resolving (e.g. SQL schema drift).
+    check_mock_hygiene: bool,
+    mock_banned_classes: Vec<String>,
+    /// Non-fatal problems found while resolving (e.g. SQL schema drift,
+    /// an old config key).
     pub warnings: Vec<String>,
 }
 
@@ -231,16 +258,30 @@ fn composer_roots(dirs: &[PathBuf], root: &Path) -> Vec<PathBuf> {
 }
 
 impl Session {
-    /// Resolves `config` (loaded from `config_dir`, if any) and the
-    /// command-line `overrides` against `root`, the directory the run's
-    /// relative paths are relative to.
+    /// Resolves `config`, whose relative paths are relative to
+    /// `config_dir` (or to `root` without one), and the command-line
+    /// `overrides` against `root`, the directory the run's relative paths
+    /// are relative to.
     pub fn resolve(
-        config: Config,
+        config: &ConfigFile,
         config_dir: Option<PathBuf>,
         root: PathBuf,
         overrides: Overrides,
         pool: Arc<rayon::ThreadPool>,
     ) -> Result<Session, String> {
+        let session = config.section::<SessionSettings>()?;
+        let reflection = config.section::<ReflectionSettings>()?;
+        let engine = config.section::<EngineSettings>()?;
+        let overlays = config.section::<OverlaySettings>()?;
+        let rules = config.section::<RulesSettings>()?;
+        let banned_settings = config.section::<BannedSettings>()?;
+        let architecture = config.section::<ArchitectureSettings>()?;
+        let class_shape = config.section::<ClassShapeSettings>()?;
+        let disallowed_calls = config.section::<DisallowedCallsSettings>()?;
+        let sql_settings = config.section::<SqlSettings>()?;
+        let mockstan = config.section::<MockstanSettings>()?;
+        let psr3 = config.section::<ext::psr3::Psr3Settings>()?;
+
         let resolve_against_config = |p: PathBuf| match &config_dir {
             Some(dir) => dir.join(p),
             None => p,
@@ -248,7 +289,7 @@ impl Session {
         let dirs: Vec<PathBuf> = if !overrides.paths.is_empty() {
             overrides.paths
         } else {
-            config
+            session
                 .paths
                 .clone()
                 .unwrap_or_default()
@@ -259,61 +300,32 @@ impl Session {
         if dirs.is_empty() {
             return Err("no paths given on the command line or in the config file".to_string());
         }
-        let configured_level = overrides.level.or(config.level);
+        let configured_level = overrides.level.or(session.level);
         let level = overrides
             .report_level
             .or(configured_level)
             .unwrap_or(DEFAULT_REPORT_LEVEL);
-        let psr3_context_key_pattern = config
-            .psr3_context_key_pattern
-            .as_deref()
-            .map(regex::Regex::new)
-            .transpose()
-            .map_err(|e| format!("invalid psr3_context_key_pattern: {e}"))?;
+        psr3.context_key_pattern()?;
         let php_version = overrides
             .php_version
             .clone()
-            .or(config.php_version.clone())
+            .or(reflection.php_version.clone())
             .map(|s| types::parse_php_version(&s))
             .transpose()?;
-        let mut restricted_symbol_entries = config.restricted_symbols.clone().unwrap_or_default();
-        for preset in config.restricted_symbol_presets.clone().unwrap_or_default() {
-            restricted_symbol_entries.extend(banned::restricted_symbol_preset(&preset)?);
-        }
-        let banned_constructs = config
-            .banned_constructs
-            .clone()
-            .unwrap_or_default()
+        let restricted_symbols = disallowed_calls.entries()?;
+        let banned_constructs = banned_settings
+            .constructs
             .iter()
             .map(|name| banned::BannedConstruct::parse(name))
             .collect::<Result<Vec<_>, _>>()?;
-        let assertion_entries = config.assertions.clone().unwrap_or_default();
-        let class_argument_returns = config.class_argument_returns.clone().unwrap_or_default();
-        if let Some(error) = assertion_entries
-            .iter()
-            .map(|e| e.validate())
-            .chain(class_argument_returns.iter().map(|e| e.validate()))
-            .find_map(Result::err)
-        {
-            return Err(error);
-        }
-        let mut parent_call_rules = config.parent_calls.clone().unwrap_or_default();
-        if config.default_parent_calls.unwrap_or(true) {
-            parent_call_rules.extend(parent_calls::default_rules());
-        }
-        let architecture_rules = config.architecture.clone().unwrap_or_default();
+        overlays.validate()?;
+        let parent_call_rules = class_shape.rules();
+        let architecture_rules = architecture.0;
         for rule in &architecture_rules {
             rule.validate()?;
         }
-        let dynamic_constant_names = config
-            .dynamic_constant_names
-            .as_ref()
-            .map(config::DynamicConstantNames::entries)
-            .unwrap_or_default();
-        let doctrine_custom_function_entries =
-            config.doctrine_custom_functions.clone().unwrap_or_default();
-        let sql_reflection_config = config.sql_reflection.clone();
-        let sql_reflection_schema = match sql_reflection_config
+        let sql_reflection = sql_settings.reflection;
+        let sql_schema = match sql_reflection
             .as_ref()
             .and_then(|c| c.schema_file.as_ref().map(|f| (f.clone(), c.driver)))
         {
@@ -323,9 +335,9 @@ impl Session {
             }
             None => None,
         };
-        let mut warnings = Vec::new();
-        if let Some(schema) = &sql_reflection_schema
-            && let Some(sql_config) = &sql_reflection_config
+        let mut warnings: Vec<String> = config.warnings().to_vec();
+        if let Some(schema) = &sql_schema
+            && let Some(sql_config) = &sql_reflection
         {
             let handle = sql::reflector::SqlReflectorHandle::default();
             if let Some(reflector) = handle.get(Some(sql_config)) {
@@ -340,23 +352,21 @@ impl Session {
         let mut scan_dirs: Vec<PathBuf> = if !overrides.scan_paths.is_empty() {
             overrides.scan_paths
         } else {
-            config
+            reflection
                 .scan_paths
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(resolve_against_config)
                 .collect()
         };
-        let no_composer = overrides.no_composer || config.no_composer.unwrap_or(false);
+        let no_composer = overrides.no_composer || reflection.no_composer.unwrap_or(false);
         let stub_dirs: Vec<PathBuf> = if !overrides.stub_paths.is_empty() {
             overrides.stub_paths
         } else {
-            config
+            reflection
                 .stub_paths
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(resolve_against_config)
                 .collect()
         };
@@ -367,6 +377,7 @@ impl Session {
         let mut composer_manifests = Vec::new();
         let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         let mut composer_php_versions = None;
+        let mut root_manifest = None;
         let mut dirs = dirs;
         if !no_composer {
             let canonical_root = absolute_root.clone();
@@ -383,6 +394,7 @@ impl Session {
                 let package = composer::PackageContext::load(&composer_root, &manifest_root);
                 if composer_root == canonical_root {
                     composer_php_versions = declared_php_versions(&package);
+                    root_manifest = package.manifest.clone();
                 }
                 scan_dirs.extend(package.vendor.dirs.iter().cloned());
                 scan_files.extend(package.vendor.files.iter().cloned());
@@ -414,44 +426,67 @@ impl Session {
         let php_versions = php_version
             .map(types::PhpVersions::exactly)
             .or(composer_php_versions);
+        let extensions = ext::ActiveExtensions::resolve(config, &|p| {
+            ext::installed_in(root_manifest.as_ref(), p)
+        })?;
+
+        let settings = ProjectSettings {
+            working_dir: Some(root.clone()),
+            absolute_root: Some(absolute_root),
+            packages: composer::PackageIndex::new(composer_manifests),
+            php_versions,
+            configured_level,
+            phpstan_api_check_enabled,
+            defer_inline_ignores: true,
+            retain_source: false,
+            rules,
+            extensions,
+            extras: config.section::<ext::extras::ExtrasSettings>()?,
+            strict_rules: config.section::<ext::strict_rules::StrictRulesSettings>()?,
+            shipmonk: config.section::<ext::shipmonk::ShipmonkSettings>()?,
+            voku: config.section::<ext::voku::VokuSettings>()?,
+            slam: config.section::<ext::slam::SlamSettings>()?,
+            psr3,
+            sidz: config.section::<ext::sidz::SidzSettings>()?,
+            phpunit: config.section::<ext::phpunit::PhpunitSettings>()?,
+            restricted_symbols,
+            doctrine: config.section::<ext::doctrine::DoctrineSettings>()?,
+            dynamic_constant_names: engine.dynamic_constant_entries(),
+            overlays,
+            sql_reflection,
+            sql_schema,
+        };
 
         Ok(Session {
             pool,
             root,
-            config,
+            session,
+            settings,
             dirs,
             scan_dirs,
             scan_files,
             stub_dirs,
             level,
-            configured_level,
             emission_order: overrides.emission_order,
-            php_versions,
-            psr3_context_key_pattern,
-            restricted_symbol_entries,
             banned_constructs,
+            banned_types: banned_settings.types,
+            check_closed_classes: class_shape.check_closed_classes,
             parent_call_rules,
             architecture_rules,
-            assertion_entries,
-            class_argument_returns,
-            dynamic_constant_names,
-            doctrine_custom_function_entries,
-            sql_reflection_config,
-            sql_reflection_schema,
-            packages: composer::PackageIndex::new(composer_manifests),
-            absolute_root,
-            phpstan_api_check_enabled,
+            check_mock_hygiene: mockstan.check_mock_hygiene.unwrap_or(extensions.mockstan),
+            mock_banned_classes: mockstan.mock_banned_classes,
             warnings,
         })
     }
 
     /// A fixture's session: `stem.php` (or the directory `stem/`) analysed
-    /// under `stem.toml` if present (its paths relative to the fixture's
-    /// directory), with composer discovery off unless the config turns it
-    /// on, reporting every level, running on `pool`. Returns the session
-    /// and that directory.
+    /// under `config`, the fixture's `stem.toml` if it has one (its paths
+    /// relative to the fixture's directory), with composer discovery off
+    /// unless the config turns it on, reporting every level, running on
+    /// `pool`. Returns the session and that directory.
     pub fn for_fixture(
         stem: &Path,
+        config: &ConfigFile,
         pool: Arc<rayon::ThreadPool>,
     ) -> Result<(Session, PathBuf), String> {
         let file_subject = stem.with_extension("php");
@@ -467,19 +502,16 @@ impl Session {
                 stem.display()
             ));
         };
-        let config_file = stem.with_extension("toml");
-        let mut config = if config_file.is_file() {
-            Config::load(&config_file)?
-        } else {
-            Config::default()
-        };
-        if config.paths.is_none() {
-            config.paths = Some(vec![subject]);
-        }
-        if config.no_composer.is_none() {
-            config.no_composer = Some(true);
-        }
         let overrides = Overrides {
+            paths: if config.section::<SessionSettings>()?.paths.is_none() {
+                vec![subject]
+            } else {
+                Vec::new()
+            },
+            no_composer: config
+                .section::<ReflectionSettings>()?
+                .no_composer
+                .is_none(),
             report_level: Some(u8::MAX),
             ..Overrides::default()
         };
@@ -495,8 +527,8 @@ impl Session {
     pub fn finalize_options(&self) -> Finalize {
         Finalize {
             level: self.level,
-            report_unmatched_ignores: Self::flag(self.config.report_unmatched_ignored_errors),
-            ignore_errors: self.config.ignore_errors.clone().unwrap_or_default(),
+            report_unmatched_ignores: self.session.report_unmatched_ignored_errors,
+            ignore_errors: self.session.ignore_errors.clone(),
             baseline: None,
             order: if self.emission_order {
                 DiagnosticOrder::Emission
@@ -512,109 +544,8 @@ impl Session {
         &self.dirs
     }
 
-    fn flag(value: Option<bool>) -> bool {
-        value.unwrap_or(false)
-    }
-
     fn configure(&self, project: &mut Project) {
-        let c = &self.config;
-        project.set_working_dir(self.root.clone());
-        project.set_strict_mixed_arrays(Self::flag(c.strict_mixed_arrays));
-        project.set_check_uninitialized_properties(Self::flag(c.check_uninitialized_properties));
-        project.set_check_internal_usage(Self::flag(c.check_internal_usage));
-        project.set_check_function_name_case(Self::flag(c.check_function_name_case));
-        project.set_check_deprecated_usage(Self::flag(c.check_deprecated_usage));
-        project.set_check_empty_method_bodies(Self::flag(c.check_empty_method_bodies));
-        project
-            .set_check_missing_checked_exceptions(Self::flag(c.check_missing_checked_exceptions));
-        project.set_check_strict_printf_placeholder_types(Self::flag(
-            c.check_strict_printf_placeholder_types,
-        ));
-        project.set_check_too_wide_throw_type_in_protected_and_public_methods(Self::flag(
-            c.check_too_wide_throw_type_in_protected_and_public_methods,
-        ));
-        project.set_check_too_wide_return_type_in_protected_and_public_methods(Self::flag(
-            c.check_too_wide_return_type_in_protected_and_public_methods,
-        ));
-        project.set_check_too_wide_by_ref_type_in_protected_and_public_methods(Self::flag(
-            c.check_too_wide_by_ref_type_in_protected_and_public_methods,
-        ));
-        project.set_check_method_throw_type_covariance(Self::flag(
-            c.check_method_throw_type_covariance,
-        ));
-        project.set_check_benevolent_union_types(Self::flag(c.check_benevolent_union_types));
-        project
-            .set_check_missing_callable_signature(Self::flag(c.check_missing_callable_signature));
-        project.set_check_duplicate_function_declarations(Self::flag(
-            c.check_duplicate_function_declarations,
-        ));
-        project.set_check_duplicate_class_declarations(Self::flag(
-            c.check_duplicate_class_declarations,
-        ));
-        project.set_check_boolean_trap(Self::flag(c.check_boolean_trap));
-        project.set_check_array_key_cast(Self::flag(c.check_array_key_cast));
-        project.set_check_parent_constructor_call(Self::flag(c.check_parent_constructor_call));
-        project.set_check_promoted_property_suggestions(Self::flag(
-            c.check_promoted_property_suggestions,
-        ));
-        project.set_check_boolean_conditions(Self::flag(c.check_boolean_conditions));
-        project.set_check_dynamic_properties(Self::flag(c.check_dynamic_properties));
-        project.set_check_swapped_arguments(Self::flag(c.check_swapped_arguments));
-        project.set_check_never_return_suggestions(Self::flag(c.check_never_return_suggestions));
-        project.set_check_switch_missing_default(Self::flag(c.check_switch_missing_default));
-        project.set_check_throw_without_message(Self::flag(c.check_throw_without_message));
-        project.set_check_throw_base_class(Self::flag(c.check_throw_base_class));
-        project.set_check_exception_hygiene(Self::flag(c.check_exception_hygiene));
-        project.set_check_current_time_dependence(Self::flag(c.check_current_time_dependence));
-        project.set_check_psr3_exception_context(Self::flag(c.check_psr3_exception_context));
-        project.set_check_psr3_logging(Self::flag(c.check_psr3_logging));
-        project.set_psr3_context_key_pattern(self.psr3_context_key_pattern.clone());
-        project.set_check_magic_numbers(Self::flag(c.check_magic_numbers));
-        project.set_magic_number_options(
-            c.magic_number_exemptions
-                .as_ref()
-                .map(|numbers| numbers.iter().map(|n| n.value()).collect()),
-            Self::flag(c.magic_numbers_ignore_numeric_strings),
-        );
-        project.set_check_native_type_hints(Self::flag(c.check_native_type_hints));
-        project.set_check_implicit_array_creation(Self::flag(c.check_implicit_array_creation));
-        project.set_check_useless_casts(Self::flag(c.check_useless_casts));
-        project.set_check_strict_array_filter(Self::flag(c.check_strict_array_filter));
-        project.set_check_mixed_type_operands(Self::flag(c.check_mixed_type_operands));
-        project.set_check_comparable_types(Self::flag(c.check_comparable_types));
-        project.set_check_arithmetic_operands(Self::flag(c.check_arithmetic_operands));
-        project.set_check_identity_vs_equals(Self::flag(c.check_identity_vs_equals));
-        project.set_check_loose_haystack_comparison(Self::flag(c.check_loose_haystack_comparison));
-        project.set_check_strict_function_calls(Self::flag(c.check_strict_function_calls));
-        project.set_check_switch_case_types(Self::flag(c.check_switch_case_types));
-        project.set_check_loop_variable_overwrite(Self::flag(c.check_loop_variable_overwrite));
-        project.set_check_dynamic_static_calls(Self::flag(c.check_dynamic_static_calls));
-        project.set_check_illegal_constructor_calls(Self::flag(c.check_illegal_constructor_calls));
-        project.set_check_enum_exhaustiveness(Self::flag(c.check_enum_exhaustiveness));
-        project.set_check_null_coercion(Self::flag(c.check_null_coercion));
-        project.set_check_new_exception_discarded(Self::flag(c.check_new_exception_discarded));
-        project.set_check_risky_tests(Self::flag(c.check_risky_tests));
-        project.set_check_dead_enum_cases(Self::flag(c.check_dead_enum_cases));
-        project.set_check_dead_code(Self::flag(c.check_dead_code));
-        project.set_check_circular_dependencies(Self::flag(c.check_circular_dependencies));
-        project.set_check_dead_abstract_classes(Self::flag(c.check_dead_abstract_classes));
-        project.set_check_dead_members(Self::flag(c.check_dead_members));
-        project.set_defer_inline_ignores(true);
-        project.set_assertion_tables(
-            self.assertion_entries.clone(),
-            self.class_argument_returns.clone(),
-        );
-        project.set_check_renamed_named_arguments(Self::flag(c.check_renamed_named_arguments));
-        project.set_configured_level(self.configured_level);
-        project.set_restricted_symbols(&self.restricted_symbol_entries);
-        project.set_dynamic_constant_names(&self.dynamic_constant_names);
-        project.set_doctrine_custom_functions(&self.doctrine_custom_function_entries);
-        project.set_sql_reflection_config(self.sql_reflection_config.clone());
-        project.set_sql_reflection_schema(self.sql_reflection_schema.clone());
-        project.set_php_versions(self.php_versions);
-        project.set_phpstan_api_check_enabled(self.phpstan_api_check_enabled);
-        project.set_absolute_root(self.absolute_root.clone());
-        project.set_packages(self.packages.clone());
+        project.apply_settings(self.settings.clone());
     }
 
     /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`
@@ -767,8 +698,8 @@ impl Session {
 
         let property_assign_facts = Arc::new(project.collect_property_assign_facts(&self.pool));
         type CheckOutcome = Result<FileCheck, String>;
-        let needs_tier_2 = Self::flag(self.config.check_dead_enum_cases)
-            || Self::flag(self.config.check_dead_members);
+        let needs_tier_2 =
+            self.settings.rules.check_dead_enum_cases || self.settings.rules.check_dead_members;
         let checked_results: Vec<(PathBuf, CheckOutcome)> = self.pool.install(|| {
             analyze_files_by_size
                 .par_iter()
@@ -840,21 +771,14 @@ impl Session {
             }
         };
         extend(project.check_whole_program(&named_argument_calls));
-        if Self::flag(self.config.check_mock_hygiene) {
-            let banned = self.config.mock_banned_classes.clone().unwrap_or_default();
-            extend(project.check_mock_hygiene(&banned));
+        if self.check_mock_hygiene {
+            extend(project.check_mock_hygiene(&self.mock_banned_classes));
         }
-        extend(project.check_class_shapes(
-            Self::flag(self.config.check_closed_classes),
-            &self.parent_call_rules,
-        ));
-        extend(project.check_banned(
-            &self.banned_constructs,
-            &self.config.banned_types.clone().unwrap_or_default(),
-        ));
+        extend(project.check_class_shapes(self.check_closed_classes, &self.parent_call_rules));
+        extend(project.check_banned(&self.banned_constructs, &self.banned_types));
         extend(project.check_architecture(&self.architecture_rules));
-        if Self::flag(self.config.check_composer_hygiene) {
-            for root in 0..self.packages.manifests().len() {
+        if self.settings.rules.check_composer_hygiene {
+            for root in 0..self.settings.packages.manifests().len() {
                 extend(project.check_composer_hygiene(root));
             }
         }

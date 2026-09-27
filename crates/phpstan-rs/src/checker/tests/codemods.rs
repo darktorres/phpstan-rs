@@ -6,7 +6,7 @@ use diagnostics::DiagnosticFix;
 fn fixed(
     src: &str,
     identifier: &str,
-    configure: impl FnOnce(&mut crate::registry::Registry),
+    configure: impl FnOnce(&mut crate::checker::settings::CheckSettings),
 ) -> String {
     let d = all_diagnostics_for_with(src, configure);
     let fixes: Vec<&DiagnosticFix> = d
@@ -21,7 +21,8 @@ fn fixed(
 #[test]
 fn function_and_method_name_case_are_fixed() {
     let src = "<?php\nfunction doThing(): void {}\nclass A { public function run(): void {} }\nfunction g(A $a): void {\n    DOTHING();\n    $a->RUN();\n}\n";
-    let enable = |r: &mut crate::registry::Registry| r.check_function_name_case = true;
+    let enable =
+        |s: &mut crate::checker::settings::CheckSettings| s.rules.check_function_name_case = true;
     assert_eq!(
         fixed(src, "function.nameCase", enable),
         src.replace("DOTHING()", "doThing()")
@@ -35,7 +36,8 @@ fn function_and_method_name_case_are_fixed() {
 #[test]
 fn a_used_function_import_is_fixed_in_place() {
     let src = "<?php\nnamespace Lib { function helper(): void {} }\nnamespace App {\nuse function lib\\HELPER;\n}\n";
-    let enable = |r: &mut crate::registry::Registry| r.check_function_name_case = true;
+    let enable =
+        |s: &mut crate::checker::settings::CheckSettings| s.rules.check_function_name_case = true;
     assert_eq!(
         fixed(src, "function.nameCase", enable),
         src.replace("lib\\HELPER", "Lib\\helper")
@@ -66,7 +68,9 @@ fn unused_private_members_are_deleted_with_their_doc_comments() {
 
 #[test]
 fn a_missing_parent_constructor_call_is_inserted_when_it_needs_no_arguments() {
-    let enable = |r: &mut crate::registry::Registry| r.check_parent_constructor_call = true;
+    let enable = |s: &mut crate::checker::settings::CheckSettings| {
+        s.strict_rules.check_parent_constructor_call = true
+    };
     let src = "<?php\nclass P { public function __construct(int $x = 0) {} }\nclass C extends P {\n    public function __construct() {\n        $this->ready();\n    }\n    private function ready(): void {}\n}\nclass E extends P {\n    public function __construct() {}\n}\n";
     let out = fixed(src, "constructor.missingParentCall", enable);
     assert_eq!(

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser as ClapParser, Subcommand};
 
-use phpstan_rs::lsp;
+use phpstan_rs::{app, lsp};
 
 #[path = "main/check.rs"]
 mod check;
@@ -72,7 +72,7 @@ fn main() {
             incremental_bench::run_incremental_bench(&dir, file_to_touch.as_deref())
         }
         Command::Lsp => {
-            let exit_code = lsp::run(env!("CARGO_PKG_VERSION"));
+            let exit_code = lsp::run(env!("CARGO_PKG_VERSION"), app::config_schema());
             // 0 falls through to main's own normal return (so the
             // dhat-heap profiler's, and a --features hotpath build's
             // HotpathGuard's, Drop still flushes) - only the spec-

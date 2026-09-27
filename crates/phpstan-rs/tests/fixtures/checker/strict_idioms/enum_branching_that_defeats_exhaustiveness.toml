@@ -1,1 +1,2 @@
+[ext.shipmonk]
 check_enum_exhaustiveness = true

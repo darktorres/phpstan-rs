@@ -144,7 +144,7 @@ impl<'a> Checker<'a> {
                 return;
             }
             let level_ty = self.infer_expr(&args[0].value, locals);
-            if self.registry.check_psr3_logging {
+            if self.settings.psr3.check_psr3_logging {
                 self.check_psr3_level(&level_ty, args[0].value.span);
             }
             let levels = string_literals(&level_ty)
@@ -159,13 +159,13 @@ impl<'a> Checker<'a> {
         let message = &args[message_at].value;
         let context = args.get(message_at + 1).map(|a| &a.value);
         let context_ty = context.map(|c| self.infer_expr(c, locals));
-        if self.registry.check_psr3_logging {
+        if self.settings.psr3.check_psr3_logging {
             self.check_psr3_message(&method, message, context, context_ty.as_ref(), locals);
             if let Some((context, ty)) = context.zip(context_ty.as_ref()) {
                 self.check_psr3_context(ty, context.span);
             }
         }
-        if self.registry.check_psr3_exception_context && !levels.is_empty() {
+        if self.settings.psr3.check_psr3_exception_context && !levels.is_empty() {
             let has_exception_key = match &context_ty {
                 None => false,
                 Some(Type::ArrayShape(shape)) => shape
@@ -321,7 +321,7 @@ impl<'a> Checker<'a> {
                     "psr3.contextKeyNotString",
                 );
             }
-            if let Some(pattern) = &self.registry.psr3_context_key_pattern
+            if let Some(pattern) = &self.settings.psr3_context_key_pattern
                 && !pattern.is_match(&key)
             {
                 self.report(

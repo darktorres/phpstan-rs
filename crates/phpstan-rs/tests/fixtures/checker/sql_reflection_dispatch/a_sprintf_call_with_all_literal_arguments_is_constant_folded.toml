@@ -1,4 +1,3 @@
-
-[sql_reflection]
+[ext.sql.reflection]
 driver = "mysql"
 schema_file = "a_sprintf_call_with_all_literal_arguments_is_constant_folded.sql"

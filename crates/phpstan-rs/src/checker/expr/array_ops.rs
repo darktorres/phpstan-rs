@@ -662,7 +662,7 @@ impl<'a> Checker<'a> {
                 "array.invalidKey",
             );
         }
-        if self.registry.check_array_key_cast
+        if self.settings.extras.check_array_key_cast
             && let Some((from, to)) = array_key_cast_description(key_expr, &key_ty)
         {
             self.report(
@@ -737,7 +737,7 @@ impl<'a> Checker<'a> {
                 "offsetAccess.invalidOffset",
             );
         }
-        if self.registry.check_array_key_cast
+        if self.settings.extras.check_array_key_cast
             && let Some((from, to)) = array_key_cast_description(idx, &idx_ty)
         {
             self.report(

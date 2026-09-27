@@ -1,4 +1,4 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 class = "Legacy"
 kind = "classConstant"
 message = "use Config::VERSION instead"

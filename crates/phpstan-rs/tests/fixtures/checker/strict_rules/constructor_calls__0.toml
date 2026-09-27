@@ -1,1 +1,2 @@
+[ext.strict-rules]
 check_illegal_constructor_calls = true

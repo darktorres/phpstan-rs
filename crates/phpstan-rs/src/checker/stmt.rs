@@ -85,13 +85,15 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        if self.registry.check_enum_exhaustiveness {
+        if self.settings.shipmonk.check_enum_exhaustiveness {
             self.check_strict_statement_idioms(stmt, locals);
         }
-        if self.registry.check_magic_numbers {
+        if self.settings.sidz.check_magic_numbers {
             self.check_magic_numbers_statement(stmt);
         }
-        if self.registry.check_loop_variable_overwrite || self.registry.check_switch_case_types {
+        if self.settings.strict_rules.check_loop_variable_overwrite
+            || self.settings.strict_rules.check_switch_case_types
+        {
             self.check_strict_rules_statement(stmt, locals);
         }
         self.check_stmt_impl(stmt, locals, declared_return, label);
@@ -590,7 +592,7 @@ impl<'a> Checker<'a> {
                     // `rule_level_accepts` already accepts a
                     // `Mixed` actual value unconditionally below real
                     // PHPStan's own level 9/10.
-                    } else if !self.registry.rule_level_accepts(&expected, &actual).yes() {
+                    } else if !self.rule_level_accepts(&expected, &actual).yes() {
                         // `DiscriminantArrayFactsMap`'s own doc comment -
                         // before reporting a real mismatch, retry against
                         // a *reconstructed* type built from this exact
@@ -604,7 +606,7 @@ impl<'a> Checker<'a> {
                         // sees no change in behavior at all.
                         let reconstructed = reconstructed_discriminant_return_type(e, locals);
                         let passes_via_reconstruction = reconstructed
-                            .is_some_and(|r| self.registry.rule_level_accepts(&expected, &r).yes());
+                            .is_some_and(|r| self.rule_level_accepts(&expected, &r).yes());
                         if !passes_via_reconstruction {
                             self.report(
                                 format!("return type mismatch: expected {expected}, got {actual}"),
@@ -862,7 +864,7 @@ impl<'a> Checker<'a> {
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 self.check_nested_class_declaration(&fqn, c);
-                if self.registry.check_magic_numbers {
+                if self.settings.sidz.check_magic_numbers {
                     self.check_magic_numbers_in_properties(&c.properties);
                 }
                 self.check_attributes(&c.attrs, &fqn);

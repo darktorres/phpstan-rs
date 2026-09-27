@@ -59,6 +59,7 @@ extern sql sql
 extern diagnostics diagnostics
 extern composer composer
 extern stub_sources stub-sources
+extern config config
 
 module output app
 module app app
@@ -66,7 +67,7 @@ module baseline project
 module ignore_errors project
 module ignore_comments project
 module deps project
-module config config
+module rules_settings rules
 module php_date_parser builtins
 module regex_groups builtins
 module pcre_validate builtins
@@ -75,7 +76,6 @@ module stub_attributes reflection
 module registry reflection
 module registry::assertion_table reflection
 module assertion_tables reflection
-module registry::dynamic_constants analyser
 module registry::purity analyser
 module registry::global_vars analyser
 module registry::access_attributes ext-language-extensions
@@ -95,9 +95,27 @@ module project::class_shape rules
 module project::composer_hygiene rules
 module project::mock_hygiene ext-mockstan
 module lsp lsp
+module ext root
+module ext::extras ext-extras
+module ext::strict_rules ext-strict-rules
+module ext::shipmonk ext-shipmonk
+module ext::voku ext-voku
+module ext::slam ext-slam
+module ext::phpunit ext-phpunit
+module ext::deprecation_rules ext-deprecation-rules
+module ext::mockstan ext-mockstan
+module ext::pest ext-pest
+module ext::psr3 ext-psr3
+module ext::sidz ext-sidz
+module ext::disallowed_calls ext-disallowed-calls
+module ext::doctrine ext-doctrine
+module ext::language_extensions ext-language-extensions
+module ext::sql ext-sql
 
 module checker analyser
 module checker::predefined_constants analyser
+module checker::constant_resolver analyser
+module checker::rule_level_helper analyser
 module checker::assignment analyser
 module checker::by_ref_params rules
 module checker::callable_values rules
@@ -201,16 +219,7 @@ module checker::access_attributes ext-language-extensions
 
 
 
-allow config architecture C1
-allow config assertion_tables C1
-allow config doctrine_functions C1
-allow config ignore_errors C1
-allow config parent_calls C1
-allow config restricted_symbols C1
-allow config @sql C1
 
-allow registry doctrine_functions C2
-allow registry restricted_symbols C2
 
 allow registry registry::global_vars C9
 allow registry registry::purity C9
@@ -423,14 +432,40 @@ allow project checker::semantic_tokens E6
 
 allow checker::restricted_symbol_usage ignore_errors F1
 allow lsp banned F1
-allow lsp doctrine_functions F1
-allow lsp restricted_symbols F1
 allow lsp @sql F1
 allow project architecture F1
 allow project banned F1
-allow project doctrine_functions F1
 allow project parent_calls F1
 allow project pest_config F1
 allow project restricted_symbols F1
 allow project @sql F1
 allow restricted_symbols ignore_errors F1
+allow checker rules_settings E3
+allow checker restricted_symbols E3g
+allow checker doctrine_functions E4
+allow checker ext::extras E4
+allow checker ext::strict_rules E4
+allow checker ext::shipmonk E4
+allow checker ext::voku E4
+allow checker ext::slam E4
+allow checker ext::psr3 E4
+allow checker ext::sidz E4
+allow checker ext::phpunit E4
+allow project rules_settings F1
+allow project ext F1
+allow project ext::disallowed_calls F1
+allow project ext::doctrine F1
+allow project ext::extras F1
+allow project ext::mockstan F1
+allow project ext::phpunit F1
+allow project ext::psr3 F1
+allow project ext::shipmonk F1
+allow project ext::sidz F1
+allow project ext::slam F1
+allow project ext::sql F1
+allow project ext::strict_rules F1
+allow project ext::voku F1
+allow lsp app F1
+allow lsp ext F1
+allow lsp ext::disallowed_calls F1
+allow lsp ext::sql F1

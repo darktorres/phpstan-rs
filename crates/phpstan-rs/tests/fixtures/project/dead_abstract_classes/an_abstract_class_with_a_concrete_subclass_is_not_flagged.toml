@@ -1,2 +1,4 @@
-check_dead_abstract_classes = true
 paths = ["a.php"]
+
+[rules]
+check_dead_abstract_classes = true

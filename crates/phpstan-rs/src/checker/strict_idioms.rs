@@ -103,7 +103,7 @@ impl<'a> Checker<'a> {
         if is_static
             || sig.visibility != Visibility::Public
             || required != 1
-            || !self.registry.accepts(&sig.params[0].ty, other).yes()
+            || !self.accepts(&sig.params[0].ty, other).yes()
         {
             return None;
         }
@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
 
     /// The expression-level checks, before `e` itself is checked.
     pub(crate) fn check_strict_expression_idioms(&mut self, e: &Expr, locals: &Locals) {
-        if self.registry.check_null_coercion {
+        if self.settings.shipmonk.check_null_coercion {
             match &e.kind {
                 ExprKind::Call(callee, args) => {
                     if let ExprKind::Name(name) = &callee.kind
@@ -223,7 +223,7 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        if self.registry.check_identity_vs_equals
+        if self.settings.extras.check_identity_vs_equals
             && let ExprKind::Binary(op @ (BinOp::Identical | BinOp::NotIdentical), l, r) = &e.kind
         {
             let left = self.infer_expr(l, locals);
@@ -251,7 +251,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if self.registry.check_enum_exhaustiveness
+        if self.settings.shipmonk.check_enum_exhaustiveness
             && let ExprKind::Match {
                 subject,
                 default: Some(default),
@@ -269,7 +269,7 @@ impl<'a> Checker<'a> {
 
     /// The statement-level checks, before `stmt` itself is checked.
     pub(crate) fn check_strict_statement_idioms(&mut self, stmt: &Stmt, locals: &Locals) {
-        if !self.registry.check_enum_exhaustiveness {
+        if !self.settings.shipmonk.check_enum_exhaustiveness {
             return;
         }
         match &stmt.kind {

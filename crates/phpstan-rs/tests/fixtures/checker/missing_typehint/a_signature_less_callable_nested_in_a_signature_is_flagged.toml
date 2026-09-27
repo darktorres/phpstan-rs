@@ -1,1 +1,2 @@
+[rules]
 check_missing_callable_signature = true

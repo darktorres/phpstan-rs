@@ -491,11 +491,7 @@ impl<'a> Checker<'a> {
             Box::new(Type::Union(vec![Type::Int, Type::String])),
             Box::new(format_value_type()),
         );
-        if self
-            .registry
-            .rule_level_accepts(&expected, &values_ty)
-            .yes()
-        {
+        if self.rule_level_accepts(&expected, &values_ty).yes() {
             return;
         }
         self.report(format!(
@@ -534,11 +530,11 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        let strict = self.registry.check_strict_printf_placeholder_types;
+        let strict = self.settings.rules.check_strict_printf_placeholder_types;
         let allowed = format_value_type();
         for (i, arg) in args.iter().enumerate().skip(function.format + 1) {
             let arg_ty = self.infer_expr(&arg.value, locals);
-            if !self.registry.rule_level_accepts(&allowed, &arg_ty).yes() {
+            if !self.rule_level_accepts(&allowed, &arg_ty).yes() {
                 self.report(format!(
                         "Parameter #{} ...$values of function {name} expects bool|float|int|string|null, {arg_ty} given.",
                         i + 1
@@ -591,7 +587,7 @@ impl<'a> Checker<'a> {
         if matches!(ty, Type::Mixed(_)) {
             return None;
         }
-        let level = self.registry.configured_level;
+        let level = self.settings.rule_levels.configured_level;
         let Type::Union(members) = ty else {
             return Some(ty.clone());
         };
@@ -618,9 +614,8 @@ impl<'a> Checker<'a> {
     /// `PrintfPlaceholder::doesArgumentTypeMatchPlaceholder`.
     fn matches_placeholder(&self, ty: &Type, accepting: Accepting, strict: bool) -> bool {
         match accepting {
-            Accepting::StrictInt => self.registry.accepts(&Type::Int, ty).yes(),
+            Accepting::StrictInt => self.accepts(&Type::Int, ty).yes(),
             Accepting::Int if strict => self
-                .registry
                 .accepts(
                     &Type::Union(vec![
                         Type::Int,
@@ -633,7 +628,6 @@ impl<'a> Checker<'a> {
                 )
                 .yes(),
             Accepting::Float if strict => self
-                .registry
                 .accepts(
                     &Type::Union(vec![
                         Type::Float,
@@ -651,7 +645,6 @@ impl<'a> Checker<'a> {
             Accepting::String | Accepting::Mixed => {
                 !strict
                     || self
-                        .registry
                         .accepts(
                             &Type::Union(vec![
                                 Type::String,

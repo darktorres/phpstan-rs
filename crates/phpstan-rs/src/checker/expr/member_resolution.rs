@@ -457,6 +457,7 @@ impl<'a> Checker<'a> {
             // general rather than `QueryBuilder`-only.
             Type::Object(class, _)
                 if method == "createQuery"
+                    && self.settings.doctrine
                     && self
                         .registry
                         .is_subclass_of(class, "Doctrine\\ORM\\EntityManagerInterface") =>
@@ -477,6 +478,7 @@ impl<'a> Checker<'a> {
             // than before this phase existed.
             Type::Object(class, _)
                 if method == "getQuery"
+                    && self.settings.doctrine
                     && self
                         .registry
                         .is_subclass_of(class, "Doctrine\\ORM\\QueryBuilder") =>
@@ -498,9 +500,10 @@ impl<'a> Checker<'a> {
                         | "getSingleColumnResult"
                         | "getSingleScalarResult"
                         | "getScalarResult"
-                ) && self
-                    .registry
-                    .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery") =>
+                ) && self.settings.doctrine
+                    && self
+                        .registry
+                        .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery") =>
             {
                 self.doctrine_query_result(recv, method, args, type_args, locals)
             }
@@ -720,7 +723,7 @@ impl<'a> Checker<'a> {
                     .resolve_dbal_sql_from_call(recv, class, args, locals)
                     .and_then(|sql| {
                         crate::checker::sql_reflection::resolve::resolve_sql_row_type(
-                            self.registry,
+                            self.doctrine_entities(),
                             self.sql,
                             &sql,
                         )
@@ -757,7 +760,7 @@ impl<'a> Checker<'a> {
                     .resolve_dbal_sql_from_call(recv, class, args, locals)
                     .and_then(|sql| {
                         crate::checker::sql_reflection::resolve::resolve_sql_row_type(
-                            self.registry,
+                            self.doctrine_entities(),
                             self.sql,
                             &sql,
                         )

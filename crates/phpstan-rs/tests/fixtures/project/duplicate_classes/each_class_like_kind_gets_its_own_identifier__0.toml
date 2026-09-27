@@ -1,3 +1,5 @@
-check_duplicate_class_declarations = true
 paths = ["a.php"]
 scan_paths = ["b.php"]
+
+[rules]
+check_duplicate_class_declarations = true

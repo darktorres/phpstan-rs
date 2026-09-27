@@ -1,1 +1,2 @@
-check_deprecated_usage = true
+[ext.deprecation-rules]
+enabled = true

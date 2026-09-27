@@ -11,7 +11,7 @@ impl<'a> Checker<'a> {
     /// this deliberately never touches - only a genuine `Throwable`
     /// qualifies).
     pub(crate) fn check_new_exception_discarded(&mut self, e: &Expr, locals: &Locals) {
-        if !self.registry.check_new_exception_discarded {
+        if !self.settings.extras.check_new_exception_discarded {
             return;
         }
         let inner = unwrap_grouping(e);

@@ -57,7 +57,7 @@ fn a_settings_save_unrelated_to_phpstan_rs_is_a_no_op() {
 #[test]
 fn a_pushed_config_path_hot_applies_the_new_config_and_republishes() {
     let dir = TempDir::new("dcc_push_config_path");
-    dir.write("other.toml", "check_deprecated_usage = true\n");
+    dir.write("other.toml", "[ext.deprecation-rules]\nenabled = true\n");
     let path = dir.write("a.php", DEPRECATED_FIXTURE);
     let uri = path_to_uri(&path).to_string();
 
@@ -90,14 +90,17 @@ fn a_pushed_config_path_hot_applies_the_new_config_and_republishes() {
             .unwrap()
             .iter()
             .any(|d| d["code"] == "function.deprecated"),
-        "other.toml's check_deprecated_usage=true must be hot-applied, got: {publishes:?}"
+        "other.toml's ext.deprecation-rules.enabled=true must be hot-applied, got: {publishes:?}"
     );
 }
 
 #[test]
 fn disabling_then_re_enabling_clears_then_restores_diagnostics_without_a_new_did_open() {
     let dir = TempDir::new("dcc_disable_reenable");
-    dir.write("phpstan-rs.toml", "check_deprecated_usage = true\n");
+    dir.write(
+        "phpstan-rs.toml",
+        "[ext.deprecation-rules]\nenabled = true\n",
+    );
     let path = dir.write("a.php", DEPRECATED_FIXTURE);
     let uri = path_to_uri(&path).to_string();
     let pos = lsp_pos(DEPRECATED_FIXTURE, "oldFunc()");
@@ -152,7 +155,7 @@ fn disabling_then_re_enabling_clears_then_restores_diagnostics_without_a_new_did
 #[test]
 fn did_change_configuration_pulls_live_settings_when_the_client_advertises_support() {
     let dir = TempDir::new("dcc_pull");
-    dir.write("other.toml", "check_deprecated_usage = true\n");
+    dir.write("other.toml", "[ext.deprecation-rules]\nenabled = true\n");
     let path = dir.write("a.php", DEPRECATED_FIXTURE);
     let uri = path_to_uri(&path).to_string();
 
@@ -237,11 +240,14 @@ fn did_change_configuration_with_no_pull_support_falls_back_to_a_fresh_disk_reso
 #[test]
 fn reload_configuration_rereads_an_on_disk_config_change() {
     let dir = TempDir::new("dcc_on_disk_change");
-    dir.write("phpstan-rs.toml", "check_deprecated_usage = false\n");
+    dir.write(
+        "phpstan-rs.toml",
+        "[ext.deprecation-rules]\nenabled = false\n",
+    );
     let path = dir.write("a.php", DEPRECATED_FIXTURE);
     let uri = path_to_uri(&path).to_string();
 
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     server.add_workspace_folders(std::slice::from_ref(&dir.0));
     let initial: Vec<Value> = server
         .publish_workspace_diagnostics()
@@ -255,10 +261,13 @@ fn reload_configuration_rereads_an_on_disk_config_change() {
                 .unwrap()
                 .iter()
                 .any(|d| d["code"] == "function.deprecated")),
-        "check_deprecated_usage starts off, got: {initial:?}"
+        "ext.deprecation-rules.enabled starts off, got: {initial:?}"
     );
 
-    dir.write("phpstan-rs.toml", "check_deprecated_usage = true\n");
+    dir.write(
+        "phpstan-rs.toml",
+        "[ext.deprecation-rules]\nenabled = true\n",
+    );
     let reload: Vec<Value> = server
         .reload_configuration(settings::PhpstanRsSettings {
             enable: true,

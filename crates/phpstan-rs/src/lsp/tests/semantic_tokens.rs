@@ -91,7 +91,7 @@ fn a_deprecated_function_call_gets_a_token_even_with_the_diagnostic_gate_left_of
             .unwrap()
             .iter()
             .any(|d| d["code"] == "function.deprecated"),
-        "check_deprecated_usage is off by default - no diagnostic should fire, got: {publish:?}"
+        "ext.deprecation-rules.enabled is off by default - no diagnostic should fire, got: {publish:?}"
     );
 }
 
@@ -227,7 +227,10 @@ fn the_legend_and_token_type_index_stay_in_sync() {
 #[test]
 fn a_multi_line_call_span_degrades_to_no_token_while_the_diagnostic_still_fires() {
     let dir = TempDir::new("st_multiline");
-    dir.write("phpstan-rs.toml", "check_deprecated_usage = true\n");
+    dir.write(
+        "phpstan-rs.toml",
+        "[ext.deprecation-rules]\nenabled = true\n",
+    );
     let src = "<?php\nnamespace Vendor\\Lib;\nclass Foo {\n    /** @deprecated */\n    function bar(): void {}\n}\n\nnamespace Other\\App;\nfunction f(\\Vendor\\Lib\\Foo $x) {\n    $x\n        ->bar();\n}\n";
     let path = dir.write("a.php", src);
     let uri = path_to_uri(&path).to_string();

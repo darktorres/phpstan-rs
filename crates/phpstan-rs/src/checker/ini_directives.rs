@@ -192,7 +192,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             }
-            if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
+            if !self.settings.deprecation_rules || self.current_scope_deprecated {
                 continue;
             }
             if let Some((_, since, kind)) = DEPRECATED.iter().find(|(name, since, kind)| {

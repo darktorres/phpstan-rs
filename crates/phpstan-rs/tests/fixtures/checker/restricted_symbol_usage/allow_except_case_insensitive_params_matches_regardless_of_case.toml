@@ -1,9 +1,9 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 kind = "function"
 message = "md5 is not a secure hash"
 name = "hash"
 
-[[restricted_symbols.allow_except_case_insensitive_params]]
+[[ext.disallowed-calls.restricted_symbols.allow_except_case_insensitive_params]]
 name = "algo"
 position = 1
 value = "md5"

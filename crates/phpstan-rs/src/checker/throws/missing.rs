@@ -6,7 +6,7 @@
 //! this flags a real, explicit `throw` the declaration's own `@throws`
 //! tag doesn't cover.
 //!
-//! Gated on `Registry::check_missing_checked_exceptions` (default
+//! Gated on `ExtrasSettings::check_missing_checked_exceptions` (default
 //! `false`) - see that field's own doc comment for why this is the
 //! riskiest of this family, and stays opt-in.
 //!
@@ -38,7 +38,7 @@ impl<'a> Checker<'a> {
         throws: Option<&Type>,
         subject: &str,
     ) {
-        if !self.registry.check_missing_checked_exceptions {
+        if !self.settings.extras.check_missing_checked_exceptions {
             return;
         }
         for (thrown, span) in self.current_function_explicit_throw_points.clone() {
@@ -48,7 +48,7 @@ impl<'a> Checker<'a> {
             if !self.registry.classes.contains_key(class.as_str()) {
                 continue;
             }
-            let covered = throws.is_some_and(|t| self.registry.accepts(t, &thrown).yes());
+            let covered = throws.is_some_and(|t| self.accepts(t, &thrown).yes());
             if covered {
                 continue;
             }

@@ -61,7 +61,7 @@ impl<'a> Checker<'a> {
             Some(sql) if !returns_result_set(sql) => Type::True,
             Some(sql) => {
                 let row = crate::checker::sql_reflection::resolve::resolve_sql_row_type(
-                    self.registry,
+                    self.doctrine_entities(),
                     self.sql,
                     sql,
                 );

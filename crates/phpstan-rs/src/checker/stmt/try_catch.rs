@@ -270,7 +270,7 @@ impl<'a> Checker<'a> {
                 catch_locals.declare(var.to_string(), ty, var_span);
             }
             self.check_block(&c.body, &mut catch_locals, declared_return, label);
-            if self.registry.check_exception_hygiene {
+            if self.settings.extras.check_exception_hygiene {
                 self.check_catch_hygiene(c);
             }
             let catch_terminates = c
@@ -366,7 +366,7 @@ impl<'a> Checker<'a> {
         // judge (Mixed, a dynamic expression), including a
         // `Union`/`Intersection`-typed value.
         let thrown_ty = self.check_expr(e, locals, label);
-        if self.registry.check_throw_without_message
+        if self.settings.extras.check_throw_without_message
             && let ExprKind::New(_, args) = &e.kind
             && args.is_empty()
         {
@@ -377,7 +377,7 @@ impl<'a> Checker<'a> {
                 "throw.missingExceptionMessage",
             );
         }
-        if self.registry.check_throw_base_class
+        if self.settings.extras.check_throw_base_class
             && let ExprKind::New(_, _) = &e.kind
             && let Type::Object(class, _) = &thrown_ty
             && (class.eq_ignore_ascii_case("Exception") || class.eq_ignore_ascii_case("Error"))

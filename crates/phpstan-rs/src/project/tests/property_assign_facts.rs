@@ -20,7 +20,7 @@ fn collect_property_assign_facts_with_mode(
         let Some(file) = project.files.get(path) else {
             continue;
         };
-        let mut checker = Checker::new(&project.registry);
+        let mut checker = Checker::new(&project.registry).with_settings(&project.settings);
         checker.set_facts_only(facts_only);
         checker.check_program(&file.ast);
         for (fqn, props) in checker.take_property_assign_facts() {
@@ -88,6 +88,13 @@ fn facts_only_mode_agrees_with_the_full_pass_on_a_pest_test_closures_property_wr
     // ever gets, so it must stay ungated in facts_only mode or every
     // Pest test closure's own property writes would be silently lost.
     let mut project = Project::new();
+    project.apply_settings(ProjectSettings {
+        extensions: crate::ext::ActiveExtensions {
+            pest: true,
+            ..Default::default()
+        },
+        ..ProjectSettings::default()
+    });
     project
         .load_file(
             PathBuf::from("Bound.php"),

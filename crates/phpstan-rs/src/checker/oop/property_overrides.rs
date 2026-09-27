@@ -290,9 +290,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let own_ty = self.resolve_pseudo(&own_sig.ty_native, fqn);
-        if self.registry.accepts(&ancestor_ty, &own_ty).yes()
-            && self.registry.accepts(&own_ty, &ancestor_ty).yes()
-        {
+        if self.accepts(&ancestor_ty, &own_ty).yes() && self.accepts(&own_ty, &ancestor_ty).yes() {
             return;
         }
         self.report_builder(

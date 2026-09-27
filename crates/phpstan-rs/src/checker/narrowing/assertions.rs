@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
         // regardless of whether `target_ty` is a literal or a general
         // type, so only the exclusion branch needs gating here.
         let narrowed = if matches_when_true {
-            narrow_type_to(self.registry, &current, &target_ty)
+            narrow_type_to(&self.relation(), &current, &target_ty)
         } else if is_known_single_value(&target_ty) {
             narrow_type_excluding(&current, &target_ty)
         } else {
@@ -318,7 +318,7 @@ impl<'a> Checker<'a> {
                 && let Some(key) = narrowing_key(&arg.value)
             {
                 let current = self.current_narrowed_type(&arg.value, &key, locals);
-                locals.insert(key, narrow_type_to(self.registry, &current, target));
+                locals.insert(key, narrow_type_to(&self.relation(), &current, target));
             }
         };
         let narrow_excluding = |locals: &mut Locals, idx: usize, excluded: &Type| {
@@ -398,7 +398,7 @@ impl<'a> Checker<'a> {
             let narrowed = if info.negated {
                 narrow_type_excluding(&current, &info.ty)
             } else {
-                narrow_type_to(self.registry, &current, &info.ty)
+                narrow_type_to(&self.relation(), &current, &info.ty)
             };
             locals.insert(key, narrowed);
         }

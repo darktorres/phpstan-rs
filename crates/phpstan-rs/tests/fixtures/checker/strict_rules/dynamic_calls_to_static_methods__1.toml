@@ -1,1 +1,2 @@
+[ext.strict-rules]
 check_dynamic_static_calls = true

@@ -37,8 +37,8 @@ Artifacts:
   run, incremental rebuild times with the workspace crates each scenario
   rebuilt (its targets asserted), and the test-name manifest.
 
-`all-on` is the scoped path set with every opt-in check enabled; `xtask`
-writes it to `<corpus>/.phpstan-rs-gate-all-on.toml`. The corpus runs use
+`all-on` is the scoped configuration with every opt-in check enabled
+through `--set` (`xtask`'s `ALL_ON_SETS`). The corpus runs use
 the `gate` profile (`target/gate/phpstan-rs`); the performance gate
 measures `release`.
 

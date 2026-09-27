@@ -1,8 +1,8 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 kind = "function"
 message = "not with baz"
 name = "foo"
 
-[[restricted_symbols.allow_except_params_anywhere]]
+[[ext.disallowed-calls.restricted_symbols.allow_except_params_anywhere]]
 position = 2
 value = "baz"

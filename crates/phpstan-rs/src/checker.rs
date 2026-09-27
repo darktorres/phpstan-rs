@@ -574,6 +574,9 @@ pub(crate) type PropertyAssignFacts = FxHashMap<Arc<str>, FxHashMap<Arc<str>, Ve
 /// get distinct keys, the same way real PHP tells them apart.
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
+    // What the checks are configured with - the defaults unless
+    // `with_settings` supplies the project's.
+    pub(crate) settings: &'a settings::CheckSettings,
     // The project's SQL reflection service - an unconfigured one unless
     // `with_sql` supplies the project's.
     pub(crate) sql: &'a sql::context::SqlContext,
@@ -721,7 +724,7 @@ pub struct Checker<'a> {
     // by a call's `@throws`-derived contribution, since that belongs to
     // the callee, not this declaration's own code. Consumed by
     // `checker/throws/missing.rs`'s "missing checked exception" family,
-    // opt-in via `Registry::check_missing_checked_exceptions`.
+    // opt-in via `ExtrasSettings::check_missing_checked_exceptions`.
     pub(crate) current_function_explicit_throw_points: Vec<(Type, Span)>,
     // Every real return point recorded so far inside the enclosing body -
     // `StmtKind::Return(Some(e))`'s value type, `StmtKind::Return(None)`'s
@@ -1162,6 +1165,7 @@ mod calls;
 mod castable_arguments;
 mod coercion;
 mod comparisons;
+pub mod constant_resolver;
 mod control_flow;
 mod current_time;
 mod date_interval;
@@ -1179,6 +1183,8 @@ mod impossible_instanceof;
 mod includes;
 mod ini_directives;
 mod instantiation;
+pub mod rule_level_helper;
+pub mod settings;
 mod strict_idioms;
 mod strict_rules;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
@@ -1263,11 +1269,47 @@ impl<'a> Checker<'a> {
         self
     }
 
+    pub fn with_settings(mut self, settings: &'a settings::CheckSettings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    /// The type relations over the registry's classes, as lenient as the
+    /// configured rule levels say.
+    pub(crate) fn relation(&self) -> types::Relation<'a> {
+        self.settings.rule_levels.relation(self.registry)
+    }
+
+    pub(crate) fn accepts(&self, accepting: &Type, accepted: &Type) -> types::AcceptsResult {
+        self.relation().accepts(accepting, accepted)
+    }
+
+    pub(crate) fn rule_level_accepts(
+        &self,
+        accepting: &Type,
+        accepted: &Type,
+    ) -> types::AcceptsResult {
+        self.relation().rule_level_accepts(accepting, accepted)
+    }
+
+    pub(crate) fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
+        self.relation().strict_mixed_receiver_level(ty)
+    }
+
+    /// The registry, for its Doctrine entities, while the Doctrine
+    /// extension is active.
+    pub(crate) fn doctrine_entities(&self) -> Option<&'a Registry> {
+        self.settings.doctrine.then_some(self.registry)
+    }
+
     pub fn new(registry: &'a Registry) -> Self {
         static NO_SQL: std::sync::LazyLock<sql::context::SqlContext> =
             std::sync::LazyLock::new(Default::default);
+        static DEFAULT_SETTINGS: std::sync::LazyLock<settings::CheckSettings> =
+            std::sync::LazyLock::new(Default::default);
         Checker {
             registry,
+            settings: &DEFAULT_SETTINGS,
             sql: &NO_SQL,
             diagnostics: Vec::new(),
             name_ctx: NameContext::default(),
@@ -1736,11 +1778,12 @@ impl<'a> Checker<'a> {
         // reused for `self.name_ctx` below, which has to be positional
         // instead (see that loop's own comment).
         let whole_file_ctx = NameContext::build(program);
-        self.current_function_assigned_variables = if self.registry.check_implicit_array_creation {
-            strict_rules::assigned_variables(program)
-        } else {
-            Vec::new()
-        };
+        self.current_function_assigned_variables =
+            if self.settings.strict_rules.check_implicit_array_creation {
+                strict_rules::assigned_variables(program)
+            } else {
+                Vec::new()
+            };
         self.constant_facts = global_constants::constant_facts(program);
         if !self.facts_only {
             if self.current_file.is_some() {
@@ -1855,7 +1898,7 @@ impl<'a> Checker<'a> {
                         self.check_sealed_hierarchy(&fqn, c.span);
                         self.check_sealed_tag_types(c.doc_comment.as_deref(), c.span, false);
                         self.check_unknown_phpstan_tags_in_class(c);
-                        if self.registry.check_magic_numbers {
+                        if self.settings.sidz.check_magic_numbers {
                             self.check_magic_numbers_in_properties(&c.properties);
                         }
                         self.check_property_hooks(&fqn, c);
@@ -1865,7 +1908,7 @@ impl<'a> Checker<'a> {
                         self.check_default_property_types(&fqn, c);
                         self.check_premature_property_access(&fqn, c);
                         self.check_duplicate_class_members(&fqn, c);
-                        if self.registry.check_risky_tests {
+                        if self.settings.phpunit.check_risky_tests {
                             self.check_risky_test_methods(&fqn, c);
                         }
                         self.check_method_declaration_sanity(
@@ -1934,7 +1977,7 @@ impl<'a> Checker<'a> {
                         // never does).
                         self.check_missing_property_typehints(&fqn, &c.properties);
                         self.check_missing_class_constant_typehints(&fqn, &c.consts);
-                        if self.registry.check_native_type_hints {
+                        if self.settings.extras.check_native_type_hints {
                             self.check_native_class_constant_types(&fqn, &c.consts);
                         }
                     }
@@ -2044,7 +2087,7 @@ impl<'a> Checker<'a> {
                         // are as real a missing-typehint candidate as a
                         // class's.
                         self.check_missing_class_constant_typehints(&fqn, &e.consts);
-                        if self.registry.check_native_type_hints {
+                        if self.settings.extras.check_native_type_hints {
                             self.check_native_class_constant_types(&fqn, &e.consts);
                         }
                     }

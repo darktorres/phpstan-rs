@@ -1,10 +1,10 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 kind = "function"
 message = "no waldo"
 name = "waldo"
 
-[[restricted_symbols.allow_except_params_any_value]]
+[[ext.disallowed-calls.restricted_symbols.allow_except_params_any_value]]
 position = 1
 
-[[restricted_symbols.allow_except_params_any_value]]
+[[ext.disallowed-calls.restricted_symbols.allow_except_params_any_value]]
 position = 2

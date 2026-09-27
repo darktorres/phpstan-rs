@@ -266,7 +266,7 @@ impl<'a> Checker<'a> {
         context: &str,
         identifier: &'static str,
     ) {
-        if !self.registry.check_boolean_conditions {
+        if !self.settings.strict_rules.check_boolean_conditions {
             return;
         }
         if matches!(ty, Type::Mixed(_)) || is_definitely_bool(ty) {
@@ -293,7 +293,7 @@ impl<'a> Checker<'a> {
         side: &str,
         identifier: &'static str,
     ) {
-        if !self.registry.check_boolean_conditions {
+        if !self.settings.strict_rules.check_boolean_conditions {
             return;
         }
         if matches!(ty, Type::Mixed(_)) || is_definitely_bool(ty) {

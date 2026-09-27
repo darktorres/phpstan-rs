@@ -1,1 +1,2 @@
+[rules]
 check_strict_printf_placeholder_types = true

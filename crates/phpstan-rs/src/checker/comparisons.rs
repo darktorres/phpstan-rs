@@ -115,8 +115,7 @@ impl<'a> Checker<'a> {
                 if !is_finite(value) || dead.iter().any(|(t, _)| t == value) {
                     continue;
                 }
-                let another_value_of_needle =
-                    self.registry.accepts(&generalize(value), &needle).yes();
+                let another_value_of_needle = self.accepts(&generalize(value), &needle).yes();
                 dead.push((value.clone(), another_value_of_needle));
             }
         }

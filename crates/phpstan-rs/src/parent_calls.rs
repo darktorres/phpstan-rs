@@ -15,6 +15,45 @@
 
 use serde::Deserialize;
 
+/// `[rules.class_shape]`: which classes are closed, and which methods an
+/// override must call its parent's version of.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ClassShapeSettings {
+    /// Classes closed by default (`project::class_shape`).
+    pub check_closed_classes: bool,
+    pub parent_calls: Vec<ParentCallRule>,
+    /// Whether the built-in PHPUnit/Codeception hook requirements
+    /// (`default_rules`) apply.
+    pub default_parent_calls: bool,
+}
+
+impl Default for ClassShapeSettings {
+    fn default() -> Self {
+        ClassShapeSettings {
+            check_closed_classes: false,
+            parent_calls: Vec::new(),
+            default_parent_calls: true,
+        }
+    }
+}
+
+impl config::Section for ClassShapeSettings {
+    const PATH: &'static [&'static str] = &["rules", "class_shape"];
+}
+
+impl ClassShapeSettings {
+    /// The configured requirements, then the built-in ones unless turned
+    /// off.
+    pub fn rules(&self) -> Vec<ParentCallRule> {
+        let mut rules = self.parent_calls.clone();
+        if self.default_parent_calls {
+            rules.extend(default_rules());
+        }
+        rules
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Invocation {

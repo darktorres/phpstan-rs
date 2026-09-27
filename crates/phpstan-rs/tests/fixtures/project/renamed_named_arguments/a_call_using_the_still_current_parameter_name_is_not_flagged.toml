@@ -1,2 +1,4 @@
-check_renamed_named_arguments = true
 paths = ["a.php"]
+
+[rules]
+check_renamed_named_arguments = true

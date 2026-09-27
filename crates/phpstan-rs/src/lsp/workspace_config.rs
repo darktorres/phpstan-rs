@@ -6,6 +6,14 @@
 use std::path::{Path, PathBuf};
 
 use composer::vendor::VendorContext;
+use config::{ConfigFile, Schema};
+
+use crate::checker::settings::EngineSettings;
+use crate::ext::disallowed_calls::DisallowedCallsSettings;
+use crate::ext::sql::SqlSettings;
+use crate::project::ProjectSettings;
+use crate::project::session::SessionSettings;
+use crate::registry::settings::ReflectionSettings;
 
 /// Everything a workspace's `phpstan-rs.toml` (or its absence) resolves
 /// into, applied once per `Server::configure_from_workspace` call.
@@ -15,74 +23,8 @@ use composer::vendor::VendorContext;
 /// redacts (`SqlReflectionConfig`'s `password`) is never silently missed.
 #[derive(Clone, PartialEq)]
 pub(crate) struct ResolvedWorkspaceConfig {
-    pub(crate) configured_level: Option<u8>,
-    pub(crate) strict_mixed_arrays: bool,
-    pub(crate) check_uninitialized_properties: bool,
-    pub(crate) check_internal_usage: bool,
-    pub(crate) check_function_name_case: bool,
-    pub(crate) check_deprecated_usage: bool,
-    pub(crate) check_empty_method_bodies: bool,
-    pub(crate) check_missing_checked_exceptions: bool,
-    pub(crate) check_strict_printf_placeholder_types: bool,
-    pub(crate) check_too_wide_throw_type_in_protected_and_public_methods: bool,
-    pub(crate) check_too_wide_return_type_in_protected_and_public_methods: bool,
-    pub(crate) check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
-    pub(crate) check_method_throw_type_covariance: bool,
-    pub(crate) check_benevolent_union_types: bool,
-    pub(crate) check_missing_callable_signature: bool,
-    pub(crate) check_duplicate_function_declarations: bool,
-    pub(crate) check_duplicate_class_declarations: bool,
-    pub(crate) check_boolean_trap: bool,
-    pub(crate) check_array_key_cast: bool,
-    pub(crate) check_parent_constructor_call: bool,
-    pub(crate) check_promoted_property_suggestions: bool,
-    pub(crate) check_boolean_conditions: bool,
-    pub(crate) check_dynamic_properties: bool,
-    pub(crate) check_swapped_arguments: bool,
-    pub(crate) check_never_return_suggestions: bool,
-    pub(crate) check_switch_missing_default: bool,
-    pub(crate) check_throw_without_message: bool,
-    pub(crate) check_throw_base_class: bool,
-    pub(crate) check_exception_hygiene: bool,
-    pub(crate) check_current_time_dependence: bool,
-    pub(crate) check_psr3_exception_context: bool,
-    pub(crate) check_psr3_logging: bool,
-    pub(crate) psr3_context_key_pattern: Option<String>,
-    pub(crate) check_magic_numbers: bool,
-    pub(crate) magic_number_exemptions: Option<Vec<f64>>,
-    pub(crate) magic_numbers_ignore_numeric_strings: bool,
-    pub(crate) check_native_type_hints: bool,
-    pub(crate) check_implicit_array_creation: bool,
-    pub(crate) check_useless_casts: bool,
-    pub(crate) check_strict_array_filter: bool,
-    pub(crate) check_mixed_type_operands: bool,
-    pub(crate) check_comparable_types: bool,
-    pub(crate) check_arithmetic_operands: bool,
-    pub(crate) check_identity_vs_equals: bool,
-    pub(crate) check_loose_haystack_comparison: bool,
-    pub(crate) check_strict_function_calls: bool,
-    pub(crate) check_switch_case_types: bool,
-    pub(crate) check_loop_variable_overwrite: bool,
-    pub(crate) check_dynamic_static_calls: bool,
-    pub(crate) check_illegal_constructor_calls: bool,
-    pub(crate) check_enum_exhaustiveness: bool,
-    pub(crate) check_null_coercion: bool,
-    pub(crate) check_new_exception_discarded: bool,
-    pub(crate) check_risky_tests: bool,
-    pub(crate) php_versions: Option<types::PhpVersions>,
-    pub(crate) assertion_entries: Vec<crate::assertion_tables::AssertionEntry>,
-    pub(crate) class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
-    pub(crate) restricted_symbol_entries: Vec<crate::restricted_symbols::RestrictedSymbolEntry>,
-    pub(crate) dynamic_constant_names: Vec<(String, Option<String>)>,
-    pub(crate) doctrine_custom_function_entries:
-        Vec<crate::doctrine_functions::DoctrineCustomFunctionEntry>,
-    pub(crate) sql_reflection_config: Option<sql::config::SqlReflectionConfig>,
-    pub(crate) sql_reflection_schema: Option<sql::schema::SchemaCatalog>,
-    pub(crate) phpstan_api_check_enabled: bool,
-    /// The workspace's composer packages, and the root canonicalized, which
-    /// analysed paths resolve against.
-    pub(crate) packages: composer::PackageIndex,
-    pub(crate) absolute_root: PathBuf,
+    /// What the workspace's project is configured with.
+    pub(crate) settings: ProjectSettings,
     pub(crate) vendor_context: VendorContext,
     pub(crate) extra_context_dirs: Vec<PathBuf>,
     pub(crate) baseline: Option<crate::baseline::Baseline>,
@@ -107,32 +49,48 @@ pub(crate) struct WorkspaceContextPaths {
 }
 
 /// Resolves `root`'s own `phpstan-rs.toml` (or `config_path_override`,
-/// for a future explicit-path setting) into everything
-/// `Server::configure_from_workspace` needs to apply. Every failure mode
-/// (a malformed config file, an invalid `php_version`, an unreadable
-/// `sql_reflection.schema_file`) degrades to "as if unset" plus one
-/// `eprintln!`, never `std::process::exit` - unlike `check-project`,
-/// there is no process invocation here to fail out of, and a malformed
-/// config must not kill the editor session.
-pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> ResolvedWorkspaceConfig {
+/// for a future explicit-path setting), read through `schema`, into
+/// everything `Server::configure_from_workspace` needs to apply. Every
+/// failure mode (a malformed config file, an invalid `php_version`, an
+/// unreadable `ext.sql.reflection.schema_file`) degrades to "as if unset"
+/// plus one `eprintln!`, never `std::process::exit` - unlike
+/// `check-project`, there is no process invocation here to fail out of,
+/// and a malformed config must not kill the editor session.
+pub(crate) fn resolve(
+    root: &Path,
+    config_path_override: Option<&Path>,
+    schema: &Schema,
+) -> ResolvedWorkspaceConfig {
     let config_path = config_path_override
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.join("phpstan-rs.toml"));
-    let mut config = if config_path.is_file() {
-        match crate::config::Config::load(&config_path) {
+    let config = if config_path.is_file() {
+        match ConfigFile::load(&config_path, schema).and_then(|c| c.validate(schema).map(|()| c)) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("phpstan-rs lsp: {e}");
-                crate::config::Config::default()
+                ConfigFile::empty()
             }
         }
     } else {
-        crate::config::Config::default()
+        ConfigFile::empty()
     };
+    for warning in config.warnings() {
+        eprintln!("phpstan-rs lsp: {warning}");
+    }
+    fn section<S: config::Section>(config: &ConfigFile) -> S {
+        config.section::<S>().unwrap_or_else(|e| {
+            eprintln!("phpstan-rs lsp: {e}");
+            S::default()
+        })
+    }
+    let session = section::<SessionSettings>(&config);
+    let reflection = section::<ReflectionSettings>(&config);
+    let disallowed_calls = section::<DisallowedCallsSettings>(&config);
 
     let resolve_against_root = |p: PathBuf| root.join(p);
 
-    let php_version = match config.php_version {
+    let php_version = match reflection.php_version {
         Some(s) => match types::php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
             Err(e) => {
@@ -143,8 +101,8 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         None => None,
     };
 
-    let sql_reflection_config = config.sql_reflection;
-    let sql_reflection_schema = match sql_reflection_config
+    let sql_reflection = section::<SqlSettings>(&config).reflection;
+    let sql_schema = match sql_reflection
         .as_ref()
         .and_then(|c| c.schema_file.as_ref().map(|f| (f.clone(), c.driver)))
     {
@@ -161,23 +119,24 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         None => None,
     };
 
-    let mut restricted_symbol_entries = config.restricted_symbols.take().unwrap_or_default();
-    for preset in config.restricted_symbol_presets.take().unwrap_or_default() {
-        match crate::banned::restricted_symbol_preset(&preset) {
-            Ok(entries) => restricted_symbol_entries.extend(entries),
+    let mut restricted_symbols = disallowed_calls.restricted_symbols.clone();
+    for preset in &disallowed_calls.restricted_symbol_presets {
+        match crate::banned::restricted_symbol_preset(preset) {
+            Ok(entries) => restricted_symbols.extend(entries),
             Err(e) => eprintln!("phpstan-rs lsp: {e}"),
         }
     }
 
-    let baseline = config.baseline.map(resolve_against_root).and_then(|path| {
-        match crate::baseline::Baseline::load(&path) {
-            Ok(b) => Some(b.with_match_mode(
-                if config.baseline_match_identifier.unwrap_or(false) {
-                    crate::baseline::MatchMode::Identifier
-                } else {
-                    crate::baseline::MatchMode::Message
-                },
-            )),
+    let baseline = session
+        .baseline
+        .clone()
+        .map(resolve_against_root)
+        .and_then(|path| match crate::baseline::Baseline::load(&path) {
+            Ok(b) => Some(b.with_match_mode(if session.baseline_match_identifier {
+                crate::baseline::MatchMode::Identifier
+            } else {
+                crate::baseline::MatchMode::Message
+            })),
             Err(e) => {
                 eprintln!(
                     "phpstan-rs lsp: failed to read baseline {}: {e}",
@@ -185,10 +144,9 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
                 );
                 None
             }
-        }
-    });
+        });
 
-    let no_composer = config.no_composer.unwrap_or(false);
+    let no_composer = reflection.no_composer.unwrap_or(false);
     let absolute_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let package = if no_composer {
         composer::PackageContext::default()
@@ -196,128 +154,74 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         composer::PackageContext::load(&absolute_root, root)
     };
     let phpstan_api_check_enabled = package.requires_phpstan();
+    let extensions = crate::ext::ActiveExtensions::resolve(&config, &|p| {
+        crate::ext::installed_in(package.manifest.as_ref(), p)
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("phpstan-rs lsp: {e}");
+        crate::ext::ActiveExtensions::default()
+    });
     let php_versions = php_version
         .map(types::PhpVersions::exactly)
         .or_else(|| crate::project::session::declared_php_versions(&package));
     let packages = composer::PackageIndex::new(package.manifest.into_iter().collect());
     let vendor_context = package.vendor;
 
-    let analyze_paths: Vec<PathBuf> = config
+    let analyze_paths: Vec<PathBuf> = session
         .paths
+        .clone()
         .unwrap_or_default()
         .into_iter()
         .map(resolve_against_root)
         .collect();
 
-    let mut extra_context_dirs: Vec<PathBuf> = config
+    let mut extra_context_dirs: Vec<PathBuf> = reflection
         .scan_paths
-        .unwrap_or_default()
-        .into_iter()
+        .iter()
+        .cloned()
         .map(resolve_against_root)
         .collect();
     extra_context_dirs.extend(
-        config
+        reflection
             .stub_paths
-            .unwrap_or_default()
-            .into_iter()
+            .iter()
+            .cloned()
             .map(resolve_against_root),
     );
 
-    ResolvedWorkspaceConfig {
-        configured_level: config.level,
-        strict_mixed_arrays: config.strict_mixed_arrays.unwrap_or(false),
-        check_uninitialized_properties: config.check_uninitialized_properties.unwrap_or(false),
-        check_internal_usage: config.check_internal_usage.unwrap_or(false),
-        check_function_name_case: config.check_function_name_case.unwrap_or(false),
-        check_deprecated_usage: config.check_deprecated_usage.unwrap_or(false),
-        check_empty_method_bodies: config.check_empty_method_bodies.unwrap_or(false),
-        check_missing_checked_exceptions: config.check_missing_checked_exceptions.unwrap_or(false),
-        check_strict_printf_placeholder_types: config
-            .check_strict_printf_placeholder_types
-            .unwrap_or(false),
-        check_too_wide_throw_type_in_protected_and_public_methods: config
-            .check_too_wide_throw_type_in_protected_and_public_methods
-            .unwrap_or(false),
-        check_too_wide_return_type_in_protected_and_public_methods: config
-            .check_too_wide_return_type_in_protected_and_public_methods
-            .unwrap_or(false),
-        check_too_wide_by_ref_type_in_protected_and_public_methods: config
-            .check_too_wide_by_ref_type_in_protected_and_public_methods
-            .unwrap_or(false),
-        check_method_throw_type_covariance: config
-            .check_method_throw_type_covariance
-            .unwrap_or(false),
-        check_benevolent_union_types: config.check_benevolent_union_types.unwrap_or(false),
-        check_missing_callable_signature: config.check_missing_callable_signature.unwrap_or(false),
-        check_duplicate_function_declarations: config
-            .check_duplicate_function_declarations
-            .unwrap_or(false),
-        check_duplicate_class_declarations: config
-            .check_duplicate_class_declarations
-            .unwrap_or(false),
-        check_boolean_trap: config.check_boolean_trap.unwrap_or(false),
-        check_array_key_cast: config.check_array_key_cast.unwrap_or(false),
-        check_parent_constructor_call: config.check_parent_constructor_call.unwrap_or(false),
-        check_promoted_property_suggestions: config
-            .check_promoted_property_suggestions
-            .unwrap_or(false),
-        check_boolean_conditions: config.check_boolean_conditions.unwrap_or(false),
-        check_dynamic_properties: config.check_dynamic_properties.unwrap_or(false),
-        check_swapped_arguments: config.check_swapped_arguments.unwrap_or(false),
-        check_never_return_suggestions: config.check_never_return_suggestions.unwrap_or(false),
-        check_switch_missing_default: config.check_switch_missing_default.unwrap_or(false),
-        check_throw_without_message: config.check_throw_without_message.unwrap_or(false),
-        check_throw_base_class: config.check_throw_base_class.unwrap_or(false),
-        check_exception_hygiene: config.check_exception_hygiene.unwrap_or(false),
-        check_current_time_dependence: config.check_current_time_dependence.unwrap_or(false),
-        check_psr3_exception_context: config.check_psr3_exception_context.unwrap_or(false),
-        check_psr3_logging: config.check_psr3_logging.unwrap_or(false),
-        psr3_context_key_pattern: config.psr3_context_key_pattern.clone(),
-        check_magic_numbers: config.check_magic_numbers.unwrap_or(false),
-        magic_number_exemptions: config
-            .magic_number_exemptions
-            .as_ref()
-            .map(|numbers| numbers.iter().map(|n| n.value()).collect()),
-        magic_numbers_ignore_numeric_strings: config
-            .magic_numbers_ignore_numeric_strings
-            .unwrap_or(false),
-        check_native_type_hints: config.check_native_type_hints.unwrap_or(false),
-        check_implicit_array_creation: config.check_implicit_array_creation.unwrap_or(false),
-        check_useless_casts: config.check_useless_casts.unwrap_or(false),
-        check_strict_array_filter: config.check_strict_array_filter.unwrap_or(false),
-        check_mixed_type_operands: config.check_mixed_type_operands.unwrap_or(false),
-        check_comparable_types: config.check_comparable_types.unwrap_or(false),
-        check_arithmetic_operands: config.check_arithmetic_operands.unwrap_or(false),
-        check_identity_vs_equals: config.check_identity_vs_equals.unwrap_or(false),
-        check_loose_haystack_comparison: config.check_loose_haystack_comparison.unwrap_or(false),
-        check_strict_function_calls: config.check_strict_function_calls.unwrap_or(false),
-        check_switch_case_types: config.check_switch_case_types.unwrap_or(false),
-        check_loop_variable_overwrite: config.check_loop_variable_overwrite.unwrap_or(false),
-        check_dynamic_static_calls: config.check_dynamic_static_calls.unwrap_or(false),
-        check_illegal_constructor_calls: config.check_illegal_constructor_calls.unwrap_or(false),
-        check_enum_exhaustiveness: config.check_enum_exhaustiveness.unwrap_or(false),
-        check_null_coercion: config.check_null_coercion.unwrap_or(false),
-        check_new_exception_discarded: config.check_new_exception_discarded.unwrap_or(false),
-        check_risky_tests: config.check_risky_tests.unwrap_or(false),
-        php_versions,
-        assertion_entries: config.assertions.take().unwrap_or_default(),
-        class_argument_returns: config.class_argument_returns.take().unwrap_or_default(),
-        restricted_symbol_entries,
-        dynamic_constant_names: config
-            .dynamic_constant_names
-            .as_ref()
-            .map(crate::config::DynamicConstantNames::entries)
-            .unwrap_or_default(),
-        doctrine_custom_function_entries: config.doctrine_custom_functions.unwrap_or_default(),
-        sql_reflection_config,
-        sql_reflection_schema,
-        phpstan_api_check_enabled,
+    let settings = ProjectSettings {
+        working_dir: Some(root.to_path_buf()),
+        absolute_root: Some(absolute_root),
         packages,
-        absolute_root,
+        php_versions,
+        configured_level: session.level,
+        phpstan_api_check_enabled,
+        defer_inline_ignores: false,
+        retain_source: true,
+        rules: section(&config),
+        extensions,
+        extras: section(&config),
+        strict_rules: section(&config),
+        shipmonk: section(&config),
+        voku: section(&config),
+        slam: section(&config),
+        psr3: section(&config),
+        sidz: section(&config),
+        phpunit: section(&config),
+        restricted_symbols,
+        doctrine: section(&config),
+        dynamic_constant_names: section::<EngineSettings>(&config).dynamic_constant_entries(),
+        overlays: section(&config),
+        sql_reflection,
+        sql_schema,
+    };
+
+    ResolvedWorkspaceConfig {
+        settings,
         vendor_context,
         extra_context_dirs,
         baseline,
-        ignore_error_entries: config.ignore_errors.unwrap_or_default(),
+        ignore_error_entries: session.ignore_errors,
         analyze_paths,
     }
 }

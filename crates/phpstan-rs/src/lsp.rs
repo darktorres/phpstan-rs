@@ -46,8 +46,8 @@ use lsp_types::{
 };
 
 use crate::checker::Checker;
-use crate::project::Project;
 use crate::project::use_sites;
+use crate::project::{Project, ProjectSettings};
 use crate::registry::{FunctionSig, format_signature, param_label};
 use crate::{baseline, ignore_errors};
 use syntax::ast::ClassKind;
@@ -236,7 +236,7 @@ struct Server {
     root: Option<PathBuf>,
     baseline: Option<crate::baseline::Baseline>,
     ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
-    // The same `Option<u8>` `Project::set_configured_level` also
+    // The same `Option<u8>` `Project::apply_settings` also
     // received - kept separately here too since `Project`/`Registry`
     // only use it for type-strictness, not for filtering already-
     // produced diagnostics before they're published.
@@ -295,15 +295,20 @@ struct Server {
     inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<(Span, Arc<str>)>, Vec<(Span, Type)>)>,
     // The version `initialize` reports, the binary's own.
     version: String,
+    // Every section a workspace's `phpstan-rs.toml` may set.
+    config_schema: config::Schema,
 }
 
 impl Server {
-    fn new(version: &str) -> Self {
+    fn new(version: &str, config_schema: config::Schema) -> Self {
         let mut project = Project::new();
         // hover/definition's own text-split technique needs each file's
         // exact source text - see `Project::retain_source`'s own doc
         // comment for why this is opt-in and off elsewhere.
-        project.set_retain_source(true);
+        project.apply_settings(ProjectSettings {
+            retain_source: true,
+            ..ProjectSettings::default()
+        });
         Server {
             project,
             pool: crate::project::worker_pool(),
@@ -334,6 +339,7 @@ impl Server {
             file_versions: FxHashMap::default(),
             inlay_hint_cache: FxHashMap::default(),
             version: version.to_string(),
+            config_schema,
         }
     }
 
@@ -344,7 +350,11 @@ impl Server {
     /// context paths (`vendor`/`scan_paths`/`stub_paths`) `load_workspace`
     /// needs to load before walking `root` itself.
     fn configure_from_workspace(&mut self, root: &Path) -> workspace_config::WorkspaceContextPaths {
-        let resolved = workspace_config::resolve(root, self.config_path_override.as_deref());
+        let resolved = workspace_config::resolve(
+            root,
+            self.config_path_override.as_deref(),
+            &self.config_schema,
+        );
         self.apply_resolved_config(root, resolved)
     }
 
@@ -361,148 +371,12 @@ impl Server {
         resolved: workspace_config::ResolvedWorkspaceConfig,
     ) -> workspace_config::WorkspaceContextPaths {
         self.last_applied_config = Some(resolved.clone());
-        self.project
-            .set_strict_mixed_arrays(resolved.strict_mixed_arrays);
-        self.project
-            .set_check_uninitialized_properties(resolved.check_uninitialized_properties);
-        self.project
-            .set_check_internal_usage(resolved.check_internal_usage);
-        self.project
-            .set_check_function_name_case(resolved.check_function_name_case);
-        self.project
-            .set_check_deprecated_usage(resolved.check_deprecated_usage);
-        self.project
-            .set_check_empty_method_bodies(resolved.check_empty_method_bodies);
-        self.project
-            .set_check_missing_checked_exceptions(resolved.check_missing_checked_exceptions);
-        self.project.set_check_strict_printf_placeholder_types(
-            resolved.check_strict_printf_placeholder_types,
-        );
-        self.project
-            .set_check_too_wide_throw_type_in_protected_and_public_methods(
-                resolved.check_too_wide_throw_type_in_protected_and_public_methods,
-            );
-        self.project
-            .set_check_too_wide_return_type_in_protected_and_public_methods(
-                resolved.check_too_wide_return_type_in_protected_and_public_methods,
-            );
-        self.project
-            .set_check_too_wide_by_ref_type_in_protected_and_public_methods(
-                resolved.check_too_wide_by_ref_type_in_protected_and_public_methods,
-            );
-        self.project
-            .set_check_method_throw_type_covariance(resolved.check_method_throw_type_covariance);
-        self.project
-            .set_check_benevolent_union_types(resolved.check_benevolent_union_types);
-        self.project
-            .set_check_missing_callable_signature(resolved.check_missing_callable_signature);
-        self.project.set_check_duplicate_function_declarations(
-            resolved.check_duplicate_function_declarations,
-        );
-        self.project
-            .set_check_duplicate_class_declarations(resolved.check_duplicate_class_declarations);
-        self.project
-            .set_check_boolean_trap(resolved.check_boolean_trap);
-        self.project
-            .set_check_array_key_cast(resolved.check_array_key_cast);
-        self.project
-            .set_check_parent_constructor_call(resolved.check_parent_constructor_call);
-        self.project
-            .set_check_promoted_property_suggestions(resolved.check_promoted_property_suggestions);
-        self.project
-            .set_check_boolean_conditions(resolved.check_boolean_conditions);
-        self.project
-            .set_check_dynamic_properties(resolved.check_dynamic_properties);
-        self.project
-            .set_check_swapped_arguments(resolved.check_swapped_arguments);
-        self.project
-            .set_check_never_return_suggestions(resolved.check_never_return_suggestions);
-        self.project
-            .set_check_switch_missing_default(resolved.check_switch_missing_default);
-        self.project
-            .set_check_throw_without_message(resolved.check_throw_without_message);
-        self.project
-            .set_check_throw_base_class(resolved.check_throw_base_class);
-        self.project
-            .set_check_exception_hygiene(resolved.check_exception_hygiene);
-        self.project
-            .set_check_current_time_dependence(resolved.check_current_time_dependence);
-        self.project
-            .set_check_psr3_exception_context(resolved.check_psr3_exception_context);
-        self.project
-            .set_check_psr3_logging(resolved.check_psr3_logging);
-        self.project.set_psr3_context_key_pattern(
-            resolved
-                .psr3_context_key_pattern
-                .as_deref()
-                .and_then(|pattern| regex::Regex::new(pattern).ok()),
-        );
-        self.project
-            .set_check_magic_numbers(resolved.check_magic_numbers);
-        self.project.set_magic_number_options(
-            resolved.magic_number_exemptions.clone(),
-            resolved.magic_numbers_ignore_numeric_strings,
-        );
-        self.project
-            .set_check_native_type_hints(resolved.check_native_type_hints);
-        self.project
-            .set_check_implicit_array_creation(resolved.check_implicit_array_creation);
-        self.project
-            .set_check_useless_casts(resolved.check_useless_casts);
-        self.project
-            .set_check_strict_array_filter(resolved.check_strict_array_filter);
-        self.project
-            .set_check_mixed_type_operands(resolved.check_mixed_type_operands);
-        self.project
-            .set_check_comparable_types(resolved.check_comparable_types);
-        self.project
-            .set_check_arithmetic_operands(resolved.check_arithmetic_operands);
-        self.project
-            .set_check_identity_vs_equals(resolved.check_identity_vs_equals);
-        self.project
-            .set_check_loose_haystack_comparison(resolved.check_loose_haystack_comparison);
-        self.project
-            .set_check_strict_function_calls(resolved.check_strict_function_calls);
-        self.project
-            .set_check_switch_case_types(resolved.check_switch_case_types);
-        self.project
-            .set_check_loop_variable_overwrite(resolved.check_loop_variable_overwrite);
-        self.project
-            .set_check_dynamic_static_calls(resolved.check_dynamic_static_calls);
-        self.project
-            .set_check_illegal_constructor_calls(resolved.check_illegal_constructor_calls);
-        self.project
-            .set_check_enum_exhaustiveness(resolved.check_enum_exhaustiveness);
-        self.project
-            .set_check_null_coercion(resolved.check_null_coercion);
-        self.project
-            .set_check_new_exception_discarded(resolved.check_new_exception_discarded);
-        self.project
-            .set_check_risky_tests(resolved.check_risky_tests);
-        self.project.set_configured_level(resolved.configured_level);
-        self.project
-            .set_restricted_symbols(&resolved.restricted_symbol_entries);
-        self.project
-            .set_dynamic_constant_names(&resolved.dynamic_constant_names);
-        self.project
-            .set_doctrine_custom_functions(&resolved.doctrine_custom_function_entries);
-        self.project
-            .set_sql_reflection_config(resolved.sql_reflection_config);
-        self.project
-            .set_sql_reflection_schema(resolved.sql_reflection_schema);
-        self.project.set_php_versions(resolved.php_versions);
-        self.project
-            .set_assertion_tables(resolved.assertion_entries, resolved.class_argument_returns);
-        self.project
-            .set_phpstan_api_check_enabled(resolved.phpstan_api_check_enabled);
-        self.project.set_absolute_root(resolved.absolute_root);
-        self.project.set_packages(resolved.packages);
+        self.level_cutoff = resolved.settings.configured_level;
+        self.project.apply_settings(resolved.settings);
 
         self.root = Some(root.to_path_buf());
-        self.project.set_working_dir(root.to_path_buf());
         self.baseline = resolved.baseline;
         self.ignore_error_entries = resolved.ignore_error_entries;
-        self.level_cutoff = resolved.configured_level;
 
         workspace_config::WorkspaceContextPaths {
             vendor: resolved.vendor_context,
@@ -1134,7 +1008,9 @@ impl Server {
         is_static: bool,
         class: Option<&str>,
     ) -> Option<Type> {
-        let mut checker = Checker::new(self.project.registry()).with_sql(self.project.sql());
+        let mut checker = Checker::new(self.project.registry())
+            .with_sql(self.project.sql())
+            .with_settings(self.project.check_settings());
         checker.probe_span.set(Some(receiver_span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker.probe_hit.into_inner()
@@ -1158,7 +1034,9 @@ impl Server {
         is_static: bool,
         class: Option<&str>,
     ) -> Vec<Span> {
-        let mut checker = Checker::new(self.project.registry()).with_sql(self.project.sql());
+        let mut checker = Checker::new(self.project.registry())
+            .with_sql(self.project.sql())
+            .with_settings(self.project.check_settings());
         checker.probe_span.set(Some(span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker
@@ -2014,7 +1892,8 @@ impl Server {
                 root.join(candidate)
             }
         });
-        let resolved = workspace_config::resolve(&root, config_path_override.as_deref());
+        let resolved =
+            workspace_config::resolve(&root, config_path_override.as_deref(), &self.config_schema);
         if settings.enable == was_enabled && self.last_applied_config.as_ref() == Some(&resolved) {
             return Vec::new();
         }
@@ -2135,8 +2014,9 @@ fn queue_change(
 
 /// Returns the process exit code `main.rs` should exit with (per the LSP
 /// spec's `exit`-notification contract - see `run_loop`'s own doc
-/// comment). `version` is the binary's, reported on `initialize`.
-pub fn run(version: &str) -> i32 {
+/// comment). `version` is the binary's, reported on `initialize`;
+/// `config_schema` is every section a workspace config may set.
+pub fn run(version: &str, config_schema: config::Schema) -> i32 {
     // `bounded`, not `unbounded`: backpressures a fast/misbehaving
     // client (blocks the reader thread, and so the OS pipe) instead of
     // buffering unboundedly.
@@ -2154,7 +2034,7 @@ pub fn run(version: &str) -> i32 {
     // the exact same `Write` handle `run_loop`'s own dispatch uses,
     // matching `writer`'s own new `Arc<Mutex<W>>` shape everywhere else.
     let writer = Arc::new(Mutex::new(io::stdout()));
-    run_loop(&rx, writer, version)
+    run_loop(&rx, writer, version, config_schema)
     // Not joined: once run_loop exits the process is ending anyway; the
     // reader thread, possibly still blocked in a real Message::read on
     // stdin with nothing left reading its sender, is simply abandoned -
@@ -2197,8 +2077,9 @@ fn run_loop<W: Write + Send + 'static>(
     receiver: &Receiver<Message>,
     writer: Arc<Mutex<W>>,
     version: &str,
+    config_schema: config::Schema,
 ) -> i32 {
-    let server = Arc::new(Mutex::new(Server::new(version)));
+    let server = Arc::new(Mutex::new(Server::new(version, config_schema)));
     let debounce = Arc::new(DebounceHandle {
         queue: Mutex::new(debounce::DebounceQueue::new(DEFAULT_DEBOUNCE)),
         cv: Condvar::new(),

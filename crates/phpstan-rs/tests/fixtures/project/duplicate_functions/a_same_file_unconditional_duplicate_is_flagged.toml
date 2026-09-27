@@ -1,2 +1,4 @@
-check_duplicate_function_declarations = true
 paths = ["a.php"]
+
+[rules]
+check_duplicate_function_declarations = true

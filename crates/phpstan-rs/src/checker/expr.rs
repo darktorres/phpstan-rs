@@ -12,12 +12,12 @@ use crate::checker::{
 };
 use crate::pest_config;
 use crate::regex_groups;
-use crate::registry::{FunctionSig, Registry};
+use crate::registry::FunctionSig;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
-use types::{self, AccessoryKind, Shape, ShapeKey, Type};
+use types::{self, AccessoryKind, Relation, Shape, ShapeKey, Type};
 
 mod array_ops;
 mod builtin_calls;
@@ -129,7 +129,7 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// (`NeverType` itself overrides `canCallMethods` to unconditionally
 /// return "yes"). A level-9/10 `Mixed` receiver (`checkExplicitMixed`/
 /// `checkImplicitMixed`) is handled separately at each call site, via
-/// `Registry::strict_mixed_receiver_level`, not by this predicate.
+/// `Checker::strict_mixed_receiver_level`, not by this predicate.
 ///
 /// A `Union` is flagged the moment *any* **non-`Null`** member is
 /// confirmed closed; an `Intersection` only when *every* member is - the
@@ -312,29 +312,30 @@ impl<'a> Checker<'a> {
         // "take, not just read" reasoning as `is_bare_statement` above.
         let is_condition_position = std::mem::take(&mut self.in_condition_position);
         let is_exempt_last_condition = std::mem::take(&mut self.in_exempt_last_condition);
-        if self.registry.check_null_coercion
-            || self.registry.check_enum_exhaustiveness
-            || self.registry.check_identity_vs_equals
+        if self.settings.shipmonk.check_null_coercion
+            || self.settings.shipmonk.check_enum_exhaustiveness
+            || self.settings.extras.check_identity_vs_equals
         {
             self.check_strict_expression_idioms(e, locals);
         }
-        if self.registry.check_magic_numbers {
+        if self.settings.sidz.check_magic_numbers {
             self.check_magic_numbers_expression(e);
         }
-        if self.registry.check_current_time_dependence {
+        if self.settings.slam.check_current_time_dependence {
             self.check_current_time_expression(e, locals);
         }
-        if (self.registry.check_psr3_logging || self.registry.check_psr3_exception_context)
+        if (self.settings.psr3.check_psr3_logging
+            || self.settings.psr3.check_psr3_exception_context)
             && matches!(e.kind, ExprKind::MethodCall(..) | ExprKind::StaticCall(..))
         {
             self.check_psr3_call(e, locals);
         }
-        if self.registry.check_illegal_constructor_calls
-            || self.registry.check_dynamic_static_calls
-            || self.registry.check_arithmetic_operands
-            || self.registry.check_comparable_types
-            || self.registry.check_mixed_type_operands
-            || self.registry.check_implicit_array_creation
+        if self.settings.strict_rules.check_illegal_constructor_calls
+            || self.settings.strict_rules.check_dynamic_static_calls
+            || self.settings.strict_rules.check_arithmetic_operands
+            || self.settings.shipmonk.check_comparable_types
+            || self.settings.voku.check_mixed_type_operands
+            || self.settings.strict_rules.check_implicit_array_creation
         {
             self.check_strict_rules_expression(e, locals);
         }
@@ -470,7 +471,7 @@ impl<'a> Checker<'a> {
                 // same way `check_class_name_case`'s own `resolved`
                 // variable is, so the identical canonical-vs-written
                 // comparison applies unchanged.
-                if self.registry.check_function_name_case
+                if self.settings.rules.check_function_name_case
                     && let Some(resolved) = &resolved_name
                     && let Some((canonical, _)) = self.registry.lookup_function_with_name(resolved)
                     && canonical != resolved.as_ref()
@@ -544,7 +545,8 @@ impl<'a> Checker<'a> {
                 // same restriction the bind/bindTo case has -
                 // `it('...', $variableHoldingAClosure)` falls through to
                 // plain check_expr, unrebound.
-                let is_this_binding_call = matches!(&callee.kind, ExprKind::Name(name) if pest_config::is_this_binding_call(name));
+                let is_this_binding_call = self.settings.pest
+                    && matches!(&callee.kind, ExprKind::Name(name) if pest_config::is_this_binding_call(name));
                 let pest_call_name: Option<&str> = match &callee.kind {
                     ExprKind::Name(name) if is_this_binding_call => Some(name.as_ref()),
                     _ => None,
@@ -689,7 +691,7 @@ impl<'a> Checker<'a> {
                             this_ty,
                             scope_class,
                         );
-                        if self.registry.check_risky_tests
+                        if self.settings.phpunit.check_risky_tests
                             && let Some(name) = pest_call_name
                         {
                             self.check_pest_risky_test(name, unwrap_grouping(&a.value), e.span);
@@ -817,7 +819,7 @@ impl<'a> Checker<'a> {
                         self.check_internal_function_call(name, sig, e.span);
                         self.check_restricted_function_call(name, args, locals, e.span);
                         self.check_deprecated_function_call(name, sig, e.span);
-                        if self.registry.check_current_time_dependence {
+                        if self.settings.slam.check_current_time_dependence {
                             self.check_current_time_call(
                                 &name.to_ascii_lowercase(),
                                 args,
@@ -829,7 +831,7 @@ impl<'a> Checker<'a> {
                         match name.as_ref() {
                             "array_filter" => {
                                 self.check_array_filter_no_op(args, locals, e.span);
-                                if self.registry.check_strict_array_filter {
+                                if self.settings.strict_rules.check_strict_array_filter {
                                     self.check_strict_array_filter(sig, args, locals, e.span);
                                 }
                             }
@@ -839,12 +841,12 @@ impl<'a> Checker<'a> {
                             }
                             "in_array" | "array_search" | "array_keys" | "base64_decode"
                             | "iterator_to_array"
-                                if self.registry.check_strict_function_calls =>
+                                if self.settings.strict_rules.check_strict_function_calls =>
                             {
                                 self.check_strict_function_call(name, sig, args, locals, e.span)
                             }
                             "in_array" | "array_search" | "array_keys"
-                                if self.registry.check_loose_haystack_comparison =>
+                                if self.settings.extras.check_loose_haystack_comparison =>
                             {
                                 self.check_loose_haystack_comparison(
                                     name, sig, args, locals, e.span,
@@ -1265,7 +1267,7 @@ impl<'a> Checker<'a> {
                     }
                     return Type::Mixed(false);
                 }
-                if let Some(level) = self.registry.strict_mixed_receiver_level(&nonobject_ty) {
+                if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
                     self.report(
                         format!("Cannot call method {method}() on mixed."),
                         e.span,
@@ -1813,7 +1815,7 @@ impl<'a> Checker<'a> {
                 if cast.kind() == CastKind::String {
                     self.check_implicit_tostring_usage(&inner_ty, e.span);
                 }
-                if self.registry.check_useless_casts && cast.kind() != CastKind::Void {
+                if self.settings.strict_rules.check_useless_casts && cast.kind() != CastKind::Void {
                     self.check_useless_cast(&cast_result_type(cast.kind()), &inner_ty, e.span);
                 }
                 self.cast_type(cast.kind(), &inner_ty)
@@ -2926,8 +2928,8 @@ impl<'a> Checker<'a> {
                 // literal `$this` expression, unlike the real
                 // `pestphp/pest-plugin-phpstan` extension, which resolves
                 // by the base's type.
-                let is_pest_this =
-                    matches!(&base.kind, ExprKind::Variable(name) if **name == *"this");
+                let is_pest_this = self.settings.pest
+                    && matches!(&base.kind, ExprKind::Variable(name) if **name == *"this");
                 // `stdClass` (a real, registered, zero-property class in
                 // the vendored stubs) is PHP's canonical "arbitrary
                 // property bag" - real PHP (and real PHPStan) never flag
@@ -2964,8 +2966,7 @@ impl<'a> Checker<'a> {
                         0,
                         "property.nonObject",
                     );
-                } else if let Some(level) = self.registry.strict_mixed_receiver_level(&nonobject_ty)
-                {
+                } else if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
                     self.report(
                         format!("Cannot access property ${prop} on mixed."),
                         e.span,
@@ -4042,7 +4043,7 @@ impl<'a> Checker<'a> {
                     // `rule_level_accepts` already accepts a
                     // `Mixed` body type unconditionally below real
                     // PHPStan's own level 9/10.
-                    if !self.registry.rule_level_accepts(&expected, &body_ty).yes() {
+                    if !self.rule_level_accepts(&expected, &body_ty).yes() {
                         self.report(
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             body.span,
@@ -4775,9 +4776,9 @@ impl<'a> Checker<'a> {
                     .lookup_const_with_owner(&class, member)
                     .map(|(owner, cs)| {
                         let ty = self
-                            .registry
-                            .dynamic_class_constant_type(&owner, member, &cs.ty)
-                            .unwrap_or_else(|| cs.ty.clone());
+                            .settings
+                            .constants
+                            .class_constant_type(&owner, member, &cs.ty);
                         self.resolve_pseudo(&ty, &class)
                     })
                     .unwrap_or(Type::Mixed(false))
@@ -4898,7 +4899,7 @@ impl<'a> Checker<'a> {
             return inferred;
         };
         let declared = self.resolve_type_hint(Some(hint));
-        if inferred != Type::Mixed(false) && self.registry.accepts(&declared, &inferred).yes() {
+        if inferred != Type::Mixed(false) && self.accepts(&declared, &inferred).yes() {
             inferred
         } else {
             declared
@@ -6050,7 +6051,7 @@ impl<'a> Checker<'a> {
             return_type: Box::new(match (return_type, inferred_return) {
                 (None, Some(inferred)) => inferred,
                 (Some(hint), Some(inferred)) => {
-                    intersect_but_not_never(self.registry, &resolve(Some(hint)), inferred)
+                    intersect_but_not_never(&self.relation(), &resolve(Some(hint)), inferred)
                 }
                 (hint, None) => resolve(hint),
             }),
@@ -6495,9 +6496,9 @@ impl<'a> Checker<'a> {
         } else {
             let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
             let const_ty = const_with_owner.as_ref().map(|(owner, cs)| {
-                self.registry
-                    .dynamic_class_constant_type(owner, member, &cs.ty)
-                    .unwrap_or_else(|| cs.ty.clone())
+                self.settings
+                    .constants
+                    .class_constant_type(owner, member, &cs.ty)
             });
             if const_ty.is_none() {
                 self.report(
@@ -6606,15 +6607,11 @@ impl<'a> Checker<'a> {
         let unhandled_match_error = Type::Object("UnhandledMatchError".into(), Vec::new());
         self.current_catch_types
             .iter()
-            .any(|caught| self.registry.accepts(caught, &unhandled_match_error).yes())
+            .any(|caught| self.accepts(caught, &unhandled_match_error).yes())
             || self
                 .current_declared_throws_type
                 .as_ref()
-                .is_some_and(|declared| {
-                    self.registry
-                        .accepts(declared, &unhandled_match_error)
-                        .yes()
-                })
+                .is_some_and(|declared| self.accepts(declared, &unhandled_match_error).yes())
     }
 
     /// `match(true)`'s own "is this condition provably true" oracle for
@@ -6751,7 +6748,7 @@ pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
 /// (a fall-off-the-end `void` under `: array`) leaves the native type
 /// as-is, and a nullable native type keeps its `null`. An `int` returned
 /// under `: float` is coerced at runtime, so it reads as the `float`.
-fn intersect_but_not_never(registry: &Registry, native: &Type, inferred: Type) -> Type {
+fn intersect_but_not_never(relation: &Relation, native: &Type, inferred: Type) -> Type {
     let native_members: Vec<&Type> = match native {
         Type::Union(ms) => ms.iter().collect(),
         other => vec![other],
@@ -6769,7 +6766,7 @@ fn intersect_but_not_never(registry: &Registry, native: &Type, inferred: Type) -
         let fits = !matches!(m, Type::Void)
             && native_members
                 .iter()
-                .any(|n| !(int_like && matches!(n, Type::Float)) && registry.accepts(n, &m).yes());
+                .any(|n| !(int_like && matches!(n, Type::Float)) && relation.accepts(n, &m).yes());
         if fits {
             kept.push(m);
             continue;
@@ -6777,7 +6774,7 @@ fn intersect_but_not_never(registry: &Registry, native: &Type, inferred: Type) -
         kept.extend(
             native_members
                 .iter()
-                .filter(|n| !matches!(n, Type::Null) && registry.accepts(&m, n).yes())
+                .filter(|n| !matches!(n, Type::Null) && relation.accepts(&m, n).yes())
                 .map(|n| (*n).clone()),
         );
     }

@@ -1,2 +1,4 @@
-check_promoted_property_suggestions = true
 php_version = "8.0"
+
+[ext.extras]
+check_promoted_property_suggestions = true

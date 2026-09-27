@@ -774,7 +774,7 @@ impl<'a> Checker<'a> {
                     self.or_chain_narrowing_target(cond, locals)
                 {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
-                    locals.insert(key, narrow_type_to(self.registry, &current, &target_ty));
+                    locals.insert(key, narrow_type_to(&self.relation(), &current, &target_ty));
                 }
             }
             // `if ((! is_int($a) && ! is_string($a)) || (!
@@ -801,7 +801,7 @@ impl<'a> Checker<'a> {
                     self.and_chain_narrowing_target(cond, locals)
                 {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
-                    locals.insert(key, narrow_type_to(self.registry, &current, &target_ty));
+                    locals.insert(key, narrow_type_to(&self.relation(), &current, &target_ty));
                 }
             }
             // Deliberately `===`/`!==` only, not `==`/`!=` - a loose
@@ -1035,7 +1035,7 @@ impl<'a> Checker<'a> {
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         let narrowed = if branch_true {
-                            narrow_type_to(self.registry, &current, &target_ty)
+                            narrow_type_to(&self.relation(), &current, &target_ty)
                         } else {
                             narrow_type_excluding(&current, &target_ty)
                         };
@@ -1056,7 +1056,7 @@ impl<'a> Checker<'a> {
                 {
                     let current = self.current_narrowed_type(&needle.value, &key, locals);
                     let narrowed = if branch_true {
-                        Some(narrow_type_to(self.registry, &current, &target_ty))
+                        Some(narrow_type_to(&self.relation(), &current, &target_ty))
                     } else {
                         excluded_ty.map(|excluded| narrow_type_excluding(&current, &excluded))
                     };
@@ -1611,7 +1611,7 @@ impl<'a> Checker<'a> {
             return;
         };
         let negated_prefix = if info.negated { "negated " } else { "" };
-        let is_super = self.registry.accepts(&info.ty, &param.ty).yes();
+        let is_super = self.accepts(&info.ty, &param.ty).yes();
         let is_disjoint = types_definitely_disjoint(&info.ty, &param.ty);
         let (impossible, already_narrowed) = if info.negated {
             (is_super, is_disjoint)

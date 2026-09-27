@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
     /// somewhere, never a property that check itself already flagged as
     /// globally uninitialized.
     pub(crate) fn check_premature_property_access(&mut self, fqn: &str, c: &ClassDecl) {
-        if !self.registry.check_uninitialized_properties {
+        if !self.settings.rules.check_uninitialized_properties {
             return;
         }
         if c.kind != ClassKind::Class || c.is_abstract {

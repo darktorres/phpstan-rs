@@ -1,6 +1,6 @@
 paths = ["c.php"]
 
-[[architecture]]
+[[rules.architecture]]
 excluding = []
 should_not_depend_on = []
 should_depend_on = []
@@ -12,23 +12,23 @@ should_be_final = true
 should_apply_attribute = 'App\Http\Route'
 should_have_only_one_public_method = true
 
-[[architecture.classes]]
+[[rules.architecture.classes]]
 classname = "/Controller$/"
 excluding = []
 
-[[architecture.should_not_extend]]
+[[rules.architecture.should_not_extend]]
 is_abstract = true
 excluding = []
 
-[[architecture.should_implement]]
+[[rules.architecture.should_implement]]
 classname = 'App\Http\Action'
 excluding = []
 
-[[architecture.should_not_use_trait]]
+[[rules.architecture.should_not_use_trait]]
 is_trait = true
 excluding = []
 
-[[architecture]]
+[[rules.architecture]]
 should_not_depend_on = []
 should_depend_on = []
 should_not_construct = []
@@ -40,10 +40,10 @@ should_use_trait = []
 should_not_use_trait = []
 should_be_named = '/^App\\Http\\[A-Z]\w+$/'
 
-[[architecture.classes]]
+[[rules.architecture.classes]]
 is_attribute = true
 excluding = []
 
-[[architecture.excluding]]
+[[rules.architecture.excluding]]
 namespace = 'App\Other'
 excluding = []

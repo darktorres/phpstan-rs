@@ -372,7 +372,10 @@ fn a_failed_reparse_keeps_the_files_last_good_ast_and_registry_entries() {
     // member-completion probe) would see nothing at all until the file
     // parsed cleanly again.
     let mut project = Project::new();
-    project.set_retain_source(true);
+    project.apply_settings(ProjectSettings {
+        retain_source: true,
+        ..ProjectSettings::default()
+    });
     let path = PathBuf::from("a.php");
     project
         .load_file(path.clone(), "<?php function helperA(): int { return 1; }")

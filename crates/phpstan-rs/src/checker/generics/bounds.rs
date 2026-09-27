@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
                         if *checked_arg != Type::Mixed(false)
                             && self.is_type_fully_known(checked_arg)
                             && self.is_type_fully_known(&bound)
-                            && !self.registry.accepts(&bound, checked_arg).yes()
+                            && !self.accepts(&bound, checked_arg).yes()
                         {
                             let kind = class_kind_identifier(&info.kind);
                             self.report(format!(
@@ -602,7 +602,7 @@ impl<'a> Checker<'a> {
                     if let Some(bound) = bounds.get(name)
                         && self.is_type_fully_known(default)
                         && self.is_type_fully_known(bound)
-                        && !self.registry.accepts(bound, default).yes()
+                        && !self.accepts(bound, default).yes()
                     {
                         self.report(
                             subject.default_out_of_bounds(name, default, bound),

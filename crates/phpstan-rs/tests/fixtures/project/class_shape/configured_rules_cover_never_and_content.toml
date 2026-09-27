@@ -1,13 +1,15 @@
-check_closed_classes = false
-default_parent_calls = false
 paths = ["a.php"]
 
-[[parent_calls]]
+[rules.class_shape]
+check_closed_classes = false
+default_parent_calls = false
+
+[[rules.class_shape.parent_calls]]
 method = "boot"
 invocation = "any"
 has_content = "yes"
 
-[[parent_calls]]
+[[rules.class_shape.parent_calls]]
 class = "P"
 method = "init"
 invocation = "never"

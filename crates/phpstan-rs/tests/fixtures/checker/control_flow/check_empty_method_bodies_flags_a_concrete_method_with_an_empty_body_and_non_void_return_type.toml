@@ -1,1 +1,2 @@
+[ext.extras]
 check_empty_method_bodies = true

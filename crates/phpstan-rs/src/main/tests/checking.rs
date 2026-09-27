@@ -63,6 +63,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         return_case_refs: Vec::new(),
         return_explicit_mixed_hint: false,
         no_discard: false,
+        must_use_result: false,
         visibility: syntax::ast::Visibility::Public,
         is_internal: false,
         is_api: false,

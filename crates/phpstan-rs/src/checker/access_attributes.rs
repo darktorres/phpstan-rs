@@ -4,7 +4,8 @@
 //! code may), `RestrictTraitTo` (who may use a trait), and
 //! `InjectableVersion` (constructors and `CheckInjectableVersion` methods
 //! type-hint the injectable version, never a subtype of it). A class may
-//! always use its own members.
+//! always use its own members. Enforced while the language-extensions
+//! extension is active.
 
 use crate::checker::Checker;
 use crate::registry::access_attributes::AccessAttributes;
@@ -82,6 +83,9 @@ impl<'a> Checker<'a> {
         is_public: bool,
         span: Span,
     ) {
+        if !self.settings.language_extensions {
+            return;
+        }
         let Some(info) = self.registry.classes.get(owner) else {
             return;
         };
@@ -165,6 +169,9 @@ impl<'a> Checker<'a> {
     /// in its constructor's (and `CheckInjectableVersion` methods')
     /// parameter types.
     pub(crate) fn check_class_access_attributes(&mut self, fqn: &str, c: &ClassDecl) {
+        if !self.settings.language_extensions {
+            return;
+        }
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };

@@ -121,6 +121,7 @@ pub(crate) fn method_tag_sig(
         return_case_refs,
         return_explicit_mixed_hint: false,
         no_discard: false,
+        must_use_result: false,
         visibility: Visibility::Public,
         is_internal: false,
         is_api: false,

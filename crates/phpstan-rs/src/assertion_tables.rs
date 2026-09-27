@@ -28,6 +28,29 @@
 
 use serde::Deserialize;
 
+/// Top-level keys: `[[assertions]]` and `[[class_argument_returns]]`.
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct OverlaySettings {
+    pub assertions: Vec<AssertionEntry>,
+    pub class_argument_returns: Vec<ClassArgumentReturn>,
+}
+
+impl config::Section for OverlaySettings {
+    const PATH: &'static [&'static str] = &[];
+}
+
+impl OverlaySettings {
+    /// Whether every entry is well-formed.
+    pub fn validate(&self) -> Result<(), String> {
+        self.assertions
+            .iter()
+            .map(|e| e.validate())
+            .chain(self.class_argument_returns.iter().map(|e| e.validate()))
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AssertWhen {

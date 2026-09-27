@@ -57,7 +57,7 @@ use types::{AccessoryKind, Type, is_numeric_string_literal};
 impl<'a> Checker<'a> {
     /// The expression-level ports, before `e` itself is checked.
     pub(crate) fn check_strict_rules_expression(&mut self, e: &Expr, locals: &Locals) {
-        if self.registry.check_dynamic_static_calls {
+        if self.settings.strict_rules.check_dynamic_static_calls {
             let call = match &e.kind {
                 ExprKind::FirstClassCallable(inner) => inner,
                 _ => e,
@@ -74,10 +74,10 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if self.registry.check_arithmetic_operands {
+        if self.settings.strict_rules.check_arithmetic_operands {
             self.check_arithmetic_operands(e, locals);
         }
-        if self.registry.check_comparable_types
+        if self.settings.shipmonk.check_comparable_types
             && let ExprKind::Binary(
                 op @ (BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq | BinOp::Spaceship),
                 l,
@@ -86,7 +86,7 @@ impl<'a> Checker<'a> {
         {
             self.check_comparable_types(op, l, r, e.span, locals);
         }
-        if self.registry.check_mixed_type_operands && self.current_trait.is_none() {
+        if self.settings.voku.check_mixed_type_operands && self.current_trait.is_none() {
             match &e.kind {
                 ExprKind::Binary(op, l, r)
                     if !matches!(
@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        if self.registry.check_implicit_array_creation
+        if self.settings.strict_rules.check_implicit_array_creation
             && let ExprKind::Assign(target, _) = &e.kind
             && matches!(target.kind, ExprKind::Index(..))
         {
@@ -135,7 +135,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if self.registry.check_illegal_constructor_calls {
+        if self.settings.strict_rules.check_illegal_constructor_calls {
             match &e.kind {
                 ExprKind::MethodCall(_, method, _, _)
                     if method.eq_ignore_ascii_case("__construct") =>
@@ -540,7 +540,7 @@ impl<'a> Checker<'a> {
     /// Replaces the current function's assignment sites with `body`'s,
     /// returning the previous ones to restore.
     pub(crate) fn enter_assigned_variables(&mut self, body: &[Stmt]) -> Vec<AssignedVariable> {
-        let entered = if self.registry.check_implicit_array_creation {
+        let entered = if self.settings.strict_rules.check_implicit_array_creation {
             assigned_variables(body)
         } else {
             Vec::new()
@@ -607,7 +607,7 @@ impl<'a> Checker<'a> {
 
     /// The statement-level ports, before `stmt` itself is checked.
     pub(crate) fn check_strict_rules_statement(&mut self, stmt: &Stmt, locals: &Locals) {
-        if self.registry.check_loop_variable_overwrite {
+        if self.settings.strict_rules.check_loop_variable_overwrite {
             let mut overwritten: Vec<(syntax::token::Span, &str, String)> = Vec::new();
             match &stmt.kind {
                 StmtKind::Foreach { key, value, .. } => {
@@ -645,7 +645,7 @@ impl<'a> Checker<'a> {
                 self.report(message, span, 0, id);
             }
         }
-        if self.registry.check_switch_case_types
+        if self.settings.strict_rules.check_switch_case_types
             && let StmtKind::Switch { subject, cases } = &stmt.kind
         {
             let subject_ty = self.infer_expr(subject, locals);

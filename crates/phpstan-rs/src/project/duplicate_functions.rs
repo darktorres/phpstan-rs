@@ -9,7 +9,7 @@
 //! (`project::duplicate_classes`'s own doc comment) - and never runs
 //! against ordinary scanned project files at all, only a project's own
 //! configured `stubFiles:` list in an isolated pass. This project's
-//! version instead gates behind `Registry::check_duplicate_function_
+//! version instead gates behind `RulesSettings::check_duplicate_function_
 //! declarations` (opt-in, default `false`), following
 //! `check_duplicate_class_declarations`'s own precedent: two
 //! unconditionally-declared same-named top-level functions in separate

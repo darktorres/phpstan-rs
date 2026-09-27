@@ -1,4 +1,3 @@
-
-[sql_reflection]
+[ext.sql.reflection]
 driver = "mysql"
 schema_file = "result_row_count_and_column_count_are_unaffected_by_this_phase.sql"

@@ -1,7 +1,7 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 kind = "function"
 message = "no bare calls"
 name = "f"
 
-[[restricted_symbols.allow_params_anywhere_any_value]]
+[[ext.disallowed-calls.restricted_symbols.allow_params_anywhere_any_value]]
 position = 1

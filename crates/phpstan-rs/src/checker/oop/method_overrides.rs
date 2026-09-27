@@ -67,7 +67,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Mirrors real PHPStan's `MethodThrowTypeCovarianceRule` - opt-in
-    /// (`Registry::check_method_throw_type_covariance`, see its doc
+    /// (`RulesSettings::check_method_throw_type_covariance`, see its doc
     /// comment for why this project ships it opt-in unlike real
     /// PHPStan's unconditional registration). A pure declaration-vs-
     /// declaration comparison: this method's `@throws` (or, absent one,
@@ -86,7 +86,7 @@ impl<'a> Checker<'a> {
         own_visibility: &Visibility,
         span: Span,
     ) {
-        if !self.registry.check_method_throw_type_covariance {
+        if !self.settings.rules.check_method_throw_type_covariance {
             return;
         }
         if method_name == "__construct" || *own_visibility == Visibility::Private {
@@ -160,7 +160,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             }
-            if self.registry.accepts(&parent_throws, &own_throws).yes() {
+            if self.accepts(&parent_throws, &own_throws).yes() {
                 continue;
             }
             self.report(format!(
@@ -589,7 +589,7 @@ impl<'a> Checker<'a> {
                 fqn
             };
             let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty_native, ancestor_pseudo_owner);
-            if !self.registry.accepts(&own_ty, &ancestor_ty).yes() {
+            if !self.accepts(&own_ty, &ancestor_ty).yes() {
                 self.report(format!(
                         "{fqn}::{method_name}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
                         i + 1,
@@ -638,7 +638,6 @@ impl<'a> Checker<'a> {
                 || ancestor_return_uses_static(ancestor_ty)
                 || (!matches!(own_ty, Type::Mixed(false))
                     && self
-                        .registry
                         .accepts(ancestor_ty, &self.resolve_pseudo(own_ty, fqn))
                         .yes());
             if !will_change && !compatible {
@@ -673,7 +672,6 @@ impl<'a> Checker<'a> {
             && ancestor_sig.return_type_native != Type::Mixed(false)
             && !ancestor_return_uses_static(&ancestor_sig.return_type_native)
             && !self
-                .registry
                 .accepts(
                     &self.resolve_pseudo(&ancestor_sig.return_type_native, ancestor_pseudo_owner),
                     &self.resolve_pseudo(&own_sig.return_type_native, fqn),

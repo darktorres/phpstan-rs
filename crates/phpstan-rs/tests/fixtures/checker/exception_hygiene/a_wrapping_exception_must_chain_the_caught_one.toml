@@ -1,1 +1,2 @@
+[ext.extras]
 check_exception_hygiene = true

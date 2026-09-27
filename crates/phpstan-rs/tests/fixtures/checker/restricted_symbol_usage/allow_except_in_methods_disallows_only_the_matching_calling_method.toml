@@ -1,4 +1,4 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 allow_except_in_methods = ["Controller::handleRequest()"]
 class = "Controller"
 kind = "method"

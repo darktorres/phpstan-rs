@@ -106,7 +106,12 @@ fn initialize_loads_the_workspace_and_returns_server_capabilities() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let responses = decode_all(&writer.lock().unwrap());
     assert_eq!(
@@ -151,7 +156,12 @@ fn initialize_tolerates_unrecognized_initialization_options() {
     pump_messages(&mut reader, &tx);
     drop(tx);
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let responses = decode_all(&writer.lock().unwrap());
     assert_eq!(
@@ -181,7 +191,12 @@ fn initialize_with_capabilities(capabilities: Value) -> Vec<Value> {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
     decode_all(&writer.lock().unwrap())
 }
 
@@ -257,7 +272,12 @@ fn initialize_response_does_not_depend_on_initialized_ever_arriving() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     assert!(
@@ -294,7 +314,12 @@ fn initialized_reports_progress_when_the_client_supplies_a_token() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     let progress: Vec<&Value> = messages
@@ -327,7 +352,12 @@ fn no_progress_token_means_no_progress_notifications() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     assert!(!messages.iter().any(|m| m["method"] == "$/progress"));
@@ -345,7 +375,12 @@ fn initialized_is_a_noop_with_no_workspace_root() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let responses = decode_all(&writer.lock().unwrap());
     assert_eq!(responses.len(), 1, "got: {responses:?}");
@@ -372,7 +407,12 @@ fn a_second_initialized_notification_is_a_noop() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let responses = decode_all(&writer.lock().unwrap());
     assert_eq!(responses.len(), 1, "got: {responses:?}");
@@ -402,7 +442,12 @@ fn initialize_logs_a_workspace_file_that_fails_to_parse() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     let response = messages
@@ -467,7 +512,12 @@ fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     let b_uri = path_to_uri(&b_path).to_string();
@@ -603,7 +653,12 @@ fn an_unrecognized_method_gets_a_method_not_found_error_response() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let responses = decode_all(&writer.lock().unwrap());
     assert_eq!(responses.len(), 1);
@@ -624,7 +679,12 @@ fn shutdown_returns_a_null_result_and_exit_ends_the_loop() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    let exit_code = run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    let exit_code = run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
     assert_eq!(exit_code, 0, "shutdown before exit must exit cleanly");
 
     let responses = decode_all(&writer.lock().unwrap());
@@ -641,7 +701,12 @@ fn exit_without_a_prior_shutdown_exits_with_code_1() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    let exit_code = run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    let exit_code = run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
     assert_eq!(
         exit_code, 1,
         "exit with no prior shutdown is a protocol violation"
@@ -659,7 +724,12 @@ fn eof_after_shutdown_without_exit_still_exits_cleanly() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    let exit_code = run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    let exit_code = run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
     assert_eq!(exit_code, 0);
 }
 
@@ -673,7 +743,12 @@ fn a_transport_read_failure_ends_the_loop_cleanly_too() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    let exit_code = run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    let exit_code = run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
     assert_eq!(
         exit_code, 0,
         "a genuine transport failure is not judged by the shutdown contract either"
@@ -693,7 +768,12 @@ fn run_loop_wakes_on_an_idle_timeout_instead_of_blocking_forever() {
     let writer = Arc::new(Mutex::new(Vec::new()));
     let worker_writer = Arc::clone(&writer);
     let handle = std::thread::spawn(move || {
-        run_loop(&rx, worker_writer, env!("CARGO_PKG_VERSION"));
+        run_loop(
+            &rx,
+            worker_writer,
+            env!("CARGO_PKG_VERSION"),
+            crate::app::config_schema(),
+        );
     });
 
     std::thread::sleep(RUN_LOOP_TICK * 3);
@@ -732,7 +812,12 @@ fn eof_with_no_exit_message_ends_the_loop_cleanly() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    let exit_code = run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    let exit_code = run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
     assert_eq!(
         exit_code, 0,
         "EOF without exit is not judged by the shutdown contract"
@@ -840,7 +925,12 @@ fn a_malformed_message_body_is_skipped_without_terminating_the_session() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     // The malformed body is the very first thing in the stream, skipped
     // by `pump_messages` before it ever reads the `initialize` request
@@ -899,7 +989,12 @@ fn a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     assert_eq!(
@@ -931,7 +1026,7 @@ fn a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session() {
 
 #[test]
 fn send_request_allocates_sequential_ids_and_the_right_method() {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     let Message::Request(req1) = server.send_request::<lsp_types::request::WorkDoneProgressCreate>(
         lsp_types::WorkDoneProgressCreateParams {
             token: lsp_types::NumberOrString::Number(1),
@@ -953,7 +1048,7 @@ fn send_request_allocates_sequential_ids_and_the_right_method() {
 
 #[test]
 fn handle_request_registers_and_clears_its_own_pending_entry_on_a_normal_response() {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     let mut writer = Vec::new();
     handle_request(
         &mut server,
@@ -968,7 +1063,7 @@ fn handle_request_registers_and_clears_its_own_pending_entry_on_a_normal_respons
 
 #[test]
 fn a_cancel_notification_sets_the_flag_and_answers_with_request_canceled() {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     let mut writer = Vec::new();
     let id = RequestId::from(1);
     let flag = Arc::new(AtomicBool::new(false));
@@ -993,7 +1088,7 @@ fn a_cancel_notification_sets_the_flag_and_answers_with_request_canceled() {
 
 #[test]
 fn a_cancel_notification_matches_a_string_request_id_too() {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     let mut writer = Vec::new();
     let id = RequestId::from("abc".to_string());
     let flag = Arc::new(AtomicBool::new(false));
@@ -1017,7 +1112,7 @@ fn a_cancel_notification_matches_a_string_request_id_too() {
 
 #[test]
 fn a_cancel_notification_for_an_already_answered_id_writes_nothing() {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     let mut writer = Vec::new();
     let id = RequestId::from(1);
     server
@@ -1038,7 +1133,7 @@ fn a_cancel_notification_for_an_already_answered_id_writes_nothing() {
 
 #[test]
 fn respond_unless_canceled_drops_a_late_response_for_an_already_canceled_id() {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     let mut writer = Vec::new();
     let id = RequestId::from(1);
     server
@@ -1074,7 +1169,12 @@ fn a_cancel_request_for_an_unknown_id_does_not_disrupt_the_session() {
     pump_messages(&mut reader, &tx);
     drop(tx);
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     assert_eq!(messages.len(), 1, "got: {messages:?}");
@@ -1084,7 +1184,7 @@ fn a_cancel_request_for_an_unknown_id_does_not_disrupt_the_session() {
 
 #[test]
 fn a_matching_response_clears_the_pending_entry() {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     let Message::Request(req) = server.send_request::<lsp_types::request::WorkDoneProgressCreate>(
         lsp_types::WorkDoneProgressCreateParams {
             token: lsp_types::NumberOrString::Number(1),
@@ -1106,7 +1206,7 @@ fn a_matching_response_clears_the_pending_entry() {
 
 #[test]
 fn a_second_response_for_an_already_completed_id_is_ignored_without_panicking() {
-    let mut server = Server::new(env!("CARGO_PKG_VERSION"));
+    let mut server = Server::new(env!("CARGO_PKG_VERSION"), crate::app::config_schema());
     let Message::Request(req) = server.send_request::<lsp_types::request::WorkDoneProgressCreate>(
         lsp_types::WorkDoneProgressCreateParams {
             token: lsp_types::NumberOrString::Number(1),
@@ -1142,7 +1242,12 @@ fn a_bare_response_message_from_the_client_does_not_crash_the_session() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let responses = decode_all(&writer.lock().unwrap());
     assert_eq!(responses.len(), 1, "got: {responses:?}");
@@ -1173,7 +1278,12 @@ fn initialize_publishes_diagnostics_for_unopened_workspace_files_with_findings()
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     for uri in [&root_uri, &nested_uri] {
@@ -1249,7 +1359,12 @@ fn initialize_diagnostics_push_survives_one_workspace_file_failing_to_parse() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let writer = Arc::new(Mutex::new(Vec::new()));
-    run_loop(&rx, Arc::clone(&writer), env!("CARGO_PKG_VERSION"));
+    run_loop(
+        &rx,
+        Arc::clone(&writer),
+        env!("CARGO_PKG_VERSION"),
+        crate::app::config_schema(),
+    );
 
     let messages = decode_all(&writer.lock().unwrap());
     assert!(

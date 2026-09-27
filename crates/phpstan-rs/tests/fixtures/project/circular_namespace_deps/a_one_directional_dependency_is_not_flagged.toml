@@ -1,2 +1,4 @@
-check_circular_dependencies = true
 paths = ["a.php", "b.php"]
+
+[rules]
+check_circular_dependencies = true

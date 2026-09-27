@@ -7,7 +7,13 @@ use super::super::*;
 #[test]
 fn an_update_file_edit_introduces_then_removes_a_duplicate() {
     let mut project = Project::new();
-    project.set_check_duplicate_function_declarations(true);
+    project.apply_settings(ProjectSettings {
+        rules: crate::rules_settings::RulesSettings {
+            check_duplicate_function_declarations: true,
+            ..Default::default()
+        },
+        ..ProjectSettings::default()
+    });
     project
         .load_file(PathBuf::from("a.php"), "<?php function foo() {}")
         .unwrap();

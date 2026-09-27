@@ -1,4 +1,3 @@
-
-[sql_reflection]
+[ext.sql.reflection]
 driver = "mysql"
 schema_file = "a_plain_literal_string_held_in_a_variable_is_still_folded.sql"

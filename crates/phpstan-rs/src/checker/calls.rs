@@ -380,10 +380,10 @@ impl<'a> Checker<'a> {
             is_builtin,
             span,
         } = call;
-        if self.registry.check_boolean_trap {
+        if self.settings.extras.check_boolean_trap {
             self.check_boolean_trap_arguments(callee_label, sig, args, defining_class);
         }
-        if self.registry.check_swapped_arguments {
+        if self.settings.extras.check_swapped_arguments {
             self.check_swapped_argument_names(callee_label, sig, args, defining_class);
         }
         self.check_parameters(parameters::ParametersCheck {
@@ -465,7 +465,7 @@ impl<'a> Checker<'a> {
             // See the identical, earlier comment in this file's own
             // ordinary-call argument check for why no separate `Mixed`
             // bail-out is needed here.
-            if !self.registry.rule_level_accepts(&param.ty, &arg_ty).yes() {
+            if !self.rule_level_accepts(&param.ty, &arg_ty).yes() {
                 self.report(
                     format!(
                         "Closure() argument #{} expects {}, {} given",

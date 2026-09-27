@@ -852,7 +852,7 @@ impl<'a> Checker<'a> {
         if !consts
             .iter()
             .any(|c| c.type_hint.is_some() || c.doc_comment.is_some())
-            && self.registry.dynamic_constant_names.is_empty()
+            && !self.settings.constants.has_dynamic_constants()
         {
             return;
         }
@@ -912,7 +912,7 @@ impl<'a> Checker<'a> {
             if value_ty == Type::Mixed(false) {
                 continue;
             }
-            if !self.registry.accepts(&declared_ty, &value_ty).yes() {
+            if !self.accepts(&declared_ty, &value_ty).yes() {
                 self.report(
                     format!(
                         "constant {fqn}::{} ({declared_ty}) does not accept value {value_ty}",
@@ -935,7 +935,7 @@ impl<'a> Checker<'a> {
         value_ty: &Type,
         has_native_type: bool,
     ) {
-        if self.registry.accepts(phpdoc_ty, value_ty).yes() {
+        if self.accepts(phpdoc_ty, value_ty).yes() {
             return;
         }
         let name = &c.name;
@@ -1105,7 +1105,7 @@ impl<'a> Checker<'a> {
             }
             if let Some(proto_native) = &proto.native_ty {
                 match &own.native_ty {
-                    Some(own_native) if !self.registry.accepts(proto_native, own_native).yes() => {
+                    Some(own_native) if !self.accepts(proto_native, own_native).yes() => {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
                                     "Native type {own_native} of constant {fqn}::{name} is not covariant with native type {proto_native} of constant {proto_owner}::{name}."
@@ -1134,7 +1134,7 @@ impl<'a> Checker<'a> {
             }
             if proto.has_phpdoc_type
                 && own.has_phpdoc_type
-                && !self.registry.accepts(&proto.ty, &own.ty).yes()
+                && !self.accepts(&proto.ty, &own.ty).yes()
             {
                 self.report(format!(
                         "Type {} of constant {fqn}::{name} is not covariant with type {} of constant {proto_owner}::{name}.",
@@ -1676,7 +1676,7 @@ impl<'a> Checker<'a> {
     /// `lookup_ancestor_method_with_owner` already gets that "nearest
     /// real declaration" semantics for free.
     pub(crate) fn check_parent_constructor_call(&mut self, fqn: &str, c: &ClassDecl) {
-        if !self.registry.check_parent_constructor_call {
+        if !self.settings.strict_rules.check_parent_constructor_call {
             return;
         }
         if c.kind == ClassKind::Trait || c.kind == ClassKind::Interface {
@@ -1736,7 +1736,7 @@ impl<'a> Checker<'a> {
     /// on this same class with the identical native type. Requires a
     /// configured PHP version >= 8.0.
     pub(crate) fn check_promoted_property_candidate(&mut self, fqn: &str, c: &ClassDecl) {
-        if !self.registry.check_promoted_property_suggestions {
+        if !self.settings.extras.check_promoted_property_suggestions {
             return;
         }
         if self
@@ -1910,8 +1910,19 @@ impl<'a> Checker<'a> {
             let Some(parent_info) = self.registry.classes.get(parent_fqn) else {
                 continue;
             };
-            if parent_info.sealed.is_empty() || parent_info.sealed.iter().any(|s| s.as_ref() == fqn)
-            {
+            let attribute_sealed: &[std::sync::Arc<str>] = if self.settings.language_extensions {
+                &parent_info.access.sealed
+            } else {
+                &[]
+            };
+            let permitted = || {
+                parent_info
+                    .sealed
+                    .iter()
+                    .chain(attribute_sealed)
+                    .any(|s| s.as_ref() == fqn)
+            };
+            if (parent_info.sealed.is_empty() && attribute_sealed.is_empty()) || permitted() {
                 continue;
             }
             self.report(

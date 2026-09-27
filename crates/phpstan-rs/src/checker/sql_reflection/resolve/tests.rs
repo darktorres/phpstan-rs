@@ -96,7 +96,8 @@ fn an_unknown_column_falls_through() {
 fn resolve_sql_row_type_uses_the_static_schema_when_configured_and_no_live_reflector_exists() {
     let registry = Registry::default();
     let context = SqlContext::new(None, Some(fixture_schema()));
-    let ty = resolve_sql_row_type(&registry, &context, "SELECT id, name FROM categories").unwrap();
+    let ty =
+        resolve_sql_row_type(Some(&registry), &context, "SELECT id, name FROM categories").unwrap();
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
@@ -108,7 +109,7 @@ fn resolve_sql_row_type_uses_the_static_schema_when_configured_and_no_live_refle
 fn resolve_sql_row_type_returns_none_with_nothing_configured_at_all() {
     let registry = Registry::default();
     let context = SqlContext::default();
-    assert!(resolve_sql_row_type(&registry, &context, "SELECT id FROM categories").is_none());
+    assert!(resolve_sql_row_type(Some(&registry), &context, "SELECT id FROM categories").is_none());
 }
 
 #[test]
@@ -119,7 +120,10 @@ fn resolve_sql_row_type_falls_through_to_the_live_reflector_when_static_cannot_a
     // None rather than panic.
     let registry = Registry::default();
     let context = SqlContext::new(None, Some(fixture_schema()));
-    assert!(resolve_sql_row_type(&registry, &context, "SELECT id FROM some_other_table").is_none());
+    assert!(
+        resolve_sql_row_type(Some(&registry), &context, "SELECT id FROM some_other_table")
+            .is_none()
+    );
 }
 
 #[test]
@@ -284,7 +288,7 @@ fn resolve_pure_ast_bails_when_any_select_item_references_a_column() {
 fn resolve_sql_row_type_answers_a_pure_literal_query_with_nothing_configured_at_all() {
     let registry = Registry::default();
     let context = SqlContext::default();
-    let ty = resolve_sql_row_type(&registry, &context, "SELECT 1, 'x'").unwrap();
+    let ty = resolve_sql_row_type(Some(&registry), &context, "SELECT 1, 'x'").unwrap();
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };

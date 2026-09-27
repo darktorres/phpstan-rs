@@ -1,10 +1,10 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 allow_in = ["tests/*"]
 kind = "function"
 message = "no debug dumps"
 name = "var_dump"
 
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 allow_except_in = ["legacy/*"]
 kind = "function"
 message = "no printing"

@@ -547,8 +547,9 @@ impl<'a> Checker<'a> {
     }
 
     /// Method-call/static-call sibling of `ExprKind::Call`'s own inline
-    /// `function.nameCase` check, gated on the same `Registry::
-    /// check_function_name_case` flag as `use function`'s own check.
+    /// `function.nameCase` check, gated on the same
+    /// `RulesSettings::check_function_name_case` flag as `use function`'s
+    /// own check.
     /// `Registry::lookup_method_canonical_name` mirrors `lookup_class`'s
     /// case-insensitive-fallback shape.
     /// `name_region` is the part of the call after its receiver, where
@@ -560,7 +561,7 @@ impl<'a> Checker<'a> {
         span: Span,
         name_region: Span,
     ) {
-        if !self.registry.check_function_name_case {
+        if !self.settings.rules.check_function_name_case {
             return;
         }
         let Some(canonical) = self.registry.lookup_method_canonical_name(class, method) else {

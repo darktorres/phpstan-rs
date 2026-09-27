@@ -44,7 +44,10 @@ fn no_config_file_leaves_opt_in_checks_off() {
 #[test]
 fn workspace_root_config_file_turns_on_an_opt_in_check() {
     let dir = TempDir::new("config_turns_on_check");
-    dir.write("phpstan-rs.toml", "check_deprecated_usage = true\n");
+    dir.write(
+        "phpstan-rs.toml",
+        "[ext.deprecation-rules]\nenabled = true\n",
+    );
     let path = dir.write("a.php", DEPRECATED_FIXTURE);
     let uri = path_to_uri(&path).to_string();
 
@@ -68,7 +71,7 @@ fn workspace_root_config_wires_php_version_together_with_a_gated_check() {
     let dir_80 = TempDir::new("promo_php80");
     dir_80.write(
         "phpstan-rs.toml",
-        "check_promoted_property_suggestions = true\nphp_version = \"8.0\"\n",
+        "php_version = \"8.0\"\n\n[ext.extras]\ncheck_promoted_property_suggestions = true\n",
     );
     let path_80 = dir_80.write("a.php", PROMOTABLE_CTOR_FIXTURE);
     let uri_80 = path_to_uri(&path_80).to_string();
@@ -90,7 +93,7 @@ fn workspace_root_config_wires_php_version_together_with_a_gated_check() {
     let dir_74 = TempDir::new("promo_php74");
     dir_74.write(
         "phpstan-rs.toml",
-        "check_promoted_property_suggestions = true\nphp_version = \"7.4\"\n",
+        "php_version = \"7.4\"\n\n[ext.extras]\ncheck_promoted_property_suggestions = true\n",
     );
     let path_74 = dir_74.write("a.php", PROMOTABLE_CTOR_FIXTURE);
     let uri_74 = path_to_uri(&path_74).to_string();
@@ -158,7 +161,7 @@ fn vendor_context_reachable_via_composer_and_also_under_the_workspace_root_is_no
     let dir = TempDir::new("vendor_no_double_load");
     dir.write(
         "phpstan-rs.toml",
-        "check_duplicate_class_declarations = true\n",
+        "[rules]\ncheck_duplicate_class_declarations = true\n",
     );
     dir.write(
         "composer.json",
@@ -238,7 +241,7 @@ fn ignore_errors_entries_from_config_suppress_matching_diagnostics_in_the_editor
     let dir = TempDir::new("ignore_errors_config");
     dir.write(
         "phpstan-rs.toml",
-        "check_deprecated_usage = true\n\n[[ignore_errors]]\nidentifier = \"function.deprecated\"\n",
+        "[[ignore_errors]]\nidentifier = \"function.deprecated\"\n\n[ext.deprecation-rules]\nenabled = true\n",
     );
     let path = dir.write("a.php", DEPRECATED_FIXTURE);
     let uri = path_to_uri(&path).to_string();
@@ -263,7 +266,7 @@ fn a_configured_level_cutoff_hides_higher_severity_diagnostics() {
     let dir = TempDir::new("level_cutoff");
     dir.write(
         "phpstan-rs.toml",
-        "check_promoted_property_suggestions = true\nphp_version = \"8.0\"\nlevel = 0\n",
+        "php_version = \"8.0\"\nlevel = 0\n\n[ext.extras]\ncheck_promoted_property_suggestions = true\n",
     );
     let path = dir.write("a.php", PROMOTABLE_CTOR_FIXTURE);
     let uri = path_to_uri(&path).to_string();
@@ -292,7 +295,10 @@ fn baseline_entries_from_a_root_relative_baseline_file_suppress_matching_diagnos
     // rather than guessed, since `to_lsp_diagnostic` joins
     // `location`/`message` as `"{location}: {message}"` on the wire.
     let control_dir = TempDir::new("baseline_config_control");
-    control_dir.write("phpstan-rs.toml", "check_deprecated_usage = true\n");
+    control_dir.write(
+        "phpstan-rs.toml",
+        "[ext.deprecation-rules]\nenabled = true\n",
+    );
     let control_path = control_dir.write("a.php", DEPRECATED_FIXTURE);
     let control_uri = path_to_uri(&control_path).to_string();
     let control_messages = run(
@@ -314,7 +320,7 @@ fn baseline_entries_from_a_root_relative_baseline_file_suppress_matching_diagnos
     let dir = TempDir::new("baseline_config");
     dir.write(
         "phpstan-rs.toml",
-        "check_deprecated_usage = true\nbaseline = \"baseline.json\"\n",
+        "baseline = \"baseline.json\"\n\n[ext.deprecation-rules]\nenabled = true\n",
     );
     dir.write(
         "baseline.json",

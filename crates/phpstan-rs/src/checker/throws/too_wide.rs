@@ -32,7 +32,7 @@ impl<'a> Checker<'a> {
     /// A `private` method, a method on a `final` class, or a method
     /// itself declared `final` always gets checked; everything else is
     /// silent by default (a subclass overriding this method might
-    /// genuinely need the wider declared type) unless `Registry::
+    /// genuinely need the wider declared type) unless `RulesSettings::
     /// check_too_wide_throw_type_in_protected_and_public_methods` is on,
     /// in which case an overridable method still gets a pass the first
     /// time it's declared - only a re-declaration narrowing an
@@ -60,7 +60,8 @@ impl<'a> Checker<'a> {
             return true;
         }
         if !self
-            .registry
+            .settings
+            .rules
             .check_too_wide_throw_type_in_protected_and_public_methods
         {
             return false;
@@ -106,7 +107,7 @@ impl<'a> Checker<'a> {
                 .map(flatten_union)
                 .unwrap_or_default()
                 .into_iter()
-                .any(|a| self.registry.accepts(&declared, a).yes());
+                .any(|a| self.accepts(&declared, a).yes());
             if is_used {
                 continue;
             }

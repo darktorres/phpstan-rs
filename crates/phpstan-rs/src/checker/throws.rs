@@ -13,7 +13,7 @@
 //!   tried before each hook's plain `FunctionSig.throws` fallback.
 //! - Too-wide throw-type checks: `too_wide` submodule.
 //! - Opt-in "missing checked exception" family, gated on
-//!   `Registry::check_missing_checked_exceptions`: `missing` submodule.
+//!   `ExtrasSettings::check_missing_checked_exceptions`: `missing` submodule.
 //!
 //! Declined: a method-throw-type covariance check, since no call-graph-
 //! wide implicit-throw model exists to build it on.

@@ -4,6 +4,19 @@
 
 use crate::restricted_symbols::RestrictedSymbolEntry;
 
+/// `[rules.banned]`: language constructs (`BannedConstruct::ALL` names)
+/// and native types or classes to report wherever they're used.
+#[derive(Debug, Default, Clone, PartialEq, serde::Deserialize)]
+#[serde(default)]
+pub struct BannedSettings {
+    pub constructs: Vec<String>,
+    pub types: Vec<String>,
+}
+
+impl config::Section for BannedSettings {
+    const PATH: &'static [&'static str] = &["rules", "banned"];
+}
+
 /// A construct `banned_constructs` can name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BannedConstruct {

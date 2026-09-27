@@ -1,50 +1,52 @@
-check_closed_classes = false
-default_parent_calls = false
 paths = ["a.php"]
 
-[[parent_calls]]
+[rules.class_shape]
+check_closed_classes = false
+default_parent_calls = false
+
+[[rules.class_shape.parent_calls]]
 class = 'PHPUnit\Framework\TestCase'
 method = "setUp"
 invocation = "first"
 has_content = "maybe"
 
-[[parent_calls]]
+[[rules.class_shape.parent_calls]]
 class = 'PHPUnit\Framework\TestCase'
 method = "setUpBeforeClass"
 invocation = "first"
 has_content = "maybe"
 
-[[parent_calls]]
+[[rules.class_shape.parent_calls]]
 class = 'PHPUnit\Framework\TestCase'
 method = "assertPreConditions"
 invocation = "any"
 has_content = "maybe"
 
-[[parent_calls]]
+[[rules.class_shape.parent_calls]]
 class = 'PHPUnit\Framework\TestCase'
 method = "assertPostConditions"
 invocation = "any"
 has_content = "maybe"
 
-[[parent_calls]]
+[[rules.class_shape.parent_calls]]
 class = 'PHPUnit\Framework\TestCase'
 method = "tearDown"
 invocation = "last"
 has_content = "maybe"
 
-[[parent_calls]]
+[[rules.class_shape.parent_calls]]
 class = 'PHPUnit\Framework\TestCase'
 method = "tearDownAfterClass"
 invocation = "last"
 has_content = "maybe"
 
-[[parent_calls]]
+[[rules.class_shape.parent_calls]]
 class = 'Codeception\Test\Unit'
 method = "_before"
 invocation = "first"
 has_content = "maybe"
 
-[[parent_calls]]
+[[rules.class_shape.parent_calls]]
 class = 'Codeception\Test\Unit'
 method = "_after"
 invocation = "last"

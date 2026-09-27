@@ -1,3 +1,5 @@
+paths = ["t.php"]
+
+[ext.mockstan]
 check_mock_hygiene = true
 mock_banned_classes = []
-paths = ["t.php"]

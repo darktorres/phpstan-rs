@@ -240,7 +240,7 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
         // dependency for the same reason (see `doctrine_functions`'s own
         // module doc comment).
         SelectItemKind::Custom(name) => checker
-            .registry
+            .settings
             .doctrine_custom_functions
             .get(&name.to_ascii_lowercase())
             .map(|kind| doctrine_custom_function_type(*kind))

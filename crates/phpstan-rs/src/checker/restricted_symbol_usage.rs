@@ -237,7 +237,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(type_string) = &cond.type_string {
             let configured = types::parse_type_string(type_string);
-            return self.registry.accepts(&configured, &ty).yes();
+            return self.accepts(&configured, &ty).yes();
         }
         if let Some(value) = &cond.value {
             return scalar_value_matches(&ty, value, case_insensitive);
@@ -673,11 +673,11 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         span: Span,
     ) {
-        if self.registry.restricted_symbols.is_empty() {
+        if self.settings.restricted_symbols.is_empty() {
             return;
         }
         let bare = fqn.rsplit('\\').next().unwrap_or(fqn);
-        let Some(entry) = self.registry.restricted_symbols.function(bare) else {
+        let Some(entry) = self.settings.restricted_symbols.function(bare) else {
             return;
         };
         if self.is_allowed_by_params_anywhere_context(entry, args, locals) {
@@ -709,15 +709,15 @@ impl<'a> Checker<'a> {
         locals: &Locals,
         span: Span,
     ) {
-        if self.registry.restricted_symbols.is_empty() {
+        if self.settings.restricted_symbols.is_empty() {
             return;
         }
         let entry = if is_static {
-            self.registry
+            self.settings
                 .restricted_symbols
                 .static_method(owner, method)
         } else {
-            self.registry.restricted_symbols.method(owner, method)
+            self.settings.restricted_symbols.method(owner, method)
         };
         let Some(entry) = entry else { return };
         if self.is_allowed_by_params_anywhere_context(entry, args, locals) {
@@ -755,15 +755,15 @@ impl<'a> Checker<'a> {
         is_static: bool,
         span: Span,
     ) {
-        if self.registry.restricted_symbols.is_empty() {
+        if self.settings.restricted_symbols.is_empty() {
             return;
         }
         let entry = if is_static {
-            self.registry
+            self.settings
                 .restricted_symbols
                 .static_property(owner, prop)
         } else {
-            self.registry.restricted_symbols.property(owner, prop)
+            self.settings.restricted_symbols.property(owner, prop)
         };
         let Some(entry) = entry else { return };
         let entry = entry.clone();
@@ -790,11 +790,11 @@ impl<'a> Checker<'a> {
         const_name: &str,
         span: Span,
     ) {
-        if self.registry.restricted_symbols.is_empty() {
+        if self.settings.restricted_symbols.is_empty() {
             return;
         }
         let Some(entry) = self
-            .registry
+            .settings
             .restricted_symbols
             .class_constant(owner, const_name)
         else {
@@ -824,10 +824,10 @@ impl<'a> Checker<'a> {
         span: Span,
         location: ClassUsageLocation,
     ) {
-        if self.registry.restricted_symbols.is_empty() {
+        if self.settings.restricted_symbols.is_empty() {
             return;
         }
-        let Some(entry) = self.registry.restricted_symbols.class(class) else {
+        let Some(entry) = self.settings.restricted_symbols.class(class) else {
             return;
         };
         if is_allowed_by_position(entry, location) {
@@ -862,10 +862,10 @@ impl<'a> Checker<'a> {
     /// is the one allow-mechanism scoped to exactly this single
     /// location, not shared by any of the others.
     pub(crate) fn check_restricted_class_use_import(&mut self, class: &str, span: Span) {
-        if self.registry.restricted_symbols.is_empty() {
+        if self.settings.restricted_symbols.is_empty() {
             return;
         }
-        let Some(entry) = self.registry.restricted_symbols.class(class) else {
+        let Some(entry) = self.settings.restricted_symbols.class(class) else {
             return;
         };
         if entry.allow_in_use {
@@ -900,7 +900,7 @@ impl<'a> Checker<'a> {
     /// a trait's own `use` clause isn't one of the `Class`-kind ban's own
     /// listed detection surfaces.
     pub(crate) fn check_restricted_class_inheritance(&mut self, fqn: &str, span: Span) {
-        if self.registry.restricted_symbols.is_empty() {
+        if self.settings.restricted_symbols.is_empty() {
             return;
         }
         let Some(info) = self.registry.classes.get(fqn) else {
@@ -957,7 +957,7 @@ impl<'a> Checker<'a> {
         return_type_fallback_span: Span,
         class_name: Option<&str>,
     ) {
-        if self.registry.restricted_symbols.is_empty() {
+        if self.settings.restricted_symbols.is_empty() {
             return;
         }
         for p in params {

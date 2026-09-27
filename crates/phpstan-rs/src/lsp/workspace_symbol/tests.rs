@@ -1,7 +1,7 @@
 //! Unit tests for `workspace_symbols`, built against a real multi-file
 //! `Project` via `Project::new()` + `load_file` + `finish_loading()`
 //! (the same pattern `src/project/tests/incremental_updates.rs` already
-//! uses), plus `set_retain_source(true)` - the one addition beyond that
+//! uses), plus `retain_source` - the one addition beyond that
 //! existing pattern, since `decl_locations()` needs it.
 
 use super::*;
@@ -9,7 +9,10 @@ use lsp_types::SymbolKind;
 
 fn project(files: &[(&str, &str)]) -> Project {
     let mut project = Project::new();
-    project.set_retain_source(true);
+    project.apply_settings(crate::project::ProjectSettings {
+        retain_source: true,
+        ..Default::default()
+    });
     for (name, src) in files {
         project
             .load_file(std::path::PathBuf::from(*name), src)

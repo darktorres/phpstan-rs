@@ -184,7 +184,8 @@ impl<'a> Checker<'a> {
         if info.is_final || info.final_properties.contains(property) {
             return true;
         }
-        self.registry
+        self.settings
+            .rules
             .check_too_wide_throw_type_in_protected_and_public_methods
     }
 
@@ -296,9 +297,7 @@ impl<'a> Checker<'a> {
         match body {
             PropertyHookBody::Arrow(e) => {
                 let body_ty = self.check_expr(e, &mut locals, &label);
-                if body_ty != Type::Mixed(false)
-                    && !self.registry.accepts(&prop_sig.ty, &body_ty).yes()
-                {
+                if body_ty != Type::Mixed(false) && !self.accepts(&prop_sig.ty, &body_ty).yes() {
                     self.report(
                         format!(
                             "return type mismatch: expected {}, got {body_ty}",
@@ -469,7 +468,7 @@ impl<'a> Checker<'a> {
                 );
                 let prop_native_ty =
                     self.resolve_type_hint(type_hint.map(TypeHint::to_string).as_deref());
-                if !self.registry.accepts(&param_ty, &prop_native_ty).yes() {
+                if !self.accepts(&param_ty, &prop_native_ty).yes() {
                     self.report_builder(
                         DiagnosticBuilder::new(format!(
                                 "Native type {param_ty} of set hook parameter ${} is not contravariant with native type {prop_native_ty} of property {fqn}::${name}.",

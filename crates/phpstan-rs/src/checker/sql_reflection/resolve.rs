@@ -48,14 +48,20 @@ use sql::schema::SchemaCatalog;
 use types::union_types;
 use types::{Shape, ShapeField, Type};
 
+/// The row type `sql` returns, its columns refined by the matching
+/// Doctrine entity's fields when `entities` (the registry, while the
+/// Doctrine extension is active) has one.
 pub(crate) fn resolve_sql_row_type(
-    registry: &Registry,
+    entities: Option<&Registry>,
     context: &SqlContext,
     sql: &str,
 ) -> Option<Type> {
+    let refine = |ty: Type| match entities {
+        Some(registry) => cross_reference_entity_fields(registry, sql, ty),
+        None => ty,
+    };
     if let Some(ty) = resolve_pure_ast(sql, context.driver()) {
-        let ty = refine_count_columns(sql, ty);
-        return Some(cross_reference_entity_fields(registry, sql, ty));
+        return Some(refine(refine_count_columns(sql, ty)));
     }
     let row_type = match context
         .schema()
@@ -66,9 +72,7 @@ pub(crate) fn resolve_sql_row_type(
             .reflect(sql)
             .map(|columns| super::row_type(&columns)),
     };
-    row_type
-        .map(|ty| refine_count_columns(sql, ty))
-        .map(|ty| cross_reference_entity_fields(registry, sql, ty))
+    row_type.map(|ty| refine_count_columns(sql, ty)).map(refine)
 }
 
 /// Gap #9: a raw SQL query against a table a `DoctrineEntity` already

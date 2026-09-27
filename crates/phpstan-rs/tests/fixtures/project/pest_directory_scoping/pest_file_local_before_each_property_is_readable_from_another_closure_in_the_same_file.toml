@@ -1,1 +1,4 @@
 paths = ["tests/FooTest.php"]
+
+[ext.pest]
+enabled = true

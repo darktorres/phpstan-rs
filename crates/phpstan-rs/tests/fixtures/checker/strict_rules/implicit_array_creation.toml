@@ -1,1 +1,2 @@
+[ext.strict-rules]
 check_implicit_array_creation = true

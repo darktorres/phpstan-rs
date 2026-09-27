@@ -1,3 +1,6 @@
-[[doctrine_custom_functions]]
+[ext.doctrine]
+enabled = true
+
+[[ext.doctrine.custom_functions]]
 name = "DATE_FORMAT_YEAR_MONTH"
 kind = "string"

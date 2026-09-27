@@ -1,0 +1,12 @@
+config::tests::toml_config_loading::loads_every_field_from_a_real_toml_file -> app::tests::every_section_loads_from_its_own_table
+config::tests::toml_config_loading::loads_every_ignore_error_field_combination -> app::tests::loads_every_ignore_error_field_combination
+config::tests::toml_config_loading::absent_sql_reflection_block_parses_as_none -> app::tests::absent_sql_reflection_block_parses_as_none
+config::tests::toml_config_loading::loads_a_live_connection_sql_reflection_block -> app::tests::loads_a_live_connection_sql_reflection_block
+config::tests::toml_config_loading::loads_a_static_schema_only_sql_reflection_block -> app::tests::loads_a_static_schema_only_sql_reflection_block
+config::tests::toml_config_loading::every_field_is_optional -> app::tests::every_key_is_optional
+config::tests::toml_config_loading::a_missing_file_is_a_real_error_not_a_panic -> app::tests::a_missing_file_is_a_real_error_not_a_panic
+config::tests::toml_config_loading::malformed_toml_is_a_real_error_not_a_panic -> app::tests::malformed_toml_is_a_real_error_not_a_panic
+config::tests::toml_config_loading::dynamic_constant_names_accept_a_list_a_typed_table_or_mixed_entries -> app::tests::dynamic_constant_names_accept_a_list_a_typed_table_or_mixed_entries
+project::tests::php_version_setter::defaults_to_unset -> project::tests::project_settings::php_versions_default_to_unset
+project::tests::php_version_setter::set_php_versions_stores_onto_the_registry -> project::tests::project_settings::php_versions_are_stored_onto_the_registry
+project::tests::php_version_setter::set_php_versions_can_be_cleared_back_to_none -> project::tests::project_settings::php_versions_are_cleared_by_settings_without_them

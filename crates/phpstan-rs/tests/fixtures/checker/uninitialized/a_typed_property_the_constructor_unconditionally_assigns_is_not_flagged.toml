@@ -1,1 +1,2 @@
+[rules]
 check_uninitialized_properties = true

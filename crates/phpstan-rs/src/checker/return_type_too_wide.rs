@@ -44,7 +44,8 @@ impl<'a> Checker<'a> {
             return true;
         }
         if !self
-            .registry
+            .settings
+            .rules
             .check_too_wide_return_type_in_protected_and_public_methods
         {
             return false;
@@ -119,7 +120,7 @@ impl<'a> Checker<'a> {
             // the member, or merely overlaps it, uses it.
             let is_used = actual_members.iter().any(|a| {
                 *a == Type::Mixed(false)
-                    || self.registry.accepts(member, a).yes()
+                    || self.accepts(member, a).yes()
                     || !types::types_definitely_disjoint(a, member)
             });
             if is_used {

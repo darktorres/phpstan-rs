@@ -1,1 +1,2 @@
+[rules]
 check_method_throw_type_covariance = true

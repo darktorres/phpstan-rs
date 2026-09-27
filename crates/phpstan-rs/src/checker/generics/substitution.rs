@@ -169,6 +169,7 @@ impl<'a> Checker<'a> {
             return_case_refs: sig.return_case_refs.clone(),
             return_explicit_mixed_hint: sig.return_explicit_mixed_hint,
             no_discard: sig.no_discard,
+            must_use_result: sig.must_use_result,
             visibility: sig.visibility.clone(),
             is_internal: sig.is_internal,
             is_api: sig.is_api,

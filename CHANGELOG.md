@@ -4,6 +4,31 @@ User-visible changes: output, formats, flags, configuration and exit codes.
 
 ## Unreleased
 
+### Configuration
+- `phpstan-rs.toml` groups keys by owner: the core checks under `[rules]`
+  (`[rules.banned]`, `[rules.architecture]`, `[rules.class_shape]`), each
+  ported extension under `[ext.<name>]` (`[ext.extras]`,
+  `[ext.strict-rules]`, `[ext.sql.reflection]`, ...). Paths, levels,
+  baselines, `ignore_errors`, PHP version, scan/stub paths and the type
+  overlays stay at the top level. A key in its old top-level place still
+  loads, with a warning naming its new place; setting both is an error.
+- An unknown key is reported by its full dotted path
+  (`rules.check_bogus`).
+- Extensions activate as PHPStan's extension installer would load them:
+  an `[ext.<name>]` table's `enabled`, or, unset, whether one of the
+  extension's packages is installed in the composer root
+  (`phpstan/phpstan-strict-rules`, `phpstan/phpstan-deprecation-rules`,
+  `phpstan/phpstan-doctrine`, `phpstan/phpstan-phpunit`,
+  `pestphp/pest-plugin-phpstan`, `shipmonk/phpstan-rules`, ...). An
+  active extension's checks default to on, each still switchable in its
+  table; the extras have no package and stay off unless enabled. Doctrine
+  query result types, Pest's `$this` binding and the
+  php-language-extensions attributes apply only while their extension is
+  active (`[ext.doctrine]`, `[ext.pest]`, `[ext.language-extensions]`).
+- `check-project` drops its per-check flags (`--check-dead-code`,
+  `--strict-mixed-arrays`, ...) for `--set KEY=VALUE`, which sets any
+  config key over the file: `--set rules.check_dead_code=true`.
+
 ### Output
 - Diagnostics come in one total order - position, then identifier, message
   and tip - in the CLI and the language server (`e87343f3`).

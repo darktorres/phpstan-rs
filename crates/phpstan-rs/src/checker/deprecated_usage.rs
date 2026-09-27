@@ -1,5 +1,5 @@
-//! `@deprecated` usage warnings, gated behind `Registry::
-//! check_deprecated_usage` (default off - see its own doc comment).
+//! `@deprecated` usage warnings, reported while the deprecation-rules
+//! extension is active (`DeprecationRulesSettings::enabled`).
 //! Mirrors the highest-value shapes of real PHPStan's own separate
 //! `phpstan/phpstan-deprecation-rules` package: a plain function call
 //! (`function.deprecated`), an instance method call (`method.deprecated`),
@@ -32,7 +32,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         span: Span,
     ) {
-        if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
+        if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
         let Some(reason) = &sig.deprecated else {
@@ -62,7 +62,7 @@ impl<'a> Checker<'a> {
         is_static: bool,
         span: Span,
     ) {
-        if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
+        if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
         let kind_word = if is_static { "staticMethod" } else { "method" };
@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
         sig: &PropertySig,
         span: Span,
     ) {
-        if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
+        if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
         let kind_word = if sig.is_static {
@@ -169,7 +169,7 @@ impl<'a> Checker<'a> {
         sig: &ConstSig,
         span: Span,
     ) {
-        if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
+        if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
         if let Some(declaring_info) = self.registry.classes.get(owner)
@@ -210,7 +210,7 @@ impl<'a> Checker<'a> {
     /// Independent of whether any of its members are individually tagged
     /// too.
     pub(crate) fn check_deprecated_instantiation(&mut self, class: &str, span: Span) {
-        if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
+        if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
         let Some(info) = self.registry.classes.get(class) else {

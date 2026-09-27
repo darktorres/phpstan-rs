@@ -464,7 +464,7 @@ impl Registry {
     /// passing `is_phpstan_namespace`, so this is a zero-cost no-op for
     /// every ordinary corpus.
     pub(crate) fn record_phpstan_class_file(&mut self, name: &str, path: &std::path::Path) {
-        if !self.phpstan_api_check_enabled || !crate::registry::is_phpstan_namespace(name) {
+        if !crate::registry::is_phpstan_namespace(name) {
             return;
         }
         self.phpstan_class_files

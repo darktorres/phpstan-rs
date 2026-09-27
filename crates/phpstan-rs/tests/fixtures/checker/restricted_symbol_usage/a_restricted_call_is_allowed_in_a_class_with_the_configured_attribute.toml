@@ -1,4 +1,4 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 allow_in_class_with_attributes = ["AllowedLegacy"]
 class = "Db"
 kind = "method"

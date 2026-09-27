@@ -26,6 +26,7 @@ const LIBRARY_CRATES: &[&str] = &[
     "diagnostics",
     "composer",
     "stub-sources",
+    "config",
 ];
 const PRINT_DENY: &str =
     "#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]";

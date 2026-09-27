@@ -1,4 +1,6 @@
-check_composer_hygiene = true
 no_composer = false
 paths = ["tests/SomeTest.php"]
 scan_paths = ["vendor/acme/assert/src/Assert.php", "vendor/acme/faker/src/Faker.php", "vendor/acme/tool/src/Tool.php"]
+
+[rules]
+check_composer_hygiene = true

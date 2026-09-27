@@ -1160,11 +1160,10 @@ impl ClassInfo {
                 (!a.is_empty()).then(|| (intern(&m.function.name.to_ascii_lowercase()), a))
             })
             .collect();
-        let mut sealed = class_doc
+        let sealed = class_doc
             .as_ref()
             .map(|d| resolve_tag_types(&d.sealed))
             .unwrap_or_default();
-        sealed.extend(access.sealed.iter().cloned());
         let mixins = class_doc
             .as_ref()
             .map(|d| resolve_tag_types(&d.mixins))
@@ -1345,6 +1344,7 @@ impl ClassInfo {
                 return_case_refs: Vec::new(),
                 return_explicit_mixed_hint: false,
                 no_discard: false,
+                must_use_result: false,
                 visibility: Visibility::Public,
                 is_internal: false,
                 is_api: false,
@@ -1397,6 +1397,7 @@ impl ClassInfo {
                     return_case_refs: Vec::new(),
                     return_explicit_mixed_hint: false,
                     no_discard: false,
+                    must_use_result: false,
                     visibility: Visibility::Public,
                     is_internal: false,
                     is_api: false,
@@ -1429,6 +1430,7 @@ impl ClassInfo {
                     return_case_refs: Vec::new(),
                     return_explicit_mixed_hint: false,
                     no_discard: false,
+                    must_use_result: false,
                     visibility: Visibility::Public,
                     is_internal: false,
                     is_api: false,

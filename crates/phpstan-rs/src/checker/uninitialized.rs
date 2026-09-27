@@ -16,7 +16,7 @@
 //! (real PHP: `isset()` on an uninitialized typed property returns
 //! `false` rather than throwing, so this is genuinely safe code).
 //!
-//! Opt-in (`Registry::check_uninitialized_properties`), since this
+//! Opt-in (`RulesSettings::check_uninitialized_properties`), since this
 //! heuristic is considerably simpler than a real dataflow analysis and
 //! isn't safe to run unconditionally.
 
@@ -40,7 +40,7 @@ impl<'a> Checker<'a> {
     /// which this project has no way to verify happens on every real
     /// subclass.
     pub(crate) fn check_uninitialized_properties(&mut self, fqn: &str, c: &ClassDecl) {
-        if !self.registry.check_uninitialized_properties {
+        if !self.settings.rules.check_uninitialized_properties {
             return;
         }
         if c.kind != ClassKind::Class || c.is_abstract {

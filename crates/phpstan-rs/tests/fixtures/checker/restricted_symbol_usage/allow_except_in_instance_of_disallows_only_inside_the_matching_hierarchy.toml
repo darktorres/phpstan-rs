@@ -1,4 +1,4 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 allow_except_in_instance_of = ["HandlerInterface"]
 class = "Dispatcher"
 kind = "method"

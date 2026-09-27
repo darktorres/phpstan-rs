@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
                 // member," not "definitely not this member."
                 let is_used = actual_members
                     .iter()
-                    .any(|a| **a == Type::Mixed(false) || self.registry.accepts(member, a).yes());
+                    .any(|a| **a == Type::Mixed(false) || self.accepts(member, a).yes());
                 if is_used {
                     continue;
                 }

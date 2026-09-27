@@ -26,12 +26,10 @@ impl<'a> Checker<'a> {
     /// The value of `e` when it's a magic number.
     fn magic_number(&self, e: &Expr) -> Option<f64> {
         let value = self.numeric_literal_value(e)?;
-        let exempt = self
-            .registry
-            .magic_number_exemptions
-            .as_deref()
-            .unwrap_or(&[0.0, 1.0])
-            .contains(&value);
+        let exempt = match &self.settings.sidz.magic_number_exemptions {
+            Some(numbers) => numbers.iter().any(|n| n.value() == value),
+            None => value == 0.0 || value == 1.0,
+        };
         (!exempt).then_some(value)
     }
 
@@ -40,7 +38,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(Literal::Int(i)) => Some(*i as f64),
             ExprKind::Literal(Literal::Float(f)) => Some(*f),
             ExprKind::Literal(Literal::String(s))
-                if !self.registry.magic_numbers_ignore_numeric_strings =>
+                if !self.settings.sidz.magic_numbers_ignore_numeric_strings =>
             {
                 php_numeric_string(s)
             }

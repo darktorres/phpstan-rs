@@ -1,6 +1,6 @@
 paths = ["domain.php", "infra.php"]
 
-[[architecture]]
+[[rules.architecture]]
 name = "domain is infrastructure-free"
 excluding = []
 should_depend_on = []
@@ -12,10 +12,10 @@ should_not_implement = []
 should_use_trait = []
 should_not_use_trait = []
 
-[[architecture.classes]]
+[[rules.architecture.classes]]
 namespace = 'App\Domain'
 excluding = []
 
-[[architecture.should_not_depend_on]]
+[[rules.architecture.should_not_depend_on]]
 namespace = 'App\Infra'
 excluding = []

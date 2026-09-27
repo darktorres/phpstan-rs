@@ -1,4 +1,6 @@
-
-[sql_reflection]
+[ext.sql.reflection]
 driver = "mysql"
 schema_file = "a_mapped_entitys_non_nullable_native_property_type_narrows_a_nullable_db_column.sql"
+
+[ext.doctrine]
+enabled = true

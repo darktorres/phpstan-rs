@@ -143,10 +143,7 @@ impl<'a> Checker<'a> {
         let enclosing_send = generator_template_param(&enclosing, self.registry, "TSend");
         if enclosing_key != Type::Mixed(false)
             && inner_key != Type::Mixed(false)
-            && !self
-                .registry
-                .rule_level_accepts(&enclosing_key, &inner_key)
-                .yes()
+            && !self.rule_level_accepts(&enclosing_key, &inner_key).yes()
         {
             self.report(format!(
                     "Key type {inner_key} of yielded generator is not assignable to key type {enclosing_key} of enclosing generator."
@@ -159,7 +156,6 @@ impl<'a> Checker<'a> {
         if enclosing_value != Type::Mixed(false)
             && inner_value != Type::Mixed(false)
             && !self
-                .registry
                 .rule_level_accepts(&enclosing_value, &inner_value)
                 .yes()
         {
@@ -177,7 +173,7 @@ impl<'a> Checker<'a> {
         // generator delegates that same value into the inner one).
         if enclosing_send != Type::Mixed(false)
             && inner_send != Type::Mixed(false)
-            && !self.registry.accepts(&inner_send, &enclosing_send).yes()
+            && !self.accepts(&inner_send, &enclosing_send).yes()
         {
             self.report(format!(
                     "Send type {enclosing_send} of enclosing generator is not assignable to send type {inner_send} of yielded generator."

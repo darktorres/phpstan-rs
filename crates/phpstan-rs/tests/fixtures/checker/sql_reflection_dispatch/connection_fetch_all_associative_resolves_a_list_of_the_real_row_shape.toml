@@ -1,4 +1,3 @@
-
-[sql_reflection]
+[ext.sql.reflection]
 driver = "mysql"
 schema_file = "connection_fetch_all_associative_resolves_a_list_of_the_real_row_shape.sql"

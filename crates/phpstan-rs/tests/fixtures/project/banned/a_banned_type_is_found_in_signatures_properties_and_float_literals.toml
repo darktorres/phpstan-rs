@@ -1,3 +1,5 @@
-banned_constructs = []
-banned_types = ["float"]
 paths = ["a.php"]
+
+[rules.banned]
+constructs = []
+types = ["float"]

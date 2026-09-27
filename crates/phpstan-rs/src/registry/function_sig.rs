@@ -106,6 +106,9 @@ pub struct FunctionSig {
     // (`Checker::check_no_discard_statement`), matching real PHPStan's
     // short-name, case-insensitive match convention.
     pub no_discard: bool,
+    // `MustUseResult` (php-language-extensions): `no_discard` while that
+    // extension is active.
+    pub must_use_result: bool,
     // `Visibility::Public` for a top-level function; a method's
     // declared visibility otherwise.
     pub visibility: Visibility,
@@ -554,8 +557,9 @@ impl FunctionSig {
         let no_discard = f
             .attrs
             .iter()
-            .any(|a| is_no_discard_attribute_name(&a.name))
-            || crate::registry::access_attributes::has_must_use_result(&f.attrs, ctx);
+            .any(|a| is_no_discard_attribute_name(&a.name));
+        let must_use_result =
+            crate::registry::access_attributes::has_must_use_result(&f.attrs, ctx);
         let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
         let attrs: Vec<Arc<str>> = f
             .attrs
@@ -612,6 +616,7 @@ impl FunctionSig {
                 None,
             ) || doc_return.is_some_and(mentions_mixed),
             no_discard,
+            must_use_result,
             visibility,
             is_internal,
             is_api,
@@ -646,6 +651,7 @@ impl FunctionSig {
         // (of what's really the same underlying declaration, PHP-version-
         // split) happened not to repeat the attribute.
         let no_discard = self.no_discard || other.no_discard;
+        let must_use_result = self.must_use_result || other.must_use_result;
         let has_override_attr = self.has_override_attr || other.has_override_attr;
         let len = self.params.len().max(other.params.len());
         let mut self_params = self.params.into_iter();
@@ -731,6 +737,7 @@ impl FunctionSig {
             return_explicit_mixed_hint: self.return_explicit_mixed_hint
                 || other.return_explicit_mixed_hint,
             no_discard,
+            must_use_result,
             // Both real overloads share one declaration (a stub-modeled
             // PHP-version split of the same underlying function/method,
             // never two independently-declared visibilities) - either

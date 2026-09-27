@@ -1,0 +1,559 @@
+--- old
++++ new
+@@ -1,4 +1,5 @@
+ # files_checked 2792
++src/Piwigo/Activity/ActivityRepository.php	64	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Activity/ActivityRepository.php	307	19	4	function.alreadyNarrowedType	Call to function is_array() with array{activity_id: Piwigo\\Common\\ValueObject\\ActivityId|null, performed_by: mixed, object: string, object_id: int, action: string, ip_address: Piwigo\\Common\\ValueObject\\IpAddress|null, occured_on: Piwigo\\Common\\ValueObject\\SqlDateTime, details: array|null, username: Piwigo\\Common\\ValueObject\\Username} will always evaluate to true.	
+ src/Piwigo/Activity/ActivityRepository.php	464	19	4	function.alreadyNarrowedType	Call to function is_array() with array{performed_by: mixed, object: string, object_id: int, action: string, session_idx: string, ip_address: Piwigo\\Common\\ValueObject\\IpAddress|null, occured_on: Piwigo\\Common\\ValueObject\\SqlDateTime, details: array|null, user_agent: string|null} will always evaluate to true.	
+ src/Piwigo/Activity/ActivityRepository.php	466	22	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\SqlDateTime and Piwigo\\Common\\ValueObject\\SqlDateTime will always evaluate to true.	
+@@ -7,13 +8,43 @@
+ src/Piwigo/Activity/ActivityRepository.php	581	26	4	function.alreadyNarrowedType	Call to function is_array() with array{action: string, occured_on: Piwigo\\Common\\ValueObject\\SqlDateTime, details: array|null} will always evaluate to true.	
+ src/Piwigo/Activity/ActivityRepository.php	584	25	4	function.alreadyNarrowedType	Call to function is_array() with array{action: string, occured_on: Piwigo\\Common\\ValueObject\\SqlDateTime, details: array|null} will always evaluate to true.	
+ src/Piwigo/Activity/ActivityRepository.php	584	43	4	function.alreadyNarrowedType	Call to function is_string() with string will always evaluate to true.	
++src/Piwigo/Admin/Extensions/CoreUpdateService.php	134	13	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
++src/Piwigo/Admin/Extensions/CoreUpdateService.php	149	29	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
++src/Piwigo/Admin/Extensions/CoreUpdateService.php	261	40	5	booleanNot.exprNotBoolean	Only booleans are allowed in a negated boolean, int|bool given.	
++src/Piwigo/Admin/Extensions/CoreUpdateService.php	279	27	5	ternary.condNotBoolean	Only booleans are allowed in a ternary operator condition, int|bool given.	
++src/Piwigo/Admin/Extensions/ExtensionUpdateChecker.php	257	25	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
++src/Piwigo/Admin/Extensions/ZipExtractor.php	121	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++src/Piwigo/Admin/Install/InstallPostInstallSession.php	79	21	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_only_cookies is deprecated since PHP 8.4.	
++src/Piwigo/Admin/Install/InstallPostInstallSession.php	80	21	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_trans_sid is deprecated since PHP 8.4.	
++src/Piwigo/Admin/Install/InstallService.php	124	21	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
++src/Piwigo/Admin/Install/InstallService.php	127	23	5	elseif.condNotBoolean	Only booleans are allowed in an elseif condition, int|bool given.	
++src/Piwigo/Admin/Install/InstallWizard.php	363	13	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
++src/Piwigo/Admin/Integrity/C13yInternal.php	95	17	5	if.condNotBoolean	Only booleans are allowed in an if condition, int|bool given.	
++src/Piwigo/Admin/Maintenance/DbMaintenanceRepository.php	282	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Admin/Maintenance/DbMaintenanceRepository.php	304	17	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\UserId|null} will always evaluate to true.	
+ src/Piwigo/Admin/Maintenance/DbMaintenanceRepository.php	311	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: string, data: string} will always evaluate to true.	
++src/Piwigo/Admin/PiwigoInfosSender.php	478	69	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Admin/UpdatesPwgPageRenderer.php	179	50	5	booleanAnd.rightNotBoolean	Only booleans are allowed in and, int|bool given on the right side.	
++src/Piwigo/Admin/UpdatesPwgPageRenderer.php	184	50	5	booleanAnd.rightNotBoolean	Only booleans are allowed in and, int|bool given on the right side.	
++src/Piwigo/Admin/Upload/UploadService.php	765	18	0	function.strict	Call to function iterator_to_array() requires parameter #2 to be set.	
++src/Piwigo/Admin/Upload/UploadService.php	776	18	0	function.strict	Call to function iterator_to_array() requires parameter #2 to be set.	
++src/Piwigo/Admin/Upload/UploadService.php	785	18	0	function.strict	Call to function iterator_to_array() requires parameter #2 to be set.	
++src/Piwigo/Auth/ApiKeyRepository.php	60	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Auth/AuthRepository.php	69	21	0	nullCoalesce.offset	Offset 'username' on array{username: Piwigo\\Common\\ValueObject\\Username, password: string|null} on left side of ?? always exists and is not nullable.	
++src/Piwigo/Auth/AuthRepository.php	217	38	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Auth/PasswordResetRequestRepository.php	32	16	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Auth/PasswordResetRequestRepository.php	49	16	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Auth/UserFailedLoginRepository.php	26	16	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Auth/UserFailedLoginRepository.php	51	16	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Caddie/CaddieRepository.php	108	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Calendar/CalendarBase.php	434	34	0	minus.leftNonNumeric	Only numeric types are allowed in -, int|string given on the left side.	
++src/Piwigo/Calendar/CalendarBase.php	450	39	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	
++src/Piwigo/Calendar/CalendarRenderer.php	146	45	5	booleanOr.rightNotBoolean	Only booleans are allowed in or, never given on the right side.	
++src/Piwigo/Calendar/CalendarRepository.php	286	34	0	foreach.valueOverwrite	Foreach overwrites $alias with its value variable.	
+ src/Piwigo/Calendar/CalendarRepository.php	470	90	0	nullCoalesce.offset	Offset 'file' on array{id: Piwigo\\Common\\ValueObject\\ImageId|null, file: string, representative_ext: string|null, path: string, width: int|null, height: int|null, rotation: int|null} on left side of ?? always exists and is not nullable.	
+ src/Piwigo/Calendar/CalendarRepository.php	471	28	0	nullCoalesce.offset	Offset 'path' on array{id: Piwigo\\Common\\ValueObject\\ImageId|null, file: string, representative_ext: string|null, path: string, width: int|null, height: int|null, rotation: int|null} on left side of ?? always exists and is not nullable.	
+ src/Piwigo/Category/CategoryRepository.php	611	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\CategoryId|null, uppercats: string, counter: int<0, max>} will always evaluate to true.	
++src/Piwigo/Category/CategoryRepository.php	619	64	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Category/CategoryRepository.php	708	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	735	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	815	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+@@ -24,13 +55,17 @@
+ src/Piwigo/Category/CategoryRepository.php	1426	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	1675	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	2519	19	4	function.alreadyNarrowedType	Call to function is_array() with array{category_id: mixed, from_date: string|null, to_date: string|null} will always evaluate to true.	
++src/Piwigo/Category/CategoryRepository.php	2527	66	0	cast.useless	Casting to string something that's already string.	
++src/Piwigo/Category/CategoryRepository.php	2528	62	0	cast.useless	Casting to string something that's already string.	
+ src/Piwigo/Category/CategoryRepository.php	2566	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	2625	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	2681	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	2727	19	4	function.alreadyNarrowedType	Call to function is_array() with array{cat_id: Piwigo\\Common\\ValueObject\\CategoryId|null, uppercats: string, global_rank: string|null} will always evaluate to true.	
+ src/Piwigo/Category/CategoryRepository.php	2779	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	2856	19	4	function.alreadyNarrowedType	Call to function is_array() with array{category_id: mixed, counter: int<0, max>} will always evaluate to true.	
++src/Piwigo/Category/CategoryRepository.php	2865	89	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Category/CategoryRepository.php	2922	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Category/CategoryRepository.php	3026	38	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Category/CategoryRepository.php	3062	19	4	function.alreadyNarrowedType	Call to function is_array() with array{date_available: Piwigo\\Common\\ValueObject\\SqlDateTime|null} will always evaluate to true.	
+ src/Piwigo/Category/CategoryRepository.php	3111	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	3259	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+@@ -38,38 +73,75 @@
+ src/Piwigo/Category/CategoryRepository.php	3683	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	3716	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Category/CategoryRepository.php	3854	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Category/CategoryService.php	664	35	0	foreach.valueOverwrite	Foreach overwrites $cat with its value variable.	
++src/Piwigo/Comment/CommentRepository.php	242	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Comment/CommentRepository.php	264	38	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Comment/CommentRepository.php	484	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Comment/CommentRepository.php	510	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Comment/CommentRepository.php	550	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\CommentId|null, date: Piwigo\\Common\\ValueObject\\SqlDateTime|null, author: string|null, content: string|null} will always evaluate to true.	
+ src/Piwigo/Comment/CommentRepository.php	570	76	4	function.impossibleType	Call to function is_string() with null will always evaluate to false.	
+ src/Piwigo/Comment/CommentRepository.php	614	19	4	function.alreadyNarrowedType	Call to function is_array() with array{imageId: Piwigo\\Common\\ValueObject\\ImageId, nbComments: int<0, max>} will always evaluate to true.	
++src/Piwigo/Comment/CommentRepository.php	621	47	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Comment/CommentRepository.php	687	17	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\CommentId|null, author: string|null, author_id: mixed, user_email: Piwigo\\Common\\ValueObject\\Email|null, date: Piwigo\\Common\\ValueObject\\SqlDateTime|null, image_id: Piwigo\\Common\\ValueObject\\ImageId, website_url: string|null, email: string|null, content: string|null, validated: bool} will always evaluate to true.	
+ src/Piwigo/Comment/CommentRepository.php	1057	19	4	function.alreadyNarrowedType	Call to function is_array() with array{author: string|null, author_id: mixed, nb_authors: int<0, max>} will always evaluate to true.	
++src/Piwigo/Comment/CommentRepository.php	1071	58	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Comment/CommentRepository.php	1092	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Comment/CommentRepository.php	1111	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Config/ConfigRepository.php	120	19	4	function.alreadyNarrowedType	Call to function is_array() with array{param: string, value: string|null} will always evaluate to true.	
++src/Piwigo/Config/ConfigRepository.php	233	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Controller/Admin/BatchManagerSubController.php	365	56	0	foreach.valueOverwrite	Foreach overwrites $type with its value variable.	
++src/Piwigo/Controller/Admin/ConfigurationSubController.php	476	58	0	foreach.valueOverwrite	Foreach overwrites $checkbox with its value variable.	
++src/Piwigo/Controller/Admin/ConfigurationSubController.php	1224	38	0	foreach.valueOverwrite	Foreach overwrites $field with its value variable.	
++src/Piwigo/Controller/Admin/IntroSubController.php	431	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++src/Piwigo/Controller/Admin/IntroSubController.php	446	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++src/Piwigo/Controller/Admin/IntroSubController.php	458	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++src/Piwigo/Controller/CommentsController.php	452	35	0	foreach.valueOverwrite	Foreach overwrites $option with its value variable.	
++src/Piwigo/Controller/ImageDerivativeController.php	549	91	5	booleanOr.rightNotBoolean	Only booleans are allowed in or, never given on the right side.	
++src/Piwigo/Controller/ImageDerivativeController.php	556	27	5	booleanOr.rightNotBoolean	Only booleans are allowed in ||, never given on the right side.	
++src/Piwigo/Controller/ImageDerivativeController.php	562	27	5	booleanOr.rightNotBoolean	Only booleans are allowed in ||, never given on the right side.	
++src/Piwigo/Core/FilesystemHelper.php	172	68	5	booleanOr.rightNotBoolean	Only booleans are allowed in or, never given on the right side.	
++src/Piwigo/Core/FilesystemHelper.php	185	64	5	booleanOr.rightNotBoolean	Only booleans are allowed in or, never given on the right side.	
+ src/Piwigo/Core/ThemeRepository.php	47	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\ThemeId, name: string|null} will always evaluate to true.	
++src/Piwigo/Db/BatchWriter.php	262	28	0	foreach.keyOverwrite	Foreach overwrites $key with its key variable.	
++src/Piwigo/Db/BatchWriter.php	262	36	0	foreach.valueOverwrite	Foreach overwrites $value with its value variable.	
++src/Piwigo/Db/SqlDialectExecutor.php	159	27	0	foreach.valueOverwrite	Foreach overwrites $day with its value variable.	
++src/Piwigo/Group/GroupRepository.php	215	38	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Group/GroupRepository.php	340	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Group/GroupRepository.php	631	19	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\UserId and Piwigo\\Common\\ValueObject\\UserId will always evaluate to true.	
+ src/Piwigo/Group/GroupRepository.php	631	57	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\GroupId and Piwigo\\Common\\ValueObject\\GroupId will always evaluate to true.	
+ src/Piwigo/Group/GroupRepository.php	677	19	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\UserId and Piwigo\\Common\\ValueObject\\UserId will always evaluate to true.	
+ src/Piwigo/Group/GroupRepository.php	677	57	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\GroupId and Piwigo\\Common\\ValueObject\\GroupId will always evaluate to true.	
++src/Piwigo/Group/GroupRepository.php	701	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/History/HistoryRepository.php	99	18	0	nullCoalesce.offset	Offset 'time' on array{date: Piwigo\\Common\\ValueObject\\SqlDate|null, time: Piwigo\\Common\\ValueObject\\SqlTime} on left side of ?? always exists and is not nullable.	
+ src/Piwigo/History/HistoryRepository.php	127	23	0	nullCoalesce.offset	Offset 'year' on array{year: int, month: int|null, day: int|null, hour: int|null, history_id_to: int|null} on left side of ?? always exists and is not nullable.	
+ src/Piwigo/History/HistoryRepository.php	444	17	4	function.alreadyNarrowedType	Call to function is_array() with array{year: int, month: int|null, day: int|null, hour: int|null, nb_pages: int|null} will always evaluate to true.	
+ src/Piwigo/History/HistoryRepository.php	480	17	4	function.alreadyNarrowedType	Call to function is_array() with array{year: int, month: int|null, day: int|null, hour: int|null, nb_pages: int|null} will always evaluate to true.	
+ src/Piwigo/History/HistoryRepository.php	522	17	4	function.alreadyNarrowedType	Call to function is_array() with array{year: int, month: int|null, day: int|null, hour: int|null, nb_pages: int|null} will always evaluate to true.	
+ src/Piwigo/History/HistoryRepository.php	634	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Http/SessionBootstrap.php	67	25	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_only_cookies is deprecated since PHP 8.4.	
++src/Piwigo/Http/SessionBootstrap.php	70	25	0	ini.deprecated	Call to ini_set(): Changing ini directive session.use_trans_sid is deprecated since PHP 8.4.	
+ src/Piwigo/Image/ImageRepository.php	622	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Image/ImageRepository.php	711	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Image/ImageRepository.php	826	19	4	function.alreadyNarrowedType	Call to function is_array() with array{imageId: mixed, categoryId: mixed} will always evaluate to true.	
+ src/Piwigo/Image/ImageRepository.php	865	19	4	function.alreadyNarrowedType	Call to function is_array() with array{categoryId: mixed, maxRank: int|null} will always evaluate to true.	
++src/Piwigo/Image/ImageRepository.php	875	42	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Image/ImageRepository.php	890	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	983	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\ImageId|null, storageCategoryId: mixed} will always evaluate to true.	
+ src/Piwigo/Image/ImageRepository.php	1019	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Image/ImageRepository.php	1077	39	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Image/ImageRepository.php	1117	15	4	function.alreadyNarrowedType	Call to function is_array() with array{cnt: int<0, max>, total: int|numeric-string|null} will always evaluate to true.	
+ src/Piwigo/Image/ImageRepository.php	1122	31	0	nullCoalesce.offset	Offset 'cnt' on array{cnt: int<0, max>, total: int|numeric-string|null} on left side of ?? always exists and is not nullable.	
++src/Piwigo/Image/ImageRepository.php	1122	54	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Image/ImageRepository.php	1167	19	4	function.alreadyNarrowedType	Call to function is_array() with array{image_id: Piwigo\\Common\\ValueObject\\ImageId, ext: string} will always evaluate to true.	
+ src/Piwigo/Image/ImageRepository.php	1172	26	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\ImageId and Piwigo\\Common\\ValueObject\\ImageId will always evaluate to true.	
+ src/Piwigo/Image/ImageRepository.php	1173	22	4	function.alreadyNarrowedType	Call to function is_string() with string will always evaluate to true.	
++src/Piwigo/Image/ImageRepository.php	1212	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Image/ImageRepository.php	1230	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Image/ImageRepository.php	1448	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	1476	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	1705	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: mixed} will always evaluate to true.	
++src/Piwigo/Image/ImageRepository.php	1798	38	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Image/ImageRepository.php	1823	39	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Image/ImageRepository.php	2145	19	4	function.alreadyNarrowedType	Call to function is_array() with array{category_id: mixed, uppercats: string, dir: string|null} will always evaluate to true.	
+ src/Piwigo/Image/ImageRepository.php	2183	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	2214	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+@@ -77,8 +149,12 @@
+ src/Piwigo/Image/ImageRepository.php	2254	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	2274	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	2363	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Image/ImageRepository.php	2414	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Image/ImageRepository.php	2523	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\CategoryId|null, name: string, permalink: Piwigo\\Common\\ValueObject\\Permalink|null, uppercats: string, global_rank: string|null, commentable: bool} will always evaluate to true.	
++src/Piwigo/Image/ImageRepository.php	2535	30	0	cast.useless	Casting to bool something that's already bool.	
+ src/Piwigo/Image/ImageRepository.php	2605	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\CategoryId|null, uppercats: string, commentable: bool, visible: bool, status: Piwigo\\Category\\CategoryStatus, global_rank: string|null} will always evaluate to true.	
++src/Piwigo/Image/ImageRepository.php	2614	30	0	cast.useless	Casting to bool something that's already bool.	
++src/Piwigo/Image/ImageRepository.php	2615	26	0	cast.useless	Casting to bool something that's already bool.	
+ src/Piwigo/Image/ImageRepository.php	2635	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	2659	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	2924	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+@@ -90,14 +166,19 @@
+ src/Piwigo/Image/ImageRepository.php	3133	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Image/ImageRepository.php	3601	19	4	function.alreadyNarrowedType	Call to function is_array() with array{ext: string, counter: int<0, max>, filesize: int|numeric-string|null} will always evaluate to true.	
+ src/Piwigo/Image/ImageRepository.php	3606	22	4	function.alreadyNarrowedType	Call to function is_string() with string will always evaluate to true.	
++src/Piwigo/Image/ImageRepository.php	3607	56	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Metadata/MetadataRepository.php	79	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Notification/NotificationByMailRepository.php	48	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Notification/NotificationByMailRepository.php	110	19	4	function.alreadyNarrowedType	Call to function is_array() with array{user_id: Piwigo\\Common\\ValueObject\\UserId, check_key: string, username: Piwigo\\Common\\ValueObject\\Username, mail_address: Piwigo\\Common\\ValueObject\\Email|null, enabled: bool, last_send: string|null, status: Piwigo\\Users\\UserStatus} will always evaluate to true.	
+ src/Piwigo/Notification/NotificationByMailRepository.php	185	19	4	function.alreadyNarrowedType	Call to function is_array() with array{user_id: Piwigo\\Common\\ValueObject\\UserId|null, username: Piwigo\\Common\\ValueObject\\Username, mail_address: Piwigo\\Common\\ValueObject\\Email|null} will always evaluate to true.	
+ src/Piwigo/Notification/NotificationRepository.php	71	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Notification/NotificationRepository.php	184	19	4	function.alreadyNarrowedType	Call to function is_array() with array{dateAvailable: Piwigo\\Common\\ValueObject\\SqlDateTime|null, nb_elements: int<0, max>, nb_cats: int<0, max>} will always evaluate to true.	
++src/Piwigo/Notification/NotificationRepository.php	192	63	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Notification/NotificationRepository.php	193	55	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Notification/NotificationRepository.php	241	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Notification/NotificationRepository.php	295	19	4	function.alreadyNarrowedType	Call to function is_array() with array{uppercats: string, img_count: int<0, max>} will always evaluate to true.	
+ src/Piwigo/Notification/NotificationRepository.php	300	28	4	function.alreadyNarrowedType	Call to function is_string() with string will always evaluate to true.	
++src/Piwigo/Notification/NotificationRepository.php	301	59	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Permalink/PermalinkRepository.php	391	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Permission/PermissionRepository.php	213	19	4	function.alreadyNarrowedType	Call to function is_array() with array{catId: Piwigo\\Common\\ValueObject\\CategoryId, groupId: Piwigo\\Common\\ValueObject\\GroupId} will always evaluate to true.	
+ src/Piwigo/Permission/PermissionRepository.php	213	39	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\CategoryId and Piwigo\\Common\\ValueObject\\CategoryId will always evaluate to true.	
+@@ -106,30 +187,53 @@
+ src/Piwigo/Permission/PermissionRepository.php	246	39	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\CategoryId and Piwigo\\Common\\ValueObject\\CategoryId will always evaluate to true.	
+ src/Piwigo/Permission/PermissionRepository.php	246	80	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Common\\ValueObject\\UserId and Piwigo\\Common\\ValueObject\\UserId will always evaluate to true.	
+ src/Piwigo/Permission/PermissionRepository.php	309	16	4	function.alreadyNarrowedType	Call to function is_scalar() with int<0, max> will always evaluate to true.	
++src/Piwigo/Permission/PermissionRepository.php	347	35	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Permission/SqlCondition.php	157	31	0	foreach.valueOverwrite	Foreach overwrites $condition with its value variable.	
+ src/Piwigo/Rate/RateRepository.php	53	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Rate/RateRepository.php	155	19	4	function.alreadyNarrowedType	Call to function is_array() with array{elementId: Piwigo\\Common\\ValueObject\\ImageId, rcount: int<0, max>, rsum: int|numeric-string} will always evaluate to true.	
++src/Piwigo/Rate/RateRepository.php	165	62	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Rate/RateRepository.php	223	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Rate/RateRepository.php	260	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\UserId|null, username: Piwigo\\Common\\ValueObject\\Username} will always evaluate to true.	
++src/Piwigo/Rate/RateRepository.php	307	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Rate/RateRepository.php	393	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\ImageId|null, path: string|null, file: string|null, representative_ext: string|null, score: float|null, recently_rated: string|null, avg_rates: float|numeric-string, nb_rates: int<0, max>, sum_rates: int|numeric-string} will always evaluate to true.	
++src/Piwigo/Rate/RateRepository.php	404	60	0	cast.useless	Casting to float something that's already float.	
++src/Piwigo/Rate/RateRepository.php	407	65	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Rate/RateRepository.php	447	16	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Rate/RateRepository.php	494	16	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Rate/RateRepository.php	521	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\UserId|null, name: Piwigo\\Common\\ValueObject\\Username, status: Piwigo\\Users\\UserStatus} will always evaluate to true.	
+ src/Piwigo/Rate/RateRepository.php	593	16	0	arrayValues.list	call to array_values() on list<Piwigo\\Rate\\Projection\\ImageThumbInfo>, which is already a list, has no effect	
+ src/Piwigo/Rate/RateRepository.php	625	26	4	function.alreadyNarrowedType	Call to function is_array() with array{elementId: Piwigo\\Common\\ValueObject\\ImageId, avgRate: float|numeric-string} will always evaluate to true.	
+ src/Piwigo/Rate/RateRepository.php	656	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
++src/Piwigo/Rate/RateRepository.php	683	48	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Rate/RateRepository.php	719	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Search/Inflector/InflectorEn.php	65	383	0	foreach.valueOverwrite	Foreach overwrites $v with its value variable.	
++src/Piwigo/Search/SearchFilterRenderer.php	421	42	0	foreach.valueOverwrite	Foreach overwrites $row with its value variable.	
++src/Piwigo/Search/SearchRepository.php	126	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Search/SearchRepository.php	182	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: int|null, rules: array|null} will always evaluate to true.	
++src/Piwigo/Search/SearchRepository.php	186	21	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Search/SearchRepository.php	249	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Search/SearchRepository.php	327	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Search/SearchRepository.php	356	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\CategoryId|null, uppercats: string} will always evaluate to true.	
++src/Piwigo/Search/SearchService.php	911	79	5	booleanAnd.rightNotBoolean	Only booleans are allowed in &&, int|bool given on the right side.	
++src/Piwigo/Search/SearchService.php	1267	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++src/Piwigo/Search/SearchService.php	1279	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++src/Piwigo/Search/SearchService.php	1355	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++src/Piwigo/Search/SearchService.php	1367	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
+ src/Piwigo/Section/SectionPopulator.php	679	21	5	argument.type	Parameter #7 $chronologyDate of method Piwigo\\Calendar\\CalendarRenderer::render() expects list<int|string>, array given.	
+ src/Piwigo/Section/SectionRepository.php	100	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Section/SectionRepository.php	186	16	0	arrayValues.list	call to array_values() on list<string|null>, which is already a list, has no effect	
+ src/Piwigo/Section/SectionRepository.php	255	16	0	arrayValues.list	call to array_values() on list<string|null>, which is already a list, has no effect	
+ src/Piwigo/Section/SectionRepository.php	284	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Section/SectionRepository.php	311	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
++src/Piwigo/Site/SiteRepository.php	36	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Site/SiteRepository.php	119	29	4	function.alreadyNarrowedType	Call to function is_array() with array{id: int|null, galleriesUrl: string} will always evaluate to true.	
+ src/Piwigo/Site/SiteRepository.php	120	17	4	function.alreadyNarrowedType	Call to function is_array() with array{id: int|null, galleriesUrl: string} will always evaluate to true.	
+ src/Piwigo/Site/SiteRepository.php	120	58	4	function.impossibleType	Call to function is_string() with null will always evaluate to false.	
+ src/Piwigo/Site/SiteRepository.php	198	19	4	function.alreadyNarrowedType	Call to function is_array() with array{site_id: mixed, nb_categories: int<0, max>, nb_images: int<0, max>} will always evaluate to true.	
++src/Piwigo/Site/SiteRepository.php	207	33	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Site/SiteRepository.php	208	29	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Tag/TagRepository.php	152	19	4	function.alreadyNarrowedType	Call to function is_array() with array{tagId: Piwigo\\Common\\ValueObject\\TagId, counter: int<0, max>} will always evaluate to true.	
++src/Piwigo/Tag/TagRepository.php	158	74	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Tag/TagRepository.php	397	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Tag/TagRepository.php	444	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\TagId|null, name: string} will always evaluate to true.	
+ src/Piwigo/Tag/TagRepository.php	514	16	0	arrayValues.list	call to array_values() on list<int>, which is already a list, has no effect	
+@@ -137,9 +241,19 @@
+ src/Piwigo/Tag/TagRepository.php	781	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\TagId|null, name: string} will always evaluate to true.	
+ src/Piwigo/Tag/TagRepository.php	824	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\TagId|null, name: string} will always evaluate to true.	
+ src/Piwigo/Tag/TagRepository.php	915	19	4	function.alreadyNarrowedType	Call to function is_array() with array{tagId: Piwigo\\Common\\ValueObject\\TagId, counter: int<0, max>} will always evaluate to true.	
++src/Piwigo/Tag/TagRepository.php	924	78	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Tag/TagRepository.php	973	19	4	function.alreadyNarrowedType	Call to function is_array() with array{image_id: Piwigo\\Common\\ValueObject\\ImageId, tag_id: Piwigo\\Common\\ValueObject\\TagId} will always evaluate to true.	
++src/Piwigo/Tag/TagRepository.php	1019	38	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Tag/TagRepository.php	1040	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Tag/TagRepository.php	1055	38	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Tag/TagRepository.php	1078	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
++src/Piwigo/Tag/TagRepository.php	1104	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Tag/TagRepository.php	1123	37	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Tag/TagService.php	200	28	0	foreach.valueOverwrite	Foreach overwrites $tag with its value variable.	
++src/Piwigo/Tag/TagService.php	203	18	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
+ src/Piwigo/Users/UserRepository.php	221	21	0	nullCoalesce.offset	Offset 'username' on array{id: Piwigo\\Common\\ValueObject\\UserId|null, username: Piwigo\\Common\\ValueObject\\Username, email: Piwigo\\Common\\ValueObject\\Email|null} on left side of ?? always exists and is not nullable.	
++src/Piwigo/Users/UserRepository.php	246	38	0	cast.useless	Casting to int something that's already int.	
++src/Piwigo/Users/UserRepository.php	270	38	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Users/UserRepository.php	309	16	0	arrayValues.list	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Users/UserRepository.php	336	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\UserId|null, username: Piwigo\\Common\\ValueObject\\Username} will always evaluate to true.	
+ src/Piwigo/Users/UserRepository.php	622	17	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\UserId|null} will always evaluate to true.	
+@@ -147,14 +261,305 @@
+ src/Piwigo/Users/UserRepository.php	829	35	4	instanceof.alwaysTrue	Instanceof between Piwigo\\Users\\UserInfoEntity and Piwigo\\Users\\UserInfoEntity will always evaluate to true.	
+ src/Piwigo/Users/UserRepository.php	862	32	0	arrayValues.list	call to array_values() on list, which is already a list, has no effect	
+ src/Piwigo/Users/UserRepository.php	888	32	0	arrayValues.list	call to array_values() on list, which is already a list, has no effect	
++src/Piwigo/Users/UserRepository.php	969	38	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Users/UserRepository.php	1055	20	0	arrayValues.list	call to array_values() on list<string|null>, which is already a list, has no effect	
++src/Piwigo/Users/UserRepository.php	1724	46	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Users/UserRepository.php	1834	19	4	function.alreadyNarrowedType	Call to function is_array() with array{user_id: mixed, status: Piwigo\\Users\\UserStatus, language: Piwigo\\Common\\ValueObject\\LangCode, email: Piwigo\\Common\\ValueObject\\Email|null, username: Piwigo\\Common\\ValueObject\\Username} will always evaluate to true.	
+ src/Piwigo/Users/UserRepository.php	1885	19	4	function.alreadyNarrowedType	Call to function is_array() with array{username: Piwigo\\Common\\ValueObject\\Username, id: Piwigo\\Common\\ValueObject\\UserId|null} will always evaluate to true.	
++src/Piwigo/Users/UserRepository.php	1962	37	0	cast.useless	Casting to int something that's already int.	
+ src/Piwigo/Users/UserRepository.php	1996	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\UserId|null, status: Piwigo\\Users\\UserStatus|null} will always evaluate to true.	
+ src/Piwigo/Users/UserRepository.php	2039	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\UserId|null, username: Piwigo\\Common\\ValueObject\\Username, status: Piwigo\\Users\\UserStatus|null} will always evaluate to true.	
+ src/Piwigo/Users/UserRepository.php	2079	19	4	function.alreadyNarrowedType	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\UserId|null, username: Piwigo\\Common\\ValueObject\\Username, mailAddress: Piwigo\\Common\\ValueObject\\Email|null, status: Piwigo\\Users\\UserStatus|null, registrationDate: Piwigo\\Common\\ValueObject\\SqlDateTime|null} will always evaluate to true.	
++tests/Arch/StructuralTest.php	167	31	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	
++tests/Arch/StructuralTest.php	189	31	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	
++tests/Arch/StructuralTest.php	220	31	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	
++tests/Arch/StructuralTest.php	649	35	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	
++tests/Browser/ConsoleCleanTest.php	48	26	0	foreach.keyOverwrite	Foreach overwrites $name with its key variable.	
++tests/Browser/ConsoleCleanTest.php	48	35	0	foreach.valueOverwrite	Foreach overwrites $path with its value variable.	
++tests/Browser/GoldenHtmlSnapshotTest.php	568	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Browser/GoldenHtmlSnapshotTest.php	572	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Browser/GoldenHtmlSnapshotTest.php	576	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Browser/Helpers/BrowserTestHelpers.php	1117	14	0	foreach.keyOverwrite	Foreach overwrites $legacyKey with its key variable.	
++tests/Browser/Helpers/BrowserTestHelpers.php	1117	28	0	foreach.valueOverwrite	Foreach overwrites $restKey with its value variable.	
++tests/Browser/Helpers/BrowserTestHelpers.php	1132	14	0	foreach.keyOverwrite	Foreach overwrites $legacyKey with its key variable.	
++tests/Browser/Helpers/BrowserTestHelpers.php	1132	28	0	foreach.valueOverwrite	Foreach overwrites $restKey with its value variable.	
++tests/Browser/Helpers/BrowserTestHelpers.php	2938	76	0	foreach.valueOverwrite	Foreach overwrites $line with its value variable.	
++tests/Browser/IntroSubControllerTest.php	106	10	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++tests/Browser/LanguagesNewInteractionTest.php	115	76	0	foreach.valueOverwrite	Foreach overwrites $field with its value variable.	
++tests/Browser/RegenerateFixtureTest.php	298	56	0	foreach.valueOverwrite	Foreach overwrites $name with its value variable.	
++tests/Browser/ThemesInstalledPageRendererTest.php	310	51	0	foreach.valueOverwrite	Foreach overwrites $id with its value variable.	
++tests/Integration/AuthRepositoryTest.php	99	21	4	test.risky	Test Piwigo\\Tests\\Integration\\AuthRepositoryTest::testUpdateLanguageIsANoOpForANonexistentUser() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/AuthRepositoryTest.php	108	21	4	test.risky	Test Piwigo\\Tests\\Integration\\AuthRepositoryTest::testClearActivationKeyIsANoOpForANonexistentUser() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/AuthRepositoryTest.php	135	21	4	test.risky	Test Piwigo\\Tests\\Integration\\AuthRepositoryTest::testSetActivationKeyIsANoOpForANonexistentUser() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/CategoryRepositoryTest.php	596	59	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryRepositoryTest.php	700	54	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryRepositoryTest.php	721	59	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryRepositoryTest.php	722	59	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	637	53	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	840	60	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	916	79	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	924	76	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	932	77	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	942	75	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	978	60	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	986	58	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	1082	62	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	1116	62	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	1301	59	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CategoryServiceTest.php	1368	66	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/CommentRepositoryTest.php	497	26	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|null given on the left side.	
++tests/Integration/DbMaintenanceRepositoryTest.php	326	21	4	test.risky	Test Piwigo\\Tests\\Integration\\DbMaintenanceRepositoryTest::testRepairOptimizeAllTablesCompletesWithoutThrowing() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/ExtensionContextTest.php	562	47	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ExtensionContextTest.php	587	34	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ExtensionContextTest.php	591	54	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ExtensionContextTest.php	593	90	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ExtensionContextTest.php	653	53	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ExtensionLifecycleTest.php	442	25	4	test.risky	Test Piwigo\\Tests\\Integration\\ExtensionLifecycleTest::testDeleteWhenExtensionsInstallIsDisabledFatallyErrors() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/ExtensionLifecycleTest.php	791	41	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/GeoIpLookupControllerTest.php	112	22	4	test.risky	Test Piwigo\\Tests\\Integration\\GeoIpLookupControllerTest::testPaths() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/HistoryServiceTest.php	586	37	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	92	41	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	102	39	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	115	41	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	125	39	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	406	57	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	423	53	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	459	63	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	460	64	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	478	59	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ImageRepositoryTest.php	479	60	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/IntegrationTestCase.php	368	24	4	test.risky	Test Piwigo\\Tests\\Integration\\IntegrationTestCase::testHeader() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/MailServiceTest.php	593	21	4	test.risky	Test Piwigo\\Tests\\Integration\\MailServiceTest::testSwitchLangBackIsANoOpWhenTheStackIsEmpty() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/MaintenancePurgeHistoryCommandTest.php	78	54	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/MessengerRoundTripTest.php	139	22	0	function.strict	Call to function iterator_to_array() requires parameter #2 to be set.	
++tests/Integration/NotificationByMailRepositoryTest.php	177	37	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/NotificationByMailSenderTest.php	150	26	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/NotificationByMailSenderTest.php	500	21	4	test.risky	Test Piwigo\\Tests\\Integration\\NotificationByMailSenderTest::testBeginUsersEnvUsesTheConfiguredNbmSendMailAsNameInsteadOfTheMailSenderNameFallback() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/PermalinkRepositoryTest.php	157	21	4	test.risky	Test Piwigo\\Tests\\Integration\\PermalinkRepositoryTest::testClearCategoryPermalinkOnAnUnknownCategoryIsASilentNoop() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/PermalinkRepositoryTest.php	226	49	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/PluginRepositoryTest.php	171	50	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/RateRepositoryTest.php	166	54	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/RateRepositoryTest.php	511	37	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/RateRepositoryTest.php	529	37	0	cast.useless	Casting to float something that's already float.	
+ tests/Integration/RateServiceTest.php	303	21	4	function.alreadyNarrowedType	Call to function is_string() with string will always evaluate to true.	
++tests/Integration/RateServiceTest.php	325	50	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/ReindexImagesHandlerTest.php	88	21	4	test.risky	Test Piwigo\\Tests\\Integration\\ReindexImagesHandlerTest::testInvokeDelegatesToMetadataServiceSyncMetadata() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/SiteRepositoryTest.php	118	21	4	test.risky	Test Piwigo\\Tests\\Integration\\SiteRepositoryTest::testDeleteOnAnUnknownIdIsASilentNoop() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/TagServiceTest.php	584	45	0	cast.useless	Casting to int something that's already int.	
++tests/Integration/TemplateDefineDerivativeTest.php	95	21	4	test.risky	Test Piwigo\\Tests\\Integration\\TemplateDefineDerivativeTest::testMissingHeightWithoutATypeIsFatal() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/TemplateDefineDerivativeTest.php	103	21	4	test.risky	Test Piwigo\\Tests\\Integration\\TemplateDefineDerivativeTest::testMissingWidthWithoutATypeIsFatal() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/TemplateDefineDerivativeTest.php	155	21	4	test.risky	Test Piwigo\\Tests\\Integration\\TemplateDefineDerivativeTest::testMinWidthGreaterThanWidthIsFatal() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/TemplateDefineDerivativeTest.php	170	21	4	test.risky	Test Piwigo\\Tests\\Integration\\TemplateDefineDerivativeTest::testMinHeightGreaterThanHeightIsFatal() has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Integration/UploadServiceTest.php	398	15	5	booleanNot.exprNotBoolean	Only booleans are allowed in a negated boolean, bool|never given.	
+ tests/Integration/UserRepositoryTest.php	269	31	4	function.alreadyNarrowedType	Call to function is_scalar() with int<0, max>|false will always evaluate to true.	
++tests/Integration/UserRepositoryTest.php	386	70	0	cast.useless	Casting to int something that's already int.	
+ tests/Integration/UserRepositoryTest.php	387	33	4	function.impossibleType	Call to function is_bool() with int will always evaluate to false.	
++tests/Integration/UserServiceTest.php	324	68	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Admin/Extensions/ExtensionIgnoredUpdateRepositoryTest.php	115	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Extensions/ExtensionScannerTest.php	310	14	0	for.variableOverwrite	For loop initial assignment overwrites variable $i.	
++tests/Unit/Admin/Image/ImageBackendTest.php	1502	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Image/ImageImagickTest.php	566	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Image/ImageImagickTest.php	581	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Image/ImageImagickTest.php	588	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Image/ImageImagickTest.php	595	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Image/ImageImagickTest.php	613	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Image/ImageImagickTest.php	623	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Maintenance/MaintenanceActionDispatcherTest.php	27	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	1215	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	1231	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	1248	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Auth/CookieServiceTest.php	330	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Auth/CookieServiceTest.php	342	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Auth/CookieServiceTest.php	394	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	107	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	114	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	121	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	128	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	135	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	142	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	149	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	156	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	163	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	170	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	177	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	184	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	191	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	198	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	205	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	212	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	219	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	226	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	233	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	240	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	247	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	254	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	261	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	268	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminAccessorTest.php	275	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminDispatcherTest.php	44	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/AdminDispatcherTest.php	57	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/CliBootstrapTest.php	150	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/CliBootstrapTest.php	157	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/CliBootstrapTest.php	164	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/CliBootstrapTest.php	171	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/CliBootstrapTest.php	175	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/CoreDomainAccessorTest.php	40	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/CoreDomainAccessorTest.php	56	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/ExtendedDomainAccessorTest.php	40	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/ExtendedDomainAccessorTest.php	56	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/InfrastructureAccessorTest.php	35	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/PresentationAccessorTest.php	54	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/PresentationAccessorTest.php	61	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/PresentationAccessorTest.php	68	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/PresentationAccessorTest.php	75	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/RequestBootstrapBootConfigOnlyTest.php	233	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/RequestBootstrapCurrentConfigTest.php	16	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/RequestBootstrapResolverGuardsTest.php	24	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/RequestBootstrapResolverGuardsTest.php	31	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/RequestBootstrapResolverGuardsTest.php	38	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/RequestBootstrapResolverGuardsTest.php	45	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/RequestBootstrapResolverGuardsTest.php	52	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Bootstrap/RequestBootstrapResolverGuardsTest.php	59	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
+ tests/Unit/Cache/CachePoolsTest.php	29	15	4	instanceof.alwaysTrue	Instanceof between Psr\\Cache\\CacheItemPoolInterface and Psr\\Cache\\CacheItemPoolInterface will always evaluate to true.	
+ tests/Unit/Cache/CachePoolsTest.php	35	11	4	function.alreadyNarrowedType	Call to function is_int() with int will always evaluate to true.	
++tests/Unit/Category/CategoryRepositoryTest.php	640	38	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryRepositoryTest.php	766	33	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryRepositoryTest.php	788	34	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryRepositoryTest.php	790	37	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	554	35	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	811	43	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	860	44	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	921	58	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	930	55	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	939	56	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	950	54	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	987	39	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	996	37	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	1104	37	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	1133	37	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	1417	33	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Category/CategoryServiceTest.php	1474	33	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Comment/Projection/CommentSummaryTest.php	60	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Comment/Projection/CommentTest.php	102	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Comment/Projection/CommentTest.php	132	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Common/SmallDtoTest.php	39	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Common/SmallDtoTest.php	43	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Common/SmallDtoTest.php	59	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/DateHelperExtraTest.php	115	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/DateHelperExtraTest.php	137	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/ErrorCollectorTest.php	294	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/FilesystemHelperTest.php	322	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/FilesystemHelperTest.php	357	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/KernelBootTest.php	22	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/KernelBootTest.php	48	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/KernelBootTest.php	61	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/LoggerTest.php	310	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/LoggerTest.php	450	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Core/LoggerTest.php	476	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DbInfoTest.php	79	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/DateFormatMonthDayFunctionTest.php	35	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/DateFormatYearMonthFunctionTest.php	35	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/DateSubFunctionTest.php	50	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/DateSubFunctionTest.php	54	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/DateSubFunctionTest.php	58	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/DayOfMonthFunctionTest.php	34	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/DayOfWeekFunctionTest.php	35	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/GroupConcatFunctionTest.php	36	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/MonthFunctionTest.php	34	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/RandFunctionTest.php	33	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/SubstringIndexFunctionTest.php	32	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/SubstringIndexFunctionTest.php	36	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/WeekFunctionTest.php	42	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/WeekFunctionTest.php	51	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/WeekFunctionTest.php	55	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/WeekdayFunctionTest.php	35	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/DqlFunction/YearFunctionTest.php	34	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/Type/CustomTypesTest.php	65	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/Type/CustomTypesTest.php	73	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/Type/CustomTypesTest.php	125	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/Type/CustomTypesTest.php	131	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Db/Type/CustomTypesTest.php	213	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Feed/FeedRepositoryTest.php	180	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Group/Projection/GroupListingTest.php	43	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Group/Projection/GroupTest.php	40	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Html/HtmlServiceTest.php	154	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Html/HtmlServiceTest.php	171	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Html/HtmlServiceTest.php	1459	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Http/Middleware/ControllerInvokerMiddlewareTest.php	165	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Http/Middleware/ControllerInvokerMiddlewareTest.php	171	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Http/SessionBootstrapTest.php	48	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/DerivativeCacheServiceTest.php	215	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/DerivativeImageTest.php	207	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/DerivativeImageTest.php	232	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/DerivativeImageTest.php	276	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/DerivativeImageTest.php	301	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/DerivativeImageTest.php	326	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/DerivativeImageTest.php	357	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/DerivativeImageTest.php	928	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/ImageRepositoryTest.php	377	40	0	foreach.valueOverwrite	Foreach overwrites $table with its value variable.	
++tests/Unit/Image/ImageServiceTest.php	170	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/SrcImageTest.php	174	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/SrcImageTest.php	304	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/SrcImageTest.php	585	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Image/SrcImageTest.php	610	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Job/Handler/ReindexImagesHandlerTest.php	28	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Job/SendNotificationEmailHandlerTest.php	40	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Notification/NotificationByMailRepositoryTest.php	46	33	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Permalink/PermalinkRepositoryTest.php	375	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Permission/PermissionServiceTest.php	463	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/PluginConfig/EventDispatcherTest.php	38	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/PluginConfig/EventDispatcherTest.php	194	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/PluginConfig/PluginManifestTest.php	150	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/PluginConfig/PluginManifestTest.php	162	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/PluginConfig/PluginRepositoryTest.php	147	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/PluginConfig/PluginRepositoryTest.php	155	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/PluginConfig/ThemeManifestTest.php	132	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Rate/RateRepositoryTest.php	101	33	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Rate/RateRepositoryTest.php	119	33	0	cast.useless	Casting to float something that's already float.	
++tests/Unit/Session/SessionServiceTest.php	74	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Session/SessionServiceTest.php	363	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Site/SiteRepositoryTest.php	133	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Storage/StorageRegistryTest.php	60	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Storage/StorageRegistryTest.php	66	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Tag/Projection/TagBriefTest.php	40	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Tag/Projection/TagTest.php	52	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Tag/TagRepositoryTest.php	1079	39	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Tag/TagRepositoryTest.php	1119	39	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Tag/TagServiceTest.php	885	40	0	cast.useless	Casting to int something that's already int.	
++tests/Unit/Template/CurrentTemplateTest.php	137	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Template/TemplateInstanceTest.php	257	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Template/TemplateInstanceTest.php	1073	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Tools/GeneratedFileErrorMapperTest.php	114	24	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	250	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	267	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	276	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	479	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	493	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	507	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	675	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	820	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	912	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1597	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1632	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1657	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1690	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1725	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1754	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1775	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1795	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1815	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1845	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1879	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	1907	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	2014	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	2031	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	2074	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	2084	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	2123	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	2133	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Url/UrlServiceTest.php	2143	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Users/CurrentUserTest.php	38	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Users/Projection/ActivationKeyRowTest.php	46	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tests/Unit/Users/UserTest.php	73	1	4	test.risky	Test has no assertions and no expectException/markTestSkipped/markTestIncomplete/addToAssertionCount call - it will be reported risky by PHPUnit at runtime.	
++tools/doc-drift-check.php	80	17	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	
++tools/phpstan/Latte/LatteTemplateCompiler.php	163	37	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	

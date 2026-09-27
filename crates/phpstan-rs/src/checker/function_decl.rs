@@ -344,7 +344,7 @@ impl<'a> Checker<'a> {
             if class_name.is_none() {
                 self.check_unknown_phpstan_tags_on(f.doc_comment.as_deref(), f.name_span);
             }
-            if self.registry.check_magic_numbers {
+            if self.settings.sidz.check_magic_numbers {
                 self.check_magic_numbers_in_params(&f.params);
             }
             self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
@@ -942,7 +942,7 @@ impl<'a> Checker<'a> {
                 declared_return.as_ref(),
                 sig.or(ancestor_sig_hint),
             );
-            if self.registry.check_native_type_hints
+            if self.settings.extras.check_native_type_hints
                 && let Some(sig) = sig
             {
                 self.check_native_type_hints(f, class_name, &label, sig);
@@ -1124,7 +1124,8 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some(expected) = &declared_return
-                && (!f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete))
+                && (!f.body.is_empty()
+                    || (self.settings.extras.check_empty_method_bodies && is_concrete))
                 && body_falls_off_end
                 && (!self.current_function_is_generator || generator_treturn.is_some())
             {
@@ -1171,7 +1172,7 @@ impl<'a> Checker<'a> {
             // (a bare `return;` counts too), that's "never returns
             // normally". Scoped to an undeclared (reads as `Mixed`) or
             // `void`-declared return type only.
-            if self.registry.check_never_return_suggestions
+            if self.settings.extras.check_never_return_suggestions
                 && !f.body.is_empty()
                 && !self.current_function_is_generator
                 && !body_falls_off_end
@@ -1207,7 +1208,8 @@ impl<'a> Checker<'a> {
             // "nothing was thrown at all, flag every declared member"
             // fallback would otherwise unconditionally fire on every
             // `@throws` tag any interface/abstract method ever carries.
-            if !f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete) {
+            if !f.body.is_empty() || (self.settings.extras.check_empty_method_bodies && is_concrete)
+            {
                 let subject = match class_name {
                     Some(c) => format!("Method {c}::{}()", f.name),
                     None => format!("Function {}()", f.name),
@@ -1594,9 +1596,7 @@ impl<'a> Checker<'a> {
                 other => other,
             };
             let default_ty = self.infer_expr(default, &Locals::default());
-            if matches!(default_ty, Type::Mixed(_))
-                || self.registry.accepts(param_ty, &default_ty).yes()
-            {
+            if matches!(default_ty, Type::Mixed(_)) || self.accepts(param_ty, &default_ty).yes() {
                 continue;
             }
             let target = match class_name {

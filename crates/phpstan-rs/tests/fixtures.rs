@@ -17,8 +17,10 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use config::ConfigFile;
 use diagnostics::Diagnostic;
 use libtest_mimic::{Arguments, Failed, Trial};
+use phpstan_rs::app::config_schema;
 use phpstan_rs::project::session::Session;
 use phpstan_rs::project::worker_pool;
 
@@ -62,7 +64,8 @@ fn collect(root: &Path, dir: &Path, pool: &Arc<rayon::ThreadPool>, trials: &mut 
 
 fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> Result<(), Failed> {
     let stem = expect_file.with_extension("");
-    let (session, base) = Session::for_fixture(&stem, pool)?;
+    let config = fixture_config(&stem.with_extension("toml"))?;
+    let (session, base) = Session::for_fixture(&stem, &config, pool)?;
     let single_file = stem.with_extension("php").is_file();
     let dump = std::env::var_os("PHPSTAN_RS_DUMP_TYPES")
         .map(|dir| PathBuf::from(dir).join(name.replace('/', "__")));
@@ -97,6 +100,22 @@ fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> 
         )
         .into())
     }
+}
+
+/// The fixture's config, `path` when it exists, checked against the
+/// application's schema. An old key a schema moves is an error here: a
+/// fixture is written in the current layout.
+fn fixture_config(path: &Path) -> Result<ConfigFile, Failed> {
+    if !path.is_file() {
+        return Ok(ConfigFile::empty());
+    }
+    let schema = config_schema();
+    let config = ConfigFile::load(path, &schema)?;
+    config.validate(&schema)?;
+    if let Some(warning) = config.warnings().first() {
+        return Err(format!("{}: {warning}", path.display()).into());
+    }
+    Ok(config)
 }
 
 /// Writes `text`, the session's type dump, to `out`: each line's path

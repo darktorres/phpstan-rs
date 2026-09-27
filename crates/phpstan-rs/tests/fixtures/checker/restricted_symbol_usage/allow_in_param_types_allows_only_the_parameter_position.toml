@@ -1,4 +1,4 @@
-[[restricted_symbols]]
+[[ext.disallowed-calls.restricted_symbols]]
 allow_in_param_types = true
 kind = "class"
 message = "use NewService instead"

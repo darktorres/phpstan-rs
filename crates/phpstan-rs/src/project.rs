@@ -4,6 +4,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::checker::constant_resolver::ConstantResolver;
+use crate::checker::rule_level_helper::RuleLevelHelper;
+use crate::checker::settings::CheckSettings;
 use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::ignore_comments;
@@ -106,24 +109,20 @@ pub struct Project {
     // resolves them against the working directory. `None` means the
     // process's own working directory.
     working_dir: Option<PathBuf>,
-    // `working_dir` canonicalized (`set_absolute_root`), which
+    // `working_dir` canonicalized, which
     // `absolute_path` resolves analysed paths against.
     absolute_root: Option<PathBuf>,
-    // The composer packages and which directories they own
-    // (`set_packages`); each file's owner is kept in its `FileState`.
+    // The composer packages and which directories they own; each file's
+    // owner is kept in its `FileState`.
     packages: composer::PackageIndex,
-    // Gates `checker::phpstan_api::check_phpstan_api_usage` - set once
-    // via `set_phpstan_api_check_enabled` rather than re-detected here on
-    // every load/check, since `Project` itself has no fixed notion of
-    // "the project's own root directory" - its files are just whatever
-    // absolute paths were handed to `load_file`. Defaults to `false`.
-    phpstan_api_check_enabled: bool,
+    // What the checks are configured with (`apply_settings`).
+    settings: CheckSettings,
     // When set, per-file and whole-program checks leave inline
     // `@phpstan-ignore*` suppression to `apply_inline_ignores`.
     defer_inline_ignores: bool,
     // Whether `load_file`/`update_file` keep each file's own raw source
     // text around in its `FileState` (see that field's own doc comment) -
-    // off by default. Only `lsp.rs`'s `Server::new()` turns this on:
+    // off by default. Only `lsp.rs`'s `Server` turns this on:
     // hover/definition's own text-split technique (`lsp::text_split`)
     // needs a known span's exact source text, including whatever an
     // editor's `didChange` most recently sent - not necessarily what's on
@@ -145,12 +144,12 @@ pub struct Project {
     // always populated (no `retain_source` gate, same as `decl_locations`
     // above), the same indexing-side/check-side split
     // `duplicate_class_sites` below uses: its own gate is at the check
-    // side, `Registry::check_duplicate_function_declarations`, not the
+    // side, `RulesSettings::check_duplicate_function_declarations`, not the
     // indexing side. See `DuplicateFunctionSites`'s own doc comment.
     duplicate_fn_sites: DuplicateFunctionSites,
     // The class-like counterpart to `duplicate_fn_sites` above - always
     // populated too (its own gate is at the check side,
-    // `Registry::check_duplicate_class_declarations`, not the indexing
+    // `RulesSettings::check_duplicate_class_declarations`, not the indexing
     // side, so an opt-out project pays only the cost of an unused table,
     // not a missing one it might later want turned on incrementally).
     // See `DuplicateClassSites`'s own doc comment.
@@ -232,6 +231,52 @@ pub(crate) struct FileCheck {
     pub(crate) type_dump: Vec<String>,
 }
 
+/// Everything a project is configured with, applied together
+/// (`Project::apply_settings`).
+#[derive(Default, Clone, PartialEq)]
+pub struct ProjectSettings {
+    /// The directory relative include paths resolve against first, as PHP
+    /// resolves them against the working directory; `None` means the
+    /// process's own.
+    pub working_dir: Option<PathBuf>,
+    /// `working_dir` canonicalized, which analysed paths resolve against.
+    pub absolute_root: Option<PathBuf>,
+    /// The composer packages, and which directories each owns.
+    pub packages: composer::PackageIndex,
+    pub php_versions: Option<types::PhpVersions>,
+    /// The level types are accepted at; `None` when it's unset.
+    pub configured_level: Option<u8>,
+    /// Whether the project consumes PHPStan as a library, which the
+    /// PHPStan-API rules apply to.
+    pub phpstan_api_check_enabled: bool,
+    /// Leaves inline `@phpstan-ignore*` suppression to
+    /// `apply_inline_ignores`.
+    pub defer_inline_ignores: bool,
+    /// Keeps each file's source text (the language server's hover and
+    /// definition need it).
+    pub retain_source: bool,
+    pub rules: crate::rules_settings::RulesSettings,
+    /// Which extensions are active; each extension's checks default to it.
+    pub extensions: crate::ext::ActiveExtensions,
+    pub extras: crate::ext::extras::ExtrasSettings,
+    pub strict_rules: crate::ext::strict_rules::StrictRulesSettings,
+    pub shipmonk: crate::ext::shipmonk::ShipmonkSettings,
+    pub voku: crate::ext::voku::VokuSettings,
+    pub slam: crate::ext::slam::SlamSettings,
+    pub psr3: crate::ext::psr3::Psr3Settings,
+    pub sidz: crate::ext::sidz::SidzSettings,
+    pub phpunit: crate::ext::phpunit::PhpunitSettings,
+    /// Every restricted symbol, the presets' included
+    /// (`DisallowedCallsSettings::entries`).
+    pub restricted_symbols: Vec<crate::restricted_symbols::RestrictedSymbolEntry>,
+    pub doctrine: crate::ext::doctrine::DoctrineSettings,
+    /// `EngineSettings::dynamic_constant_entries`.
+    pub dynamic_constant_names: Vec<(String, Option<String>)>,
+    pub overlays: crate::assertion_tables::OverlaySettings,
+    pub sql_reflection: Option<sql::config::SqlReflectionConfig>,
+    pub sql_schema: Option<sql::schema::SchemaCatalog>,
+}
+
 impl Project {
     /// What this project's names are interned into; a file parsed for it
     /// elsewhere (`parse_file`) should use it too.
@@ -254,7 +299,7 @@ impl Project {
             working_dir: None,
             absolute_root: None,
             packages: composer::PackageIndex::default(),
-            phpstan_api_check_enabled: false,
+            settings: CheckSettings::default(),
             defer_inline_ignores: false,
             retain_source: false,
             decl_locations: DeclLocations::default(),
@@ -264,6 +309,92 @@ impl Project {
             member_index_built: false,
             escaped_enum_cases: FxHashSet::default(),
             escaped_member_classes: FxHashSet::default(),
+        }
+    }
+
+    /// Configures the project with `settings`, replacing what it had.
+    /// Each loaded file's package owner is recomputed.
+    pub fn apply_settings(&mut self, settings: ProjectSettings) {
+        let ProjectSettings {
+            working_dir,
+            absolute_root,
+            packages,
+            php_versions,
+            configured_level,
+            phpstan_api_check_enabled,
+            defer_inline_ignores,
+            retain_source,
+            rules,
+            extensions: active,
+            extras,
+            strict_rules,
+            shipmonk,
+            voku,
+            slam,
+            psr3,
+            sidz,
+            phpunit,
+            restricted_symbols,
+            doctrine,
+            dynamic_constant_names,
+            overlays,
+            sql_reflection,
+            sql_schema,
+        } = settings;
+        self.working_dir = working_dir;
+        self.absolute_root = absolute_root;
+        self.defer_inline_ignores = defer_inline_ignores;
+        self.retain_source = retain_source;
+
+        self.registry.php_versions = php_versions;
+        self.registry
+            .set_assertion_tables(overlays.assertions, overlays.class_argument_returns);
+
+        self.settings = CheckSettings {
+            rule_levels: RuleLevelHelper {
+                configured_level,
+                strict_mixed_arrays: rules.strict_mixed_arrays,
+                check_benevolent_union_types: rules.check_benevolent_union_types,
+            },
+            constants: ConstantResolver::new(&dynamic_constant_names),
+            rules,
+            phpstan_api: phpstan_api_check_enabled,
+            extras: extras.resolve(active.extras),
+            strict_rules: strict_rules.resolve(active.strict_rules),
+            shipmonk: shipmonk.resolve(active.shipmonk),
+            voku: voku.resolve(active.voku),
+            slam: slam.resolve(active.slam),
+            psr3_context_key_pattern: psr3.context_key_pattern().ok().flatten(),
+            psr3: psr3.resolve(active.psr3),
+            sidz: sidz.resolve(active.sidz),
+            phpunit: phpunit.resolve(active.phpunit),
+            deprecation_rules: active.deprecation_rules,
+            restricted_symbols: crate::restricted_symbols::RestrictedSymbols::compile(
+                &restricted_symbols,
+            ),
+            doctrine: active.doctrine,
+            doctrine_custom_functions: doctrine
+                .custom_functions
+                .iter()
+                .map(|e| (e.name.to_ascii_lowercase(), e.kind))
+                .collect(),
+            language_extensions: active.language_extensions,
+            pest: active.pest,
+        };
+
+        self.sql.set_config(sql_reflection);
+        self.sql.set_schema(sql_schema);
+
+        self.packages = packages;
+        let owners: Vec<(PathBuf, Option<composer::PackageOwner>)> = self
+            .files
+            .keys()
+            .map(|path| (path.clone(), self.packages.owner(&self.absolute_path(path))))
+            .collect();
+        for (path, owner) in owners {
+            if let Some(file) = self.files.get_mut(&path) {
+                file.owner = owner;
+            }
         }
     }
 
@@ -288,460 +419,14 @@ impl Project {
         );
     }
 
-    /// Opts the whole project's checking into
-    /// `registry::Registry::strict_mixed_arrays` - a narrow,
-    /// purpose-built setter rather than exposing a general `&mut
-    /// Registry` accessor, which would let a caller bypass
-    /// `load_file`/`update_file`'s own bookkeeping around what's
-    /// currently indexed.
-    pub fn set_strict_mixed_arrays(&mut self, strict: bool) {
-        self.registry.strict_mixed_arrays = strict;
-    }
-
-    /// Opts the whole project's checking into `Checker::
-    /// check_uninitialized_properties` - see `registry::Registry::check_
-    /// uninitialized_properties`'s own doc comment for why this defaults
-    /// to `false`.
-    pub fn set_check_uninitialized_properties(&mut self, enabled: bool) {
-        self.registry.check_uninitialized_properties = enabled;
-    }
-
-    /// Opts the whole project's checking into the `@internal`
-    /// restricted-usage engine - see `registry::Registry::
-    /// check_internal_usage`'s own doc comment for why this defaults to
-    /// `false`.
-    pub fn set_check_internal_usage(&mut self, enabled: bool) {
-        self.registry.check_internal_usage = enabled;
-    }
-
-    /// Compiles a project's own configured `restricted_symbols` list
-    /// into the `Registry`-held index `checker::restricted_symbol_usage`
-    /// consults. Empty by default (no entries configured), so this is a
-    /// zero-cost no-op call for every ordinary project.
-    /// See `Registry::set_dynamic_constant_names`.
-    /// See `working_dir`.
-    pub fn set_working_dir(&mut self, dir: PathBuf) {
-        self.working_dir = Some(dir);
-    }
-
-    pub fn set_dynamic_constant_names(&mut self, entries: &[(String, Option<String>)]) {
-        self.registry.set_dynamic_constant_names(entries);
-    }
-
-    pub fn set_restricted_symbols(
-        &mut self,
-        entries: &[crate::restricted_symbols::RestrictedSymbolEntry],
-    ) {
-        self.registry.restricted_symbols =
-            crate::restricted_symbols::RestrictedSymbols::compile(entries);
-    }
-
-    /// Compiles a project's own configured `[[doctrine_custom_functions]]`
-    /// list (ROADMAP Phase 168 168h) into the `Registry`-held
-    /// lookup `checker::doctrine::result_shape` consults. Empty by
-    /// default, so this is a zero-cost no-op call for every project with
-    /// no custom DQL function registrations.
-    pub fn set_doctrine_custom_functions(
-        &mut self,
-        entries: &[crate::doctrine_functions::DoctrineCustomFunctionEntry],
-    ) {
-        self.registry.doctrine_custom_functions = entries
-            .iter()
-            .map(|e| (e.name.to_ascii_lowercase(), e.kind))
-            .collect();
-    }
-
-    /// Sets the project's `[sql_reflection]` block. `None` (no block
-    /// configured) keeps every raw-SQL call site on its fallback.
-    pub fn set_sql_reflection_config(&mut self, config: Option<sql::config::SqlReflectionConfig>) {
-        self.sql.set_config(config);
-    }
-
-    /// Sets the project's parsed `schema_file` catalog - `None` when no
-    /// `schema_file` is configured.
-    pub fn set_sql_reflection_schema(&mut self, schema: Option<sql::schema::SchemaCatalog>) {
-        self.sql.set_schema(schema);
-    }
-
     /// The project's SQL reflection service.
     pub fn sql(&self) -> &sql::context::SqlContext {
         &self.sql
     }
 
-    /// Opts the whole project's checking into `use function`'s own
-    /// `function.nameCase` check - see `registry::Registry::
-    /// check_function_name_case`'s own doc comment for why this defaults
-    /// to `false`.
-    pub fn set_check_function_name_case(&mut self, enabled: bool) {
-        self.registry.check_function_name_case = enabled;
-    }
-
-    /// Opts the whole project's checking into `@deprecated` usage
-    /// warnings - see `registry::Registry::check_deprecated_usage`'s own
-    /// doc comment for why this defaults to `false`.
-    pub fn set_check_deprecated_usage(&mut self, enabled: bool) {
-        self.registry.check_deprecated_usage = enabled;
-    }
-
-    /// Opts the whole project's checking into the "missing checked
-    /// exception" family - see `registry::Registry::
-    /// check_missing_checked_exceptions`'s own doc comment for why this
-    /// defaults to `false`.
-    pub fn set_check_missing_checked_exceptions(&mut self, enabled: bool) {
-        self.registry.check_missing_checked_exceptions = enabled;
-    }
-
-    /// Opts the whole project's checking into the reinstated
-    /// empty-concrete-method-body completeness check - see
-    /// `registry::Registry::check_empty_method_bodies`'s own doc comment
-    /// for why this defaults to `false`.
-    pub fn set_check_empty_method_bodies(&mut self, enabled: bool) {
-        self.registry.check_empty_method_bodies = enabled;
-    }
-
-    /// Opts the whole project's checking into the strict (vs. the
-    /// default, castable) printf placeholder-type matching mode - see
-    /// `registry::Registry::check_strict_printf_placeholder_types`'s own
-    /// doc comment for why this defaults to `false`.
-    pub fn set_check_strict_printf_placeholder_types(&mut self, enabled: bool) {
-        self.registry.check_strict_printf_placeholder_types = enabled;
-    }
-
-    /// Opts the whole project's checking into `TooWideMethodThrowTypeRule`'s
-    /// wider, re-declaration-only mode - see
-    /// `registry::Registry::check_too_wide_throw_type_in_protected_and_public_methods`'s
-    /// own doc comment for why this defaults to `false`.
-    pub fn set_check_too_wide_throw_type_in_protected_and_public_methods(&mut self, enabled: bool) {
-        self.registry
-            .check_too_wide_throw_type_in_protected_and_public_methods = enabled;
-    }
-
-    /// The return-type analogue - see `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`'s
-    /// own doc comment.
-    pub fn set_check_too_wide_return_type_in_protected_and_public_methods(
-        &mut self,
-        enabled: bool,
-    ) {
-        self.registry
-            .check_too_wide_return_type_in_protected_and_public_methods = enabled;
-    }
-
-    /// The by-ref-parameter analogue - see `registry::Registry::
-    /// check_too_wide_by_ref_type_in_protected_and_public_methods`'s own
-    /// doc comment.
-    pub fn set_check_too_wide_by_ref_type_in_protected_and_public_methods(
-        &mut self,
-        enabled: bool,
-    ) {
-        self.registry
-            .check_too_wide_by_ref_type_in_protected_and_public_methods = enabled;
-    }
-
-    /// Opts the whole project's checking into
-    /// `MethodThrowTypeCovarianceRule` - see `registry::Registry::
-    /// check_method_throw_type_covariance`'s own doc comment for why
-    /// this defaults to `false`.
-    pub fn set_check_method_throw_type_covariance(&mut self, enabled: bool) {
-        self.registry.check_method_throw_type_covariance = enabled;
-    }
-
-    /// Opts the whole project's checking into real PHPStan's own
-    /// standalone `checkBenevolentUnionTypes` behavior - see
-    /// `registry::Registry::check_benevolent_union_types`'s own doc
-    /// comment for why this defaults to `false`.
-    pub fn set_check_benevolent_union_types(&mut self, enabled: bool) {
-        self.registry.check_benevolent_union_types = enabled;
-    }
-
-    /// Opts into real PHPStan's own `checkMissingCallableSignature`
-    /// behavior - see `registry::Registry::check_missing_callable_signature`.
-    pub fn set_check_missing_callable_signature(&mut self, enabled: bool) {
-        self.registry.check_missing_callable_signature = enabled;
-    }
-
-    /// Corrected from unconditional to opt-in - see `registry::Registry::
-    /// check_duplicate_function_declarations`'s own doc comment for the
-    /// real false positive that motivated this.
-    pub fn set_check_duplicate_function_declarations(&mut self, enabled: bool) {
-        self.registry.check_duplicate_function_declarations = enabled;
-    }
-
-    /// Opts the whole project's checking into `project::
-    /// duplicate_classes::check_duplicate_class_declarations` - see
-    /// `registry::Registry::check_duplicate_class_declarations`'s own doc
-    /// comment for why this defaults to `false`.
-    pub fn set_check_duplicate_class_declarations(&mut self, enabled: bool) {
-        self.registry.check_duplicate_class_declarations = enabled;
-    }
-
-    /// Opts the whole project's checking into boolean-trap detection -
-    /// see `registry::Registry::check_boolean_trap`'s own doc comment for
-    /// why this defaults to `false`.
-    pub fn set_check_boolean_trap(&mut self, enabled: bool) {
-        self.registry.check_boolean_trap = enabled;
-    }
-
-    /// Opts the whole project's checking into array-key cast warnings -
-    /// see `registry::Registry::check_array_key_cast`'s own doc comment
-    /// for why this defaults to `false`.
-    pub fn set_check_array_key_cast(&mut self, enabled: bool) {
-        self.registry.check_array_key_cast = enabled;
-    }
-
-    /// Opts the whole project's checking into
-    /// `RequireParentConstructCallRule` - see `registry::Registry::
-    /// check_parent_constructor_call`'s own doc comment for why this
-    /// defaults to `false`.
-    pub fn set_check_parent_constructor_call(&mut self, enabled: bool) {
-        self.registry.check_parent_constructor_call = enabled;
-    }
-
-    /// Opts the whole project's checking into constructor-property-
-    /// promotion suggestions - see `registry::Registry::
-    /// check_promoted_property_suggestions`'s own doc comment for why
-    /// this defaults to `false`.
-    pub fn set_check_promoted_property_suggestions(&mut self, enabled: bool) {
-        self.registry.check_promoted_property_suggestions = enabled;
-    }
-
-    /// Opts the whole project's checking into the "only booleans in a
-    /// condition" family - see `registry::Registry::
-    /// check_boolean_conditions`'s own doc comment for why this
-    /// defaults to `false`.
-    pub fn set_check_boolean_conditions(&mut self, enabled: bool) {
-        self.registry.check_boolean_conditions = enabled;
-    }
-
-    /// Opts the whole project's checking into strict `checkDynamic
-    /// Properties` behavior inside `isset()`/`empty()`/`??`/`??=` - see
-    /// `registry::Registry::check_dynamic_properties`'s own doc comment
-    /// for why this defaults to `false`.
-    pub fn set_check_dynamic_properties(&mut self, enabled: bool) {
-        self.registry.check_dynamic_properties = enabled;
-    }
-
-    /// Opts the whole project's checking into swapped-adjacent-
-    /// argument-name detection - see `registry::Registry::
-    /// check_swapped_arguments`'s own doc comment for why this defaults
-    /// to `false`.
-    pub fn set_check_swapped_arguments(&mut self, enabled: bool) {
-        self.registry.check_swapped_arguments = enabled;
-    }
-
-    /// Opts the whole project's checking into `never`-return-type
-    /// suggestions - see `registry::Registry::
-    /// check_never_return_suggestions`'s own doc comment for why this
-    /// defaults to `false`.
-    pub fn set_check_never_return_suggestions(&mut self, enabled: bool) {
-        self.registry.check_never_return_suggestions = enabled;
-    }
-
-    /// Opts the whole project's checking into missing-`default:`-arm
-    /// detection - see `registry::Registry::check_switch_missing_
-    /// default`'s own doc comment for why this defaults to `false`.
-    pub fn set_check_switch_missing_default(&mut self, enabled: bool) {
-        self.registry.check_switch_missing_default = enabled;
-    }
-
-    /// Opts the whole project's checking into missing-exception-message
-    /// detection - see `registry::Registry::check_throw_without_message`'s
-    /// own doc comment for why this defaults to `false`.
-    pub fn set_check_throw_without_message(&mut self, enabled: bool) {
-        self.registry.check_throw_without_message = enabled;
-    }
-
-    /// Opts the whole project's checking into base-Exception/Error-class
-    /// detection - see `registry::Registry::check_throw_base_class`'s
-    /// own doc comment for why this defaults to `false`.
-    pub fn set_check_throw_base_class(&mut self, enabled: bool) {
-        self.registry.check_throw_base_class = enabled;
-    }
-
-    /// See `Registry::check_exception_hygiene`.
-    pub fn set_check_exception_hygiene(&mut self, enabled: bool) {
-        self.registry.check_exception_hygiene = enabled;
-    }
-
-    /// See `Registry::check_current_time_dependence`.
-    pub fn set_check_current_time_dependence(&mut self, enabled: bool) {
-        self.registry.check_current_time_dependence = enabled;
-    }
-
-    /// See `Registry::check_psr3_exception_context`.
-    pub fn set_check_psr3_exception_context(&mut self, enabled: bool) {
-        self.registry.check_psr3_exception_context = enabled;
-    }
-
-    /// See `Registry::check_psr3_logging`.
-    pub fn set_check_psr3_logging(&mut self, enabled: bool) {
-        self.registry.check_psr3_logging = enabled;
-    }
-
-    /// See `Registry::psr3_context_key_pattern`.
-    pub fn set_psr3_context_key_pattern(&mut self, pattern: Option<regex::Regex>) {
-        self.registry.psr3_context_key_pattern = pattern;
-    }
-
-    /// See `Registry::check_magic_numbers`.
-    pub fn set_check_magic_numbers(&mut self, enabled: bool) {
-        self.registry.check_magic_numbers = enabled;
-    }
-
-    /// See `Registry::magic_number_exemptions`.
-    pub fn set_magic_number_options(
-        &mut self,
-        exemptions: Option<Vec<f64>>,
-        ignore_numeric_strings: bool,
-    ) {
-        self.registry.magic_number_exemptions = exemptions;
-        self.registry.magic_numbers_ignore_numeric_strings = ignore_numeric_strings;
-    }
-
-    /// See `Registry::check_native_type_hints`.
-    pub fn set_check_native_type_hints(&mut self, enabled: bool) {
-        self.registry.check_native_type_hints = enabled;
-    }
-
-    /// See `Registry::check_implicit_array_creation`.
-    pub fn set_check_implicit_array_creation(&mut self, enabled: bool) {
-        self.registry.check_implicit_array_creation = enabled;
-    }
-
-    /// See `Registry::check_useless_casts`.
-    pub fn set_check_useless_casts(&mut self, enabled: bool) {
-        self.registry.check_useless_casts = enabled;
-    }
-
-    /// See `Registry::check_strict_array_filter`.
-    pub fn set_check_strict_array_filter(&mut self, enabled: bool) {
-        self.registry.check_strict_array_filter = enabled;
-    }
-
-    /// See `Registry::check_mixed_type_operands`.
-    pub fn set_check_mixed_type_operands(&mut self, enabled: bool) {
-        self.registry.check_mixed_type_operands = enabled;
-    }
-
-    /// See `Registry::check_comparable_types`.
-    pub fn set_check_comparable_types(&mut self, enabled: bool) {
-        self.registry.check_comparable_types = enabled;
-    }
-
-    /// See `Registry::check_arithmetic_operands`.
-    pub fn set_check_arithmetic_operands(&mut self, enabled: bool) {
-        self.registry.check_arithmetic_operands = enabled;
-    }
-
-    /// See `Registry::check_identity_vs_equals`.
-    pub fn set_check_identity_vs_equals(&mut self, enabled: bool) {
-        self.registry.check_identity_vs_equals = enabled;
-    }
-
-    /// See `Registry::check_loose_haystack_comparison`.
-    pub fn set_check_loose_haystack_comparison(&mut self, enabled: bool) {
-        self.registry.check_loose_haystack_comparison = enabled;
-    }
-
-    /// See `Registry::check_strict_function_calls`.
-    pub fn set_check_strict_function_calls(&mut self, enabled: bool) {
-        self.registry.check_strict_function_calls = enabled;
-    }
-
-    /// See `Registry::check_switch_case_types`.
-    pub fn set_check_switch_case_types(&mut self, enabled: bool) {
-        self.registry.check_switch_case_types = enabled;
-    }
-
-    /// See `Registry::check_loop_variable_overwrite`.
-    pub fn set_check_loop_variable_overwrite(&mut self, enabled: bool) {
-        self.registry.check_loop_variable_overwrite = enabled;
-    }
-
-    /// See `Registry::check_dynamic_static_calls`.
-    pub fn set_check_dynamic_static_calls(&mut self, enabled: bool) {
-        self.registry.check_dynamic_static_calls = enabled;
-    }
-
-    /// See `Registry::check_illegal_constructor_calls`.
-    pub fn set_check_illegal_constructor_calls(&mut self, enabled: bool) {
-        self.registry.check_illegal_constructor_calls = enabled;
-    }
-
-    /// See `Registry::check_enum_exhaustiveness`.
-    pub fn set_check_enum_exhaustiveness(&mut self, enabled: bool) {
-        self.registry.check_enum_exhaustiveness = enabled;
-    }
-
-    /// See `Registry::check_null_coercion`.
-    pub fn set_check_null_coercion(&mut self, enabled: bool) {
-        self.registry.check_null_coercion = enabled;
-    }
-
-    /// Opts the whole project's checking into discarded-`new`-exception
-    /// detection - see `registry::Registry::check_new_exception_
-    /// discarded`'s own doc comment for why this defaults to `false`.
-    pub fn set_check_new_exception_discarded(&mut self, enabled: bool) {
-        self.registry.check_new_exception_discarded = enabled;
-    }
-
-    /// Opts the whole project's checking into assertion-less-test
-    /// ("risky test") detection - see
-    /// `registry::Registry::check_risky_tests`'s own doc comment for why
-    /// this defaults to `false`.
-    pub fn set_check_risky_tests(&mut self, enabled: bool) {
-        self.registry.check_risky_tests = enabled;
-    }
-
-    /// Opts the whole project's checking into dead-enum-case detection -
-    /// see `registry::Registry::check_dead_enum_cases`'s own doc comment
-    /// for why this defaults to `false`.
-    pub fn set_check_dead_enum_cases(&mut self, enabled: bool) {
-        self.registry.check_dead_enum_cases = enabled;
-    }
-
-    /// Opts the whole project's checking into dead-function/dead-class
-    /// detection - see `registry::Registry::check_dead_code`'s own doc
-    /// comment for why this defaults to `false`.
-    pub fn set_check_dead_code(&mut self, enabled: bool) {
-        self.registry.check_dead_code = enabled;
-    }
-
-    /// Opts the whole project's checking into namespace-level circular-
-    /// dependency detection - see `registry::Registry::
-    /// check_circular_dependencies`'s own doc comment for why this
-    /// defaults to `false`.
-    pub fn set_check_circular_dependencies(&mut self, enabled: bool) {
-        self.registry.check_circular_dependencies = enabled;
-    }
-
-    /// Opts the whole project's checking into dead-abstract-class
-    /// detection - see `registry::Registry::check_dead_abstract_classes`'s
-    /// own doc comment for why this defaults to `false`.
-    pub fn set_check_dead_abstract_classes(&mut self, enabled: bool) {
-        self.registry.check_dead_abstract_classes = enabled;
-    }
-
-    /// Opts the whole project's checking into dead-protected/public-
-    /// member detection - see `registry::Registry::check_dead_members`'s
-    /// own doc comment for why this defaults to `false`.
-    pub fn set_check_dead_members(&mut self, enabled: bool) {
-        self.registry.check_dead_members = enabled;
-    }
-
-    /// Configured `[[assertions]]`/`[[class_argument_returns]]` entries;
-    /// set before loading so the registry applies them.
-    pub fn set_assertion_tables(
-        &mut self,
-        assertions: Vec<crate::assertion_tables::AssertionEntry>,
-        returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
-    ) {
-        self.registry.set_assertion_tables(assertions, returns);
-    }
-
-    /// Leaves inline ignore comments to one final `apply_inline_ignores`
-    /// pass over every file's complete diagnostics.
-    pub fn set_defer_inline_ignores(&mut self, deferred: bool) {
-        self.defer_inline_ignores = deferred;
+    /// What the checks are configured with.
+    pub fn check_settings(&self) -> &CheckSettings {
+        &self.settings
     }
 
     /// Applies every analyzed file's inline ignore comments to `results`
@@ -835,53 +520,6 @@ impl Project {
         }
     }
 
-    /// Opts the whole project's checking into named-argument-rename-
-    /// collision detection - see `registry::Registry::check_renamed_
-    /// named_arguments`'s own doc comment for why this defaults to
-    /// `false`.
-    pub fn set_check_renamed_named_arguments(&mut self, enabled: bool) {
-        self.registry.check_renamed_named_arguments = enabled;
-    }
-
-    /// Configures the project's own `level` setting for
-    /// `registry::Registry::rule_level_accepts` - see that
-    /// field's own doc comment for why this is `Option<u8>` (not the
-    /// collapsed `u8` `check-project` otherwise uses for diagnostic
-    /// filtering) and why `None` must keep today's always-strict
-    /// behavior.
-    pub fn set_configured_level(&mut self, level: Option<u8>) {
-        self.registry.configured_level = level;
-    }
-
-    /// Configures the PHP versions the project runs on
-    /// (`registry::Registry::php_versions`). `None` means neither the
-    /// config nor composer.json says.
-    pub fn set_php_versions(&mut self, php_versions: Option<types::PhpVersions>) {
-        self.registry.php_versions = php_versions;
-    }
-
-    /// The working directory canonicalized, which analysed paths spelled
-    /// from the working directory resolve against (`absolute_path`).
-    pub fn set_absolute_root(&mut self, absolute_root: PathBuf) {
-        self.absolute_root = Some(absolute_root);
-    }
-
-    /// The project's composer packages. Recomputes each loaded file's
-    /// owner, so the absolute root must be set first.
-    pub fn set_packages(&mut self, packages: composer::PackageIndex) {
-        self.packages = packages;
-        let owners: Vec<(PathBuf, Option<composer::PackageOwner>)> = self
-            .files
-            .keys()
-            .map(|path| (path.clone(), self.packages.owner(&self.absolute_path(path))))
-            .collect();
-        for (path, owner) in owners {
-            if let Some(file) = self.files.get_mut(&path) {
-                file.owner = owner;
-            }
-        }
-    }
-
     /// `path`, spelled from the working directory, as an absolute path:
     /// the working directory swapped for `absolute_root`, then `.` and
     /// `..` resolved lexically. Without an absolute root, only the latter.
@@ -901,24 +539,6 @@ impl Project {
     pub(crate) fn package_name(&self, path: &Path) -> Option<&str> {
         let owner = self.files.get(path)?.owner?;
         self.packages.name(owner)
-    }
-
-    /// Opts every subsequent `check_file`/`check_all` call into
-    /// `checker::phpstan_api::check_phpstan_api_usage` - the caller
-    /// decides this once, from the project's `composer::PackageContext`
-    /// (`requires_phpstan`). Also
-    /// mirrored into `self.registry.phpstan_api_check_enabled`, since
-    /// the main `Checker` pass's own `MethodCall` arm needs to read this
-    /// too (`phpstanApi.method`/`phpParser.nodeConnectingAttribute`), and
-    /// `Checker` only ever has `&Registry` in hand, not `Project` itself.
-    pub fn set_phpstan_api_check_enabled(&mut self, enabled: bool) {
-        self.phpstan_api_check_enabled = enabled;
-        self.registry.phpstan_api_check_enabled = enabled;
-    }
-
-    /// See `retain_source`'s own doc comment.
-    pub fn set_retain_source(&mut self, enabled: bool) {
-        self.retain_source = enabled;
     }
 
     /// A loaded file's own retained raw source text, when `retain_source`
@@ -1029,7 +649,7 @@ impl Project {
         // off, the default, pays nothing extra here at all.
         let class_fn_refs = if self.retain_source {
             use_sites::index_class_fn_refs(&ast, &source)
-        } else if self.registry.check_dead_code {
+        } else if self.settings.rules.check_dead_code {
             use_sites::index_class_fn_refs_without_source(&ast)
         } else {
             Vec::new()
@@ -1037,10 +657,9 @@ impl Project {
         for (span, target) in class_fn_refs {
             self.use_sites.insert(&path, target, span);
         }
-        // `record_phpstan_class_file` no-ops unless
-        // `phpstan_api_check_enabled` and the name is `PHPStan\*`-
-        // namespaced, so this is a zero-cost loop for every ordinary
-        // corpus.
+        // `record_phpstan_class_file` no-ops unless the name is
+        // `PHPStan\*`-namespaced, so this is a zero-cost loop for every
+        // ordinary corpus.
         for name in &classes {
             self.registry.record_phpstan_class_file(name, &path);
         }
@@ -1659,7 +1278,9 @@ impl Project {
     /// facts pass to plug in).
     pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, &[Stmt])> {
         let file = self.files.get(path)?;
-        let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
+        let mut checker = Checker::new(&self.registry)
+            .with_sql(&self.sql)
+            .with_settings(&self.settings);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
@@ -1701,7 +1322,9 @@ impl Project {
                 type_dump: Vec::new(),
             };
         };
-        let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
+        let mut checker = Checker::new(&self.registry)
+            .with_sql(&self.sql)
+            .with_settings(&self.settings);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
@@ -1723,13 +1346,13 @@ impl Project {
         let named_argument_calls = checker.take_named_argument_call_facts();
         let type_dump = checker.take_type_dump();
         let mut diagnostics = checker.into_diagnostics();
-        if self.registry.check_duplicate_function_declarations {
+        if self.settings.rules.check_duplicate_function_declarations {
             diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
                 path,
                 &self.duplicate_fn_sites,
             ));
         }
-        if self.registry.check_duplicate_class_declarations {
+        if self.settings.rules.check_duplicate_class_declarations {
             diagnostics.extend(duplicate_classes::check_duplicate_class_declarations(
                 path,
                 &self.duplicate_class_sites,
@@ -1752,7 +1375,7 @@ impl Project {
             );
         }
         diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-        if self.phpstan_api_check_enabled {
+        if self.settings.phpstan_api {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
                 &file.ast,
                 &self.registry,
@@ -1940,7 +1563,9 @@ impl Project {
         tests::panic_injection::panic_if_injected(path);
         #[cfg(not(test))]
         let _ = path;
-        let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
+        let mut checker = Checker::new(&self.registry)
+            .with_sql(&self.sql)
+            .with_settings(&self.settings);
         checker.set_facts_only(true);
         checker.check_program(&file.ast);
         checker.take_property_assign_facts()
@@ -2127,7 +1752,7 @@ impl Project {
     ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
 
-        if self.registry.check_dead_enum_cases {
+        if self.settings.rules.check_dead_enum_cases {
             self.ensure_member_index_built();
             let dead = whole_program::dead_enum_cases::find_dead_cases(
                 &self.registry,
@@ -2154,7 +1779,7 @@ impl Project {
             }
         }
 
-        if self.registry.check_dead_code {
+        if self.settings.rules.check_dead_code {
             let dead_functions =
                 whole_program::dead_code::find_dead_functions(&self.registry, &self.use_sites);
             for name in dead_functions {
@@ -2189,7 +1814,7 @@ impl Project {
             }
         }
 
-        if self.registry.check_circular_dependencies {
+        if self.settings.rules.check_circular_dependencies {
             let cycles =
                 whole_program::circular_namespace_deps::find_namespace_cycles(&self.registry);
             for cycle in cycles {
@@ -2211,7 +1836,7 @@ impl Project {
             }
         }
 
-        if self.registry.check_dead_abstract_classes {
+        if self.settings.rules.check_dead_abstract_classes {
             let dead_abstract_classes =
                 whole_program::dead_abstract_classes::find_dead_abstract_classes(&self.registry);
             for name in dead_abstract_classes {
@@ -2232,7 +1857,7 @@ impl Project {
             }
         }
 
-        if self.registry.check_dead_members {
+        if self.settings.rules.check_dead_members {
             self.ensure_member_index_built();
             let dead_members = whole_program::dead_members::find_dead_members(
                 &self.registry,
@@ -2268,7 +1893,7 @@ impl Project {
             }
         }
 
-        if self.registry.check_renamed_named_arguments {
+        if self.settings.rules.check_renamed_named_arguments {
             let mut programs: Vec<(&PathBuf, &[Stmt])> = self
                 .files
                 .iter()

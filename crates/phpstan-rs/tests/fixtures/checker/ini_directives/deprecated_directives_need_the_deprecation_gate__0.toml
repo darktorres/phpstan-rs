@@ -1,2 +1,4 @@
-check_deprecated_usage = true
 php_version = "8.3"
+
+[ext.deprecation-rules]
+enabled = true

@@ -1,3 +1,5 @@
-check_dead_enum_cases = true
 paths = ["analysed.php"]
 scan_paths = ["vendor/lib/a.php"]
+
+[rules]
+check_dead_enum_cases = true

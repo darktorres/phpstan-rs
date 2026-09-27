@@ -70,26 +70,20 @@ impl Registry {
             .map_or(name, |(declared, _)| declared)
     }
 
-    /// The type relations against this registry's classes and settings.
+    /// The type relations against this registry's classes, at their
+    /// default leniency; the checker's `relation` applies the configured
+    /// rule levels.
     pub fn relation(&self) -> Relation<'_> {
         Relation {
             hierarchy: self,
-            strict_mixed_arrays: self.strict_mixed_arrays,
-            configured_level: self.configured_level,
-            check_benevolent_union_types: self.check_benevolent_union_types,
+            strict_mixed_arrays: false,
+            configured_level: None,
+            check_benevolent_union_types: false,
         }
     }
 
     pub fn accepts(&self, accepting: &Type, accepted: &Type) -> AcceptsResult {
         self.relation().accepts(accepting, accepted)
-    }
-
-    pub fn rule_level_accepts(&self, accepting: &Type, accepted: &Type) -> AcceptsResult {
-        self.relation().rule_level_accepts(accepting, accepted)
-    }
-
-    pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
-        self.relation().strict_mixed_receiver_level(ty)
     }
 
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {

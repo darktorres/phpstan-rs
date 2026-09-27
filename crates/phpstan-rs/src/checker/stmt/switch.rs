@@ -14,7 +14,9 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         self.check_expr(subject, locals, label);
-        if self.registry.check_switch_missing_default && !cases.iter().any(|c| c.test.is_none()) {
+        if self.settings.extras.check_switch_missing_default
+            && !cases.iter().any(|c| c.test.is_none())
+        {
             self.report(
                 "Switch has no default branch.".to_string(),
                 span,

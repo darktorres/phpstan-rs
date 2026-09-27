@@ -6,7 +6,7 @@ use crate::checker::{
 use crate::registry::{FunctionSig, Registry};
 use syntax::ast::*;
 use syntax::token::Span;
-use types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
+use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 use types::{has_offset_value_parts, union_types};
 
 use super::{
@@ -397,13 +397,21 @@ impl<'a> Checker<'a> {
                         // not `A` too.
                         if let Some(class_name) = is_instanceof_filter_callback(&args[1].value) {
                             let target = self.resolve_name_expr(class_name);
-                            return narrow_array_element_type_to(self.registry, stripped, &target);
+                            return narrow_array_element_type_to(
+                                &self.relation(),
+                                stripped,
+                                &target,
+                            );
                         }
                         // A native `is_string`/`is_int`/`is_float`/
                         // `is_bool`/`is_null` type-check predicate narrows
                         // the same way.
                         if let Some(target) = is_type_check_filter_callback(&args[1].value) {
-                            return narrow_array_element_type_to(self.registry, stripped, &target);
+                            return narrow_array_element_type_to(
+                                &self.relation(),
+                                stripped,
+                                &target,
+                            );
                         }
                     } else {
                         // No callback at all - real PHP's default
@@ -2361,12 +2369,12 @@ fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
 /// `array_filter`'s `instanceof`-filter callback (recognized by
 /// `is_instanceof_filter_callback` above) narrows the retained element
 /// type to `target` specifically.
-fn narrow_array_element_type_to(registry: &Registry, ty: Type, target: &Type) -> Type {
+fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) -> Type {
     filter_array_elements(ty, &|elem| {
         if types::types_definitely_disjoint(elem, target) {
             Type::Never
         } else {
-            narrow_type_to(registry, elem, target)
+            narrow_type_to(relation, elem, target)
         }
     })
 }

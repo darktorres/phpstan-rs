@@ -1,1 +1,2 @@
+[ext.strict-rules]
 check_strict_function_calls = true

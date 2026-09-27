@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::checker::settings::CheckSettings;
 use crate::registry::Registry;
 use diagnostics::Diagnostic;
 use syntax::lexer::Lexer;
@@ -30,7 +31,7 @@ pub(super) fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
 
 pub(super) fn diagnostics_for_with(
     src: &str,
-    configure: impl FnOnce(&mut Registry),
+    configure: impl FnOnce(&mut CheckSettings),
 ) -> Vec<Diagnostic> {
     let mut diagnostics = all_diagnostics_for_with(src, configure);
     diagnostics.retain(|d| !is_incidental(d));
@@ -43,7 +44,7 @@ pub(super) fn all_diagnostics_for(src: &str) -> Vec<Diagnostic> {
 
 pub(super) fn all_diagnostics_for_with(
     src: &str,
-    configure: impl FnOnce(&mut Registry),
+    configure: impl FnOnce(&mut CheckSettings),
 ) -> Vec<Diagnostic> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
@@ -51,12 +52,13 @@ pub(super) fn all_diagnostics_for_with(
     registry.merge_stubs(crate::php_stubs::generated_stubs());
     registry.merge_stub_classes(crate::php_stubs::generated_stub_classes());
     registry.merge_stub_constants(crate::php_stubs::generated_stub_constants());
-    configure(&mut registry);
-    // Merging stubs and `configure` can add classes and `extends` edges
-    // after `Registry::build`'s own precompute ran.
+    // Merging stubs can add classes and `extends` edges after
+    // `Registry::build`'s own precompute ran.
     registry.precompute_ancestor_names();
     registry.precompute_member_owners();
-    let mut checker = Checker::new(&registry);
+    let mut settings = CheckSettings::default();
+    configure(&mut settings);
+    let mut checker = Checker::new(&registry).with_settings(&settings);
     checker.check_program(&program);
     checker.into_diagnostics()
 }

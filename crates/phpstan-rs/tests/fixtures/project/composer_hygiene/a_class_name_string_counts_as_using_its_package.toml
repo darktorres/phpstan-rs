@@ -1,4 +1,6 @@
-check_composer_hygiene = true
 no_composer = false
 paths = ["src/Wiring.php"]
 scan_paths = ["vendor/acme/used/src/Used.php", "vendor/acme/unused/src/Unused.php", "vendor/acme/dev-tool/src/Tool.php", "vendor/acme/transitive/src/Helper.php"]
+
+[rules]
+check_composer_hygiene = true

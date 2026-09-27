@@ -1,5 +1,5 @@
 //! The `@internal` restricted-usage engine, gated behind
-//! `Registry::check_internal_usage` (default off - see its own doc
+//! `RulesSettings::check_internal_usage` (default off - see its own doc
 //! comment). Mirrors real PHPStan's own `RestrictedInternal*UsageExtension`
 //! family (`vendor/phpstan-src/src/Rules/InternalTag/`): a symbol tagged
 //! `@internal` (or declared inside an `@internal`-tagged class) is usable
@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         span: Span,
     ) {
-        if !self.registry.check_internal_usage || !sig.is_internal {
+        if !self.settings.rules.check_internal_usage || !sig.is_internal {
             return;
         }
         if !self.should_report_internal_usage(fqn) {
@@ -122,7 +122,7 @@ impl<'a> Checker<'a> {
             sig.visibility == syntax::ast::Visibility::Public,
             span,
         );
-        if !self.registry.check_internal_usage {
+        if !self.settings.rules.check_internal_usage {
             return;
         }
         let Some(declaring_info) = self.registry.classes.get(owner) else {
@@ -178,7 +178,7 @@ impl<'a> Checker<'a> {
         sig: &PropertySig,
         span: Span,
     ) {
-        if !self.registry.check_internal_usage {
+        if !self.settings.rules.check_internal_usage {
             return;
         }
         let Some(declaring_info) = self.registry.classes.get(owner) else {
@@ -239,7 +239,7 @@ impl<'a> Checker<'a> {
         sig: &ConstSig,
         span: Span,
     ) {
-        if !self.registry.check_internal_usage {
+        if !self.settings.rules.check_internal_usage {
             return;
         }
         let Some(declaring_info) = self.registry.classes.get(owner) else {
@@ -338,7 +338,7 @@ impl<'a> Checker<'a> {
         case_refs: &[(std::sync::Arc<str>, std::sync::Arc<str>)],
         span: Span,
     ) {
-        if !self.registry.check_internal_usage {
+        if !self.settings.rules.check_internal_usage {
             return;
         }
         for (_, resolved) in case_refs {
@@ -353,7 +353,7 @@ impl<'a> Checker<'a> {
         identifier_prefix: &str,
         span: Span,
     ) {
-        if !self.registry.check_internal_usage {
+        if !self.settings.rules.check_internal_usage {
             return;
         }
         let Some(info) = self.registry.classes.get(class) else {
@@ -388,7 +388,7 @@ impl<'a> Checker<'a> {
     /// (`check_class_references_exist` doesn't run for a nested/
     /// conditionally-declared class either, so neither does this).
     pub(crate) fn check_internal_inheritance(&mut self, fqn: &str, kind: ClassKind, span: Span) {
-        if !self.registry.check_internal_usage {
+        if !self.settings.rules.check_internal_usage {
             return;
         }
         let Some(info) = self.registry.classes.get(fqn) else {
@@ -529,7 +529,7 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
         label: &str,
     ) {
-        if !self.registry.check_internal_usage {
+        if !self.settings.rules.check_internal_usage {
             return;
         }
         let context = if is_method {

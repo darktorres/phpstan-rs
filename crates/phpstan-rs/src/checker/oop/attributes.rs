@@ -139,7 +139,7 @@ impl<'a> Checker<'a> {
     /// missing `Attribute::IS_REPEATABLE` used more than once in this
     /// `attrs` list - a `HashSet` scoped fresh per call, matching real
     /// PHPStan's per-`check()` accumulator) and `attribute.deprecated`
-    /// (gated on `registry.check_deprecated_usage`, reading
+    /// (gated on `settings.deprecation_rules`, reading
     /// `info.deprecated` - checks a class's own deprecation at its use
     /// as an attribute specifically, not a duplicate of the existing
     /// `@deprecated` family). Both only apply to an attribute that
@@ -189,7 +189,7 @@ impl<'a> Checker<'a> {
                     "attribute.nonRepeatable",
                 );
             }
-            if self.registry.check_deprecated_usage
+            if self.settings.deprecation_rules
                 && !self.current_scope_deprecated
                 && let Some(desc) = &info.deprecated
             {

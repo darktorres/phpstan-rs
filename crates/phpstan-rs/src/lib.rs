@@ -11,9 +11,9 @@ pub mod assertion_tables;
 pub mod banned;
 pub mod baseline;
 pub mod checker;
-pub mod config;
 pub mod deps;
 pub mod doctrine_functions;
+pub mod ext;
 pub mod ignore_comments;
 pub mod ignore_errors;
 pub mod lsp;
@@ -31,6 +31,7 @@ pub mod regex_groups;
 pub mod registry;
 pub mod restricted_symbols;
 pub mod rule;
+pub mod rules_settings;
 pub(crate) mod stub_attributes;
 
 pub use checker::Checker;

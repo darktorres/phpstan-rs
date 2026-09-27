@@ -369,96 +369,85 @@ fn unscoped_args() -> Vec<String> {
     vec!["--no-composer".into(), ".".into()]
 }
 
+/// Every opt-in check on, over the scoped configuration: the rules the
+/// default configurations never exercise.
 fn all_on_args() -> Vec<String> {
-    vec!["--config".into(), ALL_ON_FILE.into()]
-}
-
-const ALL_ON_FILE: &str = ".phpstan-rs-gate-all-on.toml";
-
-/// Every opt-in check on, over the scoped path set: the rules the default
-/// configurations never exercise.
-fn write_all_on_config() -> Result<(), String> {
-    let scoped = std::fs::read_to_string(corpus_dir().join("phpstan-rs.toml"))
-        .map_err(|e| format!("reading the scoped config: {e}"))?;
-    let (head, tables) = match scoped.find("\n[") {
-        Some(i) => scoped.split_at(i + 1),
-        None => (scoped.as_str(), ""),
-    };
-    let mut toml = String::from(head);
-    for key in ALL_ON_TOGGLES {
-        writeln!(toml, "{key} = true").unwrap();
+    let mut args = scoped_args();
+    for set in ALL_ON_SETS {
+        args.push("--set".into());
+        args.push((*set).into());
     }
-    toml.push_str("restricted_symbol_presets = [\"multibyte-strings\"]\n");
-    toml.push_str(
-        "banned_constructs = [\"eval\", \"goto\", \"global\", \"backticks\", \"variable-variables\"]\n",
-    );
-    toml.push_str(tables);
-    std::fs::write(corpus_dir().join(ALL_ON_FILE), toml)
-        .map_err(|e| format!("writing {ALL_ON_FILE}: {e}"))
+    args
 }
 
-const ALL_ON_TOGGLES: &[&str] = &[
-    "strict_mixed_arrays",
-    "check_uninitialized_properties",
-    "check_internal_usage",
-    "check_function_name_case",
-    "check_deprecated_usage",
-    "check_empty_method_bodies",
-    "check_missing_checked_exceptions",
-    "check_strict_printf_placeholder_types",
-    "check_too_wide_throw_type_in_protected_and_public_methods",
-    "check_too_wide_return_type_in_protected_and_public_methods",
-    "check_too_wide_by_ref_type_in_protected_and_public_methods",
-    "check_method_throw_type_covariance",
-    "check_benevolent_union_types",
-    "check_missing_callable_signature",
-    "check_closed_classes",
-    "default_parent_calls",
-    "check_mock_hygiene",
-    "check_duplicate_function_declarations",
-    "check_duplicate_class_declarations",
-    "check_boolean_trap",
-    "check_array_key_cast",
-    "check_parent_constructor_call",
-    "check_promoted_property_suggestions",
-    "check_boolean_conditions",
-    "check_dynamic_properties",
-    "check_swapped_arguments",
-    "check_never_return_suggestions",
-    "check_switch_missing_default",
-    "check_throw_without_message",
-    "check_throw_base_class",
-    "check_exception_hygiene",
-    "check_current_time_dependence",
-    "check_psr3_exception_context",
-    "check_psr3_logging",
-    "check_magic_numbers",
-    "check_native_type_hints",
-    "check_implicit_array_creation",
-    "check_useless_casts",
-    "check_strict_array_filter",
-    "check_mixed_type_operands",
-    "check_comparable_types",
-    "check_arithmetic_operands",
-    "check_identity_vs_equals",
-    "check_loose_haystack_comparison",
-    "check_strict_function_calls",
-    "check_switch_case_types",
-    "check_loop_variable_overwrite",
-    "check_dynamic_static_calls",
-    "check_illegal_constructor_calls",
-    "check_enum_exhaustiveness",
-    "check_null_coercion",
-    "check_new_exception_discarded",
-    "check_risky_tests",
-    "check_dead_enum_cases",
-    "check_dead_code",
-    "check_circular_dependencies",
-    "check_dead_abstract_classes",
-    "check_dead_members",
-    "check_renamed_named_arguments",
-    "report_unmatched_ignored_errors",
-    "check_composer_hygiene",
+/// The config keys `all_on_args` sets over the scoped configuration.
+const ALL_ON_SETS: &[&str] = &[
+    "rules.strict_mixed_arrays=true",
+    "rules.check_uninitialized_properties=true",
+    "rules.check_internal_usage=true",
+    "rules.check_function_name_case=true",
+    "ext.deprecation-rules.enabled=true",
+    "ext.extras.check_empty_method_bodies=true",
+    "ext.extras.check_missing_checked_exceptions=true",
+    "rules.check_strict_printf_placeholder_types=true",
+    "rules.check_too_wide_throw_type_in_protected_and_public_methods=true",
+    "rules.check_too_wide_return_type_in_protected_and_public_methods=true",
+    "rules.check_too_wide_by_ref_type_in_protected_and_public_methods=true",
+    "rules.check_method_throw_type_covariance=true",
+    "rules.check_benevolent_union_types=true",
+    "rules.check_missing_callable_signature=true",
+    "rules.class_shape.check_closed_classes=true",
+    "rules.class_shape.default_parent_calls=true",
+    "ext.mockstan.check_mock_hygiene=true",
+    "rules.check_duplicate_function_declarations=true",
+    "rules.check_duplicate_class_declarations=true",
+    "ext.extras.check_boolean_trap=true",
+    "ext.extras.check_array_key_cast=true",
+    "ext.strict-rules.check_parent_constructor_call=true",
+    "ext.extras.check_promoted_property_suggestions=true",
+    "ext.strict-rules.check_boolean_conditions=true",
+    "rules.check_dynamic_properties=true",
+    "ext.extras.check_swapped_arguments=true",
+    "ext.extras.check_never_return_suggestions=true",
+    "ext.extras.check_switch_missing_default=true",
+    "ext.extras.check_throw_without_message=true",
+    "ext.extras.check_throw_base_class=true",
+    "ext.extras.check_exception_hygiene=true",
+    "ext.slam.check_current_time_dependence=true",
+    "ext.psr3.check_psr3_exception_context=true",
+    "ext.psr3.check_psr3_logging=true",
+    "ext.sidz.check_magic_numbers=true",
+    "ext.extras.check_native_type_hints=true",
+    "ext.strict-rules.check_implicit_array_creation=true",
+    "ext.strict-rules.check_useless_casts=true",
+    "ext.strict-rules.check_strict_array_filter=true",
+    "ext.voku.check_mixed_type_operands=true",
+    "ext.shipmonk.check_comparable_types=true",
+    "ext.strict-rules.check_arithmetic_operands=true",
+    "ext.extras.check_identity_vs_equals=true",
+    "ext.extras.check_loose_haystack_comparison=true",
+    "ext.strict-rules.check_strict_function_calls=true",
+    "ext.strict-rules.check_switch_case_types=true",
+    "ext.strict-rules.check_loop_variable_overwrite=true",
+    "ext.strict-rules.check_dynamic_static_calls=true",
+    "ext.strict-rules.check_illegal_constructor_calls=true",
+    "ext.shipmonk.check_enum_exhaustiveness=true",
+    "ext.shipmonk.check_null_coercion=true",
+    "ext.extras.check_new_exception_discarded=true",
+    "ext.phpunit.check_risky_tests=true",
+    "rules.check_dead_enum_cases=true",
+    "rules.check_dead_code=true",
+    "rules.check_circular_dependencies=true",
+    "rules.check_dead_abstract_classes=true",
+    "rules.check_dead_members=true",
+    "rules.check_renamed_named_arguments=true",
+    "report_unmatched_ignored_errors=true",
+    "rules.check_composer_hygiene=true",
+    "ext.doctrine.enabled=true",
+    "ext.pest.enabled=true",
+    "ext.language-extensions.enabled=true",
+    "ext.disallowed-calls.restricted_symbol_presets=[\"multibyte-strings\"]",
+    "rules.banned.constructs=[\"eval\", \"goto\", \"global\", \"backticks\", \"variable-variables\"]",
 ];
 
 const SCOPED: Config = Config {
@@ -580,7 +569,6 @@ fn corpus(
 ) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
     timings.time("gate build", |_| build_gate())?;
-    write_all_on_config()?;
     for (config, level) in artifacts(full) {
         record_artifact(&config, level, hash, timings)?;
     }
@@ -768,7 +756,6 @@ fn baseline_file(config: &str) -> PathBuf {
 /// entries.
 fn baseline_generate() -> Result<(), String> {
     build_gate()?;
-    write_all_on_config()?;
     for config in [SCOPED, ALL_ON] {
         let file = baseline_file(config.name);
         std::fs::create_dir_all(file.parent().unwrap()).map_err(|e| e.to_string())?;
@@ -1145,6 +1132,7 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("diagnostics", false),
             ("composer", false),
             ("stub_sources", false),
+            ("config", false),
         ],
     ),
     (
@@ -1158,12 +1146,18 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("diagnostics", false),
             ("composer", false),
             ("stub_sources", false),
+            ("config", false),
         ],
     ),
     (
         "lexer",
         "crates/syntax/src/lexer.rs",
-        &[("syntax", true), ("sql", false), ("stub_sources", false)],
+        &[
+            ("syntax", true),
+            ("sql", false),
+            ("stub_sources", false),
+            ("config", false),
+        ],
     ),
     (
         "stub",
@@ -1176,6 +1170,7 @@ const BUILD_SCENARIOS: &[(&str, &str, &[RebuildTarget])] = &[
             ("diagnostics", false),
             ("composer", false),
             ("stub_sources", true),
+            ("config", false),
         ],
     ),
 ];

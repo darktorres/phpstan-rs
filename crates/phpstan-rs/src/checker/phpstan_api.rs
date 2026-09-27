@@ -489,7 +489,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         span: Span,
     ) {
-        if !self.registry.phpstan_api_check_enabled
+        if !self.settings.phpstan_api
             || sig.is_api
             || !is_phpstan_code(self.name_ctx.namespace(), owner, self.registry)
         {
@@ -526,7 +526,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         span: Span,
     ) {
-        if !self.registry.phpstan_api_check_enabled {
+        if !self.settings.phpstan_api {
             return;
         }
         if !self

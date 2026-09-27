@@ -193,12 +193,15 @@ impl<'a> Checker<'a> {
         identifier: &'static str,
         span: Span,
     ) {
-        let Some(configured) = self.registry.configured_constant_type(class, name).cloned() else {
+        let Some(configured) = self
+            .settings
+            .constants
+            .configured_type(class, name)
+            .cloned()
+        else {
             return;
         };
-        if matches!(value, types::Type::Mixed(false))
-            || self.registry.accepts(&configured, value).yes()
-        {
+        if matches!(value, types::Type::Mixed(false)) || self.accepts(&configured, value).yes() {
             return;
         }
         let display = match class {
