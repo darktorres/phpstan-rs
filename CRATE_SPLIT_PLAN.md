@@ -31,7 +31,7 @@ extracted in one final wave.
 | Size | 216k lines in one crate; 4,869 `#[test]` in `src/`; `src/checker/tests/` holds 3,297 tests in 67,140 lines, and all checker test modules together hold 3,441 |
 | Diagnostic emission | 544 `report`/`report_builder` call sites under `src/checker` (433 + 111), ~324 of them in the inference modules (`expr`, `stmt`, `calls`, `oop`, `function_decl`, `assignment`, `operators`, `control_flow`, `comparisons`, `coercion`, `resolve`, `narrowing`). Plus 13 raw `Diagnostic {}` literals (`phpstan_api.rs` ×11, `duplicate_classes.rs`, `duplicate_functions.rs`) and 3 vector splices: external-`Rule` dispatch at `expr.rs:248`/`stmt.rs:393`, and the trait-host dedup at `function_decl.rs:126` |
 | Post-emission processing | extract()/eval() truncates *every* diagnostic of the enclosing body (`saw_dynamic_var_construct`). Loop bodies run up to 6 passes, and `while`/`for` conditions get a quiet pre-pass; diagnostics from non-final passes are truncated, but return points, throw points and property facts leak across passes. Trait methods are checked once per host, then deduplicated by (span, message) and filtered by a cross-host constant-condition verdict |
-| `Checker` | 67 fields (Appendix C) |
+| `Checker` | 67 fields; 74 at `76e738b4` (Appendix C) |
 | `Registry` | 90 fields (74 `pub`, 12 `pub(crate)`, 4 private). They include 67 settings (Appendix B), 4 SQL fields, Doctrine entity metadata (`doctrine_entity_table_index`) and provenance sets (`built_in_stub_classes`, `unconditionally_declared_*`, `stub_provided_functions`). There are ~173 `registry.classes` reads in non-test checker code |
 | Reflection data | `ClassInfo` has 48 `pub` fields, `FunctionSig` 24, `PropertySig` 22 and `ParamSig` 13. Member facts are stored as parallel sets, templates as five parallel maps, and `FunctionSig.body` holds AST bodies. `ClassInfo` also carries `doctrine_entity` and php-language-extensions access data |
 | Reflection pipeline | 15 whole-registry copy-down passes (`flatten_traits`, `resolve_method_tags`, `precompute_member_owners` ×2, `flatten_phpdoc_inheritance`, `resolve_deferred_*`, `precompute_ancestor_names`, `resolve_constant_named_types`, `drop_doc_members_excluded_by_native`, `apply_assertion_table`, `resolve_transitive_purity`, `infer_global_variables`, ...), duplicated across `finish_loading`, `update_file` and `Registry::build`. The LSP reruns all of them on every edit. Two staleness bugs are documented: trait/mixin members stay on hosts; anonymous classes from old file versions are never removed. An unknown ancestor counts as an ancestor (`is_subclass_of` true), after a fresh load as after removing its file |
@@ -453,7 +453,9 @@ Visitor-based walk.
     over an interned structured `ExprKey` (variable, property path, offset
     path, static property, call), in persistent maps with O(1) clone.
   - Virtual keys: property-initialized, parameter original value, by-ref
-    intertwining, always-remembered, possibly-impure call.
+    intertwining, always-remembered, possibly-impure call, clone
+    reinitialization, original foreach key and value, foreach value by
+    reference.
   - Conditional holders, frozen at creation.
   - Non-holder scope state: currently-assigned, allowed-undefined,
     function-call stack, closure-bind scope classes, first-level statement,
@@ -480,16 +482,21 @@ Visitor-based walk.
 - **Transitions** mirror MutatingScope: merge (PHPStan `mergeWith`:
   intersect conditionals, `createConditionalExpressions`, Maybe certainty
   for one-sided variables, AND `afterExtractCall`), loop
-  generalization/fixpoint, finally, closure capture, and always-iterable
-  foreach. Convergence equality compares holders, certainty and natives,
-  excluding conditionals.
+  generalization/fixpoint, backward-goto fixpoint and forward-goto merge,
+  finally, closure capture and closure binding, the constructor's
+  remembered scope, and always-iterable foreach. Convergence equality
+  compares the context, holders with certainty, natives and conditional
+  holders (`MutatingScope::equals`).
 - **Invalidation** follows PHPStan `invalidateExpression`: a write to any
   expression (variable, property/dim fetch, by-ref argument, unset,
   foreach binding) drops every holder and conditional that contains it.
   May-alias dim siblings are an explicit sub-rule. Other triggers: impure
-  calls on the receiver, volatile/static expressions, existence checks, and
-  extract/include/eval via `afterExtractCall`; eval is treated like
-  extract.
+  calls on the receiver, volatile/static expressions (`ob_get_level()`,
+  `openssl_error_string()`, superglobals, negative existence checks; the
+  stat family after `clearstatcache()`/`unlink()`), existence checks, and
+  extract/include/eval via `afterExtractCall`. Eval is treated like
+  extract, although 2.2.16's `EvalHandler` only invalidates the volatile
+  expressions: eval can define variables.
 - **Natives.** Natives are full holders, narrowed in lockstep, with a
   complete `native_type_of` inference path.
 - **Results.**
@@ -499,9 +506,11 @@ Visitor-based walk.
   - `ExpressionContext`/`StatementContext` are passed down the recursion,
     replacing the take-idiom flags.
 - **One inference path.**
-  - Per-kind `ExprHandler` modules behind a dispatch (splitting `expr.rs`);
-    one implementation records per-`NodeId` results, and `infer_expr` is
-    deleted.
+  - Per-kind `ExprHandler` modules behind a dispatch (splitting `expr.rs`),
+    each with processing, type resolution and `specifyTypes`, and per-kind
+    `StmtHandler` modules (splitting `stmt.rs`). One implementation records
+    per-`NodeId` before-scopes (`ExpressionResultStorage`), and
+    `infer_expr` is deleted.
   - Inference is side-effect-free apart from pure memo caches; the RefCell
     recording channels become observer events.
   - A maximum analyser source-file size is enforced.
@@ -551,7 +560,8 @@ Visitor-based walk.
   - `InternalRule` is deleted, and the `rule::Scope` guard queries migrate
     to expression-type queries (documented for external users).
 - **Derived nodes** map one-to-one to PHPStan's `src/Node` catalogue
-  (~60), each with its payload and the scopes it carries. Among them:
+  at 2.2.16 (52 node classes plus the `Node/Expr` virtual expressions), each
+  with its payload and the scopes it carries. Among them:
   - Boolean And/Or with the right scope;
   - match expression / arms with the remaining subject;
   - catch with thrown types;
@@ -1900,9 +1910,20 @@ checks Appendix E's rows for it.
 
 ### Stage D: engine (in the package, module-gated)
 
-**D1. Holder storage (byte-identical).** Every `Locals` map moves into holder
-storage with its current per-kind merge and invalidation policy; interned
-ExprKey; persistent maps. Benchmarked on the merge/clone hot path.
+The reference is PHPStan 2.2.16's engine (`vendor/phpstan-src/src/Analyser`:
+`NodeScopeResolver`, `MutatingScope`, `ScopeOps`, `StmtHandler/*`,
+`ExprHandler/*`). Every behaviour bug below is reproduced and gets its
+fixture before its phase's structural commit.
+
+**D1. Holder storage (byte-identical).**
+- Every `Locals` map moves into holder storage with its current per-kind
+  merge and invalidation policy, `guarded_classes` and
+  `clone_reinitialized` included.
+- ExprKey is interned; the maps are persistent.
+- Benchmarked on the merge/clone hot path.
+  `merge_scopes`'s doc comment and `#[hotpath::measure]` sit on
+  `add_implied_fact` (`control_flow.rs:394-412`), so `merge_scopes` is
+  unmeasured; they move onto it before the baseline is recorded.
 
 **D2. Convergence onto PHPStan semantics**, one approved-delta commit each,
 with a fixture per transition and trigger:
@@ -1911,40 +1932,170 @@ with a fixture per transition and trigger:
   intersection members instead of the `guarded_methods`/
   `guarded_properties` side sets;
 - `container_field_facts` folding;
-- conditional holders with `mergeWith`;
+- conditional holders with `mergeWith`: `ScopeOps::createConditionalExpressions`,
+  including the holders that record a variable as undefined on the other
+  side, `preserveVacuousConditionals` and `withoutPreciseClassConstantFetches`;
 - frozen condition aliases;
 - certainty plus maybe-undefined (level-gated), with each variable's
-  certainty added to the type snapshot; a maybe-defined variable is
-  reported today as `undefined variable` at level 0, where PHPStan reports
-  "might not be defined" at level 1, and `$x ?? null` on one types as
-  `mixed`;
+  certainty added to the type snapshot:
+  - A maybe-defined variable is reported today as `undefined variable` at
+    level 0, where PHPStan reports "might not be defined" at level 1.
+    `$x ?? null` on one types as `mixed`.
+  - After a foreach that may not run, the value variable is dropped, and
+    a read of it is `variable.undefined`.
+  - At a file's top level every unknown variable is Maybe
+    (`canAnyVariableExist`), because the including scope may define it.
+    `echo $x;` in a script file is `variable.undefined` at level 0 today;
+    snapshot 0a8fe69 has 75 of them in `<main>` (fixed first).
+  - A merge keeps a Maybe holder only for variables, function calls and
+    virtual keys, and drops superglobals.
 - rememberPossiblyImpureFunctionValues: the analysis behaves as `false`
   today (of the 12 lines flipping it changes in PHPStan 2.2.16's output,
   over `gates/phpstan-oracle/`'s probes and its test fixtures, phpstan-rs
   agrees with the flipped run on 9); the `true`
-  behaviour, PHPStan's default, comes with the key;
-- `afterExtractCall` replacing extract/eval truncation;
-- invalidation unification (receiver rebind, by-ref, declare purges);
-- the transition set;
+  behaviour, PHPStan's default, comes with the key. Call results aren't
+  remembered at all today: after `if ($x->getY() !== null)`,
+  `$x->getY()` is still `Y|null`, even when the method is `@phpstan-pure`.
+- `afterExtractCall` replacing extract/eval truncation:
+  - Today an `extract()`/`eval()` drops every diagnostic of its function
+    body. At file top level it drops every diagnostic after the file
+    pre-scan, so the class methods' `return.type` errors disappear too.
+  - `extract()` of a constant array assigns its keys as variables, with
+    optional keys Maybe; only another argument sets `afterExtractCall`.
+  - `afterExtractCall` clears the conditional holders and makes every
+    unknown variable Maybe. It doesn't invalidate the holders.
+- invalidation unification (receiver rebind, by-ref, declare purges):
+  - An impure method call on `$this` drops `$this->p`'s narrowing; today
+    `if ($this->p !== null) { $this->mutate(); }` keeps `$this->p` as `X`.
+  - `unset($arr['a'])` removes the key from the shape; today the shape
+    keeps `a: int`, and `$arr['a']` afterwards isn't reported.
+  - Volatile expressions, dropped after an impure call, `new`, `eval` or
+    `include`: `ob_get_level()`, `openssl_error_string()`, superglobals and
+    their offsets, and negative existence checks.
+  - `clearstatcache()`/`unlink()` drop the stat family (`file_exists`,
+    `is_file`, `filemtime`, …); `openssl_*` drops `openssl_error_string()`.
+  - A function, class or trait declaration drops the negative existence
+    check for its name.
+  - The output-buffer level delta.
+- references (`IntertwinedVariableByReferenceWithExpr`):
+  - After `$b = &$a; $b = 'x';`, `$a` is still `1`, and
+    `if ($a === 'x')` is reported `identical.alwaysFalse`.
+  - After `$ref = &$list; $ref[] = 5;`, `count($list) > 0` is reported
+    `greater.alwaysFalse`.
+- the transition set:
+  - **Loops** follow `LOOP_SCOPE_ITERATIONS = 3` with `generalizeWith` after
+    the first pass, then the final walk. Today there are up to 6 passes and
+    no generalization: `$i = 0; while (c()) { $i++; }` leaves `$i` as
+    `0|1|2|3|4|5|6`, where PHPStan has `int<0, max>`, and `.=` in a loop
+    leaves seven literal strings. The 14 `loop_depth` guards that suppress
+    rules inside loops are deleted with it. The doc comments saying 3
+    passes (`converge_loop_body`, `check_foreach`) go too.
+  - **Foreach** follows `ForeachHandler`:
+    - the body sees the iteratee narrowed by `!== []`, and the post-loop
+      scope merges `=== [] || is_object()`; today `$arr` in the body is
+      `array<string, int>`, not non-empty;
+    - `$arr[$k]` is the value type in the body, through the
+      `OriginalForeachKey`/`OriginalForeachValue` virtual keys;
+    - after the loop, the iteratee's value and key types are rewritten from
+      the narrowed loop variables;
+    - constant arrays of up to 16 keys are unrolled (8 when nested), and
+      constant-array iteratees add key → value conditional holders;
+    - `foreach (array_keys($a) as $k)` knows `$a[$k]`;
+    - destructuring a tagged union of shapes adds cross-variable
+      conditional holders;
+    - a Traversable iteratee adds `getIterator()`'s throw point;
+    - by-reference foreach leaves `ForeachValueByRefExpr`;
+    - the loop always terminates only when the iteratee is non-empty and
+      the body always terminates.
+  - **Goto**: forward gotos merge at their label; a backward goto runs a
+    fixpoint like a loop (`resolveBackwardGotoScope`). In
+    `retry: $i++; if ($i < 3) { goto retry; }`, `$i < 3` is reported
+    `smaller.alwaysTrue` today and `$i` is `1|never`.
+  - **Constructor first**: the constructor is analysed before the other
+    methods. Its end scope seeds them with readonly `$this` properties,
+    `PropertyInitializationExpr`, `class_exists`/`function_exists`
+    holders and constants (`rememberConstructorScope`). A class with
+    custom serialization is excluded. Today a `function_exists('f')` guard
+    in the constructor still leaves `f()` in another method as
+    `function.notFound`.
+  - **Closures**:
+    - `->call($obj)`, `Closure::bind()` and `bindTo()` bind `$this` and the
+      scope class (`enterClosureCall`, `enterClosureBind`, `restoreThis`);
+    - an immediately invoked closure's body runs definitely: after
+      `(function () use (&$x) { $x = 'a'; })()`, `$x` is `0|'a'` today;
+    - by-reference `use` follows `processClosureScope`: an undefined
+      variable is `null` in the outer scope, and afterwards it is the
+      closure's type unioned with the previous one and generalized.
+    - `(fn () => $this->n)->call($r)` is `undefined variable $this` today.
+      Snapshot 0a8fe69 has 12 `$this` hits, among them
+      `collision/ResultReflection.php:19`. The bound closure's read also
+      leaves `property.onlyWritten` on `$n`.
+  - **Switch**: `default` excludes the handled cases; today `$k` in
+    `default` after `case 1:` is `int`.
+  - **Finally**: `processFinallyScope`.
 - natives as full holders plus `native_type_of`;
-- convergence equality;
-- virtual keys;
+- convergence equality: `MutatingScope::equals` compares the context,
+  holders with certainty, natives and the conditional holders;
+- virtual keys: property-initialized, parameter original value, by-ref
+  intertwining, always-remembered, possibly-impure call, clone
+  reinitialization, original foreach key and value, foreach value by
+  reference;
 - provenance as holder metadata;
 - non-holder scope state;
 - the PHP version via `PHP_VERSION_ID`.
 
-**D3. Results and contexts.** `StatementResult`/`ExpressionResult`; context
-passing replaces the take-idiom flags; per-function mutable fields are
-deleted.
+**D3. Results and contexts.**
+- `StatementResult`/`ExpressionResult` carry exit points by statement kind
+  and loop level, throw points, impure points, `hasYield`, and
+  `isAlwaysTerminating` computed from them.
+  - `always_terminates`/`exits_function_or_loop` are deleted.
+  - The loop rules follow `WhileHandler`/`DoWhileHandler`/`ForHandler`: a
+    loop always iterates when its condition's type is `true`, and it
+    terminates when no `break` targets it.
+  - Today three shapes are reported `return.missing`: a `break` in a
+    nested loop inside `while (true)`, `while (FOREVER)` with a `true`
+    constant, and `do { … } while (true)`. About a dozen of the 70
+    `return.missing` in snapshot 0a8fe69 are such loops (fixed first),
+    e.g. `amphp/socket/RetrySocketConnector.php:37` and
+    `psl/Str/pad_left.php:40`.
+- One `StmtHandler` per statement kind, splitting `stmt.rs` the way D4
+  splits `expr.rs`.
+- Context passing replaces the take-idiom flags:
+  - `ExpressionContext` holds deep, in-throw and the assignment's
+    right-side variable and expression.
+  - `StatementContext` holds top level and the foreach unroll factor.
+- A statement's `/** @throws */` overrides its throw points.
+- The statement after a terminating one gets the unreachable-statement
+  node. Functions, classes and labels after it are still processed.
+- Each end statement gets its own `ExecutionEndNode`.
+- Per-function mutable fields are deleted.
 
 **D4. One inference path.** ExprHandlers, per-`NodeId` results, `infer_expr`
 deleted, RefCell channels removed; the file-size gate.
+- An ExprHandler has three parts, as in 2.2.16: processing, type
+  resolution, and its own `specifyTypes` part of the TypeSpecifier.
+  `ExpressionResultStorage` keeps each node's before-scope, and rule type
+  queries are answered from it.
+- A node's callback fires post-order with its before-scope. A call then
+  emits its call-expression node, so the impossible-check rules see the
+  processed call.
+- Assignment is two-phase (`PreparedAssignTarget`/`AssignTargetWalkMode`):
+  the target's sub-expressions in PHP's evaluation order, then the value,
+  then the write.
+- isset/`empty`/`??` resolve through one issetability descriptor, which the
+  engine and the isset rules share.
 - `$this`/`static` inside a class body carry their bound class
   (`Type::This`/`StaticRef` bound), displayed `$this(Base)`/`static(Base)`,
   and `@return $this` rejects a returned `new static()`.
 - **Arithmetic** follows PHPStan's `InitializerExprTypeResolver` (fixed
   first): `int|float * 2` and `int|float + 1` are `int` today, so
   `is_float($n * 2)` is reported always false; integer overflow is a float.
+  A float literal types as its value; `1.5` is `float` today.
+- **Identical** follows `resolveIdenticalType`: operand types that don't
+  intersect make `===` constant false. `identical_result` tests type
+  families only, so `1|2 === 7` isn't reported today.
+- **First-class callables** carry the callee's signature: `strlen(...)` is
+  a bare `Closure` today.
 - **Short ternary** on an object keeps its type: `$a ?: null` and
   `$na ?: $a` are `mixed` today.
 - **Deep expressions** don't overflow the stack: the handlers iterate over
@@ -1954,12 +2105,43 @@ deleted, RefCell channels removed; the file-size gate.
 
 **D5. NodeCallback sink** (approved deltas for `return.unusedType`,
 `throws.*` and `property.unusedType`).
+- Gatherer frames collect return statements, yields, execution ends and
+  impure points outside the rule sink, as `NodeScopeResolver::pushNodeGatherer`
+  does.
+- A converged pass is recorded and replayed instead of a final walk when
+  its body is replayable (`RecordingNodeCallback`,
+  `isReplayableConvergenceBody`).
+- The five `diagnostics.truncate` sites are deleted:
+  `control_flow.rs:387`, `loops.rs:101`/`368`, `function_decl.rs:1297`
+  and `checker.rs:2127`.
 
 **D6. Engine APIs**, one commit each:
-- Scope API;
-- TypeSpecifier;
+- Scope API. Beyond §3.8's list, 2.2.16's `Scope` adds:
+  - `getParentScope`, `hasConstant`;
+  - member reflections by type;
+  - the anonymous function's reflection and return type;
+  - `getKeepVoidType`, `getScopeType`/`getScopeNativeType`;
+  - `resolveTypeByName`, `getTypeFromValue`, `hasExpressionType`;
+  - `isInClassExists`/`isInFunctionExists`, `isParameterValueNullable`;
+  - `getFunctionType`, `isInExpressionAssign`,
+    `isUndefinedExpressionAllowed`;
+  - `invokeNodeCallback` (`NodeCallbackInvoker`), which runs the rules on
+    a virtual node;
+  - `emitCollectedData`.
+- TypeSpecifier. `SpecifiedTypes` carries:
+  - sure, sure-not and alternative types;
+  - overwrite and equality;
+  - the root expression and new conditional holders;
+  - `&&`/`||` holder recipes and deferred augments
+    (`ConditionalExpressionHolderRecipe`, `DisjunctionBranchUnionAugment`,
+    `DisjunctionHolderProjectionAugment`), evaluated on the scope they
+    are applied to.
+
+  They replace `condition_aliases`, `branch_implied_facts` and
+  `pending_or_disjunctions`.
 - returned-error `Rule` and dispatcher;
-- derived-node catalogue plus the site-mapping table;
+- derived-node catalogue plus the site-mapping table, recounted at D6 (543
+  report sites at `76e738b4`);
 - Collector with collected data;
 - Observer;
 - the extension-trait registry;
@@ -1969,7 +2151,15 @@ deleted, RefCell channels removed; the file-size gate.
 - porting the external `Rule`/`ReflectionRule` users.
 
 **D7. Parse-time annotations consumed.** The corresponding `Checker` fields
-are deleted.
+are deleted. The annotation set follows 2.2.16's parser visitors:
+- `GotoLabelVisitor`, `LastConditionVisitor`, `TryCatchTypeVisitor`;
+- the closure-argument context (`ClosureArgVisitor`, `ArrayMapArgVisitor`,
+  `ArrowFunctionArgVisitor`, `ClosureBindArgVisitor`,
+  `ClosureBindToVarVisitor`);
+- `ImmediatelyInvokedClosureVisitor`, `NewAssignedToPropertyVisitor`,
+  `StandaloneThrowExprVisitor`;
+- `ParentStmtTypesVisitor`, `DeclarePositionVisitor`;
+- `RemoveUnusedCodeByPhpVersionIdVisitor`.
 
 ### Stage E: everything out of the engine (in the package, module-gated)
 
@@ -2335,16 +2525,18 @@ its owner. Non-Registry keys follow the table.
 | parent_calls, default_parent_calls | rules::class_shape (+ ext defaults) |
 | assertions, class_argument_returns | reflection overlays |
 
-## Appendix C: `Checker` fields (67) and where they go
+## Appendix C: `Checker` fields (74) and where they go
 
 | Fields | Disposition |
 |---|---|
 | registry | AnalysisContext (reflection snapshot) |
+| settings, bodies | AnalysisContext (settings, body source) |
+| sql | ext-sql (the `sql` service in AnalysisContext) |
 | diagnostics | deleted (returned errors) |
 | semantic_tokens, probe_span, probe_hit, probe_var_provenance, collect_inlay_hints, inlay_param_name_hints, inlay_local_type_hints | LSP observers |
 | collect_member_refs, member_ref_sites, escaped_enums, escaped_member_classes | reference-site collector |
 | name_ctx | deleted: AST names read their parse-time resolution (D4), PHPDoc names resolve through C7's name scope |
-| current_file, anonymous_class_names, current_anonymous_class | file state (anonymous names from reflection) |
+| current_file, current_file_absolute, anonymous_class_names, current_anonymous_class | file state (anonymous names from reflection) |
 | current_class, current_method, current_method_templates, current_class_attrs, current_method_attrs, current_trait | Scope (class / function / trait context) |
 | current_scope_deprecated | Scope query (deprecation predicate) |
 | saw_dynamic_var_construct | scope `afterExtractCall` |
@@ -2355,17 +2547,19 @@ its owner. Non-Registry keys follow the table.
 | current_function_assigned_variables | ext-strict-rules file state |
 | in_bare_statement_position, in_condition_position, in_exempt_last_condition | ExpressionContext / StatementContext / parse-time attributes |
 | pest_this_type, pest_hook_properties | ext-pest (closure-this ext + file-set hook) |
-| include_guarded_paths, include_path_dirs, include_constant_initializers | RequireFileExists rule state |
+| include_guarded_paths, include_path_dirs, include_constant_initializers, working_dir | RequireFileExists rule state |
 | enum_chain_tails | rules (enum exhaustiveness, ext-shipmonk) file state |
 | constant_facts | magic-constant rule file state |
 | by_ref_empty_dim_args | by-ref argument context on the resolved-call node |
-| property_assign_facts, cross_file_property_assign_facts, named_argument_call_facts, renamed_parameter_override_facts, facts_only | deleted (ClassPropertiesNode rule / collectors) |
+| property_assign_facts, cross_file_property_assign_facts, named_argument_call_facts, facts_only | deleted (ClassPropertiesNode rule / collectors) |
 | external_rules | rule registry in AnalysisContext |
 | loop_break_states, loop_continue_states, loop_depth | StatementResult exit points + traversal context |
+| try_throw_states, call_throw_types | StatementResult / ExpressionResult throw points |
 | in_range_index_writes, active_discriminant, pending_or_disjunctions | conditional holders / loop context |
 | static_var_names | scope state (static-variable status) |
 | rebind_target_classes, rebind_escape_all | reference-site collector (escape analysis) |
 | call_candidate_cache | pure memo cache (allowed) |
+| type_dump | `--dump-types` observer |
 
 ## Appendix D: `Locals` and its merge policies
 
@@ -2374,8 +2568,9 @@ its owner. Non-Registry keys follow the table.
 | types | only if on both sides, unioned | holders with certainty (Maybe for one side) |
 | native | only if on both sides, unioned | native holders, narrowed |
 | provenance | per-variable union | holder metadata (on observer request) |
-| guarded_functions / guarded_constants | intersection | FuncCall / ConstFetch holders |
+| guarded_functions / guarded_constants / guarded_classes | intersection | FuncCall / ConstFetch holders; `class_exists` always remembered |
 | guarded_methods / guarded_properties | intersection, never invalidated | HasMethod / HasProperty accessories |
+| clone_reinitialized | union | `CloneReinitializationExpr` virtual key |
 | condition_aliases | `Rc::ptr_eq` (AST replayed lazily) | frozen conditional holders |
 | branch_implied_facts | union | conditional holders (mergeWith intersection) |
 | container_field_facts | `Rc::ptr_eq` | element-type refinement |
@@ -2428,8 +2623,9 @@ its owner. Non-Registry keys follow the table.
 - **Bugs in code a later phase rewrites.** A fixture first; the fix is that
   phase's own behaviour commit (approved delta) after its structural
   commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2),
-  C3a's `property.unused` delta and `int|float` arithmetic (D4), each a
-  false positive on ordinary code.
+  C3a's `property.unused` delta, `int|float` arithmetic (D4), top-level
+  variables as maybe-defined (D2) and infinite-loop termination (D3), each
+  a false positive on ordinary code.
 - **Stage B follow-ups before C5.** The AST and type API changes they make
   (declaration names, trait adaptations, language-construct nodes, byte
   strings, one subtyping relation) land before C5–C8 build on them; the
