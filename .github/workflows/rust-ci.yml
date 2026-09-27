@@ -77,11 +77,11 @@ jobs:
       - name: Fuzz targets compile
         run: cargo check --manifest-path fuzz/Cargo.toml --all-targets
       # --each-feature also builds --all-features unless excluded, and the
-      # allocator features refuse to build together.
+      # allocator features refuse to build together. Resolver 3 keeps
+      # dev-dependency features out of a check without test targets.
       - name: Each feature on its own
         run: >
           cargo hack check --workspace --each-feature --exclude-all-features
-          --no-dev-deps
       # third_party/hotpath is vendored as released, unused dependencies
       # included.
       - name: Unused dependencies

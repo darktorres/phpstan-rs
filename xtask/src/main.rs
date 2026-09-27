@@ -1495,7 +1495,6 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
                 "--workspace",
                 "--each-feature",
                 "--exclude-all-features",
-                "--no-dev-deps",
                 "--quiet",
             ]))
         })?;
