@@ -336,10 +336,12 @@ Visitor-based walk.
   - process-wide and keyed by PHP version (`version -> Arc<StubLayer>`,
     "unset" being the newest reading);
   - its unit of resolution is a class plus its transitive ancestors, traits
-    and mixins, resolved through a per-class `OnceLock` (no shared Mutex; a
-    panic leaves the unit retryable);
+    and mixins, resolved through C4's memo levels, one per-class `OnceLock`
+    each (no shared Mutex; a panic leaves the unit retryable);
   - a project declaration that merges with a stub symbol becomes a
-    per-project materialized entry (copy-on-merge);
+    per-project materialized entry (copy-on-merge), and so does a stub
+    memo whose read set names a class or constant the project declares:
+    only a memo reading stub names alone is shared across projects;
   - the four seeded tracking sets become provenance queries against the
     index;
   - polyfill arbitration first keeps the current quality tiebreak
@@ -1387,8 +1389,10 @@ Follow-ups:
   with a test. `@mixin` edges are never followed at their own level, so a
   mixin cycle needs no breaking. With that, no `OnceLock` initialization
   waits on itself; a reentrant resolution panics, and a panic leaves the
-  cell retryable (a panic-injection test and a parallel-resolution test
-  over cyclic fixtures). A level stores what it changes and shares the rest
+  cell retryable and pops the reentrancy guard's frame as it unwinds, so
+  `check-project`'s per-file `catch_unwind` resumes cleanly (a
+  panic-injection test and a parallel-resolution test over cyclic
+  fixtures). A level stores what it changes and shares the rest
   with the level below (member maps behind `Arc`). Within this commit any
   declaration or `ReflectionSettings` change resets every memo,
   `doctrine_entity_table_index` included, at no cost while none has been
@@ -1428,8 +1432,11 @@ Follow-ups:
   load is one apply, its declarations built per file in parallel as
   `build_declarations` does today. A name's entry is recomputed from its
   declaring files in load order by the collision policy, so a delta gives
-  what a fresh load gives. Unchanged entries and memos are shared between
-  snapshots by `Arc`. Each memo records every folded class and constant
+  what a fresh load gives. Declarations are shared between snapshots by
+  `Arc`; memo cells are not: a new snapshot starts with fresh cells,
+  seeded with every value already computed and not invalidated, so a cell
+  an older snapshot fills after the apply never reaches the new one. Each
+  memo records every folded class and constant
   name it looked up, absent ones included, through a per-resolution read
   set the hierarchy and the lookups append to; a delta invalidates the
   transitive readers of the names it changes, a `ReflectionSettings`
@@ -1516,8 +1523,10 @@ reaches it.
 - locator order;
 - the lazy composer locator (approved delta): classes load on demand;
   functions, constants and `files` autoload entries stay eager;
-- the version-keyed, per-class `OnceLock` stub layer with copy-on-merge and
-  a per-file parse memo; `rayon` in the index build decided, Appendix E
+- the version-keyed stub layer holding C4's memo levels for stub classes,
+  with copy-on-merge (a merged name, or a stub memo whose read set names a
+  project declaration, materializes per project) and a per-file parse
+  memo; `rayon` in the index build decided, Appendix E
   follows;
 - provenance queries replacing `built_in_stub_classes` and
   `stub_provided_functions`, each consumer naming its question: "a stub
@@ -1848,7 +1857,8 @@ engine context, file state, function frame and traversal context
 
 The fixture harness backend switches to Session.
 
-**F2. Result cache and dependencies**: resolved dependencies, fingerprints,
+**F2. Result cache and dependencies**: resolved dependencies (reflection's
+memo read sets, C4, give the declaration-level edges), fingerprints,
 the persistent cache, incremental collectors, `deps.rs` deleted. The LSP
 replay gate goes on.
 
