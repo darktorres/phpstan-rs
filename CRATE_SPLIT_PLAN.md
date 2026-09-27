@@ -902,7 +902,33 @@ commit); the unsorted corpus comparison starts here.
   `UnhandledMatchError`;
 - a dynamic method call is impure.
 
+Follow-ups:
+- **Full tier.** `xtask gates --full` runs now and at the end of every phase
+  from here. The unscoped and level 0–10 artifacts were last recorded at
+  `1e5e42be` (Stage A); the first run's diff against them is reviewed line
+  by line as one catch-up delta.
+- **Performance and build time** record their first results; from then on
+  the performance gate compares every commit with its parent (§4.8).
+- **CI** runs `xtask modgraph`, `xtask arch` and the test-name manifest,
+  none of which needs the corpus.
+- **Docs lint.** `rustdoc::broken_intra_doc_links` is `deny` in
+  `[workspace.lints]`, and `cargo doc` runs with `RUSTDOCFLAGS=-D warnings`
+  in CI and `xtask gates`.
+- **Module-graph gate.** `gates/module-graph.txt` records the finished
+  phases, and an `allow` line dated to one fails; each workspace crate's
+  workspace dependencies are checked against its `crate` row.
+- **Fixtures.** A `requires-feature` key; the fixtures without it also run
+  under `--no-default-features` (the fixture suite never runs without
+  `pcre-validate`). A fixture with an empty expectation and no inference
+  assert fails unless its expectation is the explicit empty list (§3.11).
+- **`.corpus-runs/README.md`** loses the manual sorted-run section (the gate
+  compares unsorted) and names `gate-runner` as what records the snapshots.
+
 ### Stage B: workspace and leaf layers
+
+Stage B's follow-ups land before C5: C5–C8 build on the AST and type API
+they change. Each behaviour fix is its own approved-delta commit with a
+fixture.
 
 **B1. Workspace skeleton.**
 - Virtual root, conventions (§2), and the package moved to
@@ -943,6 +969,81 @@ commit); the unsorted corpus comparison starts here.
 Then extract `syntax`: the `lex_parse`/`token_stream_parse` fuzz targets
 repoint to it, and a new lex / parse microbench is added.
 
+Follow-ups, behaviour fixes:
+- **Interpolation.** `"${name}"` and `"${expr}"` interpolate (read as
+  literal text today).
+- **Integer literals.** A legacy octal `0775` is 509 (775 today); a hex,
+  octal or binary literal past `i64` is a float (`0xFFFFFFFFFFFFFFFF` is
+  `0` today).
+- **Byte strings.** `Literal::String` and `Type::StringLiteral` hold bytes:
+  `"\xff"`, octal escapes and non-UTF-8 source bytes keep their bytes
+  (`"\xff" === "\u{ff}"` is reported always true today). A heredoc keeps
+  `\"` as written.
+- **Keywords fold case** everywhere: `<?PHP` (the file is inline HTML
+  today), `DECLARE(strict_types=1)` (three false positives), `VAR`
+  (`class.notFound` for `VAR`), `INSTEADOF`, `PRIVATE(SET)` (a parse error).
+- **Shebang.** A leading `#!` line is not a statement
+  (`declareStrictTypes.notFirst` after one today).
+- **PHP 8 precedence.** `+`/`-` bind tighter than `.`, and `.` looser than
+  `<<`/`>>` (`"sum: " . $a + $b` reports `binaryOp.invalid` today).
+- **Assignment as an operand** at every binary operator, by one grammar rule
+  instead of the per-level patches: `$a ?? $b = 1`, `1 | $g = 2` and
+  `2 * $i = 3` report `assign.invalidExpr` and `variable.undefined` today.
+- **Trait adaptations** keep the `insteadof` choice and the `as`
+  visibility, with resolved trait names (`use T { foo as private; }` leaves
+  `foo` public, and `B::hello insteadof A` still picks `A`'s, today); C4's
+  trait flattening reads them.
+- **Promoted parameters** keep their `(set)` visibility (parsed and dropped
+  today; C4's asymmetric-visibility fix reads it). A `&get` hook is
+  recorded as by reference.
+- **`$obj->$$name` and `$obj->${expr}`** keep both levels of indirection.
+- **Spans inside strings.** Interpolated `$var` parts and literal chunks get
+  their own spans (each spans the whole string today, so LSP references and
+  renames of a `$var` in a string land on its start); heredoc `{$...}`
+  positions account for the stripped indentation.
+
+Follow-ups, the typed AST (§3.1):
+- **Resolved names are read.** No engine code reads
+  `QualifiedName::resolved`; about 155 sites in 40 files re-resolve through
+  a `NameContext`. C4 converts the builders and D4 the checker; the project
+  rules, the LSP, `pest_config` and `deps` convert with the phases that move
+  them. `NameContext::build` (the last namespace wins, used at six sites,
+  anonymous classes among them) is deleted first, and `NameContext` becomes
+  private to `syntax`.
+- **Declarations carry their namespaced name** (class-likes, functions,
+  global constants), before C4's builder commit reads the AST, so nothing
+  tracks namespaces positionally.
+- **Names.** Declaration and member names are `Name`s; named arguments,
+  `static` and `global` variables, labels and `use` imports are spanned
+  names (`Arg.name: Option<String>` and `UseImport.path: String` today); the
+  `"class@anonymous"` placeholder becomes `None`.
+- **Language constructs are nodes**: `isset`, `empty`, `unset` (a
+  statement), `exit`/`die`, `eval`, `include`/`require` with their kind,
+  `print`, `list()` apart from array literals, `@` (dropped today), a
+  `Declare` holding its block (a `Block` led by a `Declare` today) and
+  shell-exec without a synthesized `shell_exec()` call. Today they are calls
+  to names that name resolution resolves as functions.
+- **`EnumDecl`** folds into `ClassDecl`, which already has `ClassKind::Enum`.
+  Match arms are nodes with spans, the default arm in its place.
+- **`NodeId`s** on the nodes rules and side tables key on beyond
+  `Stmt`/`Expr`: class-likes, methods, properties, constants, enum cases,
+  parameters, arguments, match arms, catch clauses, closure uses.
+- **One parse entry point**, `syntax::parse(source, &Interner) ->
+  ParsedFile` (statements, comments, lexer warnings, annotations). The ten
+  lex-and-parse call sites use it, and the separate comment re-lexes
+  (`ignore_comments.rs`, `output/codeframe.rs`) go. The nesting-depth limit
+  is a `ParseError`, not a panic.
+- **Walkers.** `Visitor` gains `visit_name` and `visit_closure_use`. The
+  self-recursive walkers built on `child_exprs`/`child_stmts`/`stmt_exprs`
+  (about 80, each deciding closure and anonymous-class descent on its own;
+  `architecture.rs`'s `new` scan skips parameter defaults, hooks and
+  constants) become `Visitor` impls, and the three allocating helpers are
+  deleted.
+- **Annotations.** An arrow function is a catch-scope boundary.
+- **Interner.** `From<&str>`/`From<String>` for `Name` intern globally
+  behind a conversion; they are deleted once C4 routes names through the
+  project's interner.
+
 **B4. types redesign**, one commit each (§3.2):
 - variants;
 - shape keys and unsealed tail;
@@ -961,12 +1062,46 @@ repoint to it, and a new lex / parse microbench is added.
 Then extract `types`, with the proptest seeds moved to
 `crates/types/proptest-regressions/`.
 
+Follow-ups:
+- **One subtyping implementation.** `Relation::subtype` (a bool, the old
+  `is_subtype` renamed, 56 callers) is deleted; its callers use
+  `is_super_type_of(..).yes()`. `is_super_type_of` stands on its own and
+  `accepts` is built on it (today its `Yes` follows `accepts`).
+  `types_definitely_disjoint` and `types_provably_disjoint` become
+  `is_super_type_of(..).no()` both ways, and `conditional_branch` reads the
+  relation.
+- **One union.** `union_of_branches` and `late::join` go through
+  `union_types`. A union keeps an explicit `mixed` explicit (behaviour fix:
+  `$b ? $mixedParam : null` is reported at level 10 only, not 9).
+- **Template inference** is PHPStan's structural `inferTemplateTypes`:
+  through generic arguments (by ancestor bindings), callables, shapes, array
+  keys and iterables, unioning every binding (behaviour fix, each case
+  fixtured: `@param T $a, T $b` infers `1` for `(1, 2)`; `array<K, V>` keys,
+  `ArrayObject<int, T>`, `callable(): T` and `array{x: T}` infer nothing).
+- **Late types.** `new<T>` and `template-type<...>` get variants (PHPStan's
+  `NewObjectType` and `GetTemplateTypeType`); `int-mask<>`/`int-mask-of<>`
+  resolve in C7's resolver instead of reading as `int`.
+- **Typed templates.** `TemplateParam`'s name is a `Name` and its scope an
+  enum (class, function, method, callable) instead of `Option<String>` with
+  a `"callable"` sentinel; a `Conditional`'s subject is an enum (parameter
+  or template) instead of a string and `template_subject`.
+- **Patch versions.** `PhpVersion` carries the patch: the false branch of
+  `PHP_VERSION_ID >= 80105` keeps 8.1 (`narrow_at_least` drops it, which
+  D2's scope narrowing would read as dead code).
+
 **B5. phpdoc redesign.**
 - `DocBlock` stores `TypeNode`s.
 - TypeNode → Type resolution goes behind an interface that reflection
   fills in C7; until then a resolver adapter.
 - Extract `phpdoc`; the `parse_type_string` fuzz target repoints to the
   phpdoc parser.
+
+Follow-up: **one tag splitter.** `grammar::parse` joins wrapped lines with a
+space and cuts each line at `//` (so a `'http://a'` type breaks);
+`docblock::parse` joins with a newline and leaves `//` comments to the
+lexer. One splitter remains, `DocBlock` is built from its `PhpDocNode`, and
+`phpdoc_unresolvable`, `generics/ancestors` and `unknown_phpstan_tags` read
+that parse (C4's store of parsed doc blocks holds it).
 
 **B6. sql.**
 - Its own column-type model, `[sql_reflection]` parsing, and `SqlContext`
@@ -975,6 +1110,11 @@ Then extract `types`, with the proptest seeds moved to
 - The SQL → PHP `Type` mapping moves to the package's future `ext-sql`
   module.
 - Extract `sql`.
+
+Follow-up: **identifier case per driver.** `SchemaCatalog` compares table
+and column names exactly; lookups fold case where the driver does (MySQL
+and SQLite column names; Postgres folds unquoted identifiers to lowercase),
+fixture first.
 
 **B7. diagnostics.**
 - The diagnostic model (§3.7): `Diagnostic` gets its validated
@@ -986,15 +1126,31 @@ Then extract `types`, with the proptest seeds moved to
 - Extract `diagnostics`. The ignore / baseline pipeline stays in the
   package's future `project` module.
 
+Follow-up: `DiagnosticFix::within` (a text search for a name whose span is
+missing) is deleted; its two sites use the name's span.
+
 **B8. composer.** The package context is computed once. Extract. The
 default `PhpVersions` range comes from it (§3.2): composer
 `config.platform.php`, else `require.php`. An approved-delta commit of its
 own.
 
+Follow-ups:
+- **Constraints follow Composer's grammar**, whitespace after an operator
+  included: `"php": ">= 8.1"` gives no range today, so every
+  version-gated rule is silent.
+- **No global panic hook.** `discover_vendor_context` replaces the process
+  panic hook while it parses, which races parallel analysis; the parse
+  already returns its errors.
+
 **B9. stub-sources.**
 - The generated index plus the xtask plus the regeneration test.
 - The crate owns the `include!`.
 - Extract.
+
+Follow-up for every extracted crate: comments follow the comment rules.
+About 130 sites cite package modules the crate can't see, phases, fix
+numbers or investigation history (syntax 19, types 73, phpdoc 29, sql 8,
+diagnostics 2, composer 2).
 
 ### Stage C: config and reflection
 
@@ -1049,6 +1205,9 @@ Follow-ups, one commit each, each with its test:
   load error.
 - **`--set` paths** resolve against the working directory, like every other
   command-line path.
+- **Config discovery.** `check-project` without `--config` reads
+  `phpstan-rs.toml` in the working directory, as the LSP does at a
+  workspace root (the CLI reads no config without `--config` today).
 - **Composer roots.** PHP versions and extension activation read every
   discovered root's manifest, as `phpstan_api_check_enabled` does.
 - **Pest risky tests** get their own `[ext.pest]` key.
@@ -1077,6 +1236,7 @@ Gate: reflection reads no settings type but `ReflectionSettings`
 named under `registry`/`stub_attributes`).
 
 Follow-ups:
+- **The gate is implemented**: `xtask/src/arch.rs` has no settings rule.
 - **Predefined constants over a version range** (fixed first): `PHP_VERSION_ID`
   is `int<min.id, max.id + 99>`, `PHP_MAJOR_VERSION`/`PHP_MINOR_VERSION` are
   ranges or unions over the range, and a predefined constant never falls
@@ -2000,6 +2160,10 @@ its owner. Non-Registry keys follow the table.
   phase's own behaviour commit (approved delta) after its structural
   commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2) and
   C3a's `property.unused` delta.
+- **Stage B follow-ups before C5.** The AST and type API changes they make
+  (declaration names, trait adaptations, language-construct nodes, byte
+  strings, one subtyping relation) land before C5–C8 build on them; the
+  declarations' namespaced names before C4's builder commit.
 - **Subtyping home.** A ClassHierarchy oracle trait in `types` with one
   tri-state relation, implemented by reflection. ExtensionTypeData hooks
   take `&dyn ClassHierarchy`. Level-dependent acceptance lives in
