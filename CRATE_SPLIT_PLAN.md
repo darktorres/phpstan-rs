@@ -2713,7 +2713,10 @@ building on the previous one:
     agrees with the flipped run on 9); the `true`
     behaviour, PHPStan's default, comes with the key. Call results aren't
     remembered at all today: after `if ($x->getY() !== null)`,
-    `$x->getY()` is still `Y|null`, even when the method is `@phpstan-pure`.
+    `$x->getY()` is still `Y|null`, even when the method is `@phpstan-pure`,
+    and a variable defined under `if (returnsBool($b))` is
+    `variable.undefined` under the next `if (returnsBool($b))` (17 `Yes`
+    certainty assertions in nsrt `dependent-expression-certainty.php`).
 - **Control-flow transitions:**
   - **Loops** follow `LOOP_SCOPE_ITERATIONS = 3` with `generalizeWith` after
     the first pass, then the final walk. Today there are up to 6 passes and
