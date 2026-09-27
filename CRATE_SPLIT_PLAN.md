@@ -2161,7 +2161,12 @@ tracked number: each phase records it, and a phase that raises it has a
 named reason in its commit. The suite's other two assertions,
 `assertNativeType` (313 calls) and `assertVariableCertainty` (681), are
 ignored today; the assertion DSL reads both before D1, so D5's natives and
-certainty are measured by the same suite. `cargo xtask nsrt` and `cargo
+certainty are measured by the same suite. Until then, `variable.undefined`
+approximates certainty: of the 327 `Yes` assertions phpstan-rs reports 97
+as undefined (17 in `dependent-expression-certainty.php`, about 40 in
+`throw-points/*`: correlated conditions, `finally` scopes and
+possibly-impure calls, D5), and of the 351 `No`/`Maybe` it leaves 112
+unreported. `cargo xtask nsrt` and `cargo
 xtask oracle` land with it, and their first recorded counts are D1's
 baseline.
 
@@ -2804,7 +2809,12 @@ building on the previous one:
     - a catch is entered from the merge of the throw points it catches;
     - its variable is the catch type minus the earlier catches;
     - the finally scope merges the try end, the catch ends, their exit
-      points and the remaining throw points;
+      points and the remaining throw points, so a variable the try assigns
+      before any throw point is defined there: `try { $bar = 1; } finally
+      { echo $bar; }` is `variable.undefined` today, as is `$foo =
+      doesntThrow()` with `@throws void` (about 40 of nsrt's `throw-points/*`
+      certainty assertions, and
+      `rector/vendor/symfony/console/Application.php:188`);
     - exit points leave through the finally block
       (`processFinallyScope`, `ReturnAfterFinallyNode`).
   - **Expression statements** apply their `specifyTypes` with the null
