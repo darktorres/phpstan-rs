@@ -662,7 +662,13 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         no_composer: args.no_composer,
         emission_order: args.emission_order,
     };
-    let session = match Session::resolve(config, config_dir, PathBuf::from("."), overrides) {
+    let session = match Session::resolve(
+        config,
+        config_dir,
+        PathBuf::from("."),
+        overrides,
+        phpstan_rs::project::worker_pool(),
+    ) {
         Ok(session) => session,
         Err(e) => {
             eprintln!("{e}");

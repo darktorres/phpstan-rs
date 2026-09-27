@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -181,6 +182,23 @@ pub struct Project {
     // above, just for Phase 86's B1 (`whole_program::
     // dead_members::find_dead_members`) instead of Phase 92.
     escaped_member_classes: FxHashSet<String>,
+}
+
+/// The stack each checking thread gets: the checker's recursive walk, and
+/// in a debug build the parser's precedence-climbing chain, need far more
+/// than a default thread's ~2 MiB.
+pub const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
+
+/// A pool of one `WORKER_STACK_SIZE` thread per core. A process builds one
+/// and runs every parallel parse and check on it: the global rayon pool's
+/// threads have too little stack for the checker.
+pub fn worker_pool() -> Arc<rayon::ThreadPool> {
+    Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .stack_size(WORKER_STACK_SIZE)
+            .build()
+            .expect("failed to build the worker pool"),
+    )
 }
 
 /// The result of `Project::check_paths_isolating_panics`: successful
@@ -1888,32 +1906,15 @@ impl Project {
     /// either "not yet initialized" or a real, valid reflector - never a
     /// torn/partial one. `AssertUnwindSafe` here is that specific, checked
     /// claim, not a blanket "trust me" (matches `check_project.rs`'s own
-    /// identical reasoning).
-    pub fn check_paths_isolating_panics(&self, paths: &[PathBuf]) -> CheckPathsIsolatingPanics {
+    /// identical reasoning). The paths are checked in parallel on `pool`.
+    pub fn check_paths_isolating_panics(
+        &self,
+        paths: &[PathBuf],
+        pool: &rayon::ThreadPool,
+    ) -> CheckPathsIsolatingPanics {
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let facts = Arc::new(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.collect_property_assign_facts()
-            }))
-            .unwrap_or_default(),
-        );
-        let outcomes: Vec<(PathBuf, Result<Vec<Diagnostic>, String>)> = paths
-            .iter()
-            .map(|path| {
-                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.check_file_with_property_assign_facts(path, &facts)
-                }))
-                .map_err(|payload| {
-                    payload
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .unwrap_or_else(|| "unknown panic".to_string())
-                });
-                (path.clone(), outcome)
-            })
-            .collect();
+        let outcomes = pool.install(|| self.check_paths_catching_panics(paths));
         std::panic::set_hook(default_hook);
 
         let mut results = FxHashMap::default();
@@ -1928,6 +1929,35 @@ impl Project {
         }
         panics.sort();
         (results, panics)
+    }
+
+    /// `check_paths_isolating_panics`' work, run on its pool.
+    fn check_paths_catching_panics(
+        &self,
+        paths: &[PathBuf],
+    ) -> Vec<(PathBuf, Result<Vec<Diagnostic>, String>)> {
+        let facts = Arc::new(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.collect_property_assign_facts()
+            }))
+            .unwrap_or_default(),
+        );
+        paths
+            .par_iter()
+            .map(|path| {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    self.check_file_with_property_assign_facts(path, &facts)
+                }))
+                .map_err(|payload| {
+                    payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "unknown panic".to_string())
+                });
+                (path.clone(), outcome)
+            })
+            .collect()
     }
 
     /// Runs the checker over every currently-loaded file, not just one -

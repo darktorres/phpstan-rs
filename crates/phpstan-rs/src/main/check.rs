@@ -4,11 +4,12 @@ use std::path::PathBuf;
 use lexer::Lexer;
 use parser::Parser;
 use phpstan_rs::project;
+use rayon::prelude::*;
 use syntax::{lexer, parser};
 
 /// `phpstan-rs check <file-or-dir>...` - lex+parse every .php file under
 /// the given paths in a single process (no per-file fork/exec), split
-/// across worker threads, report a pass/fail summary. Panics are the
+/// across the worker pool, report a pass/fail summary. Panics are the
 /// parser's only error-reporting mechanism today, so each file's lex+parse
 /// runs under catch_unwind with the default panic hook silenced for the
 /// batch, to avoid both a crashed whole run and thousands of lines of
@@ -23,35 +24,13 @@ pub(crate) fn run_check(paths: &[PathBuf]) {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
 
-    let num_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1);
-    let chunk_size = files.len().div_ceil(num_threads).max(1);
-    // A bare `scope.spawn` uses Rust's default new-thread stack size
-    // (~2MiB on Linux) - smaller than what the parser's own
-    // MAX_EXPR_DEPTH guard (1000 levels) needs to safely trip before
-    // physically exhausting the stack, and a debug build's much larger
-    // per-frame stack usage through the parser's ~20-function-deep
-    // precedence-climbing chain needs considerably more still. 64MiB
-    // (this project's own `RUST_MIN_STACK` value elsewhere) gives real
-    // headroom for both build profiles; `RUST_MIN_STACK` itself only
-    // affects a *default*, unsized `thread::spawn`/`Builder`, never a
-    // smaller floor on an explicit `.stack_size()` call like this one,
-    // so it has to be set here too.
-    const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
-    let failures: Vec<(PathBuf, String)> = std::thread::scope(|scope| {
-        let handles: Vec<_> = files
-            .chunks(chunk_size)
-            .map(|chunk| {
-                std::thread::Builder::new()
-                    .stack_size(WORKER_STACK_SIZE)
-                    .spawn_scoped(scope, || check_chunk(chunk))
-                    .expect("failed to spawn worker thread")
-            })
-            .collect();
-        handles
-            .into_iter()
-            .flat_map(|h| h.join().unwrap_or_default())
+    // One chunk per worker, on threads with the stack the parser needs.
+    let pool = project::worker_pool();
+    let chunk_size = files.len().div_ceil(pool.current_num_threads()).max(1);
+    let failures: Vec<(PathBuf, String)> = pool.install(|| {
+        files
+            .par_chunks(chunk_size)
+            .flat_map_iter(check_chunk)
             .collect()
     });
 

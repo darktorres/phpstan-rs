@@ -155,6 +155,9 @@ struct PendingWorkspaceScan {
 
 struct Server {
     project: Project,
+    // The process's worker pool (`project::worker_pool`), which every
+    // workspace check runs on.
+    pool: Arc<rayon::ThreadPool>,
     // Every URI the client currently has open or has otherwise seen, so
     // the (now-deferred) workspace scan and `didOpen`/`didChange` share
     // one path->diagnostics story instead of the workspace scan being
@@ -303,6 +306,7 @@ impl Server {
         project.set_retain_source(true);
         Server {
             project,
+            pool: crate::project::worker_pool(),
             open_uris: FxHashMap::default(),
             last_diagnostics: FxHashMap::default(),
             latest_text: FxHashMap::default(),
@@ -748,12 +752,10 @@ impl Server {
 
     /// Runs the checker over every analyzed (first-party) file currently
     /// loaded, post-filtered the same way any other published diagnostic
-    /// set is. Runs on a dedicated 64MiB-stack scoped thread (mirrors
-    /// `main/check.rs`'s own `WORKER_STACK_SIZE` precedent) since the
-    /// checker's recursive AST walk needs real headroom over the ~2MiB a
-    /// bare thread gets, and through `Project::check_paths_isolating_panics`
-    /// (not `check_paths`) so one file's latent checker bug can't take
-    /// down the whole push. Shared by `publish_workspace_diagnostics`
+    /// set is. Runs on the worker pool, whose threads have the stack the
+    /// checker's recursive walk needs, and through
+    /// `Project::check_paths_isolating_panics` (not `check_paths`) so one
+    /// file's latent checker bug can't take down the whole push. Shared by `publish_workspace_diagnostics`
     /// (which then drops empty results) and `republish_known_files`
     /// (which must not, so a file previously flagged and now clean gets
     /// an explicit clearing notification).
@@ -767,15 +769,9 @@ impl Server {
         // make repeated runs against an unchanged workspace look like a
         // spurious diff to anyone comparing published-message order.
         paths.sort();
-        const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
-        let (results, panics) = std::thread::scope(|scope| {
-            std::thread::Builder::new()
-                .stack_size(WORKER_STACK_SIZE)
-                .spawn_scoped(scope, || self.project.check_paths_isolating_panics(&paths))
-                .expect("failed to spawn worker thread")
-                .join()
-                .unwrap_or_default()
-        });
+        let (results, panics) = self
+            .project
+            .check_paths_isolating_panics(&paths, &self.pool);
         for (path, msg) in &panics {
             eprintln!(
                 "phpstan-rs lsp: checking {} panicked: {msg}",

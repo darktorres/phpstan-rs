@@ -100,7 +100,8 @@ fn check_paths_isolating_panics_behaves_like_check_paths_when_nothing_panics() {
     let paths = vec![PathBuf::from("good.php"), PathBuf::from("bad.php")];
 
     let expected = project.check_paths(&paths);
-    let (actual, panics) = project.check_paths_isolating_panics(&paths);
+    let (actual, panics) =
+        project.check_paths_isolating_panics(&paths, &crate::project::worker_pool());
 
     assert!(panics.is_empty(), "got: {panics:?}");
     assert_eq!(actual.len(), expected.len());

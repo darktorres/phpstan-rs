@@ -625,7 +625,8 @@ Each index entry records:
     and reuses unchanged reflection and stub layers (no window reload).
 
   The Session also provides:
-  - panic isolation and the 64 MiB pool;
+  - panic isolation, and the 64 MiB worker pool, injected: one per
+    process (`project::worker_pool`, landed early as GATE_SPEED_PLAN S4);
   - context-before-analysed ordering;
   - one Session per workspace root;
   - a single engine-construction path (gate: none outside `project`).

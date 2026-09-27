@@ -51,6 +51,9 @@ pub struct Overrides {
 /// A fully resolved `check-project` run: every path, setting and derived
 /// table, ready to load.
 pub struct Session {
+    /// The process's worker pool (`project::worker_pool`), which every
+    /// parallel parse and check runs on.
+    pool: Arc<rayon::ThreadPool>,
     root: PathBuf,
     config: Config,
     dirs: Vec<PathBuf>,
@@ -84,7 +87,6 @@ pub struct Session {
 /// A configured `Project` with every file loaded, before any check ran.
 pub struct Loaded {
     pub project: Project,
-    pool: rayon::ThreadPool,
     analyze_files_by_size: Vec<PathBuf>,
     skipped_analyze: usize,
     skipped_context: usize,
@@ -164,6 +166,7 @@ impl Session {
         config_dir: Option<PathBuf>,
         root: PathBuf,
         overrides: Overrides,
+        pool: Arc<rayon::ThreadPool>,
     ) -> Result<Session, String> {
         let resolve_against_config = |p: PathBuf| match &config_dir {
             Some(dir) => dir.join(p),
@@ -343,6 +346,7 @@ impl Session {
             .or(composer_php_versions);
 
         Ok(Session {
+            pool,
             root,
             config,
             dirs,
@@ -374,8 +378,12 @@ impl Session {
     /// A fixture's session: `stem.php` (or the directory `stem/`) analysed
     /// under `stem.toml` if present (its paths relative to the fixture's
     /// directory), with composer discovery off unless the config turns it
-    /// on, reporting every level. Returns the session and that directory.
-    pub fn for_fixture(stem: &Path) -> Result<(Session, PathBuf), String> {
+    /// on, reporting every level, running on `pool`. Returns the session
+    /// and that directory.
+    pub fn for_fixture(
+        stem: &Path,
+        pool: Arc<rayon::ThreadPool>,
+    ) -> Result<(Session, PathBuf), String> {
         let file_subject = stem.with_extension("php");
         let (subject, base) = if file_subject.is_file() {
             let base = file_subject.parent().unwrap_or(Path::new("")).to_path_buf();
@@ -408,7 +416,7 @@ impl Session {
         // Paths stay relative to the fixture's own directory, so where the
         // fixture suite lives (under `tests/`) never shows in the analysed
         // paths - path-sensitive checks see only the fixture's own layout.
-        let session = Session::resolve(config, None, base.clone(), overrides)?;
+        let session = Session::resolve(config, None, base.clone(), overrides, pool)?;
         Ok((session, base))
     }
 
@@ -586,13 +594,7 @@ impl Session {
         let interner = Arc::clone(project.interner());
         self.configure(&mut project);
 
-        // Deep recursion in the checker needs more than rayon's default
-        // worker stack.
-        const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
-        let pool = rayon::ThreadPoolBuilder::new()
-            .stack_size(WORKER_STACK_SIZE)
-            .build()
-            .expect("failed to build check-project worker pool");
+        let pool = &self.pool;
 
         let mut stub_files_vec = Vec::new();
         for dir in &self.stub_dirs {
@@ -656,7 +658,6 @@ impl Session {
             .sort_by_key(|path| std::cmp::Reverse(analyze_sizes.get(path).copied().unwrap_or(0)));
         Ok(Loaded {
             project,
-            pool,
             analyze_files_by_size,
             skipped_analyze,
             skipped_context,
@@ -670,7 +671,6 @@ impl Session {
     pub fn analyse(&self, loaded: Loaded, dump_types: bool) -> Analysis {
         let Loaded {
             mut project,
-            pool,
             analyze_files_by_size,
             skipped_analyze,
             skipped_context,
@@ -690,7 +690,7 @@ impl Session {
         type CheckOutcome = Result<FileCheck, String>;
         let needs_tier_2 = Self::flag(self.config.check_dead_enum_cases)
             || Self::flag(self.config.check_dead_members);
-        let checked_results: Vec<(PathBuf, CheckOutcome)> = pool.install(|| {
+        let checked_results: Vec<(PathBuf, CheckOutcome)> = self.pool.install(|| {
             analyze_files_by_size
                 .par_iter()
                 .map(|path| {

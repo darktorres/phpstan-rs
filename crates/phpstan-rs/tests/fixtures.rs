@@ -15,21 +15,26 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use diagnostics::Diagnostic;
 use libtest_mimic::{Arguments, Failed, Trial};
 use phpstan_rs::project::session::Session;
+use phpstan_rs::project::worker_pool;
 
 fn main() {
     let args = Arguments::from_args();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    // One pool for the whole suite: every fixture's parse and check runs
+    // on it, alongside the fixtures libtest-mimic runs in parallel.
+    let pool = worker_pool();
     let mut trials = Vec::new();
-    collect(&root, &root, &mut trials);
+    collect(&root, &root, &pool, &mut trials);
     trials.sort_by(|a, b| a.name().cmp(b.name()));
     libtest_mimic::run(&args, trials).exit();
 }
 
-fn collect(root: &Path, dir: &Path, trials: &mut Vec<Trial>) {
+fn collect(root: &Path, dir: &Path, pool: &Arc<rayon::ThreadPool>, trials: &mut Vec<Trial>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -38,7 +43,7 @@ fn collect(root: &Path, dir: &Path, trials: &mut Vec<Trial>) {
         if path.is_dir() {
             // A multi-file fixture's own directory holds no fixtures.
             if !path.with_extension("expect").is_file() {
-                collect(root, &path, trials);
+                collect(root, &path, pool, trials);
             }
         } else if path.extension().is_some_and(|e| e == "expect") {
             let name = path
@@ -47,14 +52,17 @@ fn collect(root: &Path, dir: &Path, trials: &mut Vec<Trial>) {
                 .with_extension("")
                 .display()
                 .to_string();
-            trials.push(Trial::test(name.clone(), move || run_fixture(&name, &path)));
+            let pool = Arc::clone(pool);
+            trials.push(Trial::test(name.clone(), move || {
+                run_fixture(&name, &path, pool)
+            }));
         }
     }
 }
 
-fn run_fixture(name: &str, expect_file: &Path) -> Result<(), Failed> {
+fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> Result<(), Failed> {
     let stem = expect_file.with_extension("");
-    let (session, base) = Session::for_fixture(&stem)?;
+    let (session, base) = Session::for_fixture(&stem, pool)?;
     let single_file = stem.with_extension("php").is_file();
     let dump = std::env::var_os("PHPSTAN_RS_DUMP_TYPES")
         .map(|dir| PathBuf::from(dir).join(name.replace('/', "__")));
