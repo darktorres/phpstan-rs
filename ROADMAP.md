@@ -5227,6 +5227,58 @@ moving crates. Before Phase 185, which is published under the new name.
 
 **Effort: medium** (wide, but mechanical over four tokens).
 
+### Phase 185 — A project page (§AW)
+
+The project's only public face is a 65-line README in a private
+repository. This phase publishes a site that explains what the project
+is, how to install it, and how to configure it. Every reference page is
+generated from the code or from measurements, so the site can't drift
+from the tool.
+
+**Pages:**
+- **Landing:** what the tool is (an analyser and language server for PHP
+  that reads PHPStan's configuration), what it adds (the LSP, the checks
+  past PHPStan's, speed), and one quick start: install, then `init`
+  (Phase 183).
+- **Install:** the release binaries with their `.sha256` checks (the
+  README's steps, per target), and the VS Code extension.
+- **Configuration reference**, generated from the config sections' doc
+  comments (crate-split C1's "Docs" follow-up is the single source), with
+  every key's type, default and PHPStan equivalent.
+- **Rule reference**, generated from E3's identifier families: each
+  identifier, its level, what it reports, and a failing and a passing
+  example taken from its fixture.
+- **PHPStan compatibility**, generated from Phase 183's parameter table
+  and a `gates/phpstan-oracle/` run: which parameters and extension
+  options map, which don't, and where levels differ. Measured, with the
+  PHPStan version it was measured against.
+- **Changelog**, from `CHANGELOG.md`.
+- **Performance**, only numbers `cargo xtask perf` produced, with the
+  corpus, machine and command to reproduce them.
+
+**Build and deploy.** `cargo xtask site` generates the reference pages
+into Markdown and builds the site with mdBook (Rust-native, no
+JavaScript toolchain). A GitHub Actions workflow builds and deploys it to
+GitHub Pages on every push to `master`, after a link check. A gate fails
+when a generated page is stale: a config key, identifier or oracle row
+changed without the page being regenerated. GitHub Pages serves a
+private repository only on a paid plan, so the site goes live when the
+repository goes public (or the plan allows it). The custom domain is the
+one Phase 184 secured.
+
+**Later:** an in-browser playground running the analyser compiled to
+WebAssembly. The `--no-default-features` build is already pure Rust (the
+PCRE2 C dependency is behind `pcre-validate`); the embedded stubs' size
+is the open question.
+
+**Depends on:** Phase 184 (the name and domain); crate-split C1's "Docs"
+follow-up (the config reference); E3 (the rule reference); Phase 183 and
+`gates/phpstan-oracle/` (the compatibility page); a first real release
+(`release.yml` has never run), so the install page links real assets.
+
+**Effort: medium** (the playground: large).
+
+
 ---
 
 # Known limitations
