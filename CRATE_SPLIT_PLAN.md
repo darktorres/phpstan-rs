@@ -1284,6 +1284,13 @@ Follow-ups:
 - **`ConstantResolver` in `reflection`**, with `dynamic_constant_names` a
   `ReflectionSettings` key; `resolve_constant_named_types` and
   class-constant initializer typing read constants through it.
+- **Initializers evaluate as PHPStan's `InitializerExprTypeResolver`**, one
+  evaluator for class and global constants, enum case values and
+  parameter defaults (D4's arithmetic shares it): arithmetic, bitwise
+  operators, ternaries, `??`, global and class constants, enum cases and
+  `new` each give `mixed` today (`const A = 2 + 3`, `const G = 1 << 2`,
+  `const E = PHP_INT_SIZE`), and a backed enum's `case A = self::X` or
+  `case B = 2 + 3` types `->value` and `value-of` as `int`.
 - **One folded constant key.** A constant's namespace prefix folds case at
   every lookup, `checker/imports.rs`'s `use const` check and
   `dynamic_constant_names` included.
@@ -1433,7 +1440,8 @@ Follow-ups:
   with the class's imported aliases substituted; a
   constant reference cycle, found from the declarations with `*` patterns
   expanded against the ancestor level, types as `mixed`, with a test. An
-  enum's `value-of` reads its cases from the declaration. A function
+  enum's case values are constants to the resolver too, so `value-of` and
+  `->value` read them evaluated. A function
   resolves lazily the same way (value types, constant-named types,
   native-excluded members, the interim assertion step);
   `finalize_standalone_sig` is that resolver.
