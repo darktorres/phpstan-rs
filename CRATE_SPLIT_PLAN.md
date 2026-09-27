@@ -2343,6 +2343,13 @@ assignments inside `assert()`.
     at level 1 as "Variable $x might not be defined."
   - A merge keeps a Maybe holder only for variables, function calls and
     virtual keys, and drops superglobals.
+  - A truthy `??` proves its left side defined and non-null in that branch,
+    as `isset()` already does: after `if ($c) { $foo = 'bar'; }`,
+    `if ($foo ?? null) { return $foo; }` reports `$foo` undefined today
+    (nsrt `bug-10224.php`; the suite's certainty files
+    `dependent-variable-certainty.php`, `falsey-isset-certainty.php`,
+    `falsey-empty-certainty.php` and `falsey-ternary-certainty.php` are
+    D5's certainty fixtures).
   - An assignment inside `assert()` is Maybe afterwards, because
     `zend.assertions = -1` compiles the call out; PHPStan treats it as
     definite. Today `\assert((bool) ($trace = debug_backtrace()));`
