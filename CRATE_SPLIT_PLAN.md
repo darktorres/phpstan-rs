@@ -764,14 +764,16 @@ progress, feature work touching that stage's modules waits for it.
     `--no-default-features` build checked rather than built;
   - the scoped and all-on corpus runs;
   - the type snapshots;
-  - baseline compatibility.
+  - baseline compatibility;
+  - the nsrt oracle (gate 12, from Stage D).
 - **full** (`--full`, run at the end of every phase and on any commit
   that touches levels, acceptance or performance-sensitive code):
   - everything in quick;
   - the unscoped run;
   - levels 0–10 for scoped and all-on;
   - `cargo hack`, `machete`, `deny` and `cargo bench --no-run`;
-  - performance and build time.
+  - performance and build time;
+  - the corpus oracle (gate 12, from Stage D).
 
 CI (`.github/workflows/rust-ci.yml`) runs the build and test half. The
 corpus, type, baseline, performance and build-time gates run locally
@@ -854,6 +856,20 @@ corpus, type, baseline, performance and build-time gates run locally
     Otherwise the change is split into a pure rename commit (exempt from
     the build gate) and a path-rewrite commit, recorded in
     `.git-blame-ignore-revs`.
+12. **Oracles** (from Stage D), both against PHPStan 2.2.16:
+    - `cargo xtask nsrt` runs `check-project` over
+      `vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (14 s) and counts the
+      `assertType`, `assertNativeType` and `assertVariableCertainty`
+      mismatches after display normalization, by class and file;
+    - `cargo xtask oracle` runs the phar (copied out of the corpus's
+      `vendor/phpstan/phpstan`) over the corpus files with
+      engine-sensitive diagnostics, with the corpus autoloader as the only
+      bootstrap, and lists the phpstan-rs-only and PHPStan-only findings
+      by identifier; files that raise PHPStan internal errors are excluded
+      and listed.
+
+    Both record under `.corpus-runs/gate/{nsrt,oracle}/<hash>`. A count
+    rises only through an approved delta that names the cause.
 
 **Approved deltas.** A commit that intentionally changes output records its
 expected diffs (corpus, fixtures, type snapshot, baseline) in the commit.
@@ -1956,8 +1972,9 @@ behaviour commits a phase lists follow it as approved deltas. D5 is the
 semantics phase. Every behaviour bug below is reproduced and gets its
 fixture before its phase's structural commit.
 
-The oracle is real PHPStan 2.2.16 over the corpus files with
-engine-sensitive diagnostics: the phar copied outside `vendor/` (so the
+Gate 12 runs both oracles below. The oracle is real PHPStan 2.2.16 over
+the corpus files with engine-sensitive diagnostics: the phar copied
+outside `vendor/` (so the
 corpus's extensions don't load), Piwigo's `vendor/autoload.php` as the only
 bootstrap file, level 10, run from a directory with no `vendor/`. Files
 that raise internal errors (missing optional classes, php-standard-library
