@@ -4424,8 +4424,12 @@ decides the HTML-only behaviour (URL checking, the `<script>` rules),
 changed by a `{contentType}` in the header (or, for an HTML type, inside
 a `<script>` element - the one place outside the header Latte allows it)
 and by each element's own context (`<script>`, `<style>`, an attribute); `MigrationWarnings`
-turns the runtime deprecations Latte gates on it (an `n:attr` given a
-non-array, ...) into findings; and
+turns the attribute-rendering changes Latte 3.1 warns about at runtime
+under it (`HtmlHelpers::triggerMigrationWarning()`: a `null` value now
+omitting the attribute, `true`/`false` in `data-*` now rendering as
+`"true"`/`"false"`, an `on*` string no longer JSON-encoded, a `bool` in
+`aria-*`, a `null` XML attribute) into findings, unless the value carries
+`|accept`; and
 a sandboxed engine's `Policy`, when written with literals
 (`SecurityPolicy::createSafePolicy()` and its `allow*()` calls), is
 checked (182f). A project can configure
@@ -4490,11 +4494,24 @@ Core tags (`CoreExtension::getTags()`) lower to their PHP meaning:
 - variables: `var` (a declared type kept, which Latte parses and
   discards), `default` (assigning only a variable that doesn't exist yet,
   `array_key_exists()` on the scope, so its type is the existing one or
-  the default's), `capture` (its target
-  `Latte\Runtime\Html|string|false`), `parameters`, `do`, `php` (with
+  the default's), `capture` (its target, by
+  `CaptureNode`'s own code: `Latte\Runtime\Html` or `''` in HTML text,
+  a `string` elsewhere, and with filters the last filter's return type,
+  wrapped back into `Html` in HTML text - never `false`, the buffer being
+  its own), `parameters`, `do`, `php` (with
   `RawPhpExtension`);
 - output: `{$x}`/`{=...}`, `n:attr`, `n:class`, `n:tag`, `contentType`,
-  `spaceless`, `dump`/`trace`/`debugbreak`;
+  `spaceless`, `dump`/`trace`/`debugbreak`; an unquoted attribute value
+  `name={expr}` in HTML renders by the attribute's kind
+  (`ExpressionAttributeNode`, `HtmlHelpers::classifyAttributeType()`):
+  a boolean attribute (`checked`, `disabled`, ...) by truthiness, a
+  space-separated one (`class`, ...) from a string or a list, `style` from
+  a string or a declaration map, `data-*` from a scalar, a `bool`
+  (`"true"`/`"false"`) or JSON for an array or `stdClass`, `aria-*` with
+  its own `bool` rendering, any other from `string|int|float|
+  Stringable|null` (`null` omitting it); `|toggle` forces the boolean
+  kind and a trailing `|json` the JSON one; a quoted value
+  (`name="{$x}"`) stays text interpolation;
 - structure: `block`, `define`, `include` (file, block, and `parent`/
   `this` inside a block, rendering the overridden or current block),
   `embed`,
@@ -4562,7 +4579,8 @@ resolved to its real signature: a first-class callable
 - a registered function's name shadows the PHP function of that name
   (`customFunctionsPass`); a PHP function is used only when none is
   registered;
-- `noescape`, `nocheck`/`noCheck`, `datastream` are modifiers, not
+- `noescape`, `nocheck`/`noCheck`, `datastream`, and on an attribute
+  value `toggle`, `accept` and a trailing `json`, are modifiers, not
   filters, and a URL attribute's print gets `checkUrl` appended the way
   `checkUrlsPass` appends it.
 
@@ -4586,10 +4604,11 @@ classes (`{parameters}`, `{templateType}`, `{extends}`/`{layout}` and
 `{contentType}` outside the header, an unclosed or mismatched tag, an
 unknown tag, `n:else` without its `n:if`/`n:foreach`, ...) and in the
 core passes (`$GLOBALS` and `$ʟ_*` always; `$this` and `$__*` a
-deprecation unless `StrictParsing`, an error with it; `{first}`/
-`{last}`/`{sep}` outside a `foreach`; a registered function used as a
-partial `fn(...)`; a print followed by quotes inside `<script>`;
-strict-HTML errors under `StrictParsing`). Then, with `latte.*` identifiers:
+deprecation unless `StrictParsing`, an error with it; a registered
+function used as a partial `fn(...)`; a print followed by quotes inside
+`<script>`; strict-HTML errors under `StrictParsing`); and the
+deprecations Latte raises at compile time (`{first}`/`{last}`/`{sep}`
+outside a `foreach`, among others), as deprecation findings. Then, with `latte.*` identifiers:
 - an unknown filter or function (an unknown tag is Latte's own compile
   error, above);
 - a `{foreach}` key or value variable named like one of the template's
@@ -4602,6 +4621,10 @@ strict-HTML errors under `StrictParsing`). Then, with `latte.*` identifiers:
   chain defines;
 - a printed value that can't be printed (an array, an object without
   `__toString()`);
+- an attribute value of a type its kind doesn't render - Latte's runtime
+  warning `HtmlHelpers::triggerInvalidValue()` ("Invalid value for
+  attribute ...: array is not allowed"), such as an array, a `bool` or an
+  object without `__toString()` for an ordinary attribute;
 - a `{varType}` or `{parameters}` type contradicting `{templateType}`'s
   for the same variable;
 - arguments against the signature they're passed to, as a call's are:
