@@ -2200,8 +2200,14 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
   - `ParentStmtTypesVisitor`, `DeclarePositionVisitor`;
   - `RemoveUnusedCodeByPhpVersionIdVisitor`;
   - the closure-argument context (`ClosureArgVisitor`,
-    `ArrayMapArgVisitor`, `ArrowFunctionArgVisitor`,
-    `ClosureBindArgVisitor`, `ClosureBindToVarVisitor`);
+    `ArrayMapArgVisitor`, `ArrayFilterArgVisitor`, `ArrayFindArgVisitor`,
+    `ArrayWalkArgVisitor`, `CurlSetOptArgVisitor`,
+    `CurlSetOptArrayArgVisitor`, `ImplodeArgVisitor`,
+    `ArrowFunctionArgVisitor`, `ClosureBindArgVisitor`,
+    `ClosureBindToVarVisitor`), which D3's intrinsic callback overrides
+    read;
+  - `PipeTransformerVisitor` (`$x |> f(...)` as `f($x)`, keeping the pipe
+    for messages) and `MagicConstantParamDefaultVisitor`;
   - `ImmediatelyInvokedClosureVisitor`, `NewAssignedToPropertyVisitor`,
     `StandaloneThrowExprVisitor`.
 
