@@ -613,9 +613,14 @@ Visitor-based walk.
 - PHPStan's 0–10 plus `max` ladder, following `conf/config.level0.neon`…
   `config.level10.neon` and `config.levelmax.neon`.
 - Each rule has a registration level. Computed-level sites become named
-  parameters: reportMaybes, checkUnionTypes, checkNullables,
-  checkExplicitMixed, checkImplicitMixed, checkPhpDocMissingReturn,
-  checkMaybeUndefinedVariables, and so on.
+  parameters, one config key each: the 18 the level files set -
+  checkMaybeUndefinedVariables, checkExtraArguments, reportMagicMethods,
+  reportMagicProperties (1); checkClassCaseSensitivity, checkThisOnly,
+  checkPhpDocMissingReturn (2); checkPhpDocMethodSignatures (3);
+  checkAdvancedIsset (4); checkFunctionArgumentTypes,
+  checkArgumentsPassedByReference (5); checkMissingVarTagTypehint,
+  checkMissingTypehints (6); checkUnionTypes, reportMaybes (7);
+  checkNullables (8); checkExplicitMixed (9); checkImplicitMixed (10).
 - A rule → level table is cross-checked against the neon files, including
   conditional tags.
 - One documented default level for CLI and LSP.
@@ -633,7 +638,13 @@ Visitor-based walk.
   - startup warnings (SQL drift, lexer warnings).
 - **Result finalizer**, a fixed, documented order:
   1. inline ignores (with unmatched reporting);
-  2. ignoreErrors (with `IgnoreErrorExtension`);
+  2. ignoreErrors (with `IgnoreErrorExtension`), reporting unmatched
+     entries as PHPStan does: `ignore.unmatched` (non-ignorable, skipped
+     after internal errors, a path entry only when its file was analysed)
+     under `reportUnmatched`; `ignore.count` for a count exceeded (always,
+     the surplus reported again) or not reached (under `reportUnmatched`).
+     An unmatched entry with only a message, whose pattern may be worded
+     after PHPStan's messages, is a notice rather than an error;
   3. baseline filter / generate;
   4. (span, message) dedup;
   5. a total order (path, line, col, identifier, message, tip) for every
@@ -1245,7 +1256,22 @@ Follow-ups, one commit each, each with its test:
   `ParamRef`, `ParamFlagsCondition`, `DoctrineCustomFunctionEntry`,
   `sql::config::SqlReflectionConfig`. An `[[ignore_errors]]` entry needs
   `message` or `identifier`; its regex is compiled once, at load, and an
-  invalid one is a load error; `count` is enforced.
+  invalid one is a load error; `count` is enforced. The entry takes
+  PHPStan's whole shape and semantics (`Analyser/Ignore/IgnoredErrorHelper.php`,
+  `IgnoredErrorHelperResult.php`): `raw_message`, the plural `messages`,
+  `raw_messages`, `identifiers` (only the first present of the three
+  expands) and `paths`, the string form, and per-entry `report_unmatched`;
+  entries with the same path, message and identifier merge with their
+  counts summed (a missing count is 1); `count` applies to single-path
+  entries only. A malformed entry fails the load. Messages match through
+  PCRE2 (the `pcre2-sys` path of `pcre_validate`) with the pattern's own
+  delimiters and modifiers; without `pcre-validate` they compile with
+  `regex`, a pattern it rejects failing the load, and its divergences
+  (`$` before a final newline, Unicode `\d`/`\w`) documented. PHPStan's
+  `IgnoredRegexValidator` checks are load errors: an unescaped `||` or
+  `()`, a top-level alternation starting with a type name, an anchor in
+  the middle (entries with `count` skipped); they need a PCRE-syntax
+  parser and the phpdoc type parser.
 - **Error paths.** Every type error names its full dotted key path.
 - **Missing settings**, each with the phase that implements it:
   mixin exclude classes (`ReflectionSettings`, C8), universal object
@@ -1254,7 +1280,18 @@ Follow-ups, one commit each, each with its test:
   (`ReflectionSettings`, C7), a `php_version` range and patch version
   (C5), treatPhpDocTypesAsCertain (D2), polluteScopeWith* (D2),
   rememberPossiblyImpureFunctionValues (D2), early-terminating calls (D3),
-  the exception model (E3f).
+  the exception model (E3f), additional constructors and always-read /
+  always-written property tags (keys for the D6 built-in implementors of
+  `AdditionalConstructorsExtension` and the dead-code-roots extension),
+  `exclude_paths.analyse` / `exclude_paths.analyse_and_scan` (PHPStan's
+  `excludePaths`: a flat list means `analyse_and_scan`, an entry marked
+  optional may be missing, any other missing literal path fails the load;
+  applied by `Session`, the LSP's workspace load and incremental file adds,
+  in place of `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`; vendor context loaded
+  through Composer stays loaded), `file_extensions`,
+  `report_ignores_without_comments`,
+  `use_path_constants_as_constant_string`,
+  `check_internal_class_case_sensitivity`.
 - **One settings assembly.** `lsp/workspace_config.rs` stops assembling
   `ProjectSettings` itself and uses `Session::resolve`'s function: the same
   validation (overlays, architecture, banned constructs, psr3 pattern), the
@@ -1268,7 +1305,10 @@ Follow-ups, one commit each, each with its test:
 - **`test.risky`** gets its own activation (ext-extras or an explicit key)
   instead of `phpstan/phpstan-phpunit`'s; the corpus delta is re-reviewed.
 - **`ignore_errors.path`** resolves against the config file's directory and
-  is compared as a normalized path.
+  is compared as a normalized path, by one matcher with PHPStan's
+  `File/FileExcluder` semantics - a literal file, a literal directory as a
+  prefix, or an fnmatch pattern (`*?[]`, `*` crossing `/`) - shared with
+  `exclude_paths`; `glob_matches` goes.
 - **`restricted_symbols`.** A member entry without `class` is a load error;
   a user entry wins over a preset's for the same symbol.
 - **`[[assertions]]`/`[[class_argument_returns]]`.** Type strings are parsed
@@ -1278,7 +1318,27 @@ Follow-ups, one commit each, each with its test:
   command-line path.
 - **Config discovery.** `check-project` without `--config` reads
   `phpstan-rs.toml` in the working directory, as the LSP does at a
-  workspace root (the CLI reads no config without `--config` today).
+  workspace root (the CLI reads no config without `--config` today). The
+  first of `.phpstan-rs.toml`, `phpstan-rs.toml`, `.phpstan-rs.dist.toml`,
+  `phpstan-rs.dist.toml` wins, as PHPStan's six `phpstan.neon` names do;
+  one lookup serves the CLI and the LSP. The LSP watches the config files
+  (today it registers `**/*.php` only), so an edit reconfigures without a
+  client configuration push.
+- **One walk per file.** The file walker dedups by canonical path: a
+  symlink back into the tree (`src/up -> ..` checks one file 41 times
+  today) or an alias of an analysed directory is walked once.
+- **`psr3_context_key_pattern`** is a PCRE pattern matched through PCRE2,
+  as ignore messages are, not `regex` syntax.
+- **Strict-rules activation** also sets the core settings
+  phpstan-strict-rules' `rules.neon` sets: polluteScopeWith* off, dynamic
+  properties, explicit-mixed missing return, function name case, internal
+  class case, maybes in method signatures and property PHPDoc types,
+  static method signatures, wrong PHPDoc type in `@var`, strict printf
+  placeholders.
+- **Grouped keys** name the upstream parameters each covers
+  (`ext.shipmonk.check_null_coercion`: the three `forbidNullIn*` rules;
+  `ext.shipmonk.check_enum_exhaustiveness`; `rules.check_dead_members`;
+  `ext.psr3.check_psr3_logging`).
 - **Composer roots.** PHP versions and extension activation read every
   discovered root's manifest, as `phpstan_api_check_enabled` does.
 - **Pest risky tests** get their own `[ext.pest]` key.
@@ -1732,9 +1792,11 @@ approved-delta commits.
 **C6. Overlay layer**, one commit each. Every entry's types are parsed with
 the phpdoc grammar (TypeNode), never `parse_type_string`:
 - phpstan-src `.stub` PHPDoc overlays (approved delta, split per stub
-  file): the 31 files `conf/config.neon` lists, plus the 9 selected by the
-  five version-gated `StubFilesExtension`s (`BcMathNumber`,
-  `JsonValidate`, `ReflectionClass`, `ReflectionEnum`, `SocketSelect`),
+  file): the 30 files `conf/config.neon` lists (phpstan-src 2.2.16), plus
+  the 10 selected by the six gated `StubFilesExtension`s (`BcMathNumber`,
+  `JsonValidate`, `ReflectionClass`, `ReflectionEnum`, `SocketSelect` on
+  the PHP version; `ExtDs`, which took `ext-ds.stub` out of
+  `config.neon` in 2.2.16, on the `ds` extension's major version),
   which port as built-in implementors. All 146 functions and all method
   PHPDoc apply, not only class templates and property types;
 - declarative patch entries replacing the Rust patch functions;
@@ -1871,7 +1933,15 @@ with a fixture per transition and trigger:
 - conditional holders with `mergeWith`;
 - frozen condition aliases;
 - certainty plus maybe-undefined (level-gated), with each variable's
-  certainty added to the type snapshot;
+  certainty added to the type snapshot; a maybe-defined variable is
+  reported today as `undefined variable` at level 0, where PHPStan reports
+  "might not be defined" at level 1, and `$x ?? null` on one types as
+  `mixed`;
+- rememberPossiblyImpureFunctionValues: the analysis behaves as `false`
+  today (of the 12 lines flipping it changes in PHPStan 2.2.16's output,
+  over `gates/phpstan-oracle/`'s probes and its test fixtures, phpstan-rs
+  agrees with the flipped run on 9); the `true`
+  behaviour, PHPStan's default, comes with the key;
 - `afterExtractCall` replacing extract/eval truncation;
 - invalidation unification (receiver rebind, by-ref, declare purges);
 - the transition set;
@@ -1980,7 +2050,9 @@ The rest of the diagnostic model (§3.7), each its own commit:
 - identifier families: each rule declares its identifiers as prefix ×
   suffix sets, the dispatcher debug-asserts every error against its rule's
   declaration, and the `format!`-built identifiers (about 40 sites)
-  become family members;
+  become family members. An `[[ignore_errors]]` entry whose identifiers all
+  lie outside every family is never reported unmatched: it names a check
+  phpstan-rs doesn't have, not a stale entry;
 - AST-node fixes beside text fixes, rendered to diffs through
   `syntax::printer`, which gains statements and declarations, keeps the
   surrounding formatting (php-parser's format-preserving printer) and
@@ -2026,6 +2098,18 @@ JSON and the LSP. The level-dependent acceptance in
 `strict_mixed_arrays` and `check_benevolent_union_types` fields. The level
 tests become level-header fixtures. LevelsTestCase fixtures are added. Gate: for every level in 0..=10 plus
 unset, before == after, except approved deltas.
+
+The rule → level table starts from these divergences, measured by running
+the same probes through PHPStan 2.2.16 and phpstan-rs at every level
+(first level reporting, PHPStan / phpstan-rs): `isset.variable` and
+`nullCoalesce.variable` 1 / 0; a maybe-defined or top-level undefined
+variable 1 / 0; `method.notFound` on a receiver other than `$this` 2 / 0;
+a method or property reached only through `__call`/`__get` 2 / never; a
+union argument 7 / 5 and a union return 7 / 3 (the `.all()` arm in
+`types::Relation::accepts` below level 7); a maybe-non-offset-accessible
+7 / 3; a maybe-missing constant-array offset 7 / never; a PHPDoc-only
+child parameter type conflict 3 / never; `@var array` without a value
+type 6 / never. The approved deltas are these rows.
 
 **E6. Observers.** LSP-only presentation (semantic tokens, inlay hints,
 hover, definition probes) on observer events.
