@@ -132,8 +132,8 @@ This is the collector shape of crate-split §3.8.
   earlier passes are kept. That's identical today in both the facts pass
   and the main pass, so output is unchanged. Keeping only final-pass
   data is the Stage D dispatcher's job ("drops non-final-pass output").
-- Verify: corpus identical, all-on in particular; the rename rule's
-  fixture directory identical.
+- Verify: corpus identical, all-on in particular;
+  `project/renamed_named_arguments` identical.
 
 ### S3. Type dump from the main pass (engine and gate)
 - `--dump-types` and `PHPSTAN_RS_DUMP_TYPES` go through
@@ -198,8 +198,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   files keep theirs. This matches the main pass and F1's panic
   isolation. The corpus has no panics, so snapshots don't change. A
   fixture that injects a panic covers the new behaviour.
-- Verify: corpus identical to S5a; the property-assign fixtures
-  identical; LSP tests pass.
+- Verify: corpus identical to S5a; `project/property_assign_facts` and
+  `checker/property_assignment` identical; LSP tests pass.
 
 ### S6. Case-folded function keys, pulled forward from C5 (engine)
 - The C5 item "a case-folded function key map replacing the linear
@@ -224,9 +224,9 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Before changing the map, list the case-colliding keys in the stubs
   and the corpus. If any exist and output changes, that lands as S6a
   with its approved delta.
-- Verify: corpus identical (after S6a); the symbol-existence and
-  function-case fixture directories identical; registry and LSP tests
-  pass.
+- Verify: corpus identical (after S6a); `checker/symbol_existence`
+  (which holds 28 of the 39 `nameCase` fixtures) and `checker/codemods`
+  identical; registry and LSP tests pass.
 
 ### S7. Composer hygiene without engine I/O (engine)
 - The session resolves its root to an absolute path once, at intake,
@@ -265,9 +265,10 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   F1's VFS replaces them, because each lookup there also records a
   dependency for F2's result cache; building that ahead of F2 would be
   thrown away.
-- Verify: corpus identical, all-on in particular; the composer, include
-  and PHPStan-namespace fixture directories identical; composer tests
-  pass; `cargo xtask arch` passes.
+- Verify: corpus identical, all-on in particular;
+  `project/composer_hygiene`, `checker/includes`,
+  `project/phpstan_api_gating` and `checker/phpstan_api` identical;
+  composer tests pass; `cargo xtask arch` passes.
 
 ### S8. Stub-proportional work in per-project passes (engine)
 - Profile a one-line fixture's `analyse` (~38 ms).
