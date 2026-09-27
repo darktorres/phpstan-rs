@@ -5,6 +5,7 @@
 //! `phpstan_rs::project::Project`/`phpstan_rs::checker::Checker`. The full
 //! module paths remain available either way.
 
+pub mod app;
 pub mod architecture;
 pub mod assertion_tables;
 pub mod banned;

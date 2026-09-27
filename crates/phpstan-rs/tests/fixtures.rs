@@ -80,7 +80,8 @@ fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> 
     if let Some((path, message)) = analysis.check_panics.first() {
         return Err(format!("{} panicked: {message}", path.display()).into());
     }
-    let actual = render(&analysis.results, &base, single_file);
+    let report = analysis.finalize(&session.finalize_options());
+    let actual = render(&report.results, &base, single_file);
     if std::env::var_os("PHPSTAN_RS_BLESS").is_some() {
         std::fs::write(expect_file, &actual)?;
         return Ok(());

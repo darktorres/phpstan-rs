@@ -1,11 +1,13 @@
-//! `check-project`: command-line flags overlaid onto the config file,
-//! run through `project::session::Session`, then baselined, fixed and
-//! printed.
+//! `check-project`: the command line parsed into an
+//! `app::check_project::CheckRequest`, its flags overlaid onto the config
+//! file, the run resolved and analysed by the library, then baselined,
+//! fixed and printed.
 
 use std::path::{Path, PathBuf};
 
 use output::OutputFormat;
-use phpstan_rs::project::session::{Overrides, Session};
+use phpstan_rs::app::check_project::{self, CheckRequest, CheckRun};
+use phpstan_rs::project::session::AnalysisResult;
 use phpstan_rs::{baseline, config, output};
 
 /// Load every .php file under the given paths and run the full checker
@@ -620,69 +622,42 @@ fn overlay_flags(args: &CheckProjectArgs, config: &mut config::Config) {
 }
 
 pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
-    let config_dir = args
-        .config
-        .as_deref()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf);
-    let mut config = match &args.config {
-        Some(path) => match config::Config::load(path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        },
-        None => config::Config::default(),
-    };
-    overlay_flags(&args, &mut config);
-    let resolve_against_config = |p: PathBuf| match &config_dir {
-        Some(dir) => dir.join(p),
-        None => p,
-    };
-    let baseline_path = args
-        .baseline
-        .clone()
-        .or(config.baseline.clone().map(resolve_against_config));
-    let baseline_mode =
-        if args.baseline_match_identifier || config.baseline_match_identifier.unwrap_or(false) {
-            baseline::MatchMode::Identifier
-        } else {
-            baseline::MatchMode::Message
-        };
-    let baseline_per_identifier =
-        args.baseline_per_identifier || config.baseline_per_identifier.unwrap_or(false);
-    let overrides = Overrides {
+    let request = CheckRequest {
+        config_file: args.config.clone(),
         paths: args.dirs.clone(),
         scan_paths: args.scan_dirs.clone(),
         stub_paths: args.stub_paths.clone(),
         level: args.level,
-        report_level: None,
         php_version: args.php_version.clone(),
         no_composer: args.no_composer,
         emission_order: args.emission_order,
+        baseline: args.baseline.clone(),
+        baseline_match_identifier: args.baseline_match_identifier,
+        baseline_per_identifier: args.baseline_per_identifier,
     };
-    let session = match Session::resolve(
-        config,
-        config_dir,
-        PathBuf::from("."),
-        overrides,
-        phpstan_rs::project::worker_pool(),
-    ) {
-        Ok(session) => session,
+    let mut config = match check_project::load_config(&request) {
+        Ok(config) => config,
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(1);
         }
     };
-    for warning in &session.warnings {
-        eprintln!("{warning}");
+    overlay_flags(&args, &mut config);
+    let run = match check_project::prepare(&request, config, phpstan_rs::project::worker_pool()) {
+        Ok(run) => run,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    for notice in run.notices() {
+        eprintln!("{notice}");
     }
     // A file whose parse or check panics is reported per file; don't also
     // print each caught panic's default message.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let analysis = session.run(args.dump_types.is_some());
+    let analysis = run.session.run(args.dump_types.is_some());
     std::panic::set_hook(default_hook);
     let analysis = match analysis {
         Ok(analysis) => analysis,
@@ -691,8 +666,8 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
             return;
         }
     };
-    for warning in &analysis.lex_warnings {
-        eprintln!("{warning}");
+    for notice in analysis.notices() {
+        eprintln!("{notice}");
     }
     if let (Some(out), Some(dump)) = (&args.dump_types, &analysis.type_dump)
         && let Err(e) = std::fs::write(out, dump)
@@ -700,36 +675,38 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         eprintln!("failed to write type dump {}: {e}", out.display());
     }
     report(
-        analysis,
+        &run,
+        &analysis,
         args.generate_baseline.as_deref(),
-        baseline_path.as_deref(),
-        baseline_mode,
-        baseline_per_identifier,
         args.fix,
         args.format.unwrap_or_default(),
     );
 }
 
 fn report(
-    analysis: phpstan_rs::project::session::Analysis,
+    run: &CheckRun,
+    analysis: &AnalysisResult,
     generate_baseline_path: Option<&Path>,
-    baseline_path: Option<&Path>,
-    baseline_mode: baseline::MatchMode,
-    baseline_per_identifier: bool,
     apply_fixes: bool,
     format: OutputFormat,
 ) {
-    let phpstan_rs::project::session::Analysis {
-        mut results,
+    let AnalysisResult {
         checked,
         skipped_analyze,
         skipped_context,
         context_loaded,
         check_panics,
-        lex_warnings: _,
-        type_dump: _,
+        ..
     } = analysis;
+    let (checked, skipped_analyze, skipped_context, context_loaded) = (
+        *checked,
+        *skipped_analyze,
+        *skipped_context,
+        *context_loaded,
+    );
+    let baseline_per_identifier = run.baseline_per_identifier;
     if let Some(generate_baseline_path) = generate_baseline_path {
+        let results = analysis.finalize(&run.finalize_options(None)).results;
         let generated = if baseline_per_identifier {
             baseline::generate_per_identifier(generate_baseline_path, &results)
         } else {
@@ -748,17 +725,19 @@ fn report(
         return;
     }
 
-    if let Some(baseline_path) = baseline_path {
-        match baseline::Baseline::load(baseline_path) {
-            Ok(baseline) => {
-                let baseline = baseline.with_match_mode(baseline_mode);
-                for stale in baseline::filter(&mut results, &baseline) {
-                    eprintln!("baseline entry no longer matches any diagnostic: {stale}");
-                }
-            }
-            Err(e) => eprintln!("failed to load baseline {}: {e}", baseline_path.display()),
+    let baseline = match run.load_baseline() {
+        Some(Ok(baseline)) => Some(baseline),
+        Some(Err(line)) => {
+            eprintln!("{line}");
+            None
         }
+        None => None,
+    };
+    let report = analysis.finalize(&run.finalize_options(baseline));
+    for notice in report.notices() {
+        eprintln!("{notice}");
     }
+    let results = report.results;
 
     if apply_fixes {
         let mut fixed_files = 0usize;
@@ -824,7 +803,7 @@ fn report(
                     }
                 }
             }
-            for (path, msg) in &check_panics {
+            for (path, msg) in check_panics {
                 println!("{}: internal error while checking: {msg}", path.display());
             }
             let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");

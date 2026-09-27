@@ -1,9 +1,9 @@
 //! The `check-project` pipeline as a library: a `Config` (plus command-line
 //! overrides) resolved against an explicit root directory, loaded into a
-//! `Project`, checked in parallel, and post-processed into the per-file
-//! diagnostics every consumer reports. The CLI and the fixture harness
-//! both drive it, so a fixture exercises exactly what `check-project`
-//! runs.
+//! `Project`, checked in parallel into an `AnalysisResult`, which
+//! `finalize` post-processes into the per-file diagnostics a consumer
+//! reports. The CLI and the fixture harness both drive it, so a fixture
+//! exercises exactly what `check-project` runs.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
@@ -96,10 +96,14 @@ pub struct Loaded {
     pub lex_warnings: Vec<String>,
 }
 
-/// What one run produced, after the full post-processing chain.
-pub struct Analysis {
-    /// Per-file diagnostics in `diagnostic::diagnostic_order`.
-    pub results: FxHashMap<PathBuf, Vec<Diagnostic>>,
+/// What one run's analysis produced, before post-processing: every
+/// check's diagnostics, and the project they came from, which
+/// `finalize` needs for inline ignores. Finalizing doesn't consume it,
+/// so one analysis can be finalized several ways.
+pub struct AnalysisResult {
+    project: Project,
+    /// Per-file diagnostics as the checks emitted them.
+    results: FxHashMap<PathBuf, Vec<Diagnostic>>,
     /// Analysed files that parsed and checked without an internal error.
     pub checked: usize,
     pub skipped_analyze: usize,
@@ -114,6 +118,74 @@ pub struct Analysis {
     /// `path:line:col [host] vars` line per statement, files in path
     /// order.
     pub type_dump: Option<String>,
+}
+
+/// The post-processing a finalized report gets, in this order: the level
+/// filter, inline ignores, `ignore_errors`, the baseline, then the order.
+#[derive(Clone)]
+pub struct Finalize {
+    pub level: u8,
+    pub report_unmatched_ignores: bool,
+    pub ignore_errors: Vec<ignore_errors::IgnoreErrorEntry>,
+    pub baseline: Option<crate::baseline::Baseline>,
+    pub order: DiagnosticOrder,
+}
+
+/// How each file's diagnostics are ordered in a report.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticOrder {
+    /// `diagnostics::sort_diagnostics`' total order.
+    Sorted,
+    /// The order the checks emitted them in.
+    Emission,
+}
+
+/// A finalized report.
+pub struct Report {
+    pub results: FxHashMap<PathBuf, Vec<Diagnostic>>,
+    /// The baseline's entries that matched no diagnostic.
+    pub stale_baseline_entries: Vec<String>,
+}
+
+impl Report {
+    /// What the report says beyond its diagnostics, one line each.
+    pub fn notices(&self) -> Vec<String> {
+        self.stale_baseline_entries
+            .iter()
+            .map(|stale| format!("baseline entry no longer matches any diagnostic: {stale}"))
+            .collect()
+    }
+}
+
+impl AnalysisResult {
+    /// What the analysis says beyond its diagnostics, one line each.
+    pub fn notices(&self) -> Vec<String> {
+        self.lex_warnings.clone()
+    }
+
+    /// The report `options` make of this analysis.
+    pub fn finalize(&self, options: &Finalize) -> Report {
+        let mut results = self.results.clone();
+        for diagnostics in results.values_mut() {
+            diagnostics.retain(|d| d.level <= options.level);
+        }
+        self.project
+            .apply_inline_ignores(&mut results, options.report_unmatched_ignores);
+        ignore_errors::filter(&mut results, &options.ignore_errors);
+        let stale_baseline_entries = match &options.baseline {
+            Some(baseline) => crate::baseline::filter(&mut results, baseline),
+            None => Vec::new(),
+        };
+        if options.order == DiagnosticOrder::Sorted {
+            for diagnostics in results.values_mut() {
+                diagnostics::sort_diagnostics(diagnostics);
+            }
+        }
+        Report {
+            results,
+            stale_baseline_entries,
+        }
+    }
 }
 
 /// The directory a composer project containing `dirs` is rooted at: the
@@ -418,6 +490,22 @@ impl Session {
         Ok((session, base))
     }
 
+    /// The post-processing this session's configuration asks for, without
+    /// a baseline.
+    pub fn finalize_options(&self) -> Finalize {
+        Finalize {
+            level: self.level,
+            report_unmatched_ignores: Self::flag(self.config.report_unmatched_ignored_errors),
+            ignore_errors: self.config.ignore_errors.clone().unwrap_or_default(),
+            baseline: None,
+            order: if self.emission_order {
+                DiagnosticOrder::Emission
+            } else {
+                DiagnosticOrder::Sorted
+            },
+        }
+    }
+
     /// The directories analysed (after composer path-repository
     /// promotion), relative to the root as given.
     pub fn dirs(&self) -> &[PathBuf] {
@@ -562,10 +650,10 @@ impl Session {
         Some((source, parsed))
     }
 
-    /// Loads, checks and post-processes every analysed file, with the
-    /// `--dump-types` output when `dump_types` is set. Fails when the
-    /// analysed paths hold no `.php` file.
-    pub fn run(&self, dump_types: bool) -> Result<Analysis, String> {
+    /// Loads and checks every analysed file, with the `--dump-types`
+    /// output when `dump_types` is set. Fails when the analysed paths hold
+    /// no `.php` file.
+    pub fn run(&self, dump_types: bool) -> Result<AnalysisResult, String> {
         let loaded = self.load()?;
         Ok(self.analyse(loaded, dump_types))
     }
@@ -665,9 +753,9 @@ impl Session {
         })
     }
 
-    /// Checks every analysed file of `loaded`, runs the project-wide
-    /// passes, and post-processes the result.
-    pub fn analyse(&self, loaded: Loaded, dump_types: bool) -> Analysis {
+    /// Checks every analysed file of `loaded` and runs the project-wide
+    /// passes.
+    pub fn analyse(&self, loaded: Loaded, dump_types: bool) -> AnalysisResult {
         let Loaded {
             mut project,
             analyze_files_by_size,
@@ -771,24 +859,8 @@ impl Session {
             }
         }
 
-        for diagnostics in results.values_mut() {
-            diagnostics.retain(|d| d.level <= self.level);
-        }
-        project.apply_inline_ignores(
-            &mut results,
-            Self::flag(self.config.report_unmatched_ignored_errors),
-        );
-        ignore_errors::filter(
-            &mut results,
-            &self.config.ignore_errors.clone().unwrap_or_default(),
-        );
-        if !self.emission_order {
-            for diagnostics in results.values_mut() {
-                diagnostics::sort_diagnostics(diagnostics);
-            }
-        }
-
-        Analysis {
+        AnalysisResult {
+            project,
             results,
             checked: analyze_files_by_size.len() - skipped_analyze - check_panics.len(),
             skipped_analyze,
