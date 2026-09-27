@@ -25,11 +25,12 @@ pub struct PackageContext {
 }
 
 impl PackageContext {
-    /// Reads the project at `root`. `spelled_root` is the root as analysed
-    /// paths spell it, which the manifest's own paths follow.
+    /// Reads the project at `root`, which is canonical. `spelled_root` is
+    /// the root as analysed paths spell it, which the manifest's own paths
+    /// follow.
     pub fn load(root: &Path, spelled_root: &Path) -> PackageContext {
         PackageContext {
-            manifest: ComposerManifest::load(spelled_root),
+            manifest: ComposerManifest::load(spelled_root, root),
             vendor: vendor::discover_vendor_context(root),
         }
     }
@@ -55,39 +56,69 @@ impl PackageContext {
             .map(|p| p.value.as_str())
             .or_else(|| manifest.constraints.get("php").map(String::as_str))
     }
-
-    /// Each directory whose files belong to a package, with that package's
-    /// name: every installed package's (as linked under `vendor/` and as
-    /// installed) and the root package's own.
-    pub fn package_dirs(&self) -> Vec<(PathBuf, String)> {
-        let Some(manifest) = &self.manifest else {
-            return Vec::new();
-        };
-        let mut dirs: Vec<(PathBuf, String)> = manifest
-            .installed
-            .iter()
-            .flat_map(|p| {
-                [
-                    (p.vendor_dir.clone(), p.name.clone()),
-                    (p.install_dir.clone(), p.name.clone()),
-                ]
-            })
-            .collect();
-        if let Some(name) = &manifest.name {
-            dirs.push((manifest.root.clone(), name.clone()));
-        }
-        dirs
-    }
 }
 
-/// The package owning `file` among `package_dirs`: the one with the
-/// deepest directory containing it.
-pub fn owning_package<'a>(package_dirs: &'a [(PathBuf, String)], file: &Path) -> Option<&'a str> {
-    package_dirs
-        .iter()
-        .filter(|(dir, _)| path_starts_with(file, dir))
-        .max_by_key(|(dir, _)| dir.components().count())
-        .map(|(_, name)| name.as_str())
+/// A package that owns files: a composer root's own package, or one of the
+/// packages installed under it (indices into `PackageIndex::manifests` and
+/// that manifest's `installed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PackageOwner {
+    Root(usize),
+    Installed(usize, usize),
+}
+
+/// Package ownership across a project's composer roots.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PackageIndex {
+    manifests: Vec<ComposerManifest>,
+    /// Every owned directory, absolute: each root's own, and each
+    /// installed package's `vendor/` link and install directory.
+    dirs: Vec<(PathBuf, PackageOwner)>,
+}
+
+impl PackageIndex {
+    pub fn new(manifests: Vec<ComposerManifest>) -> PackageIndex {
+        let mut dirs = Vec::new();
+        for (i, manifest) in manifests.iter().enumerate() {
+            dirs.push((manifest.absolute_root.clone(), PackageOwner::Root(i)));
+            for (j, package) in manifest.installed.iter().enumerate() {
+                let owner = PackageOwner::Installed(i, j);
+                dirs.push((manifest.absolute(&package.vendor_dir), owner));
+                dirs.push((package.install_dir.clone(), owner));
+            }
+        }
+        PackageIndex { manifests, dirs }
+    }
+
+    pub fn manifests(&self) -> &[ComposerManifest] {
+        &self.manifests
+    }
+
+    /// The package owning the absolute `file`: the one whose directory
+    /// containing it is deepest.
+    pub fn owner(&self, file: &Path) -> Option<PackageOwner> {
+        self.dirs
+            .iter()
+            .filter(|(dir, _)| path_starts_with(file, dir))
+            .max_by_key(|(dir, _)| dir.components().count())
+            .map(|(_, owner)| *owner)
+    }
+
+    /// `owner`'s package name; a root package may have none.
+    pub fn name(&self, owner: PackageOwner) -> Option<&str> {
+        match owner {
+            PackageOwner::Root(i) => self.manifests[i].name.as_deref(),
+            PackageOwner::Installed(i, j) => Some(&self.manifests[i].installed[j].name),
+        }
+    }
+
+    /// The installed package `owner` names, if it is one.
+    pub fn installed(&self, owner: PackageOwner) -> Option<&manifest::InstalledPackage> {
+        match owner {
+            PackageOwner::Root(_) => None,
+            PackageOwner::Installed(i, j) => Some(&self.manifests[i].installed[j]),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -42,3 +42,42 @@ fn other_output_is_not_a_test_binary() {
     );
     assert_eq!(test_binary_label("   Compiling xtask v0.1.0"), None);
 }
+
+/// The architecture findings for `source` as a file at `rel` under the
+/// repository root `/repo`.
+fn arch_findings(rel: &str, source: &str) -> Vec<&'static str> {
+    use syn::visit::Visit;
+    let root = std::path::Path::new("/repo");
+    let mut finder = crate::arch::Finder {
+        in_diagnostics: false,
+        in_engine: crate::arch::is_engine_source(root, &root.join(rel)),
+        found: Vec::new(),
+    };
+    finder.visit_file(&syn::parse_file(source).unwrap());
+    finder.found.into_iter().map(|(_, what)| what).collect()
+}
+
+#[test]
+fn the_engine_may_not_resolve_a_path_against_the_process() {
+    let source = "fn f(p: &std::path::Path) { let _ = std::env::current_dir(); \
+                  let _ = std::fs::canonicalize(p); let _ = std::path::absolute(p); \
+                  let _ = p.canonicalize(); }";
+    assert_eq!(
+        arch_findings("crates/phpstan-rs/src/checker/includes.rs", source).len(),
+        4
+    );
+}
+
+#[test]
+fn the_session_the_binary_the_language_server_and_tests_may() {
+    let source = "fn f() { let _ = std::env::current_dir(); }";
+    for rel in [
+        "crates/phpstan-rs/src/project/session.rs",
+        "crates/phpstan-rs/src/main/check_project.rs",
+        "crates/phpstan-rs/src/lsp/workspace_config.rs",
+        "crates/phpstan-rs/src/checker/phpstan_api/tests.rs",
+        "crates/composer/src/manifest.rs",
+    ] {
+        assert!(arch_findings(rel, source).is_empty(), "{rel}");
+    }
+}

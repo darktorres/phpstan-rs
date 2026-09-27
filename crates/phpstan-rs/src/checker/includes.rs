@@ -124,14 +124,17 @@ impl<'a> Checker<'a> {
     /// The checked file's own absolute path - what PHP's `__FILE__`
     /// holds, however the file was named on the command line or in the
     /// config's `paths` (a relative path's `dirname()` chain would
-    /// otherwise walk off its top to `""`).
+    /// otherwise walk off its top to `""`). The project supplies it; a
+    /// checker run without one falls back to the path as named.
     fn current_file_absolute(&self) -> Option<PathBuf> {
+        if let Some(file) = &self.current_file_absolute {
+            return Some(file.clone());
+        }
         let file = self.current_file.as_ref()?;
-        let file = match &self.working_dir {
+        Some(match &self.working_dir {
             Some(dir) => dir.join(file),
             None => file.to_path_buf(),
-        };
-        Some(std::path::absolute(&file).unwrap_or(file))
+        })
     }
 
     fn current_dir_of_file(&self) -> Option<PathBuf> {
@@ -255,10 +258,12 @@ impl<'a> Checker<'a> {
         if path.is_absolute() {
             return path.is_file();
         }
-        let from_cwd = match &self.working_dir {
-            Some(dir) => Some(dir.join(path)),
-            None => std::env::current_dir().ok().map(|d| d.join(path)),
-        };
+        // Without a working directory, the relative path itself: the
+        // filesystem resolves it against the process's.
+        let from_cwd = Some(match &self.working_dir {
+            Some(dir) => dir.join(path),
+            None => path.to_path_buf(),
+        });
         let from_file = self.current_dir_of_file().map(|d| d.join(path));
         from_cwd.is_some_and(|p| p.is_file())
             || from_file.is_some_and(|p| p.is_file())

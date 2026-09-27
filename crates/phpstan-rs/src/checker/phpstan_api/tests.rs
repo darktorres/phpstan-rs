@@ -291,9 +291,17 @@ mod namespace_in_3rd_party_package {
     ) -> Vec<diagnostics::Diagnostic> {
         let tokens = Lexer::new(src).tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let mut registry = Registry::build(&program);
-        registry.package_dirs = composer::PackageContext::load(&root.0, &root.0).package_dirs();
-        check_phpstan_api_usage(&program, &registry, Some(php_path))
+        let registry = Registry::build(&program);
+        let absolute_root = std::fs::canonicalize(&root.0).unwrap();
+        let packages = composer::PackageIndex::new(
+            composer::PackageContext::load(&absolute_root, &absolute_root)
+                .manifest
+                .into_iter()
+                .collect(),
+        );
+        let file = absolute_root.join(php_path.strip_prefix(&root.0).unwrap());
+        let package = packages.owner(&file).and_then(|o| packages.name(o));
+        check_phpstan_api_usage(&program, &registry, Some(package))
     }
 
     #[test]

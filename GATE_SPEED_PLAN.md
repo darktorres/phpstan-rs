@@ -259,38 +259,47 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   LSP tests pass.
 
 ### S7. Composer hygiene without engine I/O (engine)
-- The session resolves its root to an absolute path once, at intake,
-  and hands the project that absolute root for resolution. It keeps the
-  root's own spelling (`.` for the CLI) for display, so reported paths
-  don't change. Today `resolved()` joins onto the spelled root `.` and
-  calls `std::path::absolute`, which is where the per-call `getcwd`
-  comes from.
-- `path_starts_with` becomes a pure comparison of absolute paths, with
-  no `getcwd`.
-- `includes.rs` resolves against the absolute root instead of falling
-  back to `current_dir()`.
-- Package ownership gets one implementation, computed once per file
-  when the session loads it and stored with the file. Today there are
-  two, and they differ:
-  - `ComposerManifest::owning_package` (composer hygiene) canonicalizes
-    the file before matching install directories, never returns the
-    root package, and returns the whole `InstalledPackage`;
-  - B8's `owning_package(dirs, file)` (the PHPStan-namespace rule)
-    matches the path as written against both vendor and install
-    directories, includes the root package, and returns only a name.
-
-  The single version returns an owner, either the root package or an
-  installed package's index, and resolves symlinks. The canonical path
-  comes from the session's one canonicalization per file at intake,
-  which is session I/O, not engine I/O. Composer hygiene,
-  `belongs_to_root` and the PHPStan-namespace rule all read it, and
-  `OwnerCache` is deleted.
-- **S7a (behaviour, only if output changes):** if the two rules ever
-  disagreed on a file, reconciling them changes one rule's output. That
-  lands first, with its approved delta.
+- The session canonicalizes its root once (`Project::set_absolute_root`),
+  and so does the LSP. `Project::absolute_path` maps an analysed path
+  spelled from the working directory onto it: swap the spelled root for
+  the canonical one, then resolve `.` and `..` lexically. Paths keep
+  their spelling everywhere they're shown.
+- Each `ComposerManifest` keeps its spelled paths for display and
+  records its canonical root, and `ComposerManifest::absolute` maps its
+  own paths the same way. `path_starts_with` is a pure lexical
+  comparison, and autoload coverage and exclusion are manifest methods
+  on absolute paths. No `getcwd` remains.
+- Package ownership has one implementation: `composer::PackageIndex`,
+  built from every composer root's manifest. It maps an absolute path to
+  the deepest owning directory: a root's own, or an installed package's
+  `vendor/` link or canonical install directory.
+  - A file reached through a `vendor/` symlink matches the link, and a
+    file inside a path-repository package matches the install directory,
+    both lexically. That's what the per-file `canonicalize` did before,
+    so no file is canonicalized any more.
+  - Each file's owner is computed when it's inserted, or when the index
+    changes, and stored in its `FileState`.
+  - Composer hygiene runs per root index. It reads the owners, keeping
+    only installed packages of its own root as before, and
+    `belongs_to_root` becomes "owned by this root".
+  - The PHPStan-namespace rule takes the owner's name, and
+    `registry.package_dirs`, both old `owning_package`s and `OwnerCache`
+    are gone.
+- `includes.rs` drops its `current_dir()` fallback: a relative path's
+  `is_file()` already resolves against the process. `__FILE__` comes
+  from `Project::absolute_path`, the canonical path PHP defines it as,
+  instead of `std::path::absolute`.
+- **S7a (behaviour, only if output changes):** with nested composer
+  roots, a file inside a sub-project used to count for both roots in
+  composer hygiene and now counts only for its own. And the owner of a
+  file now considers root packages alongside installed ones. If the
+  final run shows a change from this, it lands as its own behaviour
+  commit.
 - The arch gate gains the part of §4.10's "no engine I/O" this step
-  makes true: no `std::env::current_dir` or `fs::canonicalize` outside
-  `project::session`, the binary and the LSP.
+  makes true: no `std::env::current_dir`, `fs::canonicalize` or
+  `std::path::absolute` in the package outside `project::session`, the
+  binary, the LSP and tests. xtask tests show the rule firing and its
+  exemptions.
 - File-existence checks (`includes.rs`'s `is_file()`) remain engine I/O.
   F1's VFS replaces them, because each lookup there also records a
   dependency for F2's result cache; building that ahead of F2 would be

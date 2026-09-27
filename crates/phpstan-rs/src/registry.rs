@@ -408,9 +408,6 @@ pub struct Registry {
     // written with no `(params): return` signature, at every position
     // the `missingType.iterableValue` family already checks.
     pub check_missing_callable_signature: bool,
-    // Each package directory and the package owning it (`composer::
-    // PackageContext::package_dirs`), set once before any file is checked.
-    pub package_dirs: Vec<(std::path::PathBuf, String)>,
     // Whether this project consumes real PHPStan as a dependency at all
     // (set once from `composer::PackageContext::requires_phpstan` before any
     // file is checked). Gates the main `MethodCall` arm's own

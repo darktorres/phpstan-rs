@@ -28,11 +28,6 @@ pub struct Autoload {
 }
 
 impl Autoload {
-    /// Whether `file` is under an `exclude-from-classmap` path.
-    pub fn excludes(&self, file: &Path) -> bool {
-        self.excluded.iter().any(|dir| path_starts_with(file, dir))
-    }
-
     fn read(section: Option<&Value>, root: &Path) -> Autoload {
         let Some(section) = section else {
             return Autoload::default();
@@ -72,19 +67,6 @@ impl Autoload {
             excluded,
         }
     }
-
-    /// Whether `file` lies under any of this section's roots.
-    pub fn covers(&self, file: &Path) -> bool {
-        if self.excludes(file) {
-            return false;
-        }
-        self.psr4
-            .iter()
-            .flat_map(|(_, dirs)| dirs)
-            .chain(&self.classmap)
-            .any(|dir| path_starts_with(file, dir))
-            || self.files.iter().any(|f| same_path(f, file))
-    }
 }
 
 /// An installed package from `installed.json`.
@@ -114,9 +96,14 @@ pub struct Repository {
     pub url: String,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ComposerManifest {
+    /// The root as analysed paths spell it; the manifest's own paths
+    /// (`path`, autoload directories, `vendor_dir`s) are spelled from it.
     pub root: PathBuf,
+    /// The same directory, canonical: what `absolute` resolves the
+    /// manifest's paths against.
+    pub absolute_root: PathBuf,
     pub path: PathBuf,
     pub name: Option<String>,
     pub require: Vec<Located<String>>,
@@ -138,13 +125,15 @@ pub struct ComposerManifest {
 impl ComposerManifest {
     /// Reads `root/composer.json` (and `root/vendor/composer/installed.json`
     /// when present); `None` without a readable, parseable composer.json.
-    pub fn load(root: &Path) -> Option<ComposerManifest> {
+    /// `absolute_root` is `root` canonicalized.
+    pub fn load(root: &Path, absolute_root: &Path) -> Option<ComposerManifest> {
         let path = root.join("composer.json");
         let text = std::fs::read_to_string(&path).ok()?;
         let json: Value = serde_json::from_str(&text).ok()?;
         let lines = LineFinder::new(&text);
         let mut manifest = ComposerManifest {
             root: root.to_path_buf(),
+            absolute_root: absolute_root.to_path_buf(),
             path,
             name: json.get("name").and_then(Value::as_str).map(str::to_string),
             ..ComposerManifest::default()
@@ -245,18 +234,41 @@ impl ComposerManifest {
             .any(|r| r.value.eq_ignore_ascii_case(package))
     }
 
-    /// The installed package whose directory contains `file`.
-    pub fn owning_package(&self, file: &Path) -> Option<&InstalledPackage> {
-        let canonical = std::fs::canonicalize(file).ok();
-        self.installed
+    /// `path`, one of this manifest's paths or an analysed path spelled
+    /// from the same root, as an absolute path: `root` swapped for
+    /// `absolute_root`, then `.` and `..` resolved lexically.
+    pub fn absolute(&self, path: &Path) -> PathBuf {
+        let joined = match path.strip_prefix(&self.root) {
+            Ok(rest) => self.absolute_root.join(rest),
+            Err(_) => self.absolute_root.join(path),
+        };
+        lexically_normalized(&joined)
+    }
+
+    /// Whether the absolute `file` is under one of `section`'s
+    /// `exclude-from-classmap` paths.
+    pub fn excludes(&self, section: &Autoload, file: &Path) -> bool {
+        section
+            .excluded
             .iter()
-            .filter(|p| {
-                path_starts_with(file, &p.vendor_dir)
-                    || canonical
-                        .as_deref()
-                        .is_some_and(|c| path_starts_with(c, &p.install_dir))
-            })
-            .max_by_key(|p| p.install_dir.components().count())
+            .any(|dir| path_starts_with(file, &self.absolute(dir)))
+    }
+
+    /// Whether the absolute `file` lies under any of `section`'s roots.
+    pub fn covers(&self, section: &Autoload, file: &Path) -> bool {
+        if self.excludes(section, file) {
+            return false;
+        }
+        section
+            .psr4
+            .iter()
+            .flat_map(|(_, dirs)| dirs)
+            .chain(&section.classmap)
+            .any(|dir| path_starts_with(file, &self.absolute(dir)))
+            || section
+                .files
+                .iter()
+                .any(|f| lexically_normalized(file) == self.absolute(f))
     }
 
     /// Installed packages that come from a `type: path` repository: local
@@ -269,7 +281,7 @@ impl ComposerManifest {
             .filter(|r| r.kind == "path")
             .map(|r| {
                 let fixed = r.url.split('*').next().unwrap_or(&r.url);
-                let joined = self.root.join(fixed.trim_end_matches('/'));
+                let joined = self.absolute_root.join(fixed.trim_end_matches('/'));
                 std::fs::canonicalize(&joined).unwrap_or(joined)
             })
             .collect();
@@ -347,37 +359,27 @@ fn read_installed(root: &Path) -> Vec<InstalledPackage> {
         .collect()
 }
 
-/// Component-wise prefix test that tolerates `./` and relative vs
-/// absolute spellings by comparing canonical forms when both exist.
-pub fn path_starts_with(path: &Path, prefix: &Path) -> bool {
-    if path.starts_with(prefix) {
-        return true;
-    }
-    let normalize = |p: &Path| -> PathBuf {
-        let absolute = if p.is_absolute() {
-            p.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map(|cwd| cwd.join(p))
-                .unwrap_or_else(|_| p.to_path_buf())
-        };
-        let mut out = PathBuf::new();
-        for component in absolute.components() {
-            match component {
-                std::path::Component::CurDir => {}
-                std::path::Component::ParentDir => {
-                    out.pop();
-                }
-                other => out.push(other),
+/// `path` with `.` components dropped and each `..` removing the
+/// component before it, without touching the filesystem.
+pub fn lexically_normalized(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
             }
+            other => out.push(other),
         }
-        out
-    };
-    normalize(path).starts_with(normalize(prefix))
+    }
+    out
 }
 
-fn same_path(a: &Path, b: &Path) -> bool {
-    path_starts_with(a, b) && path_starts_with(b, a)
+/// Component-wise prefix test of two paths spelled the same way (both
+/// absolute, or both relative to one directory), after resolving `.`
+/// and `..` lexically.
+pub fn path_starts_with(path: &Path, prefix: &Path) -> bool {
+    path.starts_with(prefix) || lexically_normalized(path).starts_with(lexically_normalized(prefix))
 }
 
 /// Finds the line a key is written on in the raw JSON text.
@@ -456,17 +458,19 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("packages/b/src/B.php"), "<?php").unwrap();
 
-        let manifest = ComposerManifest::load(&root).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+        let manifest = ComposerManifest::load(&root, &root).unwrap();
         let names: Vec<&str> = manifest
             .path_repository_packages()
             .iter()
             .map(|p| p.name.as_str())
             .collect();
         assert_eq!(names, vec!["acme/b"]);
-        let owner = manifest.owning_package(&root.join("vendor/acme/b/src/B.php"));
-        assert_eq!(owner.map(|p| p.name.as_str()), Some("acme/b"));
-        let owner = manifest.owning_package(&root.join("packages/b/src/B.php"));
-        assert_eq!(owner.map(|p| p.name.as_str()), Some("acme/b"));
+        let index = crate::PackageIndex::new(vec![manifest]);
+        for file in ["vendor/acme/b/src/B.php", "packages/b/src/B.php"] {
+            let owner = index.owner(&root.join(file)).unwrap();
+            assert_eq!(index.name(owner), Some("acme/b"), "{file}");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 }

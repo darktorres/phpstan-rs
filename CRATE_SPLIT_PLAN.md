@@ -784,7 +784,9 @@ Piwigo checkout and a stable machine, so they run locally.
       identifier literals and does no diagnostics-vector mutation;
     - no setting is read under reflection;
     - no `Locals` map outside the holder model;
-    - no engine I/O;
+    - no engine I/O (its path-resolution part enforced early by
+      GATE_SPEED_PLAN S7: no `current_dir`, `canonicalize` or
+      `path::absolute` outside the session, binary, LSP and tests);
     - no engine construction outside `project`;
     - the built-in function names the analyser may mention form an
       allowlist (scope-effect built-ins only: extract, compact,

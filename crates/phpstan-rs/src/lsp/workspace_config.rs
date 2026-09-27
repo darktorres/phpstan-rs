@@ -79,7 +79,10 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) sql_reflection_config: Option<sql::config::SqlReflectionConfig>,
     pub(crate) sql_reflection_schema: Option<sql::schema::SchemaCatalog>,
     pub(crate) phpstan_api_check_enabled: bool,
-    pub(crate) package_dirs: Vec<(PathBuf, String)>,
+    /// The workspace's composer packages, and the root canonicalized, which
+    /// analysed paths resolve against.
+    pub(crate) packages: composer::PackageIndex,
+    pub(crate) absolute_root: PathBuf,
     pub(crate) vendor_context: VendorContext,
     pub(crate) extra_context_dirs: Vec<PathBuf>,
     pub(crate) baseline: Option<crate::baseline::Baseline>,
@@ -186,16 +189,17 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
     });
 
     let no_composer = config.no_composer.unwrap_or(false);
+    let absolute_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let package = if no_composer {
         composer::PackageContext::default()
     } else {
-        composer::PackageContext::load(root, root)
+        composer::PackageContext::load(&absolute_root, root)
     };
     let phpstan_api_check_enabled = package.requires_phpstan();
     let php_versions = php_version
         .map(types::PhpVersions::exactly)
         .or_else(|| crate::project::session::declared_php_versions(&package));
-    let package_dirs = package.package_dirs();
+    let packages = composer::PackageIndex::new(package.manifest.into_iter().collect());
     let vendor_context = package.vendor;
 
     let analyze_paths: Vec<PathBuf> = config
@@ -308,7 +312,8 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         sql_reflection_config,
         sql_reflection_schema,
         phpstan_api_check_enabled,
-        package_dirs,
+        packages,
+        absolute_root,
         vendor_context,
         extra_context_dirs,
         baseline,

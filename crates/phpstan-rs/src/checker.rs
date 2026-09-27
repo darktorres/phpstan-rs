@@ -873,6 +873,9 @@ pub struct Checker<'a> {
     pub(crate) current_anonymous_class: Option<String>,
     // The file being checked, for resolving `include`/`require` paths.
     pub(crate) current_file: Option<std::path::PathBuf>,
+    // `current_file` as an absolute path (`Project::absolute_path`), what
+    // PHP's `__FILE__` holds.
+    pub(crate) current_file_absolute: Option<std::path::PathBuf>,
     // Paths the file tests with `file_exists()` and friends.
     pub(crate) include_guarded_paths: FxHashSet<String>,
     // `include_path` directories for the file being checked.
@@ -1301,6 +1304,7 @@ impl<'a> Checker<'a> {
             anonymous_class_names: FxHashMap::default(),
             current_anonymous_class: None,
             current_file: None,
+            current_file_absolute: None,
             include_guarded_paths: FxHashSet::default(),
             include_path_dirs: Vec::new(),
             working_dir: None,
@@ -1399,6 +1403,10 @@ impl<'a> Checker<'a> {
     /// See `current_file`.
     pub fn set_current_file(&mut self, path: &std::path::Path) {
         self.current_file = Some(path.to_path_buf());
+    }
+
+    pub(crate) fn set_current_file_absolute(&mut self, path: std::path::PathBuf) {
+        self.current_file_absolute = Some(path);
     }
 
     pub fn set_anonymous_class_names(&mut self, names: FxHashMap<syntax::token::Span, String>) {

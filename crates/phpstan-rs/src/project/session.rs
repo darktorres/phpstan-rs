@@ -75,11 +75,12 @@ pub struct Session {
     doctrine_custom_function_entries: Vec<doctrine_functions::DoctrineCustomFunctionEntry>,
     sql_reflection_config: Option<sql::config::SqlReflectionConfig>,
     sql_reflection_schema: Option<sql::schema::SchemaCatalog>,
-    composer_manifests: Vec<composer::manifest::ComposerManifest>,
+    /// Every composer root's manifest, and which directories each
+    /// package owns.
+    packages: composer::PackageIndex,
+    /// The root canonicalized, which analysed paths resolve against.
+    absolute_root: PathBuf,
     phpstan_api_check_enabled: bool,
-    /// Every composer root's package directories (`PackageContext::
-    /// package_dirs`), for which package owns an analysed file.
-    package_dirs: Vec<(PathBuf, String)>,
     /// Non-fatal problems found while resolving (e.g. SQL schema drift).
     pub warnings: Vec<String>,
 }
@@ -292,11 +293,11 @@ impl Session {
         let mut scan_files = Vec::new();
         let mut phpstan_api_check_enabled = false;
         let mut composer_manifests = Vec::new();
-        let mut package_dirs = Vec::new();
+        let absolute_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
         let mut composer_php_versions = None;
         let mut dirs = dirs;
         if !no_composer {
-            let canonical_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+            let canonical_root = absolute_root.clone();
             let mut promoted: Vec<PathBuf> = Vec::new();
             for composer_root in composer_roots(&dirs, &canonical_root) {
                 // The root itself keeps its own spelling (`.` for the CLI),
@@ -314,7 +315,6 @@ impl Session {
                 scan_dirs.extend(package.vendor.dirs.iter().cloned());
                 scan_files.extend(package.vendor.files.iter().cloned());
                 phpstan_api_check_enabled |= package.requires_phpstan();
-                package_dirs.extend(package.package_dirs());
                 if let Some(manifest) = package.manifest {
                     promoted.extend(
                         manifest
@@ -322,9 +322,7 @@ impl Session {
                             .into_iter()
                             .map(|p| p.vendor_dir.clone()),
                     );
-                    if config.check_composer_hygiene.unwrap_or(false) {
-                        composer_manifests.push(manifest);
-                    }
+                    composer_manifests.push(manifest);
                 }
             }
             if !promoted.is_empty() {
@@ -368,9 +366,9 @@ impl Session {
             doctrine_custom_function_entries,
             sql_reflection_config,
             sql_reflection_schema,
-            composer_manifests,
+            packages: composer::PackageIndex::new(composer_manifests),
+            absolute_root,
             phpstan_api_check_enabled,
-            package_dirs,
             warnings,
         })
     }
@@ -527,7 +525,8 @@ impl Session {
         project.set_sql_reflection_schema(self.sql_reflection_schema.clone());
         project.set_php_versions(self.php_versions);
         project.set_phpstan_api_check_enabled(self.phpstan_api_check_enabled);
-        project.set_package_dirs(self.package_dirs.clone());
+        project.set_absolute_root(self.absolute_root.clone());
+        project.set_packages(self.packages.clone());
     }
 
     /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`
@@ -766,8 +765,10 @@ impl Session {
             &self.config.banned_types.clone().unwrap_or_default(),
         ));
         extend(project.check_architecture(&self.architecture_rules));
-        for manifest in &self.composer_manifests {
-            extend(project.check_composer_hygiene(manifest));
+        if Self::flag(self.config.check_composer_hygiene) {
+            for root in 0..self.packages.manifests().len() {
+                extend(project.check_composer_hygiene(root));
+            }
         }
 
         for diagnostics in results.values_mut() {

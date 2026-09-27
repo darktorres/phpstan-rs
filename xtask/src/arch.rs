@@ -5,6 +5,10 @@
 //!   expression outside the `diagnostics` crate.
 //! - No `"$$`-prefixed type-string sentinel.
 //! - Every library crate denies the print macros in its non-test code.
+//! - The engine resolves no path against the process: no
+//!   `std::env::current_dir`, `fs::canonicalize` or `std::path::absolute`
+//!   in the package outside the session, the binary and the language
+//!   server (which set the project's absolute root) and tests.
 
 use std::path::{Path, PathBuf};
 
@@ -36,6 +40,7 @@ pub(crate) fn arch(root: &Path) -> Result<(), String> {
         let ast = syn::parse_file(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut finder = Finder {
             in_diagnostics: path.starts_with(root.join("crates/diagnostics")),
+            in_engine: is_engine_source(root, path),
             found: Vec::new(),
         };
         finder.visit_file(&ast);
@@ -64,10 +69,28 @@ pub(crate) fn arch(root: &Path) -> Result<(), String> {
     }
 }
 
-struct Finder {
-    in_diagnostics: bool,
-    found: Vec<(usize, &'static str)>,
+/// Whether `path` is package source the path-resolution rule covers:
+/// not the session, the binary, the language server or a test.
+pub(crate) fn is_engine_source(root: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(root.join("crates/phpstan-rs/src")) else {
+        return false;
+    };
+    let rel = rel.to_string_lossy();
+    let exempt = ["project/session.rs", "main.rs", "main/", "lsp.rs", "lsp/"];
+    !exempt.iter().any(|e| rel.starts_with(e))
+        && !rel
+            .split('/')
+            .any(|part| part == "tests" || part == "tests.rs")
 }
+
+pub(crate) struct Finder {
+    pub(crate) in_diagnostics: bool,
+    pub(crate) in_engine: bool,
+    pub(crate) found: Vec<(usize, &'static str)>,
+}
+
+const PATH_RESOLUTION: &str =
+    "path resolved against the process (current_dir/canonicalize/absolute) in the engine";
 
 impl<'ast> Visit<'ast> for Finder {
     fn visit_expr_struct(&mut self, e: &'ast syn::ExprStruct) {
@@ -83,6 +106,32 @@ impl<'ast> Visit<'ast> for Finder {
             ));
         }
         syn::visit::visit_expr_struct(self, e);
+    }
+
+    fn visit_expr_path(&mut self, e: &'ast syn::ExprPath) {
+        let segments: Vec<String> = e
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect();
+        let tail: Vec<&str> = segments.iter().rev().take(2).map(String::as_str).collect();
+        if self.in_engine
+            && matches!(
+                tail.as_slice(),
+                ["current_dir", "env"] | ["canonicalize", "fs"] | ["absolute", "path"]
+            )
+        {
+            self.found.push((e.span().start().line, PATH_RESOLUTION));
+        }
+        syn::visit::visit_expr_path(self, e);
+    }
+
+    fn visit_expr_method_call(&mut self, e: &'ast syn::ExprMethodCall) {
+        if self.in_engine && e.method == "canonicalize" {
+            self.found.push((e.span().start().line, PATH_RESOLUTION));
+        }
+        syn::visit::visit_expr_method_call(self, e);
     }
 
     fn visit_lit_str(&mut self, lit: &'ast syn::LitStr) {

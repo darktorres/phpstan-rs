@@ -65,7 +65,6 @@
 //! surface - without that nuance would be pure noise.
 
 use rustc_hash::FxHashMap;
-use std::path::Path;
 
 use crate::checker::Checker;
 use crate::registry::{FunctionSig, Registry, is_phpstan_namespace};
@@ -85,17 +84,17 @@ use syntax::visit::{child_exprs, child_stmts};
 /// itself.
 type ParamTypes = FxHashMap<String, String>;
 
-/// `file_path` is `None` in every existing test (`Walker::
-/// tests`'s own `diagnostics_for` has no real file on disk to point at) -
-/// only `PhpStanNamespaceIn3rdPartyPackageRule` needs it at all (it's the
-/// only one of these rules that cares which real package a file belongs
-/// to), and simply never fires without one, the same "no signal, stay
-/// quiet" leniency every other unresolvable case in this module already
-/// gets.
+/// `file_package` is the checked file's composer package name: `None`
+/// when there's no file (`Walker::tests`' own `diagnostics_for`), and
+/// `Some(None)` for a file no named package owns. Only
+/// `PhpStanNamespaceIn3rdPartyPackageRule` reads it (it's the only one of
+/// these rules that cares which package a file belongs to), and it never
+/// fires without a file, the same "no signal, stay quiet" leniency every
+/// other unresolvable case in this module already gets.
 pub(crate) fn check_phpstan_api_usage(
     program: &[Stmt],
     registry: &Registry,
-    file_path: Option<&Path>,
+    file_package: Option<Option<&str>>,
 ) -> Vec<Diagnostic> {
     // Same "last `namespace` seen wins, brace-delimited multi-namespace
     // files are rare enough not to bother" simplification
@@ -108,7 +107,7 @@ pub(crate) fn check_phpstan_api_usage(
         current_prop_types: ParamTypes::default(),
         current_class_implements_phpstan_interface: false,
         current_class_fqn: None,
-        file_path,
+        file_package,
     };
     let empty = ParamTypes::default();
     for stmt in program {
@@ -587,11 +586,10 @@ struct Walker<'a> {
     // doc comment), and this standalone `Walker` has no other "current
     // class" state of its own the way the main `Checker` does.
     current_class_fqn: Option<String>,
-    // `PhpStanNamespaceIn3rdPartyPackageRule`'s own real file
-    // path on disk, used only to find the nearest `composer.json` upward
-    // from it. `None` in every test (no real file on disk to point at) -
-    // that one rule just never fires without it.
-    file_path: Option<&'a Path>,
+    // The checked file's composer package name, for
+    // `PhpStanNamespaceIn3rdPartyPackageRule` - see
+    // `check_phpstan_api_usage`.
+    file_package: Option<Option<&'a str>>,
 }
 
 impl<'a> Walker<'a> {
@@ -984,12 +982,10 @@ impl<'a> Walker<'a> {
         if !is_phpstan_namespace(ns) {
             return;
         }
-        let Some(file) = self.file_path else {
+        let Some(package) = self.file_package else {
             return;
         };
-        if composer::owning_package(&self.registry.package_dirs, file)
-            .is_some_and(|name| name.starts_with("phpstan/"))
-        {
+        if package.is_some_and(|name| name.starts_with("phpstan/")) {
             return;
         }
         self.diagnostics.push(

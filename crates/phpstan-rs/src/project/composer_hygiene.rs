@@ -26,6 +26,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::php_stubs;
+use composer::PackageOwner;
 use composer::constraint;
 use composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use syntax::ast::*;
@@ -256,66 +257,13 @@ fn psr4_expected_path(dir: &Path, prefix: &str, fqn: &str) -> PathBuf {
     path
 }
 
-/// `path` resolved against `base` (the project's working directory) when
-/// it's relative, so it compares with the manifest's paths no matter what
-/// directory the process runs in.
-fn resolved(base: Option<&Path>, path: &Path) -> PathBuf {
-    let joined = match base {
-        Some(base) if path.is_relative() => base.join(path),
-        _ => path.to_path_buf(),
-    };
-    std::path::absolute(&joined).unwrap_or(joined)
-}
-
-fn normalized(path: &Path) -> String {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(path))
-            .unwrap_or_else(|_| path.to_path_buf())
-    };
-    let mut out = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other),
-        }
-    }
-    out.to_string_lossy().into_owned()
-}
-
-/// `ComposerManifest::owning_package`, memoized per file.
-struct OwnerCache<'m> {
-    manifest: &'m ComposerManifest,
-    base: Option<&'m Path>,
-    cache: FxHashMap<PathBuf, Option<usize>>,
-}
-
-impl<'m> OwnerCache<'m> {
-    fn owner(&mut self, path: &Path) -> Option<&'m InstalledPackage> {
-        let manifest = self.manifest;
-        let path = resolved(self.base, path);
-        let index = *self.cache.entry(path.clone()).or_insert_with(|| {
-            manifest
-                .owning_package(&path)
-                .and_then(|p| manifest.installed.iter().position(|q| std::ptr::eq(p, q)))
-        });
-        index.map(|i| &manifest.installed[i])
-    }
-}
-
 impl Project {
-    /// Every composer-hygiene diagnostic for the analysed files against
-    /// `manifest`, keyed by the file each belongs to (`composer.json`
-    /// itself for the manifest-level ones).
-    pub fn check_composer_hygiene(
-        &self,
-        manifest: &ComposerManifest,
-    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    /// Every composer-hygiene diagnostic for the analysed files of the
+    /// composer root `root` (an index into `packages().manifests()`),
+    /// keyed by the file each belongs to (`composer.json` itself for the
+    /// manifest-level ones).
+    pub fn check_composer_hygiene(&self, root: usize) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let manifest = &self.packages.manifests()[root];
         let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let classes_by_lower: FxHashMap<String, (&str, &Path, Span)> = self
             .decl_locations
@@ -334,11 +282,15 @@ impl Project {
             .iter()
             .map(|(name, (path, _))| (name.to_ascii_lowercase(), (name.as_str(), path.as_path())))
             .collect();
-        let base = self.working_dir.as_deref();
-        let mut owners = OwnerCache {
-            manifest,
-            base,
-            cache: FxHashMap::default(),
+        // The package installed under this root that `path`, a loaded
+        // file, belongs to.
+        let installed_owner = |path: &Path| -> Option<&InstalledPackage> {
+            match self.files.get(path)?.owner? {
+                owner @ PackageOwner::Installed(i, _) if i == root => {
+                    self.packages.installed(owner)
+                }
+                _ => None,
+            }
         };
 
         let mut used_packages: FxHashSet<String> = FxHashSet::default();
@@ -347,14 +299,11 @@ impl Project {
             self.files.iter().filter(|(_, f)| f.analyzed).collect();
         analyzed.sort_by(|a, b| a.0.cmp(b.0));
 
-        let belongs_to_root = |path: &Path| {
-            let path = resolved(base, path);
-            path_starts_with(&path, &manifest.root) && manifest.owning_package(&path).is_none()
-        };
-        analyzed.retain(|(path, _)| belongs_to_root(path));
+        analyzed.retain(|(_, file)| file.owner == Some(PackageOwner::Root(root)));
         for (path, file) in &analyzed {
-            let production = manifest.autoload.covers(&resolved(base, path));
-            let dev_only = !production && manifest.autoload_dev.covers(&resolved(base, path));
+            let absolute = self.absolute_path(path);
+            let production = manifest.covers(&manifest.autoload, &absolute);
+            let dev_only = !production && manifest.covers(&manifest.autoload_dev, &absolute);
             let used_before: FxHashSet<String> = used_packages.clone();
             let mut facts = FileFacts::default();
             collect_facts_in_stmts(&file.ast, &mut facts);
@@ -365,7 +314,7 @@ impl Project {
                 if trimmed.contains('\\')
                     && let Some((_, declared_in, _)) =
                         classes_by_lower.get(&trimmed.to_ascii_lowercase())
-                    && let Some(package) = owners.owner(declared_in)
+                    && let Some(package) = installed_owner(declared_in)
                 {
                     used_packages.insert(package.name.to_ascii_lowercase());
                 }
@@ -414,7 +363,7 @@ impl Project {
                 };
 
                 if let Some(stub_dir) = builtin_extension {
-                    let polyfill = declared_in.and_then(|d| owners.owner(d));
+                    let polyfill = declared_in.and_then(&installed_owner);
                     if let Some(package) = polyfill {
                         used_packages.insert(package.name.to_ascii_lowercase());
                     }
@@ -454,8 +403,8 @@ impl Project {
                 if self.files.get(declared_in).is_some_and(|f| f.analyzed) {
                     if production
                         && kind == "Class"
-                        && manifest.autoload_dev.covers(&resolved(base, declared_in))
-                        && !manifest.autoload.covers(&resolved(base, declared_in))
+                        && manifest.covers(&manifest.autoload_dev, &self.absolute_path(declared_in))
+                        && !manifest.covers(&manifest.autoload, &self.absolute_path(declared_in))
                         && reported_dev_symbols.insert(display.clone())
                     {
                         diagnostics.push(diagnostic(
@@ -468,7 +417,7 @@ impl Project {
                     }
                     continue;
                 }
-                let Some(package) = owners.owner(declared_in) else {
+                let Some(package) = installed_owner(declared_in) else {
                     continue;
                 };
                 let package_name = package.name.clone();
@@ -592,19 +541,21 @@ impl Project {
         // Compared against the manifest's paths resolved; reported as the
         // file's own spelling.
         let shown = path;
-        let path = resolved(self.working_dir.as_deref(), path);
+        let path = self.absolute_path(path);
         let path = path.as_path();
         let sections = [&manifest.autoload, &manifest.autoload_dev];
-        if sections.iter().any(|s| s.excludes(path)) {
+        if sections.iter().any(|s| manifest.excludes(s, path)) {
             return;
         }
         if sections.iter().any(|s| {
-            s.classmap.iter().any(|dir| path_starts_with(path, dir))
-                || s.files.iter().any(|f| path_starts_with(path, f))
+            s.classmap
+                .iter()
+                .chain(&s.files)
+                .any(|dir| path_starts_with(path, &manifest.absolute(dir)))
         }) {
             return;
         }
-        let actual = normalized(path);
+        let actual = path.to_string_lossy();
         for (fqn, span) in declared {
             let candidates: Vec<(&String, &PathBuf)> = sections
                 .iter()
@@ -616,10 +567,14 @@ impl Project {
             let Some(longest) = longest else {
                 // No prefix covers the class; flag it only when the file
                 // sits inside a PSR-4 root, where it can't be autoloaded.
-                if let Some((prefix, _)) = sections
-                    .iter()
-                    .flat_map(|s| s.psr4.iter())
-                    .find(|(_, dirs)| dirs.iter().any(|d| path_starts_with(path, d)))
+                if let Some((prefix, _)) =
+                    sections
+                        .iter()
+                        .flat_map(|s| s.psr4.iter())
+                        .find(|(_, dirs)| {
+                            dirs.iter()
+                                .any(|d| path_starts_with(path, &manifest.absolute(d)))
+                        })
                 {
                     diagnostics.push(diagnostic(
                         format!(
@@ -636,14 +591,19 @@ impl Project {
                 .filter(|(p, _)| p.len() == longest)
                 .map(|(p, dir)| (p, psr4_expected_path(dir, p, &fqn)))
                 .collect();
-            if expected.iter().any(|(_, e)| normalized(e) == actual) {
+            if expected
+                .iter()
+                .any(|(_, e)| manifest.absolute(e).to_string_lossy() == actual)
+            {
                 continue;
             }
             let (prefix, first) = &expected[0];
-            if let Some((_, case_variant)) = expected
-                .iter()
-                .find(|(_, e)| normalized(e).eq_ignore_ascii_case(&actual))
-            {
+            if let Some((_, case_variant)) = expected.iter().find(|(_, e)| {
+                manifest
+                    .absolute(e)
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&actual)
+            }) {
                 diagnostics.push(diagnostic(
                     format!(
                         "Class {fqn} is declared in {}, whose letter case differs from {} that PSR-4 prefix {prefix} maps it to; a case-sensitive filesystem won't find it.",

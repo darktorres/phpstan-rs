@@ -66,6 +66,8 @@ struct FileState {
     // per-file so `Project::is_analyzed`/`analyzed_paths` can answer
     // without threading extra state through every caller.
     analyzed: bool,
+    // The composer package this file belongs to (`Project::packages`).
+    owner: Option<composer::PackageOwner>,
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one
@@ -104,6 +106,12 @@ pub struct Project {
     // resolves them against the working directory. `None` means the
     // process's own working directory.
     working_dir: Option<PathBuf>,
+    // `working_dir` canonicalized (`set_absolute_root`), which
+    // `absolute_path` resolves analysed paths against.
+    absolute_root: Option<PathBuf>,
+    // The composer packages and which directories they own
+    // (`set_packages`); each file's owner is kept in its `FileState`.
+    packages: composer::PackageIndex,
     // Gates `checker::phpstan_api::check_phpstan_api_usage` - set once
     // via `set_phpstan_api_check_enabled` rather than re-detected here on
     // every load/check, since `Project` itself has no fixed notion of
@@ -244,6 +252,8 @@ impl Project {
             sql: sql::context::SqlContext::default(),
             pest_config: PestConfig::default(),
             working_dir: None,
+            absolute_root: None,
+            packages: composer::PackageIndex::default(),
             phpstan_api_check_enabled: false,
             defer_inline_ignores: false,
             retain_source: false,
@@ -850,10 +860,47 @@ impl Project {
         self.registry.php_versions = php_versions;
     }
 
-    /// Which package owns each directory (`composer::PackageContext::
-    /// package_dirs`), read by the checker through the registry.
-    pub fn set_package_dirs(&mut self, package_dirs: Vec<(PathBuf, String)>) {
-        self.registry.package_dirs = package_dirs;
+    /// The working directory canonicalized, which analysed paths spelled
+    /// from the working directory resolve against (`absolute_path`).
+    pub fn set_absolute_root(&mut self, absolute_root: PathBuf) {
+        self.absolute_root = Some(absolute_root);
+    }
+
+    /// The project's composer packages. Recomputes each loaded file's
+    /// owner, so the absolute root must be set first.
+    pub fn set_packages(&mut self, packages: composer::PackageIndex) {
+        self.packages = packages;
+        let owners: Vec<(PathBuf, Option<composer::PackageOwner>)> = self
+            .files
+            .keys()
+            .map(|path| (path.clone(), self.packages.owner(&self.absolute_path(path))))
+            .collect();
+        for (path, owner) in owners {
+            if let Some(file) = self.files.get_mut(&path) {
+                file.owner = owner;
+            }
+        }
+    }
+
+    /// `path`, spelled from the working directory, as an absolute path:
+    /// the working directory swapped for `absolute_root`, then `.` and
+    /// `..` resolved lexically. Without an absolute root, only the latter.
+    pub(crate) fn absolute_path(&self, path: &Path) -> PathBuf {
+        let joined = match (&self.absolute_root, &self.working_dir) {
+            (Some(absolute_root), Some(working_dir)) => match path.strip_prefix(working_dir) {
+                Ok(rest) => absolute_root.join(rest),
+                Err(_) => absolute_root.join(path),
+            },
+            (Some(absolute_root), None) => absolute_root.join(path),
+            (None, _) => path.to_path_buf(),
+        };
+        composer::manifest::lexically_normalized(&joined)
+    }
+
+    /// The name of the composer package `path` belongs to.
+    pub(crate) fn package_name(&self, path: &Path) -> Option<&str> {
+        let owner = self.files.get(path)?.owner?;
+        self.packages.name(owner)
     }
 
     /// Opts every subsequent `check_file`/`check_all` call into
@@ -1000,6 +1047,7 @@ impl Project {
         self.duplicate_fn_sites.merge(duplicate_fn_sites);
         self.duplicate_class_sites.merge(duplicate_class_sites);
         register_references(&mut self.dependents, &path, &references);
+        let owner = self.packages.owner(&self.absolute_path(&path));
         self.files.insert(
             path,
             FileState {
@@ -1011,6 +1059,7 @@ impl Project {
                 anonymous_class_names,
                 source: self.retain_source.then_some(source),
                 analyzed,
+                owner,
             },
         );
     }
@@ -1354,6 +1403,7 @@ impl Project {
                 anonymous_class_names,
                 source: self.retain_source.then(|| new_source.to_string()),
                 analyzed,
+                owner: self.packages.owner(&self.absolute_path(path)),
             },
         );
         self.rebuild_pest_config();
@@ -1614,6 +1664,7 @@ impl Project {
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
         checker.set_current_file(path);
+        checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_working_dir(self.working_dir.clone());
         Some((checker, &file.ast))
     }
@@ -1655,6 +1706,7 @@ impl Project {
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
         checker.set_current_file(path);
+        checker.set_current_file_absolute(self.absolute_path(path));
         checker.set_working_dir(self.working_dir.clone());
         if let Some(facts) = cross_file_property_assign_facts {
             checker.set_cross_file_property_assign_facts(Arc::clone(facts));
@@ -1704,7 +1756,7 @@ impl Project {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
                 &file.ast,
                 &self.registry,
-                Some(path),
+                Some(self.package_name(path)),
             ));
             // `into_diagnostics` above already sorted the checker's own
             // diagnostics into span order - re-sort once more now that
