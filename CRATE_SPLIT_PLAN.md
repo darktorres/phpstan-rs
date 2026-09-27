@@ -2046,14 +2046,15 @@ level-10 implicit-`mixed` checks (§1's level row), which turned 2,519
 `offsetAccess.nonOffsetAccessible` into apparent misses. Both sides are
 filtered to the engine identifiers. Files that raise internal errors
 (missing optional classes, php-standard-library function redeclaration)
-are excluded, which leaves 941 files. At `76e738b4` phpstan-rs has 1,652
-findings PHPStan doesn't, 1,009 of them `offsetAccess.nonOffsetAccessible`
-(970 on `mixed`), and misses 2,010, among them 735
-`offsetAccess.nonOffsetAccessible`, 282 `foreach.nonIterable`, 263
-`offsetAccess.notFound` and 243 `function.alreadyNarrowedType` (188 of
-those are `assert()` of `true`, which phpstan-rs reports as
-`assert.alreadyNarrowedType`). The counts that cite snapshot 0a8fe69 below
-come from the earlier run with the level unset. Each phase reruns the
+are excluded, which leaves 941 files. At `76e738b4` phpstan-rs has 1,628
+findings PHPStan doesn't, 1,060 of them `offsetAccess.nonOffsetAccessible`
+(1,013 on `mixed`), and misses 2,033, among them 735
+`offsetAccess.nonOffsetAccessible`, 281 `foreach.nonIterable`, 263
+`offsetAccess.notFound`, 244 `function.alreadyNarrowedType` (188 of those
+are `assert()` of `true`, which phpstan-rs reports as
+`assert.alreadyNarrowedType`), 115 `booleanAnd.alwaysFalse` and 63
+`deadCode.unreachable`. The counts that cite snapshot 0a8fe69 below come
+from the earlier run with the level and the PHP version unpinned. Each phase reruns the
 comparison, and every phpstan-rs-only finding it names is a fixture.
 
 The second oracle is PHPStan's own inference suite,
@@ -2588,7 +2589,11 @@ building on the previous one:
       `HasOffsetValue` for a constant key and becomes offset-accessible
       when it wasn't known to be an array. After
       `if (is_int($a['k']))`, `$a` is still `array<string, mixed>` today,
-      and a `mixed` container stays `mixed`.
+      and a `mixed` container stays `mixed`: after
+      `isset($tokens[$i]['open'])`, `$tokens[$i]` is `mixed`, and reading
+      `$tokens[$i]['open']` is a level-10 `offsetAccess.nonOffsetAccessible`
+      PHPStan doesn't report. The bundled `php_codesniffer` alone has 368 of
+      them at `76e738b4` (18 of 20 sampled follow such an `isset()`).
     - `unset($arr['a'])` removes the key from the shape; today the shape
       keeps `a: int`, and `$arr['a']` afterwards isn't reported.
     - Volatile expressions, dropped after an impure call, `new`, `eval` or
