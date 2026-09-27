@@ -38,9 +38,14 @@ Artifacts:
   rebuilt (its targets asserted), and the test-name manifest.
 
 `all-on` is the scoped configuration with every opt-in check enabled
-through `--set` (`xtask`'s `ALL_ON_SETS`). The corpus runs use
-the `gate` profile (`target/gate/phpstan-rs`); the performance gate
-measures `release`.
+through `--set` (`xtask`'s `ALL_ON_SETS`). `cargo xtask corpus` records
+each configuration through `gate-runner` (`tools/gate-runner`, built in
+the `gate` profile): one analysis, finalized into the report, the
+emission-order view, the baseline run and the type dump, through the
+same library calls `check-project` makes. The determinism check runs the
+shipped `target/gate/phpstan-rs` with `--emission-order` against the
+runner's emission-order view. `compare` diffs the snapshots as recorded,
+in output order, never sorted. The performance gate measures `release`.
 
 A commit that intentionally changes an artifact adds
 `gates/approved/<slug>/<artifact>.diff` holding exactly the `diff -u`
@@ -48,38 +53,12 @@ A commit that intentionally changes an artifact adds
 renames tests adds `gates/test-renames/<slug>.txt` (`old -> new` or
 `old -> REMOVED: reason`).
 
-## Layout
+## Older runs
 
-    .corpus-runs/scoped/<commit-hash>.txt    - phpstan-rs.toml-scoped run
-    .corpus-runs/unscoped/<commit-hash>.txt  - --no-composer unscoped run
-
-`<commit-hash>` is the short hash of the phpstan-rs commit the binary was
-built from when the run was taken (`git rev-parse --short HEAD`). Piwigo's
-own checkout (`/home/torres/piwigo17-frozen`) is treated as fixed/frozen,
-so it isn't part of the key.
-
-## Producing a run
-
-    cargo build --release --bin phpstan-rs
-    HASH=$(git rev-parse --short HEAD)
-    cd /home/torres/piwigo17-frozen
-    /home/torres/projects/phpstan-rs/target/release/phpstan-rs check-project \
-        --config phpstan-rs.toml 2>&1 | LC_ALL=C sort \
-        > /home/torres/projects/phpstan-rs/.corpus-runs/scoped/$HASH.txt
-    /home/torres/projects/phpstan-rs/target/release/phpstan-rs check-project \
-        --no-composer . 2>&1 | LC_ALL=C sort \
-        > /home/torres/projects/phpstan-rs/.corpus-runs/unscoped/$HASH.txt
-
-Only save a run for a real commit (working-tree/uncommitted state has no
-stable key to file it under - re-run once committed instead).
-
-## Diffing
-
-Before rebuilding an old commit to get a comparison snapshot, check here
-first - `ls .corpus-runs/scoped/` - the commit you want may already have
-one. Only fall back to a worktree rebuild when it's genuinely missing.
-
-    diff .corpus-runs/scoped/<old-hash>.txt .corpus-runs/scoped/<new-hash>.txt
+`.corpus-runs/scoped/<short-hash>.txt` and `unscoped/<short-hash>.txt`
+hold runs recorded by hand before the gates existed, each `check-project`
+output sorted with `LC_ALL=C sort`; the snapshots below name them. New
+runs go through `cargo xtask corpus`.
 
 ## Known snapshots (as of 2026-09-11)
 

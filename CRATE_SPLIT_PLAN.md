@@ -950,8 +950,6 @@ Follow-ups:
   no-default-features tests, so the docs, machete and deny steps never ran,
   and 162 commits since are unpushed. Every step passes locally; a passing
   run is recorded.
-- **`.corpus-runs/README.md`** loses the manual sorted-run section (the gate
-  compares unsorted) and names `gate-runner` as what records the snapshots.
 - **The rest of A2's conversion.** `checker/tests/key_value_of.rs`'s three
   `assertType` tests become fixtures.
 
