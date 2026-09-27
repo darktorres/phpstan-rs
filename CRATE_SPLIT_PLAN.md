@@ -1518,7 +1518,15 @@ commit's, failing on any step not lower.
   whether the index build keeps `rayon` is decided here, and Appendix E
   follows;
 - provenance queries: `built_in_stub_classes` and `stub_provided_functions`
-  become queries against the index (the other two sets went to C4);
+  become queries against the index (the other two sets went to C4). Two
+  questions are answered by these today and each consumer names its own:
+  "a stub declares it and no analysed code redeclares it"
+  (`is_builtin_function`/`is_builtin_class`, read by the restricted-usage
+  `is_builtin` flags in `expr.rs` and `oop/attributes.rs`, and
+  `checker/resolve.rs:507`), and "an extension in the stub corpus declares
+  it" (`builtin_function_extension`/`builtin_class_extension`, read by
+  composer hygiene and the architecture rules' `is_standard_class`). A
+  polyfill clears the first but not the second;
 - the enumeration APIs. Each whole-registry iteration would force every
   lazy stub class, so each moves onto a scoped query:
   `native_type_hints.rs`'s two scans (every class, `is_subclass_of`, per
@@ -1559,7 +1567,20 @@ which C7 deletes:
   files (the `bleedingEdge` variants decided and recorded), the index and
   its regeneration test cover them, and a `SignatureMapParser` port reads
   them. It replaces `patch_functionmap_array_shapes`;
-- user `stub_paths` PHPStan semantics (approved delta);
+- user `stub_paths` PHPStan semantics (approved delta). Today's behaviour,
+  reproduced, which the delta replaces:
+  - a `.stub` file given to `--stub-path`/`stub_paths` is not loaded at all
+    (only `.php` is collected), with no warning - PHPStan's own convention
+    is `.stub`;
+  - a stub's PHPDoc merges with the real declaration by `merge`'s union
+    instead of overriding it: a stub `@return list<string>` over a real
+    `@return array` leaves `array`;
+  - a stub redeclaring a built-in function (`php_uname(): non-empty-string`)
+    changes nothing - the built-in stub signature stays.
+
+  PHPStan's semantics: a stub's PHPDoc replaces the declaration's, the
+  native signature stays the real one, members the stub omits are kept,
+  and a stub declares a symbol only when nothing else does;
 - `StubFilesExtension`;
 - assertion tables compiled to overlays (`apply_assertion_table` deleted).
   The Mockery and Nette Tester defaults move to their ext modules, and
