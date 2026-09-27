@@ -1163,7 +1163,12 @@ Follow-ups:
   `ArrayObject<int, T>`, `callable(): T` and `array{x: T}` infer nothing;
   `@param T ...$v` binds only the first argument, so `collect('a', 'b',
   'c')` returning `T` is `'a'`, a wrong value, where PHPStan has
-  `'a'|'b'|'c'`: nsrt `bug-2572.php`, `bug-7704.php`).
+  `'a'|'b'|'c'`: nsrt `bug-2572.php`, `bug-7704.php`). An inferred
+  template type is generalized as `generalizeInferredTemplateType` does:
+  a literal becomes its general type unless the template is covariant or
+  its bound is scalar. Today `new Box(1)` is `Box<1>`, so `$b->set(2)` on
+  `@param T $v` is reported `argument.type` (nsrt `generics.php`,
+  `nested-generic-incomplete-constructor.php`).
 - **Late types.** `new<T>` and `template-type<...>` get variants (PHPStan's
   `NewObjectType` and `GetTemplateTypeType`); `int-mask<>`/`int-mask-of<>`
   resolve in C7's resolver instead of reading as `int`; `key-of<C::ARR>`
@@ -2203,8 +2208,10 @@ deleted; the file-size gate.
       final gives its value where a subclass may override it: `static::X`
       for `const X = 1` is `1` where PHPStan has `mixed`, and for
       `/** @var string */ const T = 'bar'` is `'bar'` where it has
-      `string`; `self::T` is `'foo'`, the value, and it is `string` today
-      (`ClassConstFetchHandler`; nsrt `class-constant-types.php`);
+      `string`; `self::T` is `'foo'`, the value, and it is `string` today.
+      A native-typed `const int X = 1` gives `int` through `static::`
+      (`ClassConstFetchHandler`; nsrt `class-constant-types.php`,
+      `class-constant-native-type.php`);
     - narrowing to a value the type excludes gives the value instead of
       `never`: after a `match ($i) { 0 => … }` caught in a `try` on
       `1|2|3|4`, `$i` is `0|1|2|3|4` (nsrt `match-expr.php:19`), and
@@ -2229,6 +2236,8 @@ deleted; the file-size gate.
       `%` on ranges follows PHP's sign rule: `int<0, 30> % -9` and
       `int<-30, 30> % -9` are `never` today where PHPStan has `int<0, 8>` and
       `int<-8, 8>`, and a range divisor gives `int` (nsrt `bug-15242.php`).
+      A shift covers every operand: `int<1, 3> << 63` is
+      `-9223372036854775808` today, missing the `0` that `2 << 63` gives.
     - **Increments** follow PHP: `$k = 'a'; $k++` leaves `'a'` today, and
       `$n = null; $n++` leaves `int` where PHP gives `1`. The value of a
       pre-increment is the new value: `$one = 1; ++$one` is `1` today, and
@@ -2613,7 +2622,11 @@ building on the previous one:
       the subject with that case excluded: after `case 1: return;`, `$k`
       is `int` today;
     - `default` excludes the handled cases;
-    - `continue` inside a switch acts like `break`.
+    - `continue` inside a switch acts like `break`;
+    - a `break` nested in a case's `if` leaves the switch with that scope:
+      in `case 1: if ($c) { $v = true; break; } default: $v = false;`, `$v`
+      is `false` after the switch today and `if ($v)` is reported
+      `if.alwaysFalse` (nsrt `if.php`).
   - **Match** follows `MatchHandler`: the subject is always remembered, each
     arm's body scope is merged into the scope after the match, and a
     non-exhaustive match adds an `UnhandledMatchError` throw point. A
@@ -2728,6 +2741,9 @@ building on the previous one:
   - `array_combine([true, 'red', 'yellow'], …)` has the keys `0`, `1`, `2`,
     where PHP gives `1`, `'red'`, `'yellow'`;
   - `array_intersect_key($a, [])` is `$a` instead of `array{}`;
+  - `array_flip` of an unsealed shape ignores the tail: on
+    `array{0: 1, 1: 2, 2: 3, ...<int, bool>}`, `array_flip($u)[1]` is `0`
+    where the tail's `true` values map to key `1` (nsrt `array-flip.php`);
   - `array_key_last`, `array_pop` and `array_shift` on a possibly empty
     array omit `null`: on `$c ? ['one', 'two'] : []` they give `0|1` and
     `'one'|'two'` (nsrt `bug-14081.php`, `array-pop.php`, `array-shift.php`);
