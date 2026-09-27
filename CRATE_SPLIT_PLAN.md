@@ -2658,6 +2658,13 @@ building on the previous one:
       (e.g. `rector/rules/Arguments/Rector/ClassMethod/ArgumentAdderRector.php:120`),
       none of which the oracle reports. Fixed first: before D5, a call on
       `$this` not known to be pure drops the `$this->…` narrowing entries.
+      With invalidation in place, the constant-comparison rules' property
+      guards that compensate for it are deleted: `expr_reads_a_property`
+      (the loose and numeric comparisons in `probe_checks.rs`) and
+      `expr_reads_a_mutable_property` (`===`). Today even a readonly
+      promoted `positive-int` isn't checked: `$this->maxAttempts < 1` in
+      the constructor isn't `smaller.alwaysFalse`
+      (`amphp/socket/src/RetrySocketConnector.php:24`, `:28`).
     - A closure's property writes invalidate the outer scope where it is
       called immediately (`InvalidateExprNode`): after
       `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
