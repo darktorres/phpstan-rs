@@ -8,6 +8,9 @@
 //! directory). Without `paths`, the subject itself is analysed; without
 //! `no_composer`, composer discovery is off.
 //!
+//! An expectation lists one diagnostic per entry, or is the single line
+//! `no diagnostics`; an empty file is not an expectation.
+//!
 //! `PHPSTAN_RS_BLESS=1 cargo test --test fixtures` rewrites every
 //! expectation from the current output. `PHPSTAN_RS_DUMP_TYPES=<dir>`
 //! also writes each fixture's `--dump-types` output to `<dir>`, its paths
@@ -90,6 +93,13 @@ fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> 
         return Ok(());
     }
     let expected = std::fs::read_to_string(expect_file)?;
+    if expected.is_empty() {
+        return Err(format!(
+            "{} is empty; write `{NO_DIAGNOSTICS}` for a fixture that expects none",
+            expect_file.display()
+        )
+        .into());
+    }
     if expected == actual {
         Ok(())
     } else {
@@ -131,8 +141,10 @@ fn write_type_dump(name: &str, base: &Path, text: &str, out: &Path) -> Result<()
     Ok(())
 }
 
+const NO_DIAGNOSTICS: &str = "no diagnostics";
+
 /// One entry per diagnostic, files in path order, diagnostics in output
-/// order. A single-file fixture omits the path.
+/// order, or `no diagnostics`. A single-file fixture omits the path.
 fn render(
     results: &rustc_hash::FxHashMap<PathBuf, Vec<Diagnostic>>,
     base: &Path,
@@ -180,6 +192,9 @@ fn render(
                 writeln!(out, "    non-ignorable").unwrap();
             }
         }
+    }
+    if out.is_empty() {
+        out = format!("{NO_DIAGNOSTICS}\n");
     }
     out
 }

@@ -930,8 +930,7 @@ Follow-ups:
   run is recorded.
 - **Fixtures.** A `requires-feature` key; the fixtures without it also run
   under `--no-default-features` (the fixture suite never runs without
-  `pcre-validate`). A fixture with an empty expectation and no inference
-  assert fails unless its expectation is the explicit empty list (§3.11).
+  `pcre-validate`).
 - **`.corpus-runs/README.md`** loses the manual sorted-run section (the gate
   compares unsorted) and names `gate-runner` as what records the snapshots.
 - **The rest of A2's conversion.** `checker/tests/key_value_of.rs`'s three
