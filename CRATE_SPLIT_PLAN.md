@@ -2040,6 +2040,11 @@ deleted, RefCell channels removed; the file-size gate.
   - **First-class callables** carry the callee's signature: `strlen(...)`
     is a bare `Closure` today.
   - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
+  - **Closure types** follow `ClosureTypeResolver`: a closure that yields
+    is `Closure(): mixed` today instead of returning a `Generator`.
+  - **`new` into a generic property**: `$this->c = new Coll();` for a
+    `@var Coll<int>` property types the `new` as `Coll<int>`
+    (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
   - **Increments** follow PHP: `$k = 'a'; $k++` leaves `'a'` today, and
     `$n = null; $n++` leaves `int` where PHP gives `1`.
   - **Narrowing gaps** in the handlers' `specifyTypes`:
@@ -2047,7 +2052,21 @@ deleted, RefCell channels removed; the file-size gate.
       `if ($e === E::A) { return; }` and in a `match` `default` arm;
     - `!empty($v)` on an `int` leaves `int`;
     - `$b?->c->n === 1` doesn't narrow `$b` to non-null
-      (`createNullsafeTypes`).
+      (`createNullsafeTypes`);
+    - none of `EqualityTypeSpecifyingHelper`'s call comparisons narrow
+      today (each reproduced):
+      - `count($a) === 3` → a 3-element shape;
+      - `count($a) === count($b)` → shared non-emptiness;
+      - `strlen($s) === 0` → `''`;
+      - `array_key_first($a) !== null` (and `array_key_last`,
+        `array_find_key`) → non-empty;
+      - `preg_match(…) === 1` → the matches shape;
+      - `get_class($o) === Bar::class`, `get_debug_type()` and
+        `$o::class === Bar::class` → `Bar`;
+      - `substr($s, 0, 1) === 'x'` and the other string functions compared
+        with a non-empty literal → `$s` non-empty or non-falsy;
+      - `strtolower($s) === 'abc'` → additionally lowercase on the other
+        side.
   - **Function scope effects** follow `FuncCallScopeEffectsHelper`:
     - `array_pop`/`array_shift`/`array_push`/`array_unshift` keep a
       constant array's shape: after `array_pop($l)` on `[1, 2, 3]`, `$l` is
@@ -2147,6 +2166,11 @@ with a fixture per transition and trigger, on D1–D4's structure:
     called immediately (`InvalidateExprNode`): after
     `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
     its narrowing today.
+  - A write to an offset that exists keeps the array a list
+    (`AssignHandler::shouldKeepList`). Today both `$l[0] = 7` on a
+    `non-empty-list<int>` and `foreach ($l as $i => $v) { $l[$i] = $v + 1; }`
+    leave `array<int, int>`, and passing `$l` on to a `list<int>`
+    parameter is `argument.type`.
   - Narrowing an offset narrows its container
     (`specifyExpressionTypeInPlace`): the container gains
     `HasOffsetValue` for a constant key and becomes offset-accessible
@@ -2166,6 +2190,7 @@ with a fixture per transition and trigger, on D1–D4's structure:
 - references (`IntertwinedVariableByReferenceWithExpr`):
   - After `$b = &$a; $b = 'x';`, `$a` is still `1`, and
     `if ($a === 'x')` is reported `identical.alwaysFalse`.
+  - After `$b = &$a[0]; $b = 'x';`, `$a` is still `array{1, 2}`.
   - `$block = &$this->blocks[$l][$n]` types `$block` as the element type,
     although a reference to a missing offset creates it as `null`, so
     `$block ??= new Block()` is `nullCoalesce.variable` today
