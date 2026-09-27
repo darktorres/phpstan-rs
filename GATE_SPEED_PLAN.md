@@ -226,12 +226,20 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 ### S6. Case-folded function keys, pulled forward from C5 (engine)
 - The C5 item "a case-folded function key map replacing the linear
   scan" lands now, in its designed form.
-- `Registry::functions` is keyed by the case-folded name, and
-  `FunctionSig` carries the declared spelling. There's one map and no
-  side index, so no mutation path (stub merge, project indexing,
-  `remove_declarations`, LSP updates) can leave the two out of step.
-- The 59 access sites go through the folded key. Sites that print a
-  function name use the declared spelling from the signature.
+- `Registry::functions` is a `FunctionTable` (`registry/function_table.rs`):
+  a map-like type keyed by the case-folded name, each entry keeping the
+  declared spelling beside its `FunctionSig`. `FunctionSig` is also the
+  method signature type, so it doesn't get a name field. Every lookup
+  method folds, so no call site can skip it; iteration yields declared
+  names. The side structures keyed by function name
+  (`unconditionally_declared_functions`, `stub_provided_functions`,
+  `function_decl_sites`) fold through the same `function_key`.
+- Sites that used exact `get` before, bypassing `lookup_function`, now
+  resolve case-insensitively too, as PHP does. That only matters for a
+  call whose case differs from its declaration's.
+- The case-collision survey found none: none among the 5,090 stub
+  functions, and in the corpus only three names inside php-cs-fixer
+  heredoc code samples, which aren't declarations. S6a isn't needed.
 - Class keys are left alone. C3's reflections, keyed by `syntax::Name`
   with its precomputed lowercase key, replace both the class map and
   `classes_lowercase`, so converting their 181 access sites now would

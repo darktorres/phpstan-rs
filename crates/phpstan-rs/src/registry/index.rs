@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::registry::Registry;
-use crate::registry::{ClassInfo, FunctionSig, infer_const_type};
+use crate::registry::{ClassInfo, FunctionSig, folded_key, function_key, infer_const_type};
 use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
@@ -331,12 +331,17 @@ impl Registry {
                             // good enough) wins" behavior.
                         }
                         _ => {
-                            self.stub_provided_functions.remove(&name);
-                            self.function_decl_sites.insert(name.clone(), Some(site));
+                            self.stub_provided_functions
+                                .remove(function_key(&name).as_ref());
+                            self.function_decl_sites
+                                .insert(folded_key(&name), Some(site));
                             self.functions.insert(name, new_sig);
                         }
                     }
-                } else if self.unconditionally_declared_functions.contains(&name) {
+                } else if self
+                    .unconditionally_declared_functions
+                    .contains(function_key(&name).as_ref())
+                {
                     // A second unconditional declaration of the same
                     // name - the real-overload shape described on
                     // `unconditionally_declared_functions`'s doc
@@ -358,12 +363,15 @@ impl Registry {
                     let existing = self.functions.remove(&name).expect(
                             "name is in unconditionally_declared_functions, so it must already be indexed",
                         );
-                    self.function_decl_sites.insert(name.clone(), None);
+                    self.function_decl_sites.insert(folded_key(&name), None);
                     self.functions.insert(name, existing.merge(new_sig));
                 } else {
-                    self.stub_provided_functions.remove(&name);
-                    self.unconditionally_declared_functions.insert(name.clone());
-                    self.function_decl_sites.insert(name.clone(), Some(site));
+                    self.stub_provided_functions
+                        .remove(function_key(&name).as_ref());
+                    self.unconditionally_declared_functions
+                        .insert(folded_key(&name));
+                    self.function_decl_sites
+                        .insert(folded_key(&name), Some(site));
                     self.functions.insert(name, new_sig);
                 }
             }
@@ -431,7 +439,7 @@ impl Registry {
             // unconditionally declared" marker with nothing left in
             // `functions` for it to point at.
             self.unconditionally_declared_functions
-                .remove(name.as_str());
+                .remove(function_key(name).as_ref());
         }
         for name in classes {
             self.classes.remove(name.as_str());
@@ -480,9 +488,10 @@ impl Registry {
     pub fn merge_stubs<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, FunctionSig)>) {
         for (name, sig) in stubs {
             let name: Arc<str> = name.into();
-            self.unconditionally_declared_functions.insert(name.clone());
-            self.stub_provided_functions.insert(name.clone());
-            self.functions.entry(name).or_insert(sig);
+            self.unconditionally_declared_functions
+                .insert(folded_key(&name));
+            self.stub_provided_functions.insert(folded_key(&name));
+            self.functions.insert_if_absent(name, sig);
         }
     }
 

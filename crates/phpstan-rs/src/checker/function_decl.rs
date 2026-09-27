@@ -234,7 +234,10 @@ impl<'a> Checker<'a> {
     /// the slot is `f`'s.
     fn own_declaration_sig(&self, f: &FunctionDecl) -> Option<FunctionSig> {
         let name = self.name_ctx.declared_name(&f.name);
-        let site = *self.registry.function_decl_sites.get(name.as_str())?;
+        let site = *self
+            .registry
+            .function_decl_sites
+            .get(crate::registry::function_key(&name).as_ref())?;
         if site == Some((f.name_span.start.line, f.name_span.start.col)) {
             return None;
         }

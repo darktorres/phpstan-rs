@@ -963,24 +963,11 @@ impl Registry {
             .map(|(name, _)| name.as_ref())
     }
 
-    /// Real PHP function calls are case-
-    /// insensitive (`STRTOLOWER()`/`strtolower()`/`StrToLower()` all
-    /// resolve to the exact same builtin, and the same is true of a
-    /// user-declared function under whatever case its own call site
-    /// happens to use) - `self.functions` itself stays keyed by
-    /// whatever case each function was actually *declared* under (every
-    /// existing insertion call site is untouched), so an exact-case miss
-    /// falls back to a case-insensitive scan before giving up. Checked
-    /// second, not first: the overwhelming majority of real calls
-    /// already match a declaration's own case exactly, so the common
-    /// path stays a plain, allocation-free `HashMap` lookup.
     /// Whether `name` is a function a stub declares (a PHP builtin or
     /// extension function) and no analysed code redeclares.
     pub(crate) fn is_builtin_function(&self, name: &str) -> bool {
-        self.stub_provided_functions.contains(name)
-            || self
-                .lookup_function_with_name(name)
-                .is_some_and(|(canonical, _)| self.stub_provided_functions.contains(canonical))
+        self.stub_provided_functions
+            .contains(super::function_key(name).as_ref())
     }
 
     /// Whether `class` is a class a stub declares (a PHP builtin or
@@ -989,13 +976,9 @@ impl Registry {
         self.built_in_stub_classes.contains(class)
     }
 
+    /// The function `name` names, compared case-insensitively as PHP does.
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionSig> {
-        self.functions.get(name).or_else(|| {
-            self.functions
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                .map(|(_, v)| v)
-        })
+        self.functions.get(name)
     }
 
     /// `lookup_function`'s canonical-name-returning sibling, mirroring
@@ -1004,13 +987,7 @@ impl Registry {
     /// `function.nameCase` diagnostic needs this to report the real
     /// declared casing rather than just presence.
     pub(crate) fn lookup_function_with_name(&self, name: &str) -> Option<(&str, &FunctionSig)> {
-        if let Some((k, v)) = self.functions.get_key_value(name) {
-            return Some((k.as_ref(), v));
-        }
-        self.functions
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(k, v)| (k.as_ref(), v))
+        self.functions.get_with_name(name)
     }
 
     /// `lookup_function`'s class-side mirror - real PHP resolves

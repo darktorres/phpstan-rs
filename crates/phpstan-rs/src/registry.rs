@@ -10,6 +10,7 @@ mod assertion_table;
 mod class_info;
 mod dynamic_constants;
 mod function_sig;
+mod function_table;
 mod generics;
 mod global_vars;
 mod hierarchy;
@@ -36,6 +37,8 @@ pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
 pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };
+pub use function_table::FunctionTable;
+pub(crate) use function_table::{folded_key, function_key};
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub use purity::PurityDependency;
@@ -75,7 +78,7 @@ pub struct Registry {
     // on top of the built-in ones (`assertion_table`).
     pub(crate) configured_assertions: Vec<crate::assertion_tables::AssertionEntry>,
     pub(crate) configured_class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
-    pub functions: FxHashMap<Arc<str>, FunctionSig>,
+    pub functions: FunctionTable,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
     // `functions`: a `const` gets its namespace-qualified name; a

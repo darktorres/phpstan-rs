@@ -358,7 +358,9 @@ Each index entry records:
   - `names(kind, layer)` from the index, without parsing (completion);
   - `subclasses_of`/`implementors_of` from the index hierarchy plus the
     project;
-  - a case-folded function key map replacing the linear scan;
+  - a case-folded function key map replacing the linear scan (landed
+    early as GATE_SPEED_PLAN S6: `registry::FunctionTable`; class keys
+    stay with C3);
   - every existing iteration site states its layer scope, including the
     ported `ReflectionRule` API.
 - **Extension points owned here:**
