@@ -1416,7 +1416,11 @@ Follow-ups:
     leave `FunctionReflection`, and the checker asks the table (C9 moves
     the table to `AnalysisContext`);
   - `names_with_assert_tags` is seeded from the assertion entries when the
-    tables are set, not by the pass.
+    tables are set, not by the pass, and holds and is checked by folded
+    name: a call spelled in another case than its method now reaches the
+    assert lookup, which already falls back case-insensitively (an
+    approved delta, fixtured; today the prefilter compares the call's
+    spelling with the declaration's exactly and skips the narrowing).
 - **The checker test harness builds like a project** (test-expectation
   delta, listed in the commit): it merges the stubs before resolving,
   instead of resolving the test program alone and then recomputing only
