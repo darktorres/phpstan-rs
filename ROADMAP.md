@@ -4360,8 +4360,10 @@ output as plain PHP under `_analysis/phpstan-latte/`):
   each `{capture}` target, and for `{define}` parameters (Latte parses
   their types and discards them);
 - variable types come from `{templateType}` (a View class and its public
-  properties), a `{varType}` block the pipeline writes into each template,
-  or a scan of the app's render calls;
+  properties), a `{varType}` block the pipeline writes into each template
+  without one, or a scan of the app's render calls, and the ambient
+  variables every page receives (`ROOT_URL`, `themeconf`, `lang_info`,
+  ...) from a global union it builds over the render calls;
 - a custom error formatter maps findings back to templates, and a
   dead-code usage provider credits `{templateType}` View properties as
   read - no PHP code reads them, Latte extracts them into template locals.
@@ -4370,11 +4372,13 @@ Parsed natively, none of that rewriting exists: filters and functions are
 calls with their signatures, declared types are declarations, and
 findings are born on template lines.
 
-**Corpus shape** (Piwigo, Latte 3.1.6, 119 templates, 19.5k lines): about
-2,000 prints (`{$x}`/`{=...}`), 1,460 `{if}`, 1,050 `{varType}`, 170
-`{foreach}`, 117 `{templateType}`, 74 `{spaceless}`, 55 `{block}`, 51
-`{var}`, 51 `{include}`, 27 `{layout}`, 15 `{_}`; 289 `n:if`, 148
-`n:foreach`, 58 `n:attr`. The engine enables `Feature::Dedent` and
+**Corpus shape** (Piwigo, Latte 3.1.6, 119 templates, 19.5k lines): 111
+templates declare `{templateType}`; the other 8 (the three layouts and
+five mail templates) carry a generated 131-line `{varType}` block of the
+ambient variables instead, and none uses `{parameters}`. About 2,000
+prints (`{$x}`/`{=...}`), 1,460 `{if}`, 170 `{foreach}`, 74
+`{spaceless}`, 55 `{block}`, 51 `{var}`, 51 `{include}`, 27 `{layout}`,
+15 `{_}`; 289 `n:if`, 148 `n:foreach`, 58 `n:attr`. The engine enables `Feature::Dedent` and
 `Feature::ScopedLoopVariables` (`src/Piwigo/Template/LatteEngine.php`).
 Most of the 978 `property.unused` findings on `*\Projection\*View`
 classes approved in C3 (`gates/approved/c3-provenance-declarations`) are
@@ -4589,6 +4593,12 @@ inferred one only types a variable nothing declares:
 - `{parameters}`/`{define}` parameters: their declared types;
 - `{varType Type $x}`: `$x`'s declared type wherever `$x` is in scope in
   that template, trusted the same way;
+- the ambient variables the app gives every template, whatever else it
+  passes (a layout's page chrome, a base controller's assignments):
+  `[ext.latte] globals_type` names a class whose public properties declare
+  them, as `{templateType}` declares a template's own, and
+  `[ext.latte] globals` maps a name to a type for a few; both sit below
+  every declaration in the template itself;
 - `{include}` sites: an included template's parameters are typed by each
   includer's arguments and parameter array, unioned over the includers;
 - render call sites found in PHP (`Engine::render()`/`renderToString()`/
@@ -4611,8 +4621,11 @@ undeclared one is `mixed`, never undefined; an opt-in
 reports variables no declaration covers, for projects that declare
 every variable. App conventions beyond these
 (Piwigo's `assignContext()` bag, its `#[Template]` View attribute) aren't
-modelled: the native declarations type 114 of the corpus's 119
-templates, and `{varType}` the rest.
+modelled. On the corpus, `{templateType}` types 111 templates' own
+variables and `{varType}` the other 8; the ambient variables the 111 read
+without declaring them are `globals_type`'s - Piwigo's 131-line
+`{varType}` block is exactly that list, so the corpus config declares it
+once as a class instead of in every template.
 
 **182e — Filters and functions.** Latte's built-ins come from the
 installed latte/latte, read as vendor context (`CoreExtension::
@@ -4796,6 +4809,8 @@ per sub-phase.
 - `tags` - a custom tag mapped to a core tag's meaning (182e);
 - `features`, `content_type`, `strict_types` - overriding what the engine
   setup says (182b);
+- `globals_type`, `globals` - the ambient variables every template
+  receives (182d);
 - `check_undeclared_variables`, `check_unused_defines` - the two opt-in
   checks (182d, 182f).
 
