@@ -1136,8 +1136,8 @@ Follow-ups:
     through an explicit exact-spelling accessor, so nothing changes until
     the behaviour commits delete them;
   - `Vec<TemplateParam>` and per-member flags; every native type is an
-    `Option<Type>`; accessors return `Option<&T>`/`&[T]`; each doc comment
-    is parsed once;
+    `Option<Type>`; accessors return `Option<&T>`/`&[T]`; the builder
+    parses each doc comment once (a method's is parsed per use today);
   - provenance is the only location record (`Origin::Unknown`, `is_stub`
     and `function_decl_sites` gone; C3's follow-up already deleted
     `phpstan_class_files`);
@@ -1179,7 +1179,9 @@ Follow-ups:
     `type_imports`) leaves `ClassReflection` for it, and the rules reading
     that scratch (duplicate methods, trait conflicts and aliases,
     class-name case and internal-usage checks on PHPDoc types) query the
-    declaration; the snapshots split it per file;
+    declaration; the declaration keeps its parsed doc blocks, and the rules
+    re-parsing a declaration's doc comment (about 25 sites in `checker/`)
+    read them; the snapshots split it per file;
   - `index_and_flatten` is deleted and `Registry::build` only indexes
     (until its callers move onto `apply`); the stub pass still resolves
     each stub file's classes within that file (until C5's stub layer),
