@@ -34,7 +34,7 @@ extracted in one final wave.
 | `Checker` | 67 fields (Appendix C) |
 | `Registry` | 90 fields (74 `pub`, 12 `pub(crate)`, 4 private). They include 67 settings (Appendix B), 4 SQL fields, Doctrine entity metadata (`doctrine_entity_table_index`) and provenance sets (`built_in_stub_classes`, `unconditionally_declared_*`, `stub_provided_functions`). There are ~173 `registry.classes` reads in non-test checker code |
 | Reflection data | `ClassInfo` has 48 `pub` fields, `FunctionSig` 24, `PropertySig` 22 and `ParamSig` 13. Member facts are stored as parallel sets, templates as five parallel maps, and `FunctionSig.body` holds AST bodies. `ClassInfo` also carries `doctrine_entity` and php-language-extensions access data |
-| Reflection pipeline | 15 whole-registry copy-down passes (`flatten_traits`, `resolve_method_tags`, `precompute_member_owners` ×2, `flatten_phpdoc_inheritance`, `resolve_deferred_*`, `precompute_ancestor_names`, `resolve_constant_named_types`, `drop_doc_members_excluded_by_native`, `apply_assertion_table`, `resolve_transitive_purity`, `infer_global_variables`, ...), duplicated across `finish_loading`, `update_file` and `Registry::build`. The LSP reruns all of them on every edit. Three staleness bugs are documented: a removed base class keeps `is_subclass_of` true; trait/mixin members stay on hosts; anonymous classes from old file versions are never removed |
+| Reflection pipeline | 15 whole-registry copy-down passes (`flatten_traits`, `resolve_method_tags`, `precompute_member_owners` ×2, `flatten_phpdoc_inheritance`, `resolve_deferred_*`, `precompute_ancestor_names`, `resolve_constant_named_types`, `drop_doc_members_excluded_by_native`, `apply_assertion_table`, `resolve_transitive_purity`, `infer_global_variables`, ...), duplicated across `finish_loading`, `update_file` and `Registry::build`. The LSP reruns all of them on every edit. Two staleness bugs are documented: trait/mixin members stay on hosts; anonymous classes from old file versions are never removed. An unknown ancestor counts as an ancestor (`is_subclass_of` true), after a fresh load as after removing its file |
 | Stubs | 2,392 embedded files (558 phpstorm-stubs + 1,793 phpstan-src/src + 41 phpstan-src `stubs/*.stub`), all parsed eagerly in one `LazyLock` and cloned into every `Registry`. Precedence is first-wins (phpstorm before phpstan-src); a constant declared differently in several files collapses to `mixed`. Ten hand-written, order-dependent Rust patch functions follow. The lexer rewrites `#[PhpStormStubsElementAvailable]`/`#[LanguageLevelTypeAware]`/`#[PhpVersionAware]` at lex time, and only the newest PHP version is read |
 | Scope | `Locals` holds `types`, `native` (variables only, never narrowed) and `provenance`. It also has nine maps with six different merge policies (Appendix D) and three flags (`any_variable_may_exist`, `may_have_member_narrowing`, `track`). Its three invalidation paths each purge a different subset, and the guard sets are never invalidated. There is no certainty: a variable defined on one side of a branch is dropped at the merge |
 | Inference | Two implementations: `check_expr` (~4.3k lines, `&mut`) and `infer_expr` (~520 lines, `&self`, with RefCell side effects). `expr.rs` is 6,760 lines with ~181 `ExprKind` arms |
@@ -246,7 +246,9 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 - **One subtyping implementation.**
   - `TrinaryLogic` moves here.
   - A `ClassHierarchy` oracle trait (is_subclass_of, ancestors, is_final,
-    enum cases, template bounds), which reflection implements.
+    enum cases, template bounds), which reflection implements. An
+    ancestor reached through a name no class answers to is `Maybe`, never
+    `Yes` or `No`.
   - One tri-state `is_super_type_of` and one `accepts` (with reasons),
     both generic over the oracle.
   - `is_subtype`, `is_assignable` and the Registry duplicates are deleted.
@@ -312,9 +314,13 @@ Visitor-based walk.
   produces immutable snapshots. Ancestors, members with their owner,
   traits and mixins, and PHPDoc inheritance are resolved lazily per class
   and memoized per snapshot (PhpDocInheritanceResolver-style), invalidated
-  along dependent symbols. The 15 copy-down passes and their three
-  duplicated lists are deleted. Anonymous classes are per-file entries,
-  removed with their file. The three staleness bugs are closure gates.
+  along dependent symbols. The memo has three levels - ancestors, members,
+  inherited PHPDoc - each reading only the same or a lower level; the
+  ancestor level is built from declarations alone, records unresolved
+  edges, and breaks a cycle through `extends`/`implements`/`use`/`@mixin`.
+  The 15 copy-down passes and their three duplicated lists are deleted.
+  Anonymous classes are per-file entries, removed with their file. The
+  staleness bugs (§1) are closure gates.
 - **Locator chain (PHPStan order):**
   1. analysed files;
   2. `scan_paths`;
@@ -1103,7 +1109,33 @@ Follow-ups:
   as the only location record, query accessors, parse-time resolved names,
   one no-native-type encoding (`Option<Type>`).
 
-**C4. Snapshots and lazy resolution**, one commit each:
+**C4. Snapshots and lazy resolution**, one commit each, in this order:
+- **`xtask gatetime --since <hash>`**: the median of N runs per step against
+  the phase-start commit, failing on any step not lower. The phase start is
+  recorded before the next commit.
+- **Keys and data model:** class keys are the case-insensitive `Name` (side
+  map and `canonicalize_class_name_case` deleted); method keys fold case;
+  property and constant keys stay exact; a type's class name is resolved to
+  the declared spelling when the type is resolved; `Vec<TemplateParam>`
+  and per-member flags; build scratch (`method_tags`, `trait_aliases`,
+  `resolved_trait_conflicts`, `redeclared_methods`, `*case_refs`,
+  `type_imports`) stays in the builder, and a class's builder declaration
+  is the memo's input; provenance is the only location record
+  (`Origin::Unknown`, `is_stub`, `phpstan_class_files`,
+  `function_decl_sites` gone); every native type is an `Option<Type>`;
+  query accessors replace the storage-returning ones and the `pub` maps,
+  and every direct `registry.classes`/`functions`/`global_constants` access
+  outside the registry is converted (about 480 sites); the builders read
+  parse-time `resolved` names instead of re-resolving through a
+  `NameContext`.
+- **Written results leave the signatures.** Everything a remaining pass
+  writes moves out of the memoized views:
+  - purity results go to a registry table keyed by function and by
+    `(class, method)`: `purity_dependencies` and `is_transitively_pure`
+    leave `FunctionReflection`, and the checker asks the table (C9 moves
+    the table to `AnalysisContext`);
+  - `names_with_assert_tags` is seeded from the assertion entries when the
+    tables are set, not by the pass.
 - **Per-class memoized resolution** replacing the passes:
   - per-class memos: `flatten_traits`, `resolve_method_tags`,
     `precompute_member_owners`, `resolve_deferred_type_imports`,
@@ -1111,34 +1143,67 @@ Follow-ups:
     `inherit_property_hooks`, `resolve_deferred_mixins`,
     `precompute_ancestor_names`, `drop_doc_members_excluded_by_native`,
     `resolve_constant_named_types`;
-  - deleted by `Name` keys: `canonicalize_class_name_case`;
-  - C6: `apply_assertion_table`; C9: `resolve_transitive_purity`,
-    `infer_global_variables`.
+  - interim until C6: `apply_assertion_table` becomes the members level's
+    last step, the entries matched by `Name` and folded method key;
+  - kept as whole-program passes until C9: `resolve_transitive_purity`
+    (classifying only classes with a member, trait or mixin from an
+    analysed or context file) and `infer_global_variables`.
 
-  The memo has one order (a fixture pins the dropped-member case) and
-  levels - ancestors, members, inherited PHPDoc - with hierarchy queries
-  during member resolution reading only the ancestor level. A cyclic `extends`/`implements`/`use` is detected and
-  treated as broken, with a test.
-- **Keys and data model:** class keys are the case-insensitive `Name` (side
-  map and `canonicalize_class_name_case` deleted); method keys fold case;
-  property and constant keys stay exact; a type's class name is resolved to
-  the declared spelling when the type is resolved; `Vec<TemplateParam>`
-  and per-member flags; build scratch (`method_tags`, `trait_aliases`,
-  `resolved_trait_conflicts`, `redeclared_methods`, `*case_refs`,
-  `type_imports`) stays in the builder; provenance is the only location
-  record (`Origin::Unknown`, `is_stub`, `phpstan_class_files`,
-  `function_decl_sites` gone); every native type is an `Option<Type>`;
-  query accessors replace the storage-returning ones and the `pub` maps,
-  and every direct `registry.classes`/`functions`/`global_constants` access
-  outside the registry is converted; the builders read parse-time
-  `resolved` names instead of re-resolving through a `NameContext`.
+  The memo has one order and three levels, each reading only the same or a
+  lower level:
+  - **ancestors**, from builder declarations alone: the `extends`/
+    `implements` closure in resolution order, the transitive `use` set, the
+    `@mixin` targets, and the unresolved edges (a declared name no class
+    answers to, with the class declaring it);
+  - **members**: own members, trait composition, `@method` tags, mixin
+    members (the target's members level), imported aliases, `value-of` and
+    class-constant types (in `extends`/`implements` arguments too),
+    constant-named types, member owners;
+  - **inherited PHPDoc**: PHPDoc inheritance from the ancestors' inherited
+    level, property hooks, and PHPDoc members the native type excludes
+    dropped.
+
+  Hierarchy queries during member and PHPDoc resolution read only the
+  ancestor level: the relation that drops native-excluded members answers
+  a member query (`has_method`, a method's or property's type) as unknown.
+  Class constants are typed through the `ConstantResolver`, which lands
+  first (C2's follow-up); a constant reference cycle types as `mixed`, with
+  a test. A function resolves lazily the same way (`value-of`,
+  constant-named types, native-excluded members, the interim assertion
+  step); `finalize_standalone_sig` is that resolver.
+
+  A cycle through `extends`, `implements`, `use` or `@mixin` is detected on
+  the ancestor level and treated as broken: every edge between two classes
+  of the same cycle is dropped, the same whichever class is resolved first,
+  with a test. With cycles broken the levels form an acyclic graph, so each
+  level is a per-class `OnceLock`; a reentrant resolution panics in debug
+  builds, and a panic leaves the cell retryable (a panic-injection test).
+  Within this commit any declaration change resets every memo, at no cost
+  while none has been read.
+
+  `has_unresolvable_ancestor` reads the unresolved edges. The boolean
+  `is_subclass_of` keeps counting an unresolved name as an ancestor until
+  C8.
+
+  Whole-registry iterations filter on the ancestor level before reading a
+  class, until C5's scoped queries replace them: the two
+  `native_type_hints.rs` scans, the concrete-implementor scan in
+  `checker.rs`, the whole-program dead-code passes, `class_shape`,
+  `Project::run_reflection_rules`, LSP workspace symbols and completion.
+
+  Approved deltas, each fixtured: the dropped-member case; mixin members
+  carry the target's members-level types; a trait's `@method` tags reach
+  its hosts; a trait conflict without `insteadof` resolves by `use` order.
 - **`ReflectionBuilder::apply` snapshots** own their names: the registry's
   and checker's `syntax::intern::intern` calls (about 100) go through the
   project's interner; the stub layer's names stay global; the session
-  interner evicts names no longer referenced elsewhere.
+  interner evicts names no longer referenced elsewhere. Each memo records
+  every folded class and constant name it looked up, absent ones included;
+  a `FileDelta` invalidates the transitive readers of the names it
+  changes, and the new snapshot inherits every other memo.
 - **Staleness fixes** (approved deltas), each with a closure gate, through
   per-file declaration sets (which also hold what
-  `unconditionally_declared_classes`/`_functions` record): the three in §1;
+  `unconditionally_declared_classes`/`_functions` record): the two in §1;
   a file's global constants are removed with it; removing a declaration
   merged onto a built-in stub keeps the built-in; removing one of two
   same-named declarations keeps the other; `stub_provided_functions`,
@@ -1183,10 +1248,8 @@ Follow-ups:
     global-variable inference.
 
 Gate: the fixture suite's and the lib tests' wall times are lower than at
-the phase's start, measured by `xtask gatetime --since <hash>` (median of N
-runs per step against the phase-start commit, failing on any step not
-lower; a command added first); per-class resolution no longer re-runs every
-pass over the stub classes for each project.
+the phase's start (`xtask gatetime --since`); per-class resolution no
+longer re-runs every pass over the stub classes for each project.
 
 **C5. Locator chain and stub layer**, one commit each:
 - the stub layer's version key over a `PhpVersions` range, decided first
@@ -1212,7 +1275,8 @@ pass over the stub classes for each project.
   `is_builtin` flags in `expr.rs` and `oop/attributes.rs`,
   `checker/resolve.rs`) or "an extension in the stub corpus declares it"
   (composer hygiene, the architecture rules' `is_standard_class`);
-- the enumeration APIs, with every whole-registry iteration moved onto a
+- the enumeration APIs, with every whole-registry iteration (C4's
+  ancestor-level filters included) moved onto a
   scoped query: `native_type_hints.rs`'s two scans onto `subclasses_of`;
   `Project::run_reflection_rules`, the LSP workspace-symbol function list
   and LSP completion's candidate lists onto the project layer or
@@ -1256,7 +1320,8 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   functions are overridable, and a stub declares a symbol only when nothing
   else does;
 - `StubFilesExtension`;
-- assertion tables compiled to overlays (`apply_assertion_table` deleted);
+- assertion tables compiled to overlays (`apply_assertion_table` and the
+  members level's interim assertion step deleted);
   the Mockery and Nette Tester defaults move to their ext modules, and
   `gates/module-graph.txt` splits `assertion_tables`.
 
@@ -1292,6 +1357,12 @@ narrows `Base` to `Child`; `!$x instanceof Base` removes `Child` from
 collapses; the DQL entity-field refinement compares object types with the
 hierarchy. The scalar-only sites don't change.
 
+The boolean `is_subclass_of` is deleted for the tri-state relation, and an
+ancestor reached through an unresolved edge (C4's ancestor level) answers
+`Maybe` (approved delta, fixture first): `instanceof`, override, `final`
+and `#[\Override]` checks through an unvendored parent stop treating it as
+known. Consumers needing certainty treat `Maybe` as unknown.
+
 The class-reflection data extensions take `registry::access_attributes`
 (ext-language-extensions) and `registry::class_info::doctrine_entity`
 (ext-doctrine), with their module-graph edges re-dated to C8.
@@ -1301,8 +1372,8 @@ The class-reflection data extensions take `registry::access_attributes`
 **C9. Summaries.** Purity and global-variable inference leave reflection for
 the summaries API; C9 creates `AnalysisContext` in the package's future
 `analyser` module to hold them per snapshot, and D6 completes it.
-`purity_dependencies` and `is_transitively_pure` leave
-`FunctionReflection`. Stubs get no global-variable summaries. Builtin
+The purity table C4 moved out of `FunctionReflection` moves to
+`AnalysisContext`. Stubs get no global-variable summaries. Builtin
 purity comes from `functionMetadata`. ROADMAP mapping (§3.8): summaries -
 H2, H3, U1-U4, U6, P1; reflection enumeration - A5, U5; collector rules
 (E1) - H1, V1, V2, Phase 90; neither - A2-A4, A6, C1, P2, D1.
@@ -1822,6 +1893,14 @@ its owner. Non-Registry keys follow the table.
   `RuleLevelHelper` (analyser).
 - **Assertion tables.** PHPDoc overlays in reflection, compiled at config
   load. There is no engine extension.
+- **Unknown ancestors.** A declared `extends`/`implements` name no class
+  answers to is an unresolved edge, and a relation through it is `Maybe`
+  (C8). Neither asserting the relationship nor denying it: PHP can't load
+  such a class, and PHPStan's ancestor chain stops at it.
+- **Reflection cycles.** A cycle through `extends`/`implements`/`use`/
+  `@mixin` is broken on the ancestor level by dropping every edge inside
+  it, so the memo levels form an acyclic graph and each is a per-class
+  `OnceLock`.
 - **ext-sql and ext-doctrine.** No crate edge between them. ext-sql owns the
   DBAL Connection / QueryBuilder typing. ext-doctrine publishes entity
   metadata through a reflection data extension (C8). DQL typing reads the
