@@ -4340,10 +4340,14 @@ Every semantic rule below is read from the installed Latte's own source -
 `Essential/CoreExtension.php`, `Essential/Passes.php`, the
 `Essential/Nodes/*` node classes, `Runtime/Template.php`,
 `Loaders/FileLoader.php`), cited where each rule is stated.
-The grammar and semantics are those of Latte 3.1, the corpus's line;
-templates under another minor or major version are still analysed, with
-one notice that they're read as 3.1, and a version this phase's rules
-aren't re-verified against is added only after the same source reading.
+The grammar and semantics are those of Latte 3.1, the corpus's line,
+selected by the latte/latte version installed in the composer root. The
+3.1-only rules - typed attribute rendering by kind and its
+`MigrationWarnings` - apply from 3.1 on; under 3.0 an attribute print is
+escaped text interpolation, as 3.0 renders it. Templates under a version
+this phase's rules weren't read against (another major, or a later 3.x
+minor) are still analysed, with one notice naming the version they're
+read as, and that version is added only after the same source reading.
 
 **What Piwigo's pipeline has to do today** (the corpus analyses its
 output as plain PHP under `_analysis/phpstan-latte/`):
@@ -4603,8 +4607,9 @@ In the closed set a `{parameters}` template has, an undeclared variable
 is undefined for certain: the ordinary `variable.undefined` reports it.
 In an open set any passed parameter can exist at runtime, so an
 undeclared one is `mixed`, never undefined; an opt-in
-`latte.variable.undeclared` reports variables no declaration covers, for
-projects that declare every variable. App conventions beyond these
+`latte.variable.undeclared` (`[ext.latte] check_undeclared_variables`)
+reports variables no declaration covers, for projects that declare
+every variable. App conventions beyond these
 (Piwigo's `assignContext()` bag, its `#[Template]` View attribute) aren't
 modelled: the native declarations type 114 of the corpus's 119
 templates, and `{varType}` the rest.
@@ -4698,7 +4703,8 @@ outside a `foreach`, among others), as deprecation findings. Then, with `latte.*
   unknown named arguments, missing required parameters;
 - a `{parameters}`, `{define}` or `{var}` default its declared type doesn't
   accept, as a PHP parameter default is checked;
-- a `{define}` never rendered (opt-in, with dead code);
+- a `{define}` never rendered (opt-in, `[ext.latte]
+  check_unused_defines`, reported where dead code is);
 - a filter applied to content (`{block|name}`, `{include ...|name}`,
   `{capture|name}`) that isn't content-aware (no `FilterInfo` first
   parameter) while the content is HTML - Latte throws at runtime there
@@ -4748,7 +4754,11 @@ vendor PHP loads.
 go-to-definition and completion inside tag expressions, over the same
 lowered units; completion of tag names after `{`, filter names after
 `|`, and template and block names in `{include}`/`{extends}`/`{block}`;
-go-to-definition from those to the template and block they name. The VSCode extension registers the
+go-to-definition from those to the template and block they name, and
+references from a block or define to every place rendering it; document
+symbols for the template's blocks and defines; folding for paired tags
+and elements; semantic tokens for tag expressions, so an editor with no
+Latte grammar still colours them. The VSCode extension registers the
 `latte` language.
 
 **182i — Retiring the compiled output on the corpus.** Once 182a-g match
@@ -4774,6 +4784,20 @@ per sub-phase.
 - Compile errors: a fixture per `CompileException` 182f lists, each
   compiled by the real installed Latte; the set of templates Latte
   rejects, and where, must equal ours.
+
+**Configuration.** `[ext.latte]`, every key optional:
+- `enabled` - C1 activation;
+- `paths` - the template directories, in the loader's search order, for a
+  loader the app defines itself (182f);
+- `engine` - the class whose engine setup is read, when engines disagree
+  (182b);
+- `extensions` - extensions registered outside a literal
+  `addExtension(new X(...))` (182e);
+- `tags` - a custom tag mapped to a core tag's meaning (182e);
+- `features`, `content_type`, `strict_types` - overriding what the engine
+  setup says (182b);
+- `check_undeclared_variables`, `check_unused_defines` - the two opt-in
+  checks (182d, 182f).
 
 **Architecture.** `latte-syntax` sits directly above `syntax` and below
 everything else;
