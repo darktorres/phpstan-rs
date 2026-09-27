@@ -1978,7 +1978,10 @@ integer ranges, 599 expect `true`/`false` where phpstan-rs has `bool` (D3's
 type-check calls), 474 lose a shape, 476 generalize a literal, 340 expect
 `*NEVER*`, 289 expect `*ERROR*`, 48 keep `never` in a union (B4). The
 count is a tracked number: each D phase records it, and a phase that
-raises it has a named reason in its commit.
+raises it has a named reason in its commit. The suite's other two
+assertions, `assertNativeType` (313 calls) and `assertVariableCertainty`
+(681), are ignored today; the assertion DSL reads both before D1, so D5's
+natives and certainty are measured by the same suite.
 
 **D1. Holder storage (byte-identical).**
 - Every `Locals` map moves into holder storage with its current per-kind
@@ -2171,7 +2174,8 @@ deleted; the file-size gate.
       and `abs(0.0)` is `0`;
     - loose comparison is evaluated with the wrong table: `'0' == null` is
       `true` and reported `equal.alwaysTrue`, where PHP 8 gives `false`
-      (nsrt `loose-comparisons.php:325`, `:460`);
+      (nsrt `loose-comparisons.php:325`, `:460`; the table's other 192
+      verdicts in the suite agree);
     - a string offset write doesn't change the string: `$s[6] = 'b'` on
       `'foo   '` leaves `'foo'`;
     - late static binding of a constant in an inherited method:
