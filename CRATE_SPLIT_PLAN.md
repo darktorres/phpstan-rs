@@ -1141,10 +1141,18 @@ deep 9 s today (20,000 deep does not finish).
   module.
 - Extract `sql`.
 
-Follow-up: **identifier case per driver.** `SchemaCatalog` compares table
-and column names exactly; lookups fold case where the driver does (MySQL
-and SQLite column names; Postgres folds unquoted identifiers to lowercase),
-fixture first.
+Follow-ups:
+- **Identifier case per driver.** `SchemaCatalog` compares table and column
+  names exactly; lookups fold case where the driver does (MySQL and SQLite
+  column names; Postgres folds unquoted identifiers to lowercase), fixture
+  first.
+- **Nullability through outer joins.** The Postgres reflector reads
+  `pg_attribute.attnotnull` and the SQLite one the origin column's
+  `NOT NULL`, so a column reached through a `LEFT JOIN` is typed non-null;
+  a column on the nullable side of an outer join is nullable.
+- **Connection errors are reported.** `build_reflector` drops a failed
+  connection's error (`.ok()`), so a wrong password or host silently turns
+  reflection off; it becomes a startup warning.
 
 **B7. diagnostics.**
 - The diagnostic model (§3.7): `Diagnostic` gets its validated
@@ -1347,12 +1355,20 @@ Follow-ups:
     name, a method name at the magic-method and override sites) goes
     through an explicit exact-spelling accessor, so nothing changes until
     the behaviour commits delete them;
-  - `Vec<TemplateParam>` and per-member flags; every native type is an
-    `Option<Type>`; accessors return `Option<&T>`/`&[T]`; the builder
+  - `Vec<TemplateParam>` and per-member flags (a property's finality moves
+    off the class's `final_properties` set onto it), and the four places
+    rebuilding `TemplateParam`s from the parallel template maps
+    (`own_template_args`, `checker/resolve.rs`'s
+    `class_template_params_for`, `build_template_params`, the
+    `ReflectionClass` stub patch) read them; every native type is an
+    `Option<Type>`, so `PropertyReflection::has_native_type` goes and the
+    `explicit_mixed_hint` flags derive from the native and PHPDoc
+    `Option`s; accessors return `Option<&T>`/`&[T]`; the builder
     parses each doc comment once (a method's is parsed per use today);
   - provenance is the only location record (`Origin::Unknown`, `is_stub`
     and `function_decl_sites` gone; C3's follow-up already deleted
-    `phpstan_class_files`);
+    `phpstan_class_files`), and the six comments citing the deleted
+    `project/decl_locations.rs`/`Project::decl_locations` are corrected;
   - query accessors replace the storage-returning ones and the `pub` maps;
     every direct `registry.classes`/`functions`/`global_constants` access
     outside `registry/` is converted (about 280, 23 of them in tests);
@@ -1914,7 +1930,10 @@ The rest of the diagnostic model (§3.7), each its own commit:
   declaration, and the `format!`-built identifiers (about 40 sites)
   become family members;
 - AST-node fixes beside text fixes, rendered to diffs through
-  `syntax::printer`;
+  `syntax::printer`, which gains statements and declarations, keeps the
+  surrounding formatting (php-parser's format-preserving printer) and
+  parenthesizes a generated node by precedence (it prints expressions only,
+  as written, and a closure without its body);
 - `accepts` reasons: `Relation::accepts` fills `AcceptsResult.reasons`, and
   the argument, return and property type rules show them as tips;
 - PHPStan's standard tip helpers (§3.7: discovering symbols,
