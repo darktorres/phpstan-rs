@@ -601,7 +601,7 @@ fn record_artifact(
         std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
         timings.time(&format!("compress types-{artifact}"), |_| {
             run(Command::new("zstd")
-                .args(["-q", "-f", "-19", "--rm", "-T0"])
+                .args(["-q", "-f", "-3", "--rm", "-T0"])
                 .arg(&dump_file)
                 .arg("-o")
                 .arg(&target))
@@ -637,7 +637,7 @@ fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String>
     std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
     timings.time("compress types-fixtures", |_| {
         run(Command::new("zstd")
-            .args(["-q", "-f", "-19", "-T0"])
+            .args(["-q", "-f", "-3", "-T0"])
             .arg(&joined)
             .arg("-o")
             .arg(&target))
