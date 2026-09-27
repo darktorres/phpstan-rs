@@ -1321,7 +1321,9 @@ own.
 Follow-ups:
 - **Constraints follow Composer's grammar**, whitespace after an operator
   included: `"php": ">= 8.1"` gives no range today, so every
-  version-gated rule is silent.
+  version-gated rule is silent. An open upper bound runs to PHPStan's
+  `MAX_PHP_VERSION` (80699, PHP 8.6): `^8.5` is `80500–80599` today, so
+  a `PHP_VERSION_ID >= 80600` branch reads as dead code.
 - **No global panic hook.** `discover_vendor_context` replaces the process
   panic hook while it parses, which races parallel analysis; the parse
   already returns its errors.
@@ -2101,7 +2103,8 @@ outside `vendor/` (so the
 corpus's extensions don't load), Piwigo's `vendor/autoload.php` as the only
 bootstrap file, level 10, run from a directory with no `vendor/`, with
 `phpVersion` set to the range phpstan-rs reads from the corpus's
-`composer.json` (`min: 80500, max: 80599`). Without it the phar uses its
+`composer.json` (`min: 80500, max: 80599`; PHPStan's own reading of
+`^8.5` runs to 80699, B8). Without it the phar uses its
 runtime version, and at least 63 of phpstan-rs's constant comparisons
 (`PHP_VERSION_ID < 70400` always false, `symfony/polyfill-*`) and the
 `&&` results built on them show as phpstan-rs-only. phpstan-rs runs at
