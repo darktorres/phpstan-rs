@@ -1,7 +1,10 @@
 use indexmap::IndexMap;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+/// Each templated ancestor's template bindings, as seen from one class.
+type AncestorBindings = FxHashMap<Arc<str>, FxHashMap<String, Type>>;
 
 use crate::registry::Registry;
 use crate::registry::function_sig;
@@ -351,9 +354,17 @@ impl Registry {
     /// child method means).
     #[hotpath::measure]
     pub(crate) fn flatten_phpdoc_inheritance(&mut self) {
+        // Each class's ancestor bindings, computed at most once for the
+        // whole fixed point: they're built from its declared hierarchy and
+        // template arguments, which the passes never change.
+        let bindings: FxHashMap<Arc<str>, OnceLock<AncestorBindings>> = self
+            .classes
+            .keys()
+            .map(|name| (name.clone(), OnceLock::new()))
+            .collect();
         let max_iterations = self.classes.len().max(1);
         for _ in 0..max_iterations {
-            if !self.flatten_phpdoc_inheritance_one_pass() {
+            if !self.flatten_phpdoc_inheritance_one_pass(&bindings) {
                 break;
             }
         }
@@ -882,6 +893,23 @@ impl Registry {
         }
     }
 
+    /// `class_name`'s concrete binding for each templated ancestor
+    /// (`{ancestor => {template => type}}`). Its own templates stay
+    /// templates, scoped to it, through the mapping, so an inherited
+    /// `list<T>` becomes `list<CMTemplate>` for a `@template-implements
+    /// Factory<CMTemplate>` class rather than losing `T` to `Mixed`.
+    fn ancestor_bindings(&self, class_name: &str, info: &ClassInfo) -> AncestorBindings {
+        let own_args = info.own_template_args(class_name);
+        self.all_ancestor_names(class_name)
+            .into_iter()
+            .filter(|a| self.classes.get(a).is_some_and(|c| !c.templates.is_empty()))
+            .map(|a| {
+                let bindings = self.class_template_bindings(class_name, &own_args, &a);
+                (a, bindings)
+            })
+            .collect()
+    }
+
     /// The narrower, corrected replacement for a bare `!type_mentions_
     /// foreign_scoped_template_param(...)` check at this function's
     /// backfill call sites: a class-scoped template is safe to backfill
@@ -993,7 +1021,10 @@ impl Registry {
     /// collection loop below only reads the registry - no write happens
     /// until the sequential apply loop afterward, the identical shape
     /// `flatten_traits_one_pass` parallelizes.
-    fn flatten_phpdoc_inheritance_one_pass(&mut self) -> bool {
+    fn flatten_phpdoc_inheritance_one_pass(
+        &mut self,
+        bindings: &FxHashMap<Arc<str>, OnceLock<AncestorBindings>>,
+    ) -> bool {
         type Backfill = (
             Arc<str>,
             Arc<str>,
@@ -1030,34 +1061,16 @@ impl Registry {
                     // so `class_name`'s concrete binding for each generic
                     // ancestor is exactly what `checker::generics::
                     // substitution::substitute_class_templates` resolves
-                    // at call time later - computed once per method
-                    // (bindings don't depend on which method's signature
-                    // is being backfilled), not per backfill call site
-                    // below. See `template_param_scopes_all_safe_to_
-                    // backfill`'s doc comment for why this must be the
-                    // real resolved bindings, not merely "is this
-                    // ancestor name reachable at all.""
-                    // `class_name`'s own templates stay templates (scoped
-                    // to it) through the ancestor mapping, so an inherited
-                    // `list<T>` becomes `list<CMTemplate>` for a
-                    // `@template-implements Factory<CMTemplate>` class
-                    // rather than losing `T` to `Mixed`.
-                    let own_args = info.own_template_args(class_name);
-                    let ancestor_bindings: FxHashMap<Arc<str>, FxHashMap<String, Type>> = registry
-                        .all_ancestor_names(class_name)
-                        .into_iter()
-                        .filter(|a| {
-                            registry
-                                .classes
-                                .get(a)
-                                .is_some_and(|c| !c.templates.is_empty())
-                        })
-                        .map(|a| {
-                            let bindings =
-                                registry.class_template_bindings(class_name, &own_args, &a);
-                            (a, bindings)
-                        })
-                        .collect();
+                    // at call time later. See `template_param_scopes_all_
+                    // safe_to_backfill`'s doc comment for why this must be
+                    // the real resolved bindings, not merely "is this
+                    // ancestor name reachable at all".
+                    let ancestor_bindings = || {
+                        bindings
+                            .get(class_name)
+                            .expect("every class has a bindings slot")
+                            .get_or_init(|| registry.ancestor_bindings(class_name, info))
+                    };
                     // Mirrors real PHPStan's identical carve-out
                     // (`PhpDocInheritanceResolver::resolvePhpDocForMethod`):
                     // a subclass's `__construct` legitimately takes
@@ -1108,7 +1121,7 @@ impl Registry {
                                     && Registry::template_param_scopes_all_safe_to_backfill(
                                         &ancestor_param.ty,
                                         method_name,
-                                        &ancestor_bindings,
+                                        ancestor_bindings(),
                                     )
                                     && Registry::safe_to_backfill_object_type(
                                         &ancestor_param.ty,
@@ -1120,7 +1133,7 @@ impl Registry {
                                         function_sig::reconcile_with_native(
                                             Registry::substitute_class_scoped_ancestor_templates(
                                                 &bind_self_ref(&ancestor_param.ty, &owner),
-                                                &ancestor_bindings,
+                                                ancestor_bindings(),
                                             ),
                                             p.ty_native.clone(),
                                         ),
@@ -1142,7 +1155,7 @@ impl Registry {
                                     && Registry::template_param_scopes_all_safe_to_backfill(
                                         &ancestor_param.ty,
                                         method_name,
-                                        &ancestor_bindings,
+                                        ancestor_bindings(),
                                     )
                                     && Registry::safe_to_backfill_object_type(
                                         &ancestor_param.ty,
@@ -1154,7 +1167,7 @@ impl Registry {
                                         function_sig::reconcile_with_native(
                                             Registry::substitute_class_scoped_ancestor_templates(
                                                 &bind_self_ref(&ancestor_param.ty, &owner),
-                                                &ancestor_bindings,
+                                                ancestor_bindings(),
                                             ),
                                             p.ty_native.clone(),
                                         ),
@@ -1182,7 +1195,7 @@ impl Registry {
                         && Registry::template_param_scopes_all_safe_to_backfill(
                             &ancestor_sig.return_type,
                             method_name,
-                            &ancestor_bindings,
+                            ancestor_bindings(),
                         )
                         && Registry::safe_to_backfill_object_type(
                             &ancestor_sig.return_type,
@@ -1193,7 +1206,7 @@ impl Registry {
                             function_sig::reconcile_with_native(
                                 Registry::substitute_class_scoped_ancestor_templates(
                                     &bind_self_ref(&ancestor_sig.return_type, &owner),
-                                    &ancestor_bindings,
+                                    ancestor_bindings(),
                                 ),
                                 sig.return_type_native.clone(),
                             ),
