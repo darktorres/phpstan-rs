@@ -1272,15 +1272,28 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
     let out = capture(cargo().args([
         "test",
         "--workspace",
-        "--all-targets",
+        "--lib",
+        "--bins",
+        "--tests",
         "--quiet",
         "--",
         "--list",
         "--format",
         "terse",
     ]))?;
-    // The fixture target is `test = false`, so `--all-targets` leaves it
-    // out; list it on its own.
+    // The benches run in the gate profile, and the fixture target is
+    // `test = false`; list both from there.
+    let benches = capture(cargo().args([
+        "test",
+        "--profile",
+        "gate",
+        "--workspace",
+        "--bench",
+        "*",
+        "--quiet",
+        "--",
+        "--list",
+    ]))?;
     let fixtures = capture(cargo().args([
         "test",
         "--profile",
@@ -1293,6 +1306,7 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
     ]))?;
     Ok(out
         .lines()
+        .chain(benches.lines())
         .chain(fixtures.lines())
         .filter_map(|l| {
             l.strip_suffix(": test")
@@ -1409,7 +1423,26 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
         ]))
     })?;
     timings.time("tests", |t| {
-        test_timed(t, "", &["--workspace", "--all-targets", "--", "--quiet"])
+        test_timed(
+            t,
+            "",
+            &["--workspace", "--lib", "--bins", "--tests", "--", "--quiet"],
+        )
+    })?;
+    timings.time("benches in test mode", |t| {
+        test_timed(
+            t,
+            "gate ",
+            &[
+                "--profile",
+                "gate",
+                "--workspace",
+                "--bench",
+                "*",
+                "--",
+                "--quiet",
+            ],
+        )
     })?;
     record_fixture_types(hash, timings)?;
     timings.time("test manifest", |_| test_manifest())?;

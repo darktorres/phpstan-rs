@@ -431,11 +431,21 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   profile that inherits `gate`, against debug's, for a one-file engine
   edit (the `buildtime` "engine" scenario). Switch `gates` to it only if
   the total is lower. Debug stays the default for `cargo test`.
-- **The criterion bench under `cargo test --all-targets`:** S0 measured
-  `vendored_corpus` at 80 s in test mode, which is material. The bench
-  target gets `test = false`, and `--full`'s `cargo bench --no-run` keeps
-  compiling it. Before that lands, check what its test-mode run catches
-  that the fixtures and the corpus don't.
+- **The benches under `cargo test --all-targets`:** S0 measured
+  `vendored_corpus` at 80 s in test mode, debug. It isn't redundant: it's
+  the only per-commit check that loading and checking all 2,351
+  phpstorm-stubs and phpstan-src files doesn't panic. So it stays in the
+  quick tier, made cheap instead:
+  - the debug test step runs `--lib --bins --tests`;
+  - a `gate`-profile step runs `--bench '*'` in test mode, reusing the
+    library the fixtures already built. Both benches take 15 s there,
+    against ~82 s in debug;
+  - the test manifest lists each target from the profile it runs in.
+- **Still open:** the dev-profile `opt-level` experiment and lib tests in
+  an optimized profile. Each needs full dependency rebuilds and suite
+  runs to measure. A side result: the gate-profile lib test run took
+  47 s against 124 s in debug, but that doesn't count its separate
+  compile. Whether to run them is the user's call.
 - The commit records every measurement, whichever way each decision
   goes.
 
