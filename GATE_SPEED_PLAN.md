@@ -22,9 +22,13 @@ early; each edit goes in with the step that causes it.
   is redundant there. `--full` and CI keep running it.
 - One commit per step, verified before the next starts:
   - engine steps check the corpus (`cargo xtask corpus`, then
-    `compare`);
+    `compare`), and the fixture directories of the rules and modules
+    they touch, byte-identical (`cargo test --profile gate --test
+    fixtures -- <dir>`);
   - harness steps check the suite they touch;
-  - the full `gates` run happens once, at the end (§6).
+  - the whole fixture suite and the full `gates` run happen once, at
+    the end (§6). That's where rule 1's fixture identity is confirmed
+    for everything the per-step directories didn't cover.
 - Each commit message records the step's before and after wall times,
   measured on an idle machine from S0's timing file.
 
@@ -129,7 +133,7 @@ This is the collector shape of crate-split §3.8.
   and the main pass, so output is unchanged. Keeping only final-pass
   data is the Stage D dispatcher's job ("drops non-final-pass output").
 - Verify: corpus identical, all-on in particular; the rename rule's
-  fixtures pass.
+  fixture directory identical.
 
 ### S3. Type dump from the main pass (engine and gate)
 - `--dump-types` and `PHPSTAN_RS_DUMP_TYPES` go through
@@ -194,7 +198,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   files keep theirs. This matches the main pass and F1's panic
   isolation. The corpus has no panics, so snapshots don't change. A
   fixture that injects a panic covers the new behaviour.
-- Verify: corpus identical to S5a; LSP tests pass.
+- Verify: corpus identical to S5a; the property-assign fixtures
+  identical; LSP tests pass.
 
 ### S6. Case-folded function keys, pulled forward from C5 (engine)
 - The C5 item "a case-folded function key map replacing the linear
@@ -219,8 +224,9 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Before changing the map, list the case-colliding keys in the stubs
   and the corpus. If any exist and output changes, that lands as S6a
   with its approved delta.
-- Verify: corpus identical (after S6a); registry, LSP and function-case
-  tests pass.
+- Verify: corpus identical (after S6a); the symbol-existence and
+  function-case fixture directories identical; registry and LSP tests
+  pass.
 
 ### S7. Composer hygiene without engine I/O (engine)
 - The session resolves its root to an absolute path once, at intake,
@@ -259,8 +265,9 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   F1's VFS replaces them, because each lookup there also records a
   dependency for F2's result cache; building that ahead of F2 would be
   thrown away.
-- Verify: corpus identical, all-on in particular; composer tests pass;
-  `cargo xtask arch` passes.
+- Verify: corpus identical, all-on in particular; the composer, include
+  and PHPStan-namespace fixture directories identical; composer tests
+  pass; `cargo xtask arch` passes.
 
 ### S8. Stub-proportional work in per-project passes (engine)
 - Profile a one-line fixture's `analyse` (~38 ms).
@@ -342,6 +349,10 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   and stderr, as the determinism check does today. That catches
   process-level nondeterminism, and any difference between the runner
   and the binary; the failure message names both possibilities.
+- The cross-check covers each configuration shape the runner maps:
+  - the quick tier checks all-on, whose `--config <file>` form is the
+    same as scoped's;
+  - `--full` also checks unscoped, the `--no-composer <dir>` form.
 - Quick tier: 3 analyses instead of 6. `--full`: 2 fewer unscoped runs.
 - Per-level runs stay real runs. Under crate-split §3.9 the level decides
   which rules run, and only a level-specific run shows that.
@@ -399,6 +410,10 @@ them, so an interim fix would be thrown away:
 - `check_paths` recomputing property-assign facts over every file on
   every LSP check. The Summaries API (crate-split §3.8), stored per
   reflection snapshot with invalidation keys, replaces it;
+- `--full`'s 22 per-level runs each redo parsing and `finish_loading`.
+  The level reaches the registry through `set_configured_level` before
+  load (`session.rs:509`), so sharing one load across levels needs F1's
+  `reconfigure`, which reuses unchanged layers;
 - the facts pass still runs the whole checker, with `facts_only` checks
   scattered through it to skip report-only work. Stage D separates rules
   from inference ("analyser emits nothing"), and the facts pass becomes
