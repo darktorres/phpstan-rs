@@ -1693,6 +1693,9 @@ Pick items the same way any other Pending/partial phase gets picked up.
   to.
 - **181** (Part 12) is a product feature rather than a finding: a local
   web viewer for one analysis's results (2026-09-26).
+- **182** (Part 13) analyses Latte templates natively, parsing them into
+  the AST instead of compiling them to PHP first; Piwigo's own
+  compile-then-analyse pipeline is its reference (2026-09-27).
 
 A number between 85 and 179 with no entry here (86, 92, 93, 99,
 102-104, 106, 108, 135, 138, 158-172, 174, 175, 179) belongs to a phase that has fully
@@ -3616,10 +3619,9 @@ Maho/Laminas/PHP-DI/PSR-11-container framework-integration package
 (needs that framework's own runtime metadata model); every single-
 library type-extension package with no independent second confirmation
 (Mockery, Prophecy, Stripe SDK, Faker, Dibi, bonami/collections,
-Deployer stubs); Blade/Twig/Latte template-compiler packages (needs a
-template-DSL-to-PHP compiler plus a source-map — architecturally
-interesting but no live successor found for two of the three, and the
-third is Laravel-Blade-specific); Pest's own plugin (entirely built
+Deployer stubs); Blade/Twig/Latte template-compiler packages (no port:
+they compile templates to PHP for PHPStan to read, where phpstan-rs parses
+templates natively instead - Phase 182); Pest's own plugin (entirely built
 around Pest's global-function DSL, no portable rule surface without
 building Pest-DSL-detection infrastructure first); `#[Sealed]`-attribute
 subtype validation (already covered by real PHPStan's own native
@@ -4314,6 +4316,201 @@ of the F2 result cache and the Session VFS.
 after Stage F.
 
 **Effort: large.**
+
+
+## Part 13: Templates
+
+### Phase 182 — Latte templates analysed natively, parsed rather than compiled (§AT)
+
+A `.latte` template is PHP expressions inside HTML and `{tags}`. The
+existing route to analysing one - efabrica/phpstan-latte,
+symplify/latte-phpstan-compiler, and the ~3,300-line pipeline Piwigo
+maintains under `tools/phpstan/Latte/` - runs Latte's own PHP compiler
+before the analyser, rewrites the generated code so PHPStan can type it,
+analyses the generated files, then maps each error back through the
+`/* pos L:C */` comments Latte leaves in them. phpstan-rs already owns a
+PHP lexer, parser and AST, so it can skip the compile step: parse the
+template itself and lower it straight into the AST, every node spanned in
+the `.latte` file. The checker, ignores, baseline, use-site index and LSP
+then treat a template like any other analysed file.
+
+**What Piwigo's pipeline shows the work is** (the corpus analyses its
+output today, as plain PHP under `_analysis/phpstan-latte/`):
+- the compiled calls `($this->filters->translate)(...)` and
+  `($this->global->fn->x)($this, ...)` type as bare `callable`; the
+  pipeline redirects them to generated static shims carrying the real
+  reflected signatures, defaults included;
+- every compiled method starts with `extract()`, which makes every local
+  `mixed`; the pipeline injects `@var` types after each `extract()`,
+  after each `{capture}` target, and for `{define}` parameters (Latte
+  parses their declared types and discards them);
+- variable types come from `{templateType}` (a View class, its public
+  properties), the ambient `{varType}` block it writes into each template,
+  or by scanning app code for render calls;
+- a custom error formatter maps findings back to the template, and a
+  dead-code usage provider credits `{templateType}` View properties as
+  read - nothing in PHP ever reads them, Latte extracts them into
+  template locals.
+
+Parsed natively, none of the rewriting is needed: filters and functions
+are calls with known signatures from the start, declared types are
+declarations from the start, and findings are born on template lines.
+
+**Corpus shape** (Piwigo, Latte 3.1.6, 119 templates, 19.5k lines): about
+2,000 prints (`{$x}`/`{=...}`), 1,460 `{if}`, 1,050 `{varType}`, 170
+`{foreach}`, 117 `{templateType}`, 74 `{spaceless}`, 55 `{block}`, 51
+`{var}`, 51 `{include}`, 27 `{layout}`, 15 `{_}`; 289 `n:if`, 148
+`n:foreach`, 58 `n:attr`. The corpus's 978 `property.unused` findings on
+`*\Projection\*View` classes (approved in C3,
+`gates/approved/c3-provenance-declarations`) are those View properties,
+read only by templates.
+
+**182a — Latte syntax.** A lossless front end for Latte 3 in its own crate
+(`latte-syntax`, depending on `syntax` only):
+- an HTML-aware template lexer: text, elements and attributes, comments,
+  `<script>`/`<style>` and attribute-value contexts, with `{...}` found in
+  each; `{* comments *}`, `{l}`/`{r}`, `{syntax off}`/`n:syntax`, and a
+  `{` followed by whitespace staying literal;
+- tag parsing into `(name, arguments, modifiers)` for paired and void
+  tags, `{/tag}` and `{/}` closers, and `n:` attributes including the
+  automatic `n:inner-`/`n:tag-` forms of every pair tag
+  (`TemplateParserHtml` and `TemplateParser`, read from the vendored
+  source, are the reference);
+- arguments parsed by `syntax`'s own expression parser, extended with
+  Latte's additions: filter chains `|name:arg1,arg2`, `in`, the
+  `key: value` named-argument shorthand, unquoted strings where Latte
+  accepts them (`{include file.latte}`, `{block name}`);
+- recovery on malformed input, so a template mid-edit still yields a tree
+  and one parse diagnostic, like the PHP parser.
+
+Gate: over every corpus template, each statement Latte's own compiler
+marks with `/* pos L:C */` in its output corresponds to a node the front
+end produced at the same line and column, and vice versa. That's a
+structural oracle from the real compiler, needing no semantic agreement
+yet.
+
+**182b — Lowering.** Each template becomes a synthetic class shaped like
+Latte's own output (`extends Latte\Runtime\Template`, `main()`, one method
+per `{block}`/`{define}`), built from our AST with template spans. Core
+tags from `CoreExtension::getTags()` lower to their PHP meaning:
+- control flow: `if`/`elseif`/`else`, `ifset`, `ifchanged`, `foreach` (with
+  `$iterator` typed as `Latte\Essential\CachingIterator`, and `{first}`/
+  `{last}`/`{sep}`/`{iterateWhile}` read through it), `for`, `while`,
+  `switch`, `skipIf`/`breakIf`/`continueIf`/`exitIf`, `try`/`rollback`;
+- variables: `var`, `default`, `capture` (its target typed
+  `Latte\Runtime\Html|string|false`), `parameters`, `do`/`php`;
+- output: `{$x}`/`{=...}` as a print of the expression, `n:attr`,
+  `n:class`, `n:tag`, `contentType`, `spaceless`;
+- structure: `block`, `define` (declared parameter types kept), `include`,
+  `embed`, `import`, `extends`/`layout`.
+
+Print lowering keeps the expression, not Latte's escaping call; a value
+that can't be printed (an array, an object without `__toString()`) is a
+template error of its own (182e). A tag the lowering doesn't know is
+reported and its arguments are still checked as expressions.
+
+**182c — Types.** Where a template's variables get their types, in
+precedence order:
+- `{templateType Cls}`: `Cls`'s public properties, the way Latte's
+  `render()` exposes an object's parameters;
+- `{parameters ...}` and `{define}` parameters: their declared types;
+- `{varType Type $x}`: the declared type (Latte compiles it to nothing and
+  trusts the app, as PHPStan trusts `@var`);
+- render call sites found in PHP: `Engine::render()`/`renderToString()`
+  with a template path the loader configuration resolves, and an array or
+  object of parameters, typed from that argument at each site and unioned;
+- otherwise `mixed`.
+
+A template with a declared contract (`{templateType}` or `{parameters}`)
+reports a variable that is in neither the contract nor the ambient
+`{varType}` block as undefined; one without a contract can't know, and
+doesn't. App-specific conventions (Piwigo's `assignContext()`, its
+`#[Template]` View attribute) are left to configuration or later work: the
+native declarations already cover 114 of the corpus's 119 templates, the
+rest by `{varType}`.
+
+**182d — Filters, functions and extensions.** Latte's built-in filters
+(`Latte\Essential\Filters`, registered by `CoreExtension::getFilters()`)
+and functions (`getFunctions()`) come from the project's own installed
+latte/latte, read as vendor context, so their signatures always match the
+installed version. Project extensions are found where the app registers
+them (`Engine::addExtension(new X(...))`) and from an explicit
+`[ext.latte] extensions` list. Their `getFilters()`/`getFunctions()`
+arrays are read statically: first-class callables (`strtolower(...)`,
+`$this->translate(...)`, `self::jsonEncode(...)`), closures, and
+`[$obj, 'm']`, each resolved to its real signature. A filter's
+`FilterInfo` first parameter is dropped at the call, as Latte injects it,
+and a function's leading `Template` parameter likewise. Custom tags
+(`getTags()`) are PHP code run at compile time, so they can't be read;
+`[ext.latte] tags` maps one to a built-in tag's semantics (Piwigo's
+`{_ ...}` behaves as `TranslatorExtension`'s `{translate}`), and an
+unmapped one is reported with its arguments checked as expressions.
+
+**182e — Cross-template semantics and template checks.** `{include}`,
+`{embed}`, `{import}` and `{extends}`/`{layout}` resolve through the
+configured template directories (`[ext.latte] paths`, defaulting to where
+the project's templates are); `{block}` and `{define}` scope as Latte
+scopes them (a block sees the template's variables, a `{define}` only its
+parameters and the globals), and `{include block}` resolves across the
+inheritance chain. New checks, each with a `latte.*` identifier:
+- unknown tag, filter or function;
+- filter and function arguments against their signatures (the ordinary
+  argument checks, on the lowered calls);
+- an included, extended or imported template that doesn't exist, and an
+  included block no template in the chain defines;
+- a printed value that can't be printed;
+- an undefined variable under a declared contract (182c);
+- a `{varType}` that contradicts the contract's own type for the same
+  variable;
+- a `{define}` never included (opt-in, like dead code).
+
+The existing checks run unchanged on the lowered code: undefined
+methods and properties, argument types, `foreach` over a non-iterable,
+possibly-null access, and the rest.
+
+**182f — Whole-program integration.** Template reads enter the use-site
+index, so a View property or method used only by a template counts as
+used: the corpus's C3-approved View `property.unused` findings go away, as
+an approved delta. `{* @phpstan-ignore <identifier> *}` suppresses the
+way the PHP comment does, and baseline entries key on the `.latte` path.
+The Session discovers `*.latte` files as their own file kind (crate split
+F1's VFS), and a PHP edit re-checks the templates that depend on the
+changed classes, as a PHP file's dependents are re-checked today.
+
+**182g — Language server.** Diagnostics are published for `.latte`
+documents, and hover, go-to-definition and completion work inside tag
+expressions over the same lowered code; the VSCode extension registers
+the `latte` language.
+
+**182h — Retiring the compiled output on the corpus.** Once 182a-f match
+the oracle, the corpus config drops `_analysis/phpstan-latte` from its
+paths and its generated-code `ignore_errors` entries, as one approved
+delta.
+
+**Oracle.** Piwigo's own pipeline is the reference for every sub-phase:
+compile with `bin/piwigo phpstan-latte:compile`, run real PHPStan on the
+generated files, and map each error back with the pipeline's own
+`GeneratedFileErrorMapper`. The compiled files' `/** source: ... */`
+headers name absolute paths in the checkout that produced them, so they're
+resolved against the corpus root. Native findings must match per template,
+with each difference either a disclosed gap or a finding the oracle
+misses, confirmed against the template.
+
+**Activation.** An `[ext.latte]` extension in the C1 model: active when
+latte/latte is installed in the composer root, or `enabled` says so.
+Latte 3.x only; another major version is reported once and its templates
+are skipped.
+
+**Later, not in this phase:** Twig and Blade on the same front-end,
+lowering and types design; escaping-context checks (`|noescape` on
+unescaped input, a URL attribute fed a non-URL).
+
+**Depends on:** 182a on nothing (a standalone crate); 182b-e on the crate
+split's Stage E (rules as registrations, the derived nodes the checks
+read); 182f-h on F1 (the Session, its VFS and file kinds). It starts after
+Stage F, except 182a.
+
+**Effort: very large.**
 
 ---
 
