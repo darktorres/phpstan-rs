@@ -4480,12 +4480,20 @@ A unit rendered from several places starts with the union of what each
 place gives it, and a variable some place doesn't give is possibly
 undefined there.
 
-Core tags (`CoreExtension::getTags()`) lower to their PHP meaning:
+Core tags (`CoreExtension::getTags()`) lower to what each node class's
+`print()` generates, which isn't always the PHP construct of the same
+name:
 - control flow: `if`/`elseif`/`else`, `n:else`, `ifset` (narrowing as
   `isset()` does, and `{ifset block name}`/`{ifset #name}` testing a
-  block's existence), `ifchanged`,
-  `switch`, `for`, `while`, `skipIf`/`breakIf`/`continueIf`/`exitIf`,
-  `try`/`rollback`; `foreach` with `{else}`, `$iterator` typed
+  block's existence), `ifchanged`; `switch` comparing strictly (`===`,
+  `in_array(..., true)` for a `{case a, b}` list) with no fallthrough,
+  so an `if` chain rather than PHP's loose, falling-through `switch`;
+  `for`; `while`, including the `{while}...{/while $cond}` form that tests
+  after the body; `skipIf`/`breakIf`/`continueIf`/`exitIf` (`skipIf`
+  leaving `$iterator->counter` alone); `try` catching every `Throwable`,
+  discarding the block's output and rendering its `{else}`, and restoring
+  `$iterator` after it, with `rollback` throwing into it; `foreach` with
+  `{else}`, `$iterator` typed
   `Latte\Essential\CachingIterator` over the loop's iterable and chained
   to the enclosing loop's (`getParent()`), `{first}`/`{last}`/`{sep}`/
   `{iterateWhile}` read through it, and, under `ScopedLoopVariables`, the
@@ -4512,9 +4520,12 @@ Core tags (`CoreExtension::getTags()`) lower to their PHP meaning:
   Stringable|null` (`null` omitting it); `|toggle` forces the boolean
   kind and a trailing `|json` the JSON one; a quoted value
   (`name="{$x}"`) stays text interpolation;
-- structure: `block`, `define`, `include` (file, block, and `parent`/
-  `this` inside a block, rendering the overridden or current block),
-  `embed`,
+- structure: `block` (named and unique in its layer, `{block local}` in
+  the template's own layer that neither a layout nor an importer sees,
+  and the anonymous `{block|filter}` that only filters its content),
+  `define`, `include` (file - `with blocks` also bringing its blocks into
+  the including template - block, and `parent`/`this` inside a block,
+  rendering the overridden or current block), `embed`,
   `import`, `extends`/`layout`, `varType`, `templateType`,
   `templatePrint`/`varPrint`.
 
@@ -4602,7 +4613,9 @@ fixture set stands in for its oracle.
 where Latte would throw a `CompileException`: the validations in the node
 classes (`{parameters}`, `{templateType}`, `{extends}`/`{layout}` and
 `{contentType}` outside the header, an unclosed or mismatched tag, an
-unknown tag, `n:else` without its `n:if`/`n:foreach`, ...) and in the
+unknown tag, `n:else` without its `n:if`/`n:foreach`, a block name used
+twice in one layer, `n:tag` on `<script>`/`<style>`, a `|noescape` where
+no filter is expected, ...) and in the
 core passes (`$GLOBALS` and `$ʟ_*` always; `$this` and `$__*` a
 deprecation unless `StrictParsing`, an error with it; a registered
 function used as a partial `fn(...)`; a print followed by quotes inside
