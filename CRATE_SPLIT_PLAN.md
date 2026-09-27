@@ -2566,9 +2566,9 @@ building on the previous one:
     - an assignment on the right of `&&`/`||` is Maybe afterwards:
       `$c || ($y = 1); echo $y ?? 2;` is `nullCoalesce.variable` today, and
       `if ($c && ($z = 2) > 1) {}` leaves `$z` as `2`;
-    - an increment on the right of `&&` counts: in a loop,
-      `$foo && $i++;` leaves `$i` as `0` today, a wrong value (nsrt
-      `foreach-loop-variables.php`);
+    - an increment on the right of `&&` counts: `$j = 0; $foo && $j++;`
+      leaves `$j` as `0` today, a wrong value, and in a loop `$i` stays `0`
+      on every pass (nsrt `foreach-loop-variables.php`);
     - a `never` operand or arm keeps the other side's scope:
       `$v = $x !== null ? $x : throw new E();` leaves `$x` as `int|null`
       today (`$x !== null || throw` already narrows);
