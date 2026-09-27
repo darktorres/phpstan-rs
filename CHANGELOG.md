@@ -74,6 +74,9 @@ User-visible changes: output, formats, flags, configuration and exit codes.
   `CRATE_SPLIT_PLAN.md` under "Bugs found during A2" (delta
   `gates/approved/a2-known-bugs`); a duplicate method or property in a
   class body is now always reported.
+- `check_dead_members` reports an unused constructor-promoted property like
+  any other property (`dcc67ce5`), and `check_dead_code` never reports an
+  anonymous class unused (`69b97cb1`).
 
 ### Project
 - Licensed under MIT.
