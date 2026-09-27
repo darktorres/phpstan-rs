@@ -281,10 +281,18 @@ mod namespace_in_3rd_party_package {
         }
     }
 
-    fn diagnostics_for_file(php_path: &Path, src: &str) -> Vec<diagnostics::Diagnostic> {
+    /// Checks `src` as the file `php_path` of the project rooted at
+    /// `root`, with package ownership read from `root` the way a session
+    /// reads it.
+    fn diagnostics_for_file(
+        root: &TempDir,
+        php_path: &Path,
+        src: &str,
+    ) -> Vec<diagnostics::Diagnostic> {
         let tokens = Lexer::new(src).tokenize_with_spans();
         let program = Parser::new(tokens).parse_program().unwrap();
-        let registry = Registry::build(&program);
+        let mut registry = Registry::build(&program);
+        registry.package_dirs = composer::PackageContext::load(&root.0, &root.0).package_dirs();
         check_phpstan_api_usage(&program, &registry, Some(php_path))
     }
 
@@ -294,6 +302,7 @@ mod namespace_in_3rd_party_package {
         dir.write("composer.json", r#"{"name": "acme/some-extension"}"#);
         let php_path = dir.write("src/MyRule.php", "");
         let diags = diagnostics_for_file(
+            &dir,
             &php_path,
             r#"<?php
             namespace PHPStan\Rules;
@@ -315,6 +324,7 @@ mod namespace_in_3rd_party_package {
         dir.write("composer.json", r#"{"name": "phpstan/phpstan"}"#);
         let php_path = dir.write("src/Rules/Rule.php", "");
         let diags = diagnostics_for_file(
+            &dir,
             &php_path,
             r#"<?php
             namespace PHPStan\Rules;
@@ -329,6 +339,7 @@ mod namespace_in_3rd_party_package {
         let dir = TempDir::new("no_composer_json_at_all");
         let php_path = dir.write("src/MyRule.php", "");
         let diags = diagnostics_for_file(
+            &dir,
             &php_path,
             r#"<?php
             namespace PHPStan\Rules;
@@ -344,6 +355,7 @@ mod namespace_in_3rd_party_package {
         dir.write("composer.json", r#"{"name": "acme/some-extension"}"#);
         let php_path = dir.write("src/MyRule.php", "");
         let diags = diagnostics_for_file(
+            &dir,
             &php_path,
             r#"<?php
             namespace App;
