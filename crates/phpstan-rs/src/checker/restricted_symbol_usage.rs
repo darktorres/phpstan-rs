@@ -72,7 +72,7 @@ fn is_allowed_by_position(entry: &RestrictedSymbolEntry, location: ClassUsageLoc
 /// `position`+`name` worked example (`json_decode()`'s `flags`
 /// parameter, matched whether called positionally or by name).
 /// Independent of the callee's own declared parameter names - unlike
-/// `checker::calls::resolve_call_args`, which needs a `ParamSig` list
+/// `checker::calls::resolve_call_args`, which needs a `ParameterReflection` list
 /// to resolve a named argument, a named condition here needs nothing
 /// more than `arg.name == configured_name`. A spread/unpack argument
 /// makes every subsequent positional slot statically unknown, so
@@ -529,7 +529,7 @@ impl<'a> Checker<'a> {
 
     /// `allow_in_class_with_method_attributes`'s own data source - every
     /// attribute on *any* method of the current class (the enclosing
-    /// method's own attrs included, via `ClassInfo::methods`, never the
+    /// method's own attrs included, via `ClassReflection::methods`, never the
     /// class's own attrs) - distinct from `current_method_attrs`, which
     /// only ever holds the single currently-executing method's own.
     /// Collected fresh per call rather than threaded as another
@@ -894,7 +894,7 @@ impl<'a> Checker<'a> {
     /// was never actually checked against an `extends`/`implements`
     /// clause at all (only `instanceof`/`new` called `check_restricted_
     /// class_name_usage`) - mirrors `check_internal_inheritance`'s own
-    /// shape exactly (same already-resolved `ClassInfo::extends`/
+    /// shape exactly (same already-resolved `ClassReflection::extends`/
     /// `implements` fields, same whole-class-declaration span, same two
     /// call sites), minus its trait-`use` half - a banned class named in
     /// a trait's own `use` clause isn't one of the `Class`-kind ban's own

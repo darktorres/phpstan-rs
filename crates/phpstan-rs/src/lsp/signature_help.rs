@@ -51,7 +51,7 @@ use super::navigation::{ProbeScope, contains, resolve_class_ref};
 use syntax::name_resolution::NameContext;
 
 /// What a resolved signature-help target needs to look its own
-/// `FunctionSig` up (or, for `Instance`, to run the same checker probe
+/// `FunctionReflection` up (or, for `Instance`, to run the same checker probe
 /// `navigation::Resolved::Instance` already uses for hover).
 pub(crate) enum Target {
     Function(String),

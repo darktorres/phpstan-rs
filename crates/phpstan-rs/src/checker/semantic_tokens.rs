@@ -22,7 +22,7 @@
 //! widen its visibility.
 
 use crate::checker::Checker;
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use syntax::token::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +70,12 @@ impl<'a> Checker<'a> {
     /// `should_report_internal_usage(fqn)` - the exact same namespace-
     /// root gate `check_internal_function_call` applies - so an
     /// in-package call to your own `@internal` function never lights up.
-    pub(crate) fn record_function_usage_token(&mut self, fqn: &str, sig: &FunctionSig, span: Span) {
+    pub(crate) fn record_function_usage_token(
+        &mut self,
+        fqn: &str,
+        sig: &FunctionReflection,
+        span: Span,
+    ) {
         let deprecated = !self.current_scope_deprecated && sig.deprecated().is_some();
         let internal = sig.is_internal() && self.should_report_internal_usage(fqn);
         self.record_usage_semantic_token(UsageTokenKind::Function, span, deprecated, internal);

@@ -982,7 +982,7 @@ impl Project {
         // trait's own members changed in this same file) means the whole
         // registry's trait flattening can't be assumed still correct -
         // re-run it. Still far cheaper than a full reload: a HashMap scan
-        // over already-parsed ClassInfo, not a re-parse of anything.
+        // over already-parsed ClassReflection, not a re-parse of anything.
         self.registry.canonicalize_class_name_case();
         self.registry.flatten_traits();
         self.registry.resolve_method_tags();
@@ -1090,7 +1090,7 @@ impl Project {
     /// the identical direct-reference reason as the `Child`/`Base` case.
     /// The same staleness class also covers a trait's or `@mixin`'s
     /// members that some OTHER, still-loaded class already baked into
-    /// its own persistent `ClassInfo.methods`/`properties` (via
+    /// its own persistent `ClassReflection.methods`/`properties` (via
     /// `flatten_traits`/`resolve_deferred_mixins`'s
     /// `Entry::Vacant`-gated `or_insert` - additive-only, no provenance
     /// tracking, nothing in the registry ever clears/resets a class's own
@@ -1099,7 +1099,7 @@ impl Project {
     /// drop a method, or a class to drop `extends`, doesn't unstick an
     /// existing user/subclass either, unless that file is also
     /// reparsed) - not a regression this introduces, and closing it
-    /// needs own-vs-baked provenance tracking on `ClassInfo`, a
+    /// needs own-vs-baked provenance tracking on `ClassReflection`, a
     /// separate, larger registry-architecture change.
     ///
     /// `path` itself is always a key in the returned map
@@ -1497,12 +1497,12 @@ impl Project {
     ///   is only skippable if none of its (transitively resolved) real
     ///   hosts have a private property either.
     ///
-    /// `Registry::classes`' own `ClassInfo::properties` map is already
+    /// `Registry::classes`' own `ClassReflection::properties` map is already
     /// trait-flattened by the time this runs (`Project::finish_loading`
     /// flattens traits before `collect_property_assign_facts` is ever
     /// called), so a plain lookup here is sound.
     fn file_may_write_private_property(&self, file: &FileState) -> bool {
-        fn has_private_property(info: &crate::registry::ClassInfo) -> bool {
+        fn has_private_property(info: &crate::registry::ClassReflection) -> bool {
             info.properties()
                 .values()
                 .any(|p| p.write_visibility() == Visibility::Private)
@@ -2030,13 +2030,13 @@ pub struct ParsedFile {
     references: FxHashSet<String>,
     ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
-    // registry-independent `ClassInfo`/`FunctionSig`/`Type` values (see
+    // registry-independent `ClassReflection`/`FunctionReflection`/`Type` values (see
     // `registry::build_declarations`'s own doc comment for why that
     // split is pure and safe to compute here, alongside everything else
     // in this struct) - `insert_parsed_file` feeds these into
     // `Registry::insert_built_decl` one at a time instead of re-deriving
     // them from `ast` via `Registry::index`, so the expensive "turn an
-    // AST node into a ClassInfo/FunctionSig" work runs here, in
+    // AST node into a ClassReflection/FunctionReflection" work runs here, in
     // parallel, rather than in the sequential insert loop.
     built_decls: Vec<crate::registry::BuiltDecl>,
     // This file's own top-level function declaration sites, already

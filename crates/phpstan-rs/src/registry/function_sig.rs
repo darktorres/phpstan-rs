@@ -28,7 +28,7 @@ pub(crate) use type_resolution::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ParamSig {
+pub struct ParameterReflection {
     pub(in crate::registry) name: Arc<str>,
     pub(in crate::registry) ty: Type,
     // The native, no-docblock-merge type (see `return_type_native`'s
@@ -84,11 +84,11 @@ pub struct ParamSig {
     pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
 }
 
-impl ParamSig {
+impl ParameterReflection {
     /// This parameter with `f` applied to its type, native type and out
     /// type.
-    pub fn map_types(&self, f: impl Fn(&Type) -> Type) -> ParamSig {
-        ParamSig {
+    pub fn map_types(&self, f: impl Fn(&Type) -> Type) -> ParameterReflection {
+        ParameterReflection {
             ty: f(&self.ty),
             ty_native: f(&self.ty_native),
             out_ty: self.out_ty.as_ref().map(&f),
@@ -154,23 +154,23 @@ impl ParamSig {
 }
 
 #[derive(Debug, Clone)]
-pub struct FunctionSig {
-    pub(in crate::registry) params: Vec<ParamSig>,
+pub struct FunctionReflection {
+    pub(in crate::registry) params: Vec<ParameterReflection>,
     pub(in crate::registry) return_type: Type,
     // The native-only return type, ignoring `@return` -
     // `check_method_overrides`'s return-type check is the only reader;
     // everything else wants the docblock-refined `return_type` above.
     pub(in crate::registry) return_type_native: Type,
-    // `ParamSig::has_own_doc`'s return-position equivalent.
+    // `ParameterReflection::has_own_doc`'s return-position equivalent.
     pub(in crate::registry) return_has_own_doc: bool,
-    // `ParamSig::doc_ty`'s return-position equivalent.
+    // `ParameterReflection::doc_ty`'s return-position equivalent.
     pub(in crate::registry) return_doc_ty: Option<Type>,
     // `@phpstan-self-out Type`: the receiver's type after a call to this
     // method. `None` without the tag.
     pub(in crate::registry) self_out: Option<Type>,
-    // `ParamSig::case_refs`'s return-position equivalent.
+    // `ParameterReflection::case_refs`'s return-position equivalent.
     pub(in crate::registry) return_case_refs: Vec<(Arc<str>, Arc<str>)>,
-    // `ParamSig::explicit_mixed_hint`'s return-position equivalent.
+    // `ParameterReflection::explicit_mixed_hint`'s return-position equivalent.
     pub(in crate::registry) return_explicit_mixed_hint: bool,
     // PHP 8.5's `#[\NoDiscard]` marker - `true` when a bare, unused
     // call to this declaration should be flagged
@@ -189,7 +189,7 @@ pub struct FunctionSig {
     pub(in crate::registry) is_internal: bool,
     // `@api` on this declaration's own doc comment - real PHPStan
     // checks both the declaring class's and the member's own tag;
-    // `ClassInfo::is_api` only covers the former.
+    // `ClassReflection::is_api` only covers the former.
     pub(in crate::registry) is_api: bool,
     // PHP 8.3's `#[\Override]` marker. Stored rather than checked
     // straight off the AST, since a trait method's `#[Override]` is
@@ -242,11 +242,11 @@ pub struct FunctionSig {
     pub(in crate::registry) provenance: crate::registry::provenance::Provenance,
 }
 
-impl FunctionSig {
+impl FunctionReflection {
     /// This signature with `f` applied to every type it declares: its
     /// parameters', return, `@phpstan-self-out`, `@throws` and assertion
     /// types.
-    pub fn map_types(&self, f: impl Fn(&Type) -> Type) -> FunctionSig {
+    pub fn map_types(&self, f: impl Fn(&Type) -> Type) -> FunctionReflection {
         let asserts = |infos: &[AssertInfo]| -> Vec<AssertInfo> {
             infos
                 .iter()
@@ -256,7 +256,7 @@ impl FunctionSig {
                 })
                 .collect()
         };
-        FunctionSig {
+        FunctionReflection {
             params: self.params.iter().map(|p| p.map_types(&f)).collect(),
             return_type: f(&self.return_type),
             return_type_native: f(&self.return_type_native),
@@ -270,14 +270,14 @@ impl FunctionSig {
     }
 
     /// This signature returning `ty` instead.
-    pub fn with_return_type(&self, ty: Type) -> FunctionSig {
-        FunctionSig {
+    pub fn with_return_type(&self, ty: Type) -> FunctionReflection {
+        FunctionReflection {
             return_type: ty,
             ..self.clone()
         }
     }
 
-    pub fn params(&self) -> &Vec<ParamSig> {
+    pub fn params(&self) -> &Vec<ParameterReflection> {
         &self.params
     }
 
@@ -574,7 +574,7 @@ pub(crate) fn is_allow_dynamic_properties_attribute_name(name: &str) -> bool {
         .eq_ignore_ascii_case("AllowDynamicProperties")
 }
 
-impl FunctionSig {
+impl FunctionReflection {
     /// `class_templates` is the enclosing class's own `@template` metadata
     /// (empty for a plain function, or a method on a non-generic class) -
     /// merged in alongside the function/method's own, so a method body
@@ -584,7 +584,7 @@ impl FunctionSig {
     /// same-named template (rare, but not invalid PHP) wins on a
     /// collision, matching a nested scope shadowing an outer one.
     // `class_type_aliases` is this method's own declaring class's
-    // `@phpstan-type` table (`ClassInfo::from_decl`'s own `build_type_
+    // `@phpstan-type` table (`ClassReflection::from_decl`'s own `build_type_
     // aliases`) - empty for a plain top-level function or an enum's own
     // synthesized method (neither has a class-level docblock these could
     // meaningfully come from). A method's own docblock declaring further
@@ -598,7 +598,7 @@ impl FunctionSig {
         class_templates: &FxHashMap<String, TemplateParam>,
         class_type_aliases: &FxHashMap<Arc<str>, Type>,
         visibility: Visibility,
-    ) -> FunctionSig {
+    ) -> FunctionReflection {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
         let mut template_params: FxHashMap<String, TemplateParam> = doc
             .as_ref()
@@ -696,7 +696,7 @@ impl FunctionSig {
                     .as_ref()
                     .and_then(|d| d.param_out.get(p.name.as_ref()))
                     .map(&resolve_doc_type);
-                ParamSig {
+                ParameterReflection {
                     attributes: ReflectionAttribute::all(&p.attrs, ctx),
                     name: p.name.clone(),
                     ty,
@@ -785,7 +785,7 @@ impl FunctionSig {
             })
             .unwrap_or_default();
 
-        FunctionSig {
+        FunctionReflection {
             provenance: crate::registry::provenance::Provenance::default(),
             params,
             return_type,
@@ -827,9 +827,9 @@ impl FunctionSig {
     /// same function name - the real-overload shape phpstorm-stubs uses
     /// for `strtr` (a 3-string-argument form and a 2-argument, `array
     /// $replace_pairs` form, as two separate top-level declarations
-    /// sharing one name), mirroring `ClassInfo::merge`'s own "later
+    /// sharing one name), mirroring `ClassReflection::merge`'s own "later
     /// declaration wins on conflict" convention.
-    pub(crate) fn merge(self, other: FunctionSig) -> FunctionSig {
+    pub(crate) fn merge(self, other: FunctionReflection) -> FunctionReflection {
         let return_type = union_types(self.return_type, other.return_type);
         let return_type_native = union_types(self.return_type_native, other.return_type_native);
         // Permissive, same direction as `variadic`/`has_default` below:
@@ -849,10 +849,10 @@ impl FunctionSig {
             let a = self_params.next();
             let b = other_params.next();
             let merged = match (a, b) {
-                (Some(a), Some(b)) => ParamSig {
+                (Some(a), Some(b)) => ParameterReflection {
                     attributes: b.attributes,
                     // Later declaration wins on conflict, matching
-                    // `ClassInfo::merge`'s own convention.
+                    // `ClassReflection::merge`'s own convention.
                     name: b.name,
                     ty: union_types(a.ty, b.ty),
                     ty_native: union_types(a.ty_native, b.ty_native),
@@ -909,7 +909,7 @@ impl FunctionSig {
             };
             params.push(merged);
         }
-        FunctionSig {
+        FunctionReflection {
             provenance: self.provenance.clone(),
             params,
             return_type,
@@ -1008,9 +1008,9 @@ impl FunctionSig {
 /// (phpstorm-stubs always writes the legacy era first), at the
 /// *position* of its *first*, so later uniquely-named parameters aren't
 /// shifted.
-fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
+fn dedup_versioned_params(params: Vec<ParameterReflection>) -> Vec<ParameterReflection> {
     let mut order: Vec<Arc<str>> = Vec::new();
-    let mut by_name: FxHashMap<Arc<str>, ParamSig> = FxHashMap::default();
+    let mut by_name: FxHashMap<Arc<str>, ParameterReflection> = FxHashMap::default();
     for p in params {
         if !by_name.contains_key(&p.name) {
             order.push(p.name.clone());
@@ -1030,12 +1030,12 @@ fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
 /// shared by `format_signature` and `signature_help`'s own per-parameter
 /// `ParameterInformation` list, so the two never drift apart on how a
 /// parameter is rendered.
-pub(crate) fn param_label(p: &ParamSig) -> String {
+pub(crate) fn param_label(p: &ParameterReflection) -> String {
     let dots = if p.variadic { "..." } else { "" };
     format!("{} {dots}${}", p.ty, p.name)
 }
 
-pub fn format_signature(name: &str, sig: &FunctionSig) -> String {
+pub fn format_signature(name: &str, sig: &FunctionReflection) -> String {
     let params: Vec<String> = sig.params.iter().map(param_label).collect();
     format!("{name}({}): {}", params.join(", "), sig.return_type)
 }

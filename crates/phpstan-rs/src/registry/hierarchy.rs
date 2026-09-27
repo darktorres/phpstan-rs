@@ -5,7 +5,9 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use crate::registry::Registry;
-use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig};
+use crate::registry::{
+    ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
+};
 use syntax::ast::ClassKind;
 use syntax::intern::intern;
 use types::Type;
@@ -79,7 +81,7 @@ impl Registry {
 
     /// Is `class` (or any ancestor it `extends`) tagged
     /// `@phpstan-immutable` (or `@phpstan-readonly` - both fold into
-    /// `ClassInfo::is_immutable`)? Query-time, `extends`-only, mirroring
+    /// `ClassReflection::is_immutable`)? Query-time, `extends`-only, mirroring
     /// real PHPStan's own `ClassReflection::isImmutable()` (walks
     /// `getParentClass()` only, never `implements`/`uses`).
     pub(crate) fn class_is_immutable(&self, class: &str) -> bool {
@@ -379,7 +381,7 @@ impl Registry {
             .unwrap_or_else(|| method.to_string())
     }
 
-    pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionSig> {
+    pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionReflection> {
         let owners = self.method_owner_by_class.get(class)?;
         if let Some(owner) = owners.get(method) {
             return self.classes.get(owner)?.methods.get(method);
@@ -432,7 +434,7 @@ impl Registry {
     }
 
     /// `all_method_names`'s own const counterpart (an enum's cases are
-    /// folded into this same map - see `ClassInfo::consts`'s own doc
+    /// folded into this same map - see `ClassReflection::consts`'s own doc
     /// comment).
     pub(crate) fn all_const_names(&self, class: &str) -> impl Iterator<Item = &str> {
         self.const_owner_by_class
@@ -468,7 +470,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(Arc<str>, &FunctionSig)> {
+    ) -> Option<(Arc<str>, &FunctionReflection)> {
         let owners = self.method_owner_by_class.get(class)?;
         if let Some(owner) = owners.get(method) {
             let sig = self.classes.get(owner)?.methods.get(method)?;
@@ -491,7 +493,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(Arc<str>, &FunctionSig)> {
+    ) -> Option<(Arc<str>, &FunctionReflection)> {
         let owner = self
             .ancestor_method_owner_by_class
             .get(class)?
@@ -531,7 +533,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(Arc<str>, &FunctionSig, bool)> {
+    ) -> Option<(Arc<str>, &FunctionReflection, bool)> {
         let info = self.classes.get(class)?;
         // 1. Immediately-implemented interfaces - walks each interface's
         //    *own* ancestor chain too (`lookup_method_with_owner`, not a
@@ -585,7 +587,7 @@ impl Registry {
     ///
     /// Deliberately doesn't synthesize a zero-parameter dummy constructor
     /// for a tagged ancestor with no `__construct` of its own the way real
-    /// PHPStan's `DummyConstructorReflection` does - every `FunctionSig`
+    /// PHPStan's `DummyConstructorReflection` does - every `FunctionReflection`
     /// this project returns is borrowed from `self.classes`, and a class
     /// that bothers tagging itself `@phpstan-consistent-constructor` at
     /// all almost always also declares the constructor it's pinning down
@@ -594,7 +596,7 @@ impl Registry {
     pub(crate) fn find_consistent_constructor_ancestor(
         &self,
         class: &str,
-    ) -> Option<(Arc<str>, &FunctionSig)> {
+    ) -> Option<(Arc<str>, &FunctionReflection)> {
         let mut current = self.classes.get(class)?.extends.first()?.clone();
         for _ in 0..self.classes.len().max(1) {
             let info = self.classes.get(&current)?;
@@ -693,7 +695,7 @@ impl Registry {
         &self,
         class: &str,
         prop: &str,
-    ) -> Option<(Arc<str>, &PropertySig)> {
+    ) -> Option<(Arc<str>, &PropertyReflection)> {
         let owner = self
             .ancestor_property_owner_by_class
             .get(class)?
@@ -785,7 +787,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Vec<(Arc<str>, &FunctionSig)> {
+    ) -> Vec<(Arc<str>, &FunctionReflection)> {
         let mut seen_classes = FxHashSet::default();
         let mut class_queue: VecDeque<Arc<str>> = VecDeque::new();
         class_queue.push_back(intern(class));
@@ -840,7 +842,7 @@ impl Registry {
                 continue;
             };
             if info.kind == ClassKind::Interface {
-                // A purely magic `@method` tag (see `FunctionSig::is_magic`)
+                // A purely magic `@method` tag (see `FunctionReflection::is_magic`)
                 // documents a capability, not a requirement - real PHP
                 // has no way to express "this interface method is
                 // optional," so an interface's real, textually-declared
@@ -901,7 +903,7 @@ impl Registry {
     /// introduced via constructor promotion). A single two-level
     /// `HashMap` lookup against `self.property_owner_by_class` - see
     /// `precompute_member_owners`'s own doc comment.
-    pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertySig> {
+    pub fn lookup_property(&self, class: &str, prop: &str) -> Option<&PropertyReflection> {
         let owner = self.property_owner_by_class.get(class)?.get(prop)?;
         self.classes.get(owner)?.properties.get(prop)
     }
@@ -913,7 +915,7 @@ impl Registry {
         &self,
         class: &str,
         prop: &str,
-    ) -> Option<(Arc<str>, &PropertySig)> {
+    ) -> Option<(Arc<str>, &PropertyReflection)> {
         let owner = self.property_owner_by_class.get(class)?.get(prop)?;
         let sig = self.classes.get(owner)?.properties.get(prop)?;
         Some((owner.clone(), sig))
@@ -921,7 +923,7 @@ impl Registry {
 
     /// Looks up a class constant, walking the ancestor graph if not
     /// declared directly on `class` - mirrors `lookup_property`.
-    pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstSig> {
+    pub fn lookup_const(&self, class: &str, const_name: &str) -> Option<&ConstantReflection> {
         let owner = self.const_owner_by_class.get(class)?.get(const_name)?;
         self.classes.get(owner)?.consts.get(const_name)
     }
@@ -936,14 +938,14 @@ impl Registry {
         &self,
         class: &str,
         const_name: &str,
-    ) -> Option<(Arc<str>, &ConstSig)> {
+    ) -> Option<(Arc<str>, &ConstantReflection)> {
         let owner = self.const_owner_by_class.get(class)?.get(const_name)?;
         let sig = self.classes.get(owner)?.consts.get(const_name)?;
         Some((owner.clone(), sig))
     }
 
     /// A backed enum case's own literal backing value, if this
-    /// checker was able to prove one (see `ClassInfo::enum_case_values`'s
+    /// checker was able to prove one (see `ClassReflection::enum_case_values`'s
     /// own doc comment) - not hierarchy-walked, since an enum can't
     /// extend anything for a case to inherit from in the first place.
     pub fn enum_case_value(&self, class: &str, case: &str) -> Option<&Type> {
@@ -977,16 +979,19 @@ impl Registry {
     }
 
     /// The function `name` names, compared case-insensitively as PHP does.
-    pub fn lookup_function(&self, name: &str) -> Option<&FunctionSig> {
+    pub fn lookup_function(&self, name: &str) -> Option<&FunctionReflection> {
         self.functions.get(name)
     }
 
     /// `lookup_function`'s canonical-name-returning sibling, mirroring
-    /// `lookup_class`'s `(&str, &Info)` shape - `FunctionSig` carries no
+    /// `lookup_class`'s `(&str, &Info)` shape - `FunctionReflection` carries no
     /// `name` field, so `check_function_name_case`'s
     /// `function.nameCase` diagnostic needs this to report the real
     /// declared casing rather than just presence.
-    pub(crate) fn lookup_function_with_name(&self, name: &str) -> Option<(&str, &FunctionSig)> {
+    pub(crate) fn lookup_function_with_name(
+        &self,
+        name: &str,
+    ) -> Option<(&str, &FunctionReflection)> {
         self.functions.get_with_name(name)
     }
 
@@ -1005,7 +1010,7 @@ impl Registry {
     /// one exact `get` - real cost given
     /// `check_type_class_names_exist` calls this once per parameter and
     /// once per return type on every function checked.
-    pub fn lookup_class(&self, name: &str) -> Option<(&str, &ClassInfo)> {
+    pub fn lookup_class(&self, name: &str) -> Option<(&str, &ClassReflection)> {
         if let Some((k, v)) = self.classes.get_key_value(name) {
             return Some((k.as_ref(), v));
         }
@@ -1017,7 +1022,7 @@ impl Registry {
 
     /// The entity that names `repository_fqn` as its own
     /// `#[ORM\Entity(repositoryClass: ...)]` argument, if any - the
-    /// reverse of `ClassInfo::doctrine_entity`'s own `repository_class`
+    /// reverse of `ClassReflection::doctrine_entity`'s own `repository_class`
     /// field, needed to resolve `EntityRepository::createQueryBuilder()`'s
     /// implicit `FROM` when checking a repository class's own method
     /// body (ROADMAP Phase 168 168b). A plain linear scan, not a

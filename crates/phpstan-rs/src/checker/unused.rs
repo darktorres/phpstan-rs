@@ -139,7 +139,7 @@ impl<'a> Checker<'a> {
     /// this class's own declared bodies. Scanning only
     /// `methods`/`properties`/`consts` exactly as declared on this one
     /// `ClassDecl`/`EnumDecl` (never the registry's own trait-flattened
-    /// `ClassInfo`) means a trait-provided member is never a candidate
+    /// `ClassReflection`) means a trait-provided member is never a candidate
     /// here at all.
     pub(crate) fn check_unused_private_members(
         &mut self,

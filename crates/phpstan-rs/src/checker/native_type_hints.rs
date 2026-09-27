@@ -19,7 +19,7 @@
 //! parameter (unless that type is only `mixed`).
 
 use crate::checker::Checker;
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use types::PhpVersion;
 use types::TrinaryLogic;
@@ -195,7 +195,7 @@ impl<'a> Checker<'a> {
         f: &FunctionDecl,
         class_name: Option<&str>,
         label: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
     ) {
         if f.name.starts_with("__") && class_name.is_some() {
             return;

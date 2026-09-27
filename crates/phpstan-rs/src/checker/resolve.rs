@@ -1,5 +1,5 @@
 use crate::checker::{Checker, Locals, class_type_word};
-use crate::registry::{self, FunctionSig};
+use crate::registry::{self, FunctionReflection};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::StaticTarget;
 use syntax::token::Span;
@@ -48,7 +48,7 @@ impl<'a> Checker<'a> {
     /// An inline `@var` annotation via `inline_var_
     /// annotation` below - one of a few places in this checker that build
     /// a `Type` straight from source without going through the registry's
-    /// own `FunctionSig::from_decl`, which already resolves names as part
+    /// own `FunctionReflection::from_decl`, which already resolves names as part
     /// of its pipeline; `checker.rs`'s anonymous-class param/return
     /// docblock fallback is another, patched the same way at its own two
     /// call sites) and resolves any class name in it against this file's
@@ -92,14 +92,14 @@ impl<'a> Checker<'a> {
     /// array-key`, `/** @var Tk $key */` referencing it directly (no
     /// enclosing class at all). Function-level wins on a name collision
     /// with a class-level template of the same name, mirroring
-    /// `FunctionSig::from_decl`'s own identical "this function's own
+    /// `FunctionReflection::from_decl`'s own identical "this function's own
     /// same-named template wins over the class's" precedent.
     pub(crate) fn resolve_type_hint(&self, hint: Option<&str>) -> Type {
         self.resolve_type_hint_with_case_refs(hint).0
     }
 
     /// `resolve_type_hint`'s own case_refs-
-    /// collecting sibling - a closure/arrow-fn literal has no `FunctionSig`
+    /// collecting sibling - a closure/arrow-fn literal has no `FunctionReflection`
     /// of its own for `case_refs` to live on at registry-build time the
     /// way an ordinary function/method parameter's does, so this
     /// registry-independent, checker-side pipeline collects them fresh at
@@ -143,7 +143,7 @@ impl<'a> Checker<'a> {
 
     /// Rebuilds the same `HashMap<String, TemplateParam>` `registry::
     /// build_template_params` would produce for `self.current_class`, by
-    /// reading it back from the already-indexed `ClassInfo` instead of
+    /// reading it back from the already-indexed `ClassReflection` instead of
     /// re-parsing a docblock - `resolve_type_hint` needs this to
     /// recognize a class-level template by name before ever resolving
     /// names in a type string built independently of the registry's own
@@ -199,8 +199,8 @@ impl<'a> Checker<'a> {
     }
 
     /// The `current_class_template_params` equivalent for the current
-    /// function/method's own `@template`s. `FunctionSig` doesn't persist
-    /// its own raw template *names* the way `ClassInfo` does, so unlike
+    /// function/method's own `@template`s. `FunctionReflection` doesn't persist
+    /// its own raw template *names* the way `ClassReflection` does, so unlike
     /// the class-level lookup above, this reads them back off
     /// `Type::TemplateParam` nodes already present in the signature's
     /// params/return type (each still carrying its full
@@ -247,7 +247,7 @@ impl<'a> Checker<'a> {
     /// function/method's own `@template` (real PHPStan runs the
     /// identical check for a closure/arrow-fn too, but neither is
     /// indexed into this project's registry, so there's no persisted
-    /// `FunctionSig`/template-name list for either to run against). Real
+    /// `FunctionReflection`/template-name list for either to run against). Real
     /// PHPStan's `TypeTraverser`-based full-tree walk over every
     /// parameter's type is what the params-only pass below re-derives; a
     /// template that only shows up in the return type (the common,
@@ -255,12 +255,12 @@ impl<'a> Checker<'a> {
     /// `T`-typed parameter) is what the difference against the
     /// params+return pass catches. Deliberately narrower in one way: a
     /// template declared but referenced nowhere at all in its signature
-    /// is invisible to this check too, since `FunctionSig` has no
+    /// is invisible to this check too, since `FunctionReflection` has no
     /// separate record of a declared template's bare name independent of
     /// where it's used (see `current_function_template_params`).
     pub(crate) fn check_template_type_not_in_parameter(
         &mut self,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         bare_name: &str,
         class_name: Option<&str>,
         label: &str,
@@ -462,7 +462,7 @@ impl<'a> Checker<'a> {
     /// non-bleeding-edge default config
     /// (`checkImportedClassNameCase`/`checkInternalClassCaseSensitivity`
     /// both `false`). `raw` is the reference exactly as written in
-    /// source (needed fresh here, not `ClassInfo::extends`/etc., which
+    /// source (needed fresh here, not `ClassReflection::extends`/etc., which
     /// `Registry::canonicalize_class_name_case` already rewrites to
     /// canonical case at registry-build time).
     /// A fix rewriting the name `raw`, written at `span`, to `canonical`'s

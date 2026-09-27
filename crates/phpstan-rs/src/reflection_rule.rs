@@ -1,14 +1,14 @@
 //! A documented, public reflection-level extension surface.
 //! `phpstan-rs` is already a library crate: `Project::registry()`/
 //! `check_file` are `pub`, `Registry::classes`/`.functions` are `pub`
-//! `FxHashMap`s of fully-`pub`-fielded `ClassInfo`/`FunctionSig`,
+//! `FxHashMap`s of fully-`pub`-fielded `ClassReflection`/`FunctionReflection`,
 //! `Diagnostic` is a `pub struct` with every field `pub`, and
 //! `ast::{Stmt, Expr, ...}` is fully public - this trait gives an
 //! external crate a named entry point for exactly this kind of check,
 //! rather than writing it by hand against `project.registry().classes`.
 //!
-//! **What this tier can see**: whatever a fully-resolved `ClassInfo`/
-//! `FunctionSig` records - declared types (native and PHPDoc-merged),
+//! **What this tier can see**: whatever a fully-resolved `ClassReflection`/
+//! `FunctionReflection` records - declared types (native and PHPDoc-merged),
 //! visibility, `@template`/`@throws`/`@deprecated`/... metadata,
 //! signatures. **What this tier cannot see**: any per-expression
 //! *inferred* type, flow-sensitive narrowing, or per-statement `Locals`
@@ -22,7 +22,7 @@
 //! `checker::internal_rules`'s own doc comment) would need a real
 //! `Scope` facade to expose safely, which doesn't exist yet.
 
-use crate::registry::{ClassInfo, FunctionSig};
+use crate::registry::{ClassReflection, FunctionReflection};
 use diagnostics::Diagnostic;
 
 /// One reflection-level check. Default no-op bodies (unlike this
@@ -32,7 +32,7 @@ use diagnostics::Diagnostic;
 pub trait ReflectionRule: Send + Sync {
     /// `fqn` is `class`'s own fully-qualified name, the same key it's
     /// stored under in `Registry::classes`.
-    fn check_class(&self, class: &ClassInfo, fqn: &str) -> Vec<Diagnostic> {
+    fn check_class(&self, class: &ClassReflection, fqn: &str) -> Vec<Diagnostic> {
         let _ = (class, fqn);
         Vec::new()
     }
@@ -42,7 +42,7 @@ pub trait ReflectionRule: Send + Sync {
     /// function only - a method is reached through `class.methods`
     /// inside `check_class` instead, since `Registry::functions` never
     /// holds one).
-    fn check_function(&self, sig: &FunctionSig, fqn: &str) -> Vec<Diagnostic> {
+    fn check_function(&self, sig: &FunctionReflection, fqn: &str) -> Vec<Diagnostic> {
         let _ = (sig, fqn);
         Vec::new()
     }

@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::checker::{Checker, Locals, purge_stale_narrowing_for, union_types};
-use crate::registry::{FunctionSig, ParamSig};
+use crate::registry::{FunctionReflection, ParameterReflection};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::{self, Type};
@@ -18,7 +18,7 @@ pub(crate) mod parameters;
 pub(crate) struct CheckArgsCall<'a> {
     pub(crate) callee_label: &'a str,
     pub(crate) callee: parameters::Callee<'a>,
-    pub(crate) sig: &'a FunctionSig,
+    pub(crate) sig: &'a FunctionReflection,
     pub(crate) args: &'a [Arg],
     pub(crate) locals: &'a Locals,
     pub(crate) defining_class: Option<&'a str>,
@@ -36,7 +36,7 @@ impl<'a> Checker<'a> {
     /// there's nothing to hint.
     pub(crate) fn maybe_record_param_name_hints(
         &mut self,
-        sig: Option<&FunctionSig>,
+        sig: Option<&FunctionReflection>,
         args: &[Arg],
     ) {
         if !self.collect_inlay_hints {
@@ -68,7 +68,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn predefine_byref_or_unknown_args(
         &self,
         call_name: Option<&str>,
-        sig: Option<&FunctionSig>,
+        sig: Option<&FunctionReflection>,
         args: &[Arg],
         resolved: &[Option<&Expr>],
         locals: &mut Locals,
@@ -342,7 +342,7 @@ impl<'a> Checker<'a> {
     /// type, and no native type (PHP checks parameter types on entry only).
     pub(crate) fn apply_param_out_types(
         &self,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         args: &[Arg],
         locals: &mut Locals,
     ) {
@@ -494,7 +494,7 @@ impl<'a> Checker<'a> {
     fn check_boolean_trap_arguments(
         &mut self,
         callee_label: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         args: &[Arg],
         defining_class: Option<&str>,
     ) {
@@ -542,7 +542,7 @@ impl<'a> Checker<'a> {
     fn check_swapped_argument_names(
         &mut self,
         callee_label: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         args: &[Arg],
         defining_class: Option<&str>,
     ) {
@@ -691,7 +691,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Resolves the two common, statically-knowable
-    /// `call_user_func(_array)` callable shapes to a real `FunctionSig` -
+    /// `call_user_func(_array)` callable shapes to a real `FunctionReflection` -
     /// a plain string-literal function name, or a two-element array
     /// literal naming a class/object plus a literal method name. Any
     /// other shape (a closure literal, a bare variable of unknown type,
@@ -701,7 +701,7 @@ impl<'a> Checker<'a> {
         &self,
         callable_expr: &Expr,
         locals: &Locals,
-    ) -> Option<&FunctionSig> {
+    ) -> Option<&FunctionReflection> {
         let callable_expr = unwrap_grouping(callable_expr);
         if let Some(name) = literal_string_value(callable_expr) {
             return self.registry.lookup_function(name.trim_start_matches('\\'));
@@ -872,7 +872,10 @@ pub(crate) fn is_language_construct(name: &str) -> bool {
 /// be resolved to a slot once one is seen - but a named argument
 /// following a spread (legal PHP: `f(...$a, name: $b)`) still resolves
 /// exactly as it would anywhere else.
-pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec<Option<&'a Expr>> {
+pub(crate) fn resolve_call_args<'a>(
+    args: &'a [Arg],
+    params: &[ParameterReflection],
+) -> Vec<Option<&'a Expr>> {
     let mut resolved: Vec<Option<&Expr>> = vec![None; params.len()];
     let mut positional_index = 0usize;
     let mut spread_seen = false;
@@ -918,7 +921,7 @@ pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec
 /// reusing that same declared name for every overflow argument.
 pub(crate) fn call_arg_param_name_hints(
     args: &[Arg],
-    params: &[ParamSig],
+    params: &[ParameterReflection],
 ) -> Vec<(Span, Arc<str>)> {
     let mut hints = Vec::new();
     let mut positional_index = 0usize;

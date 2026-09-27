@@ -1,6 +1,6 @@
 //! Doctrine ORM entity metadata (ROADMAP Phase 168 168a) - extracted
 //! once, here, from a class's own `#[ORM\...]` attributes, reusing the
-//! native property types `ClassInfo::from_decl` has already resolved
+//! native property types `ClassReflection::from_decl` has already resolved
 //! (this project's own already-indexed property types answer "what type
 //! is this entity field" for free - no from-scratch Doctrine mapping-
 //! metadata resolver needed, unlike real PHPStan's own `phpstan-doctrine`,
@@ -26,7 +26,7 @@ use syntax::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, Stat
 use syntax::intern::intern;
 use types::Type;
 
-use super::PropertySig;
+use super::PropertyReflection;
 use syntax::name_resolution::NameContext;
 
 /// One Doctrine association property (`#[ORM\ManyToOne]`/`OneToOne`/
@@ -54,7 +54,7 @@ pub struct DoctrineEntity {
     /// produce either way).
     pub id_field: Option<Arc<str>>,
     /// Every mapped scalar field's own already-resolved native type
-    /// (reused from `ClassInfo::properties`, not re-resolved here) -
+    /// (reused from `ClassReflection::properties`, not re-resolved here) -
     /// keyed by property name, association properties included too
     /// (their "field type" is the association's own declared type,
     /// consulted only via `associations` below in practice).
@@ -185,8 +185,8 @@ fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> FxHashMap<Strin
 
 /// One mapped property's own raw attribute list, alongside the FQN
 /// association target this project can already tell from its
-/// already-resolved native type (`PropertySig::ty_native`) - the same
-/// type `ClassInfo::from_decl` resolved for completely unrelated reasons
+/// already-resolved native type (`PropertyReflection::ty_native`) - the same
+/// type `ClassReflection::from_decl` resolved for completely unrelated reasons
 /// (real property-access type-checking), reused here rather than
 /// re-parsing `#[ORM\ManyToOne(targetEntity: ...)]`'s own argument for
 /// the common case where the property's own native type already names
@@ -206,7 +206,7 @@ fn association_target_from_native_type(ty: &Type) -> Option<String> {
 pub(crate) fn compute_doctrine_entity(
     c: &ClassDecl,
     ctx: &NameContext,
-    properties: &FxHashMap<Arc<str>, PropertySig>,
+    properties: &FxHashMap<Arc<str>, PropertyReflection>,
 ) -> Option<DoctrineEntity> {
     let entity_attr = find_orm_attribute(ctx, &c.attrs, "Entity")?;
     let repository_class =

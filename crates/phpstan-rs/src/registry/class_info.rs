@@ -3,8 +3,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::registry::function_sig::{
-    FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
-    build_type_aliases, infer_class_const_type, mark_template_params,
+    FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
+    build_template_params, build_type_aliases, infer_class_const_type, mark_template_params,
     resolve_type_with_parsed_native, substitute_type_aliases,
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
@@ -33,7 +33,7 @@ pub(crate) use tag_synthesis::object_class_names;
 pub(crate) use virtual_property::{hook_body_calls_parent_hook, hook_body_references_property};
 use virtual_property::{hooks_reference_backing_storage, property_hook_set_type};
 
-impl PropertySig {
+impl PropertyReflection {
     /// Whether a read is legal: not a `@property-write` tag, and a
     /// virtual hooked property needs a `get` hook.
     pub fn is_readable(&self) -> bool {
@@ -48,7 +48,7 @@ impl PropertySig {
 }
 
 #[derive(Debug, Clone)]
-pub struct PropertySig {
+pub struct PropertyReflection {
     pub(in crate::registry) ty: Type,
     pub(in crate::registry) is_static: bool,
     pub(in crate::registry) is_readonly: bool,
@@ -110,7 +110,7 @@ pub struct PropertySig {
     // an established per-item place to write the tag.
     pub(in crate::registry) is_internal: bool,
     // `@deprecated` on this property's own doc comment - direct mirror of
-    // `FunctionSig::deprecated`'s "own tag only, no class-level fallback"
+    // `FunctionReflection::deprecated`'s "own tag only, no class-level fallback"
     // scoping. Same restriction as `is_internal` above.
     pub(in crate::registry) deprecated: Option<String>,
     // Whether this property's own declaration (an ordinary
@@ -120,7 +120,7 @@ pub struct PropertySig {
     // candidate gate needs the class's AST to compute this, which isn't
     // available for an arbitrary `$obj->prop` access (only for
     // `$this->prop` inside the class currently being checked), so this
-    // field makes the same fact available from `PropertySig` alone, for
+    // field makes the same fact available from `PropertyReflection` alone, for
     // `check_pointless_offset_or_property_probe`'s "maybe genuinely
     // uninitialized, don't flag isset() as redundant" exemption. `false`
     // (the safe, permissive default) for every synthetic property with
@@ -138,7 +138,7 @@ pub struct PropertySig {
     pub(in crate::registry) has_get_hook: bool,
     pub(in crate::registry) has_set_hook: bool,
     // The native, no-docblock-merge type this property alone declares -
-    // the exact `ty`-vs-`ty_native` split `ParamSig` has, needed here for
+    // the exact `ty`-vs-`ty_native` split `ParameterReflection` has, needed here for
     // `OverridingPropertyRule`'s `property.nativeType`/
     // `.missingNativeType`/`.extraNativeType` family, which real PHPStan
     // checks purely at the native level. `resolve_type(None, native_hint)`
@@ -149,11 +149,11 @@ pub struct PropertySig {
     pub(in crate::registry) ty_native: Type,
     // This declaration's own PHPDoc type (`@var`, or for a promoted
     // property its constructor `@param`/inline `@var`), resolved but not
-    // reconciled with the native hint - `ParamSig::doc_ty`'s property
+    // reconciled with the native hint - `ParameterReflection::doc_ty`'s property
     // equivalent. `None` without one.
     pub(in crate::registry) doc_ty: Option<Type>,
     pub(in crate::registry) has_native_type: bool,
-    // `ParamSig::case_refs`'s property-position equivalent. Populated
+    // `ParameterReflection::case_refs`'s property-position equivalent. Populated
     // identically at all three real construction sites (plain declared
     // property, promoted constructor property, `@property`/`-read`/
     // `-write` tag).
@@ -165,7 +165,7 @@ pub struct PropertySig {
     pub(in crate::registry) provenance: Provenance,
 }
 
-impl PropertySig {
+impl PropertyReflection {
     pub fn ty(&self) -> &Type {
         &self.ty
     }
@@ -268,10 +268,10 @@ impl PropertySig {
 }
 
 // A class constant's `public`/`private`/`protected` modifier (PHP 7.1+).
-// Mirrors `PropertySig`'s shape, minus the property-only concerns
+// Mirrors `PropertyReflection`'s shape, minus the property-only concerns
 // (`is_static`/`is_readonly`/`set_ty`) a constant has no equivalent of.
 #[derive(Debug, Clone)]
-pub struct ConstSig {
+pub struct ConstantReflection {
     pub(in crate::registry) ty: Type,
     pub(in crate::registry) visibility: Visibility,
     // `final const` (PHP 8.1+).
@@ -283,17 +283,17 @@ pub struct ConstSig {
     // The declared value's own type, regardless of any `@var`.
     pub(in crate::registry) value_ty: Type,
     // `@internal` on this constant's own doc comment - direct mirror of
-    // `PropertySig::is_internal`. Always `false` for an enum case (no
+    // `PropertyReflection::is_internal`. Always `false` for an enum case (no
     // doc-comment/`@internal` convention of its own).
     pub(in crate::registry) is_internal: bool,
     // `@deprecated` on this constant's own doc comment - direct mirror of
-    // `PropertySig::deprecated`. Always `None` for an enum case.
+    // `PropertyReflection::deprecated`. Always `None` for an enum case.
     pub(in crate::registry) deprecated: Option<String>,
     pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
     pub(in crate::registry) provenance: Provenance,
 }
 
-impl ConstSig {
+impl ConstantReflection {
     pub fn ty(&self) -> &Type {
         &self.ty
     }
@@ -337,7 +337,7 @@ impl ConstSig {
 
 #[derive(Debug, Clone)]
 #[allow(clippy::type_complexity)]
-pub struct ClassInfo {
+pub struct ClassReflection {
     pub(in crate::registry) kind: ClassKind,
     pub(in crate::registry) is_abstract: bool,
     pub(in crate::registry) is_final: bool,
@@ -359,16 +359,16 @@ pub struct ClassInfo {
     pub(in crate::registry) is_immutable: bool,
     pub(in crate::registry) extends: Vec<Arc<str>>,
     pub(in crate::registry) implements: Vec<Arc<str>>,
-    pub(in crate::registry) methods: FxHashMap<Arc<str>, FunctionSig>,
+    pub(in crate::registry) methods: FxHashMap<Arc<str>, FunctionReflection>,
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
     // union.
-    pub(in crate::registry) redeclared_methods: FxHashMap<(u32, u32), FunctionSig>,
-    pub(in crate::registry) properties: FxHashMap<Arc<str>, PropertySig>,
+    pub(in crate::registry) redeclared_methods: FxHashMap<(u32, u32), FunctionReflection>,
+    pub(in crate::registry) properties: FxHashMap<Arc<str>, PropertyReflection>,
     // Declaration order is kept: a listing of constants (a `match`
     // remainder, a `Foo::X_*` wildcard) follows source order, as in real
     // PHPStan.
-    pub(in crate::registry) consts: IndexMap<Arc<str>, ConstSig>,
+    pub(in crate::registry) consts: IndexMap<Arc<str>, ConstantReflection>,
     pub(in crate::registry) uses: Vec<Arc<str>>,
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
@@ -481,7 +481,7 @@ pub struct ClassInfo {
     // `@deprecated` on this class's own docblock - consulted only at
     // `new Foo()` (`checker::check_deprecated_instantiation`).
     // Deliberately doesn't imply anything about this class's own members
-    // (see `FunctionSig::deprecated`'s doc comment for why that question
+    // (see `FunctionReflection::deprecated`'s doc comment for why that question
     // is left unclaimed) - this is purely "is the class itself tagged."
     pub(in crate::registry) deprecated: Option<String>,
     // This class's own `#[\Attribute(flags)]` meta-attribute flags (an
@@ -514,7 +514,7 @@ pub struct ClassInfo {
     // expand a local variable annotated `/** @var Name $x */` inside one
     // of this class's method bodies. Empty for a class with no such tags.
     pub(in crate::registry) type_aliases: FxHashMap<Arc<str>, Type>,
-    // `ParamSig::case_refs`'s `@phpstan-type` equivalent - keyed the
+    // `ParameterReflection::case_refs`'s `@phpstan-type` equivalent - keyed the
     // same way `type_aliases` itself is (the alias's resolved local
     // name), `(raw, resolved)` pairs for every class-name reference the
     // alias's own RHS text carries (not a reference to the alias
@@ -532,11 +532,11 @@ pub struct ClassInfo {
     // resolved, so this field is empty again after that pass runs; never
     // read afterward.
     pub(in crate::registry) type_imports: Vec<ResolvedTypeImport>,
-    // `@method` tags, already resolved into real `FunctionSig`s but not
+    // `@method` tags, already resolved into real `FunctionReflection`s but not
     // yet inserted into `methods` - insertion has to wait for
     // `Registry::resolve_method_tags`, a later pass. Empty again after
     // that pass runs; never read afterward.
-    pub(in crate::registry) method_tags: Vec<(Arc<str>, FunctionSig, bool)>,
+    pub(in crate::registry) method_tags: Vec<(Arc<str>, FunctionReflection, bool)>,
     // `#[ORM\Entity]` metadata (ROADMAP Phase 168 168a) - `None`
     // for the overwhelming majority of classes, which aren't Doctrine
     // entities at all.
@@ -563,7 +563,7 @@ pub struct ClassInfo {
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
     // mirroring `resolve_deferred_type_imports`'s own two-step shape.
     pub(in crate::registry) mixins: Vec<Arc<str>>,
-    // `ParamSig::case_refs`'s `@mixin`-tag equivalent - `(raw, resolved)`
+    // `ParameterReflection::case_refs`'s `@mixin`-tag equivalent - `(raw, resolved)`
     // pairs for every `@mixin` target on this class's docblock, in
     // declaration order (not keyed by name - unlike
     // `type_alias_case_refs`, a class can carry several `@mixin` tags
@@ -572,7 +572,7 @@ pub struct ClassInfo {
     pub(in crate::registry) provenance: Provenance,
 }
 
-impl ClassInfo {
+impl ClassReflection {
     pub fn kind(&self) -> ClassKind {
         self.kind
     }
@@ -605,19 +605,19 @@ impl ClassInfo {
         &self.implements
     }
 
-    pub fn methods(&self) -> &FxHashMap<Arc<str>, FunctionSig> {
+    pub fn methods(&self) -> &FxHashMap<Arc<str>, FunctionReflection> {
         &self.methods
     }
 
-    pub fn redeclared_methods(&self) -> &FxHashMap<(u32, u32), FunctionSig> {
+    pub fn redeclared_methods(&self) -> &FxHashMap<(u32, u32), FunctionReflection> {
         &self.redeclared_methods
     }
 
-    pub fn properties(&self) -> &FxHashMap<Arc<str>, PropertySig> {
+    pub fn properties(&self) -> &FxHashMap<Arc<str>, PropertyReflection> {
         &self.properties
     }
 
-    pub fn consts(&self) -> &IndexMap<Arc<str>, ConstSig> {
+    pub fn consts(&self) -> &IndexMap<Arc<str>, ConstantReflection> {
         &self.consts
     }
 
@@ -734,7 +734,7 @@ impl ClassInfo {
         &self.type_imports
     }
 
-    pub fn method_tags(&self) -> &Vec<(Arc<str>, FunctionSig, bool)> {
+    pub fn method_tags(&self) -> &Vec<(Arc<str>, FunctionReflection, bool)> {
         &self.method_tags
     }
 
@@ -777,7 +777,7 @@ impl ClassInfo {
     }
 }
 
-/// See `ClassInfo::type_imports`'s own doc comment.
+/// See `ClassReflection::type_imports`'s own doc comment.
 #[derive(Debug, Clone)]
 pub struct ResolvedTypeImport {
     // The key this class's own already-built member types reference the
@@ -809,24 +809,24 @@ pub struct ResolvedTypeImport {
 /// last declaration is the unrelated `($isostr, $options = 0)` form).
 ///
 /// Also returns each such declaration's own signature, keyed by its
-/// name's position (`ClassInfo::redeclared_methods`).
+/// name's position (`ClassReflection::redeclared_methods`).
 #[allow(clippy::type_complexity)]
 fn collect_merged_methods(
-    methods: Vec<(Arc<str>, (u32, u32), FunctionSig)>,
+    methods: Vec<(Arc<str>, (u32, u32), FunctionReflection)>,
 ) -> (
-    FxHashMap<Arc<str>, FunctionSig>,
-    FxHashMap<(u32, u32), FunctionSig>,
+    FxHashMap<Arc<str>, FunctionReflection>,
+    FxHashMap<(u32, u32), FunctionReflection>,
 ) {
     let mut counts: FxHashMap<&str, usize> = FxHashMap::default();
     for (name, _, _) in &methods {
         *counts.entry(name.as_ref()).or_default() += 1;
     }
-    let redeclared: FxHashMap<(u32, u32), FunctionSig> = methods
+    let redeclared: FxHashMap<(u32, u32), FunctionReflection> = methods
         .iter()
         .filter(|(name, _, _)| counts[name.as_ref()] > 1)
         .map(|(_, site, sig)| (*site, sig.clone()))
         .collect();
-    let mut out: FxHashMap<Arc<str>, FunctionSig> = FxHashMap::default();
+    let mut out: FxHashMap<Arc<str>, FunctionReflection> = FxHashMap::default();
     for (name, _, sig) in methods {
         match out.remove(&name) {
             Some(existing) => {
@@ -844,7 +844,7 @@ fn name_site(f: &syntax::ast::FunctionDecl) -> (u32, u32) {
     (f.name_span.start.line, f.name_span.start.col)
 }
 
-/// Each declared member's name span, by kind: what `ClassInfo::
+/// Each declared member's name span, by kind: what `ClassReflection::
 /// record_provenance` stamps the members built from one declaration with.
 #[derive(Default)]
 pub(crate) struct MemberSpans<'a> {
@@ -895,7 +895,7 @@ impl<'a> MemberSpans<'a> {
     }
 }
 
-impl ClassInfo {
+impl ClassReflection {
     /// Records `origin` on class `class`, declared at `name_span`, and on
     /// every member it builds, each at its own name's span from `spans`;
     /// a member with no declaration of its own (one synthesized from a
@@ -929,7 +929,7 @@ impl ClassInfo {
     }
 
     #[hotpath::measure]
-    pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassInfo {
+    pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassReflection {
         let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
         let templates: Vec<Arc<str>> = class_doc
             .as_ref()
@@ -982,7 +982,7 @@ impl ClassInfo {
         // cloned only for the sets it actually belongs to, instead of
         // every method in the class being filtered/name-cloned once per
         // set across 5 separate iterations.
-        let mut methods_vec: Vec<(Arc<str>, (u32, u32), FunctionSig)> =
+        let mut methods_vec: Vec<(Arc<str>, (u32, u32), FunctionReflection)> =
             Vec::with_capacity(c.methods.len());
         let mut abstract_methods: FxHashSet<Arc<str>> = FxHashSet::default();
         let mut final_methods: FxHashSet<Arc<str>> = FxHashSet::default();
@@ -1022,7 +1022,7 @@ impl ClassInfo {
             {
                 final_methods_by_phpdoc.insert(name.clone());
             }
-            let sig = FunctionSig::from_decl(
+            let sig = FunctionReflection::from_decl(
                 &m.function,
                 ctx,
                 &template_params,
@@ -1098,7 +1098,7 @@ impl ClassInfo {
             );
         }
 
-        let mut properties: FxHashMap<Arc<str>, PropertySig> = c
+        let mut properties: FxHashMap<Arc<str>, PropertyReflection> = c
             .properties
             .iter()
             .map(|p| {
@@ -1112,7 +1112,7 @@ impl ClassInfo {
                     native_parsed.as_ref(),
                     &template_params,
                 );
-                // See `FunctionSig::from_decl`'s param loop for why this
+                // See `FunctionReflection::from_decl`'s param loop for why this
                 // sharing is exact, not an approximation.
                 let shared = Some(&doc_reconciled) == native_parsed.as_ref();
                 let ty = mark_template_params(doc_reconciled, &template_params);
@@ -1142,7 +1142,7 @@ impl ClassInfo {
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 (
                     p.name.clone(),
-                    PropertySig {
+                    PropertyReflection {
                         attributes: ReflectionAttribute::all(&p.attrs, ctx),
                         provenance: Provenance::default(),
                         ty,
@@ -1199,11 +1199,11 @@ impl ClassInfo {
                     continue;
                 }
                 // Same inline-`@var`-on-a-promoted-property fallback as
-                // `FunctionSig::from_decl`'s param loop - needed here too,
-                // separately: this builds the property's `PropertySig`
+                // `FunctionReflection::from_decl`'s param loop - needed here too,
+                // separately: this builds the property's `PropertyReflection`
                 // (read by `$this->details`-style property access
                 // elsewhere in the class), a completely different
-                // construction from the `ParamSig` `FunctionSig::from_decl`
+                // construction from the `ParameterReflection` `FunctionReflection::from_decl`
                 // builds for the same parameter.
                 let doc_ty: Option<TypeNode> = ctor_doc
                     .as_ref()
@@ -1224,7 +1224,7 @@ impl ClassInfo {
                     native_parsed.as_ref(),
                     &template_params,
                 );
-                // See `FunctionSig::from_decl`'s param loop for why this
+                // See `FunctionReflection::from_decl`'s param loop for why this
                 // sharing is exact, not an approximation.
                 let shared = Some(&doc_reconciled) == native_parsed.as_ref();
                 let ty = mark_template_params(doc_reconciled, &template_params);
@@ -1264,7 +1264,7 @@ impl ClassInfo {
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 properties.insert(
                     p.name.clone(),
-                    PropertySig {
+                    PropertyReflection {
                         attributes: ReflectionAttribute::all(&p.attrs, ctx),
                         provenance: Provenance::default(),
                         ty,
@@ -1310,7 +1310,7 @@ impl ClassInfo {
         // property/promoted param always wins, since the tag exists to
         // add virtual members, not override real ones. `@property-read`/
         // `@property-write`'s one-directional access is
-        // `PropertySig::is_writable`/`is_readable`'s concern.
+        // `PropertyReflection::is_writable`/`is_readable`'s concern.
         if let Some(doc) = &class_doc {
             for tag in &doc.properties {
                 properties.entry(intern(&tag.name)).or_insert_with(|| {
@@ -1319,7 +1319,7 @@ impl ClassInfo {
                     let mut case_refs = Vec::new();
                     collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                     let ty = resolve_names_in_type(ty, ctx);
-                    PropertySig {
+                    PropertyReflection {
                         attributes: Vec::new(),
                         provenance: Provenance::default(),
                         doc_ty: None,
@@ -1370,7 +1370,7 @@ impl ClassInfo {
         // is also vacant-only.
         // `Registry::resolve_method_tags` runs this insertion later
         // instead, once `flatten_traits` has had its own say.
-        let method_tags: Vec<(Arc<str>, FunctionSig, bool)> = class_doc
+        let method_tags: Vec<(Arc<str>, FunctionReflection, bool)> = class_doc
             .as_ref()
             .map(|d| {
                 d.method_tags
@@ -1412,7 +1412,7 @@ impl ClassInfo {
                 };
                 (
                     cc.name.clone(),
-                    ConstSig {
+                    ConstantReflection {
                         attributes: ReflectionAttribute::all(&cc.attrs, ctx),
                         provenance: Provenance::default(),
                         ty,
@@ -1422,7 +1422,7 @@ impl ClassInfo {
                         has_phpdoc_type,
                         value_ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         // `@internal` on this constant's own doc
-                        // comment - see `PropertySig::is_internal`'s doc
+                        // comment - see `PropertyReflection::is_internal`'s doc
                         // comment for the convention this mirrors.
                         is_internal: doc.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc.as_ref().and_then(|d| d.deprecated.clone()),
@@ -1470,7 +1470,7 @@ impl ClassInfo {
             .collect();
         // `@use Trait<Arg, ...>` - unlike `extends`/`implements`, lives
         // on the `use` statement's own doc comment, not `c.doc_comment`
-        // (`class_doc` above) - see `ClassInfo::uses_args`'s doc comment.
+        // (`class_doc` above) - see `ClassReflection::uses_args`'s doc comment.
         // `uses_doc_comments` repeats the identical string once per trait
         // name in a multi-name `use A, B;` statement, so dedup (collect
         // into a `HashSet` first) before re-parsing each distinct doc
@@ -1624,7 +1624,7 @@ impl ClassInfo {
         let attribute_targets = compute_attribute_targets(&c.attrs);
         let doctrine_entity = compute_doctrine_entity(c, ctx, &properties);
 
-        ClassInfo {
+        ClassReflection {
             provenance: Provenance::default(),
             kind: c.kind,
             is_abstract: c.is_abstract,
@@ -1686,10 +1686,10 @@ impl ClassInfo {
     /// not just enums - a separate, pre-existing gap this doesn't attempt
     /// to close.
     #[hotpath::measure]
-    pub(crate) fn from_enum_decl(e: &EnumDecl, ctx: &NameContext) -> ClassInfo {
+    pub(crate) fn from_enum_decl(e: &EnumDecl, ctx: &NameContext) -> ClassReflection {
         // Enums can't be generic in real PHP (no `@template` on an enum
         // means anything), so there's no enclosing-class template list to
-        // pass down here, unlike ClassInfo::from_decl. An enum CAN
+        // pass down here, unlike ClassReflection::from_decl. An enum CAN
         // `implements` a genuinely generic interface though (`enum Suit
         // implements \IteratorAggregate<int, self> {}`-shaped code is
         // real), so `@implements` tags are still worth resolving - just
@@ -1707,7 +1707,7 @@ impl ClassInfo {
                 },
             )
             .collect();
-        // See `ClassInfo::from_decl`'s identical `uses_args`
+        // See `ClassReflection::from_decl`'s identical `uses_args`
         // construction - the reasoning (`@use` lives on the `use`
         // statement's own doc comment) is unrelated to whether the
         // enclosing declaration is a class or an enum.
@@ -1733,7 +1733,7 @@ impl ClassInfo {
                     (
                         m.function.name.clone(),
                         name_site(&m.function),
-                        FunctionSig::from_decl(
+                        FunctionReflection::from_decl(
                             &m.function,
                             ctx,
                             &FxHashMap::default(),
@@ -1765,7 +1765,7 @@ impl ClassInfo {
         ]);
         methods.insert(
             intern("cases"),
-            FunctionSig {
+            FunctionReflection {
                 provenance: Provenance::default(),
                 params: Vec::new(),
                 return_type: cases_return_ty.clone(),
@@ -1807,7 +1807,7 @@ impl ClassInfo {
         );
         if let Some(backing) = e.backing_type.as_ref().map(TypeHint::to_string) {
             let backing_ty = types::parse_type_string(&backing);
-            let value_param = ParamSig {
+            let value_param = ParameterReflection {
                 attributes: Vec::new(),
                 name: intern("value"),
                 ty: backing_ty.clone(),
@@ -1825,7 +1825,7 @@ impl ClassInfo {
             };
             methods.insert(
                 intern("from"),
-                FunctionSig {
+                FunctionReflection {
                     provenance: Provenance::default(),
                     params: vec![value_param.clone()],
                     return_type: self_ty.clone(),
@@ -1858,7 +1858,7 @@ impl ClassInfo {
             );
             methods.insert(
                 intern("tryFrom"),
-                FunctionSig {
+                FunctionReflection {
                     provenance: Provenance::default(),
                     params: vec![value_param],
                     return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
@@ -1887,14 +1887,14 @@ impl ClassInfo {
                 },
             );
         }
-        let mut consts: IndexMap<Arc<str>, ConstSig> = e
+        let mut consts: IndexMap<Arc<str>, ConstantReflection> = e
             .consts
             .iter()
             .map(|cc| {
                 let doc = cc.doc_comment.as_deref().map(docblock::parse);
                 (
                     cc.name.clone(),
-                    ConstSig {
+                    ConstantReflection {
                         attributes: ReflectionAttribute::all(&cc.attrs, ctx),
                         provenance: Provenance::default(),
                         ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
@@ -1919,7 +1919,7 @@ impl ClassInfo {
         for case in &e.cases {
             consts.insert(
                 case.name.clone(),
-                ConstSig {
+                ConstantReflection {
                     attributes: ReflectionAttribute::all(&case.attrs, ctx),
                     provenance: Provenance::default(),
                     ty: Type::EnumCase(Name::from(&*fqn), Name::from(&*case.name)),
@@ -1982,7 +1982,7 @@ impl ClassInfo {
         let mut properties = FxHashMap::default();
         properties.insert(
             intern("name"),
-            PropertySig {
+            PropertyReflection {
                 attributes: Vec::new(),
                 provenance: Provenance::default(),
                 doc_ty: None,
@@ -2047,7 +2047,7 @@ impl ClassInfo {
             };
             properties.insert(
                 intern("value"),
-                PropertySig {
+                PropertyReflection {
                     attributes: Vec::new(),
                     provenance: Provenance::default(),
                     doc_ty: None,
@@ -2105,7 +2105,7 @@ impl ClassInfo {
         }
 
         // One pass over `e.methods` instead of 3 separate filtered ones -
-        // see `ClassInfo::from_decl`'s equivalent loop for the same
+        // see `ClassReflection::from_decl`'s equivalent loop for the same
         // reasoning.
         let mut abstract_methods: FxHashSet<Arc<str>> = FxHashSet::default();
         let mut final_methods: FxHashSet<Arc<str>> = FxHashSet::default();
@@ -2141,7 +2141,7 @@ impl ClassInfo {
             })
             .collect();
 
-        ClassInfo {
+        ClassReflection {
             provenance: Provenance::default(),
             kind: ClassKind::Enum,
             is_abstract: false,
@@ -2240,14 +2240,14 @@ impl ClassInfo {
     /// `other` simply doesn't mention (a bare `class Imagick { ... }`
     /// override redeclaring no `extends`/`implements` of its own must
     /// not blank out the real class's).
-    pub(crate) fn merge(mut self, other: ClassInfo) -> ClassInfo {
+    pub(crate) fn merge(mut self, other: ClassReflection) -> ClassReflection {
         // Not a bare `HashMap::extend` (a plain overwrite, `self`'s
         // colliding entry discarded outright): a vendored stub's method
         // could otherwise silently overwrite an internal, correctly
-        // `FunctionSig::is_stub`-marked one, losing that marker and
+        // `FunctionReflection::is_stub`-marked one, losing that marker and
         // wrongly letting `registry::purity` classify a raw-memory-write
         // native function as pure. Routing a colliding method through
-        // `FunctionSig::merge` instead (the same function used for a
+        // `FunctionReflection::merge` instead (the same function used for a
         // top-level function's identical "declared twice" shape) keeps
         // its permissive "either side's marker sticks" `is_stub`
         // computation in the one place that owns it.

@@ -93,7 +93,7 @@ pub(super) fn class_ever_assigns_property(c: &ClassDecl, prop: &str) -> bool {
 /// parent's property type), initialized only by an ancestor's own
 /// constructor logic (`parent::__construct()`). Can only make the
 /// existing "never initialized" verdict less eager to flag. Ancestors
-/// are walked via the registry (`FunctionSig::body`), not AST - the
+/// are walked via the registry (`FunctionReflection::body`), not AST - the
 /// current file may not even contain them. Doesn't walk downward into a
 /// subclass's own overrides - an unbounded, open-hierarchy question a
 /// single-class check can't answer.

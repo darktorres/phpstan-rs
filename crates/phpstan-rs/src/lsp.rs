@@ -48,7 +48,7 @@ use lsp_types::{
 use crate::checker::Checker;
 use crate::project::use_sites;
 use crate::project::{Project, ProjectSettings};
-use crate::registry::{FunctionSig, format_signature, param_label};
+use crate::registry::{FunctionReflection, format_signature, param_label};
 use crate::{baseline, ignore_errors};
 use syntax::ast::ClassKind;
 use syntax::token::Span;
@@ -1597,7 +1597,7 @@ impl Server {
         self.build_signature_help(help)
     }
 
-    /// Resolves `help.target` into one or more real `FunctionSig`s (more
+    /// Resolves `help.target` into one or more real `FunctionReflection`s (more
     /// than one only for `Instance` on a `Union`/`Intersection`
     /// receiver, the same multi-owner case `format_member_hover_multi`
     /// already handles for hover) and builds the LSP response.
@@ -1607,7 +1607,7 @@ impl Server {
     /// regardless of which signature it's currently displaying.
     fn build_signature_help(&self, help: signature_help::SigHelp) -> Option<SignatureHelp> {
         let registry = self.project.registry();
-        let signatures: Vec<(String, &FunctionSig)> = match &help.target {
+        let signatures: Vec<(String, &FunctionReflection)> = match &help.target {
             signature_help::Target::Function(fqn) => {
                 vec![(fqn.clone(), registry.lookup_function(fqn)?)]
             }
@@ -1629,7 +1629,7 @@ impl Server {
                 let ty =
                     self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
                 let owners = resolve_member_owners(registry, &ty, member);
-                let sigs: Vec<(String, &FunctionSig)> = owners
+                let sigs: Vec<(String, &FunctionReflection)> = owners
                     .iter()
                     .filter_map(|owner| {
                         registry

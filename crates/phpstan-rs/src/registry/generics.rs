@@ -155,7 +155,7 @@ impl Registry {
     /// later call site the way this project's own method-scoped templates
     /// correctly are (`types::bind_template_param`/`substitute_template`'s
     /// own call-site binding, purely name-keyed and blind to which
-    /// class's `FunctionSig` a signature came from). Doing this
+    /// class's `FunctionReflection` a signature came from). Doing this
     /// immediately, rather than leaving the raw class-scoped `TemplateParam`
     /// in the backfilled signature for some later call-time pass to
     /// resolve, matters for a real, distinct reason from "is a concrete

@@ -28,7 +28,7 @@ mod type_node;
 pub(crate) use anonymous_class::collect_anonymous_classes;
 pub use bodies::{BodySource, FileBodies, NoBodies};
 pub(crate) use class_info::object_class_names;
-pub use class_info::{ClassInfo, ConstSig, PropertySig};
+pub use class_info::{ClassReflection, ConstantReflection, PropertyReflection};
 pub(crate) use class_info::{hook_body_calls_parent_hook, hook_body_references_property};
 pub(crate) use function_sig::apply_implicit_nullable_default;
 pub use function_sig::format_signature;
@@ -38,7 +38,7 @@ pub(crate) use function_sig::is_no_discard_attribute_name;
 pub(crate) use function_sig::is_override_attribute_name;
 pub(crate) use function_sig::param_label;
 pub(crate) use function_sig::resolve_type;
-pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
+pub use function_sig::{AssertInfo, AssertTarget, FunctionReflection, ParameterReflection};
 pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };
@@ -80,7 +80,7 @@ pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
 /// project code in a real implementation.
 #[derive(Debug, Default)]
 pub struct Registry {
-    pub classes: FxHashMap<Arc<str>, ClassInfo>,
+    pub classes: FxHashMap<Arc<str>, ClassReflection>,
     // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
     // on top of the built-in ones (`assertion_table`).
     pub(crate) configured_assertions: Vec<crate::assertion_tables::AssertionEntry>,
@@ -108,7 +108,7 @@ pub struct Registry {
     // `Mixed`.
     pub global_variables: FxHashMap<Arc<str>, Type>,
     // The one narrow crack in this struct's "path-agnostic" contract
-    // (see `project/decl_locations.rs` for why `ClassInfo`/`Registry`
+    // (see `project/decl_locations.rs` for why `ClassReflection`/`Registry`
     // are otherwise path-agnostic) - needed to port real
     // `ApiRuleHelper::isPhpStanCode`'s vendor-directory check
     // (`is_phpstan_code`, `checker/phpstan_api.rs`). Only populated for a
@@ -178,7 +178,7 @@ pub struct Registry {
     // being a no-op once the built-in stub already occupies the slot.
     stub_provided_functions: FxHashSet<Arc<str>>,
     // Every bare function/method name with a non-empty `assert` list
-    // on some indexed `FunctionSig`. `@phpstan-assert` is rare in real
+    // on some indexed `FunctionReflection`. `@phpstan-assert` is rare in real
     // corpora (zero occurrences across the full Symfony monorepo plus
     // every vendored PHP stub), so `checker::stmt`'s bare-statement
     // narrowing pass checks this set-membership first and skips the
@@ -254,7 +254,7 @@ impl Registry {
 
     /// Every step `build` runs except the final purity classification.
     /// `registry::stubs` calls this directly instead of `build` to extract
-    /// raw `FunctionSig`/`ClassInfo` values from vendored stub source - a
+    /// raw `FunctionReflection`/`ClassReflection` values from vendored stub source - a
     /// stub's function body is always empty, so classifying it here
     /// would wrongly mark every PHP built-in (`header()`, `exit()`, ...)
     /// as provably pure, baked permanently into the `LazyLock`-cached

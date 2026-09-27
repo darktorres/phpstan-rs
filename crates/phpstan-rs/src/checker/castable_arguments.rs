@@ -5,7 +5,7 @@
 //! plus `ArrayUnpackingRule`'s string-key gate for an unpacked array.
 
 use crate::checker::{Checker, Locals};
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use syntax::ast::{Arg, Expr, ExprKind};
 use types::Type;
 
@@ -43,7 +43,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_castable_array_arguments(
         &mut self,
         function: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         args: &[Arg],
         resolved: &[Option<&Expr>],
         locals: &Locals,
@@ -149,7 +149,12 @@ impl<'a> Checker<'a> {
 
     /// `#N $name` for a positional argument, `$name` for a named one,
     /// `#N` past the declared parameter list.
-    fn castable_parameter_name(&self, sig: &FunctionSig, args: &[Arg], index: usize) -> String {
+    fn castable_parameter_name(
+        &self,
+        sig: &FunctionReflection,
+        args: &[Arg],
+        index: usize,
+    ) -> String {
         let Some(param) = sig.params().get(index) else {
             return format!("#{}", index + 1);
         };

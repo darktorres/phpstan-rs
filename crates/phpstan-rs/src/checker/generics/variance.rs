@@ -1,5 +1,5 @@
 use crate::checker::Checker;
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -36,7 +36,12 @@ impl<'a> Checker<'a> {
     /// type needs different position logic entirely (`Position::Out` when
     /// write access is restricted, `Position::Inv` otherwise, not a
     /// param/return split), see `check_property_variances` below.
-    pub(crate) fn check_variance(&mut self, sig: &FunctionSig, class_name: &str, span: Span) {
+    pub(crate) fn check_variance(
+        &mut self,
+        sig: &FunctionReflection,
+        class_name: &str,
+        span: Span,
+    ) {
         let Some(info) = self.registry.classes.get(class_name) else {
             return;
         };
@@ -80,7 +85,7 @@ impl<'a> Checker<'a> {
     /// position-based half real PHPStan skips for both) - real
     /// PHPStan's own `$isPrivate` early return sits after this exact
     /// check in `checkParametersAcceptor`. Re-parses
-    /// `f.doc_comment` fresh rather than reading back through `FunctionSig`
+    /// `f.doc_comment` fresh rather than reading back through `FunctionReflection`
     /// (which has no persisted raw template-variance list of its own, the
     /// same reason `current_function_template_params` re-derives from
     /// `Type::TemplateParam` nodes instead - see that function's own doc

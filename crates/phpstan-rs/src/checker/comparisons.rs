@@ -12,7 +12,7 @@
 
 use crate::checker::expr::ranges::loose_compare_literals;
 use crate::checker::{Checker, Locals};
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use syntax::ast::Arg;
 use syntax::token::Span;
 
@@ -259,7 +259,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_loose_haystack_comparison(
         &mut self,
         function: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
         span: Span,

@@ -4,13 +4,13 @@ use crate::checker::expr::builtin_calls::{
 };
 use crate::checker::expr::doctrine_query_result_list_type;
 use crate::checker::{Checker, Locals, resolve_call_args};
-use crate::registry::{FunctionSig, PropertySig};
+use crate::registry::{FunctionReflection, PropertyReflection};
 use syntax::ast::*;
 use types::union_types;
 use types::{self, Shape, ShapeField, ShapeKey, Type};
 
 impl<'a> Checker<'a> {
-    /// The declaring class/`PropertySig` pair for `prop` on `base_ty`,
+    /// The declaring class/`PropertyReflection` pair for `prop` on `base_ty`,
     /// used by `ExprKind::PropertyAccess`'s own visibility/`@internal`/
     /// `@deprecated` checks - see that call site's own doc comment for
     /// why this recurses through `Union`/`Intersection` instead of using
@@ -23,7 +23,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         prop: &str,
-    ) -> Option<(std::sync::Arc<str>, &'a PropertySig)> {
+    ) -> Option<(std::sync::Arc<str>, &'a PropertyReflection)> {
         match base_ty {
             Type::Object(class, _) => self.registry.lookup_property_with_owner(class, prop),
             Type::EnumCase(fqn, _) => self.registry.lookup_property_with_owner(fqn, prop),
@@ -54,7 +54,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         method: &str,
-    ) -> Option<(std::sync::Arc<str>, &'a FunctionSig)> {
+    ) -> Option<(std::sync::Arc<str>, &'a FunctionReflection)> {
         match base_ty {
             Type::Object(class, _) => self.registry.lookup_method_with_owner(class, method),
             Type::EnumCase(fqn, _) => self.registry.lookup_method_with_owner(fqn, method),
@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         method: &str,
-    ) -> (Option<&'a FunctionSig>, Option<String>) {
+    ) -> (Option<&'a FunctionReflection>, Option<String>) {
         match base_ty {
             Type::Object(class, _) => (
                 self.registry.lookup_method(class, method),
@@ -179,7 +179,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         prop: &str,
-    ) -> Option<(String, Vec<Type>, std::sync::Arc<str>, PropertySig)> {
+    ) -> Option<(String, Vec<Type>, std::sync::Arc<str>, PropertyReflection)> {
         match base_ty {
             Type::Object(class, type_args) => self
                 .registry
@@ -214,8 +214,8 @@ impl<'a> Checker<'a> {
     /// the method, in the correct (`Intersection` reversed) order,
     /// exactly like `find_method_owner`/`method_call_return_type`
     /// already get right. Returns an already-class-template-substituted
-    /// `FunctionSig` so the caller can freely call further `&mut self`
-    /// methods afterward - `Cow`, not a plain owned `FunctionSig`, since
+    /// `FunctionReflection` so the caller can freely call further `&mut self`
+    /// methods afterward - `Cow`, not a plain owned `FunctionReflection`, since
     /// `substitute_class_templates` itself only actually needs to
     /// allocate a new one when real substitution happened; the
     /// overwhelmingly common non-generic case borrows straight from the
@@ -238,7 +238,7 @@ impl<'a> Checker<'a> {
         String,
         Vec<Type>,
         std::sync::Arc<str>,
-        std::borrow::Cow<'a, FunctionSig>,
+        std::borrow::Cow<'a, FunctionReflection>,
     )> {
         match base_ty {
             Type::Object(class, type_args) => self

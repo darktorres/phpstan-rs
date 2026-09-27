@@ -497,8 +497,8 @@ impl<'a> Checker<'a> {
                 // own declaration - the same "narrows unconditionally,
                 // no branch needed" shape `assert($cond)`/PHPUnit's own
                 // assertions get just above, generalized via a real
-                // `FunctionSig` lookup instead of a hardcoded name table
-                // (see `FunctionSig::assert_if_true`'s own doc comment).
+                // `FunctionReflection` lookup instead of a hardcoded name table
+                // (see `FunctionReflection::assert_if_true`'s own doc comment).
                 self.apply_bare_statement_assert_narrowing(e, locals);
                 // A bare `$cond || neverReturningCall();` statement -
                 // PHP's classic "guard or die" idiom
@@ -1020,8 +1020,8 @@ impl<'a> Checker<'a> {
     /// A bare `@phpstan-assert Type $target` on this call's own
     /// declaration - the same "narrows unconditionally, no branch needed"
     /// shape `assert($cond)`/PHPUnit's own assertions get, generalized via
-    /// a real `FunctionSig` lookup instead of a hardcoded name table (see
-    /// `FunctionSig::assert_if_true`'s own doc comment).
+    /// a real `FunctionReflection` lookup instead of a hardcoded name table (see
+    /// `FunctionReflection::assert_if_true`'s own doc comment).
     ///
     /// `@phpstan-assert` is vanishingly rare in real code, so the
     /// `infer_expr` receiver-type recompute and `find_method_owner`'s

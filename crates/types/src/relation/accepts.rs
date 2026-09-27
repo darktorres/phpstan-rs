@@ -115,7 +115,7 @@ impl Relation<'_> {
                 // (`accepts(bound, concrete)` fails whenever
                 // `concrete` is a strict subtype of `bound`) - a real,
                 // dangerous new false-positive class this project doesn't
-                // have data to avoid anyway: `ClassInfo` only persists
+                // have data to avoid anyway: `ClassReflection` only persists
                 // `template_bounds`, never a class-level `@template T =
                 // Default` map the way `TemplateParam.default` carries
                 // one for a function/method's own templates (`crate::
@@ -227,7 +227,7 @@ impl Relation<'_> {
             // `EnumCase -> Object` name-equality rule - a case
             // is assignable not just to its own enum's bare type but to
             // `UnitEnum`/`BackedEnum` (both synthesized `implements`
-            // entries every enum gets, see `ClassInfo::from_enum_decl`)
+            // entries every enum gets, see `ClassReflection::from_enum_decl`)
             // and any interface the enum itself declares.
             (Type::EnumCase(fqn, _), Type::Object(b, _)) => {
                 fqn == b || self.hierarchy.is_subclass_of(fqn, b)
@@ -245,7 +245,7 @@ impl Relation<'_> {
             // `Derived extends Base`.
             // `interface-string`/`trait-string`: real PHPStan draws no
             // distinction from bare `class-string` here, but this project
-            // is allowed to check more strictly - `ClassInfo::kind`
+            // is allowed to check more strictly - `ClassReflection::kind`
             // already tracks exactly this.
             (Type::ClassString(a), Type::ClassKindString(kind)) => {
                 let Type::Object(name, _) = &**a else {

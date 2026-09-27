@@ -13,7 +13,7 @@
 //! (`property.phpDocType`).
 
 use super::*;
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use phpdoc::docblock;
 use types::TrinaryLogic;
 
@@ -21,7 +21,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_phpdoc_types_against_native(
         &mut self,
         f: &FunctionDecl,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         class_name: Option<&str>,
     ) {
         let Some(doc) = f.doc_comment.as_deref() else {
@@ -329,7 +329,7 @@ impl<'a> Checker<'a> {
             .get(fqn)
             .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
-        let sig = FunctionSig::from_decl(
+        let sig = FunctionReflection::from_decl(
             &decl,
             &self.name_ctx,
             &class_templates,
@@ -432,7 +432,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_conditional_types(
         &mut self,
         f: &FunctionDecl,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         class_name: Option<&str>,
     ) {
         // Only this declaration's own PHPDoc: an inherited conditional is
@@ -530,7 +530,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_self_out(
         &mut self,
         f: &FunctionDecl,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         class: &str,
         is_static: bool,
         label: &str,
@@ -680,7 +680,7 @@ fn collect_conditionals(ty: &Type, out: &mut Vec<Type>) {
 }
 
 /// The `TemplateParam` named `name` somewhere in `sig`, with its bound.
-fn find_template_param(sig: &FunctionSig, name: &str) -> Option<Type> {
+fn find_template_param(sig: &FunctionReflection, name: &str) -> Option<Type> {
     fn find(ty: &Type, name: &str) -> Option<Type> {
         if let Type::TemplateParam(tp) = ty
             && tp.name == name

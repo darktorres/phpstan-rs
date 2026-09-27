@@ -11,7 +11,7 @@ use super::super::*;
 /// docblock/registry pipeline: no extra vendor-loading work is needed
 /// for this checker to see accurate `@api` state for PHPStan classes,
 /// since the stub pipeline already threads every real class's doc
-/// comment through `registry::ClassInfo::from_decl` exactly the same way
+/// comment through `registry::ClassReflection::from_decl` exactly the same way
 /// an ordinary project file's declaration would be.
 #[test]
 fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipeline() {

@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
 
     /// Who may write `sig`'s property: its declared set visibility, or,
     /// from PHP 8.4, `protected(set)` for a public native `readonly` one.
-    pub(crate) fn write_visibility(&self, sig: &crate::registry::PropertySig) -> Visibility {
+    pub(crate) fn write_visibility(&self, sig: &crate::registry::PropertyReflection) -> Visibility {
         if sig.implicit_protected_set()
             && self
                 .registry
@@ -161,7 +161,7 @@ impl<'a> Checker<'a> {
         &self,
         owner: &str,
         prop: &str,
-        prop_sig: &crate::registry::PropertySig,
+        prop_sig: &crate::registry::PropertyReflection,
         on_this: bool,
         locals: &mut Locals,
     ) -> Option<(String, &'static str)> {
@@ -228,7 +228,7 @@ impl<'a> Checker<'a> {
         &self,
         owner: &str,
         prop: &str,
-        prop_sig: &crate::registry::PropertySig,
+        prop_sig: &crate::registry::PropertyReflection,
         on_this: bool,
     ) -> Option<(String, &'static str)> {
         if self.current_class.as_deref() != Some(owner) {

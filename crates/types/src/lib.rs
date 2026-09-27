@@ -553,8 +553,8 @@ impl TemplateParam {
 }
 
 /// One parameter of a parsed `Closure(...)`/`callable(...)` PHPDoc shape.
-/// A dedicated struct rather than `registry::ParamSig`, whose sibling
-/// `FunctionSig` can't cheaply derive `PartialEq`.
+/// A dedicated struct rather than `registry::ParameterReflection`, whose sibling
+/// `FunctionReflection` can't cheaply derive `PartialEq`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallableParam {
     pub ty: Type,

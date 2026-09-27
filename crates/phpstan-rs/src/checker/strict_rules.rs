@@ -48,7 +48,7 @@
 //!   string. Trait bodies are skipped: their `$this` has no single type.
 
 use crate::checker::{Checker, Locals};
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use types::TrinaryLogic;
@@ -431,7 +431,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn check_strict_array_filter(
         &mut self,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
         span: syntax::token::Span,
@@ -569,7 +569,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_strict_function_call(
         &mut self,
         function: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
         span: syntax::token::Span,
@@ -817,7 +817,11 @@ fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::token
 
 /// The argument bound to `sig`'s parameter at `position`, positionally or
 /// by name.
-fn arg_for_param<'e>(args: &'e [Arg], sig: &FunctionSig, position: usize) -> Option<&'e Arg> {
+fn arg_for_param<'e>(
+    args: &'e [Arg],
+    sig: &FunctionReflection,
+    position: usize,
+) -> Option<&'e Arg> {
     let positional = args.iter().take_while(|a| a.name.is_none()).count();
     if position < positional {
         return args.get(position);

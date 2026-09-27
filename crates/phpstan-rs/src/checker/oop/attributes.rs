@@ -32,7 +32,7 @@ impl<'a> Checker<'a> {
     /// (`attribute.noConstructor`/`attribute.constructorNotPublic`/
     /// `attribute.abstract`/arity/type checks): `resolve_call_args`/
     /// `check_args` (`checker/calls.rs`) already take a bare
-    /// `args: &[Arg]` + `sig: &FunctionSig`, with no expr-node coupling -
+    /// `args: &[Arg]` + `sig: &FunctionReflection`, with no expr-node coupling -
     /// the exact same pair `ExprKind::New`'s constructor-call handling
     /// uses, directly reusable here. Attribute arguments are real PHP
     /// constant-expressions (no local variable can ever appear in one),

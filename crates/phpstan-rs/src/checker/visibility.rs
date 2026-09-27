@@ -1,5 +1,5 @@
 //! `public`/`private`/`protected` access-control enforcement, using
-//! `PropertySig`/`FunctionSig`'s `visibility` field. Uses
+//! `PropertyReflection`/`FunctionReflection`'s `visibility` field. Uses
 //! `property.private`/`property.protected` (shared by read and plain
 //! write - the asymmetric `private(set)`/`protected(set)` PHP 8.4 half
 //! isn't modeled), `method.private`/`method.protected`, and
@@ -71,9 +71,9 @@ impl<'a> Checker<'a> {
                         || self.registry.is_subclass_of(owner, c)
                         || match kind {
                             // A static property shares the exact same
-                            // `PropertySig`/`lookup_property` machinery an
+                            // `PropertyReflection`/`lookup_property` machinery an
                             // instance property already uses - only
-                            // `PropertySig::is_static` (already checked by
+                            // `PropertyReflection::is_static` (already checked by
                             // this arm's own caller before it ever reaches
                             // here) tells them apart.
                             "property" | "staticProperty" => {

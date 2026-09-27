@@ -8,7 +8,10 @@ type AncestorBindings = FxHashMap<Arc<str>, FxHashMap<String, Type>>;
 
 use crate::registry::Registry;
 use crate::registry::function_sig;
-use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig, substitute_type_aliases};
+use crate::registry::{
+    ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
+    substitute_type_aliases,
+};
 use syntax::ast::{ClassKind, Visibility};
 use types::{self, Type};
 
@@ -22,7 +25,7 @@ impl Registry {
     /// case-insensitive fallback through every one of those call sites,
     /// this runs once, right after indexing finishes and before any of
     /// those graph-walks - a single O(classes) rewrite pass that
-    /// canonicalizes every reference-shaped field on each `ClassInfo`
+    /// canonicalizes every reference-shaped field on each `ClassReflection`
     /// (`extends`, `implements`, `uses`, `mixins`, each
     /// `TraitAlias::trait_name`, each `ResolvedTypeImport::
     /// source_class_fqn`) to the real declared key's own case, wherever
@@ -37,7 +40,7 @@ impl Registry {
     /// sequential pass - only the per-class rewrite below is
     /// parallelized, since it's the part whose cost actually scales with
     /// how many reference-shaped fields each class has. Each class's own
-    /// rewrite touches only its own `ClassInfo` and reads only the
+    /// rewrite touches only its own `ClassReflection` and reads only the
     /// immutable, already-fully-built `canonical_by_lower` table - no
     /// other class is ever read or written, so `values_mut()` directly
     /// (no remove/reinsert dance) is sound to run concurrently.
@@ -134,9 +137,9 @@ impl Registry {
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
             Arc<str>,
-            Vec<(Arc<str>, FunctionSig)>,
-            Vec<(Arc<str>, PropertySig)>,
-            Vec<(Arc<str>, ConstSig)>,
+            Vec<(Arc<str>, FunctionReflection)>,
+            Vec<(Arc<str>, PropertyReflection)>,
+            Vec<(Arc<str>, ConstantReflection)>,
             FxHashSet<Arc<str>>,
             FxHashSet<Arc<str>>,
         );
@@ -171,7 +174,7 @@ impl Registry {
                 // it, a using class's own `static_methods` set would
                 // never learn about a trait-supplied static method it
                 // doesn't also redeclare itself, even though that
-                // method's (correctly flattened-in) `FunctionSig` is
+                // method's (correctly flattened-in) `FunctionReflection` is
                 // right there in `info.methods`.
                 let mut static_from_traits: FxHashSet<Arc<str>> = FxHashSet::default();
                 for trait_name in &uses {
@@ -294,7 +297,7 @@ impl Registry {
         changed
     }
 
-    /// `@method`'s deferred insertion - `ClassInfo::method_tags`'s
+    /// `@method`'s deferred insertion - `ClassReflection::method_tags`'s
     /// construction site (`from_decl`) has the full "why this can't just
     /// insert eagerly" explanation: a same-named real trait method hasn't
     /// been flattened in yet at that point, and both insertions are
@@ -384,7 +387,7 @@ impl Registry {
     }
 
     fn inherit_property_hooks_one_pass(&mut self) -> bool {
-        let mut updates: Vec<(Arc<str>, Arc<str>, PropertySig)> = Vec::new();
+        let mut updates: Vec<(Arc<str>, Arc<str>, PropertyReflection)> = Vec::new();
         for (class_name, info) in &self.classes {
             let Some(parent) = info.extends.first() else {
                 continue;
@@ -654,7 +657,7 @@ impl Registry {
         }
     }
 
-    /// `@phpstan-import-type`'s deferred half - `ClassInfo::from_decl`
+    /// `@phpstan-import-type`'s deferred half - `ClassReflection::from_decl`
     /// already resolved both names (`ResolvedTypeImport`'s doc comment),
     /// but couldn't look the import up yet: the source class may not be
     /// indexed at all at that point. Mirrors `resolve_deferred_value_of`'s
@@ -764,7 +767,7 @@ impl Registry {
     /// `@mixin`'s deferred half - mirrors `resolve_deferred_type_imports`'s
     /// exact two-step shape (a read-only collection pass, then a second
     /// pass applying it): the mixin target may not be indexed yet at
-    /// `ClassInfo::from_decl` time.
+    /// `ClassReflection::from_decl` time.
     ///
     /// Only a public method/property is pulled in, mirroring real
     /// PHPStan's `MixinMethodsClassReflectionExtension`/
@@ -781,8 +784,8 @@ impl Registry {
     /// type_aliases`'s alias-of-alias handling accepts.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_mixins(&mut self) {
-        let mut method_additions: Vec<(Arc<str>, Arc<str>, FunctionSig)> = Vec::new();
-        let mut property_additions: Vec<(Arc<str>, Arc<str>, PropertySig)> = Vec::new();
+        let mut method_additions: Vec<(Arc<str>, Arc<str>, FunctionReflection)> = Vec::new();
+        let mut property_additions: Vec<(Arc<str>, Arc<str>, PropertyReflection)> = Vec::new();
         for (class_name, info) in &self.classes {
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
@@ -819,7 +822,7 @@ impl Registry {
     /// resolves a `ValueOf`/`ClassConstant` immediately, inline, with no
     /// pass needed. Every checker-side call site that parses a docblock
     /// type string independently of the registry's own
-    /// `FunctionSig::from_decl`/`ClassInfo::from_decl` pipeline (which
+    /// `FunctionReflection::from_decl`/`ClassReflection::from_decl` pipeline (which
     /// `resolve_deferred_value_of` covers) needs this too - e.g.
     /// `Checker::resolve_type_hint`, reached through an inline `@var`
     /// annotation, would otherwise leak the raw, unresolved sentinel
@@ -837,7 +840,7 @@ impl Registry {
     /// `value-of<T>` needs this rather than plain
     /// `resolve_deferred_value_of_now` alone. Used by the anonymous-class
     /// param/return docblock fallback in `checker.rs`, which (like the
-    /// registry's `FunctionSig::from_decl`) reconciles its raw-parsed
+    /// registry's `FunctionReflection::from_decl`) reconciles its raw-parsed
     /// doc type against a native counterpart via `resolve_type` before
     /// this ever runs.
     pub(crate) fn resolve_deferred_value_of_now_with_native_fallback(
@@ -870,7 +873,7 @@ impl Registry {
     /// structurally distinguishable). A method-scoped template is safe
     /// to copy through verbatim: `types::bind_template_param`/
     /// `substitute_template`'s call-site binding is purely name-keyed
-    /// and blind to which class's `FunctionSig` a signature came from.
+    /// and blind to which class's `FunctionReflection` a signature came from.
     /// Real PHPStan draws the identical line:
     /// `ResolvedPhpDocBlock::resolveTemplateTypeInTag` substitutes an
     /// ancestor tag's type through
@@ -898,7 +901,7 @@ impl Registry {
     /// templates, scoped to it, through the mapping, so an inherited
     /// `list<T>` becomes `list<CMTemplate>` for a `@template-implements
     /// Factory<CMTemplate>` class rather than losing `T` to `Mixed`.
-    fn ancestor_bindings(&self, class_name: &str, info: &ClassInfo) -> AncestorBindings {
+    fn ancestor_bindings(&self, class_name: &str, info: &ClassReflection) -> AncestorBindings {
         let own_args = info.own_template_args(class_name);
         self.all_ancestor_names(class_name)
             .into_iter()
@@ -1294,7 +1297,10 @@ pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
 /// any depth. See `Registry::resolve_deferred_value_of`'s doc comment
 /// for why this exists, and `types::parse_type_keyword_or_class`'s
 /// `"value-of"` arm for where a `ValueOf` is produced.
-fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
+fn resolve_deferred_value_of_in_type(
+    ty: Type,
+    classes: &FxHashMap<Arc<str>, ClassReflection>,
+) -> Type {
     match ty {
         Type::ValueOf(target) => match *target {
             target @ Type::ClassConstant { .. } => {
@@ -1318,7 +1324,7 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
 /// constant's literal type), mirroring real PHPStan's `TypeNodeResolver`
 /// for a `ConstTypeNode` - a `*` in the name matches any run of
 /// characters. Matches are ordered by name for a deterministic union
-/// (real PHPStan uses declaration order, which `ClassInfo::consts` doesn't
+/// (real PHPStan uses declaration order, which `ClassReflection::consts` doesn't
 /// keep). An unknown class, or no match, degrades to `Mixed`. Only the
 /// class's own constants are consulted, not inherited ones. A `self`/
 /// `static` reference has already been bound to the owning class by
@@ -1327,7 +1333,7 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
 fn resolve_class_const_type(
     class: &Type,
     pattern: &str,
-    classes: &FxHashMap<Arc<str>, ClassInfo>,
+    classes: &FxHashMap<Arc<str>, ClassReflection>,
 ) -> Type {
     let Type::Object(fqn, _) = class else {
         return Type::Mixed(false);
@@ -1341,7 +1347,7 @@ fn resolve_class_const_type(
 
 /// Whether any type `resolve_deferred_value_of` rewrites on `info`
 /// contains a deferred sentinel - lets that pass skip a class outright.
-fn class_has_deferred_type(info: &ClassInfo) -> bool {
+fn class_has_deferred_type(info: &ClassReflection) -> bool {
     info.methods.values().any(|sig| {
         type_contains_deferred_value_of(&sig.return_type)
             || [&sig.return_doc_ty, &sig.self_out]
@@ -1386,9 +1392,9 @@ fn class_has_deferred_type(info: &ClassInfo) -> bool {
 /// of the same name.
 fn visible_class_consts(
     fqn: &str,
-    classes: &FxHashMap<Arc<str>, ClassInfo>,
-) -> IndexMap<Arc<str>, ConstSig> {
-    let mut consts: IndexMap<Arc<str>, ConstSig> = IndexMap::new();
+    classes: &FxHashMap<Arc<str>, ClassReflection>,
+) -> IndexMap<Arc<str>, ConstantReflection> {
+    let mut consts: IndexMap<Arc<str>, ConstantReflection> = IndexMap::new();
     let mut seen: FxHashSet<Arc<str>> = FxHashSet::default();
     let mut queue: std::collections::VecDeque<Arc<str>> = std::collections::VecDeque::new();
     queue.push_back(Arc::from(fqn));
@@ -1412,7 +1418,10 @@ fn visible_class_consts(
 
 /// The union of every constant in `consts` whose name matches `pattern` -
 /// see `resolve_class_const_type`.
-fn matching_class_const_type(consts: &IndexMap<Arc<str>, ConstSig>, pattern: &str) -> Type {
+fn matching_class_const_type(
+    consts: &IndexMap<Arc<str>, ConstantReflection>,
+    pattern: &str,
+) -> Type {
     let names: Vec<&Arc<str>> = consts
         .keys()
         .filter(|name| glob_matches(pattern, name))
@@ -1487,7 +1496,11 @@ fn value_of_type(ty: Type) -> Type {
 /// rewritten out of the registry's class map while rewriting it, so
 /// `resolve_deferred_value_of_in_type` can't find a class's own constants
 /// there - this runs first, for the one class that's missing.
-fn bind_class_const_self(ty: Type, class: &str, own_consts: &IndexMap<Arc<str>, ConstSig>) -> Type {
+fn bind_class_const_self(
+    ty: Type,
+    class: &str,
+    own_consts: &IndexMap<Arc<str>, ConstantReflection>,
+) -> Type {
     bind_class_const_self_at(ty, class, own_consts, 0)
 }
 
@@ -1498,7 +1511,7 @@ fn bind_class_const_self(ty: Type, class: &str, own_consts: &IndexMap<Arc<str>, 
 fn bind_class_const_self_at(
     ty: Type,
     class: &str,
-    own_consts: &IndexMap<Arc<str>, ConstSig>,
+    own_consts: &IndexMap<Arc<str>, ConstantReflection>,
     depth: usize,
 ) -> Type {
     const MAX_DEPTH: usize = 16;
@@ -1549,7 +1562,10 @@ fn unresolved_class_const_to_mixed(ty: Type) -> Type {
 /// (`registry/class_info.rs`, built for the enum's real `->value`
 /// property) is already the exact union-of-case-literal-values type real
 /// PHPStan computes independently - reused directly, not recomputed.
-fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
+fn resolve_value_of_target(
+    target_fqn: &str,
+    classes: &FxHashMap<Arc<str>, ClassReflection>,
+) -> Type {
     let Some(info) = classes.get(target_fqn) else {
         return Type::Mixed(false);
     };
@@ -1570,16 +1586,16 @@ fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<Arc<str>, Class
 /// this, a native type this project already trusted would be silently
 /// replaced by a bare, strictly worse `Mixed`.
 ///
-/// Only `ParamSig::ty`/`FunctionSig::return_type` get this treatment -
+/// Only `ParameterReflection::ty`/`FunctionReflection::return_type` get this treatment -
 /// they're the only two places this registry persists a native-only
-/// counterpart type to fall back to (`ParamSig::ty_native`/
-/// `FunctionSig::return_type_native`). `PropertySig`/`ConstSig`/
-/// `ClassInfo::template_bounds` have no such counterpart stored - an
+/// counterpart type to fall back to (`ParameterReflection::ty_native`/
+/// `FunctionReflection::return_type_native`). `PropertyReflection`/`ConstantReflection`/
+/// `ClassReflection::template_bounds` have no such counterpart stored - an
 /// unresolvable `value-of<T>` there stays plain `Mixed`.
 fn resolve_deferred_value_of_with_native_fallback(
     ty: Type,
     native: &Type,
-    classes: &FxHashMap<Arc<str>, ClassInfo>,
+    classes: &FxHashMap<Arc<str>, ClassReflection>,
 ) -> Type {
     let resolved = resolve_deferred_value_of_in_type(ty, classes);
     if resolved == Type::Mixed(false) && *native != Type::Mixed(false) {
@@ -1589,7 +1605,7 @@ fn resolve_deferred_value_of_with_native_fallback(
     }
 }
 
-impl ClassInfo {
+impl ClassReflection {
     /// This class's own templates as `TemplateParam` arguments scoped to
     /// `class_name` - the identity binding, which `class_template_bindings`
     /// maps through to an ancestor without erasing them.
@@ -1645,7 +1661,7 @@ impl Registry {
         // return, corrected type)
         type Fix = (Option<Arc<str>>, Arc<str>, Option<usize>, Type);
         let mut fixes: Vec<Fix> = Vec::new();
-        let mut visit = |class: Option<&Arc<str>>, name: &Arc<str>, sig: &FunctionSig| {
+        let mut visit = |class: Option<&Arc<str>>, name: &Arc<str>, sig: &FunctionReflection| {
             for (i, p) in sig.params.iter().enumerate() {
                 if let Some(ty) = self.excluding_native(&p.ty, &p.ty_native, class) {
                     fixes.push((class.cloned(), name.clone(), Some(i), ty));
@@ -1871,10 +1887,10 @@ impl Registry {
 /// `sig` with constant-named types resolved, when any are.
 fn fixed_sig(
     registry: &Registry,
-    sig: &FunctionSig,
+    sig: &FunctionReflection,
     lookup: &dyn Fn(&Registry, &Type) -> Option<Type>,
-) -> Option<FunctionSig> {
-    let mut fixed: Option<FunctionSig> = None;
+) -> Option<FunctionReflection> {
+    let mut fixed: Option<FunctionReflection> = None;
     for (i, p) in sig.params.iter().enumerate() {
         if let Some(ty) = lookup(registry, &p.ty) {
             fixed.get_or_insert_with(|| sig.clone()).params[i].ty = ty;
@@ -1956,7 +1972,10 @@ impl Registry {
     /// the same per-signature passes as every indexed function: deferred
     /// value types, constant-named types, and native-excluded PHPDoc
     /// members.
-    pub(crate) fn finalize_standalone_sig(&self, mut sig: FunctionSig) -> FunctionSig {
+    pub(crate) fn finalize_standalone_sig(
+        &self,
+        mut sig: FunctionReflection,
+    ) -> FunctionReflection {
         let resolve = |ty: &mut Type, native: &Type| {
             if type_contains_deferred_value_of(ty) {
                 let taken = std::mem::replace(ty, Type::Mixed(false));

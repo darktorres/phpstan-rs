@@ -2,12 +2,12 @@
 
 use super::super::*;
 use crate::reflection_rule::ReflectionRule;
-use crate::registry::{ClassInfo, FunctionSig};
+use crate::registry::{ClassReflection, FunctionReflection};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 
 struct FlagsEveryPublicClass;
 impl ReflectionRule for FlagsEveryPublicClass {
-    fn check_class(&self, class: &ClassInfo, fqn: &str) -> Vec<Diagnostic> {
+    fn check_class(&self, class: &ClassReflection, fqn: &str) -> Vec<Diagnostic> {
         let _ = class;
         vec![
             DiagnosticBuilder::new(
@@ -23,7 +23,7 @@ impl ReflectionRule for FlagsEveryPublicClass {
 
 struct FlagsEveryFunction;
 impl ReflectionRule for FlagsEveryFunction {
-    fn check_function(&self, sig: &FunctionSig, fqn: &str) -> Vec<Diagnostic> {
+    fn check_function(&self, sig: &FunctionReflection, fqn: &str) -> Vec<Diagnostic> {
         let _ = sig;
         vec![
             DiagnosticBuilder::new(

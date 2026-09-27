@@ -2,7 +2,7 @@ use crate::checker::{
     ATTRIBUTE_TARGET_METHOD, Checker, Locals, body_contains_explicit_throw, collect_goto_targets,
     expr_contains_explicit_throw,
 };
-use crate::registry::{self, PropertySig, resolve_names_in_type};
+use crate::registry::{self, PropertyReflection, resolve_names_in_type};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
@@ -149,7 +149,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Resolves a hook's own `@throws` tag into a real `Type`, computed
-    /// at check time since a hook has no `FunctionSig` of its own to
+    /// at check time since a hook has no `FunctionReflection` of its own to
     /// cache it on.
     fn resolve_hook_throws(&self, doc: Option<&str>) -> Option<Type> {
         let block = docblock::parse(doc?);
@@ -199,7 +199,7 @@ impl<'a> Checker<'a> {
         name: &str,
         span: Span,
         body: &PropertyHookBody,
-        prop_sig: &PropertySig,
+        prop_sig: &PropertyReflection,
         attrs: &[Attribute],
         doc: Option<&str>,
         hook_final: bool,
@@ -377,7 +377,7 @@ impl<'a> Checker<'a> {
         type_hint: Option<&TypeHint>,
         param: Option<&Param>,
         body: &PropertyHookBody,
-        prop_sig: &PropertySig,
+        prop_sig: &PropertyReflection,
         attrs: &[Attribute],
         doc: Option<&str>,
         hook_final: bool,
@@ -427,7 +427,7 @@ impl<'a> Checker<'a> {
         // `SetPropertyHookParameterRule`'s native-type-contravariance
         // half only; its docblock-merged sibling is skipped, matching
         // real PHPStan's own default-off override-compatibility flag
-        // (see `FunctionSig::return_type_native`). A hook without a
+        // (see `FunctionReflection::return_type_native`). A hook without a
         // parameter list has an implicit `$value` of the property's type.
         let param_has_native = param.is_some_and(|p| p.type_hint.is_some());
         let prop_has_native = type_hint.is_some();

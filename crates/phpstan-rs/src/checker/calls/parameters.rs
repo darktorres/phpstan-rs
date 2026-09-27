@@ -7,7 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::calls::{contains_nullsafe_access, is_valid_byref_argument_expr};
 use crate::checker::{Checker, Locals, union_types};
-use crate::registry::{FunctionSig, ParamSig};
+use crate::registry::{FunctionReflection, ParameterReflection};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -139,7 +139,7 @@ enum Position<'s> {
     Unnamed,
 }
 
-fn describe_parameter(param: &ParamSig, position: Position) -> String {
+fn describe_parameter(param: &ParameterReflection, position: Position) -> String {
     let dollar = if param.variadic() { "...$" } else { "$" };
     match position {
         Position::Index(i) => format!("Parameter #{i} {dollar}{}", param.name()),
@@ -155,7 +155,7 @@ fn describe_parameter(param: &ParamSig, position: Position) -> String {
 
 pub(crate) struct ParametersCheck<'a> {
     pub callee: Callee<'a>,
-    pub sig: &'a FunctionSig,
+    pub sig: &'a FunctionReflection,
     pub args: &'a [Arg],
     pub locals: &'a Locals,
     /// The class `self`/`static` in parameter types resolve against.
@@ -415,18 +415,19 @@ impl<'a> Checker<'a> {
     fn bind_arguments<'s>(
         &mut self,
         callee: Callee,
-        sig: &'s FunctionSig,
+        sig: &'s FunctionReflection,
         arguments: &[Argument],
         has_named: bool,
         is_builtin: bool,
         span: Span,
-    ) -> Vec<Option<&'s ParamSig>> {
+    ) -> Vec<Option<&'s ParameterReflection>> {
         let params = sig.params();
         let variadic = params.last().is_some_and(|p| p.variadic());
         let natively_variadic = params.iter().any(|p| p.variadic());
-        let by_name: FxHashMap<&str, &ParamSig> =
+        let by_name: FxHashMap<&str, &ParameterReflection> =
             params.iter().map(|p| (p.name().as_ref(), p)).collect();
-        let mut unused: Vec<&ParamSig> = params.iter().filter(|p| !p.variadic()).collect();
+        let mut unused: Vec<&ParameterReflection> =
+            params.iter().filter(|p| !p.variadic()).collect();
         let mut variadic_names: FxHashSet<&str> = FxHashSet::default();
         let mut named_occurred = false;
         let mut bound = Vec::with_capacity(arguments.len());

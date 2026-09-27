@@ -233,7 +233,7 @@ pub struct FunctionDecl {
     pub name_span: Span,
     pub params: Vec<Param>,
     pub return_type: Option<TypeHint>,
-    // `Arc`, not a plain `Vec` - `registry::FunctionSig::from_decl` shares
+    // `Arc`, not a plain `Vec` - `registry::FunctionReflection::from_decl` shares
     // this exact allocation into its own `body: Option<Arc<Vec<Stmt>>>`
     // field (an `Arc` clone, not a deep AST clone) rather than
     // re-materializing an owned copy at that boundary, the same

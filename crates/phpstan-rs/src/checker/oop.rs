@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 
 use crate::checker::{Checker, Locals, class_kind_identifier};
 use crate::registry::{
-    FunctionSig, PropertySig, collect_class_name_case_refs, object_class_names,
+    FunctionReflection, PropertyReflection, collect_class_name_case_refs, object_class_names,
     resolve_names_in_type,
 };
 use diagnostics::DiagnosticBuilder;
@@ -185,7 +185,7 @@ impl<'a> Checker<'a> {
     /// interfaces), every `implements` target, and every `use`d trait.
     /// Checks every entry - an interface's `extends A, B;` is real,
     /// valid PHP with more than one target. Operates purely on the
-    /// already-indexed, already name-resolved `ClassInfo`, so this needs
+    /// already-indexed, already name-resolved `ClassReflection`, so this needs
     /// no raw `ClassDecl`/`EnumDecl` at all and covers both uniformly
     /// from one call site. Existence-only - kind compatibility (a
     /// class `implements`-ing another class instead of an interface) is
@@ -235,7 +235,7 @@ impl<'a> Checker<'a> {
 
     /// Mirrors real PHPStan's `MethodTagCheck` - a `@method` tag's
     /// parameter/return types are already resolved into a real
-    /// `FunctionSig` (`ClassInfo::method_tags`) but never existence-
+    /// `FunctionReflection` (`ClassReflection::method_tags`) but never existence-
     /// checked. Pure reuse of `check_type_class_names_exist` - no new
     /// existence machinery. `methodTag.trait` (the type resolves but is
     /// a trait, invalid there) is deliberately not built - no analog
@@ -244,12 +244,12 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        // `Registry::resolve_method_tags` drains `ClassInfo::method_tags`
+        // `Registry::resolve_method_tags` drains `ClassReflection::method_tags`
         // into `info.methods` before this checker pass runs, so this
         // class's `@method` tags are already merged and indistinguishable
         // there from a real declared method by name alone.
-        // `FunctionSig::is_magic` is the one field `method_tag_sig` sets
-        // that a real declared method's `FunctionSig::from_decl` never
+        // `FunctionReflection::is_magic` is the one field `method_tag_sig` sets
+        // that a real declared method's `FunctionReflection::from_decl` never
         // does, so it's the correct filter here. Also matches enum
         // `cases()`/`from()`/`tryFrom()` (the other `is_magic: true`
         // producer) harmlessly - their synthesized types never reference
@@ -358,7 +358,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Mirrors real PHPStan's `MixinCheck` - `@mixin Type` is already
-    /// resolved to a bare FQN string (`ClassInfo::mixins`) and consumed
+    /// resolved to a bare FQN string (`ClassReflection::mixins`) and consumed
     /// for its real semantic effect (the mixin's methods/properties
     /// become available on the host class), but its own existence needs
     /// checking too - an unresolvable `@mixin` target would otherwise
@@ -391,7 +391,7 @@ impl<'a> Checker<'a> {
     /// `RequireImplementsDefinitionTraitRule`'s full declaration-validity
     /// family, not just the existence half - `@phpstan-require-extends`/
     /// `-implements`'s RHS is re-parsed directly from `c`'s own doc
-    /// comment (rather than read back from `ClassInfo::require_extends`/
+    /// comment (rather than read back from `ClassReflection::require_extends`/
     /// `require_implements`, which is already flattened across every tag
     /// into one combined `Vec<String>` of only the successfully-
     /// extracted object class names - exactly the information a
@@ -530,7 +530,7 @@ impl<'a> Checker<'a> {
     /// see `check_require_tag_types`'s identical doc comment for why the
     /// RHS is re-parsed directly from the declaration's own doc comment
     /// rather than read back from the already-flattened
-    /// `ClassInfo::sealed`. Takes scalars rather than a whole
+    /// `ClassReflection::sealed`. Takes scalars rather than a whole
     /// `&ClassDecl` since `@phpstan-sealed`'s `sealed.onEnum` check needs
     /// a real `StmtKind::EnumDecl` call site too - `EnumDecl` and
     /// `ClassDecl` are different AST types with no shared struct to
@@ -587,7 +587,7 @@ impl<'a> Checker<'a> {
 
     /// Mirrors real PHPStan's `LocalTypeAliasesCheck` existence half - a
     /// `@phpstan-type Name TypeExpr` alias's RHS is already resolved
-    /// (`ClassInfo::type_aliases`) but never existence-checked. Only the
+    /// (`ClassReflection::type_aliases`) but never existence-checked. Only the
     /// alias-RHS half is built here, not `@phpstan-import-type`'s
     /// `from Class` existence: that class is commonly only reachable via
     /// Composer autoloading this registry may legitimately have no data
@@ -627,8 +627,8 @@ impl<'a> Checker<'a> {
             return;
         }
 
-        let mut seen_props: FxHashMap<&str, (&str, &PropertySig)> = FxHashMap::default();
-        let mut seen_methods: FxHashMap<&str, (&str, &FunctionSig)> = FxHashMap::default();
+        let mut seen_props: FxHashMap<&str, (&str, &PropertyReflection)> = FxHashMap::default();
+        let mut seen_methods: FxHashMap<&str, (&str, &FunctionReflection)> = FxHashMap::default();
         for trait_name in info.uses() {
             let Some(trait_info) = self.registry.classes.get(trait_name) else {
                 continue;
@@ -839,7 +839,7 @@ impl<'a> Checker<'a> {
     /// PHPStan's `classConstant.value` identifier. Untyped (`const NAME
     /// = value;`, the overwhelming majority) constants have nothing to
     /// check here. `self.infer_expr`, not the registry's already-
-    /// resolved `ConstSig.ty`, so a value referencing another constant/
+    /// resolved `ConstantReflection.ty`, so a value referencing another constant/
     /// enum case gets this checker's full expression inference rather
     /// than only ever seeing `infer_const_type`'s narrower literal-only
     /// view.
@@ -984,7 +984,7 @@ impl<'a> Checker<'a> {
             &c.methods,
         );
         self.check_class_constant_modifiers(fqn, c.kind, &c.consts);
-        let own = crate::registry::ClassInfo::from_decl(c, &self.name_ctx);
+        let own = crate::registry::ClassReflection::from_decl(c, &self.name_ctx);
         let registry_matches = self.registry.classes.get(fqn).is_some_and(|info| {
             *info.extends() == *own.extends()
                 && *info.implements() == *own.implements()
@@ -1005,7 +1005,7 @@ impl<'a> Checker<'a> {
         }
         self.check_method_declaration_sanity(fqn, ClassKind::Enum, false, &e.methods);
         self.check_class_constant_modifiers(fqn, ClassKind::Enum, &e.consts);
-        let own = crate::registry::ClassInfo::from_enum_decl(e, &self.name_ctx);
+        let own = crate::registry::ClassReflection::from_enum_decl(e, &self.name_ctx);
         let registry_matches = self.registry.classes.get(fqn).is_some_and(|info| {
             *info.implements() == *own.implements() && *info.uses() == *own.uses()
         });
@@ -1222,7 +1222,7 @@ impl<'a> Checker<'a> {
         fqn: &str,
         trait_fqn: &str,
         cc: &ClassConst,
-        trait_const: &crate::registry::ConstSig,
+        trait_const: &crate::registry::ConstantReflection,
         own_native: Option<&Type>,
     ) {
         let name = cc.name.as_ref();
@@ -1977,7 +1977,7 @@ pub(crate) fn visibility_word(v: &Visibility) -> &'static str {
 /// relationship between them, so there's no contravariance/covariance
 /// direction to apply - only "are these the same signature" makes sense
 /// here.
-pub(crate) fn signatures_compatible(a: &FunctionSig, b: &FunctionSig) -> bool {
+pub(crate) fn signatures_compatible(a: &FunctionReflection, b: &FunctionReflection) -> bool {
     if a.params().len() != b.params().len() {
         return false;
     }

@@ -9,7 +9,7 @@ use syntax::ast::*;
 impl<'a> Checker<'a> {
     /// Mirrors real PHPStan's own `getWritableType()` (`set_ty` when a
     /// PHP 8.4 `set(Type $value)` hook declares its own, wider accepted
-    /// type, `ty` otherwise - `PropertySig::set_ty`'s own doc comment).
+    /// type, `ty` otherwise - `PropertyReflection::set_ty`'s own doc comment).
     /// The untyped-property exemption below mirrors real PHPStan's own
     /// `!hasNativeType()` special case exactly: only a literal `null`
     /// default is exempted, checked against the raw AST `type_hint`

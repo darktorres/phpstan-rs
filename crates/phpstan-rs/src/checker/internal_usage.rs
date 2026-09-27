@@ -27,7 +27,7 @@
 //! attribute-usage positions in this project yet).
 
 use crate::checker::Checker;
-use crate::registry::{ConstSig, FunctionSig, PropertySig};
+use crate::registry::{ConstantReflection, FunctionReflection, PropertyReflection};
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassKind, FunctionDecl, Param};
 use syntax::token::Span;
@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_internal_function_call(
         &mut self,
         fqn: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         span: Span,
     ) {
         if !self.settings.rules.check_internal_usage || !sig.is_internal() {
@@ -112,7 +112,7 @@ impl<'a> Checker<'a> {
         &mut self,
         owner: &str,
         method_name: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         is_static: bool,
         span: Span,
     ) {
@@ -175,7 +175,7 @@ impl<'a> Checker<'a> {
         &mut self,
         owner: &str,
         prop_name: &str,
-        sig: &PropertySig,
+        sig: &PropertyReflection,
         span: Span,
     ) {
         if !self.settings.rules.check_internal_usage {
@@ -236,7 +236,7 @@ impl<'a> Checker<'a> {
         &mut self,
         owner: &str,
         const_name: &str,
-        sig: &ConstSig,
+        sig: &ConstantReflection,
         span: Span,
     ) {
         if !self.settings.rules.check_internal_usage {
@@ -383,7 +383,7 @@ impl<'a> Checker<'a> {
     /// by the identical real-PHPStan mechanism -
     /// `ExistingClassInTraitUseRule` feeding the same shared
     /// `ClassNameCheck`). Mirrors `check_class_references_exist`'s own shape exactly: same
-    /// already-resolved `ClassInfo::extends`/`implements`/`uses` fields,
+    /// already-resolved `ClassReflection::extends`/`implements`/`uses` fields,
     /// same whole-class-declaration span, same two call sites
     /// (`check_class_references_exist` doesn't run for a nested/
     /// conditionally-declared class either, so neither does this).

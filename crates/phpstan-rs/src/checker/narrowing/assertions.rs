@@ -384,7 +384,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn apply_assert_infos(
         &self,
         infos: &[crate::registry::AssertInfo],
-        sig: &crate::registry::FunctionSig,
+        sig: &crate::registry::FunctionReflection,
         recv: Option<&Expr>,
         args: &[Arg],
         locals: &mut Locals,
@@ -420,7 +420,7 @@ impl<'a> Checker<'a> {
     fn assert_target_key_and_current<'l>(
         &self,
         target: &crate::registry::AssertTarget,
-        sig: &crate::registry::FunctionSig,
+        sig: &crate::registry::FunctionReflection,
         recv: Option<&Expr>,
         args: &[Arg],
         locals: &'l Locals,

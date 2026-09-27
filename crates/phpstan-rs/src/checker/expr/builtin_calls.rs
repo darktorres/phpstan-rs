@@ -3,7 +3,7 @@ use crate::checker::{
     narrow_type_excluding_falsy, narrow_type_to, narrowing_type_for_predicate, resolve_call_args,
     string_type_has_accessory,
 };
-use crate::registry::{FunctionSig, Registry};
+use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
@@ -29,7 +29,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn infer_builtin_call_return_type(
         &self,
         name: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         args: &[Arg],
         locals: &Locals,
     ) -> Type {

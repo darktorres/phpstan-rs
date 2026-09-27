@@ -39,7 +39,7 @@ use crate::registry::bodies::BodySource;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-use crate::registry::{FunctionSig, Registry};
+use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
 use syntax::intern::intern;
 use syntax::token::Span;
@@ -49,7 +49,7 @@ use types::Type;
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base
 /// case a fixed point grows outward from; `None` (not this type, see
-/// `FunctionSig::purity_dependencies`) means "can never be proven
+/// `FunctionReflection::purity_dependencies`) means "can never be proven
 /// effect-free, no matter what". Both variants store a lower-cased key
 /// (matching real PHPStan's own `functionKey`/`methodKey`, which
 /// `strtolower`s both parts) - so the same declaration referenced under
@@ -226,7 +226,7 @@ impl Registry {
 
 /// Real PHPStan's own pre-`resolveDependencies` gate: no by-reference
 /// parameter, no `@phpstan-assert`-family tag, no declared throw. Every
-/// one of this project's own `FunctionSig`s already carries exactly the
+/// one of this project's own `FunctionReflection`s already carries exactly the
 /// fields needed to check this without re-deriving anything.
 ///
 /// Real PHPStan's own `hasSideEffects()` unconditionally returns
@@ -246,8 +246,8 @@ impl Registry {
 /// (constructors can't syntactically declare a `void` return type, but
 /// a stray `@return void` PHPDoc tag on one is a real possibility this
 /// project's own `return_type` field doesn't otherwise guard against).
-fn purity_gate_passes(sig: &FunctionSig, is_constructor: bool) -> bool {
-    // See `FunctionSig::is_stub`'s own doc comment - a vendored stub's
+fn purity_gate_passes(sig: &FunctionReflection, is_constructor: bool) -> bool {
+    // See `FunctionReflection::is_stub`'s own doc comment - a vendored stub's
     // own body is always empty and never real; walking it would wrongly
     // "prove" every PHP builtin pure. Checked first, not that it matters
     // for correctness (the other checks would eventually reject some of
@@ -522,7 +522,7 @@ fn property_write_target(e: &Expr) -> bool {
 /// `owner`/`method` must be pushed exactly as returned by
 /// `lookup_method_with_owner`, without lowercasing: unlike real
 /// PHPStan's own key encoding (which lowercases both construction and
-/// lookup consistently), this project's `self.classes`/`ClassInfo.
+/// lookup consistently), this project's `self.classes`/`ClassReflection.
 /// methods` are keyed by whatever case each declaration actually used
 /// (PascalCase by PHP convention). Lowercasing before storing would
 /// break every multi-hop dependency chain through any class name
@@ -565,7 +565,7 @@ pub(crate) fn is_non_overridable(
     calling_class: &str,
     owner: &str,
     method: &str,
-    sig: &FunctionSig,
+    sig: &FunctionReflection,
 ) -> bool {
     if sig.visibility == Visibility::Private {
         return true;

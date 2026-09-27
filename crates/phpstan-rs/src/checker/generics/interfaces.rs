@@ -13,7 +13,7 @@
 //! machinery (which rebuilds and caches the full transitive interface
 //! closure at every recursion level, with its own `$first`-gated
 //! parent-chain short-circuit) - this walks the `extends`/`implements`
-//! graph directly via `ClassInfo`, substituting one level's own concrete
+//! graph directly via `ClassReflection`, substituting one level's own concrete
 //! arguments into the next via the same `types::substitute_template`
 //! primitive `Registry::class_template_bindings_rec` already uses for a
 //! single-target search, just without stopping at the first match: every
@@ -25,7 +25,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::Checker;
-use crate::registry::ClassInfo;
+use crate::registry::ClassReflection;
 use syntax::token::Span;
 use types::{self, Type};
 
@@ -153,7 +153,7 @@ impl<'a> Checker<'a> {
         // tag linking the two. `extends.len() == 1` is required in
         // addition, for the same multi-extends-conflation reason
         // `check_ancestor_generic_bounds`'s own arity checking already
-        // established (`ClassInfo::extends_args`'s own doc comment) - an
+        // established (`ClassReflection::extends_args`'s own doc comment) - an
         // interface `extends`-ing more than one parent at once conflates
         // their argument lists into one flat, un-keyed list, unsafe to
         // attribute to either.
@@ -220,7 +220,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn identity_template_bindings(info: &ClassInfo, class: &str) -> FxHashMap<String, Type> {
+fn identity_template_bindings(info: &ClassReflection, class: &str) -> FxHashMap<String, Type> {
     info.templates()
         .iter()
         .map(|name| name.to_string())

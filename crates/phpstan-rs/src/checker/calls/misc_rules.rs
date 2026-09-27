@@ -14,7 +14,7 @@ impl<'a> Checker<'a> {
     /// as a whole statement, with its return value neither assigned,
     /// returned, nor otherwise consumed, is flagged when the resolved
     /// function/method's own signature carries PHP 8.5's `#[\NoDiscard]`
-    /// marker (`FunctionSig::no_discard`). Called once per
+    /// marker (`FunctionReflection::no_discard`). Called once per
     /// `StmtKind::Expression`, on the statement's own top-level
     /// expression only - a `NoDiscard` call anywhere else
     /// (an argument, the right side of `=`, one operand of a larger

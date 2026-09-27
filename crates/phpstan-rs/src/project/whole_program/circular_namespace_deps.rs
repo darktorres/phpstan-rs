@@ -4,7 +4,7 @@
 //! some other, possibly unrelated, class pair) has an edge back into
 //! `A`. Real PHPStan has no such rule; this project's own closed-world
 //! `Registry` makes the graph available almost for free, since every
-//! `ClassInfo.extends`/`.implements`/`.uses` entry is already resolved
+//! `ClassReflection.extends`/`.implements`/`.uses` entry is already resolved
 //! to its target's real canonical FQN (`ctx.resolve` at declaration
 //! time) - no new indexing pass needed at all, unlike Phase 86's B2
 //! (`dead_code`), which needed a real (if cheap) reference index.

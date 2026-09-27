@@ -981,7 +981,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `interface-string`/`trait-string` (bare form): real PHPStan
         // gives these no distinguishing semantics from bare
         // `class-string`, but this project checks more strictly -
-        // `ClassInfo::kind` already tracks the distinction. No generic
+        // `ClassReflection::kind` already tracks the distinction. No generic
         // `<T>` form: real PHPStan has none for `trait-string`, and
         // `interface-string<T>` has no real corpus evidence calling for
         // it.

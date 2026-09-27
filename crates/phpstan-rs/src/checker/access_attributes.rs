@@ -1,5 +1,5 @@
 //! Enforces the `php-language-extensions` access attributes read into
-//! `ClassInfo::access`/`method_access`: `Friend` and `NamespaceVisibility`
+//! `ClassReflection::access`/`method_access`: `Friend` and `NamespaceVisibility`
 //! (who may call a method or instantiate a class), `TestTag` (only test
 //! code may), `RestrictTraitTo` (who may use a trait), and
 //! `InjectableVersion` (constructors and `CheckInjectableVersion` methods

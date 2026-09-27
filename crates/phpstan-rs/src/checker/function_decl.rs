@@ -5,8 +5,8 @@ use crate::checker::{
     type_allows_generator_return,
 };
 use crate::registry::{
-    ClassInfo, FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
-    resolve_names_in_type, resolve_type,
+    ClassReflection, FunctionReflection, Registry, collect_class_name_case_refs,
+    mark_template_params, resolve_names_in_type, resolve_type,
 };
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
@@ -20,7 +20,7 @@ impl<'a> Checker<'a> {
     /// A trait's method bodies are checked once per class that `use`s
     /// it, not standalone - `flatten_traits` (`registry.rs`) already
     /// merges a trait's methods/properties into every using class's
-    /// `ClassInfo` before checking starts, so re-checking with
+    /// `ClassReflection` before checking starts, so re-checking with
     /// `current_class` set to a real host's FQN means every lookup
     /// (`lookup_method`/`lookup_property`) transparently sees that
     /// host's true member set - a trait method calling
@@ -46,11 +46,11 @@ impl<'a> Checker<'a> {
         // different branch's own signatures when a trait is declared
         // twice under a version guard with genuinely different method
         // shapes. Reproduces exactly what the registry would hold for
-        // `c` had it won the slot - `ClassInfo::from_decl` is a pure
+        // `c` had it won the slot - `ClassReflection::from_decl` is a pure
         // function of `(c, ctx)`, and no later pass ever mutates a
         // trait's registry entry after indexing, so this is a no-op
         // reconstruction for the common non-duplicated-trait case.
-        let own_info = ClassInfo::from_decl(c, &self.name_ctx);
+        let own_info = ClassReflection::from_decl(c, &self.name_ctx);
         let host_count = contexts.len();
         let mut family_verdicts_by_span: rustc_hash::FxHashMap<
             Span,
@@ -157,7 +157,7 @@ impl<'a> Checker<'a> {
         &self,
         f: &FunctionDecl,
         class_name: Option<&str>,
-    ) -> Option<&'a FunctionSig> {
+    ) -> Option<&'a FunctionReflection> {
         match class_name {
             Some(c) => self.registry.classes.get(c)?.methods().get(f.name.as_ref()),
             None => self
@@ -232,7 +232,7 @@ impl<'a> Checker<'a> {
     /// `f`'s own signature when the registry's slot for its name was built
     /// from a different declaration (or merged from several); `None` when
     /// the slot is `f`'s.
-    fn own_declaration_sig(&self, f: &FunctionDecl) -> Option<FunctionSig> {
+    fn own_declaration_sig(&self, f: &FunctionDecl) -> Option<FunctionReflection> {
         let name = self.name_ctx.declared_name(&f.name);
         let site = *self
             .registry
@@ -241,7 +241,7 @@ impl<'a> Checker<'a> {
         if site == Some((f.name_span.start.line, f.name_span.start.col)) {
             return None;
         }
-        let fresh = FunctionSig::from_decl(
+        let fresh = FunctionReflection::from_decl(
             f,
             &self.name_ctx,
             &rustc_hash::FxHashMap::default(),
@@ -252,7 +252,11 @@ impl<'a> Checker<'a> {
     }
 
     /// `f`'s own signature when `class` declares its name more than once.
-    fn own_redeclared_method_sig(&self, f: &FunctionDecl, class: &str) -> Option<FunctionSig> {
+    fn own_redeclared_method_sig(
+        &self,
+        f: &FunctionDecl,
+        class: &str,
+    ) -> Option<FunctionReflection> {
         let site = (f.name_span.start.line, f.name_span.start.col);
         let sig = self
             .registry
@@ -286,7 +290,7 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
         is_static: bool,
         is_concrete: bool,
-        ancestor_sig_hint: Option<&FunctionSig>,
+        ancestor_sig_hint: Option<&FunctionReflection>,
     ) {
         self.check_function_impl(
             f,
@@ -311,7 +315,7 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
         is_static: bool,
         is_concrete: bool,
-        own_sig: Option<&FunctionSig>,
+        own_sig: Option<&FunctionReflection>,
     ) {
         self.check_function_impl(f, class_name, is_static, is_concrete, None, own_sig);
     }
@@ -328,8 +332,8 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
         is_static: bool,
         is_concrete: bool,
-        ancestor_sig_hint: Option<&FunctionSig>,
-        own_sig_override: Option<&FunctionSig>,
+        ancestor_sig_hint: Option<&FunctionReflection>,
+        own_sig_override: Option<&FunctionReflection>,
     ) {
         let sig = own_sig_override.or_else(|| self.lookup_own_signature(f, class_name));
         let label = match class_name {
@@ -397,7 +401,7 @@ impl<'a> Checker<'a> {
             // so a bound/default referencing a sibling template on the same
             // docblock - `@template A` `@template B of A` - classifies
             // correctly instead of misreading `A` as an unknown class) since
-            // `FunctionSig` has no persisted raw template-bound/-default map
+            // `FunctionReflection` has no persisted raw template-bound/-default map
             // of its own. Cheap substring pre-filter before the real
             // docblock::parse below - most documented methods declare no
             // `@template` at all, so this skips a real parse cost on every
@@ -498,7 +502,7 @@ impl<'a> Checker<'a> {
         // here on carries this forward automatically.
         locals.set_track(self.probe_span.get().is_some());
         match sig {
-            // The registry's FunctionSig already has PHPDoc types merged
+            // The registry's FunctionReflection already has PHPDoc types merged
             // in - using it here, instead of re-deriving from the raw
             // AST's native hints, is what makes an untyped-but-doc-
             // commented parameter usable inside its own function body,
@@ -540,7 +544,7 @@ impl<'a> Checker<'a> {
                     self.check_type_class_name_case(param.case_refs(), ast_param.span);
                     self.check_type_internal_usage(param.case_refs(), ast_param.span);
                     resolved_params.push((param.name().to_string(), ty.clone(), ast_param.span));
-                    // `ParamSig::ty` holds a variadic parameter's own
+                    // `ParameterReflection::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
                     // individual argument at a call site) - inside the
                     // function's own body, real PHP always collects a
@@ -586,7 +590,7 @@ impl<'a> Checker<'a> {
             // against - since this branch (unlike the `Some` one) builds
             // each `Type` fresh from a raw string on every call anyway.
             //
-            // `doc`/`resolve_type` below mirror `FunctionSig::from_decl`'s
+            // `doc`/`resolve_type` below mirror `FunctionReflection::from_decl`'s
             // param-resolution exactly, so an anonymous class's own
             // `/** @return array<string, object> */` above a fully-typed
             // method isn't silently discarded.
@@ -594,7 +598,7 @@ impl<'a> Checker<'a> {
                 let doc = f.doc_comment.as_deref().map(docblock::parse);
                 for (i, p) in f.params.iter().enumerate() {
                     // Same inline-`@var`-on-a-promoted-property fallback
-                    // as `FunctionSig::from_decl`'s param loop.
+                    // as `FunctionReflection::from_decl`'s param loop.
                     let doc_ty: Option<phpdoc::grammar::TypeNode> = doc
                         .as_ref()
                         .and_then(|d| d.params.get(p.name.as_ref()))
@@ -610,8 +614,8 @@ impl<'a> Checker<'a> {
                         p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                     );
                     // This anonymous-class fallback path builds `ty`
-                    // straight from raw text, bypassing `FunctionSig::
-                    // from_decl`'s own `ParamSig::case_refs` population,
+                    // straight from raw text, bypassing `FunctionReflection::
+                    // from_decl`'s own `ParameterReflection::case_refs` population,
                     // so this needs the collection call done inline,
                     // right before `resolve_names_in_type` destroys the
                     // pre-resolution spelling.
@@ -723,7 +727,7 @@ impl<'a> Checker<'a> {
                 f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
             );
             // Same "checker builds a Type straight from raw text,
-            // bypassing FunctionSig::from_decl" pattern as the param
+            // bypassing FunctionReflection::from_decl" pattern as the param
             // loop's identical fix above.
             collect_class_name_case_refs(
                 &ty,
@@ -1582,7 +1586,7 @@ impl<'a> Checker<'a> {
     fn check_default_parameter_types(
         &mut self,
         f: &FunctionDecl,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         class_name: Option<&str>,
     ) {
         for (i, p) in f.params.iter().enumerate() {

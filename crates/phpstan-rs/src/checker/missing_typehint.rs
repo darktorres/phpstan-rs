@@ -21,7 +21,7 @@
 //! `array_map`'s callback), so inventing that check here would be new,
 //! false-positive-prone behavior with no real rule to model it on.
 use crate::checker::Checker;
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use phpdoc::grammar::TypeNode;
@@ -78,7 +78,7 @@ pub(crate) const MISSING_TYPEHINT_LENIENT_GENERIC_CLASS_NAMES: [&str; 1] =
 
 /// Method names PHP (and real PHPStan's own `PhpMethodReflection::
 /// getReturnType`) give an implicit, non-`mixed` return type even when the
-/// source writes no `: T` hint at all. This project's `FunctionSig`
+/// source writes no `: T` hint at all. This project's `FunctionReflection`
 /// doesn't replicate that reflection-level substitution (a hint-less
 /// declaration's `return_type` defaults to plain `Mixed` regardless of
 /// which method it is), so without this exemption every ordinary,
@@ -467,7 +467,7 @@ impl<'a> Checker<'a> {
     /// (non-promoted, non-magic-`@property`) property a class declares
     /// directly. A promoted constructor property isn't in `properties`
     /// at all (it lives in `c.methods`'s own `__construct` params
-    /// instead - see `registry::ClassInfo::from_decl`'s own comment), so
+    /// instead - see `registry::ClassReflection::from_decl`'s own comment), so
     /// it's naturally covered once, by the param-typehint check below,
     /// the same "checked exactly once, on whichever side actually wrote
     /// it" real PHPStan's own `isPromoted()` guard achieves.
@@ -585,9 +585,9 @@ impl<'a> Checker<'a> {
     /// e.g. a genuinely untyped `...$args`'s own per-argument `mixed`
     /// behind a already-array-shaped `Type::Array(Mixed)`).
     ///
-    /// `sig` is the same `Option<&FunctionSig>` `check_function`
-    /// itself already looked up - when present, its `ParamSig::
-    /// explicit_mixed_hint`/`FunctionSig::return_explicit_mixed_hint`
+    /// `sig` is the same `Option<&FunctionReflection>` `check_function`
+    /// itself already looked up - when present, its `ParameterReflection::
+    /// explicit_mixed_hint`/`FunctionReflection::return_explicit_mixed_hint`
     /// (computed once in `from_decl`, from whichever declaration's
     /// docblock `ty`/`return_type` actually came from - this declaration's
     /// own, or an ancestor's via `Registry::flatten_phpdoc_inheritance`)
@@ -605,10 +605,10 @@ impl<'a> Checker<'a> {
         label: &str,
         resolved_params: &[(String, Type, Span)],
         declared_return: Option<&Type>,
-        sig: Option<&FunctionSig>,
+        sig: Option<&FunctionReflection>,
     ) {
         // The registry-computed `sig` (built once at index time via
-        // `FunctionSig::from_decl`) already carries every per-param/
+        // `FunctionReflection::from_decl`) already carries every per-param/
         // return "was there an explicit `mixed` somewhere" verdict this
         // function would otherwise re-derive by re-parsing the identical
         // raw docblock text again here - a real, measured cost at

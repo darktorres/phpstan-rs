@@ -3,7 +3,7 @@ use crate::checker::{
     Checker, Locals, build_matched_shape, int_range_bounds, literal_string_key, normalize_int_range,
 };
 use crate::regex_groups;
-use crate::registry::{AssertTarget, FunctionSig};
+use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::{AccessoryKind, Type};
@@ -267,7 +267,7 @@ impl<'a> Checker<'a> {
     }
 
     /// A plain function call tagged `@phpstan-assert-if-true`/`-if-false`
-    /// on its own docblock - see `FunctionSig::assert_if_true`'s own doc
+    /// on its own docblock - see `FunctionReflection::assert_if_true`'s own doc
     /// comment for the full picture. No `$this`/receiver here, so only a
     /// `Param`-targeted assertion can ever resolve (`apply_assert_infos`
     /// silently skips the rest).
@@ -1205,7 +1205,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // `@phpstan-assert-if-true`/`-if-false` on a method's own
-            // docblock - see `FunctionSig::assert_if_true`'s own doc
+            // docblock - see `FunctionReflection::assert_if_true`'s own doc
             // comment for the full picture. `recv_class` picks a
             // representative member out of a `Union`/`Intersection`
             // receiver the exact same way `checker/expr.rs`'s own
@@ -1502,7 +1502,7 @@ impl<'a> Checker<'a> {
 
     /// `AssertRuleHelper`'s equivalent - a `@phpstan-
     /// assert`-family tag's own type is already resolved into a real
-    /// `AssertInfo` (`FunctionSig::assert`/`assert_if_true`/
+    /// `AssertInfo` (`FunctionReflection::assert`/`assert_if_true`/
     /// `assert_if_false`) and consumed for narrowing (`apply_narrowing`'s
     /// own `check_assert_call` dispatch above); this is its own
     /// declaration-validity half - `class.notFound`/`assert.trait` reuse
@@ -1520,7 +1520,7 @@ impl<'a> Checker<'a> {
     /// plumbing change to `report_missing_typehint_findings`). Called
     /// once per declaration, alongside `check_declared_purity_tag`/
     /// `check_declared_param_callable_tags` (`function_decl.rs`).
-    pub(crate) fn check_assert_tag_types(&mut self, sig: Option<&FunctionSig>, span: Span) {
+    pub(crate) fn check_assert_tag_types(&mut self, sig: Option<&FunctionReflection>, span: Span) {
         let Some(sig) = sig else {
             return;
         };
@@ -1549,7 +1549,7 @@ impl<'a> Checker<'a> {
         &mut self,
         info: &crate::registry::AssertInfo,
         tag_name: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         span: Span,
     ) {
         let target_desc = match &info.target {

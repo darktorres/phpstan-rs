@@ -225,7 +225,7 @@ fn merge_stubs_does_not_override_user_functions() {
     );
     r.merge_stubs(vec![(
         "strlen",
-        FunctionSig {
+        FunctionReflection {
             provenance: crate::registry::provenance::Provenance::default(),
             params: vec![],
             return_type: Type::Bool,
@@ -521,10 +521,10 @@ fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
 // one-method version.
 #[test]
 fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
-    // The built-in class's own `ClassInfo` is built the same way
+    // The built-in class's own `ClassReflection` is built the same way
     // `registry::stubs::generated_stub_classes()` builds a real one - via
     // `Registry::build` over its own source - rather than
-    // constructing a `ClassInfo` literal by hand.
+    // constructing a `ClassReflection` literal by hand.
     let built_in = build_registry(
             "<?php class Imagick { public function getImageWidth() {} public function getImageHeight() {} public function convolveImage($kernel) {} }",
         )
@@ -719,7 +719,7 @@ fn two_method_declarations_with_different_arities_in_one_class_body_merge() {
     // Mirrors real `DatePeriod`'s own three distinct constructor shapes
     // (vendor/phpstorm-stubs/date/date_c.php:1529,1538,1548 - the fourth,
     // identical-signature declaration there is just a PHP-8.3-gated copy
-    // of the third and doesn't change the merged result). `FunctionSig::
+    // of the third and doesn't change the merged result). `FunctionReflection::
     // merge`'s own positional-union rule (registry/function_sig.rs:606)
     // means only the position every real overload declares as required
     // stays required in the merged signature - position 0 here, since

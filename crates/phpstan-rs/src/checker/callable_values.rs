@@ -7,7 +7,7 @@
 
 use crate::checker::calls::CheckArgsCall;
 use crate::checker::{Checker, Locals};
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use syntax::ast::{Arg, Visibility};
 use syntax::token::Span;
 use types::{ShapeKey, Type};
@@ -15,7 +15,7 @@ use types::{ShapeKey, Type};
 /// The function or method a callable value names.
 struct NamedCallable<'r> {
     description: String,
-    sig: &'r FunctionSig,
+    sig: &'r FunctionReflection,
     /// `(owner, method)` for a method, `None` for a plain function.
     method: Option<(String, String)>,
     defining_class: Option<String>,

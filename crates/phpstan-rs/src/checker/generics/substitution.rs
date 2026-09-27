@@ -1,5 +1,5 @@
 use crate::checker::{Checker, TemplateBindings};
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -50,11 +50,11 @@ impl<'a> Checker<'a> {
     /// just because they share a name.
     pub(crate) fn substitute_class_templates(
         &self,
-        sig: &'a FunctionSig,
+        sig: &'a FunctionReflection,
         class: &str,
         type_args: &[Type],
         owner: &str,
-    ) -> std::borrow::Cow<'a, FunctionSig> {
+    ) -> std::borrow::Cow<'a, FunctionReflection> {
         // `(scope, bindings)` pairs to try, in order - almost always
         // exactly one (`owner` itself, the overwhelmingly common case of
         // a class directly declaring its own `@template`), occasionally
@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
         // class_template_bindings_rec`'s own `zip(owner.templates,
         // type_args)` is always empty when the left side is, so every
         // `substitute_scoped` call below would be a no-op walk that still
-        // clones the whole signature (every `ParamSig`, the return/
+        // clones the whole signature (every `ParameterReflection`, the return/
         // throws/assert types); bailing straight to `sig.clone()` instead
         // skips that for real.
         let mut scoped_bindings: Vec<(String, TemplateBindings)> = Vec::new();
@@ -246,7 +246,7 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
 /// tag referencing an ancestor's own template with no matching param/
 /// return reference anywhere is not a real shape this project's own
 /// corpus work has found).
-fn signature_references_any_template(sig: &FunctionSig) -> bool {
+fn signature_references_any_template(sig: &FunctionReflection) -> bool {
     sig.params().iter().any(|p| {
         types::references_template(p.ty())
             || types::references_template(p.ty_native())

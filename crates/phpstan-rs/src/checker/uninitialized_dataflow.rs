@@ -57,7 +57,7 @@ use rustc_hash::FxHashSet;
 
 use crate::checker::Checker;
 use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::child_exprs;
@@ -610,7 +610,7 @@ fn absorb(
 /// method, or simply unresolvable) contributes nothing: the caller's
 /// state passes through unchanged.
 fn absorb_resolved(
-    resolved: Option<(std::sync::Arc<str>, &FunctionSig)>,
+    resolved: Option<(std::sync::Arc<str>, &FunctionReflection)>,
     method_name: &str,
     state: PropertyInitState,
     ctx: &mut PropertyInitCtx,

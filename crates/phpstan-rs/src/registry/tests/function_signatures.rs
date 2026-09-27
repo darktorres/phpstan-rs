@@ -127,7 +127,7 @@ fn phpdoc_types_an_otherwise_untyped_function() {
 // as the same conceptual parameter declared twice, each gated by its own
 // `#[PhpStormStubsElementAvailable]` attribute - PHP can't have two
 // same-named parameters in one function, so a duplicate name reaching
-// `FunctionSig::from_decl` is unconditionally this versioning artifact.
+// `FunctionReflection::from_decl` is unconditionally this versioning artifact.
 #[test]
 fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
     let r = build_registry(

@@ -57,8 +57,8 @@
 //! `ApiClassConstFetchRule` does flag it, but only after also checking
 //! every one of the class's own methods for a stray `@api` in their doc
 //! comment (a special case this project has no equivalent machinery for -
-//! method-level `@api` isn't parsed into `registry::FunctionSig` at all,
-//! only the class-level tag is, via `registry::ClassInfo::is_api`).
+//! method-level `@api` isn't parsed into `registry::FunctionReflection` at all,
+//! only the class-level tag is, via `registry::ClassReflection::is_api`).
 //! Flagging bare `SomeExtensionInterface::class` - an extremely common,
 //! benign idiom for naming a class in a DI container registration or
 //! `#[RegisteredRule]`-style attribute, not actually "using" its API
@@ -67,7 +67,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::checker::Checker;
-use crate::registry::{FunctionSig, Registry, is_phpstan_namespace};
+use crate::registry::{FunctionReflection, Registry, is_phpstan_namespace};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
@@ -486,7 +486,7 @@ impl<'a> Checker<'a> {
         &mut self,
         owner: &str,
         method: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         span: Span,
     ) {
         if !self.settings.phpstan_api
@@ -741,7 +741,7 @@ impl<'a> Walker<'a> {
     /// docblock carries `@api` directly, regardless of `__construct`.
     /// `lookup_method_with_owner` (already exists, `registry/
     /// hierarchy.rs`) gives both the real declaring class and its
-    /// resolved `FunctionSig.is_api` in one call - a referenced class
+    /// resolved `FunctionReflection.is_api` in one call - a referenced class
     /// inheriting a method from an unrelated, non-`@api` ancestor must
     /// not silently pass just because the referenced class's own
     /// `is_api` happens to be true. The declaring class

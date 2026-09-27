@@ -111,7 +111,7 @@ impl<'a> Walker<'a> {
 
     fn signature_types(
         &mut self,
-        sig: &crate::registry::FunctionSig,
+        sig: &crate::registry::FunctionReflection,
         decl: &FunctionDecl,
         what: &str,
     ) {

@@ -306,7 +306,7 @@ impl<'a> Checker<'a> {
 
     /// `IncompatibleClosureDefaultParameterTypeRule`/
     /// `IncompatibleArrowFunctionDefaultParameterTypeRule` - a closure or
-    /// arrow function has no `FunctionSig`, so each parameter's native
+    /// arrow function has no `FunctionReflection`, so each parameter's native
     /// hint is resolved here. A `null` default makes a typed parameter
     /// implicitly nullable, and a default of unknown type is always
     /// accepted, so neither is a mismatch.

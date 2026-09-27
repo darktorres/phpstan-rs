@@ -41,7 +41,7 @@ impl<'a> Checker<'a> {
     /// a plain top-level function has no such gate.
     ///
     /// Doesn't model a separate "is this `@throws` tag inherited vs.
-    /// written on this exact declaration" gate: `FunctionSig::throws` has
+    /// written on this exact declaration" gate: `FunctionReflection::throws` has
     /// no "borrowed from an ancestor" provenance bit, so every `throws`
     /// this function sees is already this declaration's own explicit tag.
     pub(crate) fn should_check_too_wide_method_throw_type(

@@ -24,7 +24,7 @@ pub struct DocBlock {
     // statement's own single assignment target.
     pub var_name: Option<String>,
     // `@template T` names, in declaration order (positional binding -
-    // see `registry::ClassInfo::templates`).
+    // see `registry::ClassReflection::templates`).
     pub templates: Vec<String>,
     // `@template T of Bound` - the bound text, when declared.
     pub template_bounds: FxHashMap<String, TypeNode>,
@@ -75,7 +75,7 @@ pub struct DocBlock {
     pub consistent_constructor: bool,
     // `@readonly` (also `@phpstan-readonly`) - the docblock-only
     // precursor to PHP 8.1's native `readonly`, folded into
-    // `PropertySig::is_readonly` at `ClassInfo::from_decl` time so it
+    // `PropertyReflection::is_readonly` at `ClassReflection::from_decl` time so it
     // flows through the same enforcement/variance/override machinery a
     // native `readonly` property gets.
     // `@phpstan-readonly-allow-private-mutation` sets this too, along
@@ -86,12 +86,12 @@ pub struct DocBlock {
     pub allow_private_mutation: bool,
     // `@phpstan-immutable` - class-level only. `ClassReflection::
     // isImmutable()` treats this OR `@phpstan-readonly` on the class
-    // identically; `ClassInfo::from_decl`/`from_enum_decl` compute
+    // identically; `ClassReflection::from_decl`/`from_enum_decl` compute
     // `is_immutable` as `immutable || readonly`.
     pub immutable: bool,
     // `@final` (also `@phpstan-final`) - declares a method/property
     // `final` without real PHP's native keyword. Consumed by
-    // `ClassInfo::final_methods_by_phpdoc`/`final_properties_by_phpdoc`.
+    // `ClassReflection::final_methods_by_phpdoc`/`final_properties_by_phpdoc`.
     pub is_final: bool,
     // `@phpstan-always-read`/`@phpstan-always-written` on a property: it
     // counts as read (written) for the unused-property checks.
@@ -132,7 +132,7 @@ pub struct DocBlock {
     pub assert: Vec<AssertTag>,
     // `@phpstan-type Name TypeExpr` - a local type alias, referenced bare
     // from that same class's `@param`/`@return`/`@var` tags. Resolved
-    // into a real `Type` at `ClassInfo::from_decl` time.
+    // into a real `Type` at `ClassReflection::from_decl` time.
     pub type_aliases: FxHashMap<String, TypeNode>,
     // `@phpstan-import-type Name from Class [as Alias]` - imports another
     // class's own local alias. Resolved once
@@ -180,7 +180,7 @@ pub struct DocBlock {
     // a `Closure`-typed parameter's own literal argument. Seeds `$this`
     // via `checker::calls::check_closure_literal_with_this_and_scope`,
     // the same mechanism `Closure::bind`/`->bindTo()` use - see
-    // `registry::function_sig::ParamSig::closure_this_type`.
+    // `registry::function_sig::ParameterReflection::closure_this_type`.
     pub param_closure_this: FxHashMap<String, TypeNode>,
     // Every recoverable parse error `grammar` produced while
     // parsing this docblock's type expressions - real PHPStan's
@@ -212,7 +212,7 @@ pub struct TypeImportTag {
     // The name as declared on the *source* class's own `@phpstan-type`.
     pub alias: String,
     // The source class, raw text (resolved against *this* class's own
-    // `use`-imports/namespace at `ClassInfo::from_decl` time, same as
+    // `use`-imports/namespace at `ClassReflection::from_decl` time, same as
     // `extends`/`implements`).
     pub from: String,
     // `as OtherName` - the name this class's own members reference it by,
@@ -226,7 +226,7 @@ pub struct TypeImportTag {
 pub struct MethodTag {
     pub is_static: bool,
     // `None` when the tag omits a return type entirely (real, legal
-    // syntax - `@method getX()` - resolved to `Mixed` at `ClassInfo::
+    // syntax - `@method getX()` - resolved to `Mixed` at `ClassReflection::
     // from_decl` time, same as an omitted native return type anywhere
     // else in this project).
     pub return_type: Option<TypeNode>,

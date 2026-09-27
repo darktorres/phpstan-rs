@@ -408,7 +408,7 @@ fn an_ancestors_object_type_naming_a_different_class_than_the_native_hint_is_nev
 // something far less precise. The inherited doc type must be
 // reconciled against the child's native type via the same
 // `reconcile_with_native` an own (non-inherited) docblock already goes
-// through (`FunctionSig::resolve_type`'s own doc comment) - filtering
+// through (`FunctionReflection::resolve_type`'s own doc comment) - filtering
 // the inherited union down to whichever member(s) the native type can
 // actually be, mirroring PHPStan's `TypehintHelper::decideType`
 // (`$type->isSuperTypeOf($phpDocType)`).

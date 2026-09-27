@@ -21,7 +21,7 @@
 //! instantiation *is* the class-level check already.
 
 use crate::checker::{Checker, class_type_word};
-use crate::registry::{ConstSig, FunctionSig, PropertySig};
+use crate::registry::{ConstantReflection, FunctionReflection, PropertyReflection};
 use syntax::token::Span;
 
 impl<'a> Checker<'a> {
@@ -29,7 +29,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_deprecated_function_call(
         &mut self,
         fqn: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         span: Span,
     ) {
         if !self.settings.deprecation_rules || self.current_scope_deprecated {
@@ -58,7 +58,7 @@ impl<'a> Checker<'a> {
         &mut self,
         owner: &str,
         method_name: &str,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         is_static: bool,
         span: Span,
     ) {
@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
         &mut self,
         owner: &str,
         prop_name: &str,
-        sig: &PropertySig,
+        sig: &PropertyReflection,
         span: Span,
     ) {
         if !self.settings.deprecation_rules || self.current_scope_deprecated {
@@ -166,7 +166,7 @@ impl<'a> Checker<'a> {
         &mut self,
         owner: &str,
         const_name: &str,
-        sig: &ConstSig,
+        sig: &ConstantReflection,
         span: Span,
     ) {
         if !self.settings.deprecation_rules || self.current_scope_deprecated {

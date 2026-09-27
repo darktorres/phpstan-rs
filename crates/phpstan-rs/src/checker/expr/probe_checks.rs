@@ -240,7 +240,7 @@ impl<'a> Checker<'a> {
                 // unrelated to its own init-state - matches every other
                 // `is_virtual`-gated check in this codebase. `!has_default`
                 // is Design ##2's own deliberately safe-direction
-                // exemption (see `PropertySig::has_default`'s own doc
+                // exemption (see `PropertyReflection::has_default`'s own doc
                 // comment): a property with no default *might* genuinely
                 // still be uninitialized, so `isset()`/`??` checking it is
                 // never treated as redundant here, even when its own

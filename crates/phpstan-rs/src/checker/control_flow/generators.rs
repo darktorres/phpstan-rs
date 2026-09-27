@@ -50,7 +50,7 @@ pub(crate) fn generator_missing_return_type(
 /// bare `iterable`/`Iterator<K,V>` declaration, an unparameterized bare
 /// `Generator`, or no declared type at all), matching real PHPStan's own
 /// `YieldHandler`/`YieldFromHandler` fallback exactly. No new `Type`
-/// variant needed - `Generator`'s own stub `ClassInfo` already declares
+/// variant needed - `Generator`'s own stub `ClassReflection` already declares
 /// its four real `@template`/`@template-covariant` tags (`vendor/
 /// phpstorm-stubs/standard/_types.php`), so `class_template_bindings`
 /// (already built for ordinary generic-class method-call resolution)

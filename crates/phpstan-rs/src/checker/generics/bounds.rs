@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
                     p.span,
                 );
                 // `ExistingClassesInPropertiesRule`'s own check -
-                // reuses this exact loop (same resolved `PropertySig::ty`,
+                // reuses this exact loop (same resolved `PropertyReflection::ty`,
                 // same real per-property span) rather than a second walk
                 // over `c.properties` elsewhere.
                 // The own PHPDoc type too: a member the native hint
@@ -260,8 +260,8 @@ impl<'a> Checker<'a> {
 
     /// `@property`/`@property-read`/`@property-write`'s *validation*
     /// half (real PHPStan's own `PropertyTagCheck`) - parsing and
-    /// inference already happen in `ClassInfo::from_decl` (which
-    /// synthesizes every tag into a real, resolved `PropertySig`); this
+    /// inference already happen in `ClassReflection::from_decl` (which
+    /// synthesizes every tag into a real, resolved `PropertyReflection`); this
     /// adds the diagnostic layer checking the tag's declared type.
     /// Mirrors the `check_generic_bounds`/`check_type_class_names_exist`
     /// pair the loop above runs for a class's *real* properties, applied
@@ -528,8 +528,8 @@ impl<'a> Checker<'a> {
     /// validates a `@template` tag's own declaration, not a usage site.
     /// Shared between a class/interface/trait's own templates
     /// (`templates`/`bounds`/`defaults` read straight off its
-    /// `ClassInfo`) and a method's own (re-parsed fresh from its own doc
-    /// comment, since `FunctionSig` has no persisted raw
+    /// `ClassReflection`) and a method's own (re-parsed fresh from its own doc
+    /// comment, since `FunctionReflection` has no persisted raw
     /// template-bound/-default map - see
     /// `Checker::current_function_template_params`) - `type_aliases` is
     /// always the *enclosing class's* map either way (a type alias is

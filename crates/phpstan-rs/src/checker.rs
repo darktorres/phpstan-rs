@@ -617,7 +617,7 @@ pub struct Checker<'a> {
     pub(crate) current_method_templates: rustc_hash::FxHashMap<String, types::TemplateParam>,
     // `checker::restricted_symbol_usage`'s own `allow_in_class_with_
     // attributes`/`allow_except_in_class_with_attributes` matching - the
-    // enclosing class's own attribute names, resolved (`ClassInfo::
+    // enclosing class's own attribute names, resolved (`ClassReflection::
     // attributes`, looked up by `current_class` at the same choke point
     // that field is set). Empty for a top-level function/no enclosing
     // class.
@@ -751,7 +751,7 @@ pub struct Checker<'a> {
     // By-ref parameter direct-assignment/execution-end tracking -
     // `name -> declared type` for every by-ref parameter of the enclosing
     // function/method/closure (native type, or `@param-out` when the tag
-    // supplies one - see `ParamSig::out_ty`'s doc comment), set/restored
+    // supplies one - see `ParameterReflection::out_ty`'s doc comment), set/restored
     // at the same choke point as `current_declared_return_type`.
     pub(crate) current_function_by_ref_params: rustc_hash::FxHashMap<Arc<str>, Type>,
     // Every by-ref parameter's own `locals`-tracked type, snapshotted at

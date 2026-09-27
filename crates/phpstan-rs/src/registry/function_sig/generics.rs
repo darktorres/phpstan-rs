@@ -11,7 +11,7 @@ use types::{self, TemplateParam, Type};
 
 /// Rewrites every `Object(name, _)` in `ty` whose `name` matches a key in
 /// `aliases` into that alias's own (already fully-resolved) `Type` -
-/// `ClassInfo::from_decl`'s own local `@phpstan-type` support. Mirrors
+/// `ClassReflection::from_decl`'s own local `@phpstan-type` support. Mirrors
 /// `mark_template_params`'s exact recursive shape (both are a one-time
 /// post-processing walk over an already-parsed `Type`), but must run
 /// strictly *after* `resolve_names_in_type` has already resolved `ty`
@@ -37,7 +37,7 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Arc<str>, Ty
 }
 
 /// Builds a class's own `@phpstan-type` alias table (`Registry::
-/// ClassInfo` doesn't keep a `type_aliases` field of its own - every
+/// ClassReflection` doesn't keep a `type_aliases` field of its own - every
 /// member's own `ty` is fully expanded once here, at registry-build
 /// time, unlike a `@template` placeholder, which stays unresolved until
 /// a real call site's own type arguments are known). Each entry is
@@ -131,7 +131,7 @@ pub(crate) fn mark_template_params(ty: Type, params: &FxHashMap<String, Template
 /// Builds this docblock's own `@template` metadata - bound (`T of X`),
 /// variance (`@template-covariant`/`-contravariant`), and default
 /// (`T = X`) - keyed by name, shared by class-level
-/// (`registry::ClassInfo::from_decl`) and function-level (`FunctionSig::
+/// (`registry::ClassReflection::from_decl`) and function-level (`FunctionReflection::
 /// from_decl` below) template declarations, which otherwise parse
 /// identically. `scope` names whichever class or function declares these
 /// templates (`TemplateParam::scope`) - lets `checker::generics::

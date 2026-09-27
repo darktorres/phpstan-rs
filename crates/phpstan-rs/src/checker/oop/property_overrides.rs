@@ -1,6 +1,6 @@
 use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
-use crate::registry::PropertySig;
+use crate::registry::PropertyReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -8,7 +8,7 @@ use types::php_version::PhpFeature;
 
 impl<'a> Checker<'a> {
     /// Mirrors real PHPStan's `OverridingPropertyRule`: the mismatch
-    /// kinds answerable with fields `PropertyDecl`/`PropertySig` already
+    /// kinds answerable with fields `PropertyDecl`/`PropertyReflection` already
     /// carry (`is_static`/`is_readonly`/`visibility` - all three real,
     /// unconditional fatal errors in whichever direction is checked
     /// below; the other direction of each is real, legal PHP and
@@ -16,8 +16,8 @@ impl<'a> Checker<'a> {
     /// (`property.nativeType`/`.missingNativeType`/`.extraNativeType` -
     /// real PHP requires a property's type to match its ancestor's
     /// exactly, invariantly, unlike a method's covariant return type),
-    /// checked at the native level via `PropertySig::ty_native`/
-    /// `has_native_type` (mirroring `ParamSig`'s identical split - see
+    /// checked at the native level via `PropertyReflection::ty_native`/
+    /// `has_native_type` (mirroring `ParameterReflection`'s identical split - see
     /// `check_property_native_type_override`'s doc comment for why a
     /// plain, already-docblock-merged `ty` comparison would risk the
     /// identical false-positive class `method.childReturnType`'s doc
@@ -57,7 +57,7 @@ impl<'a> Checker<'a> {
 
     /// Mirrors `OverridingPropertyRule`'s `hasOverrideAttribute`/
     /// `filterOverrideAttribute` half for properties - the method-level
-    /// equivalent already exists (`FunctionSig::has_override_attr`,
+    /// equivalent already exists (`FunctionReflection::has_override_attr`,
     /// `check_one_method_override`); a property needs no analogous
     /// registry field, since (unlike a method) it's never hoisted
     /// through a separate trait-merge lookup path before this check
@@ -130,7 +130,7 @@ impl<'a> Checker<'a> {
         &mut self,
         fqn: &str,
         name: &str,
-        own_sig: &PropertySig,
+        own_sig: &PropertyReflection,
         span: Span,
     ) {
         // Overriding a `final` property is a real, unconditional PHP
@@ -233,8 +233,8 @@ impl<'a> Checker<'a> {
 
     /// `OverridingPropertyRule`'s native-type-variance half
     /// (`property.nativeType`/`.missingNativeType`/`.extraNativeType`),
-    /// via `PropertySig::ty_native`/`has_native_type` (mirroring
-    /// `ParamSig`'s identical split). Checked purely at the native
+    /// via `PropertyReflection::ty_native`/`has_native_type` (mirroring
+    /// `ParameterReflection`'s identical split). Checked purely at the native
     /// level, exactly like every other override-compatibility check in
     /// this file and `method_overrides.rs`, since real PHP itself only
     /// ever enforces this invariantly against the native type, never the
@@ -254,9 +254,9 @@ impl<'a> Checker<'a> {
         &mut self,
         fqn: &str,
         name: &str,
-        own_sig: &PropertySig,
+        own_sig: &PropertyReflection,
         ancestor_owner: &str,
-        ancestor_sig: &PropertySig,
+        ancestor_sig: &PropertyReflection,
         span: Span,
     ) {
         if !ancestor_sig.has_native_type() {
@@ -315,9 +315,9 @@ impl<'a> Checker<'a> {
         &mut self,
         fqn: &str,
         name: &str,
-        own_sig: &PropertySig,
+        own_sig: &PropertyReflection,
         ancestor_owner: &str,
-        ancestor_sig: &PropertySig,
+        ancestor_sig: &PropertyReflection,
         span: Span,
     ) {
         if !ancestor_sig.is_virtual() && !own_sig.is_virtual() {

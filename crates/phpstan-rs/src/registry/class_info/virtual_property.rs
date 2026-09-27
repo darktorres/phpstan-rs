@@ -38,7 +38,7 @@ pub(crate) fn property_hook_set_type(
 }
 
 /// Whether either hook of `hooks` references `$this->prop_name` anywhere
-/// in its body - see `PropertySig::is_virtual`'s doc comment for the
+/// in its body - see `PropertyReflection::is_virtual`'s doc comment for the
 /// full, empirically-verified rule this mirrors. `get` and `set` are
 /// checked independently and OR'd together: real PHP makes the whole
 /// property non-virtual the moment either hook references the backing

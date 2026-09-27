@@ -36,7 +36,7 @@ impl<'a> Checker<'a> {
         // methods. No AST node exists for a trait-only method within
         // this class's own declaration to anchor a precise span on
         // (real PHP itself points at the trait's declaration line, in
-        // the trait's own file - information `FunctionSig` doesn't
+        // the trait's own file - information `FunctionReflection` doesn't
         // carry), so `c.span` (the using class's own declaration) is
         // used instead, matching this project's established fallback
         // for class-level diagnostics with no more specific member

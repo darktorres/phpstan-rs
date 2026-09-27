@@ -1,5 +1,5 @@
 //! Per-callee dynamic throw-type extensions, tried before the plain
-//! `FunctionSig.throws` fallback at every one of `throws/mod.rs`'s
+//! `FunctionReflection.throws` fallback at every one of `throws/mod.rs`'s
 //! recording hooks.
 //!
 //! Simplified in one consistent direction relative to what a full

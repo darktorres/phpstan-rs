@@ -78,7 +78,7 @@ fn method_symbol(m: &MethodDecl) -> DocumentSymbol {
 }
 
 /// Shared with `workspace_symbol::workspace_symbols`, which needs the
-/// same mapping for a registry-sourced `ClassInfo.kind` (the AST-level
+/// same mapping for a registry-sourced `ClassReflection.kind` (the AST-level
 /// `ClassDecl.kind` this function itself uses is the same
 /// `syntax::ast::ClassKind` type the registry reuses directly, not a
 /// separate registry-local enum).

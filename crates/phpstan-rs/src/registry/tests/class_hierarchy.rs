@@ -256,7 +256,7 @@ fn trait_constants_are_flattened_in() {
 #[test]
 fn trait_flattening_works_across_namespaced_classes() {
     // `flatten_traits` iterates `self.classes` (FQN-keyed) and resolves
-    // each class's own `uses` list (also FQN, via `ClassInfo::from_decl`'s
+    // each class's own `uses` list (also FQN, via `ClassReflection::from_decl`'s
     // `ctx.resolve`) to look trait method/property tables up by - both
     // sides need to actually agree for this to find anything at all, so
     // this must be tested with namespaced (not bare) PHP.
@@ -285,8 +285,8 @@ fn trait_flattening_works_across_namespaced_classes() {
 #[test]
 fn trait_flattening_also_works_for_enums_not_just_classes() {
     // Enums can use traits in real PHP, and `flatten_traits`/
-    // `lookup_method` don't distinguish a class's `ClassInfo` from an
-    // enum's - covers `ClassInfo::from_enum_decl`'s `uses` closure
+    // `lookup_method` don't distinguish a class's `ClassReflection` from an
+    // enum's - covers `ClassReflection::from_enum_decl`'s `uses` closure
     // (resolving an enum's own `use SomeTrait;`).
     let r = build_registry(
         r#"<?php

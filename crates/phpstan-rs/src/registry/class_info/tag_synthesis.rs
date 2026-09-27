@@ -1,7 +1,9 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::registry::function_sig::{FunctionSig, ParamSig, mark_template_params};
+use crate::registry::function_sig::{
+    FunctionReflection, ParameterReflection, mark_template_params,
+};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock;
@@ -27,21 +29,21 @@ pub(crate) fn object_class_names(ty: Type) -> Vec<String> {
     }
 }
 
-/// `@method`'s own tag-to-`FunctionSig` synthesis - mirrors the plain
-/// `@property`-to-`PropertySig` synthesis right above it as closely as
+/// `@method`'s own tag-to-`FunctionReflection` synthesis - mirrors the plain
+/// `@property`-to-`PropertyReflection` synthesis right above it as closely as
 /// the two grammars allow. `ty`/`ty_native` deliberately both end up the
 /// same resolved value: a virtual member's own "native" type is a
 /// meaningless question (there's no real declaration to have one), so
 /// this simply reuses the docblock-resolved type for both, matching
 /// `is_own_doc`/`explicit_mixed_hint` being irrelevant here too - a
-/// synthesized member's own `FunctionSig` never participates in
+/// synthesized member's own `FunctionReflection` never participates in
 /// `flatten_phpdoc_inheritance`'s own backfill machinery in the first
 /// place (it's already fully resolved, not merged from anywhere).
 pub(crate) fn method_tag_sig(
     tag: &docblock::MethodTag,
     template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> FunctionSig {
+) -> FunctionReflection {
     // Also collects `(raw, resolved)` case refs alongside the resolved
     // `Type` itself - `@method`'s own raw text flows through this exact
     // same mark-then-resolve pipeline every other PHPDoc-typed position
@@ -94,7 +96,7 @@ pub(crate) fn method_tag_sig(
                 p.ty.as_ref()
                     .map(resolve)
                     .unwrap_or((Type::Mixed(false), Vec::new()));
-            ParamSig {
+            ParameterReflection {
                 attributes: Vec::new(),
                 name: intern(&p.name),
                 ty: ty.clone(),
@@ -112,7 +114,7 @@ pub(crate) fn method_tag_sig(
             }
         })
         .collect();
-    FunctionSig {
+    FunctionReflection {
         provenance: crate::registry::provenance::Provenance::default(),
         params,
         return_type: return_type.clone(),

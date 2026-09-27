@@ -52,7 +52,7 @@ pub(crate) fn resolve_type(doc_type: Option<&TypeNode>, native_hint: Option<&str
 /// `resolve_type`'s own real body, taking the native hint's already-parsed
 /// `Type` instead of re-deriving it from `native_hint` via a second
 /// `types::parse_type_string` call - a caller that also needs the
-/// native-only type on its own (`FunctionSig::from_decl`'s `ty`/`ty_native`
+/// native-only type on its own (`FunctionReflection::from_decl`'s `ty`/`ty_native`
 /// split) parses `native_hint` once and passes the same `Type` to both,
 /// instead of each independently re-parsing the identical string.
 /// `native_hint`'s own raw text is still needed alongside `native_ty` for
@@ -297,7 +297,7 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 /// anything except a named class/interface (`Type::Object`), where
 /// `subtype`'s own Object handling is name-equality only: this
 /// project has no class hierarchy to consult at the point `resolve_type`
-/// runs (`FunctionSig::from_decl` is still building the very registry a
+/// runs (`FunctionReflection::from_decl` is still building the very registry a
 /// real lookup would need, long before one exists), so treating a
 /// hierarchy mismatch as "incompatible" would wrongly discard a common
 /// shape - a doc type naming an actual subclass of a more generic native

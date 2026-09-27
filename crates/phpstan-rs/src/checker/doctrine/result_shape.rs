@@ -7,7 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::Checker;
 use crate::doctrine_functions::DoctrineFunctionKind;
-use crate::registry::ClassInfo;
+use crate::registry::ClassReflection;
 use types::union_types;
 use types::{Shape, Type};
 
@@ -113,7 +113,7 @@ fn unaliased_scalar_key(kind: &SelectItemKind, index: usize, scalar_counter: &mu
     }
 }
 
-fn entity_info<'a>(checker: &'a Checker, class: &str) -> Option<&'a ClassInfo> {
+fn entity_info<'a>(checker: &'a Checker, class: &str) -> Option<&'a ClassReflection> {
     let (_, info) = checker.registry.lookup_class(class)?;
     info.doctrine_entity().as_ref().map(|_| info)
 }

@@ -2,7 +2,7 @@ use crate::checker::expr::{
     invalid_array_key_description, is_canonical_int_key, is_confidently_array,
 };
 use crate::checker::{Checker, Locals, TemplateBindings};
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
 use types::union_types;
@@ -555,7 +555,7 @@ impl<'a> Checker<'a> {
     /// one (`@return ($x is T ? T : null)`).
     pub(crate) fn infer_call_return_type(
         &self,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         resolved: &[Option<&Expr>],
         locals: &Locals,
     ) -> Type {

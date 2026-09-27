@@ -27,7 +27,7 @@ use crate::registry::class_info::MemberSpans;
 use crate::registry::provenance::Origin;
 use rustc_hash::FxHashMap;
 
-use crate::registry::{BuiltDecl, ClassInfo};
+use crate::registry::{BuiltDecl, ClassReflection};
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
@@ -83,7 +83,7 @@ pub(crate) fn collect_anonymous_classes(
         let name = synthetic_name(relative_file, line, line_index);
         names.insert(expr.span, name.clone());
         let name: std::sync::Arc<str> = std::sync::Arc::from(name);
-        let mut info = ClassInfo::from_decl(decl, &ctx);
+        let mut info = ClassReflection::from_decl(decl, &ctx);
         info.record_provenance(origin, &name, expr.span, &MemberSpans::of_class(decl));
         // Not `intern()`: every anonymous class in the whole corpus gets
         // its own unique md5-hashed name (file+line+index), so there is

@@ -4,7 +4,9 @@ use std::sync::Arc;
 use crate::registry::Registry;
 use crate::registry::class_info::MemberSpans;
 use crate::registry::provenance::{Origin, Provenance};
-use crate::registry::{ClassInfo, FunctionSig, folded_key, function_key, infer_const_type};
+use crate::registry::{
+    ClassReflection, FunctionReflection, folded_key, function_key, infer_const_type,
+};
 use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
@@ -21,17 +23,17 @@ pub(crate) enum BuiltDecl {
     Class {
         name: Arc<str>,
         conditional: bool,
-        info: ClassInfo,
+        info: ClassReflection,
     },
     Enum {
         name: Arc<str>,
         conditional: bool,
-        info: ClassInfo,
+        info: ClassReflection,
     },
     Function {
         name: Arc<str>,
         conditional: bool,
-        sig: FunctionSig,
+        sig: FunctionReflection,
         // The declaration's name position, `(line, col)`.
         site: (u32, u32),
     },
@@ -487,7 +489,7 @@ impl Registry {
     /// legitimately declaring a function with the same name as a builtin
     /// correctly takes `insert_built_decl`'s merge path (the `strtr`
     /// case) instead of blindly overwriting.
-    pub fn merge_stubs<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, FunctionSig)>) {
+    pub fn merge_stubs<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, FunctionReflection)>) {
         for (name, sig) in stubs {
             let name: Arc<str> = name.into();
             self.unconditionally_declared_functions
@@ -513,9 +515,9 @@ impl Registry {
     /// with the override's bare one-method version. The merge itself
     /// keeps this function's "user-defined always wins" contract robust
     /// even if user code was somehow indexed before this runs - existing
-    /// user info is `other` in `ClassInfo::merge`, so it still wins any
+    /// user info is `other` in `ClassReflection::merge`, so it still wins any
     /// member-name conflict.
-    pub fn merge_stub_classes<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, ClassInfo)>) {
+    pub fn merge_stub_classes<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, ClassReflection)>) {
         for (name, info) in stubs {
             let name: Arc<str> = name.into();
             self.unconditionally_declared_classes.insert(name.clone());
@@ -549,7 +551,7 @@ impl Registry {
 
 /// Pure: walks `stmts` with the Namespace/Use/If/Block/GlobalConst/
 /// Expression(`define()`) recursion, calling only
-/// `ClassInfo::from_decl`/`from_enum_decl`/`FunctionSig::from_decl`/
+/// `ClassReflection::from_decl`/`from_enum_decl`/`FunctionReflection::from_decl`/
 /// `infer_const_type`/`define_call_constant`, collecting each result
 /// into `BuiltDecl`s instead of mutating a registry. No `&self`/
 /// `&Registry` access anywhere in this function or anything it calls, so
@@ -604,7 +606,7 @@ fn build_declarations_with_context(
                     collect_nested_defines(&m.function.body, out);
                 }
                 let name = intern(&ctx.declared_name(&c.name));
-                let mut info = ClassInfo::from_decl(c, ctx);
+                let mut info = ClassReflection::from_decl(c, ctx);
                 info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
                 out.push(BuiltDecl::Class {
                     name,
@@ -617,7 +619,7 @@ fn build_declarations_with_context(
                     collect_nested_defines(&m.function.body, out);
                 }
                 let name = intern(&ctx.declared_name(&e.name));
-                let mut info = ClassInfo::from_enum_decl(e, ctx);
+                let mut info = ClassReflection::from_enum_decl(e, ctx);
                 info.record_provenance(origin, &name, e.name_span, &MemberSpans::of_enum(e));
                 out.push(BuiltDecl::Enum {
                     name,
@@ -628,7 +630,7 @@ fn build_declarations_with_context(
             StmtKind::FunctionDecl(f) => {
                 collect_nested_defines(&f.body, out);
                 let name = intern(&ctx.declared_name(&f.name));
-                let mut sig = FunctionSig::from_decl(
+                let mut sig = FunctionReflection::from_decl(
                     f,
                     ctx,
                     &rustc_hash::FxHashMap::default(),
@@ -905,7 +907,10 @@ pub(crate) fn register_global_constant(
 /// a parameter or return position that the stub already had typed down
 /// to `Mixed` closes this without needing to fully rank two arbitrary
 /// types against each other.
-fn conditional_declaration_may_replace_stub(new_sig: &FunctionSig, existing: &FunctionSig) -> bool {
+fn conditional_declaration_may_replace_stub(
+    new_sig: &FunctionReflection,
+    existing: &FunctionReflection,
+) -> bool {
     if new_sig.params.len() != existing.params.len() {
         return false;
     }
@@ -934,7 +939,10 @@ fn conditional_declaration_may_replace_stub(new_sig: &FunctionSig, existing: &Fu
 /// refused: a 0-param `new_sig` against a non-zero-param `existing`
 /// still fails the ordinary arity-match check, and
 /// `existing.params.is_empty()` is false, so neither branch fires for it.
-fn better_conditional_function_declaration(new_sig: &FunctionSig, existing: &FunctionSig) -> bool {
+fn better_conditional_function_declaration(
+    new_sig: &FunctionReflection,
+    existing: &FunctionReflection,
+) -> bool {
     if existing.params.is_empty() && !new_sig.params.is_empty() {
         return true;
     }

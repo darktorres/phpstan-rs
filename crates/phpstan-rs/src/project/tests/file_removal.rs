@@ -97,7 +97,7 @@ fn removing_a_never_loaded_file_is_a_harmless_no_op() {
 fn removing_a_files_trait_does_not_retroactively_unbake_its_members_from_existing_users() {
     // KNOWN LIMITATION, not a desired outcome: `flatten_traits`/
     // `resolve_deferred_mixins` merge a trait's members into a using
-    // class's own `ClassInfo.methods` via an additive-only
+    // class's own `ClassReflection.methods` via an additive-only
     // `Entry::Vacant`-gated `or_insert`, with no provenance tracking of
     // which entry came from which trait - so removing the trait's own
     // file never reparses `uses.php`, and its stale baked-in copy of
@@ -129,7 +129,7 @@ fn removing_a_files_trait_does_not_retroactively_unbake_its_members_from_existin
 fn removing_a_files_direct_ancestor_does_not_unstick_the_subclass_relationship_either() {
     // EMPIRICALLY VERIFIED, correcting an earlier (wrong) draft of this
     // test that assumed the opposite: `class_extends_implements_closure`
-    // reads `Child`'s own, unchanged `ClassInfo.extends: ["Base"]` field
+    // reads `Child`'s own, unchanged `ClassReflection.extends: ["Base"]` field
     // and inserts "Base" into Child's ancestor set unconditionally - it
     // never checks whether "Base" itself is still a live entry in
     // `self.classes` before recording it as a direct ancestor. Since

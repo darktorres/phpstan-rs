@@ -2,8 +2,8 @@
 //! attributes on a class or method, read from its declaration: `Friend`,
 //! `NamespaceVisibility` (and the older `Package`), `TestTag`,
 //! `InjectableVersion`/`CheckInjectableVersion`, `RestrictTraitTo`, and
-//! `Sealed` (checked alongside `ClassInfo::sealed`). `MustUseResult` feeds
-//! `FunctionSig::must_use_result`.
+//! `Sealed` (checked alongside `ClassReflection::sealed`). `MustUseResult` feeds
+//! `FunctionReflection::must_use_result`.
 
 use std::sync::Arc;
 

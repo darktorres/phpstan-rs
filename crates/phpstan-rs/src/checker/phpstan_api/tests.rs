@@ -171,7 +171,7 @@ fn an_instanceof_check_against_an_api_class_is_still_flagged_as_an_assumption() 
 // reference is enough: `class_implements_phpstan_interface` only needs
 // the *name* to resolve into the `PHPStan\` namespace, not a real
 // registry entry for it - `Registry::all_ancestor_names` walks
-// `ClassInfo::implements`, populated straight from the raw, resolved
+// `ClassReflection::implements`, populated straight from the raw, resolved
 // `implements` clause regardless of whether the interface itself was
 // ever declared anywhere in this test's own tiny source).
 

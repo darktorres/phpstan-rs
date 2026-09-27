@@ -10,7 +10,7 @@
 //!   point (`checker/expr.rs`'s `ExprKind::Call`/`New`/`MethodCall`/
 //!   `StaticCall` arms, `checker/stmt/try_catch.rs`'s `check_throw`).
 //! - Per-callee dynamic throw-type extensions: `dynamic` submodule,
-//!   tried before each hook's plain `FunctionSig.throws` fallback.
+//!   tried before each hook's plain `FunctionReflection.throws` fallback.
 //! - Too-wide throw-type checks: `too_wide` submodule.
 //! - Opt-in "missing checked exception" family, gated on
 //!   `ExtrasSettings::check_missing_checked_exceptions`: `missing` submodule.
@@ -19,7 +19,7 @@
 //! wide implicit-throw model exists to build it on.
 
 use crate::checker::Checker;
-use crate::registry::{FunctionSig, Registry};
+use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::{Expr, ExprKind, Stmt, StmtKind};
 use syntax::token::Span;
 use syntax::visit::{child_exprs, child_stmts};
@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn record_call_throw_point(
         &mut self,
         dynamic: Option<Type>,
-        sig: Option<&FunctionSig>,
+        sig: Option<&FunctionReflection>,
         span: Span,
     ) {
         if !self.try_throw_states.is_empty() {
@@ -167,7 +167,7 @@ impl<'a> Checker<'a> {
 /// unresolved callee, an undocumented user one, or a builtin, which can run
 /// user code (a callback, a reflected method, an autoloader, `__toString`)
 /// whatever it documents. `None` for `@throws void`.
-fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionSig>) -> Option<Type> {
+fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionReflection>) -> Option<Type> {
     let anything = Type::Object("Throwable".into(), Vec::new());
     let Some(sig) = sig else {
         return Some(anything);

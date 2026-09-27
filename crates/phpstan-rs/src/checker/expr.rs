@@ -12,7 +12,7 @@ use crate::checker::{
 };
 use crate::pest_config;
 use crate::regex_groups;
-use crate::registry::FunctionSig;
+use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -1216,7 +1216,7 @@ impl<'a> Checker<'a> {
                         "nullsafe.neverNull",
                     );
                 }
-                // A method lookup trusts the specific `ClassInfo` stored
+                // A method lookup trusts the specific `ClassReflection` stored
                 // under a fully-qualified name, not a bare one two
                 // unrelated packages could collide on. `member_missing`
                 // below picks up the "should this be flagged" question
@@ -1510,7 +1510,7 @@ impl<'a> Checker<'a> {
                 // one direct chain (`$a->diff($b)->days`) gets right.
                 let result = self.method_call_return_type(recv, &recv_ty, method, args, locals);
                 if let Some((class, _, _, s)) = &receiver {
-                    let s: &FunctionSig = std::borrow::Borrow::borrow(s);
+                    let s: &FunctionReflection = std::borrow::Borrow::borrow(s);
                     self.apply_self_out(recv, s, &resolved, locals, class);
                 }
                 // `$x?->method()` short-circuits to `null` when `$x` is
@@ -5939,7 +5939,7 @@ impl<'a> Checker<'a> {
     fn apply_self_out(
         &mut self,
         recv: &Expr,
-        sig: &FunctionSig,
+        sig: &FunctionReflection,
         resolved: &[Option<&Expr>],
         locals: &mut Locals,
         class: &str,
@@ -5984,7 +5984,10 @@ impl<'a> Checker<'a> {
         target: &StaticTarget,
         class: &str,
         method: &str,
-    ) -> Option<(std::sync::Arc<str>, std::borrow::Cow<'a, FunctionSig>)> {
+    ) -> Option<(
+        std::sync::Arc<str>,
+        std::borrow::Cow<'a, FunctionReflection>,
+    )> {
         let (owner, sig) = self.registry.lookup_method_with_owner(class, method)?;
         let sig = match &self.current_class {
             Some(current) if forwards_static_binding(target) => {
@@ -6663,7 +6666,7 @@ impl<'a> Checker<'a> {
     /// `narrow_type_excluding`'s existing `Union`-member-filtering to
     /// work against - only the fully-expanded `Union` of every real case
     /// (`Type::EnumCase(EnumClass, CaseName)`, already how a case is
-    /// represented everywhere else in this checker - `ClassInfo::
+    /// represented everywhere else in this checker - `ClassReflection::
     /// from_enum_decl` folds each case into `consts` with exactly that
     /// type) lets excluding each arm's own case value reduce it all the
     /// way to `Type::Never` once every case is covered. Recurses into a

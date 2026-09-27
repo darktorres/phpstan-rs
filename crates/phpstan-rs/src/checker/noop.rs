@@ -15,7 +15,7 @@
 //! Calls and `new` are left to `check_pure_call_without_effect`.
 
 use crate::checker::{Checker, Locals};
-use crate::registry::{FunctionSig, collect_impure_points};
+use crate::registry::{FunctionReflection, collect_impure_points};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::TypeHint;
@@ -246,7 +246,7 @@ impl<'a> Checker<'a> {
     /// since real type inference is available here, unlike
     /// `registry::purity`'s own registry-build-time classification pass;
     /// this reads `is_transitively_pure` straight off whatever
-    /// `FunctionSig` the call actually, concretely resolves to, with no
+    /// `FunctionReflection` the call actually, concretely resolves to, with no
     /// need to reconstruct a `PurityDependency` key at all.
     pub(crate) fn check_pure_call_without_effect(&mut self, e: &Expr, locals: &Locals) {
         let (message, identifier) = match &e.kind {
@@ -357,7 +357,7 @@ impl<'a> Checker<'a> {
     /// `@phpstan-pure`/`@phpstan-impure` tag validation - real PHPStan's
     /// own `FunctionPurityCheck`, scoped to the one direction this
     /// project's own binary purity classification
-    /// (`FunctionSig::is_transitively_pure` - deliberately not the
+    /// (`FunctionReflection::is_transitively_pure` - deliberately not the
     /// richer per-point `certain`/`maybe` taxonomy real PHPStan's own
     /// version needs) can support without a real risk of false
     /// positives: a declaration tagged `@phpstan-impure` that this
@@ -378,7 +378,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_declared_purity_tag(
         &mut self,
         f: &FunctionDecl,
-        sig: Option<&FunctionSig>,
+        sig: Option<&FunctionReflection>,
         is_method: bool,
         label: &str,
     ) {
@@ -456,7 +456,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_purity_impure_points(
         &mut self,
         f: &FunctionDecl,
-        sig: Option<&FunctionSig>,
+        sig: Option<&FunctionReflection>,
         is_method: bool,
         label: &str,
     ) {
@@ -541,7 +541,7 @@ impl<'a> Checker<'a> {
     /// structurally compatible with what the tag claims. The runtime
     /// effects these tags separately drive (scope-threading for the
     /// former, `$this`-injection for the latter) are unrelated to this
-    /// function - see `registry::function_sig::ParamSig::
+    /// function - see `registry::function_sig::ParameterReflection::
     /// closure_this_type` for the latter's own runtime half.
     pub(crate) fn check_declared_param_callable_tags(&mut self, f: &FunctionDecl) {
         let Some(doc) = f.doc_comment.as_deref() else {
