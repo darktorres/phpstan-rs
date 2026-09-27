@@ -1610,11 +1610,13 @@ impl Project {
     }
 
     /// `--dump-types`: every tracked variable's type after each statement
-    /// of `path`, one `line:col [host] vars` line per statement.
-    pub fn dump_types(&self, path: &Path) -> Vec<String> {
+    /// of `path`, one `line:col [host] vars` line per statement, inferred
+    /// with the same project-wide property-assign `facts` as the check.
+    pub fn dump_types(&self, path: &Path, facts: &Arc<PropertyAssignFacts>) -> Vec<String> {
         let Some((mut checker, ast)) = self.checker_for(path) else {
             return Vec::new();
         };
+        checker.set_cross_file_property_assign_facts(Arc::clone(facts));
         checker.set_dump_types(true);
         checker.check_program(ast);
         checker.take_type_dump()

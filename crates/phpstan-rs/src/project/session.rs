@@ -708,7 +708,7 @@ impl Session {
             let mut dumps: Vec<(&PathBuf, Vec<String>)> = pool.install(|| {
                 analyze_files_by_size
                     .par_iter()
-                    .map(|path| (path, project.dump_types(path)))
+                    .map(|path| (path, project.dump_types(path, &property_assign_facts)))
                     .collect()
             });
             dumps.sort_by(|a, b| a.0.cmp(b.0));
