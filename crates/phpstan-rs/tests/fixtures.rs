@@ -6,7 +6,8 @@
 //! directory `X/` for a multi-file fixture; `X.toml`, when present, is its
 //! `phpstan-rs.toml` (paths in it are relative to the subject's
 //! directory). Without `paths`, the subject itself is analysed; without
-//! `no_composer`, composer discovery is off.
+//! `no_composer`, composer discovery is off. Its `requires_feature`, a
+//! list of cargo features, skips the fixture in a build without one.
 //!
 //! An expectation lists one diagnostic per entry, or is the single line
 //! `no diagnostics`; an empty file is not an expectation.
@@ -58,9 +59,14 @@ fn collect(root: &Path, dir: &Path, pool: &Arc<rayon::ThreadPool>, trials: &mut 
                 .display()
                 .to_string();
             let pool = Arc::clone(pool);
-            trials.push(Trial::test(name.clone(), move || {
-                run_fixture(&name, &path, pool)
-            }));
+            let missing = match required_features(&path.with_extension("toml")) {
+                Ok(features) => features.iter().any(|f| !enabled(f).unwrap_or(true)),
+                Err(_) => false,
+            };
+            trials.push(
+                Trial::test(name.clone(), move || run_fixture(&name, &path, pool))
+                    .with_ignored_flag(missing),
+            );
         }
     }
 }
@@ -112,15 +118,54 @@ fn run_fixture(name: &str, expect_file: &Path, pool: Arc<rayon::ThreadPool>) -> 
     }
 }
 
+const FEATURES: &[(&str, bool)] = &[("pcre-validate", cfg!(feature = "pcre-validate"))];
+
+/// Whether the cargo feature `name` is on in this build.
+fn enabled(name: &str) -> Result<bool, String> {
+    FEATURES
+        .iter()
+        .find(|(feature, _)| *feature == name)
+        .map(|(_, on)| *on)
+        .ok_or_else(|| format!("requires_feature: unknown feature `{name}`"))
+}
+
+/// The config's `requires_feature` list, empty without a config.
+fn required_features(path: &Path) -> Result<Vec<String>, String> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Ok(Vec::new());
+    };
+    let table: toml::Table =
+        toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    feature_list(table.get("requires_feature"))
+}
+
+fn feature_list(value: Option<&toml::Value>) -> Result<Vec<String>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    value
+        .as_array()
+        .and_then(|list| {
+            list.iter()
+                .map(|f| f.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| "requires_feature: expected a list of feature names".to_string())
+}
+
 /// The fixture's config, `path` when it exists, checked against the
 /// application's schema. An old key a schema moves is an error here: a
-/// fixture is written in the current layout.
+/// fixture is written in the current layout. `requires_feature` is the
+/// harness's own key, each feature a known one.
 fn fixture_config(path: &Path) -> Result<ConfigFile, Failed> {
     if !path.is_file() {
         return Ok(ConfigFile::empty());
     }
     let schema = config_schema();
-    let config = ConfigFile::load(path, &schema)?;
+    let mut config = ConfigFile::load(path, &schema)?;
+    for feature in feature_list(config.remove("requires_feature").as_ref())? {
+        enabled(&feature)?;
+    }
     config.validate(&schema)?;
     if let Some(warning) = config.warnings().first() {
         return Err(format!("{}: {warning}", path.display()).into());

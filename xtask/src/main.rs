@@ -1477,6 +1477,17 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
                 &["--workspace", "--no-default-features", "--", "--quiet"],
             )
         })?;
+        timings.time("no-default-features fixtures", |_| {
+            run(cargo().args([
+                "test",
+                "--profile",
+                "gate",
+                "--no-default-features",
+                "--test",
+                "fixtures",
+                "--quiet",
+            ]))
+        })?;
         timings.time("feature matrix", |_| {
             run(cargo().args([
                 "hack",

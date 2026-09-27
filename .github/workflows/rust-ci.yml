@@ -66,6 +66,8 @@ jobs:
           key: test-manifest-${{ github.sha }}
       - name: Tests without default features
         run: cargo test --workspace --no-default-features
+      - name: Fixture suite without default features
+        run: cargo test --profile gate --no-default-features --test fixtures
       - name: Docs
         run: cargo doc --workspace --no-deps
         env:

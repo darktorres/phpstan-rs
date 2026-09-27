@@ -950,9 +950,6 @@ Follow-ups:
   no-default-features tests, so the docs, machete and deny steps never ran,
   and 162 commits since are unpushed. Every step passes locally; a passing
   run is recorded.
-- **Fixtures.** A `requires-feature` key; the fixtures without it also run
-  under `--no-default-features` (the fixture suite never runs without
-  `pcre-validate`).
 - **`.corpus-runs/README.md`** loses the manual sorted-run section (the gate
   compares unsorted) and names `gate-runner` as what records the snapshots.
 - **The rest of A2's conversion.** `checker/tests/key_value_of.rs`'s three

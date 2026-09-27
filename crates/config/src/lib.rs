@@ -226,6 +226,12 @@ impl ConfigFile {
         insert(&mut self.table, &segments, parse_value(value.trim()))
     }
 
+    /// Removes the top-level `key`, one the schema doesn't know, and returns
+    /// its value.
+    pub fn remove(&mut self, key: &str) -> Option<toml::Value> {
+        self.table.remove(key)
+    }
+
     /// Checks every key against `schema`.
     pub fn validate(&self, schema: &Schema) -> Result<(), String> {
         schema.validate(&self.table)
