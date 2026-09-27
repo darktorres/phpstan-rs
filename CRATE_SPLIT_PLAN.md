@@ -1479,19 +1479,24 @@ Follow-ups:
 - **`ReflectionBuilder::apply` snapshots.** `apply` takes any number of
   `FileDelta`s (a file's new declarations, or its removal); the initial
   load is one apply, its declarations built per file in parallel as
-  `build_declarations` does today. A name's entry is recomputed from its
-  declaring files in load order by the collision policy, so a delta gives
-  what a fresh load gives. Declarations are shared between snapshots by
-  `Arc`; memo cells are not: a new snapshot starts with fresh cells,
-  seeded with every value already computed and not invalidated, so a cell
-  an older snapshot fills after the apply never reaches the new one. Each
-  memo records every folded class and constant
-  name it looked up, absent ones included, through a per-resolution read
-  set the hierarchy and the lookups append to; a delta invalidates the
-  transitive readers of the names it changes, a change to any other
-  reflection input invalidates everything, and the new snapshot inherits
-  every other memo. Purity and global-variable inference rerun per snapshot
-  until C9. Snapshots own their names: the registry's and checker's
+  `build_declarations` does today. A `FileDelta` carries the file's role
+  (analysed, context, or a `stub_paths` file), which the collision policy
+  reads. A name's entry is recomputed from its declaring files by the
+  collision policy in a canonical order - the embedded stubs, then context
+  files, then analysed files, each by path, the order `check-project` and
+  the LSP's workspace load use today - not in arrival order, so a file
+  created or opened later lands where a fresh load would put it and a
+  delta gives what a fresh load gives. Declarations are shared between
+  snapshots by   `Arc`; memo cells are not: a new snapshot starts with fresh
+  cells,   seeded with every value already computed and not invalidated, so
+  a cell   an older snapshot fills after the apply never reaches the new
+  one. Each   memo records every folded class and constant   name it looked
+  up, absent ones included, through a per-resolution read   set the
+  hierarchy and the lookups append to; a delta invalidates the   transitive
+  readers of the names it changes, a change to any other   reflection input
+  invalidates everything, and the new snapshot inherits   every other memo.
+  Purity and global-variable inference rerun per snapshot   until C9.
+  Snapshots own their names: the registry's and checker's
   `syntax::intern::intern` calls (about 100) go through the project's
   interner; the stub layer's names stay global; `apply` sweeps the session
   interner's entries nothing else holds. A closure gate is a test that
