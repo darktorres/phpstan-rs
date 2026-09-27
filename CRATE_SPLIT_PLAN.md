@@ -2434,8 +2434,8 @@ deleted; the file-size gate.
       with an `int` is `false`, and `!`/`method_exists`/`instanceof` follow
       (an `instanceof` expression is `mixed` today, not even `bool`, so on
       `?Req $x`, `$x instanceof Req || $x === null` isn't
-      `booleanOr.alwaysTrue`: 11 corpus oracle findings, e.g.
-      `amphp/http-client/src/Interceptor/ModifyRequest.php:35`). A
+      `booleanOr.alwaysTrue`, one of the 11 the corpus oracle finds and
+      phpstan-rs misses, `amphp/http-client/src/Interceptor/ModifyRequest.php:35`). A
       call with `@phpstan-assert*` tags is a type-check call too: PHPUnit's
       `assertNull($bool)` is `staticMethod.impossibleType` and
       `$a->assertInt($int)` `method.alreadyNarrowedType`, unreported today
