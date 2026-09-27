@@ -786,7 +786,7 @@ fn baseline_generate() -> Result<(), String> {
 fn comparison_base(full: bool) -> Result<String, String> {
     let hash = head_hash()?;
     let artifacts = compared_artifacts(full);
-    let ancestors = git(&["rev-list", "--max-count=200", "HEAD~1"])?;
+    let ancestors = git(&["rev-list", "HEAD~1"])?;
     let mut skipped: Vec<String> = Vec::new();
     for ancestor in ancestors.lines() {
         let complete = artifacts.iter().all(|(artifact, ext)| {
@@ -812,7 +812,7 @@ fn comparison_base(full: bool) -> Result<String, String> {
         }
         skipped.push(ancestor.to_string());
     }
-    Err("no ancestor within 200 commits has a complete snapshot set".to_string())
+    Err("no ancestor has a complete snapshot set".to_string())
 }
 
 /// Whether `commit` adds or changes a file under `gates/approved/`.
@@ -1091,7 +1091,7 @@ fn perf() -> Result<(), String> {
 
 /// The nearest proper ancestor of HEAD with `<hash>.<ext>` in `dir`.
 fn nearest_ancestor_with(dir: &Path, ext: &str) -> Result<Option<String>, String> {
-    let ancestors = git(&["rev-list", "--max-count=200", "HEAD~1"])?;
+    let ancestors = git(&["rev-list", "HEAD~1"])?;
     Ok(ancestors
         .lines()
         .map(str::to_string)
@@ -1322,13 +1322,13 @@ fn test_manifest() -> Result<(), String> {
     let dir = gate_dir().join("tests");
     write(&dir.join(format!("{hash}.txt")), listing.as_bytes())?;
     eprintln!("{hash}: {} tests", tests.len());
-    let ancestors = git(&["rev-list", "--max-count=200", "HEAD~1"])?;
+    let ancestors = git(&["rev-list", "HEAD~1"])?;
     let Some((base, old)) = ancestors.lines().find_map(|hash| {
         std::fs::read_to_string(dir.join(format!("{hash}.txt")))
             .ok()
             .map(|text| (hash.to_string(), text))
     }) else {
-        eprintln!("no manifest recorded for any recent ancestor; nothing to compare");
+        eprintln!("no manifest recorded for any ancestor; nothing to compare");
         return Ok(());
     };
     eprintln!("comparing against {base}");

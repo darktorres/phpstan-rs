@@ -919,9 +919,9 @@ Follow-ups:
 - **Full tier.** `xtask gates --full` runs now and at the end of every phase
   from here. The unscoped and level 0–10 artifacts were last recorded at
   `1e5e42be` (Stage A); the first run's diff against them is reviewed line
-  by line as one catch-up delta. `compare` and the test-name manifest look
-  back 200 commits for a base (245 separate HEAD from `1e5e42be`, so the
-  full tier fails without `--against`); both search every ancestor.
+  by line as one catch-up delta (`compare --full --against 1e5e42be`: the
+  commits between add approved deltas of their own, so no base is chosen
+  past them).
 - **Performance and build time** record their first results; from then on
   the performance gate compares every commit with its parent (§4.8).
 - **CI** runs `xtask modgraph`, `xtask arch` and the test-name manifest,
