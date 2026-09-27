@@ -1548,7 +1548,15 @@ Follow-ups:
     C8's mixin extension replaces the copy and fixes that); then the
     member owners;
   - **final**: PHPDoc members the native type excludes dropped, the relation
-    reading other classes' members level.
+    reading other classes' members level. The native/PHPDoc combination is
+    `TypehintHelper::decideType` whole: native union members the PHPDoc
+    type doesn't cover are added back, and an `array` PHPDoc with a mixed
+    key under a native `iterable` becomes `iterable`. Today `@param string[]`
+    on `string|array|A` loses `A`, `@param array<int>` on `iterable` is
+    `array<int>`, and the parent's `@param string|string[]` inherited onto
+    `string|iterable|AbstractString` loses `AbstractString`: snapshot
+    0a8fe69 has 15 `instanceof.alwaysFalse` in `symfony/string/ByteString.php`
+    and its siblings that the oracle doesn't report.
 
   Class constants are typed through the `ConstantResolver` (C2's follow-up,
   which lands first), reading the ancestor level's constant declarations
@@ -2104,6 +2112,10 @@ deleted; the file-size gate.
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
       `if ($e === E::A) { return; }` and in a `match` `default` arm;
     - `!empty($v)` on an `int` leaves `int`;
+    - `!is_scalar($s)` on a `string` leaves `string` (`!is_string` already
+      gives `never`), so the checks inside that branch are reported
+      against `string`: nine `function.impossibleType` in `composer/pcre`'s
+      `Preg.php` copies where the oracle has `*NEVER*`;
     - `is_resource()` on a `resource` is never always true, because a
       resource may have been closed (fixed first). Snapshot 0a8fe69 has 52
       `function.alreadyNarrowedType` for it that the oracle doesn't report,
