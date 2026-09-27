@@ -1110,6 +1110,11 @@ Follow-ups:
   nsrt mismatches), and integer ranges merge when they overlap or touch
   (`int<10, 20>|int<5, 25>` stays unmerged today, and
   `@param int<0, 5>|int<6, 9>` widens to `int`).
+- **Subtracted types.** `mixed~T` and `object~T`/`Foo~Bar` (PHPStan's
+  `subtractedType`) are variants: narrowing `mixed` away from a type keeps
+  what was removed. Today `$m !== null`, `isset($m)` and `!is_int($m)` on a
+  `mixed` all leave plain `mixed`, so a level-9/10 check can't see that
+  `null` is gone.
 - **Template inference** is PHPStan's structural `inferTemplateTypes`:
   through generic arguments (by ancestor bindings), callables, shapes, array
   keys and iterables, unioning every binding (behaviour fix, each case
@@ -2104,6 +2109,9 @@ deleted; the file-size gate.
     `int` is `mixed` where it has `10|20`, and on `array{a: int, b: string}`
     both `$s[$v]` with `$v = 'a'` and `$s[$u]` with `'a'|'b'` are `mixed`.
     `array_key_first()` of that shape is `string` instead of `'a'`.
+    String offsets are typed: `$s[$i]` on a `string` and even `'hello'[0]`
+    are `mixed` today, where PHPStan has `string` and `'h'` (and the union
+    of the characters for a non-literal key).
   - **Key-producing assignments** follow `AssignHandler::specifyTypes`:
     after `$k = array_key_first($a)` (and `array_key_last`,
     `array_search`, `array_find_key`, `array_rand`), `$a[$k]` is known to
@@ -2131,6 +2139,11 @@ deleted; the file-size gate.
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
       `if ($e === E::A) { return; }` and in a `match` `default` arm;
     - `!empty($v)` on an `int` leaves `int`;
+    - loose `==` with a constant narrows (`specifyTypesForEqual`):
+      `$x == false` on `0|1|''|'x'|null|bool` leaves the whole union today
+      instead of `0|''|false|null`;
+    - a cast narrows its operand (`CastHandler::specifyTypes`):
+      `(string) $s !== ''` leaves `$s` as `string` today;
     - `!is_scalar($s)` on a `string` leaves `string` (`!is_string` already
       gives `never`), so the checks inside that branch are reported
       against `string`: nine `function.impossibleType` in `composer/pcre`'s
