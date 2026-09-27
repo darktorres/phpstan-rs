@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
             return;
         };
         self.inlay_param_name_hints
-            .extend(call_arg_param_name_hints(args, &sig.params));
+            .extend(call_arg_param_name_hints(args, sig.params()));
     }
 
     /// A bare-variable argument that isn't defined yet is either a real bug
@@ -86,11 +86,11 @@ impl<'a> Checker<'a> {
                         .position(|slot| slot.is_some_and(|e| std::ptr::eq(e, &arg.value)))
                         .or(Some(i))
                         .and_then(|p| {
-                            sig.params
+                            sig.params()
                                 .get(p)
-                                .or_else(|| sig.params.last().filter(|param| param.variadic))
+                                .or_else(|| sig.params().last().filter(|param| param.variadic()))
                         })
-                        .is_some_and(|param| param.by_ref),
+                        .is_some_and(|param| param.by_ref()),
                 };
                 if by_ref {
                     empty_dims.insert(arg.value.span);
@@ -126,13 +126,13 @@ impl<'a> Checker<'a> {
             // `resolved` can extend past `sig.params`'s own length for a
             // variadic tail argument.
             let param = sig
-                .params
+                .params()
                 .get(i)
-                .or_else(|| sig.params.last().filter(|p| p.variadic));
+                .or_else(|| sig.params().last().filter(|p| p.variadic()));
             let Some(param) = param else {
                 continue;
             };
-            if !param.by_ref {
+            if !param.by_ref() {
                 continue;
             }
             if !locals.contains_key(name) {
@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
             }
             // The callee may write anything its own native type allows.
             locals.clear_native(name);
-            locals.set_native(name, param.ty_native.clone());
+            locals.set_native(name, param.ty_native().clone());
             // Real PHPStan models the sort() family's own dynamic
             // type-specifying extensions rather than the generic
             // declared-param-type widening below: sort/rsort/usort/
@@ -313,10 +313,10 @@ impl<'a> Checker<'a> {
             // above.
             // A declared `@param-out` type is written after the call's
             // arguments are checked (`apply_param_out_types`).
-            if param.out_ty.is_some() {
+            if param.out_ty().is_some() {
                 continue;
             }
-            let substituted = types::substitute_template(&param.ty, &FxHashMap::default());
+            let substituted = types::substitute_template(param.ty(), &FxHashMap::default());
             // `Checker::is_array_like` also trusts a `list<T>`/
             // `non-empty-array<T>`-declared by-ref parameter (an
             // `Intersection`), rather than falling into the "anything
@@ -346,7 +346,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &mut Locals,
     ) {
-        let resolved = resolve_call_args(args, &sig.params);
+        let resolved = resolve_call_args(args, sig.params());
         for (i, slot) in resolved.iter().enumerate() {
             let Some(arg_expr) = slot else {
                 continue;
@@ -355,10 +355,13 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let param = sig
-                .params
+                .params()
                 .get(i)
-                .or_else(|| sig.params.last().filter(|p| p.variadic));
-            let Some(out_ty) = param.filter(|p| p.by_ref).and_then(|p| p.out_ty.as_ref()) else {
+                .or_else(|| sig.params().last().filter(|p| p.variadic()));
+            let Some(out_ty) = param
+                .filter(|p| p.by_ref())
+                .and_then(|p| p.out_ty().as_ref())
+            else {
                 continue;
             };
             let out_ty = types::substitute_template(out_ty, &FxHashMap::default());
@@ -506,12 +509,12 @@ impl<'a> Checker<'a> {
                 ExprKind::Literal(Literal::Bool(v)) => *v,
                 _ => continue,
             };
-            let Some(param) = sig.params.get(index) else {
+            let Some(param) = sig.params().get(index) else {
                 continue;
             };
             let param_ty = match defining_class {
-                Some(c) => self.resolve_pseudo(&param.ty, c),
-                None => param.ty.clone(),
+                Some(c) => self.resolve_pseudo(param.ty(), c),
+                None => param.ty().clone(),
             };
             if param_ty != Type::Bool {
                 continue;
@@ -519,7 +522,7 @@ impl<'a> Checker<'a> {
             self.report(format!(
                     "{callee_label}() argument #{} (${}) is a bare `{literal}` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead",
                     index + 1,
-                    param.name
+                    param.name()
                 ),
                 arg.value.span,
                 0,
@@ -566,24 +569,25 @@ impl<'a> Checker<'a> {
             let ExprKind::Variable(b_name) = &unwrap_grouping(b).kind else {
                 continue;
             };
-            let (Some(param_a), Some(param_b)) = (sig.params.get(*i), sig.params.get(*j)) else {
+            let (Some(param_a), Some(param_b)) = (sig.params().get(*i), sig.params().get(*j))
+            else {
                 continue;
             };
-            if param_a.name.eq_ignore_ascii_case(&param_b.name) {
+            if param_a.name().eq_ignore_ascii_case(param_b.name()) {
                 continue;
             }
-            if !a_name.eq_ignore_ascii_case(&param_b.name)
-                || !b_name.eq_ignore_ascii_case(&param_a.name)
+            if !a_name.eq_ignore_ascii_case(param_b.name())
+                || !b_name.eq_ignore_ascii_case(param_a.name())
             {
                 continue;
             }
             let ty_a = match defining_class {
-                Some(c) => self.resolve_pseudo(&param_a.ty, c),
-                None => param_a.ty.clone(),
+                Some(c) => self.resolve_pseudo(param_a.ty(), c),
+                None => param_a.ty().clone(),
             };
             let ty_b = match defining_class {
-                Some(c) => self.resolve_pseudo(&param_b.ty, c),
-                None => param_b.ty.clone(),
+                Some(c) => self.resolve_pseudo(param_b.ty(), c),
+                None => param_b.ty().clone(),
             };
             if ty_a == Type::Mixed(false) || ty_a != ty_b {
                 continue;
@@ -592,8 +596,8 @@ impl<'a> Checker<'a> {
                     "{callee_label}() arguments #{} (${a_name}) and #{} (${b_name}) may be swapped - their variable names match the reversed parameter order (${}, ${})",
                     i + 1,
                     j + 1,
-                    param_a.name,
-                    param_b.name
+                    param_a.name(),
+                    param_b.name()
                 ),
                 a.span,
                 5,
@@ -878,7 +882,10 @@ pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec
             continue;
         }
         if let Some(name) = &arg.name {
-            if let Some(pos) = params.iter().position(|p| p.name.as_ref() == name.as_str()) {
+            if let Some(pos) = params
+                .iter()
+                .position(|p| p.name().as_ref() == name.as_str())
+            {
                 resolved[pos] = Some(&arg.value);
             }
             continue;
@@ -893,7 +900,7 @@ pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec
         }
         if positional_index < resolved.len() {
             resolved[positional_index] = Some(&arg.value);
-        } else if params.last().is_some_and(|p| p.variadic) {
+        } else if params.last().is_some_and(|p| p.variadic()) {
             resolved.push(Some(&arg.value));
         }
         positional_index += 1;
@@ -928,9 +935,9 @@ pub(crate) fn call_arg_param_name_hints(
             continue;
         }
         if let Some(param) = params.get(positional_index) {
-            hints.push((arg.value.span, param.name.clone()));
-        } else if let Some(param) = params.last().filter(|p| p.variadic) {
-            hints.push((arg.value.span, param.name.clone()));
+            hints.push((arg.value.span, param.name().clone()));
+        } else if let Some(param) = params.last().filter(|p| p.variadic()) {
+            hints.push((arg.value.span, param.name().clone()));
         }
         positional_index += 1;
     }

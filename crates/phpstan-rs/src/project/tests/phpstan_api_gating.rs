@@ -6,7 +6,7 @@ use super::super::*;
 /// Not a normal regression test (nothing in this project's own behavior
 /// is asserted beyond "the class exists") - a documented, deliberate
 /// sanity check that PHPStan's `PHPStan\Rules\Rule` interface, as merged
-/// in unconditionally via `php_stubs::generated_stub_classes`, really
+/// in unconditionally via `registry::stubs::generated_stub_classes`, really
 /// does carry the `@api` tag once parsed through this project's own
 /// docblock/registry pipeline: no extra vendor-loading work is needed
 /// for this checker to see accurate `@api` state for PHPStan classes,
@@ -22,7 +22,7 @@ fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipel
         .classes
         .get("PHPStan\\Rules\\Rule")
         .expect("PHPStan\\Rules\\Rule should be present via the generated stub pipeline");
-    assert!(rule.is_api, "expected PHPStan\\Rules\\Rule to be @api");
+    assert!(rule.is_api(), "expected PHPStan\\Rules\\Rule to be @api");
 
     // `PHPStan\Analyser\Scope` carries both tags in PHPStan's own source -
     // proves the `@api-do-not-implement` half of the pipeline also
@@ -31,9 +31,12 @@ fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipel
         .classes
         .get("PHPStan\\Analyser\\Scope")
         .expect("PHPStan\\Analyser\\Scope should be present via the generated stub pipeline");
-    assert!(scope.is_api, "expected PHPStan\\Analyser\\Scope to be @api");
     assert!(
-        scope.is_api_do_not_implement,
+        scope.is_api(),
+        "expected PHPStan\\Analyser\\Scope to be @api"
+    );
+    assert!(
+        scope.is_api_do_not_implement(),
         "expected PHPStan\\Analyser\\Scope to be @api-do-not-implement"
     );
 
@@ -45,7 +48,7 @@ fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipel
         .get("PHPStan\\Analyser\\NodeScopeResolver")
         .expect("PHPStan\\Analyser\\NodeScopeResolver should be present via the generated stub pipeline");
     assert!(
-        !resolver.is_api,
+        !resolver.is_api(),
         "expected PHPStan\\Analyser\\NodeScopeResolver to NOT be @api"
     );
 }

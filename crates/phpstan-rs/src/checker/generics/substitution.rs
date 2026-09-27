@@ -1,5 +1,5 @@
 use crate::checker::{Checker, TemplateBindings};
-use crate::registry::{AssertInfo, FunctionSig, ParamSig};
+use crate::registry::FunctionSig;
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -73,16 +73,16 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(owner)
-            .is_some_and(|c| !c.templates.is_empty())
+            .is_some_and(|c| !c.templates().is_empty())
         {
             let mut bindings = self.class_template_bindings(class, type_args, owner);
             // An erased receiver's templates with a declared default take
             // it (`@template T = 'array'`), so a conditional on `T`
             // resolves; one without a default stays the `Mixed` wildcard.
             if let Some(info) = self.registry.classes.get(owner) {
-                for name in &info.templates {
+                for name in info.templates() {
                     if !bindings.contains_key(name.as_ref())
-                        && let Some(default) = info.template_defaults.get(name)
+                        && let Some(default) = info.template_defaults().get(name)
                     {
                         let default = substitute_scoped(default, &bindings, owner);
                         bindings.insert(name.to_string(), default);
@@ -129,7 +129,7 @@ impl<'a> Checker<'a> {
                     .registry
                     .classes
                     .get(&ancestor)
-                    .is_some_and(|c| !c.templates.is_empty())
+                    .is_some_and(|c| !c.templates().is_empty())
                 {
                     continue;
                 }
@@ -150,42 +150,7 @@ impl<'a> Checker<'a> {
                     substitute_scoped(&acc, bindings, scope)
                 })
         };
-        std::borrow::Cow::Owned(FunctionSig {
-            provenance: sig.provenance.clone(),
-            params: sig
-                .params
-                .iter()
-                .map(|p| ParamSig {
-                    ty: subst(&p.ty),
-                    ty_native: subst(&p.ty_native),
-                    out_ty: p.out_ty.as_ref().map(&subst),
-                    ..p.clone()
-                })
-                .collect(),
-            return_type: subst(&sig.return_type),
-            return_type_native: subst(&sig.return_type_native),
-            return_has_own_doc: sig.return_has_own_doc,
-            return_doc_ty: sig.return_doc_ty.clone(),
-            self_out: sig.self_out.as_ref().map(&subst),
-            return_case_refs: sig.return_case_refs.clone(),
-            return_explicit_mixed_hint: sig.return_explicit_mixed_hint,
-            no_discard: sig.no_discard,
-            must_use_result: sig.must_use_result,
-            visibility: sig.visibility.clone(),
-            is_internal: sig.is_internal,
-            is_api: sig.is_api,
-            has_override_attr: sig.has_override_attr,
-            attributes: sig.attributes.clone(),
-            deprecated: sig.deprecated.clone(),
-            throws: sig.throws.as_ref().map(subst),
-            assert_if_true: substitute_assert_infos(&sig.assert_if_true, &subst),
-            assert_if_false: substitute_assert_infos(&sig.assert_if_false, &subst),
-            assert: substitute_assert_infos(&sig.assert, &subst),
-            purity_dependencies: sig.purity_dependencies.clone(),
-            is_transitively_pure: sig.is_transitively_pure,
-            is_stub: sig.is_stub,
-            is_magic: sig.is_magic,
-        })
+        std::borrow::Cow::Owned(sig.map_types(subst))
     }
 
     /// Same substitution as `substitute_class_templates`, for a single
@@ -210,34 +175,13 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(owner)
-            .is_some_and(|c| !c.templates.is_empty())
+            .is_some_and(|c| !c.templates().is_empty())
         {
             return ty.clone();
         }
         let bindings = self.class_template_bindings(class, type_args, owner);
         substitute_scoped(ty, &bindings, owner)
     }
-}
-
-/// Applies the same class-template substitution `substitute_class_
-/// templates` computes for every other declared type on this same
-/// signature to a `@phpstan-assert`-family list's own asserted type -
-/// only `ty` needs it; `target`/`negated` name a real parameter/`$this`
-/// chain, never a type, so they're carried through unchanged.
-fn substitute_assert_infos(
-    infos: &[AssertInfo],
-    subst: &impl Fn(&Type) -> Type,
-) -> Vec<AssertInfo> {
-    infos
-        .iter()
-        .map(|info| AssertInfo {
-            negated: info.negated,
-            ty: subst(&info.ty),
-            target: info.target.clone(),
-            case_refs: info.case_refs.clone(),
-            written_ty: info.written_ty.clone(),
-        })
-        .collect()
 }
 
 /// Same structural walk as `types::substitute_template`, except a
@@ -303,10 +247,10 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
 /// return reference anywhere is not a real shape this project's own
 /// corpus work has found).
 fn signature_references_any_template(sig: &FunctionSig) -> bool {
-    sig.params.iter().any(|p| {
-        types::references_template(&p.ty)
-            || types::references_template(&p.ty_native)
-            || p.out_ty.as_ref().is_some_and(types::references_template)
-    }) || types::references_template(&sig.return_type)
-        || types::references_template(&sig.return_type_native)
+    sig.params().iter().any(|p| {
+        types::references_template(p.ty())
+            || types::references_template(p.ty_native())
+            || p.out_ty().as_ref().is_some_and(types::references_template)
+    }) || types::references_template(sig.return_type())
+        || types::references_template(sig.return_type_native())
 }

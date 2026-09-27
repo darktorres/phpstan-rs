@@ -234,7 +234,7 @@ impl<'a> Checker<'a> {
             .classes_using_trait(trait_fqn)
             .iter()
             .filter_map(|host| self.registry.classes.get(host))
-            .flat_map(|info| info.trait_aliases.iter())
+            .flat_map(|info| info.trait_aliases().iter())
             .any(|a| {
                 a.alias.eq_ignore_ascii_case("__construct")
                     && a.method.eq_ignore_ascii_case(method)

@@ -212,35 +212,35 @@ impl<'a> Checker<'a> {
                 .map(|(_, sig)| sig.clone())
         });
         for (i, param) in f.params.iter().enumerate() {
-            let Some(param_sig) = sig.params.get(i) else {
+            let Some(param_sig) = sig.params().get(i) else {
                 break;
             };
-            if param.type_hint.is_some() || param_sig.doc_ty.is_none() {
+            if param.type_hint.is_some() || param_sig.doc_ty().is_none() {
                 continue;
             }
             let mut native = Native::default();
-            if !collect(&param_sig.ty, Position::Parameter, &mut native) {
+            if !collect(param_sig.ty(), Position::Parameter, &mut native) {
                 continue;
             }
             let Some(suggested) = render(native, version) else {
                 continue;
             };
             let suggested_ty = self.suggested_type(&suggested, class_name);
-            if let Some(default) = &param_sig.default_ty
+            if let Some(default) = param_sig.default_ty()
                 && !matches!(default, Type::Mixed(_))
                 && !self.accepts(&suggested_ty, default).yes()
             {
                 continue;
             }
             if let Some(ancestor) = &ancestor {
-                let Some(overridden) = ancestor.params.get(i) else {
+                let Some(overridden) = ancestor.params().get(i) else {
                     continue;
                 };
                 if self
                     .registry
-                    .is_super_type_of(&suggested_ty, &overridden.ty_native)
+                    .is_super_type_of(&suggested_ty, overridden.ty_native())
                     != TrinaryLogic::Yes
-                    || matches!(overridden.ty_native, Type::Mixed(false)) && suggested != "mixed"
+                    || matches!(overridden.ty_native(), Type::Mixed(false)) && suggested != "mixed"
                 {
                     continue;
                 }
@@ -255,11 +255,11 @@ impl<'a> Checker<'a> {
                 "missingNativeType.parameter",
             );
         }
-        if f.return_type.is_some() || sig.return_doc_ty.is_none() {
+        if f.return_type.is_some() || sig.return_doc_ty().is_none() {
             return;
         }
         let mut native = Native::default();
-        if !collect(&sig.return_type, Position::Return, &mut native) {
+        if !collect(sig.return_type(), Position::Return, &mut native) {
             return;
         }
         let Some(suggested) = render(native, version) else {
@@ -267,10 +267,10 @@ impl<'a> Checker<'a> {
         };
         let suggested_ty = self.suggested_type(&suggested, class_name);
         if let Some(ancestor) = &ancestor
-            && !matches!(ancestor.return_type_native, Type::Mixed(false))
+            && !matches!(ancestor.return_type_native(), Type::Mixed(false))
             && self
                 .registry
-                .is_super_type_of(&ancestor.return_type_native, &suggested_ty)
+                .is_super_type_of(ancestor.return_type_native(), &suggested_ty)
                 != TrinaryLogic::Yes
         {
             return;
@@ -328,15 +328,15 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|info| info.consts.get(constant.name.as_ref()))
+                .and_then(|info| info.consts().get(constant.name.as_ref()))
             else {
                 continue;
             };
-            if sig.native_ty.is_some() || contains_mixed_or_template(&sig.ty) {
+            if sig.native_ty().is_some() || contains_mixed_or_template(sig.ty()) {
                 continue;
             }
             let mut native = Native::default();
-            if !collect(&sig.ty, Position::Parameter, &mut native) {
+            if !collect(sig.ty(), Position::Parameter, &mut native) {
                 continue;
             }
             let Some(suggested) = render(native, self.registry.php_version_min()) else {
@@ -347,10 +347,10 @@ impl<'a> Checker<'a> {
                 name.as_ref() != fqn
                     && self.registry.is_subclass_of(name, fqn)
                     && info
-                        .consts
+                        .consts()
                         .get(constant.name.as_ref())
                         .is_some_and(|child| {
-                            child.native_ty.as_ref().is_none_or(|child_ty| {
+                            child.native_ty().as_ref().is_none_or(|child_ty| {
                                 self.registry.is_super_type_of(&suggested_ty, child_ty)
                                     != TrinaryLogic::Yes
                             })
@@ -391,10 +391,10 @@ impl<'a> Checker<'a> {
                     .lookup_method_with_owner(name, method)
                     .is_some_and(|(owner, overriding)| {
                         owner.as_ref() != class
-                            && (matches!(overriding.return_type_native, Type::Mixed(false))
+                            && (matches!(overriding.return_type_native(), Type::Mixed(false))
                                 || self
                                     .registry
-                                    .is_super_type_of(suggested, &overriding.return_type_native)
+                                    .is_super_type_of(suggested, overriding.return_type_native())
                                     != TrinaryLogic::Yes)
                     })
         })

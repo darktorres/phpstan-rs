@@ -4,7 +4,8 @@ use std::path::Path;
 use checker::Checker;
 use lexer::Lexer;
 use parser::Parser;
-use phpstan_rs::{checker, output, php_stubs, registry};
+use phpstan_rs::registry::stubs;
+use phpstan_rs::{checker, output, registry};
 use registry::{Registry, format_signature};
 use syntax::{lexer, parser};
 
@@ -77,9 +78,9 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     let mut registry = Registry::build(&program);
     // Generated (real php-src source) takes priority over the hand-curated
     // approximations - merge_stubs only fills in names not already present.
-    registry.merge_stubs(php_stubs::generated_stubs());
-    registry.merge_stub_classes(php_stubs::generated_stub_classes());
-    registry.merge_stub_constants(php_stubs::generated_stub_constants());
+    registry.merge_stubs(stubs::generated_stubs());
+    registry.merge_stub_classes(stubs::generated_stub_classes());
+    registry.merge_stub_constants(stubs::generated_stub_constants());
     // `merge_stub_classes` can add extends/implements edges after
     // `Registry::build`'s own internal precompute already ran - rebuild
     // `ancestor_names`/member-owner maps once more now that the registry
@@ -99,13 +100,13 @@ pub(crate) fn run_demo(file: Option<&Path>) {
     class_names.sort();
     for class_name in &class_names {
         let info = &registry.classes[*class_name];
-        let mut method_names: Vec<&std::sync::Arc<str>> = info.methods.keys().collect();
+        let mut method_names: Vec<&std::sync::Arc<str>> = info.methods().keys().collect();
         method_names.sort();
         for method_name in method_names {
             let qualified = format!("{class_name}::{method_name}");
             println!(
                 "{}",
-                format_signature(&qualified, &info.methods[method_name])
+                format_signature(&qualified, &info.methods()[method_name])
             );
         }
     }

@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
         // exact same helper unchanged, so an enum genuinely gets called a
         // "Class" in this one specific message. Ported as-is, not
         // "corrected" to a third word real PHPStan itself doesn't use here.
-        let kind_word = if root_info.kind == syntax::ast::ClassKind::Interface {
+        let kind_word = if root_info.kind() == syntax::ast::ClassKind::Interface {
             "Interface"
         } else {
             "Class"
@@ -80,7 +80,7 @@ impl<'a> Checker<'a> {
             let Some(info) = self.registry.classes.get(iface.as_str()) else {
                 continue;
             };
-            let Some(template_name) = info.templates.get(idx) else {
+            let Some(template_name) = info.templates().get(idx) else {
                 continue;
             };
             self.report(format!(
@@ -126,8 +126,12 @@ impl<'a> Checker<'a> {
         let mut visited = visited.clone();
         visited.insert(class.to_string());
 
-        for iface in &info.implements {
-            let raw_args = info.implements_args.get(iface).cloned().unwrap_or_default();
+        for iface in info.implements() {
+            let raw_args = info
+                .implements_args()
+                .get(iface)
+                .cloned()
+                .unwrap_or_default();
             let concrete_args: Vec<Type> = raw_args
                 .iter()
                 .map(|t| types::substitute_template(t, own_bindings))
@@ -153,10 +157,10 @@ impl<'a> Checker<'a> {
         // interface `extends`-ing more than one parent at once conflates
         // their argument lists into one flat, un-keyed list, unsafe to
         // attribute to either.
-        if info.extends.len() == 1 && !info.extends_args.is_empty() {
-            let parent = &info.extends[0];
+        if info.extends().len() == 1 && !info.extends_args().is_empty() {
+            let parent = &info.extends()[0];
             let concrete_args: Vec<Type> = info
-                .extends_args
+                .extends_args()
                 .iter()
                 .map(|t| types::substitute_template(t, own_bindings))
                 .collect();
@@ -185,7 +189,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(name) else {
             return;
         };
-        if info.kind == syntax::ast::ClassKind::Interface && !info.templates.is_empty() {
+        if info.kind() == syntax::ast::ClassKind::Interface && !info.templates().is_empty() {
             match found.get(name) {
                 Some(existing) => {
                     for (idx, (new_ty, old_ty)) in
@@ -207,7 +211,7 @@ impl<'a> Checker<'a> {
             }
         }
         let next_bindings: FxHashMap<String, Type> = info
-            .templates
+            .templates()
             .iter()
             .map(|s| s.to_string())
             .zip(concrete_args.iter().cloned())
@@ -217,7 +221,7 @@ impl<'a> Checker<'a> {
 }
 
 fn identity_template_bindings(info: &ClassInfo, class: &str) -> FxHashMap<String, Type> {
-    info.templates
+    info.templates()
         .iter()
         .map(|name| name.to_string())
         .zip(info.own_template_args(class))

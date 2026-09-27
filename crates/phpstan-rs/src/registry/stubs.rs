@@ -154,7 +154,7 @@ fn patch_array_callback_family(stubs: &mut [(Arc<str>, FunctionSig)]) {
         if !FAMILY.contains(&name.as_ref()) {
             continue;
         }
-        if let Some(rest) = sig.params.iter_mut().find(|p| p.variadic) {
+        if let Some(rest) = sig.params.iter_mut().find(|p| p.variadic()) {
             let ty = Type::Union(vec![
                 Type::Array(
                     Box::new(Type::unknown_array_key()),
@@ -164,7 +164,7 @@ fn patch_array_callback_family(stubs: &mut [(Arc<str>, FunctionSig)]) {
             ]);
             rest.ty = ty.clone();
             rest.ty_native = ty.clone();
-            if rest.doc_ty.is_some() {
+            if rest.doc_ty().is_some() {
                 rest.doc_ty = Some(ty);
             }
         }
@@ -618,7 +618,7 @@ fn backtrace_frame_list_type() -> Type {
 }
 
 /// Two `list<T>` precision gaps: neither phpstorm-stubs nor this
-/// project's own `class_info.rs`/`php_stubs.rs` mark these two methods'
+/// project's own `class_info.rs`/`registry::stubs` mark these two methods'
 /// return type with the `list` accessory at all (both are a bare native
 /// `array`, with no refining PHPDoc tag in phpstorm-stubs either), while
 /// real PHPStan's own dynamic-return-type extensions do.

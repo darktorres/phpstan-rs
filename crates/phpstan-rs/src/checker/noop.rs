@@ -133,7 +133,7 @@ impl<'a> Checker<'a> {
                     return false;
                 }
                 match self.registry.lookup_property(class, name) {
-                    Some(prop) => !prop.has_get_hook,
+                    Some(prop) => !prop.has_get_hook(),
                     None => self.registry.lookup_class(class).is_some(),
                 }
             }
@@ -257,7 +257,7 @@ impl<'a> Checker<'a> {
                 let Some(sig) = self.registry.lookup_function(name) else {
                     return;
                 };
-                if !sig.is_transitively_pure {
+                if !sig.is_transitively_pure() {
                     return;
                 }
                 (
@@ -270,7 +270,7 @@ impl<'a> Checker<'a> {
                 let Some((owner, sig)) = self.find_method_owner(&recv_ty, method) else {
                     return;
                 };
-                if !sig.is_transitively_pure {
+                if !sig.is_transitively_pure() {
                     return;
                 }
                 // Real PHPStan's own `PossiblyPureMethodCallCollector`
@@ -325,7 +325,7 @@ impl<'a> Checker<'a> {
                 else {
                     return;
                 };
-                if !sig.is_transitively_pure {
+                if !sig.is_transitively_pure() {
                     return;
                 }
                 (
@@ -341,7 +341,7 @@ impl<'a> Checker<'a> {
                 let Some(sig) = self.registry.lookup_method(class, "__construct") else {
                     return;
                 };
-                if !sig.is_transitively_pure {
+                if !sig.is_transitively_pure() {
                     return;
                 }
                 (
@@ -385,7 +385,7 @@ impl<'a> Checker<'a> {
         let Some(sig) = sig else {
             return;
         };
-        if !sig.is_transitively_pure {
+        if !sig.is_transitively_pure() {
             return;
         }
         let Some(doc) = f.doc_comment.as_deref() else {
@@ -489,12 +489,12 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if sig.return_type == Type::Void
+        if *sig.return_type() == Type::Void
             && f.name != "__construct".into()
-            && sig.throws.is_none()
-            && sig.assert.is_empty()
-            && sig.assert_if_true.is_empty()
-            && sig.assert_if_false.is_empty()
+            && sig.throws().is_none()
+            && sig.assert().is_empty()
+            && sig.assert_if_true().is_empty()
+            && sig.assert_if_false().is_empty()
         {
             self.report(
                 format!("{kind_word} {label}() is pure but has no return value."),

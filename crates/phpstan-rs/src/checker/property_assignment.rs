@@ -42,9 +42,9 @@ impl<'a> Checker<'a> {
             );
         } else if can_write {
             let on_this = matches!(&base.kind, ExprKind::Variable(v) if **v == *"this");
-            let fact = if prop_sig.is_readonly && !prop_sig.readonly_by_phpdoc {
+            let fact = if prop_sig.is_readonly() && !prop_sig.readonly_by_phpdoc() {
                 self.native_readonly_assignment(&owner, prop, prop_sig, on_this, locals)
-            } else if prop_sig.readonly_by_phpdoc || self.registry.class_is_immutable(&owner) {
+            } else if prop_sig.readonly_by_phpdoc() || self.registry.class_is_immutable(&owner) {
                 self.phpdoc_readonly_assignment(&owner, prop, prop_sig, on_this)
             } else {
                 None
@@ -63,8 +63,8 @@ impl<'a> Checker<'a> {
         self.record_member_usage_token(
             UsageTokenKind::Property,
             &owner,
-            prop_sig.deprecated.is_some(),
-            prop_sig.is_internal,
+            prop_sig.deprecated().is_some(),
+            prop_sig.is_internal(),
             lhs.span,
         );
         // Checked against `write_visibility`, not `visibility` - PHP 8.4
@@ -73,8 +73,8 @@ impl<'a> Checker<'a> {
         // read of the same property; for an ordinary property the two are
         // identical.
         let write_visibility = self.write_visibility(prop_sig);
-        let set_visibility_only = write_visibility != prop_sig.visibility
-            && self.is_member_access_visible(&owner, &prop_sig.visibility, prop, "property")
+        let set_visibility_only = write_visibility != prop_sig.visibility()
+            && self.is_member_access_visible(&owner, &prop_sig.visibility(), prop, "property")
             && !self.is_member_access_visible(&owner, &write_visibility, prop, "property");
         if set_visibility_only {
             let (word, identifier) = match write_visibility {
@@ -103,7 +103,7 @@ impl<'a> Checker<'a> {
         // coercion inside the hook body) - a write is checked against
         // that hook's own parameter type when one exists, not the
         // property's read type.
-        let write_ty = prop_sig.set_ty.as_ref().unwrap_or(&prop_sig.ty);
+        let write_ty = prop_sig.set_ty().as_ref().unwrap_or(prop_sig.ty());
         let expected = types::substitute_template(write_ty, &bindings);
         let expected = self.resolve_pseudo(&expected, &class);
         let actual = self.infer_expr(rhs, locals);
@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
         // written from a subclass this project never sees, so "every
         // write we've seen" would be an unsound undercount for anything
         // wider than private).
-        if prop_sig.write_visibility == Visibility::Private {
+        if prop_sig.write_visibility() == Visibility::Private {
             self.property_assign_facts
                 .entry(syntax::intern::intern(&owner))
                 .or_default()
@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
     /// Who may write `sig`'s property: its declared set visibility, or,
     /// from PHP 8.4, `protected(set)` for a public native `readonly` one.
     pub(crate) fn write_visibility(&self, sig: &crate::registry::PropertySig) -> Visibility {
-        if sig.implicit_protected_set
+        if sig.implicit_protected_set()
             && self
                 .registry
                 .php_supports_somewhere(PhpFeature::AsymmetricVisibility)
@@ -149,7 +149,7 @@ impl<'a> Checker<'a> {
         {
             return Visibility::Protected;
         }
-        sig.write_visibility.clone()
+        sig.write_visibility()
     }
 
     /// `ReadOnlyPropertyAssignRule`: a native `readonly` property is
@@ -180,7 +180,7 @@ impl<'a> Checker<'a> {
         };
         if class != owner {
             let allowed_in_subclass = supports(PhpFeature::AsymmetricVisibility)
-                && prop_sig.write_visibility != Visibility::Private
+                && prop_sig.write_visibility() != Visibility::Private
                 && self.registry.is_subclass_of(class, owner);
             if !allowed_in_subclass {
                 return Some(out_of_class());
@@ -252,7 +252,7 @@ impl<'a> Checker<'a> {
                 )
             });
         }
-        if prop_sig.allows_private_mutation {
+        if prop_sig.allows_private_mutation() {
             return None;
         }
         Some((
@@ -297,12 +297,12 @@ impl<'a> Checker<'a> {
                 .php_supports_somewhere(types::php_version::PhpFeature::PropertyHooks)
                 != Some(false);
             if asymmetric_supported && !is_static_fetch {
-                let description = if write_visibility != sig.visibility {
+                let description = if write_visibility != sig.visibility() {
                     match write_visibility {
                         Visibility::Private => "private(set)",
                         _ => "protected(set)",
                     }
-                } else if sig.visibility == Visibility::Private {
+                } else if sig.visibility() == Visibility::Private {
                     "private"
                 } else {
                     "protected"
@@ -317,14 +317,18 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        if sig.is_readonly && !sig.readonly_by_phpdoc && !sig.tag_read_only && !is_static_fetch {
+        if sig.is_readonly()
+            && !sig.readonly_by_phpdoc()
+            && !sig.tag_read_only()
+            && !is_static_fetch
+        {
             self.report(
                 format!("Readonly property {owner}::${prop} is assigned by reference."),
                 rhs.span,
                 3,
                 "property.readOnlyAssignByRef",
             );
-        } else if sig.readonly_by_phpdoc {
+        } else if sig.readonly_by_phpdoc() {
             self.report(
                 format!("@readonly property {owner}::${prop} is assigned by reference."),
                 rhs.span,

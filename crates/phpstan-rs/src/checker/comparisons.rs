@@ -277,7 +277,7 @@ impl<'a> Checker<'a> {
             if position < positional {
                 return args.get(position);
             }
-            let name = sig.params.get(position)?.name.as_ref();
+            let name = sig.params().get(position)?.name().as_ref();
             args.iter().find(|a| {
                 a.name
                     .as_deref()

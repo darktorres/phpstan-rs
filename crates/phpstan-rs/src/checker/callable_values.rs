@@ -110,10 +110,10 @@ impl<'a> Checker<'a> {
             return;
         };
         if let Some((owner, method)) = &named.method
-            && named.sig.visibility != Visibility::Public
-            && !self.is_member_access_visible(owner, &named.sig.visibility, method, "method")
+            && named.sig.visibility() != Visibility::Public
+            && !self.is_member_access_visible(owner, &named.sig.visibility(), method, "method")
         {
-            let word = if named.sig.visibility == Visibility::Private {
+            let word = if named.sig.visibility() == Visibility::Private {
                 "private"
             } else {
                 "protected"

@@ -35,7 +35,7 @@ impl<'a> Checker<'a> {
         if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
-        let Some(reason) = &sig.deprecated else {
+        let Some(reason) = sig.deprecated() else {
             return;
         };
         let message = with_reason(&format!("Call to deprecated function {fqn}()."), reason);
@@ -67,9 +67,9 @@ impl<'a> Checker<'a> {
         }
         let kind_word = if is_static { "staticMethod" } else { "method" };
         if let Some(declaring_info) = self.registry.classes.get(owner)
-            && let Some(reason) = &declaring_info.deprecated
+            && let Some(reason) = declaring_info.deprecated()
         {
-            let type_word = class_type_word(declaring_info.kind);
+            let type_word = class_type_word(declaring_info.kind());
             let message = with_reason(
                 &format!(
                     "Call to method {method_name}() of deprecated {} {owner}.",
@@ -85,7 +85,7 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let Some(reason) = &sig.deprecated else {
+        let Some(reason) = sig.deprecated() else {
             return;
         };
         if method_name.eq_ignore_ascii_case("__toString") {
@@ -121,16 +121,16 @@ impl<'a> Checker<'a> {
         if !self.settings.deprecation_rules || self.current_scope_deprecated {
             return;
         }
-        let kind_word = if sig.is_static {
+        let kind_word = if sig.is_static() {
             "staticProperty"
         } else {
             "property"
         };
         if let Some(declaring_info) = self.registry.classes.get(owner)
-            && let Some(reason) = &declaring_info.deprecated
+            && let Some(reason) = declaring_info.deprecated()
         {
-            let type_word = class_type_word(declaring_info.kind);
-            let static_word = if sig.is_static { "static " } else { "" };
+            let type_word = class_type_word(declaring_info.kind());
+            let static_word = if sig.is_static() { "static " } else { "" };
             let message = with_reason(
                 &format!(
                     "Access to {static_word}property ${prop_name} of deprecated {} {owner}.",
@@ -146,10 +146,10 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let Some(reason) = &sig.deprecated else {
+        let Some(reason) = sig.deprecated() else {
             return;
         };
-        let static_word = if sig.is_static { "static " } else { "" };
+        let static_word = if sig.is_static() { "static " } else { "" };
         let message = with_reason(
             &format!(
                 "Access to deprecated {static_word}property ${prop_name} of {} {owner}.",
@@ -173,9 +173,9 @@ impl<'a> Checker<'a> {
             return;
         }
         if let Some(declaring_info) = self.registry.classes.get(owner)
-            && let Some(reason) = &declaring_info.deprecated
+            && let Some(reason) = declaring_info.deprecated()
         {
-            let type_word = class_type_word(declaring_info.kind);
+            let type_word = class_type_word(declaring_info.kind());
             let message = with_reason(
                 &format!(
                     "Fetching class constant {const_name} of deprecated {} {owner}.",
@@ -191,7 +191,7 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let Some(reason) = &sig.deprecated else {
+        let Some(reason) = &sig.deprecated() else {
             return;
         };
         let message = with_reason(
@@ -216,7 +216,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class) else {
             return;
         };
-        let Some(reason) = &info.deprecated else {
+        let Some(reason) = info.deprecated() else {
             return;
         };
         let message = with_reason(
@@ -245,7 +245,7 @@ impl Checker<'_> {
         self.registry
             .classes
             .get(class)
-            .map_or("class", |info| class_type_word(info.kind))
+            .map_or("class", |info| class_type_word(info.kind()))
             .to_lowercase()
     }
 }

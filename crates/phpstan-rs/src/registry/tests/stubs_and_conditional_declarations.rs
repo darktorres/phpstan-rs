@@ -522,7 +522,7 @@ fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
 #[test]
 fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
     // The built-in class's own `ClassInfo` is built the same way
-    // `php_stubs::generated_stub_classes()` builds a real one - via
+    // `registry::stubs::generated_stub_classes()` builds a real one - via
     // `Registry::build` over its own source - rather than
     // constructing a `ClassInfo` literal by hand.
     let built_in = build_registry(

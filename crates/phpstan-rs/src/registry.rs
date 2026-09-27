@@ -22,6 +22,7 @@ pub mod reflection_attribute;
 mod relation;
 mod resolve;
 pub mod settings;
+pub mod stubs;
 mod type_node;
 
 pub(crate) use anonymous_class::collect_anonymous_classes;
@@ -252,7 +253,7 @@ impl Registry {
     }
 
     /// Every step `build` runs except the final purity classification.
-    /// `php_stubs.rs` calls this directly instead of `build` to extract
+    /// `registry::stubs` calls this directly instead of `build` to extract
     /// raw `FunctionSig`/`ClassInfo` values from vendored stub source - a
     /// stub's function body is always empty, so classifying it here
     /// would wrongly mark every PHP built-in (`header()`, `exit()`, ...)

@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
                 .rev()
                 .map(|m| self.find_method_receiver_class(m, method))
                 .filter(|(sig, _)| sig.is_some())
-                .min_by_key(|(sig, _)| sig.map(|s| visibility_rank(&s.visibility)))
+                .min_by_key(|(sig, _)| sig.map(|s| visibility_rank(&s.visibility())))
                 .unwrap_or((None, None)),
             _ => (None, None),
         }
@@ -265,7 +265,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .rev()
                 .filter_map(|m| self.find_method_receiver(m, method))
-                .min_by_key(|(_, _, _, sig)| visibility_rank(&sig.visibility)),
+                .min_by_key(|(_, _, _, sig)| visibility_rank(&sig.visibility())),
             _ => None,
         }
     }
@@ -292,7 +292,7 @@ impl<'a> Checker<'a> {
                 .lookup_property_with_owner(class, prop)
                 .map(|(owner, p)| {
                     let bindings = self.class_template_bindings(class, type_args, &owner);
-                    let resolved = types::substitute_template(&p.ty, &bindings);
+                    let resolved = types::substitute_template(p.ty(), &bindings);
                     self.resolve_pseudo_at(&resolved, &owner, class)
                 })
                 .unwrap_or_else(|| {
@@ -319,13 +319,13 @@ impl<'a> Checker<'a> {
                 .or_else(|| {
                     self.registry
                         .lookup_property(fqn, "value")
-                        .map(|p| p.ty.clone())
+                        .map(|p| p.ty().clone())
                 })
                 .unwrap_or(Type::Mixed(false)),
             Type::EnumCase(fqn, _) => self
                 .registry
                 .lookup_property_with_owner(fqn, prop)
-                .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
+                .map(|(owner, p)| self.resolve_pseudo(p.ty(), &owner))
                 .unwrap_or(Type::Mixed(false)),
             Type::ObjectShape(shape) => shape
                 .field(&ShapeKey::from_name(prop))
@@ -800,7 +800,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .lookup_method_with_owner(fqn, method)
                 .map(|(owner, sig)| {
-                    let resolved_args = resolve_call_args(args, &sig.params);
+                    let resolved_args = resolve_call_args(args, sig.params());
                     let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
                     self.resolve_pseudo(&resolved, &owner)
                 })
@@ -849,7 +849,7 @@ impl<'a> Checker<'a> {
             .lookup_method_with_owner(class, method)
             .map(|(owner, sig)| {
                 let sig = self.substitute_class_templates(sig, class, type_args, &owner);
-                let resolved_args = resolve_call_args(args, &sig.params);
+                let resolved_args = resolve_call_args(args, sig.params());
                 let resolved = self.infer_call_return_type(&sig, &resolved_args, locals);
                 self.resolve_pseudo_at(&resolved, &owner, class)
             })
@@ -863,8 +863,12 @@ impl<'a> Checker<'a> {
         self.registry
             .lookup_property_with_owner(class, prop)
             .map(|(owner, sig)| {
-                let ty =
-                    self.substitute_class_template_property_type(&sig.ty, class, type_args, &owner);
+                let ty = self.substitute_class_template_property_type(
+                    sig.ty(),
+                    class,
+                    type_args,
+                    &owner,
+                );
                 self.resolve_pseudo_at(&ty, &owner, class)
             })
             .unwrap_or(Type::Mixed(false))

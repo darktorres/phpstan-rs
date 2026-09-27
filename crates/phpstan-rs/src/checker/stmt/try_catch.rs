@@ -476,9 +476,9 @@ impl<'a> Checker<'a> {
                     .registry
                     .lookup_method(&class, "__construct")
                     .is_some_and(|ctor| {
-                        ctor.params.iter().any(|p| {
-                            p.name.eq_ignore_ascii_case("previous")
-                                || crate::registry::object_class_names(p.ty.clone())
+                        ctor.params().iter().any(|p| {
+                            p.name().eq_ignore_ascii_case("previous")
+                                || crate::registry::object_class_names(p.ty().clone())
                                     .iter()
                                     .any(|n| {
                                         self.registry.is_subclass_of(n, "Throwable")

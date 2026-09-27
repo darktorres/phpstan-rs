@@ -258,7 +258,7 @@ impl<'a> Checker<'a> {
                         .and_then(|f| self.registry.lookup_function(f))
                 });
                 match sig {
-                    Some(sig) if !sig.is_magic => sig.return_type_native.clone(),
+                    Some(sig) if !sig.is_magic() => sig.return_type_native().clone(),
                     _ => Type::Mixed(false),
                 }
             }
@@ -316,10 +316,10 @@ impl<'a> Checker<'a> {
         let Some((owner, sig)) = self.registry.lookup_method_with_owner(class, method) else {
             return Type::Mixed(false);
         };
-        if sig.is_magic {
+        if sig.is_magic() {
             return Type::Mixed(false);
         }
-        self.resolve_pseudo(&bind_static(&sig.return_type_native, class), &owner)
+        self.resolve_pseudo(&bind_static(sig.return_type_native(), class), &owner)
     }
 
     /// A property's native type, `mixed` when it has none (untyped, or a
@@ -327,9 +327,9 @@ impl<'a> Checker<'a> {
     fn native_property_type(&self, class: &str, prop: &str, want_static: bool) -> Type {
         match self.registry.lookup_property_with_owner(class, prop) {
             Some((owner, sig))
-                if sig.has_native_type && !sig.is_virtual && sig.is_static == want_static =>
+                if sig.has_native_type() && !sig.is_virtual() && sig.is_static() == want_static =>
             {
-                self.resolve_pseudo(&sig.ty_native, &owner)
+                self.resolve_pseudo(sig.ty_native(), &owner)
             }
             _ => Type::Mixed(false),
         }
@@ -345,8 +345,8 @@ impl<'a> Checker<'a> {
                 let ty = self.resolve_type_node(&node);
                 let ty = match &self.current_class {
                     Some(class) => match self.registry.classes.get(class.as_str()) {
-                        Some(info) if !info.type_aliases.is_empty() => {
-                            registry::substitute_type_aliases(ty, &info.type_aliases)
+                        Some(info) if !info.type_aliases().is_empty() => {
+                            registry::substitute_type_aliases(ty, info.type_aliases())
                         }
                         _ => ty,
                     },

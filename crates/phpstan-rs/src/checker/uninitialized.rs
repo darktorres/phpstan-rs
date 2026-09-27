@@ -110,7 +110,7 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
         .registry
         .classes
         .get(fqn)
-        .and_then(|info| info.extends.first().cloned());
+        .and_then(|info| info.extends().first().cloned());
     let mut seen = FxHashSet::default();
     while let Some(ancestor) = current {
         if !seen.insert(ancestor.clone()) {
@@ -119,8 +119,8 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
         let Some(info) = checker.registry.classes.get(&ancestor) else {
             break;
         };
-        let found = info.methods.values().any(|sig| {
-            checker.bodies.body(&sig.provenance).is_some_and(|body| {
+        let found = info.methods().values().any(|sig| {
+            checker.bodies.body(sig.provenance()).is_some_and(|body| {
                 let self_vars = collect_self_instance_vars(body, &ancestor);
                 body_ever_assigns_property(body, prop, &self_vars)
             })
@@ -128,7 +128,7 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
         if found {
             return true;
         }
-        current = info.extends.first().cloned();
+        current = info.extends().first().cloned();
     }
     false
 }

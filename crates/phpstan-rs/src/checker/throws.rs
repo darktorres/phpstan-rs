@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
             self.current_function_has_unannotated_call = true;
             return;
         };
-        if let Some(t) = &sig.throws
+        if let Some(t) = sig.throws()
             && *t != Type::Void
         {
             self.current_function_throw_points.push(t.clone());
@@ -172,9 +172,9 @@ fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionSig>) -> Option<
     let Some(sig) = sig else {
         return Some(anything);
     };
-    match dynamic.or(sig.throws.as_ref()) {
+    match dynamic.or(sig.throws().as_ref()) {
         Some(Type::Void) => None,
-        Some(t) if !sig.is_stub => Some(t.clone()),
+        Some(t) if !sig.is_stub() => Some(t.clone()),
         _ => Some(anything),
     }
 }

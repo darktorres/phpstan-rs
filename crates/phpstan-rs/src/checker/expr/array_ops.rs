@@ -562,12 +562,12 @@ impl<'a> Checker<'a> {
         let mut bindings: TemplateBindings = TemplateBindings::default();
         let mut param_bindings: rustc_hash::FxHashMap<String, Type> =
             rustc_hash::FxHashMap::default();
-        for (param, slot) in sig.params.iter().zip(resolved.iter()) {
+        for (param, slot) in sig.params().iter().zip(resolved.iter()) {
             let Some(arg) = slot else {
                 // An omitted argument's conditional-return subject is its
                 // default value, as in real PHPStan.
-                if let Some(default_ty) = &param.default_ty {
-                    param_bindings.insert(param.name.to_string(), default_ty.clone());
+                if let Some(default_ty) = &param.default_ty() {
+                    param_bindings.insert(param.name().to_string(), default_ty.clone());
                 }
                 continue;
             };
@@ -577,18 +577,18 @@ impl<'a> Checker<'a> {
             // template binding, never for `param_bindings` (which feeds
             // `resolve_conditional`'s `$x is T` checks and must see the
             // argument's real, unpromoted type).
-            let promoted = types::promote_class_string_literals(&param.ty, &arg_ty, &|s| {
+            let promoted = types::promote_class_string_literals(param.ty(), &arg_ty, &|s| {
                 self.registry.lookup_class(s).map(|(c, _)| c.to_string())
             });
-            types::bind_template_param(&param.ty, &promoted, &mut bindings);
-            param_bindings.insert(param.name.to_string(), arg_ty);
+            types::bind_template_param(param.ty(), &promoted, &mut bindings);
+            param_bindings.insert(param.name().to_string(), arg_ty);
         }
         // The call's own templates (scoped to this function or method,
         // not to a class) that no argument inferred resolve to their
         // bounds; a class template left unbound here belongs to an
         // erased receiver and stays `Mixed`.
         let substituted =
-            types::substitute_template_resolving_to_bounds(&sig.return_type, &bindings, &|tp| {
+            types::substitute_template_resolving_to_bounds(sig.return_type(), &bindings, &|tp| {
                 tp.scope
                     .as_deref()
                     .is_some_and(|scope| !self.registry.classes.contains_key(scope))

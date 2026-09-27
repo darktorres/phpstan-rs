@@ -234,7 +234,7 @@ impl<'a> Checker<'a> {
             "parent" => class.is_none_or(|c| {
                 self.registry
                     .lookup_class(c)
-                    .is_none_or(|(_, info)| info.extends.is_empty())
+                    .is_none_or(|(_, info)| info.extends().is_empty())
             }),
             _ => {
                 // A hyphenated name that isn't one of the keywords (`non-
@@ -255,7 +255,7 @@ impl<'a> Checker<'a> {
             },
             "parent" => match class
                 .and_then(|c| self.registry.lookup_class(c))
-                .and_then(|(_, info)| info.extends.first().cloned())
+                .and_then(|(_, info)| info.extends().first().cloned())
             {
                 Some(p) => p.to_string(),
                 None => return true,
@@ -329,8 +329,8 @@ impl<'a> Checker<'a> {
         };
         // `@phpstan-type`/`@phpstan-import-type` aliases of the class.
         let ty = match self.registry.classes.get(c) {
-            Some(info) if !info.type_aliases.is_empty() => {
-                crate::registry::substitute_type_aliases(ty, &info.type_aliases)
+            Some(info) if !info.type_aliases().is_empty() => {
+                crate::registry::substitute_type_aliases(ty, info.type_aliases())
             }
             _ => ty,
         };

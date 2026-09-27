@@ -189,7 +189,7 @@ impl Parser {
                         name_span: cname_span,
                         value,
                         doc_comment: doc.clone(),
-                        visibility: visibility.clone(),
+                        visibility,
                         attrs: attrs.clone(),
                         type_hint: type_hint.clone(),
                         is_final: is_final_member,

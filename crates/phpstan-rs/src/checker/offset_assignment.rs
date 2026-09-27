@@ -117,15 +117,16 @@ impl<'a> Checker<'a> {
             return None;
         }
         let offset_set = self.registry.lookup_method(class, "offsetSet")?;
-        let [offset_param, value_param, ..] = offset_set.params.as_slice() else {
+        let [offset_param, value_param, ..] = offset_set.params().as_slice() else {
             return None;
         };
         let offset_ty = dim.cloned().unwrap_or(Type::Null);
-        if !matches!(offset_ty, Type::Mixed(_)) && !self.accepts(&offset_param.ty, &offset_ty).yes()
+        if !matches!(offset_ty, Type::Mixed(_))
+            && !self.accepts(offset_param.ty(), &offset_ty).yes()
         {
             return Some("offsetAssign.dimType");
         }
-        (!matches!(value, Type::Mixed(_)) && !self.accepts(&value_param.ty, value).yes())
+        (!matches!(value, Type::Mixed(_)) && !self.accepts(value_param.ty(), value).yes())
             .then_some("offsetAssign.valueType")
     }
 }

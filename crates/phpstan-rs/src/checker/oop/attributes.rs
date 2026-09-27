@@ -72,7 +72,7 @@ impl<'a> Checker<'a> {
             // `ClassNameCheck::checkClassNames` call right here too,
             // immediately after confirming the name resolves.
             self.check_class_name_case(&attr.name, attr.span);
-            if info.is_abstract {
+            if info.is_abstract() {
                 self.report(
                     format!("Attribute class {canonical} is abstract."),
                     attr.span,
@@ -99,7 +99,7 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             };
-            if ctor_sig.visibility != Visibility::Public {
+            if ctor_sig.visibility() != Visibility::Public {
                 self.report(
                     format!("Constructor of attribute class {canonical} is not public."),
                     attr.span,
@@ -158,11 +158,11 @@ impl<'a> Checker<'a> {
             let Some(info) = self.registry.classes.get(fqn.as_str()) else {
                 continue;
             };
-            let Some(flags) = info.attribute_targets else {
+            let Some(flags) = info.attribute_targets() else {
                 self.report(
                     format!(
                         "{} {fqn} is not an Attribute class.",
-                        class_type_word(info.kind)
+                        class_type_word(info.kind())
                     ),
                     attr.span,
                     0,
@@ -191,7 +191,7 @@ impl<'a> Checker<'a> {
             }
             if self.settings.deprecation_rules
                 && !self.current_scope_deprecated
-                && let Some(desc) = &info.deprecated
+                && let Some(desc) = info.deprecated()
             {
                 let message = if desc.is_empty() {
                     format!("Attribute class {fqn} is deprecated.")
@@ -318,7 +318,7 @@ impl<'a> Checker<'a> {
             return;
         }
         if let Some(ctor) = self.registry.lookup_method(fqn, "__construct")
-            && ctor.visibility != Visibility::Public
+            && ctor.visibility() != Visibility::Public
         {
             self.report(
                 format!("Attribute class {fqn} constructor must be public."),

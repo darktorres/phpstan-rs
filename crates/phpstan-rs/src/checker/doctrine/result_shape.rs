@@ -80,7 +80,7 @@ fn resolve_join_target(checker: &Checker, aliases: &AliasMap, join: &JoinClause)
     let (source_alias, assoc_prop) = join.target.split_once('.')?;
     let source_entity = aliases.get(source_alias)?;
     let assoc = entity_info(checker, source_entity)?
-        .doctrine_entity
+        .doctrine_entity()
         .as_ref()?
         .associations
         .get(assoc_prop)?;
@@ -115,7 +115,7 @@ fn unaliased_scalar_key(kind: &SelectItemKind, index: usize, scalar_counter: &mu
 
 fn entity_info<'a>(checker: &'a Checker, class: &str) -> Option<&'a ClassInfo> {
     let (_, info) = checker.registry.lookup_class(class)?;
-    info.doctrine_entity.as_ref().map(|_| info)
+    info.doctrine_entity().as_ref().map(|_| info)
 }
 
 /// A whole-entity select item's own row type (ROADMAP Phase 168
@@ -132,7 +132,7 @@ fn entity_info<'a>(checker: &'a Checker, class: &str) -> Option<&'a ClassInfo> {
 /// entity before reaching here.
 fn entity_row_type(checker: &Checker, entity: &str) -> Type {
     let discriminator_map = entity_info(checker, entity)
-        .and_then(|i| i.doctrine_entity.as_ref())
+        .and_then(|i| i.doctrine_entity().as_ref())
         .map(|e| &e.discriminator_map);
     match discriminator_map {
         Some(map) if !map.is_empty() => {
@@ -178,7 +178,7 @@ fn field_ref_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
         FieldRef::Field(alias, field) => {
             let entity = aliases.get(alias)?;
             let ty = entity_info(checker, entity)?
-                .doctrine_entity
+                .doctrine_entity()
                 .as_ref()?
                 .fields
                 .get(field.as_str())
@@ -303,7 +303,7 @@ fn raw_field_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
         return None;
     };
     let entity = aliases.get(alias)?;
-    let de = entity_info(checker, entity)?.doctrine_entity.as_ref()?;
+    let de = entity_info(checker, entity)?.doctrine_entity().as_ref()?;
     let join_nullable = aliases.is_nullable(alias);
     if let Some(schema) = checker.sql.schema()
         && let Some(table) = &de.table_name
@@ -494,7 +494,7 @@ pub(crate) fn raw_scalar_column_type(
 /// the joined alias itself (confirmed directly), so this gap has no
 /// known real false-positive/negative to trace yet.
 fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
-    let Some(de) = entity_info(checker, entity).and_then(|i| i.doctrine_entity.as_ref()) else {
+    let Some(de) = entity_info(checker, entity).and_then(|i| i.doctrine_entity().as_ref()) else {
         return Type::Mixed(false);
     };
     let mut fields: Vec<(String, Type, bool)> = de
@@ -507,7 +507,7 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
         if assoc.is_collection {
             continue;
         }
-        let target = entity_info(checker, &assoc.target).and_then(|i| i.doctrine_entity.as_ref());
+        let target = entity_info(checker, &assoc.target).and_then(|i| i.doctrine_entity().as_ref());
         let shape = target
             .and_then(|t| t.id_field.as_ref())
             .map(|id_field| {
@@ -601,7 +601,7 @@ pub(crate) fn build_scalar_result_row_type(
                     continue;
                 };
                 let Some(de) =
-                    entity_info(checker, entity).and_then(|e| e.doctrine_entity.as_ref())
+                    entity_info(checker, entity).and_then(|e| e.doctrine_entity().as_ref())
                 else {
                     fields.push((i.to_string(), Type::Mixed(false), false));
                     continue;

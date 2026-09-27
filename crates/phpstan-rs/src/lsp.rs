@@ -900,18 +900,18 @@ impl Server {
             }
             navigation::Resolved::Class(fqn) => {
                 let info = registry.classes.get(fqn.as_str())?;
-                let kind = match info.kind {
+                let kind = match info.kind() {
                     ClassKind::Class => "class",
                     ClassKind::Interface => "interface",
                     ClassKind::Trait => "trait",
                     ClassKind::Enum => "enum",
                 };
                 let mut text = format!("{kind} {fqn}");
-                if !info.extends.is_empty() {
-                    text.push_str(&format!(" extends {}", info.extends.join(", ")));
+                if !info.extends().is_empty() {
+                    text.push_str(&format!(" extends {}", info.extends().join(", ")));
                 }
-                if !info.implements.is_empty() {
-                    text.push_str(&format!(" implements {}", info.implements.join(", ")));
+                if !info.implements().is_empty() {
+                    text.push_str(&format!(" implements {}", info.implements().join(", ")));
                 }
                 Some(text)
             }
@@ -961,10 +961,10 @@ impl Server {
             return Some(format_signature(&format!("{owner}::{name}"), sig));
         }
         if let Some((_, sig)) = registry.lookup_property_with_owner(owner, name) {
-            return Some(format!("{owner}::${name}: {}", sig.ty));
+            return Some(format!("{owner}::${name}: {}", sig.ty()));
         }
         if let Some((_, sig)) = registry.lookup_const_with_owner(owner, name) {
-            return Some(format!("{owner}::{name}: {}", sig.ty));
+            return Some(format!("{owner}::{name}: {}", sig.ty()));
         }
         None
     }
@@ -1647,16 +1647,16 @@ impl Server {
         let signature_infos: Vec<SignatureInformation> = signatures
             .into_iter()
             .map(|(name, sig)| {
-                let active_parameter = if sig.params.is_empty() {
+                let active_parameter = if sig.params().is_empty() {
                     None
                 } else {
-                    Some(help.active_parameter.min(sig.params.len() - 1) as u32)
+                    Some(help.active_parameter.min(sig.params().len() - 1) as u32)
                 };
                 SignatureInformation {
                     label: format_signature(&name, sig),
                     documentation: None,
                     parameters: Some(
-                        sig.params
+                        sig.params()
                             .iter()
                             .map(|p| ParameterInformation {
                                 label: ParameterLabel::Simple(param_label(p)),

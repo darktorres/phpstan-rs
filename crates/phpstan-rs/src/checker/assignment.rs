@@ -296,13 +296,13 @@ impl<'a> Checker<'a> {
         let Some((_, sig)) = self.find_property_owner(&base_ty, prop) else {
             return value.clone();
         };
-        if sig.has_get_hook || sig.has_set_hook {
-            return sig.ty.clone();
+        if sig.has_get_hook() || sig.has_set_hook() {
+            return sig.ty().clone();
         }
-        if !sig.has_native_type || self.registry.relation().subtype(value, &sig.ty_native) {
+        if !sig.has_native_type() || self.registry.relation().subtype(value, sig.ty_native()) {
             return value.clone();
         }
-        sig.ty.clone()
+        sig.ty().clone()
     }
 
     pub(crate) fn bind_assignment_target(&self, lhs: &Expr, ty: Type, locals: &mut Locals) {
@@ -815,7 +815,7 @@ impl<'a> Checker<'a> {
         self.registry
             .classes
             .get(class)
-            .is_some_and(|info| info.kind != ClassKind::Interface)
+            .is_some_and(|info| info.kind() != ClassKind::Interface)
             && !self.registry.is_subclass_of(class, interface)
     }
 
@@ -950,7 +950,7 @@ impl<'a> Checker<'a> {
                         .registry
                         .classes
                         .get(class.as_str())
-                        .is_some_and(|info| info.kind != ClassKind::Interface)
+                        .is_some_and(|info| info.kind() != ClassKind::Interface)
                     && self.registry.lookup_method(class, "__invoke").is_none()
             }
             Type::Union(members) => members

@@ -184,7 +184,7 @@ fn resolves_to_this(e: &Expr, ctx: &PropertyInitCtx) -> bool {
             .lookup_method(&ctx.checked_class, name)
             .is_some_and(|sig| {
                 matches!(
-                    sig.return_type_native,
+                    sig.return_type_native(),
                     Type::SelfRef(_) | Type::StaticRef(_) | Type::This
                 )
             }),
@@ -618,7 +618,7 @@ fn absorb_resolved(
     let Some((owner, sig)) = resolved else {
         return state;
     };
-    let Some(body) = ctx.checker.bodies.body(&sig.provenance) else {
+    let Some(body) = ctx.checker.bodies.body(sig.provenance()) else {
         return state;
     };
     let key = (owner.to_ascii_lowercase(), method_name.to_ascii_lowercase());

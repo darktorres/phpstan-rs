@@ -260,7 +260,7 @@ pub struct FunctionDecl {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
     Public,
     Private,

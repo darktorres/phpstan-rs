@@ -65,7 +65,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(Literal::String(name)) => self
                 .registry
                 .lookup_function(name)
-                .map(|sig| sig.params.first().is_some_and(|p| p.by_ref)),
+                .map(|sig| sig.params().first().is_some_and(|p| p.by_ref())),
             // `[$obj, 'method']` / `['Class', 'method']` array callable -
             // a plain two-element list, no string key on either item.
             ExprKind::ArrayLiteral(items) => match items.as_slice() {
@@ -86,7 +86,7 @@ impl<'a> Checker<'a> {
                     };
                     self.registry
                         .lookup_method(&class, method)
-                        .map(|sig| sig.params.first().is_some_and(|p| p.by_ref))
+                        .map(|sig| sig.params().first().is_some_and(|p| p.by_ref()))
                 }
                 _ => None,
             },
@@ -116,7 +116,7 @@ impl<'a> Checker<'a> {
                         .as_deref()
                         .and_then(|g| self.registry.lookup_function(g))
                 })?;
-                Some(sig.params.first().is_some_and(|p| p.by_ref))
+                Some(sig.params().first().is_some_and(|p| p.by_ref()))
             }
             ExprKind::MethodCall(recv, method, _, _) => {
                 let class = match self.infer_expr(recv, locals) {
@@ -124,12 +124,12 @@ impl<'a> Checker<'a> {
                     _ => return None,
                 };
                 let sig = self.registry.lookup_method(&class, method)?;
-                Some(sig.params.first().is_some_and(|p| p.by_ref))
+                Some(sig.params().first().is_some_and(|p| p.by_ref()))
             }
             ExprKind::StaticCall(target, method, _) => {
                 let class = self.infer_static_target_class(target, locals)?;
                 let sig = self.registry.lookup_method(&class, method)?;
-                Some(sig.params.first().is_some_and(|p| p.by_ref))
+                Some(sig.params().first().is_some_and(|p| p.by_ref()))
             }
             _ => None,
         }

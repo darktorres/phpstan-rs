@@ -25,7 +25,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
-use crate::php_stubs;
+use crate::registry::stubs;
 use composer::PackageOwner;
 use composer::constraint;
 use composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
@@ -270,10 +270,10 @@ impl Project {
             .classes
             .iter()
             .filter_map(|(name, info)| {
-                let path = info.provenance.file()?;
+                let path = info.provenance().file()?;
                 Some((
                     name.to_ascii_lowercase(),
-                    (name.as_ref(), path, info.provenance.declaration_span()),
+                    (name.as_ref(), path, info.provenance().declaration_span()),
                 ))
             })
             .collect();
@@ -284,7 +284,7 @@ impl Project {
             .filter_map(|(name, sig)| {
                 Some((
                     name.to_ascii_lowercase(),
-                    (name.as_ref(), sig.provenance.file()?),
+                    (name.as_ref(), sig.provenance().file()?),
                 ))
             })
             .collect();
@@ -340,7 +340,7 @@ impl Project {
                                 .map(|(n, _, _)| n.to_string())
                                 .unwrap_or_else(|| fqn.clone()),
                             declared.map(|(_, p, _)| *p),
-                            php_stubs::builtin_class_extension(fqn),
+                            stubs::builtin_class_extension(fqn),
                         )
                     }
                     RefTarget::Function(fqn) => {
@@ -354,7 +354,7 @@ impl Project {
                         let builtin = if namespaced_declaration {
                             None
                         } else {
-                            php_stubs::builtin_function_extension(&global)
+                            stubs::builtin_function_extension(&global)
                         };
                         (
                             "Function",
@@ -643,7 +643,7 @@ impl Project {
             .classes
             .iter()
             .filter(|(_, info)| {
-                info.provenance
+                info.provenance()
                     .file()
                     .and_then(|path| self.files.get(path))
                     .is_some_and(|f| f.analyzed)
@@ -653,7 +653,7 @@ impl Project {
                 self.registry
                     .classes
                     .get(*name)
-                    .is_some_and(|info| info.kind == ClassKind::Class && !info.is_abstract)
+                    .is_some_and(|info| info.kind() == ClassKind::Class && !info.is_abstract())
             })
             .collect();
         for entry in &manifest.provide {
@@ -727,7 +727,7 @@ impl Project {
                 });
             let Some((owner, sig)) = found else {
                 if info
-                    .methods
+                    .methods()
                     .keys()
                     .any(|m| m.eq_ignore_ascii_case("__callStatic"))
                     || self
@@ -754,11 +754,11 @@ impl Project {
                 .get(owner.as_ref())
                 .is_some_and(|owner_info| {
                     owner_info
-                        .static_methods
+                        .static_methods()
                         .iter()
                         .any(|m| m.eq_ignore_ascii_case(method))
                 });
-            let is_public = sig.visibility == Visibility::Public;
+            let is_public = sig.visibility() == Visibility::Public;
             if is_static && is_public {
                 continue;
             }

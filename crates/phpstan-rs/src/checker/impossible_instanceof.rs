@@ -67,7 +67,7 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        let class_is_final = class_info.is_final || class_info.kind == ClassKind::Enum;
+        let class_is_final = class_info.is_final() || class_info.kind() == ClassKind::Enum;
         let class = class.to_string();
         let Some(always) = self.instanceof_verdict(&expr_ty, &class) else {
             return;
@@ -127,7 +127,7 @@ impl<'a> Checker<'a> {
         if self.registry.is_subclass_of(class, target) {
             return Some(true);
         }
-        if target_info.kind == ClassKind::Trait {
+        if target_info.kind() == ClassKind::Trait {
             return Some(false);
         }
         if self.registry.is_subclass_of(target, class)
@@ -135,9 +135,10 @@ impl<'a> Checker<'a> {
         {
             return None;
         }
-        let class_is_final = info.is_final || info.kind == ClassKind::Enum;
-        let target_is_final = target_info.is_final || target_info.kind == ClassKind::Enum;
-        let both_classes = info.kind == ClassKind::Class && target_info.kind == ClassKind::Class;
+        let class_is_final = info.is_final() || info.kind() == ClassKind::Enum;
+        let target_is_final = target_info.is_final() || target_info.kind() == ClassKind::Enum;
+        let both_classes =
+            info.kind() == ClassKind::Class && target_info.kind() == ClassKind::Class;
         (class_is_final || target_is_final || both_classes).then_some(false)
     }
 }

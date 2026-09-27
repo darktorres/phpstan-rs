@@ -49,34 +49,34 @@ impl PropertySig {
 
 #[derive(Debug, Clone)]
 pub struct PropertySig {
-    pub ty: Type,
-    pub is_static: bool,
-    pub is_readonly: bool,
+    pub(in crate::registry) ty: Type,
+    pub(in crate::registry) is_static: bool,
+    pub(in crate::registry) is_readonly: bool,
     // `@readonly`-by-PHPDoc (never native `readonly`) with
     // `@phpstan-allow-private-mutation`: the declaring class may still
     // write it outside its constructor.
-    pub allows_private_mutation: bool,
+    pub(in crate::registry) allows_private_mutation: bool,
     // `@readonly`-by-PHPDoc, never native `readonly`.
-    pub readonly_by_phpdoc: bool,
+    pub(in crate::registry) readonly_by_phpdoc: bool,
     // A `@property-read`/`@property-write` magic tag's one-directional
     // access.
-    pub tag_read_only: bool,
-    pub tag_write_only: bool,
+    pub(in crate::registry) tag_read_only: bool,
+    pub(in crate::registry) tag_write_only: bool,
     // `public`/`private`/`protected`. A magic `@property` tag and an
     // enum's built-in `name`/`value` are always `Visibility::Public` -
     // real PHP has no way to declare either any other way.
-    pub visibility: Visibility,
+    pub(in crate::registry) visibility: Visibility,
     // PHP 8.4 asymmetric visibility (`public private(set) string $x;`) -
     // the write-side visibility, defaulting to `visibility` itself (the
     // read side) for an ordinary, symmetric property, or one with no
     // established per-item place to write a separate write-visibility (a
     // promoted constructor property, a magic `@property` tag, an enum's
     // built-in `name`/`value`).
-    pub write_visibility: Visibility,
+    pub(in crate::registry) write_visibility: Visibility,
     // A native `readonly` property declared `public` with no set
     // visibility of its own, which PHP 8.4 makes `protected(set)`
     // (`Checker::write_visibility`).
-    pub implicit_protected_set: bool,
+    pub(in crate::registry) implicit_protected_set: bool,
     // PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook
     // can accept a wider type than the property's own backing/read type
     // (`public array $x { set(array $value) { $this->x =
@@ -84,7 +84,7 @@ pub struct PropertySig {
     // body before the real assignment). `None` when there's no hook, or
     // the hook uses an implicit `set { ... }` with no parameter list at
     // all - a write then still checks against `ty` as before.
-    pub set_ty: Option<Type>,
+    pub(in crate::registry) set_ty: Option<Type>,
     // PHP 8.4's "virtual property" concept - a hooked property with no
     // backing storage allocated for it. Computed as a purely syntactic
     // compile-time scan, mirroring PHP's own `ReflectionProperty::
@@ -101,18 +101,18 @@ pub struct PropertySig {
     // (`checker/oop.rs::check_property_hooks`), mirroring real PHPStan's
     // `GetNonVirtualPropertyHookReadRule`/
     // `SetNonVirtualPropertyHookAssignRule`.
-    pub is_virtual: bool,
+    pub(in crate::registry) is_virtual: bool,
     // `@internal` on this property's own docblock - see
     // `docblock::DocBlock::internal`'s doc comment. Only ever set for a
     // real, plainly-declared property with its own doc comment; a
     // promoted constructor property, a magic `@property` tag, and an
     // enum's built-in `name`/`value` all stay `false` - none of them has
     // an established per-item place to write the tag.
-    pub is_internal: bool,
+    pub(in crate::registry) is_internal: bool,
     // `@deprecated` on this property's own doc comment - direct mirror of
     // `FunctionSig::deprecated`'s "own tag only, no class-level fallback"
     // scoping. Same restriction as `is_internal` above.
-    pub deprecated: Option<String>,
+    pub(in crate::registry) deprecated: Option<String>,
     // Whether this property's own declaration (an ordinary
     // `PropertyDecl::default`, or a promoted constructor parameter's own
     // `Param::default`) gives it a default value - `checker/
@@ -125,18 +125,18 @@ pub struct PropertySig {
     // uninitialized, don't flag isset() as redundant" exemption. `false`
     // (the safe, permissive default) for every synthetic property with
     // no real declaration to read a default from.
-    pub has_default: bool,
+    pub(in crate::registry) has_default: bool,
     // PHP 8.4 `abstract` property modifier (only legal on a hooked
     // property inside an abstract class, but tracked here unconditionally
     // like `is_readonly` above - the parser/engine enforce the legality
     // half). `false` for every synthetic property.
-    pub is_abstract: bool,
+    pub(in crate::registry) is_abstract: bool,
     // Whether a `get`/`set` hook is declared at all (real PHP's
     // `hasHook()`), independent of whether it has a real body -
     // `PropertyHookBody::Abstract` is what makes this question
     // answerable. `false` for every synthetic property.
-    pub has_get_hook: bool,
-    pub has_set_hook: bool,
+    pub(in crate::registry) has_get_hook: bool,
+    pub(in crate::registry) has_set_hook: bool,
     // The native, no-docblock-merge type this property alone declares -
     // the exact `ty`-vs-`ty_native` split `ParamSig` has, needed here for
     // `OverridingPropertyRule`'s `property.nativeType`/
@@ -146,23 +146,125 @@ pub struct PropertySig {
     // same `Type::Mixed(false)` value, which is why `has_native_type` below must
     // be a separate boolean rather than testing this field against
     // `Type::Mixed(false)`.
-    pub ty_native: Type,
+    pub(in crate::registry) ty_native: Type,
     // This declaration's own PHPDoc type (`@var`, or for a promoted
     // property its constructor `@param`/inline `@var`), resolved but not
     // reconciled with the native hint - `ParamSig::doc_ty`'s property
     // equivalent. `None` without one.
-    pub doc_ty: Option<Type>,
-    pub has_native_type: bool,
+    pub(in crate::registry) doc_ty: Option<Type>,
+    pub(in crate::registry) has_native_type: bool,
     // `ParamSig::case_refs`'s property-position equivalent. Populated
     // identically at all three real construction sites (plain declared
     // property, promoted constructor property, `@property`/`-read`/
     // `-write` tag).
-    pub case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) case_refs: Vec<(Arc<str>, Arc<str>)>,
     // `set_ty`'s case_refs equivalent - `property_hook_set_type` never
     // collected these, unlike the sibling `ty` field above.
-    pub set_case_refs: Vec<(Arc<str>, Arc<str>)>,
-    pub attributes: Vec<ReflectionAttribute>,
-    pub provenance: Provenance,
+    pub(in crate::registry) set_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
+    pub(in crate::registry) provenance: Provenance,
+}
+
+impl PropertySig {
+    pub fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        self.visibility
+    }
+
+    pub fn is_internal(&self) -> bool {
+        self.is_internal
+    }
+
+    pub fn deprecated(&self) -> &Option<String> {
+        &self.deprecated
+    }
+
+    pub fn attributes(&self) -> &Vec<ReflectionAttribute> {
+        &self.attributes
+    }
+
+    pub fn provenance(&self) -> &Provenance {
+        &self.provenance
+    }
+
+    pub fn is_static(&self) -> bool {
+        self.is_static
+    }
+
+    pub fn is_readonly(&self) -> bool {
+        self.is_readonly
+    }
+
+    pub fn allows_private_mutation(&self) -> bool {
+        self.allows_private_mutation
+    }
+
+    pub fn readonly_by_phpdoc(&self) -> bool {
+        self.readonly_by_phpdoc
+    }
+
+    pub fn tag_read_only(&self) -> bool {
+        self.tag_read_only
+    }
+
+    pub fn tag_write_only(&self) -> bool {
+        self.tag_write_only
+    }
+
+    pub fn write_visibility(&self) -> Visibility {
+        self.write_visibility
+    }
+
+    pub fn implicit_protected_set(&self) -> bool {
+        self.implicit_protected_set
+    }
+
+    pub fn set_ty(&self) -> &Option<Type> {
+        &self.set_ty
+    }
+
+    pub fn is_virtual(&self) -> bool {
+        self.is_virtual
+    }
+
+    pub fn has_default(&self) -> bool {
+        self.has_default
+    }
+
+    pub fn is_abstract(&self) -> bool {
+        self.is_abstract
+    }
+
+    pub fn has_get_hook(&self) -> bool {
+        self.has_get_hook
+    }
+
+    pub fn has_set_hook(&self) -> bool {
+        self.has_set_hook
+    }
+
+    pub fn ty_native(&self) -> &Type {
+        &self.ty_native
+    }
+
+    pub fn doc_ty(&self) -> &Option<Type> {
+        &self.doc_ty
+    }
+
+    pub fn has_native_type(&self) -> bool {
+        self.has_native_type
+    }
+
+    pub fn case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+        &self.case_refs
+    }
+
+    pub fn set_case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+        &self.set_case_refs
+    }
 }
 
 // A class constant's `public`/`private`/`protected` modifier (PHP 7.1+).
@@ -170,81 +272,123 @@ pub struct PropertySig {
 // (`is_static`/`is_readonly`/`set_ty`) a constant has no equivalent of.
 #[derive(Debug, Clone)]
 pub struct ConstSig {
-    pub ty: Type,
-    pub visibility: Visibility,
+    pub(in crate::registry) ty: Type,
+    pub(in crate::registry) visibility: Visibility,
     // `final const` (PHP 8.1+).
-    pub is_final: bool,
+    pub(in crate::registry) is_final: bool,
     // The PHP 8.3 native type declaration, resolved; `None` when untyped.
-    pub native_ty: Option<Type>,
+    pub(in crate::registry) native_ty: Option<Type>,
     // Whether `ty` comes from an `@var` tag rather than the value.
-    pub has_phpdoc_type: bool,
+    pub(in crate::registry) has_phpdoc_type: bool,
     // The declared value's own type, regardless of any `@var`.
-    pub value_ty: Type,
+    pub(in crate::registry) value_ty: Type,
     // `@internal` on this constant's own doc comment - direct mirror of
     // `PropertySig::is_internal`. Always `false` for an enum case (no
     // doc-comment/`@internal` convention of its own).
-    pub is_internal: bool,
+    pub(in crate::registry) is_internal: bool,
     // `@deprecated` on this constant's own doc comment - direct mirror of
     // `PropertySig::deprecated`. Always `None` for an enum case.
-    pub deprecated: Option<String>,
-    pub attributes: Vec<ReflectionAttribute>,
-    pub provenance: Provenance,
+    pub(in crate::registry) deprecated: Option<String>,
+    pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
+    pub(in crate::registry) provenance: Provenance,
+}
+
+impl ConstSig {
+    pub fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        self.visibility
+    }
+
+    pub fn is_final(&self) -> bool {
+        self.is_final
+    }
+
+    pub fn native_ty(&self) -> &Option<Type> {
+        &self.native_ty
+    }
+
+    pub fn has_phpdoc_type(&self) -> bool {
+        self.has_phpdoc_type
+    }
+
+    pub fn value_ty(&self) -> &Type {
+        &self.value_ty
+    }
+
+    pub fn is_internal(&self) -> bool {
+        self.is_internal
+    }
+
+    pub fn deprecated(&self) -> &Option<String> {
+        &self.deprecated
+    }
+
+    pub fn attributes(&self) -> &Vec<ReflectionAttribute> {
+        &self.attributes
+    }
+
+    pub fn provenance(&self) -> &Provenance {
+        &self.provenance
+    }
 }
 
 #[derive(Debug, Clone)]
 #[allow(clippy::type_complexity)]
 pub struct ClassInfo {
-    pub kind: ClassKind,
-    pub is_abstract: bool,
-    pub is_final: bool,
+    pub(in crate::registry) kind: ClassKind,
+    pub(in crate::registry) is_abstract: bool,
+    pub(in crate::registry) is_final: bool,
     // `@final`/`@phpstan-final` on this class's own docblock, without
     // the native `final` keyword (which `is_final` covers).
-    pub is_final_by_phpdoc: bool,
+    pub(in crate::registry) is_final_by_phpdoc: bool,
     // `readonly class` (PHP 8.2). Always `false` for an enum (real PHP
     // rejects `readonly enum` at parse time) or a trait composed in (a
     // trait has no `readonly`-ness of its own to inherit; `readonly
     // class Foo { use T; }` only ever makes `Foo`'s properties readonly,
     // never retroactively marks `T`).
-    pub is_readonly: bool,
+    pub(in crate::registry) is_readonly: bool,
     // `@phpstan-immutable`/`@phpstan-readonly` on this class's own
     // docblock. Never baked with parent-inheritance
     // (`Registry::class_is_immutable` walks `extends` at query time
     // instead) - this field alone only answers "did this exact
     // declaration carry the tag," not "is this class immutable
     // considering its whole ancestor chain."
-    pub is_immutable: bool,
-    pub extends: Vec<Arc<str>>,
-    pub implements: Vec<Arc<str>>,
-    pub methods: FxHashMap<Arc<str>, FunctionSig>,
+    pub(in crate::registry) is_immutable: bool,
+    pub(in crate::registry) extends: Vec<Arc<str>>,
+    pub(in crate::registry) implements: Vec<Arc<str>>,
+    pub(in crate::registry) methods: FxHashMap<Arc<str>, FunctionSig>,
     // The own signature of each method whose name the body declares more
     // than once, keyed by its name's position: `methods` holds their
     // union.
-    pub redeclared_methods: FxHashMap<(u32, u32), FunctionSig>,
-    pub properties: FxHashMap<Arc<str>, PropertySig>,
+    pub(in crate::registry) redeclared_methods: FxHashMap<(u32, u32), FunctionSig>,
+    pub(in crate::registry) properties: FxHashMap<Arc<str>, PropertySig>,
     // Declaration order is kept: a listing of constants (a `match`
     // remainder, a `Foo::X_*` wildcard) follows source order, as in real
     // PHPStan.
-    pub consts: IndexMap<Arc<str>, ConstSig>,
-    pub uses: Vec<Arc<str>>,
+    pub(in crate::registry) consts: IndexMap<Arc<str>, ConstSig>,
+    pub(in crate::registry) uses: Vec<Arc<str>>,
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
     // `extends`/`implements` itself and consult each ancestor's own set).
-    pub abstract_methods: FxHashSet<Arc<str>>,
+    pub(in crate::registry) abstract_methods: FxHashSet<Arc<str>>,
     // Method names declared `final` in this class's own body.
-    pub final_methods: FxHashSet<Arc<str>>,
+    pub(in crate::registry) final_methods: FxHashSet<Arc<str>>,
     // Method names declared `static` in this class's own body - same
     // "not walked up the hierarchy" shape as `abstract_methods`/
     // `final_methods` above, used by `check_one_method_override`'s
     // `method.nonStatic`/`method.static` check, mirroring real PHPStan's
     // `OverridingMethodRule`: an override must match its ancestor's
     // static-ness exactly, either direction.
-    pub static_methods: FxHashSet<Arc<str>>,
+    pub(in crate::registry) static_methods: FxHashSet<Arc<str>>,
     // Property names declared `final` in this class's own body (PHP 8.4) -
     // same "not walked up the hierarchy" shape as `final_methods` above;
     // `Registry::find_final_ancestor_property` does that walk. Real PHP
     // fatals overriding a `final` property in a subclass exactly like a
     // `final` method.
-    pub final_properties: FxHashSet<Arc<str>>,
+    pub(in crate::registry) final_properties: FxHashSet<Arc<str>>,
     // `@final`'s docblock-only siblings to `final_methods`/
     // `final_properties` above - real PHP never enforces this convention
     // (no engine-level guarantee backs it, unlike the native keyword), so
@@ -252,24 +396,24 @@ pub struct ClassInfo {
     // (`Registry::find_final_ancestor_method`/
     // `find_final_ancestor_property`, real keyword taking priority when
     // both somehow apply on the same ancestor).
-    pub final_methods_by_phpdoc: FxHashSet<Arc<str>>,
-    pub final_properties_by_phpdoc: FxHashSet<Arc<str>>,
+    pub(in crate::registry) final_methods_by_phpdoc: FxHashSet<Arc<str>>,
+    pub(in crate::registry) final_properties_by_phpdoc: FxHashSet<Arc<str>>,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
     // `self.classes` directly.
-    pub trait_aliases: Vec<TraitAlias>,
+    pub(in crate::registry) trait_aliases: Vec<TraitAlias>,
     // Method/property names explicitly mentioned in any trait-adaptation
     // clause (`insteadof` or `as`) - the trait-conflict check treats
     // these as already addressed by the class author, even for
     // `insteadof` (whose actual trait-selection this project doesn't
     // otherwise model).
-    pub resolved_trait_conflicts: FxHashSet<Arc<str>>,
+    pub(in crate::registry) resolved_trait_conflicts: FxHashSet<Arc<str>>,
     // This class's own `@template T` names, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
     // class_template_bindings`). Empty for a non-generic class.
-    pub templates: Vec<Arc<str>>,
+    pub(in crate::registry) templates: Vec<Arc<str>>,
     // `@extends Parent<Arg, ...>`'s argument list - fixes
     // `extends.first()`'s `@template` names for every instance of this
     // class, independent of whether this class is itself generic (e.g.
@@ -281,12 +425,12 @@ pub struct ClassInfo {
     // class's templates are bound to at each use, not a fixed value.
     // Empty when there's no `@extends` tag, or no native `extends` for
     // it to apply to.
-    pub extends_args: Vec<Type>,
+    pub(in crate::registry) extends_args: Vec<Type>,
     // Same idea as `extends_args`, but keyed by which interface each
     // `@implements Iface<Arg, ...>` tag applies to (a class can implement
     // more than one at once) - the key is resolved to the same
     // fully-qualified name `implements` itself uses, so the two agree.
-    pub implements_args: FxHashMap<Arc<str>, Vec<Type>>,
+    pub(in crate::registry) implements_args: FxHashMap<Arc<str>, Vec<Type>>,
     // Same idea again, but for a generic trait named in an `@use
     // Trait<Arg, ...>` tag - keyed the same way as `implements_args`.
     // Unlike `extends`/`implements`, which are both written on the
@@ -296,12 +440,12 @@ pub struct ClassInfo {
     // TemplateTypeTrait;`, not the class's separate `/** @api */`
     // docblock above it) - see `ClassDecl::uses_doc_comments`'s doc
     // comment for where this project captures that.
-    pub uses_args: FxHashMap<Arc<str>, Vec<Type>>,
+    pub(in crate::registry) uses_args: FxHashMap<Arc<str>, Vec<Type>>,
     // `@template T of Bound` - the resolved bound for whichever of
     // `templates` above declared one. Checked by
     // `checker::check_generic_bounds` wherever this class is referenced
     // with concrete type arguments (`Collection<Foo>`).
-    pub template_bounds: FxHashMap<Arc<str>, Type>,
+    pub(in crate::registry) template_bounds: FxHashMap<Arc<str>, Type>,
     // `@template T = Default` - the resolved default for whichever of
     // `templates` above declared one, mirroring `template_bounds`'s
     // shape/construction exactly. A generic reference supplying fewer
@@ -309,12 +453,12 @@ pub struct ClassInfo {
     // (`check_generic_reference_arity`, `checker/generics.rs`) for a
     // template name absent from this map - one with a default is
     // legitimately optional to supply.
-    pub template_defaults: FxHashMap<Arc<str>, Type>,
+    pub(in crate::registry) template_defaults: FxHashMap<Arc<str>, Type>,
     // Names from `templates` above additionally declared
     // `@template-covariant`/`@template-contravariant` - a name absent
     // from both stays invariant.
-    pub covariant_templates: FxHashSet<Arc<str>>,
-    pub contravariant_templates: FxHashSet<Arc<str>>,
+    pub(in crate::registry) covariant_templates: FxHashSet<Arc<str>>,
+    pub(in crate::registry) contravariant_templates: FxHashSet<Arc<str>>,
     // This class/interface/trait's own docblock carries `@api` (or,
     // equivalently, `@api-do-not-implement`, which implies it - see
     // `DocBlock::api`'s doc comment). Consulted only by
@@ -322,24 +466,24 @@ pub struct ClassInfo {
     // project didn't declare itself (one loaded from a real
     // `phpstan/phpstan` `vendor/` tree as context) - `false` for every
     // ordinary class.
-    pub is_api: bool,
+    pub(in crate::registry) is_api: bool,
     // `@api-do-not-implement` specifically - an `@api` interface/class a
     // third party must not `extends`/`implements`, even though calling
     // its already-declared members is still fully covered by `is_api`
     // above.
-    pub is_api_do_not_implement: bool,
+    pub(in crate::registry) is_api_do_not_implement: bool,
     // `@internal` on this class/interface/trait/enum's own docblock -
     // see `docblock::DocBlock::internal`'s doc comment.
-    pub is_internal: bool,
+    pub(in crate::registry) is_internal: bool,
     // `@phpstan-consistent-constructor` on this class's own docblock -
     // see `docblock::DocBlock::consistent_constructor`'s doc comment.
-    pub is_consistent_constructor: bool,
+    pub(in crate::registry) is_consistent_constructor: bool,
     // `@deprecated` on this class's own docblock - consulted only at
     // `new Foo()` (`checker::check_deprecated_instantiation`).
     // Deliberately doesn't imply anything about this class's own members
     // (see `FunctionSig::deprecated`'s doc comment for why that question
     // is left unclaimed) - this is purely "is the class itself tagged."
-    pub deprecated: Option<String>,
+    pub(in crate::registry) deprecated: Option<String>,
     // This class's own `#[\Attribute(flags)]` meta-attribute flags (an
     // `int-mask-of<Attribute::TARGET_*>`), if this class is declared
     // usable as an attribute class at all - `None` means it isn't (real
@@ -348,9 +492,9 @@ pub struct ClassInfo {
     // (`Attribute::TARGET_ALL`, matching `Attribute::__construct`'s own
     // default parameter value - see `compute_attribute_targets`'s doc
     // comment).
-    pub attribute_targets: Option<u32>,
+    pub(in crate::registry) attribute_targets: Option<u32>,
     // This class's own attributes, names resolved.
-    pub attributes: Vec<ReflectionAttribute>,
+    pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
     // For a backed enum only, each case's literal backing value
     // (`StringLiteral`/`IntLiteral`), keyed by case name - lets
     // `::from()`/`::tryFrom()` narrow a literal-argument call to the
@@ -360,7 +504,7 @@ pub struct ClassInfo {
     // `->value` union-of-literals property type applies) - empty for a
     // non-enum, an unbacked enum, or a backed enum with any non-literal
     // case value (a case naming a class constant).
-    pub enum_case_values: FxHashMap<Arc<str>, Type>,
+    pub(in crate::registry) enum_case_values: FxHashMap<Arc<str>, Type>,
     // This class's own `@phpstan-type Name TypeExpr` local alias table
     // (`function_sig::build_type_aliases`), keyed by each alias's own
     // resolved FQN - already spliced into every member's `ty` at
@@ -369,7 +513,7 @@ pub struct ClassInfo {
     // check-time `@var` resolution path, which needs the same table to
     // expand a local variable annotated `/** @var Name $x */` inside one
     // of this class's method bodies. Empty for a class with no such tags.
-    pub type_aliases: FxHashMap<Arc<str>, Type>,
+    pub(in crate::registry) type_aliases: FxHashMap<Arc<str>, Type>,
     // `ParamSig::case_refs`'s `@phpstan-type` equivalent - keyed the
     // same way `type_aliases` itself is (the alias's resolved local
     // name), `(raw, resolved)` pairs for every class-name reference the
@@ -377,7 +521,7 @@ pub struct ClassInfo {
     // elsewhere - that's this same mechanism at whatever
     // `@param`/`@return`/property tag actually uses the alias, via its
     // own `case_refs`).
-    pub type_alias_case_refs: FxHashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>,
+    pub(in crate::registry) type_alias_case_refs: FxHashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>,
     // This class's own `@phpstan-import-type` tags, name-resolved
     // (`from` to the source class's FQN, the imported name to the local
     // key this class's members already reference it by) but not yet
@@ -387,16 +531,16 @@ pub struct ClassInfo {
     // fully-indexed registry - merged into `type_aliases` above once
     // resolved, so this field is empty again after that pass runs; never
     // read afterward.
-    pub type_imports: Vec<ResolvedTypeImport>,
+    pub(in crate::registry) type_imports: Vec<ResolvedTypeImport>,
     // `@method` tags, already resolved into real `FunctionSig`s but not
     // yet inserted into `methods` - insertion has to wait for
     // `Registry::resolve_method_tags`, a later pass. Empty again after
     // that pass runs; never read afterward.
-    pub method_tags: Vec<(Arc<str>, FunctionSig, bool)>,
+    pub(in crate::registry) method_tags: Vec<(Arc<str>, FunctionSig, bool)>,
     // `#[ORM\Entity]` metadata (ROADMAP Phase 168 168a) - `None`
     // for the overwhelming majority of classes, which aren't Doctrine
     // entities at all.
-    pub doctrine_entity: Option<DoctrineEntity>,
+    pub(in crate::registry) doctrine_entity: Option<DoctrineEntity>,
     // `@phpstan-require-extends`/`@phpstan-require-implements`/
     // `@phpstan-sealed` - resolved directly to fully-qualified class
     // names (a tag's value can legally be a union of several, already
@@ -405,26 +549,232 @@ pub struct ClassInfo {
     // project's "don't guess" precedent elsewhere). See
     // `checker::oop::check_require_tags`/`check_sealed_hierarchy` for
     // the two, differently-shaped consuming checks.
-    pub require_extends: Vec<Arc<str>>,
-    pub require_implements: Vec<Arc<str>>,
-    pub sealed: Vec<Arc<str>>,
+    pub(in crate::registry) require_extends: Vec<Arc<str>>,
+    pub(in crate::registry) require_implements: Vec<Arc<str>>,
+    pub(in crate::registry) sealed: Vec<Arc<str>>,
     /// The class's own `php-language-extensions` access attributes.
-    pub access: crate::registry::access_attributes::AccessAttributes,
+    pub(in crate::registry) access: crate::registry::access_attributes::AccessAttributes,
     /// Each method's, keyed by lowercased method name (only methods that
     /// have any).
-    pub method_access: FxHashMap<Arc<str>, crate::registry::access_attributes::AccessAttributes>,
+    pub(in crate::registry) method_access:
+        FxHashMap<Arc<str>, crate::registry::access_attributes::AccessAttributes>,
     // `@mixin Type` - resolved FQNs, same shape/flattening as the three
     // above. Not yet looked up in the target's own `methods`/`properties`
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
     // mirroring `resolve_deferred_type_imports`'s own two-step shape.
-    pub mixins: Vec<Arc<str>>,
+    pub(in crate::registry) mixins: Vec<Arc<str>>,
     // `ParamSig::case_refs`'s `@mixin`-tag equivalent - `(raw, resolved)`
     // pairs for every `@mixin` target on this class's docblock, in
     // declaration order (not keyed by name - unlike
     // `type_alias_case_refs`, a class can carry several `@mixin` tags
     // with no unique name to key by).
-    pub mixin_case_refs: Vec<(Arc<str>, Arc<str>)>,
-    pub provenance: Provenance,
+    pub(in crate::registry) mixin_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) provenance: Provenance,
+}
+
+impl ClassInfo {
+    pub fn kind(&self) -> ClassKind {
+        self.kind
+    }
+
+    pub fn is_abstract(&self) -> bool {
+        self.is_abstract
+    }
+
+    pub fn is_final(&self) -> bool {
+        self.is_final
+    }
+
+    pub fn is_final_by_phpdoc(&self) -> bool {
+        self.is_final_by_phpdoc
+    }
+
+    pub fn is_readonly(&self) -> bool {
+        self.is_readonly
+    }
+
+    pub fn is_immutable(&self) -> bool {
+        self.is_immutable
+    }
+
+    pub fn extends(&self) -> &Vec<Arc<str>> {
+        &self.extends
+    }
+
+    pub fn implements(&self) -> &Vec<Arc<str>> {
+        &self.implements
+    }
+
+    pub fn methods(&self) -> &FxHashMap<Arc<str>, FunctionSig> {
+        &self.methods
+    }
+
+    pub fn redeclared_methods(&self) -> &FxHashMap<(u32, u32), FunctionSig> {
+        &self.redeclared_methods
+    }
+
+    pub fn properties(&self) -> &FxHashMap<Arc<str>, PropertySig> {
+        &self.properties
+    }
+
+    pub fn consts(&self) -> &IndexMap<Arc<str>, ConstSig> {
+        &self.consts
+    }
+
+    pub fn uses(&self) -> &Vec<Arc<str>> {
+        &self.uses
+    }
+
+    pub fn abstract_methods(&self) -> &FxHashSet<Arc<str>> {
+        &self.abstract_methods
+    }
+
+    pub fn final_methods(&self) -> &FxHashSet<Arc<str>> {
+        &self.final_methods
+    }
+
+    pub fn static_methods(&self) -> &FxHashSet<Arc<str>> {
+        &self.static_methods
+    }
+
+    pub fn final_properties(&self) -> &FxHashSet<Arc<str>> {
+        &self.final_properties
+    }
+
+    pub fn final_methods_by_phpdoc(&self) -> &FxHashSet<Arc<str>> {
+        &self.final_methods_by_phpdoc
+    }
+
+    pub fn final_properties_by_phpdoc(&self) -> &FxHashSet<Arc<str>> {
+        &self.final_properties_by_phpdoc
+    }
+
+    pub fn trait_aliases(&self) -> &Vec<TraitAlias> {
+        &self.trait_aliases
+    }
+
+    pub fn resolved_trait_conflicts(&self) -> &FxHashSet<Arc<str>> {
+        &self.resolved_trait_conflicts
+    }
+
+    pub fn templates(&self) -> &Vec<Arc<str>> {
+        &self.templates
+    }
+
+    pub fn extends_args(&self) -> &Vec<Type> {
+        &self.extends_args
+    }
+
+    pub fn implements_args(&self) -> &FxHashMap<Arc<str>, Vec<Type>> {
+        &self.implements_args
+    }
+
+    pub fn uses_args(&self) -> &FxHashMap<Arc<str>, Vec<Type>> {
+        &self.uses_args
+    }
+
+    pub fn template_bounds(&self) -> &FxHashMap<Arc<str>, Type> {
+        &self.template_bounds
+    }
+
+    pub fn template_defaults(&self) -> &FxHashMap<Arc<str>, Type> {
+        &self.template_defaults
+    }
+
+    pub fn covariant_templates(&self) -> &FxHashSet<Arc<str>> {
+        &self.covariant_templates
+    }
+
+    pub fn contravariant_templates(&self) -> &FxHashSet<Arc<str>> {
+        &self.contravariant_templates
+    }
+
+    pub fn is_api(&self) -> bool {
+        self.is_api
+    }
+
+    pub fn is_api_do_not_implement(&self) -> bool {
+        self.is_api_do_not_implement
+    }
+
+    pub fn is_internal(&self) -> bool {
+        self.is_internal
+    }
+
+    pub fn is_consistent_constructor(&self) -> bool {
+        self.is_consistent_constructor
+    }
+
+    pub fn deprecated(&self) -> &Option<String> {
+        &self.deprecated
+    }
+
+    pub fn attribute_targets(&self) -> Option<u32> {
+        self.attribute_targets
+    }
+
+    pub fn attributes(&self) -> &Vec<ReflectionAttribute> {
+        &self.attributes
+    }
+
+    pub fn enum_case_values(&self) -> &FxHashMap<Arc<str>, Type> {
+        &self.enum_case_values
+    }
+
+    pub fn type_aliases(&self) -> &FxHashMap<Arc<str>, Type> {
+        &self.type_aliases
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn type_alias_case_refs(&self) -> &FxHashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>> {
+        &self.type_alias_case_refs
+    }
+
+    pub fn type_imports(&self) -> &Vec<ResolvedTypeImport> {
+        &self.type_imports
+    }
+
+    pub fn method_tags(&self) -> &Vec<(Arc<str>, FunctionSig, bool)> {
+        &self.method_tags
+    }
+
+    pub fn doctrine_entity(&self) -> &Option<DoctrineEntity> {
+        &self.doctrine_entity
+    }
+
+    pub fn require_extends(&self) -> &Vec<Arc<str>> {
+        &self.require_extends
+    }
+
+    pub fn require_implements(&self) -> &Vec<Arc<str>> {
+        &self.require_implements
+    }
+
+    pub fn sealed(&self) -> &Vec<Arc<str>> {
+        &self.sealed
+    }
+
+    pub fn access(&self) -> &crate::registry::access_attributes::AccessAttributes {
+        &self.access
+    }
+
+    pub fn method_access(
+        &self,
+    ) -> &FxHashMap<Arc<str>, crate::registry::access_attributes::AccessAttributes> {
+        &self.method_access
+    }
+
+    pub fn mixins(&self) -> &Vec<Arc<str>> {
+        &self.mixins
+    }
+
+    pub fn mixin_case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+        &self.mixin_case_refs
+    }
+
+    pub fn provenance(&self) -> &Provenance {
+        &self.provenance
+    }
 }
 
 /// See `ClassInfo::type_imports`'s own doc comment.
@@ -677,7 +1027,7 @@ impl ClassInfo {
                 ctx,
                 &template_params,
                 &type_aliases,
-                m.visibility.clone(),
+                m.visibility,
             );
             methods_vec.push((name.clone(), name_site(&m.function), sig));
         }
@@ -815,11 +1165,8 @@ impl ClassInfo {
                         tag_write_only: false,
                         set_ty,
                         is_virtual,
-                        visibility: p.visibility.clone(),
-                        write_visibility: p
-                            .write_visibility
-                            .clone()
-                            .unwrap_or(p.visibility.clone()),
+                        visibility: p.visibility,
+                        write_visibility: p.write_visibility.unwrap_or(p.visibility),
                         implicit_protected_set: p.is_readonly
                             && p.write_visibility.is_none()
                             && p.visibility == Visibility::Public,
@@ -934,11 +1281,8 @@ impl ClassInfo {
                         tag_write_only: false,
                         set_ty,
                         is_virtual,
-                        visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
-                        write_visibility: p
-                            .promoted_visibility
-                            .clone()
-                            .unwrap_or(Visibility::Public),
+                        visibility: p.promoted_visibility.unwrap_or(Visibility::Public),
+                        write_visibility: p.promoted_visibility.unwrap_or(Visibility::Public),
                         implicit_protected_set: p.promoted_readonly
                             && p.promoted_visibility
                                 .as_ref()
@@ -1072,7 +1416,7 @@ impl ClassInfo {
                         attributes: ReflectionAttribute::all(&cc.attrs, ctx),
                         provenance: Provenance::default(),
                         ty,
-                        visibility: cc.visibility.clone(),
+                        visibility: cc.visibility,
                         is_final: cc.is_final,
                         native_ty: native_const_type(cc, ctx),
                         has_phpdoc_type,
@@ -1394,7 +1738,7 @@ impl ClassInfo {
                             ctx,
                             &FxHashMap::default(),
                             &FxHashMap::default(),
-                            m.visibility.clone(),
+                            m.visibility,
                         ),
                     )
                 })
@@ -1554,7 +1898,7 @@ impl ClassInfo {
                         attributes: ReflectionAttribute::all(&cc.attrs, ctx),
                         provenance: Provenance::default(),
                         ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
-                        visibility: cc.visibility.clone(),
+                        visibility: cc.visibility,
                         is_final: cc.is_final,
                         native_ty: native_const_type(cc, ctx),
                         has_phpdoc_type: false,

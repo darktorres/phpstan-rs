@@ -428,7 +428,7 @@ impl<'a> Checker<'a> {
         use crate::registry::AssertTarget;
         match target {
             AssertTarget::Param(name) => {
-                let idx = sig.params.iter().position(|p| &p.name == name)?;
+                let idx = sig.params().iter().position(|p| p.name() == name)?;
                 let arg = args.get(idx)?;
                 let key = narrowing_key(&arg.value)?;
                 let current = self.current_narrowed_type(&arg.value, &key, locals);

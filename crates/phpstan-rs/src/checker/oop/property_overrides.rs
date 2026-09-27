@@ -32,7 +32,7 @@ impl<'a> Checker<'a> {
             return;
         };
         for p in &c.properties {
-            let Some(own_sig) = info.properties.get(p.name.as_ref()).cloned() else {
+            let Some(own_sig) = info.properties().get(p.name.as_ref()).cloned() else {
                 continue;
             };
             self.check_property_override_attribute(fqn, &p.name, &p.attrs, p.span);
@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
                 if param.promoted_visibility.is_none() {
                     continue;
                 }
-                let Some(own_sig) = info.properties.get(param.name.as_ref()).cloned() else {
+                let Some(own_sig) = info.properties().get(param.name.as_ref()).cloned() else {
                     continue;
                 };
                 self.check_property_override_attribute(fqn, &param.name, &param.attrs, param.span);
@@ -111,7 +111,7 @@ impl<'a> Checker<'a> {
         let has_real_ancestor = self
             .registry
             .lookup_ancestor_property_with_owner(fqn, name)
-            .is_some_and(|(_, sig)| sig.visibility != Visibility::Private);
+            .is_some_and(|(_, sig)| sig.visibility() != Visibility::Private);
         if !has_real_ancestor {
             self.report_builder(
                 DiagnosticBuilder::new(format!(
@@ -166,10 +166,10 @@ impl<'a> Checker<'a> {
         // A private ancestor property is an unrelated declaration, not
         // a real override target - same reasoning as
         // `check_method_overrides`'s identical exemption.
-        if ancestor_sig.visibility == Visibility::Private {
+        if ancestor_sig.visibility() == Visibility::Private {
             return;
         }
-        if ancestor_sig.is_static && !own_sig.is_static {
+        if ancestor_sig.is_static() && !own_sig.is_static() {
             self.report(format!(
                     "Non-static property {fqn}::${name} overrides static property {ancestor_owner}::${name}"
                 ),
@@ -177,7 +177,7 @@ impl<'a> Checker<'a> {
                 0,
                 "property.nonStatic",
             );
-        } else if !ancestor_sig.is_static && own_sig.is_static {
+        } else if !ancestor_sig.is_static() && own_sig.is_static() {
             self.report(format!(
                     "Static property {fqn}::${name} overrides non-static property {ancestor_owner}::${name}"
                 ),
@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
                 "property.static",
             );
         }
-        if ancestor_sig.is_readonly && !own_sig.is_readonly {
+        if ancestor_sig.is_readonly() && !own_sig.is_readonly() {
             self.report(format!(
                     "Readwrite property {fqn}::${name} overrides readonly property {ancestor_owner}::${name}"
                 ),
@@ -194,7 +194,7 @@ impl<'a> Checker<'a> {
                 0,
                 "property.readWrite",
             );
-        } else if !ancestor_sig.is_readonly && own_sig.is_readonly {
+        } else if !ancestor_sig.is_readonly() && own_sig.is_readonly() {
             self.report(format!(
                     "Readonly property {fqn}::${name} overrides readwrite property {ancestor_owner}::${name}"
                 ),
@@ -205,15 +205,15 @@ impl<'a> Checker<'a> {
         }
         // Same two-way visibility-narrowing split `check_method_overrides`
         // uses, one member kind over.
-        let narrows_visibility = match ancestor_sig.visibility {
-            Visibility::Public => own_sig.visibility != Visibility::Public,
-            Visibility::Protected => own_sig.visibility == Visibility::Private,
+        let narrows_visibility = match ancestor_sig.visibility() {
+            Visibility::Public => own_sig.visibility() != Visibility::Public,
+            Visibility::Protected => own_sig.visibility() == Visibility::Private,
             Visibility::Private => false,
         };
         if narrows_visibility {
             self.report(format!(
                     "{fqn}::${name} overriding {} property {ancestor_owner}::${name} must not reduce visibility",
-                    visibility_word(&ancestor_sig.visibility)
+                    visibility_word(&ancestor_sig.visibility())
                 ),
                 span,
                 0,
@@ -259,9 +259,9 @@ impl<'a> Checker<'a> {
         ancestor_sig: &PropertySig,
         span: Span,
     ) {
-        if !ancestor_sig.has_native_type {
-            if own_sig.has_native_type {
-                let own_ty = self.resolve_pseudo(&own_sig.ty_native, fqn);
+        if !ancestor_sig.has_native_type() {
+            if own_sig.has_native_type() {
+                let own_ty = self.resolve_pseudo(own_sig.ty_native(), fqn);
                 self.report_builder(
                     DiagnosticBuilder::new(format!(
                             "Property {fqn}::${name} ({own_ty}) overriding property {ancestor_owner}::${name} should not have a native type."
@@ -275,8 +275,8 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        let ancestor_ty = self.resolve_pseudo(&ancestor_sig.ty_native, ancestor_owner);
-        if !own_sig.has_native_type {
+        let ancestor_ty = self.resolve_pseudo(ancestor_sig.ty_native(), ancestor_owner);
+        if !own_sig.has_native_type() {
             self.report_builder(
                 DiagnosticBuilder::new(format!(
                         "Property {fqn}::${name} overriding property {ancestor_owner}::${name} ({ancestor_ty}) should also have native type {ancestor_ty}."
@@ -289,7 +289,7 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let own_ty = self.resolve_pseudo(&own_sig.ty_native, fqn);
+        let own_ty = self.resolve_pseudo(own_sig.ty_native(), fqn);
         if self.accepts(&ancestor_ty, &own_ty).yes() && self.accepts(&own_ty, &ancestor_ty).yes() {
             return;
         }
@@ -320,11 +320,11 @@ impl<'a> Checker<'a> {
         ancestor_sig: &PropertySig,
         span: Span,
     ) {
-        if !ancestor_sig.is_virtual && !own_sig.is_virtual {
+        if !ancestor_sig.is_virtual() && !own_sig.is_virtual() {
             return;
         }
-        let ancestor_readable = !ancestor_sig.is_virtual || ancestor_sig.has_get_hook;
-        let own_readable = !own_sig.is_virtual || own_sig.has_get_hook;
+        let ancestor_readable = !ancestor_sig.is_virtual() || ancestor_sig.has_get_hook();
+        let own_readable = !own_sig.is_virtual() || own_sig.has_get_hook();
         if ancestor_readable && !own_readable {
             self.report(format!(
                     "Property {fqn}::${name} does not have `get` hook and is not readable, but is required to be readable by property {ancestor_owner}::${name}."
@@ -334,8 +334,8 @@ impl<'a> Checker<'a> {
                 "property.notReadable",
             );
         }
-        let ancestor_writable = !ancestor_sig.is_virtual || ancestor_sig.has_set_hook;
-        let own_writable = !own_sig.is_virtual || own_sig.has_set_hook;
+        let ancestor_writable = !ancestor_sig.is_virtual() || ancestor_sig.has_set_hook();
+        let own_writable = !own_sig.is_virtual() || own_sig.has_set_hook();
         if ancestor_writable && !own_writable {
             self.report(format!(
                     "Property {fqn}::${name} does not have `set` hook and is not writable, but is required to be writable by property {ancestor_owner}::${name}."
@@ -348,8 +348,8 @@ impl<'a> Checker<'a> {
         // A hook only makes sense to compare "abstract-ness" for when
         // both sides actually declare that same hook type at all -
         // real PHP's own rule only fires on that exact overlap.
-        if own_sig.is_abstract && !ancestor_sig.is_abstract {
-            if own_sig.has_get_hook && ancestor_sig.has_get_hook {
+        if own_sig.is_abstract() && !ancestor_sig.is_abstract() {
+            if own_sig.has_get_hook() && ancestor_sig.has_get_hook() {
                 self.report(format!(
                         "Cannot make non abstract method {ancestor_owner}::${name}::get() abstract in class {fqn}"
                     ),
@@ -358,7 +358,7 @@ impl<'a> Checker<'a> {
                     "property.abstractOverridingNonAbstractHook",
                 );
             }
-            if own_sig.has_set_hook && ancestor_sig.has_set_hook {
+            if own_sig.has_set_hook() && ancestor_sig.has_set_hook() {
                 self.report(format!(
                         "Cannot make non abstract method {ancestor_owner}::${name}::set() abstract in class {fqn}"
                     ),

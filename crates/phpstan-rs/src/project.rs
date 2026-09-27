@@ -11,7 +11,7 @@ use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
-use crate::php_stubs;
+use crate::registry::stubs;
 use crate::registry::{BodySource, FileBodies, Origin, Provenance, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
@@ -301,9 +301,9 @@ impl Project {
 
     pub fn new() -> Self {
         let mut registry = Registry::default();
-        registry.merge_stubs(php_stubs::generated_stubs());
-        registry.merge_stub_classes(php_stubs::generated_stub_classes());
-        registry.merge_stub_constants(php_stubs::generated_stub_constants());
+        registry.merge_stubs(stubs::generated_stubs());
+        registry.merge_stub_classes(stubs::generated_stub_classes());
+        registry.merge_stub_constants(stubs::generated_stub_constants());
         Project {
             files: FxHashMap::default(),
             interner: Arc::new(Interner::new()),
@@ -1503,9 +1503,9 @@ impl Project {
     /// called), so a plain lookup here is sound.
     fn file_may_write_private_property(&self, file: &FileState) -> bool {
         fn has_private_property(info: &crate::registry::ClassInfo) -> bool {
-            info.properties
+            info.properties()
                 .values()
-                .any(|p| p.write_visibility == Visibility::Private)
+                .any(|p| p.write_visibility() == Visibility::Private)
         }
         let class_may_write = |name: &str| {
             let Some(info) = self.registry.classes.get(name) else {
@@ -1514,7 +1514,7 @@ impl Project {
             if has_private_property(info) {
                 return true;
             }
-            info.kind == ClassKind::Trait
+            info.kind() == ClassKind::Trait
                 && self.registry.classes_using_trait(name).iter().any(|host| {
                     self.registry
                         .classes

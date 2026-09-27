@@ -285,9 +285,9 @@ impl<'a> Checker<'a> {
                 .and_then(|g| self.registry.lookup_function(g))
         }) {
             let infos = if branch_true {
-                &sig.assert_if_true
+                sig.assert_if_true()
             } else {
-                &sig.assert_if_false
+                sig.assert_if_false()
             };
             if !infos.is_empty() {
                 self.apply_assert_infos(infos, sig, None, args, locals);
@@ -1234,9 +1234,9 @@ impl<'a> Checker<'a> {
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                 {
                     let infos = if branch_true {
-                        &sig.assert_if_true
+                        sig.assert_if_true()
                     } else {
-                        &sig.assert_if_false
+                        sig.assert_if_false()
                     };
                     if !infos.is_empty() {
                         self.apply_assert_infos(infos, sig, Some(recv), args, locals);
@@ -1251,9 +1251,9 @@ impl<'a> Checker<'a> {
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                 {
                     let infos = if branch_true {
-                        &sig.assert_if_true
+                        sig.assert_if_true()
                     } else {
-                        &sig.assert_if_false
+                        sig.assert_if_false()
                     };
                     if !infos.is_empty() {
                         self.apply_assert_infos(infos, sig, None, args, locals);
@@ -1525,9 +1525,9 @@ impl<'a> Checker<'a> {
             return;
         };
         for (tag_name, infos) in [
-            ("@phpstan-assert", &sig.assert),
-            ("@phpstan-assert-if-true", &sig.assert_if_true),
-            ("@phpstan-assert-if-false", &sig.assert_if_false),
+            ("@phpstan-assert", sig.assert()),
+            ("@phpstan-assert-if-true", sig.assert_if_true()),
+            ("@phpstan-assert-if-false", sig.assert_if_false()),
         ] {
             for info in infos {
                 self.check_one_assert_tag(info, tag_name, sig, span);
@@ -1607,12 +1607,12 @@ impl<'a> Checker<'a> {
         let AssertTarget::Param(name) = &info.target else {
             return;
         };
-        let Some(param) = sig.params.iter().find(|p| &p.name == name) else {
+        let Some(param) = sig.params().iter().find(|p| p.name() == name) else {
             return;
         };
         let negated_prefix = if info.negated { "negated " } else { "" };
-        let is_super = self.accepts(&info.ty, &param.ty).yes();
-        let is_disjoint = types_definitely_disjoint(&info.ty, &param.ty);
+        let is_super = self.accepts(&info.ty, param.ty()).yes();
+        let is_disjoint = types_definitely_disjoint(&info.ty, param.ty());
         let (impossible, already_narrowed) = if info.negated {
             (is_super, is_disjoint)
         } else {
@@ -1621,7 +1621,7 @@ impl<'a> Checker<'a> {
         if impossible {
             self.report(format!(
                     "Asserted {negated_prefix}type {} for {target_desc} with type {} can never happen.",
-                    info.ty, param.ty
+                    info.ty, param.ty()
                 ),
                 span,
                 0,
@@ -1630,7 +1630,7 @@ impl<'a> Checker<'a> {
         } else if already_narrowed {
             self.report(format!(
                     "Asserted {negated_prefix}type {} for {target_desc} with type {} does not narrow down the type.",
-                    info.ty, param.ty
+                    info.ty, param.ty()
                 ),
                 span,
                 0,

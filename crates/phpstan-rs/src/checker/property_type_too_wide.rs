@@ -52,13 +52,13 @@ impl<'a> Checker<'a> {
             return;
         };
         for p in &c.properties {
-            let Some(prop_sig) = info.properties.get(p.name.as_ref()) else {
+            let Some(prop_sig) = info.properties().get(p.name.as_ref()) else {
                 continue;
             };
-            if prop_sig.write_visibility != Visibility::Private {
+            if prop_sig.write_visibility() != Visibility::Private {
                 continue;
             }
-            let Type::Union(declared_members) = &prop_sig.ty else {
+            let Type::Union(declared_members) = prop_sig.ty() else {
                 continue;
             };
             if declared_members.len() < 2 {
@@ -96,7 +96,7 @@ impl<'a> Checker<'a> {
                 actual
             };
             let actual_members = flatten_union(&actual);
-            let identifier = if prop_sig.is_static {
+            let identifier = if prop_sig.is_static() {
                 "staticProperty.unusedType"
             } else {
                 "property.unusedType"

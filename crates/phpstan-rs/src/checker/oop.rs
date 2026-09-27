@@ -47,7 +47,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(registry_name) else {
             return;
         };
-        let kind = info.kind;
+        let kind = info.kind();
         let subject = if is_anonymous {
             "anonymous class".to_string()
         } else {
@@ -58,24 +58,24 @@ impl<'a> Checker<'a> {
         } else {
             format!("class {registry_name}")
         };
-        let is_readonly = info.is_readonly;
+        let is_readonly = info.is_readonly();
         let target_kind = |name: &str| {
             self.registry
                 .lookup_class(name)
-                .map(|(fqn, i)| (fqn.to_string(), i.kind))
+                .map(|(fqn, i)| (fqn.to_string(), i.kind()))
         };
         let mut reports: Vec<(String, &'static str)> = Vec::new();
 
-        for parent in &info.extends {
+        for parent in info.extends() {
             let Some((parent_fqn, parent_info)) = self.registry.lookup_class(parent) else {
                 continue;
             };
-            let parent_kind = class_kind_identifier(&parent_info.kind);
+            let parent_kind = class_kind_identifier(&parent_info.kind());
             if kind == ClassKind::Interface {
-                if parent_info.kind != ClassKind::Interface {
+                if parent_info.kind() != ClassKind::Interface {
                     reports.push((
                         format!("{subject} cannot extend {parent_kind} {parent_fqn}"),
-                        match parent_info.kind {
+                        match parent_info.kind() {
                             ClassKind::Trait => "interfaceExtends.trait",
                             ClassKind::Enum => "interfaceExtends.enum",
                             _ => "interfaceExtends.class",
@@ -84,35 +84,35 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             }
-            match parent_info.kind {
+            match parent_info.kind() {
                 ClassKind::Interface | ClassKind::Trait | ClassKind::Enum => reports.push((
                     format!("{subject} cannot extend {parent_kind} {parent_fqn}"),
-                    match parent_info.kind {
+                    match parent_info.kind() {
                         ClassKind::Interface => "class.extendsInterface",
                         ClassKind::Trait => "class.extendsTrait",
                         _ => "class.extendsEnum",
                     },
                 )),
                 ClassKind::Class => {
-                    if parent_info.is_final {
+                    if parent_info.is_final() {
                         reports.push((
                             format!("{subject} cannot extend final class {parent_fqn}"),
                             "class.extendsFinal",
                         ));
-                    } else if parent_info.is_final_by_phpdoc {
+                    } else if parent_info.is_final_by_phpdoc() {
                         reports.push((
                             format!("{subject} extends @final class {parent_fqn}"),
                             "class.extendsFinalByPhpDoc",
                         ));
                     }
-                    if is_readonly && !parent_info.is_readonly {
+                    if is_readonly && !parent_info.is_readonly() {
                         reports.push((
                             format!(
                                 "readonly {bare_name} cannot extend non-readonly class {parent_fqn}"
                             ),
                             "class.readOnly",
                         ));
-                    } else if !is_readonly && parent_info.is_readonly {
+                    } else if !is_readonly && parent_info.is_readonly() {
                         reports.push((
                             format!(
                                 "non-readonly {bare_name} cannot extend readonly class {parent_fqn}"
@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        for iface in &info.implements {
+        for iface in info.implements() {
             let Some((iface_fqn, iface_kind)) = target_kind(iface) else {
                 continue;
             };
@@ -147,7 +147,7 @@ impl<'a> Checker<'a> {
             ));
         }
 
-        for used in &info.uses {
+        for used in info.uses() {
             let Some((used_fqn, used_kind)) = target_kind(used) else {
                 continue;
             };
@@ -194,9 +194,9 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        for parent in &info.extends {
+        for parent in info.extends() {
             if !self.class_name_exists(parent) {
-                let verb = if info.kind == ClassKind::Interface {
+                let verb = if info.kind() == ClassKind::Interface {
                     "extends unknown interface"
                 } else {
                     "extends unknown class"
@@ -204,7 +204,7 @@ impl<'a> Checker<'a> {
                 self.report(format!("{fqn} {verb} {parent}"), span, 0, "class.notFound");
             }
         }
-        for iface in &info.implements {
+        for iface in info.implements() {
             if !self.class_name_exists(iface) {
                 self.report(
                     format!("{fqn} implements unknown interface {iface}"),
@@ -219,7 +219,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        for used_trait in &info.uses {
+        for used_trait in info.uses() {
             if !self.class_name_exists(used_trait) {
                 self.report(
                     format!("{fqn} uses unknown trait {used_trait}"),
@@ -254,24 +254,24 @@ impl<'a> Checker<'a> {
         // `cases()`/`from()`/`tryFrom()` (the other `is_magic: true`
         // producer) harmlessly - their synthesized types never reference
         // an unresolvable class.
-        for (name, sig) in info.methods.iter().filter(|(_, sig)| sig.is_magic) {
-            for param in &sig.params {
+        for (name, sig) in info.methods().iter().filter(|(_, sig)| sig.is_magic()) {
+            for param in sig.params() {
                 self.check_type_class_names_exist(
-                    &param.ty,
+                    param.ty(),
                     &format!("PHPDoc tag @method for method {fqn}::{name}()"),
                     span,
                 );
                 // `class.nameCase` for this `@method`-tag parameter.
-                self.check_type_class_name_case(&param.case_refs, span);
-                self.check_type_internal_usage(&param.case_refs, span);
+                self.check_type_class_name_case(param.case_refs(), span);
+                self.check_type_internal_usage(param.case_refs(), span);
             }
             self.check_type_class_names_exist(
-                &sig.return_type,
+                sig.return_type(),
                 &format!("PHPDoc tag @method for method {fqn}::{name}()"),
                 span,
             );
-            self.check_type_class_name_case(&sig.return_case_refs, span);
-            self.check_type_internal_usage(&sig.return_case_refs, span);
+            self.check_type_class_name_case(sig.return_case_refs(), span);
+            self.check_type_internal_usage(sig.return_case_refs(), span);
         }
     }
 
@@ -296,7 +296,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(fqn)
-            .map(|info| info.type_aliases.clone())
+            .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
         for tag in &block.method_tags {
             if tag.templates.is_empty() {
@@ -369,7 +369,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        for mixin in &info.mixins {
+        for mixin in info.mixins() {
             if !self.class_name_exists(mixin) {
                 self.report(
                     format!("PHPDoc tag @mixin references unknown class {mixin}."),
@@ -383,8 +383,8 @@ impl<'a> Checker<'a> {
         // doesn't route through `check_type_class_names_exist` at all
         // (its bare `class_name_exists` check above), so this is a
         // parallel loop rather than a rewire of an existing one.
-        self.check_type_class_name_case(&info.mixin_case_refs, span);
-        self.check_type_internal_usage(&info.mixin_case_refs, span);
+        self.check_type_class_name_case(info.mixin_case_refs(), span);
+        self.check_type_internal_usage(info.mixin_case_refs(), span);
     }
 
     /// Mirrors real PHPStan's `RequireExtendsCheck`/
@@ -444,7 +444,7 @@ impl<'a> Checker<'a> {
                 let Some((_, info)) = self.registry.lookup_class(&name) else {
                     continue;
                 };
-                match info.kind {
+                match info.kind() {
                     ClassKind::Interface => {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
@@ -463,10 +463,10 @@ impl<'a> Checker<'a> {
                             ),
                             c.span,
                             0,
-                            format!("requireExtends.{}", class_kind_identifier(&info.kind)),
+                            format!("requireExtends.{}", class_kind_identifier(&info.kind())),
                         );
                     }
-                    ClassKind::Class if info.is_final => {
+                    ClassKind::Class if info.is_final() => {
                         self.report(format!(
                                 "PHPDoc tag @phpstan-require-extends cannot contain final class {name}."
                             ),
@@ -512,13 +512,13 @@ impl<'a> Checker<'a> {
                 let Some((_, info)) = self.registry.lookup_class(&name) else {
                     continue;
                 };
-                if info.kind != ClassKind::Interface {
+                if info.kind() != ClassKind::Interface {
                     self.report(format!(
                             "PHPDoc tag @phpstan-require-implements cannot contain non-interface type {name}."
                         ),
                         c.span,
                         0,
-                        format!("requireImplements.{}", class_kind_identifier(&info.kind)),
+                        format!("requireImplements.{}", class_kind_identifier(&info.kind())),
                     );
                 }
             }
@@ -596,7 +596,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        for (name, ty) in &info.type_aliases {
+        for (name, ty) in info.type_aliases() {
             self.check_type_class_names_exist(
                 ty,
                 &format!("PHPDoc tag @phpstan-type {name} for class {fqn}"),
@@ -604,7 +604,7 @@ impl<'a> Checker<'a> {
             );
             // `class.nameCase` for this alias's RHS - looked up by the
             // same key already in scope here.
-            if let Some(case_refs) = info.type_alias_case_refs.get(name) {
+            if let Some(case_refs) = info.type_alias_case_refs().get(name) {
                 self.check_type_class_name_case(case_refs, span);
                 self.check_type_internal_usage(case_refs, span);
             }
@@ -623,22 +623,22 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        if info.uses.len() < 2 {
+        if info.uses().len() < 2 {
             return;
         }
 
         let mut seen_props: FxHashMap<&str, (&str, &PropertySig)> = FxHashMap::default();
         let mut seen_methods: FxHashMap<&str, (&str, &FunctionSig)> = FxHashMap::default();
-        for trait_name in &info.uses {
+        for trait_name in info.uses() {
             let Some(trait_info) = self.registry.classes.get(trait_name) else {
                 continue;
             };
-            for (prop_name, sig) in &trait_info.properties {
-                if info.resolved_trait_conflicts.contains(prop_name) {
+            for (prop_name, sig) in trait_info.properties() {
+                if info.resolved_trait_conflicts().contains(prop_name) {
                     continue;
                 }
                 match seen_props.get(prop_name.as_ref()) {
-                    Some((first_trait, first_sig)) if first_sig.ty != sig.ty => {
+                    Some((first_trait, first_sig)) if *first_sig.ty() != *sig.ty() => {
                         self.report(format!(
                                 "{first_trait} and {trait_name} define the same property (${prop_name}) with incompatible types in the composition of {fqn}"
                             ), span, 0, "trait.propertyConflict");
@@ -649,8 +649,8 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            for (method_name, sig) in &trait_info.methods {
-                if info.resolved_trait_conflicts.contains(method_name) {
+            for (method_name, sig) in trait_info.methods() {
+                if info.resolved_trait_conflicts().contains(method_name) {
                     continue;
                 }
                 match seen_methods.get(method_name.as_ref()) {
@@ -869,8 +869,8 @@ impl<'a> Checker<'a> {
             let phpdoc_ty = self
                 .registry
                 .lookup_const_with_owner(fqn, &c.name)
-                .filter(|(owner, sig)| owner.as_ref() == fqn && sig.has_phpdoc_type)
-                .map(|(_, sig)| sig.ty.clone());
+                .filter(|(owner, sig)| owner.as_ref() == fqn && sig.has_phpdoc_type())
+                .map(|(_, sig)| sig.ty().clone());
             if phpdoc_ty.is_none() && c.type_hint.is_none() {
                 let value_ty = self.infer_expr(&c.value, &Locals::default());
                 self.check_configured_constant_value(
@@ -986,9 +986,9 @@ impl<'a> Checker<'a> {
         self.check_class_constant_modifiers(fqn, c.kind, &c.consts);
         let own = crate::registry::ClassInfo::from_decl(c, &self.name_ctx);
         let registry_matches = self.registry.classes.get(fqn).is_some_and(|info| {
-            info.extends == own.extends
-                && info.implements == own.implements
-                && info.uses == own.uses
+            *info.extends() == *own.extends()
+                && *info.implements() == *own.implements()
+                && *info.uses() == *own.uses()
         });
         if registry_matches {
             self.check_inheritance_target_kinds(fqn, false, c.span);
@@ -1006,11 +1006,9 @@ impl<'a> Checker<'a> {
         self.check_method_declaration_sanity(fqn, ClassKind::Enum, false, &e.methods);
         self.check_class_constant_modifiers(fqn, ClassKind::Enum, &e.consts);
         let own = crate::registry::ClassInfo::from_enum_decl(e, &self.name_ctx);
-        let registry_matches = self
-            .registry
-            .classes
-            .get(fqn)
-            .is_some_and(|info| info.implements == own.implements && info.uses == own.uses);
+        let registry_matches = self.registry.classes.get(fqn).is_some_and(|info| {
+            *info.implements() == *own.implements() && *info.uses() == *own.uses()
+        });
         if registry_matches {
             self.check_inheritance_target_kinds(fqn, false, e.span);
             self.check_constant_overrides(fqn, &e.consts);
@@ -1029,9 +1027,9 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let interfaces = info.implements.clone();
-        let parent = info.extends.first().cloned();
-        let is_interface = info.kind == ClassKind::Interface;
+        let interfaces = info.implements().clone();
+        let parent = info.extends().first().cloned();
+        let is_interface = info.kind() == ClassKind::Interface;
         for cc in consts {
             let name = cc.name.as_ref();
             let Some((own_owner, own)) = self.registry.lookup_const_with_owner(fqn, name) else {
@@ -1046,7 +1044,7 @@ impl<'a> Checker<'a> {
                 self.registry
                     .classes
                     .get(fqn)
-                    .map(|i| i.extends.clone())
+                    .map(|i| i.extends().clone())
                     .unwrap_or_default()
             } else {
                 interfaces.clone()
@@ -1061,7 +1059,7 @@ impl<'a> Checker<'a> {
                     let parent = parent.as_deref()?;
                     self.registry
                         .lookup_const_with_owner(parent, name)
-                        .filter(|(_, sig)| sig.visibility != Visibility::Private)
+                        .filter(|(_, sig)| sig.visibility() != Visibility::Private)
                 });
             let Some((proto_owner, proto)) = prototype else {
                 continue;
@@ -1069,7 +1067,7 @@ impl<'a> Checker<'a> {
             let own = own.clone();
             let proto = proto.clone();
             let span = cc.name_span;
-            if proto.is_final {
+            if proto.is_final() {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         format!(
@@ -1082,7 +1080,7 @@ impl<'a> Checker<'a> {
                     .non_ignorable(),
                 );
             }
-            let narrowed = match (&proto.visibility, &own.visibility) {
+            let narrowed = match (&proto.visibility(), &own.visibility()) {
                 (Visibility::Public, Visibility::Public) => None,
                 (Visibility::Public, own_vis) => Some(format!(
                     "{} constant {fqn}::{name} overriding public constant {proto_owner}::{name} should also be public.",
@@ -1103,8 +1101,8 @@ impl<'a> Checker<'a> {
                         .non_ignorable(),
                 );
             }
-            if let Some(proto_native) = &proto.native_ty {
-                match &own.native_ty {
+            if let Some(proto_native) = &proto.native_ty() {
+                match &own.native_ty() {
                     Some(own_native) if !self.accepts(proto_native, own_native).yes() => {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
@@ -1132,13 +1130,13 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            if proto.has_phpdoc_type
-                && own.has_phpdoc_type
-                && !self.accepts(&proto.ty, &own.ty).yes()
+            if proto.has_phpdoc_type()
+                && own.has_phpdoc_type()
+                && !self.accepts(proto.ty(), own.ty()).yes()
             {
                 self.report(format!(
                         "Type {} of constant {fqn}::{name} is not covariant with type {} of constant {proto_owner}::{name}.",
-                        own.ty, proto.ty
+                        own.ty(), proto.ty()
                     ),
                     span,
                     3,
@@ -1158,7 +1156,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let immediate: Vec<std::sync::Arc<str>> = info.uses.clone();
+        let immediate: Vec<std::sync::Arc<str>> = info.uses().clone();
         if immediate.is_empty() {
             return;
         }
@@ -1169,7 +1167,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if let Some(trait_info) = self.registry.classes.get(&t) {
-                stack.extend(trait_info.uses.iter().cloned());
+                stack.extend(trait_info.uses().iter().cloned());
             }
             all_traits.push(t);
         }
@@ -1200,11 +1198,11 @@ impl<'a> Checker<'a> {
                 );
                 if immediate.contains(trait_fqn) {
                     let own_value = self.infer_expr(&cc.value, &Locals::default());
-                    if own_value != Type::Mixed(false) && own_value != trait_const.value_ty {
+                    if own_value != Type::Mixed(false) && own_value != *trait_const.value_ty() {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
                                     "Constant {fqn}::{name} with value {own_value} overriding constant {trait_fqn}::{name} with different value {} should have the same value.",
-                                    trait_const.value_ty
+                                    trait_const.value_ty()
                                 ),
                                 cc.name_span,
                                 0,
@@ -1234,9 +1232,9 @@ impl<'a> Checker<'a> {
             Visibility::Private => "private",
         };
         let mut errors: Vec<(String, &'static str)> = Vec::new();
-        if cc.visibility != trait_const.visibility {
+        if cc.visibility != trait_const.visibility() {
             let own = word(&cc.visibility);
-            let theirs = word(&trait_const.visibility);
+            let theirs = word(&trait_const.visibility());
             let mut own_cap = own.to_string();
             own_cap[..1].make_ascii_uppercase();
             errors.push((
@@ -1246,14 +1244,14 @@ impl<'a> Checker<'a> {
                 "classConstant.visibility",
             ));
         }
-        if trait_const.is_final && !cc.is_final {
+        if trait_const.is_final() && !cc.is_final {
             errors.push((
                 format!(
                     "Non-final constant {fqn}::{name} overriding final constant {trait_fqn}::{name} should also be final."
                 ),
                 "classConstant.nonFinal",
             ));
-        } else if !trait_const.is_final && cc.is_final {
+        } else if !trait_const.is_final() && cc.is_final {
             errors.push((
                 format!(
                     "Final constant {fqn}::{name} overriding non-final constant {trait_fqn}::{name} should also be non-final."
@@ -1261,7 +1259,7 @@ impl<'a> Checker<'a> {
                 "classConstant.final",
             ));
         }
-        match (&trait_const.native_ty, own_native) {
+        match (&trait_const.native_ty(), own_native) {
             (None, Some(own)) => errors.push((
                 format!(
                     "Constant {fqn}::{name} ({own}) overriding constant {trait_fqn}::{name} should not have a native type."
@@ -1308,8 +1306,8 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(registry_name) else {
             return;
         };
-        if info.kind != ClassKind::Class
-            || info.is_abstract
+        if info.kind() != ClassKind::Class
+            || info.is_abstract()
             || !self.registry.is_subclass_of(registry_name, "Serializable")
         {
             return;
@@ -1318,7 +1316,7 @@ impl<'a> Checker<'a> {
             let declared = self
                 .registry
                 .lookup_method(registry_name, method)
-                .is_some_and(|sig| !sig.is_magic);
+                .is_some_and(|sig| !sig.is_magic());
             if declared {
                 continue;
             }
@@ -1638,10 +1636,10 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        if info.kind != ClassKind::Class && info.kind != ClassKind::Enum {
+        if info.kind() != ClassKind::Class && info.kind() != ClassKind::Enum {
             return;
         }
-        if info.is_abstract {
+        if info.is_abstract() {
             return;
         }
         let required = self.registry.required_abstract_methods(fqn);
@@ -1698,14 +1696,14 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        if ancestor_sig.visibility == Visibility::Private {
+        if ancestor_sig.visibility() == Visibility::Private {
             return;
         }
         if self
             .registry
             .classes
             .get(&ancestor)
-            .is_some_and(|info| info.abstract_methods.contains("__construct"))
+            .is_some_and(|info| info.abstract_methods().contains("__construct"))
         {
             return;
         }
@@ -1719,9 +1717,9 @@ impl<'a> Checker<'a> {
             "constructor.missingParentCall",
         );
         let needs_arguments = ancestor_sig
-            .params
+            .params()
             .iter()
-            .any(|p| !p.has_default && !p.variadic);
+            .any(|p| !p.has_default() && !p.variadic());
         if !needs_arguments && let Some((span, text)) = parent_call_insertion(ctor) {
             builder = builder.fix(span, text, "Call parent::__construct()");
         }
@@ -1829,7 +1827,7 @@ impl<'a> Checker<'a> {
         // `implements` anything, so `is_subclass_of`/membership would
         // never be satisfiable for one regardless of what any real
         // using class eventually does.
-        if info.kind == ClassKind::Trait {
+        if info.kind() == ClassKind::Trait {
             return;
         }
         // Real PHP: a checked class that is itself an interface is
@@ -1838,17 +1836,17 @@ impl<'a> Checker<'a> {
         // `RequireExtendsRule`'s top-level guard. Interfaces can't `use`
         // traits at all, so require-implements never has anything to
         // check for one either way.
-        let is_interface = info.kind == ClassKind::Interface;
+        let is_interface = info.kind() == ClassKind::Interface;
         for ancestor_fqn in self.registry.all_ancestor_names(fqn) {
             let Some(ancestor_info) = self.registry.classes.get(&ancestor_fqn) else {
                 continue;
             };
             if !is_interface {
-                for required in ancestor_info.require_extends.clone() {
+                for required in ancestor_info.require_extends().clone() {
                     if self.registry.is_subclass_of(fqn, &required) {
                         continue;
                     }
-                    let (kind_word, relation_word) = if ancestor_info.kind == ClassKind::Trait {
+                    let (kind_word, relation_word) = if ancestor_info.kind() == ClassKind::Trait {
                         ("Trait", "using")
                     } else {
                         ("Interface", "implementing")
@@ -1862,7 +1860,7 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            for required in ancestor_info.require_implements.clone() {
+            for required in ancestor_info.require_implements().clone() {
                 if self.registry.is_subclass_of(fqn, &required) {
                     continue;
                 }
@@ -1902,27 +1900,27 @@ impl<'a> Checker<'a> {
         // PHPStan's `AllowedSubTypesRule` also never consults `uses` at
         // all (only `extends`/immediate `implements`), so a trait being
         // sealed is never actually enforced there either way.
-        if info.kind == ClassKind::Trait {
+        if info.kind() == ClassKind::Trait {
             return;
         }
-        let kind = info.kind;
-        for parent_fqn in info.extends.iter().chain(info.implements.iter()) {
+        let kind = info.kind();
+        for parent_fqn in info.extends().iter().chain(info.implements().iter()) {
             let Some(parent_info) = self.registry.classes.get(parent_fqn) else {
                 continue;
             };
             let attribute_sealed: &[std::sync::Arc<str>] = if self.settings.language_extensions {
-                &parent_info.access.sealed
+                &parent_info.access().sealed
             } else {
                 &[]
             };
             let permitted = || {
                 parent_info
-                    .sealed
+                    .sealed()
                     .iter()
                     .chain(attribute_sealed)
                     .any(|s| s.as_ref() == fqn)
             };
-            if (parent_info.sealed.is_empty() && attribute_sealed.is_empty()) || permitted() {
+            if (parent_info.sealed().is_empty() && attribute_sealed.is_empty()) || permitted() {
                 continue;
             }
             self.report(
@@ -1980,16 +1978,16 @@ pub(crate) fn visibility_word(v: &Visibility) -> &'static str {
 /// direction to apply - only "are these the same signature" makes sense
 /// here.
 pub(crate) fn signatures_compatible(a: &FunctionSig, b: &FunctionSig) -> bool {
-    if a.params.len() != b.params.len() {
+    if a.params().len() != b.params().len() {
         return false;
     }
-    if a.return_type != b.return_type {
+    if *a.return_type() != *b.return_type() {
         return false;
     }
-    a.params
+    a.params()
         .iter()
-        .zip(&b.params)
-        .all(|(pa, pb)| pa.ty == pb.ty)
+        .zip(b.params())
+        .all(|(pa, pb)| pa.ty() == pb.ty())
 }
 
 /// A value type fully known down to its value (a literal, or a shape of

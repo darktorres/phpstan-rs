@@ -9,7 +9,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
-use crate::php_stubs;
+use crate::registry::stubs;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
@@ -189,10 +189,10 @@ impl<'p> Context<'p> {
         let mut current = self.canonical(fqn);
         let mut seen = FxHashSet::default();
         while let Some((_, info)) = self.project.registry.lookup_class(&current) {
-            if info.kind != ClassKind::Class {
+            if info.kind() != ClassKind::Class {
                 break;
             }
-            let Some(parent) = info.extends.first() else {
+            let Some(parent) = info.extends().first() else {
                 break;
             };
             let parent = self.canonical(parent);
@@ -233,7 +233,7 @@ impl<'p> Context<'p> {
             let iface = self.canonical(iface);
             let is_interface = registry
                 .lookup_class(&iface)
-                .is_some_and(|(_, i)| i.kind == ClassKind::Interface);
+                .is_some_and(|(_, i)| i.kind() == ClassKind::Interface);
             if fqn.eq_ignore_ascii_case(&iface)
                 || !is_interface
                 || !registry.is_subclass_of(&fqn, &iface)
@@ -271,21 +271,21 @@ impl<'p> Context<'p> {
             (
                 selector.is_abstract,
                 info.as_ref()
-                    .map(|i| i.is_abstract && i.kind == ClassKind::Class),
+                    .map(|i| i.is_abstract() && i.kind() == ClassKind::Class),
             ),
-            (selector.is_final, info.as_ref().map(|i| i.is_final)),
-            (selector.is_readonly, info.as_ref().map(|i| i.is_readonly)),
+            (selector.is_final, info.as_ref().map(|i| i.is_final())),
+            (selector.is_readonly, info.as_ref().map(|i| i.is_readonly())),
             (
                 selector.is_interface,
-                info.as_ref().map(|i| i.kind == ClassKind::Interface),
+                info.as_ref().map(|i| i.kind() == ClassKind::Interface),
             ),
             (
                 selector.is_trait,
-                info.as_ref().map(|i| i.kind == ClassKind::Trait),
+                info.as_ref().map(|i| i.kind() == ClassKind::Trait),
             ),
             (
                 selector.is_enum,
-                info.as_ref().map(|i| i.kind == ClassKind::Enum),
+                info.as_ref().map(|i| i.kind() == ClassKind::Enum),
             ),
             (
                 selector.is_exception,
@@ -296,7 +296,7 @@ impl<'p> Context<'p> {
             (
                 selector.is_standard_class,
                 info.as_ref()
-                    .map(|i| i.kind == ClassKind::Class && !i.is_abstract),
+                    .map(|i| i.kind() == ClassKind::Class && !i.is_abstract()),
             ),
         ];
         for (wanted, actual) in flags {
@@ -315,7 +315,7 @@ impl<'p> Context<'p> {
 }
 
 fn is_builtin(fqn: &str) -> bool {
-    php_stubs::builtin_class_extension(fqn).is_some()
+    stubs::builtin_class_extension(fqn).is_some()
 }
 
 impl Project {
@@ -425,14 +425,14 @@ impl Project {
         }
         if let Some((_, info)) = self.registry.lookup_class(fqn) {
             let mut names = Vec::new();
-            for sig in info.methods.values() {
-                for p in &sig.params {
-                    type_class_names(&p.ty, &mut names);
+            for sig in info.methods().values() {
+                for p in sig.params() {
+                    type_class_names(p.ty(), &mut names);
                 }
-                type_class_names(&sig.return_type, &mut names);
+                type_class_names(sig.return_type(), &mut names);
             }
-            for prop in info.properties.values() {
-                type_class_names(&prop.ty, &mut names);
+            for prop in info.properties().values() {
+                type_class_names(prop.ty(), &mut names);
             }
             for name in names {
                 if self.registry.lookup_class(&name).is_some() {
@@ -518,12 +518,12 @@ impl Project {
             .filter(|a: &String| {
                 self.registry
                     .lookup_class(a)
-                    .is_some_and(|(_, i)| i.kind == ClassKind::Interface)
+                    .is_some_and(|(_, i)| i.kind() == ClassKind::Interface)
             })
             .collect();
         let traits: Vec<String> = info
             .as_ref()
-            .map(|i| i.uses.iter().map(|u| u.to_string()).collect())
+            .map(|i| i.uses().iter().map(|u| u.to_string()).collect())
             .unwrap_or_default();
         let relation_checks: [RelationCheck; 6] = [
             (
@@ -602,19 +602,19 @@ impl Project {
         let flag_checks = [
             (
                 rule.should_be_final,
-                info.as_ref().map(|i| i.is_final),
+                info.as_ref().map(|i| i.is_final()),
                 "final",
                 "architecture.final",
             ),
             (
                 rule.should_be_abstract,
-                info.as_ref().map(|i| i.is_abstract),
+                info.as_ref().map(|i| i.is_abstract()),
                 "abstract",
                 "architecture.abstract",
             ),
             (
                 rule.should_be_readonly,
-                info.as_ref().map(|i| i.is_readonly),
+                info.as_ref().map(|i| i.is_readonly()),
                 "readonly",
                 "architecture.readonly",
             ),

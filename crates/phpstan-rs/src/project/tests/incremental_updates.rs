@@ -34,7 +34,7 @@ fn updating_one_file_does_not_disturb_another_files_registry_entries() {
 
     assert!(project.registry().functions.contains_key("helperA"));
     let helper_b = &project.registry().functions["helperB"];
-    assert_eq!(helper_b.return_type.to_string(), "string");
+    assert_eq!(helper_b.return_type().to_string(), "string");
 }
 
 #[test]

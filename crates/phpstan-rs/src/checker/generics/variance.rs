@@ -40,14 +40,19 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class_name) else {
             return;
         };
-        if info.covariant_templates.is_empty() && info.contravariant_templates.is_empty() {
+        if info.covariant_templates().is_empty() && info.contravariant_templates().is_empty() {
             return;
         }
         let mut violations: Vec<String> = Vec::new();
-        for param in &sig.params {
-            self.walk_variance(&param.ty, Position::In, class_name, &mut violations);
+        for param in sig.params() {
+            self.walk_variance(param.ty(), Position::In, class_name, &mut violations);
         }
-        self.walk_variance(&sig.return_type, Position::Out, class_name, &mut violations);
+        self.walk_variance(
+            sig.return_type(),
+            Position::Out,
+            class_name,
+            &mut violations,
+        );
 
         // Sorted-and-deduped before reporting: the same `T` can
         // legitimately be reached more than once (once per parameter, or
@@ -163,18 +168,18 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        if info.covariant_templates.is_empty() && info.contravariant_templates.is_empty() {
+        if info.covariant_templates().is_empty() && info.contravariant_templates().is_empty() {
             return;
         }
         for p in &c.properties {
-            let Some(prop_sig) = info.properties.get(p.name.as_ref()) else {
+            let Some(prop_sig) = info.properties().get(p.name.as_ref()) else {
                 continue;
             };
-            if prop_sig.visibility == Visibility::Private {
+            if prop_sig.visibility() == Visibility::Private {
                 continue;
             }
-            let has_restricted_write_access = prop_sig.is_readonly
-                || prop_sig.write_visibility == Visibility::Private
+            let has_restricted_write_access = prop_sig.is_readonly()
+                || prop_sig.write_visibility() == Visibility::Private
                 || p.hooks
                     .as_ref()
                     .is_some_and(|h| h.set.is_none() && h.get.is_some());
@@ -184,7 +189,7 @@ impl<'a> Checker<'a> {
                 Position::Inv
             };
             let mut violations: Vec<String> = Vec::new();
-            self.walk_variance(&prop_sig.ty.clone(), pos, fqn, &mut violations);
+            self.walk_variance(prop_sig.ty(), pos, fqn, &mut violations);
             violations.sort();
             violations.dedup();
             for message in violations {
@@ -205,14 +210,14 @@ impl<'a> Checker<'a> {
                 if param.promoted_visibility.is_none() {
                     continue;
                 }
-                let Some(prop_sig) = info.properties.get(param.name.as_ref()) else {
+                let Some(prop_sig) = info.properties().get(param.name.as_ref()) else {
                     continue;
                 };
-                if prop_sig.visibility == Visibility::Private {
+                if prop_sig.visibility() == Visibility::Private {
                     continue;
                 }
-                let has_restricted_write_access = prop_sig.is_readonly
-                    || prop_sig.write_visibility == Visibility::Private
+                let has_restricted_write_access = prop_sig.is_readonly()
+                    || prop_sig.write_visibility() == Visibility::Private
                     || param
                         .hooks
                         .as_deref()
@@ -223,7 +228,7 @@ impl<'a> Checker<'a> {
                     Position::Inv
                 };
                 let mut violations: Vec<String> = Vec::new();
-                self.walk_variance(&prop_sig.ty.clone(), pos, fqn, &mut violations);
+                self.walk_variance(prop_sig.ty(), pos, fqn, &mut violations);
                 violations.sort();
                 violations.dedup();
                 for message in violations {

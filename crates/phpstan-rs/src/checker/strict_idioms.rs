@@ -67,7 +67,7 @@ impl<'a> Checker<'a> {
         self.registry
             .classes
             .get(class.as_str())
-            .is_some_and(|i| i.kind == ClassKind::Enum)
+            .is_some_and(|i| i.kind() == ClassKind::Enum)
             .then_some(class.to_string())
     }
 
@@ -83,7 +83,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         let info = self.registry.classes.get(class.as_str())?;
-        if info.kind == ClassKind::Enum {
+        if info.kind() == ClassKind::Enum {
             return None;
         }
         let name = self
@@ -94,16 +94,16 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(owner.as_ref())
-            .is_some_and(|o| o.static_methods.contains(name));
+            .is_some_and(|o| o.static_methods().contains(name));
         let required = sig
-            .params
+            .params()
             .iter()
-            .filter(|p| !p.has_default && !p.variadic)
+            .filter(|p| !p.has_default() && !p.variadic())
             .count();
         if is_static
-            || sig.visibility != Visibility::Public
+            || sig.visibility() != Visibility::Public
             || required != 1
-            || !self.accepts(&sig.params[0].ty, other).yes()
+            || !self.accepts(sig.params()[0].ty(), other).yes()
         {
             return None;
         }

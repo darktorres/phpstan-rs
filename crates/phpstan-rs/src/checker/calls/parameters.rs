@@ -140,16 +140,16 @@ enum Position<'s> {
 }
 
 fn describe_parameter(param: &ParamSig, position: Position) -> String {
-    let dollar = if param.variadic { "...$" } else { "$" };
+    let dollar = if param.variadic() { "...$" } else { "$" };
     match position {
-        Position::Index(i) => format!("Parameter #{i} {dollar}{}", param.name),
-        Position::Name(name) if param.variadic => {
+        Position::Index(i) => format!("Parameter #{i} {dollar}{}", param.name()),
+        Position::Name(name) if param.variadic() => {
             format!(
                 "Named argument {name} for variadic parameter {dollar}{}",
-                param.name
+                param.name()
             )
         }
-        _ => format!("Parameter {dollar}{}", param.name),
+        _ => format!("Parameter {dollar}{}", param.name()),
     }
 }
 
@@ -178,11 +178,11 @@ impl<'a> Checker<'a> {
             is_builtin,
             span,
         } = check;
-        let params = &sig.params;
-        let variadic = params.last().is_some_and(|p| p.variadic);
+        let params = sig.params();
+        let variadic = params.last().is_some_and(|p| p.variadic());
         let min = params
             .iter()
-            .filter(|p| !p.has_default && !p.variadic)
+            .filter(|p| !p.has_default() && !p.variadic())
             .count();
         let max = if variadic { None } else { Some(params.len()) };
         let supports =
@@ -294,12 +294,12 @@ impl<'a> Checker<'a> {
             let arg_ty = match &argument.ty {
                 Some(ty) => ty.clone(),
                 None => self
-                    .infer_closure_literal_in_context(argument.value, &param.ty, locals)
+                    .infer_closure_literal_in_context(argument.value, param.ty(), locals)
                     .unwrap_or_else(|| self.infer_expr(argument.value, locals)),
             };
             let param_ty = match defining_class {
-                Some(c) => self.resolve_pseudo(&param.ty, c),
-                None => param.ty.clone(),
+                Some(c) => self.resolve_pseudo(param.ty(), c),
+                None => param.ty().clone(),
             };
             if !self.rule_level_accepts(&param_ty, &arg_ty).yes() {
                 let position = match &argument.name {
@@ -317,7 +317,7 @@ impl<'a> Checker<'a> {
                     "argument.type",
                 );
             }
-            if !param.by_ref {
+            if !param.by_ref() {
                 continue;
             }
             let position = match argument.name {
@@ -421,12 +421,12 @@ impl<'a> Checker<'a> {
         is_builtin: bool,
         span: Span,
     ) -> Vec<Option<&'s ParamSig>> {
-        let params = &sig.params;
-        let variadic = params.last().is_some_and(|p| p.variadic);
-        let natively_variadic = params.iter().any(|p| p.variadic);
+        let params = sig.params();
+        let variadic = params.last().is_some_and(|p| p.variadic());
+        let natively_variadic = params.iter().any(|p| p.variadic());
         let by_name: FxHashMap<&str, &ParamSig> =
-            params.iter().map(|p| (p.name.as_ref(), p)).collect();
-        let mut unused: Vec<&ParamSig> = params.iter().filter(|p| !p.variadic).collect();
+            params.iter().map(|p| (p.name().as_ref(), p)).collect();
+        let mut unused: Vec<&ParamSig> = params.iter().filter(|p| !p.variadic()).collect();
         let mut variadic_names: FxHashSet<&str> = FxHashSet::default();
         let mut named_occurred = false;
         let mut bound = Vec::with_capacity(arguments.len());
@@ -435,7 +435,7 @@ impl<'a> Checker<'a> {
                 None => match params.get(i) {
                     Some(p) => p,
                     None => match params.last() {
-                        Some(last) if variadic && last.variadic => last,
+                        Some(last) if variadic && last.variadic() => last,
                         _ => {
                             bound.push(None);
                             bound.resize(arguments.len(), None);
@@ -486,7 +486,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             bound.push(Some(param));
-            if !param.variadic {
+            if !param.variadic() {
                 match unused.iter().position(|p| std::ptr::eq(*p, param)) {
                     Some(at) => {
                         unused.remove(at);
@@ -495,7 +495,7 @@ impl<'a> Checker<'a> {
                         self.report(
                             format!(
                                 "Argument for parameter ${} has already been passed.",
-                                param.name
+                                param.name()
                             ),
                             argument.span,
                             0,
@@ -508,14 +508,14 @@ impl<'a> Checker<'a> {
         }
         if has_named {
             for param in unused {
-                if param.has_default {
+                if param.has_default() {
                     continue;
                 }
                 self.report(
                     format!(
                         "Missing parameter ${} ({}) in call to {}.",
-                        param.name,
-                        param.ty.describe_type_only(),
+                        param.name(),
+                        param.ty().describe_type_only(),
                         callee.target()
                     ),
                     span,

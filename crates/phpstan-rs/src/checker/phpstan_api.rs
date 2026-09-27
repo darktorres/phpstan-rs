@@ -490,7 +490,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         if !self.settings.phpstan_api
-            || sig.is_api
+            || sig.is_api()
             || !is_phpstan_code(self.name_ctx.namespace(), owner, self.registry)
         {
             return;
@@ -498,7 +498,7 @@ impl<'a> Checker<'a> {
         let Some(owner_info) = self.registry.classes.get(owner) else {
             return;
         };
-        if owner_info.is_api && method != "__construct" {
+        if owner_info.is_api() && method != "__construct" {
             return;
         }
         self.report(format!(
@@ -623,7 +623,7 @@ impl<'a> Walker<'a> {
                 self.registry
                     .classes
                     .get(current)?
-                    .extends
+                    .extends()
                     .first()
                     .map(|s| s.to_string())
             }
@@ -724,7 +724,7 @@ impl<'a> Walker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        if info.is_api {
+        if info.is_api() {
             return;
         }
         self.diagnostics.push(DiagnosticBuilder::new(format!(
@@ -763,7 +763,7 @@ impl<'a> Walker<'a> {
         let Some((owner, sig)) = self.registry.lookup_method_with_owner(class, method) else {
             return;
         };
-        if sig.is_api {
+        if sig.is_api() {
             return;
         }
         if !self.is_phpstan_code(ctx.namespace(), &owner) {
@@ -772,7 +772,7 @@ impl<'a> Walker<'a> {
         let Some(owner_info) = self.registry.classes.get(&owner) else {
             return;
         };
-        if owner_info.is_api && method != "__construct" {
+        if owner_info.is_api() && method != "__construct" {
             return;
         }
         let action = format!("calling {owner}::{method}()");
@@ -833,13 +833,13 @@ impl<'a> Walker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        if check_do_not_implement && info.is_api_do_not_implement {
+        if check_do_not_implement && info.is_api_do_not_implement() {
             self.diagnostics.push(DiagnosticBuilder::new(format!(
                     "{action} is not supported: {fqn} is marked @api-do-not-implement and may gain new members in a minor version"
                 ), span, 0, identifier).build());
             return;
         }
-        if !info.is_api {
+        if !info.is_api() {
             self.diagnostics.push(DiagnosticBuilder::new(format!(
                     "{action} is not covered by PHPStan's backward compatibility promise (missing @api on {fqn})"
                 ), span, 0, identifier).build());
@@ -1194,9 +1194,9 @@ impl<'a> Walker<'a> {
                         // not `lookup_method`, since an inherited
                         // constructor doesn't count) itself carries `@api`.
                         let has_own_api_constructor = info
-                            .methods
+                            .methods()
                             .get("__construct")
-                            .is_some_and(|ctor| ctor.is_api);
+                            .is_some_and(|ctor| ctor.is_api());
                         if !has_own_api_constructor {
                             let action = format!("instantiating {fqn}");
                             self.report_always(
@@ -1294,16 +1294,16 @@ impl<'a> Walker<'a> {
                 if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
                     && let Some(info) = self.registry.classes.get(fqn.as_str())
                 {
-                    if !info.is_api {
+                    if !info.is_api() {
                         let action = format!("instanceof {fqn}");
-                        let identifier = match info.kind {
+                        let identifier = match info.kind() {
                             ClassKind::Class => "phpstanApi.class",
                             ClassKind::Interface => "phpstanApi.interface",
                             ClassKind::Trait => "phpstanApi.trait",
                             ClassKind::Enum => "phpstanApi.enum",
                         };
                         self.report_always(&fqn, &action, e.span, identifier, ctx);
-                    } else if fqn != "PHPStan\\Type\\Type" && info.kind != ClassKind::Interface {
+                    } else if fqn != "PHPStan\\Type\\Type" && info.kind() != ClassKind::Interface {
                         self.diagnostics.push(DiagnosticBuilder::new(format!(
                                 "Although {fqn} is covered by backward compatibility promise, this instanceof assumption might break in a minor PHPStan version."
                             ), e.span, 0, "phpstanApi.instanceofAssumption").build());

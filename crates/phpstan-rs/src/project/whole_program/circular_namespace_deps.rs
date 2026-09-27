@@ -59,10 +59,10 @@ pub(crate) fn find_namespace_cycles(registry: &Registry) -> Vec<NamespaceCycle> 
     for (fqn, info) in &registry.classes {
         let from_ns = namespace_of(fqn).to_string();
         let targets = info
-            .extends
+            .extends()
             .iter()
-            .chain(info.implements.iter())
-            .chain(info.uses.iter());
+            .chain(info.implements().iter())
+            .chain(info.uses().iter());
         for target in targets {
             let to_ns = namespace_of(target).to_string();
             if from_ns == to_ns {

@@ -69,7 +69,7 @@ impl<'a> Checker<'a> {
             Type::Object(class, args) => {
                 if !args.is_empty()
                     && let Some(info) = self.registry.classes.get(class.as_str())
-                    && !info.template_bounds.is_empty()
+                    && !info.template_bounds().is_empty()
                 {
                     // Bound-checking cares about the real referenced
                     // type, not a call-site variance marker wrapping it
@@ -82,7 +82,7 @@ impl<'a> Checker<'a> {
                     // original, marker-and-all, so a violation message
                     // still shows `covariant Foo`.
                     let bindings: TemplateBindings = info
-                        .templates
+                        .templates()
                         .iter()
                         .map(|s| s.to_string())
                         .zip(args.iter().map(|a| {
@@ -91,8 +91,8 @@ impl<'a> Checker<'a> {
                                 .unwrap_or(Type::Mixed(false))
                         }))
                         .collect();
-                    for (name, arg) in info.templates.iter().zip(args.iter()) {
-                        let Some(bound) = info.template_bounds.get(name) else {
+                    for (name, arg) in info.templates().iter().zip(args.iter()) {
+                        let Some(bound) = info.template_bounds().get(name) else {
                             continue;
                         };
                         let bound = types::substitute_template(bound, &bindings);
@@ -126,7 +126,7 @@ impl<'a> Checker<'a> {
                             && self.is_type_fully_known(&bound)
                             && !self.accepts(&bound, checked_arg).yes()
                         {
-                            let kind = class_kind_identifier(&info.kind);
+                            let kind = class_kind_identifier(&info.kind());
                             self.report(format!(
                                     "Type {arg} in generic type {ty} in {location} is not subtype of template type {name} of {kind} {class}."
                                 ),
@@ -192,9 +192,9 @@ impl<'a> Checker<'a> {
         // sorted HashMap walk - the AST's `Vec<PropertyDecl>` is already
         // deterministic, unlike the registry's `HashMap`-backed lookup).
         for p in &c.properties {
-            if let Some(prop_sig) = info.properties.get(p.name.as_ref()) {
+            if let Some(prop_sig) = info.properties().get(p.name.as_ref()) {
                 self.check_generic_bounds(
-                    &prop_sig.ty,
+                    prop_sig.ty(),
                     &format!("PHPDoc tag @var for property {fqn}::${}", p.name),
                     fqn,
                     p.span,
@@ -205,9 +205,9 @@ impl<'a> Checker<'a> {
                 // over `c.properties` elsewhere.
                 // The own PHPDoc type too: a member the native hint
                 // excludes no longer reaches `ty`.
-                let checked = match &prop_sig.doc_ty {
-                    Some(doc) => Type::Union(vec![prop_sig.ty.clone(), doc.clone()]),
-                    None => prop_sig.ty.clone(),
+                let checked = match prop_sig.doc_ty() {
+                    Some(doc) => Type::Union(vec![prop_sig.ty().clone(), doc.clone()]),
+                    None => prop_sig.ty().clone(),
                 };
                 self.check_type_class_names_exist(
                     &checked,
@@ -217,14 +217,14 @@ impl<'a> Checker<'a> {
                 // `property.trait` - see `check_type_trait_refs`'s
                 // own doc comment.
                 self.check_type_trait_refs(
-                    &prop_sig.ty,
+                    prop_sig.ty(),
                     &format!("property {fqn}::${}", p.name),
                     p.span,
                     "property.trait",
                 );
                 // `class.nameCase` for this PHPDoc-typed property position.
-                self.check_type_class_name_case(&prop_sig.case_refs, p.span);
-                self.check_type_internal_usage(&prop_sig.case_refs, p.span);
+                self.check_type_class_name_case(prop_sig.case_refs(), p.span);
+                self.check_type_internal_usage(prop_sig.case_refs(), p.span);
             }
         }
         self.check_property_tag_types(fqn, c);
@@ -239,12 +239,12 @@ impl<'a> Checker<'a> {
         // `enum.generic` check is `EnumTemplateTypeRule`'s real
         // counterpart, since real PHPStan excludes enums from
         // `ClassTemplateTypeRule` entirely.
-        if !info.templates.is_empty() {
+        if !info.templates().is_empty() {
             let display_name = format!("{} {fqn}", class_kind_identifier(&c.kind));
-            let templates = info.templates.clone();
-            let bounds = info.template_bounds.clone();
-            let defaults = info.template_defaults.clone();
-            let type_aliases = info.type_aliases.clone();
+            let templates = info.templates().clone();
+            let bounds = info.template_bounds().clone();
+            let defaults = info.template_defaults().clone();
+            let type_aliases = info.type_aliases().clone();
             self.check_template_declaration_validity(
                 &templates,
                 &bounds,
@@ -287,7 +287,7 @@ impl<'a> Checker<'a> {
         };
         let block = docblock::parse(raw);
         for tag in &block.properties {
-            let Some(prop_sig) = info.properties.get(tag.name.as_str()) else {
+            let Some(prop_sig) = info.properties().get(tag.name.as_str()) else {
                 continue;
             };
             let tag_name = match (tag.readable, tag.writable) {
@@ -297,19 +297,19 @@ impl<'a> Checker<'a> {
                 (false, false) => "@property",
             };
             self.check_generic_bounds(
-                &prop_sig.ty,
+                prop_sig.ty(),
                 &format!("PHPDoc tag {tag_name} for property {fqn}::${}", tag.name),
                 fqn,
                 c.span,
             );
             self.check_type_class_names_exist(
-                &prop_sig.ty,
+                prop_sig.ty(),
                 &format!("PHPDoc tag {tag_name} for property {fqn}::${}", tag.name),
                 c.span,
             );
             // `class.nameCase` for this `@property`-tag target.
-            self.check_type_class_name_case(&prop_sig.case_refs, c.span);
-            self.check_type_internal_usage(&prop_sig.case_refs, c.span);
+            self.check_type_class_name_case(prop_sig.case_refs(), c.span);
+            self.check_type_internal_usage(prop_sig.case_refs(), c.span);
         }
     }
 
@@ -378,8 +378,8 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class.as_str()) else {
             return;
         };
-        let kind = class_kind_identifier(&info.kind);
-        if info.templates.is_empty() {
+        let kind = class_kind_identifier(&info.kind());
+        if info.templates().is_empty() {
             self.report(
                 format!("{location} contains generic type {ty} but {kind} {class} is not generic."),
                 span,
@@ -410,13 +410,13 @@ impl<'a> Checker<'a> {
             return;
         }
         let required = info
-            .templates
+            .templates()
             .iter()
-            .filter(|name| !info.template_defaults.contains_key(*name))
+            .filter(|name| !info.template_defaults().contains_key(*name))
             .count();
-        let total = info.templates.len();
+        let total = info.templates().len();
         let list = info
-            .templates
+            .templates()
             .iter()
             .map(|t| t.as_ref())
             .collect::<Vec<_>>()
@@ -477,7 +477,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class) else {
             return;
         };
-        let kind = class_kind_identifier(&info.kind);
+        let kind = class_kind_identifier(&info.kind());
         let ty = Type::Object(class.into(), args.to_vec());
         for (i, arg) in args.iter().enumerate() {
             let call_site = match arg {
@@ -494,7 +494,7 @@ impl<'a> Checker<'a> {
             let Some(declared) = self.registry.slot_variance(class, i) else {
                 continue;
             };
-            let Some(template_name) = info.templates.get(i) else {
+            let Some(template_name) = info.templates().get(i) else {
                 continue;
             };
             if declared == call_site {

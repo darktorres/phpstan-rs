@@ -46,19 +46,18 @@ impl<'a> Checker<'a> {
             let own_method_names: rustc_hash::FxHashSet<&str> =
                 c.methods.iter().map(|m| m.function.name.as_ref()).collect();
             let mut trait_method_names: Vec<std::sync::Arc<str>> = info
-                .methods
+                .methods()
                 .keys()
                 .filter(|name| {
                     name.as_ref() != "__construct"
                         && !own_method_names.contains(name.as_ref())
-                        && !info.abstract_methods.contains(*name)
+                        && !info.abstract_methods().contains(*name)
                 })
                 .cloned()
                 .collect();
             trait_method_names.sort();
             for name in trait_method_names {
-                let Some(own_visibility) = info.methods.get(&name).map(|s| s.visibility.clone())
-                else {
+                let Some(own_visibility) = info.methods().get(&name).map(|s| s.visibility()) else {
                     continue;
                 };
                 self.check_one_method_override(fqn, &name, &own_visibility, c.span, None);
@@ -95,11 +94,11 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let Some(own_sig) = info.methods.get(method_name) else {
+        let Some(own_sig) = info.methods().get(method_name) else {
             return;
         };
         let throwable = || Type::Object("Throwable".into(), Vec::new());
-        let own_throws = own_sig.throws.clone().unwrap_or_else(throwable);
+        let own_throws = own_sig.throws().clone().unwrap_or_else(throwable);
         if own_throws == Type::Void {
             return;
         }
@@ -115,17 +114,17 @@ impl<'a> Checker<'a> {
         // class's effective implementation, not something to compare the
         // class against).
         let mut ancestors: Vec<(String, Type)> = Vec::new();
-        if let Some(parent) = info.extends.first()
+        if let Some(parent) = info.extends().first()
             && let Some(parent_sig) = self
                 .registry
                 .classes
                 .get(parent)
-                .and_then(|p| p.methods.get(method_name))
-            && parent_sig.visibility != Visibility::Private
+                .and_then(|p| p.methods().get(method_name))
+            && parent_sig.visibility() != Visibility::Private
         {
             ancestors.push((
                 parent.to_string(),
-                parent_sig.throws.clone().unwrap_or_else(throwable),
+                parent_sig.throws().clone().unwrap_or_else(throwable),
             ));
         }
         for (owner, sig) in self
@@ -134,17 +133,17 @@ impl<'a> Checker<'a> {
         {
             ancestors.push((
                 owner.to_string(),
-                sig.throws.clone().unwrap_or_else(throwable),
+                sig.throws().clone().unwrap_or_else(throwable),
             ));
         }
-        for used in &info.uses {
+        for used in info.uses() {
             if let Some(trait_info) = self.registry.classes.get(used)
-                && trait_info.abstract_methods.contains(method_name)
-                && let Some(trait_sig) = trait_info.methods.get(method_name)
+                && trait_info.abstract_methods().contains(method_name)
+                && let Some(trait_sig) = trait_info.methods().get(method_name)
             {
                 ancestors.push((
                     used.to_string(),
-                    trait_sig.throws.clone().unwrap_or_else(throwable),
+                    trait_sig.throws().clone().unwrap_or_else(throwable),
                 ));
             }
         }
@@ -224,7 +223,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let Some(own_sig) = info.methods.get(method_name) else {
+        let Some(own_sig) = info.methods().get(method_name) else {
             return;
         };
         if let Some((ancestor_owner, ancestor_name)) = self
@@ -285,13 +284,13 @@ impl<'a> Checker<'a> {
         // "no matching parent method" can't be confidently claimed.
         let has_real_ancestor = ancestor
             .as_ref()
-            .is_some_and(|(_, sig, _)| sig.visibility != Visibility::Private)
+            .is_some_and(|(_, sig, _)| sig.visibility() != Visibility::Private)
             || self
                 .registry
                 .trait_declares_abstract_method(fqn, method_name);
-        if own_sig.has_override_attr
+        if own_sig.has_override_attr()
             && !has_real_ancestor
-            && info.kind != ClassKind::Trait
+            && info.kind() != ClassKind::Trait
             && !self.registry.has_unresolvable_ancestor(fqn)
         {
             let mut builder = DiagnosticBuilder::new(
@@ -317,14 +316,14 @@ impl<'a> Checker<'a> {
         // constructor still needs checking against its real prototype
         // like any other method.
         if let Some((ancestor_owner, ancestor_sig, _)) = &ancestor
-            && ancestor_sig.visibility != Visibility::Private
+            && ancestor_sig.visibility() != Visibility::Private
         {
-            let own_is_static = info.static_methods.contains(method_name);
+            let own_is_static = info.static_methods().contains(method_name);
             let ancestor_is_static = self
                 .registry
                 .classes
                 .get(ancestor_owner)
-                .is_some_and(|i| i.static_methods.contains(method_name));
+                .is_some_and(|i| i.static_methods().contains(method_name));
             if ancestor_is_static && !own_is_static {
                 self.report_builder(
                     DiagnosticBuilder::new(format!(
@@ -359,9 +358,9 @@ impl<'a> Checker<'a> {
             // or even allows - the literal `abstract` keyword there),
             // unlike `static_methods` above, where interface methods use
             // the same explicit-keyword convention as any other class.
-            let own_is_abstract = info.abstract_methods.contains(method_name);
+            let own_is_abstract = info.abstract_methods().contains(method_name);
             let ancestor_is_abstract = self.registry.classes.get(ancestor_owner).is_some_and(|i| {
-                i.kind == ClassKind::Interface || i.abstract_methods.contains(method_name)
+                i.kind() == ClassKind::Interface || i.abstract_methods().contains(method_name)
             });
             if own_is_abstract && !ancestor_is_abstract {
                 self.report_builder(
@@ -410,7 +409,7 @@ impl<'a> Checker<'a> {
         // right question for the visibility-narrowing check below, which
         // needs to see a private ancestor to know it's not a real
         // override) - this exemption belongs here, not there.
-        if ancestor_sig.visibility == Visibility::Private {
+        if ancestor_sig.visibility() == Visibility::Private {
             return;
         }
         // Narrowing a method's visibility on override is a real,
@@ -425,7 +424,7 @@ impl<'a> Checker<'a> {
         // declaration the way it does for an interface/`extends`
         // ancestor.
         let narrows_visibility = check_visibility
-            && match ancestor_sig.visibility {
+            && match ancestor_sig.visibility() {
                 Visibility::Public => *own_visibility != Visibility::Public,
                 Visibility::Protected => *own_visibility == Visibility::Private,
                 Visibility::Private => false,
@@ -433,15 +432,15 @@ impl<'a> Checker<'a> {
         if narrows_visibility {
             self.report(format!(
                     "{fqn}::{method_name}() overriding {} method {ancestor_owner}::{method_name}() must not reduce visibility",
-                    visibility_word(&ancestor_sig.visibility),
+                    visibility_word(&ancestor_sig.visibility()),
                 ),
                 span,
                 0,
                 "method.visibility",
             );
         }
-        for (i, ancestor_param) in ancestor_sig.params.iter().enumerate() {
-            let Some(own_param) = own_sig.params.get(i) else {
+        for (i, ancestor_param) in ancestor_sig.params().iter().enumerate() {
+            let Some(own_param) = own_sig.params().get(i) else {
                 // Real PHP fatal error - the override doesn't declare
                 // this many parameters at all. Skipped for a variadic
                 // ancestor tail (`...$args`): real PHPStan's handling of
@@ -449,11 +448,11 @@ impl<'a> Checker<'a> {
                 // (contravariance across every trailing ancestor
                 // parameter the variadic swallows) than this project
                 // attempts here.
-                if !ancestor_param.variadic {
+                if !ancestor_param.variadic() {
                     self.report(format!(
                             "{fqn}::{method_name}() overrides {ancestor_owner}::{method_name}() but misses parameter #{} (${})",
                             i + 1,
-                            ancestor_param.name
+                            ancestor_param.name()
                         ),
                         span,
                         0,
@@ -468,13 +467,13 @@ impl<'a> Checker<'a> {
             // unconditional PHP fatal error. Not gated on either side's
             // type being `Mixed` the way the narrowing check below is -
             // this is about arity/callability, not type compatibility.
-            if ancestor_param.has_default && !own_param.has_default && !own_param.variadic {
+            if ancestor_param.has_default() && !own_param.has_default() && !own_param.variadic() {
                 self.report(format!(
                         "Parameter #{} (${}) of {fqn}::{method_name}() is required but parameter #{} (${}) of {ancestor_owner}::{method_name}() is optional",
                         i + 1,
-                        own_param.name,
+                        own_param.name(),
                         i + 1,
-                        ancestor_param.name
+                        ancestor_param.name()
                     ),
                     span,
                     0,
@@ -490,15 +489,15 @@ impl<'a> Checker<'a> {
             // variadic-contravariance treatment too). Neither is gated on
             // either side being `Type::Mixed(false)` - both are about calling-
             // convention compatibility, not type compatibility.
-            if own_param.by_ref != ancestor_param.by_ref {
-                let (message, identifier) = if own_param.by_ref {
+            if own_param.by_ref() != ancestor_param.by_ref() {
+                let (message, identifier) = if own_param.by_ref() {
                     (
                         format!(
                             "Parameter #{} (${}) of {fqn}::{method_name}() is passed by reference but parameter #{} (${}) of {ancestor_owner}::{method_name}() is not passed by reference",
                             i + 1,
-                            own_param.name,
+                            own_param.name(),
                             i + 1,
-                            ancestor_param.name
+                            ancestor_param.name()
                         ),
                         "parameter.byRef",
                     )
@@ -507,9 +506,9 @@ impl<'a> Checker<'a> {
                         format!(
                             "Parameter #{} (${}) of {fqn}::{method_name}() is not passed by reference but parameter #{} (${}) of {ancestor_owner}::{method_name}() is passed by reference",
                             i + 1,
-                            own_param.name,
+                            own_param.name(),
                             i + 1,
-                            ancestor_param.name
+                            ancestor_param.name()
                         ),
                         "parameter.notByRef",
                     )
@@ -519,11 +518,11 @@ impl<'a> Checker<'a> {
             // The reverse direction (a non-variadic ancestor parameter
             // widened to variadic on override) is real, legal PHP, so
             // only this direction is checked.
-            if ancestor_param.variadic && !own_param.variadic {
+            if ancestor_param.variadic() && !own_param.variadic() {
                 self.report(format!(
                         "Parameter #{} (${}) of {fqn}::{method_name}() is not variadic but parameter #{} (${}) of {ancestor_owner}::{method_name}() is variadic",
-                        i + 1, own_param.name,
-                        i + 1, ancestor_param.name
+                        i + 1, own_param.name(),
+                        i + 1, ancestor_param.name()
                     ),
                     span,
                     0,
@@ -554,8 +553,8 @@ impl<'a> Checker<'a> {
             // alone while leaving a wide native hint unchanged, as an
             // LSP violation real PHPStan doesn't, by default, check at
             // all.
-            if own_param.ty_native == Type::Mixed(false)
-                || ancestor_param.ty_native == Type::Mixed(false)
+            if *own_param.ty_native() == Type::Mixed(false)
+                || *ancestor_param.ty_native() == Type::Mixed(false)
             {
                 continue;
             }
@@ -582,18 +581,19 @@ impl<'a> Checker<'a> {
             // `createUserlandMethodReflection($trait, $classReflection,
             // ...)`, passing the using `$classReflection` as context,
             // not the trait.
-            let own_ty = self.resolve_pseudo(&own_param.ty_native, fqn);
+            let own_ty = self.resolve_pseudo(own_param.ty_native(), fqn);
             let ancestor_pseudo_owner = if check_visibility {
                 &ancestor_owner
             } else {
                 fqn
             };
-            let ancestor_ty = self.resolve_pseudo(&ancestor_param.ty_native, ancestor_pseudo_owner);
+            let ancestor_ty =
+                self.resolve_pseudo(ancestor_param.ty_native(), ancestor_pseudo_owner);
             if !self.accepts(&own_ty, &ancestor_ty).yes() {
                 self.report(format!(
                         "{fqn}::{method_name}() parameter #{} (${}) narrows the inherited parameter type: expects {}, ancestor expects {}",
                         i + 1,
-                        own_param.name,
+                        own_param.name(),
                         own_ty,
                         ancestor_ty
                     ), span, 0, "method.childParameterType");
@@ -621,17 +621,17 @@ impl<'a> Checker<'a> {
         // replaces that check with `method.tentativeReturnType`, where a
         // missing native return type counts as `mixed`, and
         // `#[\ReturnTypeWillChange]` on either side opts out.
-        let tentative = ancestor_sig.is_stub
-            && has_attr(&ancestor_sig.attributes, "TentativeType")
+        let tentative = ancestor_sig.is_stub()
+            && has_attr(ancestor_sig.attributes(), "TentativeType")
             && self
                 .registry
                 .php_supports_somewhere(types::php_version::PhpFeature::TentativeReturnTypes)
                 != Some(false);
         if tentative {
-            let will_change = has_attr(&own_sig.attributes, "ReturnTypeWillChange")
-                || has_attr(&ancestor_sig.attributes, "ReturnTypeWillChange");
-            let ancestor_ty = &ancestor_sig.return_type_native;
-            let own_ty = &own_sig.return_type_native;
+            let will_change = has_attr(own_sig.attributes(), "ReturnTypeWillChange")
+                || has_attr(ancestor_sig.attributes(), "ReturnTypeWillChange");
+            let ancestor_ty = ancestor_sig.return_type_native();
+            let own_ty = own_sig.return_type_native();
             // The child's own `self`/`static` is its own class, which a
             // built-in ancestor's class-named hint accepts.
             let compatible = matches!(ancestor_ty, Type::Mixed(_))
@@ -668,19 +668,19 @@ impl<'a> Checker<'a> {
         } else {
             fqn
         };
-        if own_sig.return_type_native != Type::Mixed(false)
-            && ancestor_sig.return_type_native != Type::Mixed(false)
-            && !ancestor_return_uses_static(&ancestor_sig.return_type_native)
+        if *own_sig.return_type_native() != Type::Mixed(false)
+            && *ancestor_sig.return_type_native() != Type::Mixed(false)
+            && !ancestor_return_uses_static(ancestor_sig.return_type_native())
             && !self
                 .accepts(
-                    &self.resolve_pseudo(&ancestor_sig.return_type_native, ancestor_pseudo_owner),
-                    &self.resolve_pseudo(&own_sig.return_type_native, fqn),
+                    &self.resolve_pseudo(ancestor_sig.return_type_native(), ancestor_pseudo_owner),
+                    &self.resolve_pseudo(own_sig.return_type_native(), fqn),
                 )
                 .yes()
         {
             self.report(format!(
                     "{fqn}::{method_name}() return type {} is not compatible with the inherited return type {}",
-                    own_sig.return_type, ancestor_sig.return_type
+                    own_sig.return_type(), ancestor_sig.return_type()
                 ), span, 0, "method.childReturnType");
         }
     }

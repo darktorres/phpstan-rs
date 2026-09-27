@@ -421,7 +421,7 @@ impl<'a> Checker<'a> {
                         0,
                         "class.notFound",
                     ),
-                    Some((_, info)) if info.kind == ClassKind::Trait && name != *class => self
+                    Some((_, info)) if info.kind() == ClassKind::Trait && name != *class => self
                         .report(
                             format!("{location} has invalid type {name}."),
                             span,
@@ -469,16 +469,16 @@ impl<'a> Checker<'a> {
                 let Some((canonical, info)) = self.registry.lookup_class(name) else {
                     continue;
                 };
-                let total = info.templates.len();
+                let total = info.templates().len();
                 let required = info
-                    .templates
+                    .templates()
                     .iter()
-                    .filter(|t| !info.template_defaults.contains_key(*t))
+                    .filter(|t| !info.template_defaults().contains_key(*t))
                     .count();
                 if required == 0 {
                     continue;
                 }
-                let mut list = info.templates.join(", ");
+                let mut list = info.templates().join(", ");
                 if required != total {
                     list.push_str(&format!(" ({required}-{total} required)"));
                 }
@@ -507,7 +507,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(fqn)
-            .map(|info| info.type_aliases.clone())
+            .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
         let mut out: Vec<(String, grammar::TypeNode, Type)> = Vec::new();
         for spelling in tag.spellings() {

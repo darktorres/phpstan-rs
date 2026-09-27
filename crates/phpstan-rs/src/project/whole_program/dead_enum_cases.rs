@@ -53,11 +53,11 @@ pub(crate) fn find_dead_cases(
 ) -> Vec<(String, String)> {
     let mut dead = Vec::new();
     for (fqn, info) in &registry.classes {
-        if info.kind != ClassKind::Enum || escaped_enum_cases.contains(fqn.as_ref()) {
+        if info.kind() != ClassKind::Enum || escaped_enum_cases.contains(fqn.as_ref()) {
             continue;
         }
-        for (case_name, sig) in &info.consts {
-            if !matches!(&sig.ty, Type::EnumCase(..)) {
+        for (case_name, sig) in info.consts() {
+            if !matches!(&sig.ty(), Type::EnumCase(..)) {
                 continue;
             }
             let target = RefTarget::Member(fqn.to_string(), case_name.to_string());

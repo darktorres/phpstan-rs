@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
             .current_class
             .as_deref()
             .and_then(|c| self.registry.classes.get(c))
-            .is_some_and(|info| info.is_final);
+            .is_some_and(|info| info.is_final());
         if is_final {
             return;
         }

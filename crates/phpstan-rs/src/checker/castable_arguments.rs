@@ -150,16 +150,16 @@ impl<'a> Checker<'a> {
     /// `#N $name` for a positional argument, `$name` for a named one,
     /// `#N` past the declared parameter list.
     fn castable_parameter_name(&self, sig: &FunctionSig, args: &[Arg], index: usize) -> String {
-        let Some(param) = sig.params.get(index) else {
+        let Some(param) = sig.params().get(index) else {
             return format!("#{}", index + 1);
         };
         if args
             .iter()
-            .any(|a| a.name.as_deref() == Some(param.name.as_ref()))
+            .any(|a| a.name.as_deref() == Some(param.name().as_ref()))
         {
-            format!("${}", param.name)
+            format!("${}", param.name())
         } else {
-            format!("#{} ${}", index + 1, param.name)
+            format!("#{} ${}", index + 1, param.name())
         }
     }
 

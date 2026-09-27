@@ -115,11 +115,11 @@ impl<'a> Walker<'a> {
         decl: &FunctionDecl,
         what: &str,
     ) {
-        for (param, p) in sig.params.iter().zip(&decl.params) {
+        for (param, p) in sig.params().iter().zip(&decl.params) {
             self.ban_type(
                 p.span,
                 format!("Parameter ${} of {what}", p.name),
-                &param.ty,
+                param.ty(),
             );
         }
         self.ban_type(
@@ -128,7 +128,7 @@ impl<'a> Walker<'a> {
                 .map(|h| h.span)
                 .unwrap_or(decl.name_span),
             format!("The return type of {what}"),
-            &sig.return_type,
+            sig.return_type(),
         );
     }
 
@@ -149,9 +149,9 @@ impl<'a> Walker<'a> {
                 &format!("{fqn}::{}()", f.name),
             );
             if let Some(sig) = info.and_then(|i| {
-                i.methods
+                i.methods()
                     .get(f.name.as_ref())
-                    .or_else(|| i.methods.get(f.name.to_ascii_lowercase().as_str()))
+                    .or_else(|| i.methods().get(f.name.to_ascii_lowercase().as_str()))
             }) {
                 self.signature_types(sig, f, &format!("{fqn}::{}()", f.name));
             }
@@ -161,15 +161,15 @@ impl<'a> Walker<'a> {
             if let Some(default) = &p.default {
                 self.expr(default);
             }
-            if let Some(prop) = info.and_then(|i| i.properties.get(p.name.as_ref())) {
-                self.ban_type(p.span, format!("Property {fqn}::${}", p.name), &prop.ty);
+            if let Some(prop) = info.and_then(|i| i.properties().get(p.name.as_ref())) {
+                self.ban_type(p.span, format!("Property {fqn}::${}", p.name), prop.ty());
             }
         }
         for c in consts {
             self.expr(&c.value);
             if let Some(native) = info
-                .and_then(|i| i.consts.get(c.name.as_ref()))
-                .and_then(|k| k.native_ty.as_ref())
+                .and_then(|i| i.consts().get(c.name.as_ref()))
+                .and_then(|k| k.native_ty().as_ref())
             {
                 self.ban_type(c.span, format!("Constant {fqn}::{}", c.name), native);
             }

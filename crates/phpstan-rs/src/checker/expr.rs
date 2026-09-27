@@ -495,7 +495,7 @@ impl<'a> Checker<'a> {
                 // get checked as if they were positional in written
                 // order) before any consumer below sees them.
                 let resolved = sig
-                    .map(|s| resolve_call_args(args, &s.params))
+                    .map(|s| resolve_call_args(args, s.params()))
                     .unwrap_or_default();
                 self.maybe_record_param_name_hints(sig, args);
                 // `array_pop`/`array_shift`'s by-ref first argument gets
@@ -740,8 +740,8 @@ impl<'a> Checker<'a> {
                         // one of the other four contextually-checked
                         // functions.
                     } else if let Some(this_ty) = sig
-                        .and_then(|s| s.params.get(i))
-                        .and_then(|p| p.closure_this_type.clone())
+                        .and_then(|s| s.params().get(i))
+                        .and_then(|p| p.closure_this_type().clone())
                         && matches!(
                             unwrap_grouping(&a.value).kind,
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
@@ -763,8 +763,8 @@ impl<'a> Checker<'a> {
                             None,
                         );
                     } else if let Some(callable_sig) = sig
-                        .and_then(|s| s.params.get(i))
-                        .and_then(|p| p.ty.callable_sig())
+                        .and_then(|s| s.params().get(i))
+                        .and_then(|p| p.ty().callable_sig())
                         && matches!(
                             unwrap_grouping(&a.value).kind,
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
@@ -1324,7 +1324,7 @@ impl<'a> Checker<'a> {
                     self.current_function_has_unannotated_call = true;
                 }
                 let resolved = sig
-                    .map(|s| resolve_call_args(args, &s.params))
+                    .map(|s| resolve_call_args(args, s.params()))
                     .unwrap_or_default();
                 self.maybe_record_param_name_hints(sig, args);
                 self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
@@ -1343,8 +1343,8 @@ impl<'a> Checker<'a> {
                         }
                     }
                     let closure_this = sig
-                        .and_then(|s| s.params.get(i))
-                        .and_then(|p| p.closure_this_type.clone());
+                        .and_then(|s| s.params().get(i))
+                        .and_then(|p| p.closure_this_type().clone());
                     if let Some(this_ty) = closure_this
                         && matches!(
                             unwrap_grouping(&a.value).kind,
@@ -1428,7 +1428,7 @@ impl<'a> Checker<'a> {
                             kind: "method",
                             owner,
                             member_name: method,
-                            visibility: &sig.visibility,
+                            visibility: &sig.visibility(),
                             describe: &format!("method {owner}::{method}()"),
                             span: e.span,
                         });
@@ -1440,8 +1440,8 @@ impl<'a> Checker<'a> {
                         self.record_member_usage_token(
                             UsageTokenKind::Method,
                             owner,
-                            sig.deprecated.is_some(),
-                            sig.is_internal,
+                            sig.deprecated().is_some(),
+                            sig.is_internal(),
                             e.span,
                         );
                         self.record_member_ref(e.span, owner, method);
@@ -1473,7 +1473,7 @@ impl<'a> Checker<'a> {
                         self.record_named_argument_call(
                             owner,
                             method,
-                            &sig.visibility,
+                            &sig.visibility(),
                             e.span,
                             args,
                         );
@@ -2298,7 +2298,7 @@ impl<'a> Checker<'a> {
                     .as_deref()
                     .and_then(|class| self.registry.lookup_method(class, "__construct"));
                 let resolved = ctor_sig
-                    .map(|s| resolve_call_args(args, &s.params))
+                    .map(|s| resolve_call_args(args, s.params()))
                     .unwrap_or_default();
                 self.maybe_record_param_name_hints(ctor_sig, args);
                 self.predefine_byref_or_unknown_args(None, ctor_sig, args, &resolved, locals);
@@ -2317,8 +2317,8 @@ impl<'a> Checker<'a> {
                         }
                     }
                     let closure_this = ctor_sig
-                        .and_then(|s| s.params.get(i))
-                        .and_then(|p| p.closure_this_type.clone());
+                        .and_then(|s| s.params().get(i))
+                        .and_then(|p| p.closure_this_type().clone());
                     if let Some(this_ty) = closure_this
                         && matches!(
                             unwrap_grouping(&a.value).kind,
@@ -2559,7 +2559,7 @@ impl<'a> Checker<'a> {
                         .registry
                         .classes
                         .get(owner.as_ref())
-                        .is_some_and(|c| c.kind == ClassKind::Enum)
+                        .is_some_and(|c| c.kind() == ClassKind::Enum)
                 {
                     self.record_enum_escape(owner);
                 }
@@ -2571,7 +2571,7 @@ impl<'a> Checker<'a> {
                     self.current_function_has_unannotated_call = true;
                 }
                 let resolved = sig
-                    .map(|s| resolve_call_args(args, &s.params))
+                    .map(|s| resolve_call_args(args, s.params()))
                     .unwrap_or_default();
                 self.maybe_record_param_name_hints(sig, args);
                 self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
@@ -2639,8 +2639,8 @@ impl<'a> Checker<'a> {
                             }
                         }
                         let closure_this = sig
-                            .and_then(|s| s.params.get(i))
-                            .and_then(|p| p.closure_this_type.clone());
+                            .and_then(|s| s.params().get(i))
+                            .and_then(|p| p.closure_this_type().clone());
                         if let Some(this_ty) = closure_this
                             && matches!(
                                 unwrap_grouping(&a.value).kind,
@@ -2678,7 +2678,7 @@ impl<'a> Checker<'a> {
                                 kind: "staticMethod",
                                 owner,
                                 member_name: method,
-                                visibility: &sig.visibility,
+                                visibility: &sig.visibility(),
                                 describe: &format!("static method {owner}::{method}()"),
                                 span: e.span,
                             });
@@ -2690,8 +2690,8 @@ impl<'a> Checker<'a> {
                             self.record_member_usage_token(
                                 UsageTokenKind::Method,
                                 owner,
-                                sig.deprecated.is_some(),
-                                sig.is_internal,
+                                sig.deprecated().is_some(),
+                                sig.is_internal(),
                                 e.span,
                             );
                             self.record_member_ref(e.span, owner, method);
@@ -2702,7 +2702,7 @@ impl<'a> Checker<'a> {
                             // identical class-constant/static-property
                             // rules.
                             if target.as_name() == Some("static")
-                                && sig.visibility == Visibility::Private
+                                && sig.visibility() == Visibility::Private
                             {
                                 self.check_static_private_method_access(owner, method, e.span);
                             }
@@ -2728,7 +2728,7 @@ impl<'a> Checker<'a> {
                             .registry
                             .classes
                             .get(owner.as_str())
-                            .is_some_and(|info| info.static_methods.contains(declared.as_str()));
+                            .is_some_and(|info| info.static_methods().contains(declared.as_str()));
                         self.check_args(CheckArgsCall {
                             callee_label: &qualified,
                             callee: Callee::StaticMethod {
@@ -3008,12 +3008,12 @@ impl<'a> Checker<'a> {
                         kind: "property",
                         owner: &owner,
                         member_name: prop,
-                        visibility: &p.visibility,
+                        visibility: &p.visibility(),
                         describe: &format!("property {owner}::${prop}"),
                         span: e.span,
                     });
                     if !p.is_readable()
-                        && self.is_member_access_visible(&owner, &p.visibility, prop, "property")
+                        && self.is_member_access_visible(&owner, &p.visibility(), prop, "property")
                     {
                         self.report(
                             format!("Property {owner}::${prop} is not readable."),
@@ -3028,8 +3028,8 @@ impl<'a> Checker<'a> {
                     self.record_member_usage_token(
                         UsageTokenKind::Property,
                         &owner,
-                        p.deprecated.is_some(),
-                        p.is_internal,
+                        p.deprecated().is_some(),
+                        p.is_internal(),
                         e.span,
                     );
                     self.record_member_ref(e.span, &owner, prop);
@@ -4226,7 +4226,7 @@ impl<'a> Checker<'a> {
                                     kind: "method",
                                     owner: &owner,
                                     member_name: method,
-                                    visibility: &sig.visibility,
+                                    visibility: &sig.visibility(),
                                     describe: &format!("method {owner}::{method}()"),
                                     span: e.span,
                                 });
@@ -4245,8 +4245,8 @@ impl<'a> Checker<'a> {
                                 self.record_member_usage_token(
                                     UsageTokenKind::Method,
                                     &owner,
-                                    sig.deprecated.is_some(),
-                                    sig.is_internal,
+                                    sig.deprecated().is_some(),
+                                    sig.is_internal(),
                                     e.span,
                                 );
                                 self.check_call_site_method_name_case(
@@ -4293,7 +4293,7 @@ impl<'a> Checker<'a> {
                                     kind: "staticMethod",
                                     owner: &owner,
                                     member_name: method,
-                                    visibility: &sig.visibility,
+                                    visibility: &sig.visibility(),
                                     describe: &format!("static method {owner}::{method}()"),
                                     span: e.span,
                                 });
@@ -4312,12 +4312,12 @@ impl<'a> Checker<'a> {
                                 self.record_member_usage_token(
                                     UsageTokenKind::Method,
                                     &owner,
-                                    sig.deprecated.is_some(),
-                                    sig.is_internal,
+                                    sig.deprecated().is_some(),
+                                    sig.is_internal(),
                                     e.span,
                                 );
                                 if target.as_name() == Some("static")
-                                    && sig.visibility == Visibility::Private
+                                    && sig.visibility() == Visibility::Private
                                 {
                                     self.check_static_private_method_access(&owner, method, e.span);
                                 }
@@ -4539,7 +4539,7 @@ impl<'a> Checker<'a> {
                             .registry
                             .classes
                             .get(canonical.as_str())
-                            .map(|info| info.templates.as_slice())
+                            .map(|info| info.templates().as_slice())
                             .unwrap_or(&[]);
                         if templates.is_empty() {
                             Type::Object(canonical.into(), Vec::new())
@@ -4548,8 +4548,8 @@ impl<'a> Checker<'a> {
                             if let Some(sig) =
                                 self.registry.lookup_method(&canonical, "__construct")
                             {
-                                let resolved_args = resolve_call_args(args, &sig.params);
-                                for (param, slot) in sig.params.iter().zip(resolved_args.iter()) {
+                                let resolved_args = resolve_call_args(args, sig.params());
+                                for (param, slot) in sig.params().iter().zip(resolved_args.iter()) {
                                     let Some(arg) = slot else { continue };
                                     let arg_ty = self.infer_expr(arg, locals);
                                     // A bare string literal naming a
@@ -4559,7 +4559,7 @@ impl<'a> Checker<'a> {
                                     // mirroring real PHPStan's
                                     // `ConstantStringType::isClassString()`.
                                     let promoted = types::promote_class_string_literals(
-                                        &param.ty,
+                                        param.ty(),
                                         &arg_ty,
                                         &|s| {
                                             self.registry
@@ -4567,7 +4567,11 @@ impl<'a> Checker<'a> {
                                                 .map(|(c, _)| c.to_string())
                                         },
                                     );
-                                    types::bind_template_param(&param.ty, &promoted, &mut bindings);
+                                    types::bind_template_param(
+                                        param.ty(),
+                                        &promoted,
+                                        &mut bindings,
+                                    );
                                 }
                             }
                             // A template the constructor's arguments
@@ -4662,7 +4666,7 @@ impl<'a> Checker<'a> {
                             .registry
                             .classes
                             .get(owner.as_ref())
-                            .is_some_and(|c| c.kind == ClassKind::Enum)
+                            .is_some_and(|c| c.kind() == ClassKind::Enum)
                     {
                         self.record_enum_escape(&owner);
                     }
@@ -4672,7 +4676,7 @@ impl<'a> Checker<'a> {
                         self.static_call_method(target, &class, method)
                             .map(|(_, sig)| {
                                 let sig = sig.as_ref();
-                                let resolved_args = resolve_call_args(args, &sig.params);
+                                let resolved_args = resolve_call_args(args, sig.params());
                                 let resolved =
                                     self.infer_call_return_type(sig, &resolved_args, locals);
                                 let resolved = self
@@ -4760,7 +4764,7 @@ impl<'a> Checker<'a> {
                 }
                 self.registry
                     .lookup_property(&class, prop_name)
-                    .map(|p| self.resolve_pseudo(&p.ty, &class))
+                    .map(|p| self.resolve_pseudo(p.ty(), &class))
                     .unwrap_or(Type::Mixed(false))
             }
             ExprKind::ClassConstFetch(target, member) => {
@@ -4775,10 +4779,10 @@ impl<'a> Checker<'a> {
                 self.registry
                     .lookup_const_with_owner(&class, member)
                     .map(|(owner, cs)| {
-                        let ty = self
-                            .settings
-                            .constants
-                            .class_constant_type(&owner, member, &cs.ty);
+                        let ty =
+                            self.settings
+                                .constants
+                                .class_constant_type(&owner, member, cs.ty());
                         self.resolve_pseudo(&ty, &class)
                     })
                     .unwrap_or(Type::Mixed(false))
@@ -5063,13 +5067,13 @@ impl<'a> Checker<'a> {
                 };
                 sig.map(|s| {
                     let mut bindings: TemplateBindings = TemplateBindings::default();
-                    for (param, ty) in s.params.iter().zip(param_overrides) {
-                        let promoted = types::promote_class_string_literals(&param.ty, ty, &|s| {
+                    for (param, ty) in s.params().iter().zip(param_overrides) {
+                        let promoted = types::promote_class_string_literals(param.ty(), ty, &|s| {
                             self.registry.lookup_class(s).map(|(c, _)| c.to_string())
                         });
-                        types::bind_template_param(&param.ty, &promoted, &mut bindings);
+                        types::bind_template_param(param.ty(), &promoted, &mut bindings);
                     }
-                    let substituted = types::substitute_template(&s.return_type, &bindings);
+                    let substituted = types::substitute_template(s.return_type(), &bindings);
                     match &class {
                         Some(class) => self.resolve_pseudo(&substituted, class),
                         None => substituted,
@@ -5940,14 +5944,13 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         class: &str,
     ) {
-        let Some(out) = &sig.self_out else {
+        let Some(out) = sig.self_out() else {
             return;
         };
         let Some(key) = narrowing_key(recv) else {
             return;
         };
-        let mut as_return = sig.clone();
-        as_return.return_type = out.clone();
+        let as_return = sig.with_return_type(out.clone());
         let ty = self.infer_call_return_type(&as_return, resolved, locals);
         let ty = self.resolve_pseudo(&ty, class);
         locals.insert(key, ty);
@@ -5965,10 +5968,10 @@ impl<'a> Checker<'a> {
         self.registry
             .classes
             .get(current.as_str())
-            .and_then(|info| info.extends.first())
+            .and_then(|info| info.extends().first())
             .and_then(|parent| {
                 let (owner, sig) = self.registry.lookup_property_with_owner(parent, property)?;
-                Some(self.resolve_pseudo(&sig.ty, &owner))
+                Some(self.resolve_pseudo(sig.ty(), &owner))
             })
             .unwrap_or(Type::Mixed(false))
     }
@@ -6450,7 +6453,7 @@ impl<'a> Checker<'a> {
             let prop_with_owner = self.registry.lookup_property_with_owner(&class, prop_name);
             let is_valid_static = prop_with_owner
                 .as_ref()
-                .is_some_and(|(_, sig)| sig.is_static);
+                .is_some_and(|(_, sig)| sig.is_static());
             if !is_valid_static {
                 self.report(
                     format!("access to undefined static property {class}::${prop_name}"),
@@ -6465,8 +6468,8 @@ impl<'a> Checker<'a> {
                 self.record_member_usage_token(
                     UsageTokenKind::Property,
                     owner,
-                    sig.deprecated.is_some(),
-                    sig.is_internal,
+                    sig.deprecated().is_some(),
+                    sig.is_internal(),
                     e.span,
                 );
                 self.record_member_ref(e.span, owner, prop_name);
@@ -6478,7 +6481,7 @@ impl<'a> Checker<'a> {
                     kind: "staticProperty",
                     owner,
                     member_name: prop_name,
-                    visibility: &sig.visibility,
+                    visibility: &sig.visibility(),
                     describe: &format!("static property {owner}::${prop_name}"),
                     span: e.span,
                 });
@@ -6486,19 +6489,19 @@ impl<'a> Checker<'a> {
                 // `AccessPrivatePropertyThroughStaticRule` - same
                 // late-static-binding unsafety as the identical
                 // class-constant rule above.
-                if written == Some("static") && sig.visibility == Visibility::Private {
+                if written == Some("static") && sig.visibility() == Visibility::Private {
                     self.check_static_private_property_access(owner, prop_name, e.span);
                 }
             }
             prop_with_owner
-                .map(|(_, p)| self.resolve_pseudo(&p.ty, &class))
+                .map(|(_, p)| self.resolve_pseudo(p.ty(), &class))
                 .unwrap_or(Type::Mixed(false))
         } else {
             let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
             let const_ty = const_with_owner.as_ref().map(|(owner, cs)| {
                 self.settings
                     .constants
-                    .class_constant_type(owner, member, &cs.ty)
+                    .class_constant_type(owner, member, cs.ty())
             });
             if const_ty.is_none() {
                 self.report(
@@ -6514,8 +6517,8 @@ impl<'a> Checker<'a> {
                 self.record_member_usage_token(
                     UsageTokenKind::ClassConstant,
                     owner,
-                    cs.deprecated.is_some(),
-                    cs.is_internal,
+                    cs.deprecated().is_some(),
+                    cs.is_internal(),
                     e.span,
                 );
                 self.record_member_ref(e.span, owner, member);
@@ -6523,13 +6526,13 @@ impl<'a> Checker<'a> {
                     kind: "classConstant",
                     owner,
                     member_name: member,
-                    visibility: &cs.visibility,
+                    visibility: &cs.visibility(),
                     describe: &format!("constant {owner}::{member}"),
                     span: e.span,
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivateConstantThroughStaticRule`.
-                if written == Some("static") && cs.visibility == Visibility::Private {
+                if written == Some("static") && cs.visibility() == Visibility::Private {
                     self.check_static_private_constant_access(owner, member, e.span);
                 }
             }
@@ -6547,7 +6550,7 @@ impl<'a> Checker<'a> {
             .as_name()
             .and_then(|n| self.resolve_static_class_name(n))
             && let Some((canonical, info)) = self.registry.lookup_class(&raw)
-            && info.kind == ClassKind::Enum
+            && info.kind() == ClassKind::Enum
         {
             self.record_enum_escape(canonical);
         }
@@ -6697,9 +6700,9 @@ impl<'a> Checker<'a> {
                     return ty.clone();
                 };
                 let cases: Vec<Type> = info
-                    .consts
+                    .consts()
                     .values()
-                    .filter_map(|c| match &c.ty {
+                    .filter_map(|c| match c.ty() {
                         Type::EnumCase(cls, case) if cls == class_name => {
                             Some(Type::EnumCase(cls.clone(), case.clone()))
                         }

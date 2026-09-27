@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         span: Span,
     ) {
-        if !self.settings.rules.check_internal_usage || !sig.is_internal {
+        if !self.settings.rules.check_internal_usage || !sig.is_internal() {
             return;
         }
         if !self.should_report_internal_usage(fqn) {
@@ -119,7 +119,7 @@ impl<'a> Checker<'a> {
         self.check_access_attributes(
             owner,
             method_name,
-            sig.visibility == syntax::ast::Visibility::Public,
+            sig.visibility() == syntax::ast::Visibility::Public,
             span,
         );
         if !self.settings.rules.check_internal_usage {
@@ -128,8 +128,8 @@ impl<'a> Checker<'a> {
         let Some(declaring_info) = self.registry.classes.get(owner) else {
             return;
         };
-        let is_method_internal = sig.is_internal;
-        if !is_method_internal && !declaring_info.is_internal {
+        let is_method_internal = sig.is_internal();
+        if !is_method_internal && !declaring_info.is_internal() {
             return;
         }
         if !self.should_report_internal_usage(owner) {
@@ -137,7 +137,7 @@ impl<'a> Checker<'a> {
         }
         let static_word = if is_static { "static " } else { "" };
         let kind_word = if is_static { "staticMethod" } else { "method" };
-        let type_word = class_type_word(declaring_info.kind);
+        let type_word = class_type_word(declaring_info.kind());
         let root_ns = root_namespace_segment(owner);
         let (message, identifier) = match (root_ns, is_method_internal) {
             (None, false) => (
@@ -184,20 +184,20 @@ impl<'a> Checker<'a> {
         let Some(declaring_info) = self.registry.classes.get(owner) else {
             return;
         };
-        let is_prop_internal = sig.is_internal;
-        if !is_prop_internal && !declaring_info.is_internal {
+        let is_prop_internal = sig.is_internal();
+        if !is_prop_internal && !declaring_info.is_internal() {
             return;
         }
         if !self.should_report_internal_usage(owner) {
             return;
         }
-        let static_word = if sig.is_static { "static " } else { "" };
-        let kind_word = if sig.is_static {
+        let static_word = if sig.is_static() { "static " } else { "" };
+        let kind_word = if sig.is_static() {
             "staticProperty"
         } else {
             "property"
         };
-        let type_word = class_type_word(declaring_info.kind);
+        let type_word = class_type_word(declaring_info.kind());
         let root_ns = root_namespace_segment(owner);
         let (message, identifier) = match (root_ns, is_prop_internal) {
             (None, false) => (
@@ -245,14 +245,14 @@ impl<'a> Checker<'a> {
         let Some(declaring_info) = self.registry.classes.get(owner) else {
             return;
         };
-        let is_const_internal = sig.is_internal;
-        if !is_const_internal && !declaring_info.is_internal {
+        let is_const_internal = sig.is_internal();
+        if !is_const_internal && !declaring_info.is_internal() {
             return;
         }
         if !self.should_report_internal_usage(owner) {
             return;
         }
-        let type_word = class_type_word(declaring_info.kind);
+        let type_word = class_type_word(declaring_info.kind());
         let root_ns = root_namespace_segment(owner);
         let (message, identifier) = match (root_ns, is_const_internal) {
             (None, false) => (
@@ -294,7 +294,7 @@ impl<'a> Checker<'a> {
             let is_public = self
                 .registry
                 .lookup_method(&canonical, "__construct")
-                .is_none_or(|sig| sig.visibility == syntax::ast::Visibility::Public);
+                .is_none_or(|sig| sig.visibility() == syntax::ast::Visibility::Public);
             self.check_access_attributes(&canonical, "__construct", is_public, span);
         }
         self.check_internal_class_name_usage(class, "Instantiation of", "new", span);
@@ -359,13 +359,13 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class) else {
             return;
         };
-        if !info.is_internal {
+        if !info.is_internal() {
             return;
         }
         if !self.should_report_internal_usage(class) {
             return;
         }
-        let type_word = class_type_word(info.kind);
+        let type_word = class_type_word(info.kind());
         let message = format!(
             "{verb_phrase} internal {} {class}.",
             type_word.to_lowercase()
@@ -395,9 +395,9 @@ impl<'a> Checker<'a> {
             return;
         };
         let (extends, implements, uses) = (
-            info.extends.clone(),
-            info.implements.clone(),
-            info.uses.clone(),
+            info.extends().clone(),
+            info.implements().clone(),
+            info.uses().clone(),
         );
         let subject = class_type_word(kind);
         let extends_prefix = if kind == ClassKind::Interface {
@@ -447,10 +447,10 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(target) else {
             return;
         };
-        if !info.is_internal || !self.should_report_internal_usage(target) {
+        if !info.is_internal() || !self.should_report_internal_usage(target) {
             return;
         }
-        let type_word = class_type_word(info.kind);
+        let type_word = class_type_word(info.kind());
         self.report(
             format!(
                 "{subject} {fqn} {verb} internal {} {target}.",
@@ -466,10 +466,10 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(target) else {
             return;
         };
-        if !info.is_internal || !self.should_report_internal_usage(target) {
+        if !info.is_internal() || !self.should_report_internal_usage(target) {
             return;
         }
-        let type_word = class_type_word(info.kind);
+        let type_word = class_type_word(info.kind());
         self.report(
             format!(
                 "Usage of internal {} {target} in class {fqn}.",
@@ -587,10 +587,10 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class) else {
             return;
         };
-        if !info.is_internal || !self.should_report_internal_usage(class) {
+        if !info.is_internal() || !self.should_report_internal_usage(class) {
             return;
         }
-        let type_word = class_type_word(info.kind);
+        let type_word = class_type_word(info.kind());
         self.report(
             format!(
                 "{subject} of {context} has typehint with internal {} {class}.",

@@ -64,9 +64,9 @@ impl<'a> Checker<'a> {
                     m.function.name_span.start.col,
                 );
                 let own_sig = own_info
-                    .redeclared_methods
+                    .redeclared_methods()
                     .get(&site)
-                    .or_else(|| own_info.methods.get(m.function.name.as_ref()));
+                    .or_else(|| own_info.methods().get(m.function.name.as_ref()));
                 self.check_function_with_own_sig(
                     &m.function,
                     Some(&host),
@@ -159,7 +159,7 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
     ) -> Option<&'a FunctionSig> {
         match class_name {
-            Some(c) => self.registry.classes.get(c)?.methods.get(f.name.as_ref()),
+            Some(c) => self.registry.classes.get(c)?.methods().get(f.name.as_ref()),
             None => self
                 .registry
                 .functions
@@ -258,7 +258,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(class)?
-            .redeclared_methods
+            .redeclared_methods()
             .get(&site)?;
         Some(self.registry.finalize_standalone_sig(sig.clone()))
     }
@@ -441,7 +441,7 @@ impl<'a> Checker<'a> {
                     .collect();
                 let type_aliases = class_name
                     .and_then(|c| self.registry.classes.get(c))
-                    .map(|info| info.type_aliases.clone())
+                    .map(|info| info.type_aliases().clone())
                     .unwrap_or_default();
                 let display_name = match class_name {
                     Some(c) => format!("method {c}::{}()", f.name),
@@ -465,7 +465,7 @@ impl<'a> Checker<'a> {
                     let mut shadowed: Vec<&String> = doc
                         .templates
                         .iter()
-                        .filter(|n| info.templates.iter().any(|t| t.as_ref() == n.as_str()))
+                        .filter(|n| info.templates().iter().any(|t| t.as_ref() == n.as_str()))
                         .collect();
                     shadowed.sort();
                     for name in shadowed {
@@ -504,7 +504,7 @@ impl<'a> Checker<'a> {
             // commented parameter usable inside its own function body,
             // not just checkable from the outside at call sites.
             Some(sig) => {
-                for (param, ast_param) in sig.params.iter().zip(&f.params) {
+                for (param, ast_param) in sig.params().iter().zip(&f.params) {
                     // `self`/`static`/`parent` need resolving against the
                     // enclosing class the same way `$this` and a return
                     // type already are - without this, a `self`-typed
@@ -517,19 +517,19 @@ impl<'a> Checker<'a> {
                     // method checking at all, unlike the identical access
                     // through `$this`.
                     let ty = match class_name {
-                        Some(c) => self.resolve_pseudo(&param.ty, c),
-                        None => param.ty.clone(),
+                        Some(c) => self.resolve_pseudo(param.ty(), c),
+                        None => param.ty().clone(),
                     };
                     // Mirrors real PHPStan's `ExistingClassesInTypehintsRule` -
                     // on the un-array-wrapped element type below (a
                     // variadic parameter's declared type, not the
                     // `array` it collects into), the same reasoning the
                     // Closure/arrow-fn arms in `checker/expr.rs` share.
-                    let subject = format!("parameter ${} of {label}()", param.name);
+                    let subject = format!("parameter ${} of {label}()", param.name());
                     // The own PHPDoc type too: a member the native hint
                     // excludes no longer reaches `ty`, but naming an
                     // unknown class is still wrong.
-                    let checked = match &param.doc_ty {
+                    let checked = match &param.doc_ty() {
                         Some(doc) => Type::Union(vec![ty.clone(), doc.clone()]),
                         None => ty.clone(),
                     };
@@ -537,16 +537,16 @@ impl<'a> Checker<'a> {
                     self.check_type_trait_refs(&ty, &subject, ast_param.span, "parameter.trait");
                     // `ty` above is already `resolve_pseudo`'d.
                     self.check_no_parent_ref(&ty, &subject, ast_param.span, "parameter.noParent");
-                    self.check_type_class_name_case(&param.case_refs, ast_param.span);
-                    self.check_type_internal_usage(&param.case_refs, ast_param.span);
-                    resolved_params.push((param.name.to_string(), ty.clone(), ast_param.span));
+                    self.check_type_class_name_case(param.case_refs(), ast_param.span);
+                    self.check_type_internal_usage(param.case_refs(), ast_param.span);
+                    resolved_params.push((param.name().to_string(), ty.clone(), ast_param.span));
                     // `ParamSig::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
                     // individual argument at a call site) - inside the
                     // function's own body, real PHP always collects a
                     // variadic parameter into an `array` from the first
                     // statement onward, never the bare element type.
-                    let ty = if param.variadic {
+                    let ty = if param.variadic() {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
                         ty
@@ -559,17 +559,17 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     self.probe_hit_at(ast_param.name_span, &ty);
-                    locals.declare(param.name.to_string(), ty, ast_param.name_span);
+                    locals.declare(param.name().to_string(), ty, ast_param.name_span);
                     let native = match class_name {
-                        Some(c) => self.resolve_pseudo(&param.ty_native, c),
-                        None => param.ty_native.clone(),
+                        Some(c) => self.resolve_pseudo(param.ty_native(), c),
+                        None => param.ty_native().clone(),
                     };
-                    let native = if param.variadic {
+                    let native = if param.variadic() {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(native))
                     } else {
                         native
                     };
-                    locals.set_native(&param.name, native);
+                    locals.set_native(param.name(), native);
                 }
             }
             // This is exactly what every anonymous class method hits,
@@ -643,22 +643,23 @@ impl<'a> Checker<'a> {
                         ancestor_sig_hint
                             .and_then(|s| {
                                 if f.name.as_ref() == "__construct" {
-                                    s.params
+                                    s.params()
                                         .iter()
-                                        .find(|ap| ap.name.as_ref() == p.name.as_ref())
+                                        .find(|ap| ap.name().as_ref() == p.name.as_ref())
                                 } else {
-                                    s.params.get(i)
+                                    s.params().get(i)
                                 }
                             })
                             .filter(|ap| {
-                                ap.has_own_doc
-                                    && Registry::safe_to_backfill_mixed(&ap.ty, &ty)
+                                ap.has_own_doc()
+                                    && Registry::safe_to_backfill_mixed(ap.ty(), &ty)
                                     && !Registry::type_mentions_foreign_scoped_template_param(
-                                        &ap.ty, &f.name,
+                                        ap.ty(),
+                                        &f.name,
                                     )
-                                    && Registry::safe_to_backfill_object_type(&ap.ty, &ty)
+                                    && Registry::safe_to_backfill_object_type(ap.ty(), &ty)
                             })
-                            .map(|ap| ap.ty.clone())
+                            .map(|ap| ap.ty().clone())
                             .unwrap_or(ty)
                     } else {
                         ty
@@ -707,7 +708,7 @@ impl<'a> Checker<'a> {
             std::sync::Arc<str>,
             std::sync::Arc<str>,
         )> = Vec::new();
-        let declared_return = sig.map(|s| s.return_type.clone()).or_else(|| {
+        let declared_return = sig.map(|s| s.return_type().clone()).or_else(|| {
             // Same "the registry-side merge this branch otherwise skips"
             // fix as the param loop above, for the return position - an
             // anonymous class's `@return` docblock tag is only ever
@@ -742,15 +743,15 @@ impl<'a> Checker<'a> {
             let ty = if doc_return.is_none() {
                 ancestor_sig_hint
                     .filter(|s| {
-                        s.return_has_own_doc
-                            && Registry::safe_to_backfill_mixed(&s.return_type, &ty)
+                        s.return_has_own_doc()
+                            && Registry::safe_to_backfill_mixed(s.return_type(), &ty)
                             && !Registry::type_mentions_foreign_scoped_template_param(
-                                &s.return_type,
+                                s.return_type(),
                                 &f.name,
                             )
-                            && Registry::safe_to_backfill_object_type(&s.return_type, &ty)
+                            && Registry::safe_to_backfill_object_type(s.return_type(), &ty)
                     })
-                    .map(|s| s.return_type.clone())
+                    .map(|s| s.return_type().clone())
                     .unwrap_or(ty)
             } else {
                 ty
@@ -771,7 +772,7 @@ impl<'a> Checker<'a> {
         // redeclaring the native type - using `declared_return` here
         // would produce false positives on every docblock-typed-as-array
         // generator.
-        let native_return = sig.map(|s| s.return_type_native.clone()).or_else(|| {
+        let native_return = sig.map(|s| s.return_type_native().clone()).or_else(|| {
             let ty = f
                 .return_type
                 .as_ref()
@@ -790,7 +791,7 @@ impl<'a> Checker<'a> {
         // `declared_return_case_refs_none_path` (empty and unused when
         // `sig` was `Some`, since that closure never ran).
         let declared_return_case_refs = sig
-            .map(|s| s.return_case_refs.clone())
+            .map(|s| s.return_case_refs().clone())
             .unwrap_or(declared_return_case_refs_none_path);
         // Mirrors real PHPStan's `ExistingClassesInTypehintsRule`'s
         // return-type check - the un-widened, exactly-as-declared type
@@ -799,7 +800,7 @@ impl<'a> Checker<'a> {
         // other existence check in this function.
         let subject = format!("return type of {label}()");
         let declared = declared_return.clone().unwrap_or(Type::Mixed(false));
-        let checked = match sig.and_then(|s| s.return_doc_ty.as_ref()) {
+        let checked = match sig.and_then(|s| s.return_doc_ty().as_ref()) {
             Some(doc) => Type::Union(vec![declared, doc.clone()]),
             None => declared,
         };
@@ -826,7 +827,7 @@ impl<'a> Checker<'a> {
         // comment.
         if !self.facts_only
             && let Some(sig) = sig
-            && let Some(throws) = &sig.throws
+            && let Some(throws) = sig.throws()
         {
             self.check_throws_tag_validity(throws, f.span);
             // Mirrors real PHPStan's
@@ -894,10 +895,10 @@ impl<'a> Checker<'a> {
         // `extract()` in the body should be able to hide.
         if !self.facts_only {
             if let Some(sig) = sig {
-                for (param, ast_param) in sig.params.iter().zip(&f.params) {
+                for (param, ast_param) in sig.params().iter().zip(&f.params) {
                     self.check_generic_bounds(
-                        &param.ty,
-                        &format!("PHPDoc tag @param for parameter ${}", param.name),
+                        param.ty(),
+                        &format!("PHPDoc tag @param for parameter ${}", param.name()),
                         &label,
                         ast_param.span,
                     );
@@ -969,7 +970,7 @@ impl<'a> Checker<'a> {
         self.current_class_attrs = class_name
             .and_then(|c| self.registry.classes.get(c))
             .map(|info| {
-                info.attributes
+                info.attributes()
                     .iter()
                     .map(|a| a.name_arc().clone())
                     .collect()
@@ -985,18 +986,18 @@ impl<'a> Checker<'a> {
         // every deprecated-usage diagnostic from within a deprecated
         // function/method, class, or trait's own body.
         let previous_scope_deprecated = self.current_scope_deprecated;
-        self.current_scope_deprecated = sig.is_some_and(|s| s.deprecated.is_some())
+        self.current_scope_deprecated = sig.is_some_and(|s| s.deprecated().is_some())
             || self.current_class.as_deref().is_some_and(|c| {
                 self.registry
                     .classes
                     .get(c)
-                    .is_some_and(|i| i.deprecated.is_some())
+                    .is_some_and(|i| i.deprecated().is_some())
             })
             || self.current_trait.as_deref().is_some_and(|t| {
                 self.registry
                     .classes
                     .get(t)
-                    .is_some_and(|i| i.deprecated.is_some())
+                    .is_some_and(|i| i.deprecated().is_some())
             });
 
         let diagnostics_before = self.diagnostics.len();
@@ -1011,7 +1012,7 @@ impl<'a> Checker<'a> {
                 None => t.clone(),
             });
         let previous_declared_throws_type = self.current_declared_throws_type.take();
-        self.current_declared_throws_type = sig.and_then(|s| s.throws.clone());
+        self.current_declared_throws_type = sig.and_then(|s| s.throws().clone());
         let previous_goto_targets = std::mem::replace(
             &mut self.current_function_goto_targets,
             collect_goto_targets(&f.body),
@@ -1044,14 +1045,14 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_by_ref_params_with_tag);
         match sig {
             Some(sig) => {
-                for param in &sig.params {
-                    if param.by_ref {
-                        let name: std::sync::Arc<str> = std::sync::Arc::from(param.name.as_ref());
-                        if let Some(out_ty) = &param.out_ty {
+                for param in sig.params() {
+                    if param.by_ref() {
+                        let name: std::sync::Arc<str> = std::sync::Arc::from(param.name().as_ref());
+                        if let Some(out_ty) = &param.out_ty() {
                             self.current_function_by_ref_params_with_tag
                                 .insert(name.clone(), out_ty.clone());
                         }
-                        let check_ty = param.out_ty.clone().unwrap_or_else(|| param.ty.clone());
+                        let check_ty = param.out_ty().clone().unwrap_or_else(|| param.ty().clone());
                         self.current_function_by_ref_params.insert(name, check_ty);
                     }
                 }
@@ -1219,14 +1220,12 @@ impl<'a> Checker<'a> {
                     Some(c) => format!("Method {c}::{}()", f.name),
                     None => format!("Function {}()", f.name),
                 };
-                let throws_tag = sig.and_then(|s| s.throws.as_ref());
+                let throws_tag = sig.and_then(|s| s.throws().as_ref());
                 if let Some(throws) = throws_tag {
                     let should_check = match (class_name, sig) {
-                        (Some(c), Some(s)) => self.should_check_too_wide_method_throw_type(
-                            c,
-                            &f.name,
-                            s.visibility.clone(),
-                        ),
+                        (Some(c), Some(s)) => {
+                            self.should_check_too_wide_method_throw_type(c, &f.name, s.visibility())
+                        }
                         // `TooWideFunctionThrowTypeRule` (a plain top-level
                         // function, or a method whose signature somehow
                         // isn't indexed) has no visibility/finality gate -
@@ -1251,7 +1250,7 @@ impl<'a> Checker<'a> {
                         (Some(c), Some(s)) => self.should_check_too_wide_method_return_type(
                             c,
                             &f.name,
-                            s.visibility.clone(),
+                            s.visibility(),
                         ),
                         _ => true,
                     };
@@ -1263,7 +1262,7 @@ impl<'a> Checker<'a> {
                                 .is_none(),
                             _ => true,
                         };
-                        let is_private = sig.is_some_and(|s| s.visibility == Visibility::Private);
+                        let is_private = sig.is_some_and(|s| s.visibility() == Visibility::Private);
                         self.check_too_wide_return_type(
                             &declared,
                             is_first_declaration,
@@ -1280,7 +1279,7 @@ impl<'a> Checker<'a> {
                 self.check_by_ref_execution_end(f.span);
                 let should_check_by_ref_too_wide = match (class_name, sig) {
                     (Some(c), Some(s)) => {
-                        self.should_check_too_wide_by_ref_type(c, &f.name, s.visibility.clone())
+                        self.should_check_too_wide_by_ref_type(c, &f.name, s.visibility())
                     }
                     _ => true,
                 };
@@ -1593,10 +1592,10 @@ impl<'a> Checker<'a> {
             if p.variadic {
                 continue;
             }
-            let Some(param_sig) = sig.params.get(i) else {
+            let Some(param_sig) = sig.params().get(i) else {
                 continue;
             };
-            let param_ty = match &param_sig.ty {
+            let param_ty = match &param_sig.ty() {
                 Type::TemplateParam(tp) => tp.bound.as_ref(),
                 other => other,
             };

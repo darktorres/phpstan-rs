@@ -35,7 +35,7 @@ impl<'a> Checker<'a> {
             let Some(hooks) = &p.hooks else {
                 continue;
             };
-            let Some(prop_sig) = info.properties.get(p.name.as_ref()).cloned() else {
+            let Some(prop_sig) = info.properties().get(p.name.as_ref()).cloned() else {
                 continue;
             };
             if let Some(body) = &hooks.get {
@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
                 let Some(hooks) = param.hooks.as_deref() else {
                     continue;
                 };
-                let Some(prop_sig) = info.properties.get(param.name.as_ref()).cloned() else {
+                let Some(prop_sig) = info.properties().get(param.name.as_ref()).cloned() else {
                     continue;
                 };
                 if let Some(body) = &hooks.get {
@@ -181,7 +181,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class) else {
             return true;
         };
-        if info.is_final || info.final_properties.contains(property) {
+        if info.is_final() || info.final_properties().contains(property) {
             return true;
         }
         self.settings
@@ -239,7 +239,7 @@ impl<'a> Checker<'a> {
         // `GetNonVirtualPropertyHookReadRule`: a non-virtual get hook
         // that never reads its own backing storage almost certainly
         // forgot to.
-        if !prop_sig.is_virtual
+        if !prop_sig.is_virtual()
             && !registry::hook_body_references_property(body, name)
             && !registry::hook_body_calls_parent_hook(body, name)
         {
@@ -257,7 +257,7 @@ impl<'a> Checker<'a> {
         self.current_class = Some(fqn.to_string());
         let mut locals = Locals::default();
         locals.insert("this".to_string(), Type::Object(fqn.into(), Vec::new()));
-        let declared_return = Some(prop_sig.ty.clone());
+        let declared_return = Some(prop_sig.ty().clone());
         let previous_generator_flag = self.current_function_is_generator;
         let previous_declared_return_type = std::mem::replace(
             &mut self.current_declared_return_type,
@@ -297,11 +297,11 @@ impl<'a> Checker<'a> {
         match body {
             PropertyHookBody::Arrow(e) => {
                 let body_ty = self.check_expr(e, &mut locals, &label);
-                if body_ty != Type::Mixed(false) && !self.accepts(&prop_sig.ty, &body_ty).yes() {
+                if body_ty != Type::Mixed(false) && !self.accepts(prop_sig.ty(), &body_ty).yes() {
                     self.report(
                         format!(
                             "return type mismatch: expected {}, got {body_ty}",
-                            prop_sig.ty
+                            prop_sig.ty()
                         ),
                         e.span,
                         3,
@@ -317,21 +317,21 @@ impl<'a> Checker<'a> {
                 if !stmts.iter().any(|s| self.always_terminates(s, &locals))
                     && !self.current_function_is_generator
                     && let Some(level) = crate::checker::function_decl::missing_return_level(
-                        &prop_sig.ty,
-                        prop_sig.has_native_type,
+                        prop_sig.ty(),
+                        prop_sig.has_native_type(),
                         false,
                     )
                 {
                     let mut builder = DiagnosticBuilder::new(
                         format!(
                             "should return {} but return statement is missing",
-                            prop_sig.ty
+                            prop_sig.ty()
                         ),
                         span,
                         level,
                         "return.missing",
                     );
-                    if prop_sig.has_native_type {
+                    if prop_sig.has_native_type() {
                         builder = builder.non_ignorable();
                     }
                     self.report_builder(builder);
@@ -348,7 +348,7 @@ impl<'a> Checker<'a> {
             && self.should_check_too_wide_property_hook_throw_type(
                 fqn,
                 name,
-                prop_sig.visibility.clone(),
+                prop_sig.visibility(),
                 hook_final,
             )
         {
@@ -410,7 +410,7 @@ impl<'a> Checker<'a> {
         // skipped; native-type/class-existence checks on the parameter
         // still apply.
         if !matches!(body, PropertyHookBody::Abstract)
-            && !prop_sig.is_virtual
+            && !prop_sig.is_virtual()
             && !registry::hook_body_references_property(body, name)
             && !registry::hook_body_calls_parent_hook(body, name)
         {
@@ -487,7 +487,7 @@ impl<'a> Checker<'a> {
 
         // `ExistingClassesInPropertyHookTypehintsRule`'s existence half;
         // `prop_sig.set_ty` is already resolved.
-        if let Some(set_ty) = &prop_sig.set_ty {
+        if let Some(set_ty) = prop_sig.set_ty() {
             self.check_type_class_names_exist(
                 set_ty,
                 &format!(
@@ -508,7 +508,7 @@ impl<'a> Checker<'a> {
                 "parameter.trait",
             );
             // `class.nameCase` for the set hook's parameter type.
-            self.check_type_class_name_case(&prop_sig.set_case_refs, span);
+            self.check_type_class_name_case(prop_sig.set_case_refs(), span);
         }
 
         // `ExistingClassesInPropertyHookTypehintsRule`'s native-union-
@@ -553,9 +553,9 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| "value".to_string().into());
         let param_span = param.map(|p| p.name_span).unwrap_or(span);
         let value_ty = prop_sig
-            .set_ty
+            .set_ty()
             .clone()
-            .unwrap_or_else(|| prop_sig.ty.clone());
+            .unwrap_or_else(|| prop_sig.ty().clone());
         locals.declare(param_name.to_string(), value_ty, param_span);
         let declared_return = Some(Type::Void);
         let previous_generator_flag = self.current_function_is_generator;
@@ -609,7 +609,7 @@ impl<'a> Checker<'a> {
             && self.should_check_too_wide_property_hook_throw_type(
                 fqn,
                 name,
-                prop_sig.visibility.clone(),
+                prop_sig.visibility(),
                 hook_final,
             )
         {

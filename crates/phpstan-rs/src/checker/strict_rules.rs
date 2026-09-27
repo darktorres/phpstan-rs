@@ -698,7 +698,7 @@ impl<'a> Checker<'a> {
                 .unwrap_or(method)
                 .to_string();
             let owner_info = self.registry.classes.get(owner.as_ref())?;
-            if !owner_info.static_methods.contains(name.as_str()) {
+            if !owner_info.static_methods().contains(name.as_str()) {
                 return None;
             }
             // PHPStan's own test-case base classes expose their static
@@ -736,9 +736,11 @@ impl<'a> Checker<'a> {
                 .classes
                 .iter()
                 .filter(|(_, info)| {
-                    info.uses.iter().any(|u| u.eq_ignore_ascii_case(trait_name))
+                    info.uses()
+                        .iter()
+                        .any(|u| u.eq_ignore_ascii_case(trait_name))
                         && (method.eq_ignore_ascii_case("__construct")
-                            || info.trait_aliases.iter().any(|alias| {
+                            || info.trait_aliases().iter().any(|alias| {
                                 alias.alias.eq_ignore_ascii_case("__construct")
                                     && alias.method.eq_ignore_ascii_case(method)
                                     && alias
@@ -783,7 +785,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(current.as_str())
-            .and_then(|info| info.extends.first())
+            .and_then(|info| info.extends().first())
         {
             let parent = parent.to_string();
             if parents.iter().any(|p| p.eq_ignore_ascii_case(&parent))
@@ -820,7 +822,7 @@ fn arg_for_param<'e>(args: &'e [Arg], sig: &FunctionSig, position: usize) -> Opt
     if position < positional {
         return args.get(position);
     }
-    let name = sig.params.get(position)?.name.as_ref();
+    let name = sig.params().get(position)?.name().as_ref();
     args.iter().find(|a| {
         a.name
             .as_deref()

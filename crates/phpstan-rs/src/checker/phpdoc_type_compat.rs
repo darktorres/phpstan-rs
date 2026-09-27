@@ -56,7 +56,7 @@ impl<'a> Checker<'a> {
                     );
                     continue;
                 };
-                let (Some(param), Some(param_sig)) = (f.params.get(i), sig.params.get(i)) else {
+                let (Some(param), Some(param_sig)) = (f.params.get(i), sig.params().get(i)) else {
                     continue;
                 };
                 let node = if tag == "@param-out" {
@@ -87,14 +87,14 @@ impl<'a> Checker<'a> {
                         );
                         continue;
                     }
-                    param_sig.out_ty.as_ref()
+                    param_sig.out_ty().as_ref()
                 } else {
-                    param_sig.doc_ty.as_ref()
+                    param_sig.doc_ty().as_ref()
                 };
                 let Some(doc_ty) = doc_ty else {
                     continue;
                 };
-                let native = resolve(self, &param_sig.ty_native);
+                let native = resolve(self, param_sig.ty_native());
                 let mut doc_ty = resolve(self, doc_ty);
                 // A variadic `@param int[] ...$xs` describes the whole
                 // collected array; its elements are what the native hint
@@ -135,8 +135,8 @@ impl<'a> Checker<'a> {
                 2,
                 "return.unresolvableType",
             );
-        } else if let Some(doc_ty) = &sig.return_doc_ty {
-            let native = resolve(self, &sig.return_type_native);
+        } else if let Some(doc_ty) = sig.return_doc_ty() {
+            let native = resolve(self, sig.return_type_native());
             let doc_ty = resolve(self, doc_ty);
             self.report_phpdoc_native_mismatch(
                 "PHPDoc tag @return",
@@ -193,10 +193,10 @@ impl<'a> Checker<'a> {
         }
         let class_info = class.and_then(|c| self.registry.classes.get(c));
         let type_aliases = class_info
-            .map(|info| info.type_aliases.clone())
+            .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
         let class_templates: Vec<String> = class_info
-            .map(|info| info.templates.iter().map(|t| t.to_string()).collect())
+            .map(|info| info.templates().iter().map(|t| t.to_string()).collect())
             .unwrap_or_default();
         for callable in callables {
             let Some(sig) = callable.callable_sig() else {
@@ -327,7 +327,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(fqn)
-            .map(|info| info.type_aliases.clone())
+            .map(|info| info.type_aliases().clone())
             .unwrap_or_default();
         let sig = FunctionSig::from_decl(
             &decl,
@@ -391,22 +391,22 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|info| info.properties.get(name.as_ref()))
+                .and_then(|info| info.properties().get(name.as_ref()))
             else {
                 continue;
             };
             if description == "PHPDoc tag @var"
-                && let Some(doc) = &prop.doc_ty
+                && let Some(doc) = prop.doc_ty()
             {
                 callables.push((doc.clone(), span));
             }
-            if !prop.has_native_type {
+            if !prop.has_native_type() {
                 continue;
             }
-            let Some(doc) = prop.doc_ty.clone() else {
+            let Some(doc) = prop.doc_ty().clone() else {
                 continue;
             };
-            checks.push((doc, prop.ty_native.clone(), subject, span));
+            checks.push((doc, prop.ty_native().clone(), subject, span));
         }
         for (doc, span) in callables {
             self.check_generic_callables(&doc, "@var", None, Some(fqn), span);
@@ -438,15 +438,15 @@ impl<'a> Checker<'a> {
         // Only this declaration's own PHPDoc: an inherited conditional is
         // checked once, where it's written, with its own templates.
         let mut conditionals: Vec<Type> = Vec::new();
-        for p in &sig.params {
-            for own in [&p.doc_ty, &p.out_ty, &p.closure_this_type]
+        for p in sig.params() {
+            for own in [p.doc_ty(), p.out_ty(), p.closure_this_type()]
                 .into_iter()
                 .flatten()
             {
                 collect_conditionals(own, &mut conditionals);
             }
         }
-        if let Some(ret) = &sig.return_doc_ty {
+        if let Some(ret) = sig.return_doc_ty() {
             collect_conditionals(ret, &mut conditionals);
         }
         if conditionals.is_empty() {
@@ -484,8 +484,8 @@ impl<'a> Checker<'a> {
                     None => continue,
                 }
             } else {
-                match sig.params.iter().find(|p| *p.name == **subject) {
-                    Some(p) => p.ty.clone(),
+                match sig.params().iter().find(|p| **p.name() == **subject) {
+                    Some(p) => p.ty().clone(),
                     None => {
                         self.report(
                             format!(
@@ -535,7 +535,7 @@ impl<'a> Checker<'a> {
         is_static: bool,
         label: &str,
     ) {
-        let Some(out) = &sig.self_out else {
+        let Some(out) = sig.self_out() else {
             return;
         };
         let raw = f
@@ -618,7 +618,7 @@ impl<'a> Checker<'a> {
             .map(|d| docblock::parse(d).templates)
             .unwrap_or_default();
         if let Some(info) = class_name.and_then(|c| self.registry.classes.get(c)) {
-            names.extend(info.templates.iter().map(|t| t.to_string()));
+            names.extend(info.templates().iter().map(|t| t.to_string()));
         }
         names
     }
@@ -696,8 +696,8 @@ fn find_template_param(sig: &FunctionSig, name: &str) -> Option<Type> {
         });
         found
     }
-    sig.params
+    sig.params()
         .iter()
-        .find_map(|p| find(&p.ty, name))
-        .or_else(|| find(&sig.return_type, name))
+        .find_map(|p| find(p.ty(), name))
+        .or_else(|| find(sig.return_type(), name))
 }

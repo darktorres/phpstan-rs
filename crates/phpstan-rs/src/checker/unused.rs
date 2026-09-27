@@ -91,14 +91,14 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class) else {
             return false;
         };
-        if info.attribute_targets.is_some() {
+        if info.attribute_targets().is_some() {
             return true;
         }
         self.registry.all_ancestor_names(class).iter().any(|name| {
             self.registry.classes.get(name).is_some_and(|ancestor| {
-                ancestor.kind == ClassKind::Interface
+                ancestor.kind() == ClassKind::Interface
                     && ancestor
-                        .methods
+                        .methods()
                         .keys()
                         .any(|m| m.eq_ignore_ascii_case("__construct"))
             })

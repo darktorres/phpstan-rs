@@ -215,7 +215,7 @@ pub(super) fn resolve_class_ref(
         "parent" => registry
             .classes
             .get(current_class?)
-            .and_then(|info| info.extends.first())
+            .and_then(|info| info.extends().first())
             .map(|s| s.to_string()),
         _ => Some(ctx.resolve(name)),
     }

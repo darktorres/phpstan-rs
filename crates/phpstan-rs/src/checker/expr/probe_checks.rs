@@ -245,10 +245,10 @@ impl<'a> Checker<'a> {
                 // still be uninitialized, so `isset()`/`??` checking it is
                 // never treated as redundant here, even when its own
                 // declared type is non-nullable.
-                if sig.is_virtual || !sig.has_default {
+                if sig.is_virtual() || !sig.has_default() {
                     return None;
                 }
-                Some(sig.ty.clone())
+                Some(sig.ty().clone())
             }
             _ => None,
         }

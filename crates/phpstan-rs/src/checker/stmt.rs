@@ -1042,9 +1042,9 @@ impl<'a> Checker<'a> {
                 }
                 let recv_ty = self.infer_expr(recv, locals);
                 if let Some((_, sig)) = self.find_method_owner(&recv_ty, method)
-                    && !sig.assert.is_empty()
+                    && !sig.assert().is_empty()
                 {
-                    self.apply_assert_infos(&sig.assert, sig, Some(recv), args, locals);
+                    self.apply_assert_infos(sig.assert(), sig, Some(recv), args, locals);
                 }
             }
             ExprKind::StaticCall(target, method, args) => {
@@ -1053,9 +1053,9 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(class) = self.infer_static_target_class(target, locals)
                     && let Some(sig) = self.registry.lookup_method(&class, method)
-                    && !sig.assert.is_empty()
+                    && !sig.assert().is_empty()
                 {
-                    self.apply_assert_infos(&sig.assert, sig, None, args, locals);
+                    self.apply_assert_infos(sig.assert(), sig, None, args, locals);
                 }
             }
             ExprKind::Call(callee, args) => {
@@ -1069,9 +1069,9 @@ impl<'a> Checker<'a> {
                         fallback
                             .as_deref()
                             .and_then(|g| self.registry.lookup_function(g))
-                    }) && !sig.assert.is_empty()
+                    }) && !sig.assert().is_empty()
                     {
-                        self.apply_assert_infos(&sig.assert, sig, None, args, locals);
+                        self.apply_assert_infos(sig.assert(), sig, None, args, locals);
                     }
                 }
             }

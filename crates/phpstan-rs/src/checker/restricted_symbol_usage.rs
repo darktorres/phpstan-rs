@@ -544,9 +544,9 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class.as_str()) else {
             return Vec::new();
         };
-        info.methods
+        info.methods()
             .values()
-            .flat_map(|sig| sig.attributes.iter().map(|a| a.name_arc().clone()))
+            .flat_map(|sig| sig.attributes().iter().map(|a| a.name_arc().clone()))
             .collect()
     }
 
@@ -838,7 +838,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(class)
-            .map(|info| class_type_word(info.kind))
+            .map(|info| class_type_word(info.kind()))
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
         self.report_restricted(
             &entry,
@@ -876,7 +876,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(class)
-            .map(|info| class_type_word(info.kind))
+            .map(|info| class_type_word(info.kind()))
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
         self.report_restricted(
             &entry,
@@ -906,7 +906,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let (extends, implements) = (info.extends.clone(), info.implements.clone());
+        let (extends, implements) = (info.extends().clone(), info.implements().clone());
         for parent in &extends {
             self.check_restricted_class_name_usage(
                 parent,

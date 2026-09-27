@@ -79,8 +79,8 @@ impl<'a> Checker<'a> {
             .map(|p| PropertyView {
                 name: &p.name,
                 span: p.span,
-                visibility: p.visibility.clone(),
-                write_visibility: p.write_visibility.clone(),
+                visibility: p.visibility,
+                write_visibility: p.write_visibility,
                 is_static: p.is_static,
                 is_readonly: p.is_readonly,
                 is_abstract: p.is_abstract,
@@ -103,7 +103,7 @@ impl<'a> Checker<'a> {
                     .map(|p| PropertyView {
                         name: &p.name,
                         span: p.span,
-                        visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
+                        visibility: p.promoted_visibility.unwrap_or(Visibility::Public),
                         write_visibility: None,
                         is_static: false,
                         is_readonly: p.promoted_readonly,
@@ -229,8 +229,8 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(registry_name)
-            .and_then(|info| info.properties.get(view.name))
-            .is_some_and(|sig| sig.is_virtual);
+            .and_then(|info| info.properties().get(view.name))
+            .is_some_and(|sig| sig.is_virtual());
         let has_set_visibility = view.write_visibility.is_some();
         let error = if view.is_final && unavailable(PhpFeature::FinalProperties) {
             Some((

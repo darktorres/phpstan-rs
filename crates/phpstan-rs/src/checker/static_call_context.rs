@@ -57,7 +57,7 @@ impl<'a> Checker<'a> {
                     .registry
                     .classes
                     .get(class.as_str())
-                    .is_none_or(|info| !info.extends.is_empty());
+                    .is_none_or(|info| !info.extends().is_empty());
                 if keyword == "parent" && !has_parent {
                     let current = self.current_method.clone().unwrap_or_default();
                     self.report(format!(
@@ -112,9 +112,9 @@ impl<'a> Checker<'a> {
             .lookup_method_canonical_name(owner, method)
             .unwrap_or(method)
             .to_string();
-        let is_static = owner_info.static_methods.contains(canonical.as_str());
-        let is_abstract = owner_info.abstract_methods.contains(canonical.as_str());
-        let owner_is_interface = owner_info.kind == syntax::ast::ClassKind::Interface;
+        let is_static = owner_info.static_methods().contains(canonical.as_str());
+        let is_abstract = owner_info.abstract_methods().contains(canonical.as_str());
+        let owner_is_interface = owner_info.kind() == syntax::ast::ClassKind::Interface;
         if !is_static && !self.static_call_has_compatible_this(class) {
             let dom_load_html = canonical.eq_ignore_ascii_case("loadHTML")
                 && owner.eq_ignore_ascii_case("DOMDocument");
@@ -162,7 +162,7 @@ impl<'a> Checker<'a> {
             .and_then(|(owner, _)| self.registry.classes.get(&owner))
             .is_some_and(|owner| {
                 owner
-                    .static_methods
+                    .static_methods()
                     .iter()
                     .any(|m| m.eq_ignore_ascii_case(current_method))
             });

@@ -29,8 +29,8 @@ pub(crate) use type_resolution::{
 
 #[derive(Debug, Clone)]
 pub struct ParamSig {
-    pub name: Arc<str>,
-    pub ty: Type,
+    pub(in crate::registry) name: Arc<str>,
+    pub(in crate::registry) ty: Type,
     // The native, no-docblock-merge type (see `return_type_native`'s
     // doc comment for the same split on the return side).
     // `check_one_method_override`'s param-narrowing check must compare
@@ -38,127 +38,196 @@ pub struct ParamSig {
     // while leaving a wide native hint (the common
     // Rector/PHPStan-`Collector<T>` idiom) would be wrongly flagged as
     // an LSP violation real PHPStan doesn't check by default.
-    pub ty_native: Type,
-    pub variadic: bool,
-    pub has_default: bool,
+    pub(in crate::registry) ty_native: Type,
+    pub(in crate::registry) variadic: bool,
+    pub(in crate::registry) has_default: bool,
     // The default value's own inferred type (`infer_const_type` - a
     // literal, or `Mixed` for anything it can't read), when there is one.
     // Lets a conditional return type resolve against an omitted
     // argument's default the way real PHPStan does
     // (`sendMailNotifications()` with `$action = 'list_to_send'` picks the
     // `$action is 'send'` false branch).
-    pub default_ty: Option<Type>,
+    pub(in crate::registry) default_ty: Option<Type>,
     // This declaration's own `@param` tag type, resolved but not
     // reconciled with the native hint - what real PHPStan's
     // `IncompatiblePhpDocTypeRule` compares against that hint. `None`
     // without an own tag.
-    pub doc_ty: Option<Type>,
-    pub by_ref: bool,
+    pub(in crate::registry) doc_ty: Option<Type>,
+    pub(in crate::registry) by_ref: bool,
     // True when this parameter's own `@param` tag was present on this
     // declaration's docblock; `false` marks it eligible for
     // `Registry::flatten_phpdoc_inheritance` to backfill from an
     // ancestor, which then sets this `true` too - what makes
     // multi-level inheritance resolve one level per fixed-point pass.
-    pub has_own_doc: bool,
+    pub(in crate::registry) has_own_doc: bool,
     // Whether this declaration's own native hint/`@param` text spells
     // out `mixed` explicitly - needed so `checker::missing_typehint`
     // still recognizes a backfilled (`flatten_phpdoc_inheritance`)
     // `mixed` as deliberate, not undocumented; that pass copies this
     // field alongside `ty`.
-    pub explicit_mixed_hint: bool,
+    pub(in crate::registry) explicit_mixed_hint: bool,
     // Every class-name reference `ty` carries, as (raw, resolved-FQN)
     // pairs, collected before `resolve_names_in_type` destroys the
     // original spelling. Empty for a backfilled position - the raw text
     // belongs to an ancestor file's own `use` imports, not this one's
     // `name_ctx`.
-    pub case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) case_refs: Vec<(Arc<str>, Arc<str>)>,
     // `@param-closure-this Type $name`'s resolved `Type` - what `$this`
     // becomes inside a `Closure`/`ArrowFn` argument at this position.
     // `None` when untagged.
-    pub closure_this_type: Option<Type>,
+    pub(in crate::registry) closure_this_type: Option<Type>,
     // `@param-out Type $name`'s resolved `Type` - the widened type a
     // by-ref parameter is guaranteed to hold on return. `None` falls
     // back to the native/`@param` type, matching real PHPStan's
     // `getOutType() ?? getType()`.
-    pub out_ty: Option<Type>,
-    pub attributes: Vec<ReflectionAttribute>,
+    pub(in crate::registry) out_ty: Option<Type>,
+    pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
+}
+
+impl ParamSig {
+    /// This parameter with `f` applied to its type, native type and out
+    /// type.
+    pub fn map_types(&self, f: impl Fn(&Type) -> Type) -> ParamSig {
+        ParamSig {
+            ty: f(&self.ty),
+            ty_native: f(&self.ty_native),
+            out_ty: self.out_ty.as_ref().map(&f),
+            ..self.clone()
+        }
+    }
+
+    pub fn name(&self) -> &Arc<str> {
+        &self.name
+    }
+
+    pub fn ty(&self) -> &Type {
+        &self.ty
+    }
+
+    pub fn ty_native(&self) -> &Type {
+        &self.ty_native
+    }
+
+    pub fn variadic(&self) -> bool {
+        self.variadic
+    }
+
+    pub fn has_default(&self) -> bool {
+        self.has_default
+    }
+
+    pub fn default_ty(&self) -> &Option<Type> {
+        &self.default_ty
+    }
+
+    pub fn doc_ty(&self) -> &Option<Type> {
+        &self.doc_ty
+    }
+
+    pub fn by_ref(&self) -> bool {
+        self.by_ref
+    }
+
+    pub fn has_own_doc(&self) -> bool {
+        self.has_own_doc
+    }
+
+    pub fn explicit_mixed_hint(&self) -> bool {
+        self.explicit_mixed_hint
+    }
+
+    pub fn case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+        &self.case_refs
+    }
+
+    pub fn closure_this_type(&self) -> &Option<Type> {
+        &self.closure_this_type
+    }
+
+    pub fn out_ty(&self) -> &Option<Type> {
+        &self.out_ty
+    }
+
+    pub fn attributes(&self) -> &Vec<ReflectionAttribute> {
+        &self.attributes
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionSig {
-    pub params: Vec<ParamSig>,
-    pub return_type: Type,
+    pub(in crate::registry) params: Vec<ParamSig>,
+    pub(in crate::registry) return_type: Type,
     // The native-only return type, ignoring `@return` -
     // `check_method_overrides`'s return-type check is the only reader;
     // everything else wants the docblock-refined `return_type` above.
-    pub return_type_native: Type,
+    pub(in crate::registry) return_type_native: Type,
     // `ParamSig::has_own_doc`'s return-position equivalent.
-    pub return_has_own_doc: bool,
+    pub(in crate::registry) return_has_own_doc: bool,
     // `ParamSig::doc_ty`'s return-position equivalent.
-    pub return_doc_ty: Option<Type>,
+    pub(in crate::registry) return_doc_ty: Option<Type>,
     // `@phpstan-self-out Type`: the receiver's type after a call to this
     // method. `None` without the tag.
-    pub self_out: Option<Type>,
+    pub(in crate::registry) self_out: Option<Type>,
     // `ParamSig::case_refs`'s return-position equivalent.
-    pub return_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub(in crate::registry) return_case_refs: Vec<(Arc<str>, Arc<str>)>,
     // `ParamSig::explicit_mixed_hint`'s return-position equivalent.
-    pub return_explicit_mixed_hint: bool,
+    pub(in crate::registry) return_explicit_mixed_hint: bool,
     // PHP 8.5's `#[\NoDiscard]` marker - `true` when a bare, unused
     // call to this declaration should be flagged
     // (`Checker::check_no_discard_statement`), matching real PHPStan's
     // short-name, case-insensitive match convention.
-    pub no_discard: bool,
+    pub(in crate::registry) no_discard: bool,
     // `MustUseResult` (php-language-extensions): `no_discard` while that
     // extension is active.
-    pub must_use_result: bool,
+    pub(in crate::registry) must_use_result: bool,
     // `Visibility::Public` for a top-level function; a method's
     // declared visibility otherwise.
-    pub visibility: Visibility,
+    pub(in crate::registry) visibility: Visibility,
     // `@internal` on this declaration's own doc comment (see
     // `docblock::DocBlock::internal`) - a method also counts as internal
     // via its declaring class, checked separately by the caller.
-    pub is_internal: bool,
+    pub(in crate::registry) is_internal: bool,
     // `@api` on this declaration's own doc comment - real PHPStan
     // checks both the declaring class's and the member's own tag;
     // `ClassInfo::is_api` only covers the former.
-    pub is_api: bool,
+    pub(in crate::registry) is_api: bool,
     // PHP 8.3's `#[\Override]` marker. Stored rather than checked
     // straight off the AST, since a trait method's `#[Override]` is
     // only a real error relative to the *using* class's ancestor chain
     // - must survive `flatten_traits`' merge like `no_discard`.
-    pub has_override_attr: bool,
+    pub(in crate::registry) has_override_attr: bool,
     // `@deprecated` on this declaration's own tag only, unlike
     // `is_internal`'s "declaring class also counts" fallback - whether a
     // class-level `@deprecated` implicitly covers members isn't
     // confirmed against real PHPStan's source, so left unclaimed.
-    pub deprecated: Option<String>,
+    pub(in crate::registry) deprecated: Option<String>,
     // `@throws` on this declaration, resolved and unioned across every
     // tag present. `None` when no `@throws` tag exists at all.
-    pub throws: Option<Type>,
+    pub(in crate::registry) throws: Option<Type>,
     // `@phpstan-assert`-family tags, resolved into a `Type` plus a
     // classified `AssertTarget` - a tag whose target doesn't match a
     // real parameter (typo'd, or unclassifiable) is dropped rather than
     // kept half-resolved.
-    pub assert_if_true: Vec<AssertInfo>,
-    pub assert_if_false: Vec<AssertInfo>,
-    pub assert: Vec<AssertInfo>,
+    pub(in crate::registry) assert_if_true: Vec<AssertInfo>,
+    pub(in crate::registry) assert_if_false: Vec<AssertInfo>,
+    pub(in crate::registry) assert: Vec<AssertInfo>,
     // `None` until `Registry::resolve_transitive_purity` classifies
     // this body; stays `None` for a bodyless signature or one the
     // classifier can never prove effect-free. `Some(vec![])` is the
     // fixed point's base case: no dependencies, unconditionally
     // effect-free.
-    pub purity_dependencies: Option<Vec<crate::registry::PurityDependency>>,
+    pub(in crate::registry) purity_dependencies: Option<Vec<crate::registry::PurityDependency>>,
     // Set once every `purity_dependencies` entry is itself proven
     // pure. The field the bare-discarded-call-to-a-pure-declaration
     // diagnostic actually reads.
-    pub is_transitively_pure: bool,
-    // `true` for every signature `php_stubs.rs` generates - a stub
+    pub(in crate::registry) is_transitively_pure: bool,
+    // `true` for every signature `registry::stubs` generates - a stub
     // body is always empty (`{}`), so without this,
     // `registry::purity::classify_body` would wrongly call PHP builtins
     // like `header()` provably pure. `false` for a real, first-party
-    // declaration; `php_stubs.rs` sets this on its own generated
+    // declaration; `registry::stubs` sets this on its own generated
     // signatures, the one place that knows.
-    pub is_stub: bool,
+    pub(in crate::registry) is_stub: bool,
     // `true` for a signature with no real textual declaration at all -
     // a magic `@method` tag or a synthesized enum method
     // (`cases()`/`from()`/`tryFrom()`). Needed so
@@ -167,10 +236,146 @@ pub struct FunctionSig {
     // (real shape: Tracy's own `IBarPanel`, `@method ?string
     // getAgentInfo()`) - `@method` only ever documents a
     // magic-`__call`-backed capability, never a requirement.
-    pub is_magic: bool,
+    pub(in crate::registry) is_magic: bool,
     // This declaration's own attributes, names resolved.
-    pub attributes: Vec<ReflectionAttribute>,
-    pub provenance: crate::registry::provenance::Provenance,
+    pub(in crate::registry) attributes: Vec<ReflectionAttribute>,
+    pub(in crate::registry) provenance: crate::registry::provenance::Provenance,
+}
+
+impl FunctionSig {
+    /// This signature with `f` applied to every type it declares: its
+    /// parameters', return, `@phpstan-self-out`, `@throws` and assertion
+    /// types.
+    pub fn map_types(&self, f: impl Fn(&Type) -> Type) -> FunctionSig {
+        let asserts = |infos: &[AssertInfo]| -> Vec<AssertInfo> {
+            infos
+                .iter()
+                .map(|info| AssertInfo {
+                    ty: f(&info.ty),
+                    ..info.clone()
+                })
+                .collect()
+        };
+        FunctionSig {
+            params: self.params.iter().map(|p| p.map_types(&f)).collect(),
+            return_type: f(&self.return_type),
+            return_type_native: f(&self.return_type_native),
+            self_out: self.self_out.as_ref().map(&f),
+            throws: self.throws.as_ref().map(&f),
+            assert_if_true: asserts(&self.assert_if_true),
+            assert_if_false: asserts(&self.assert_if_false),
+            assert: asserts(&self.assert),
+            ..self.clone()
+        }
+    }
+
+    /// This signature returning `ty` instead.
+    pub fn with_return_type(&self, ty: Type) -> FunctionSig {
+        FunctionSig {
+            return_type: ty,
+            ..self.clone()
+        }
+    }
+
+    pub fn params(&self) -> &Vec<ParamSig> {
+        &self.params
+    }
+
+    pub fn return_type(&self) -> &Type {
+        &self.return_type
+    }
+
+    pub fn return_type_native(&self) -> &Type {
+        &self.return_type_native
+    }
+
+    pub fn return_has_own_doc(&self) -> bool {
+        self.return_has_own_doc
+    }
+
+    pub fn return_doc_ty(&self) -> &Option<Type> {
+        &self.return_doc_ty
+    }
+
+    pub fn self_out(&self) -> &Option<Type> {
+        &self.self_out
+    }
+
+    pub fn return_case_refs(&self) -> &Vec<(Arc<str>, Arc<str>)> {
+        &self.return_case_refs
+    }
+
+    pub fn return_explicit_mixed_hint(&self) -> bool {
+        self.return_explicit_mixed_hint
+    }
+
+    pub fn no_discard(&self) -> bool {
+        self.no_discard
+    }
+
+    pub fn must_use_result(&self) -> bool {
+        self.must_use_result
+    }
+
+    pub fn visibility(&self) -> Visibility {
+        self.visibility
+    }
+
+    pub fn is_internal(&self) -> bool {
+        self.is_internal
+    }
+
+    pub fn is_api(&self) -> bool {
+        self.is_api
+    }
+
+    pub fn has_override_attr(&self) -> bool {
+        self.has_override_attr
+    }
+
+    pub fn deprecated(&self) -> &Option<String> {
+        &self.deprecated
+    }
+
+    pub fn throws(&self) -> &Option<Type> {
+        &self.throws
+    }
+
+    pub fn assert_if_true(&self) -> &Vec<AssertInfo> {
+        &self.assert_if_true
+    }
+
+    pub fn assert_if_false(&self) -> &Vec<AssertInfo> {
+        &self.assert_if_false
+    }
+
+    pub fn assert(&self) -> &Vec<AssertInfo> {
+        &self.assert
+    }
+
+    pub fn purity_dependencies(&self) -> &Option<Vec<crate::registry::PurityDependency>> {
+        &self.purity_dependencies
+    }
+
+    pub fn is_transitively_pure(&self) -> bool {
+        self.is_transitively_pure
+    }
+
+    pub fn is_stub(&self) -> bool {
+        self.is_stub
+    }
+
+    pub fn is_magic(&self) -> bool {
+        self.is_magic
+    }
+
+    pub fn attributes(&self) -> &Vec<ReflectionAttribute> {
+        &self.attributes
+    }
+
+    pub fn provenance(&self) -> &crate::registry::provenance::Provenance {
+        &self.provenance
+    }
 }
 
 /// A class constant's value is almost always a literal in real code - this

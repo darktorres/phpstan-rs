@@ -181,7 +181,7 @@ fn overrides_an_ancestor_method(registry: &Registry, fqn: &str, method_name: &st
         registry
             .classes
             .get(ancestor)
-            .is_some_and(|info| info.methods.contains_key(method_name))
+            .is_some_and(|info| info.methods().contains_key(method_name))
     })
 }
 
@@ -206,7 +206,7 @@ pub(crate) fn find_dead_members(
         // count as real ancestors for `overrides_an_ancestor_method`
         // above - only their own candidacy as a *source* of findings is
         // excluded).
-        if !matches!(info.kind, ClassKind::Class | ClassKind::Enum)
+        if !matches!(info.kind(), ClassKind::Class | ClassKind::Enum)
             || escaped_classes.contains(fqn.as_ref())
         {
             continue;
@@ -218,9 +218,9 @@ pub(crate) fn find_dead_members(
                 .is_empty()
         };
 
-        for (name, sig) in &info.methods {
-            if !is_visible(&sig.visibility)
-                || sig.is_magic
+        for (name, sig) in info.methods() {
+            if !is_visible(&sig.visibility())
+                || sig.is_magic()
                 || is_implicitly_invoked_method(name)
                 || overrides_an_ancestor_method(registry, fqn, name)
                 || is_phpunit_test_method(registry, fqn, name)
@@ -230,16 +230,18 @@ pub(crate) fn find_dead_members(
             }
             dead.push((fqn.to_string(), name.to_string(), MemberKind::Method));
         }
-        for (name, sig) in &info.properties {
-            let is_enum_builtin = info.kind == ClassKind::Enum
+        for (name, sig) in info.properties() {
+            let is_enum_builtin = info.kind() == ClassKind::Enum
                 && (name.as_ref() == "name" || name.as_ref() == "value");
-            if !is_visible(&sig.visibility) || is_enum_builtin || is_used(name) {
+            if !is_visible(&sig.visibility()) || is_enum_builtin || is_used(name) {
                 continue;
             }
             dead.push((fqn.to_string(), name.to_string(), MemberKind::Property));
         }
-        for (name, sig) in &info.consts {
-            if matches!(sig.ty, Type::EnumCase(..)) || !is_visible(&sig.visibility) || is_used(name)
+        for (name, sig) in info.consts() {
+            if matches!(sig.ty(), Type::EnumCase(..))
+                || !is_visible(&sig.visibility())
+                || is_used(name)
             {
                 continue;
             }

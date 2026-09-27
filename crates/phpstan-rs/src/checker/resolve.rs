@@ -166,12 +166,12 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class.as_str()) else {
             return rustc_hash::FxHashMap::default();
         };
-        info.templates
+        info.templates()
             .iter()
             .map(|name| {
-                let variance = if info.covariant_templates.contains(name) {
+                let variance = if info.covariant_templates().contains(name) {
                     types::Variance::Covariant
-                } else if info.contravariant_templates.contains(name) {
+                } else if info.contravariant_templates().contains(name) {
                     types::Variance::Contravariant
                 } else {
                     types::Variance::Invariant
@@ -181,7 +181,7 @@ impl<'a> Checker<'a> {
                     types::TemplateParam {
                         name: name.to_string(),
                         bound: Box::new(
-                            info.template_bounds
+                            info.template_bounds()
                                 .get(name)
                                 .cloned()
                                 // No `of`/`as` clause at all - explicit
@@ -235,10 +235,10 @@ impl<'a> Checker<'a> {
             return self.current_method_templates.clone();
         };
         let mut out = rustc_hash::FxHashMap::default();
-        for p in &sig.params {
-            collect_scoped_template_params(&p.ty, method_name, &mut out);
+        for p in sig.params() {
+            collect_scoped_template_params(p.ty(), method_name, &mut out);
         }
-        collect_scoped_template_params(&sig.return_type, method_name, &mut out);
+        collect_scoped_template_params(sig.return_type(), method_name, &mut out);
         out
     }
 
@@ -267,8 +267,8 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         let mut in_params = rustc_hash::FxHashMap::default();
-        for p in &sig.params {
-            collect_scoped_template_params(&p.ty, bare_name, &mut in_params);
+        for p in sig.params() {
+            collect_scoped_template_params(p.ty(), bare_name, &mut in_params);
         }
         // A non-negated conditional return type on a parameter
         // (`($params is array{wrapperClass: class-string<T>} ? T : X)`)
@@ -277,12 +277,12 @@ impl<'a> Checker<'a> {
             negated: false,
             template_subject: false,
             ..
-        } = &sig.return_type
+        } = sig.return_type()
         {
-            collect_scoped_template_params(&sig.return_type, bare_name, &mut in_params);
+            collect_scoped_template_params(sig.return_type(), bare_name, &mut in_params);
         }
         let mut in_signature = in_params.clone();
-        collect_scoped_template_params(&sig.return_type, bare_name, &mut in_signature);
+        collect_scoped_template_params(sig.return_type(), bare_name, &mut in_signature);
         if in_signature.len() == in_params.len() {
             return;
         }
@@ -408,7 +408,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(declaring_class)
-                .and_then(|info| info.extends.first())
+                .and_then(|info| info.extends().first())
                 .map(|p| Type::Object(p.into(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
             // Every nested position too: a generic class's own template
@@ -508,7 +508,7 @@ impl<'a> Checker<'a> {
             return;
         }
         if canonical != resolved {
-            let type_word = class_type_word(info.kind);
+            let type_word = class_type_word(info.kind());
             let mut builder = DiagnosticBuilder::new(
                 format!("{type_word} referenced with incorrect case: {resolved}."),
                 span,
@@ -654,7 +654,7 @@ impl<'a> Checker<'a> {
                 if self
                     .registry
                     .lookup_class(name)
-                    .is_some_and(|(_, info)| info.kind == syntax::ast::ClassKind::Trait)
+                    .is_some_and(|(_, info)| info.kind() == syntax::ast::ClassKind::Trait)
                     && !out.iter().any(|n| n == name)
                 {
                     out.push(name.clone().to_string());

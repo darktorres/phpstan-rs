@@ -62,8 +62,8 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
     for (fqn, info) in &registry.classes {
         push(
             short_name(fqn),
-            class_kind_symbol_kind(info.kind),
-            &info.provenance,
+            class_kind_symbol_kind(info.kind()),
+            info.provenance(),
             namespace_of(fqn),
         );
         let declared_here = |provenance: &Provenance| {
@@ -71,34 +71,34 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
                 .declaring_class()
                 .is_some_and(|c| c.eq_ignore_ascii_case(fqn))
         };
-        for (name, sig) in &info.methods {
-            if declared_here(&sig.provenance) {
+        for (name, sig) in info.methods() {
+            if declared_here(sig.provenance()) {
                 push(
                     name,
                     SymbolKind::METHOD,
-                    &sig.provenance,
+                    sig.provenance(),
                     Some(fqn.to_string()),
                 );
             }
         }
-        for (name, prop) in &info.properties {
-            if declared_here(&prop.provenance) {
+        for (name, prop) in info.properties() {
+            if declared_here(prop.provenance()) {
                 push(
                     name,
                     SymbolKind::PROPERTY,
-                    &prop.provenance,
+                    prop.provenance(),
                     Some(fqn.to_string()),
                 );
             }
         }
-        for (name, cst) in &info.consts {
-            if declared_here(&cst.provenance) {
-                let kind = if matches!(cst.ty, Type::EnumCase(..)) {
+        for (name, cst) in info.consts() {
+            if declared_here(cst.provenance()) {
+                let kind = if matches!(cst.ty(), Type::EnumCase(..)) {
                     SymbolKind::ENUM_MEMBER
                 } else {
                     SymbolKind::CONSTANT
                 };
-                push(name, kind, &cst.provenance, Some(fqn.to_string()));
+                push(name, kind, cst.provenance(), Some(fqn.to_string()));
             }
         }
     }
@@ -107,7 +107,7 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
         push(
             short_name(fqn),
             SymbolKind::FUNCTION,
-            &sig.provenance,
+            sig.provenance(),
             namespace_of(fqn),
         );
     }

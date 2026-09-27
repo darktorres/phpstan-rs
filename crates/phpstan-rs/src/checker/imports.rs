@@ -102,7 +102,7 @@ impl<'a> Checker<'a> {
     /// (`registry/index.rs`'s `build_declarations_with_context`) *and*
     /// every real built-in/extension constant the vendored phpstorm-
     /// stubs corpus declares via its own top-level `define()` calls
-    /// (`php_stubs::generated_stub_constants`, merged in at `Project::
+    /// (`registry::stubs::generated_stub_constants`, merged in at `Project::
     /// new` alongside `generated_stubs`/`generated_stub_classes`) - a
     /// disclosed residual: `Registry::global_constants` only ever sees a
     /// `define()` reachable from a file's own top level (through

@@ -436,7 +436,7 @@ pub(super) fn enumerate_members(
             let Some((owner, sig)) = registry.lookup_method_with_owner(class, name) else {
                 continue;
             };
-            if !is_visible(registry, &owner, &sig.visibility, current_class) {
+            if !is_visible(registry, &owner, &sig.visibility(), current_class) {
                 continue;
             }
             items.push(CompletionItem {
@@ -455,10 +455,10 @@ pub(super) fn enumerate_members(
                 let Some((owner, sig)) = registry.lookup_const_with_owner(class, name) else {
                     continue;
                 };
-                if !is_visible(registry, &owner, &sig.visibility, current_class) {
+                if !is_visible(registry, &owner, &sig.visibility(), current_class) {
                     continue;
                 }
-                let kind = if matches!(sig.ty, Type::EnumCase(..)) {
+                let kind = if matches!(sig.ty(), Type::EnumCase(..)) {
                     CompletionItemKind::ENUM_MEMBER
                 } else {
                     CompletionItemKind::CONSTANT
@@ -474,10 +474,10 @@ pub(super) fn enumerate_members(
                 let Some((owner, sig)) = registry.lookup_property_with_owner(class, name) else {
                     continue;
                 };
-                if !sig.is_static || !seen.insert((2, name.to_string())) {
+                if !sig.is_static() || !seen.insert((2, name.to_string())) {
                     continue;
                 }
-                if !is_visible(registry, &owner, &sig.visibility, current_class) {
+                if !is_visible(registry, &owner, &sig.visibility(), current_class) {
                     continue;
                 }
                 items.push(CompletionItem {
@@ -492,10 +492,10 @@ pub(super) fn enumerate_members(
                 let Some((owner, sig)) = registry.lookup_property_with_owner(class, name) else {
                     continue;
                 };
-                if sig.is_static || !seen.insert((2, name.to_string())) {
+                if sig.is_static() || !seen.insert((2, name.to_string())) {
                     continue;
                 }
-                if !is_visible(registry, &owner, &sig.visibility, current_class) {
+                if !is_visible(registry, &owner, &sig.visibility(), current_class) {
                     continue;
                 }
                 items.push(CompletionItem {
@@ -590,7 +590,7 @@ pub(super) fn enumerate_bare(
             let (insert_text, edit) = resolve_import(current_stmts, fqn);
             items.push(CompletionItem {
                 label: short_name(fqn).to_string(),
-                kind: Some(class_kind_completion_kind(info.kind)),
+                kind: Some(class_kind_completion_kind(info.kind())),
                 insert_text: Some(insert_text),
                 additional_text_edits: edit.map(|e| vec![e]),
                 ..Default::default()

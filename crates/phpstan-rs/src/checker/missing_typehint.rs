@@ -52,7 +52,7 @@ pub(crate) const ITERABLE_GENERIC_CLASS_NAMES: [&str; 4] =
     ["Traversable", "Iterator", "IteratorAggregate", "Generator"];
 
 /// `ReflectionMethod`/`ReflectionProperty` carry a `TClass`
-/// `@template` this project's own `php_stubs::patch_reflection_method_
+/// `@template` this project's own `registry::stubs::patch_reflection_method_
 /// and_property_templates` synthesizes internally (neither is generic in
 /// real phpstorm-stubs, and real PHPStan itself never flags a bare
 /// reference to either) - a bare, untemplated reference to one must never
@@ -63,7 +63,7 @@ pub(crate) const SYNTHETIC_GENERIC_CLASS_NAMES: [&str; 2] =
 
 /// `RecursiveDirectoryIterator` carries a real (not synthetic)
 /// `TKey`/`TValue` template pair once patched in
-/// (`php_stubs::patch_spl_iterator_templates`) - real PHPStan resolves it
+/// (`registry::stubs::patch_spl_iterator_templates`) - real PHPStan resolves it
 /// as generic too (confirmed: a mismatched `@extends` argument there
 /// triggers `generics.notCompatible`, which only fires past the
 /// `isGeneric()` gate), yet a real, installed `phpstan/phpstan` never
@@ -371,20 +371,20 @@ impl<'a> Checker<'a> {
                 }
                 // Only templates without a default must be given.
                 if let Some(info) = self.registry.classes.get(name.as_str())
-                    && info.kind != ClassKind::Trait
+                    && info.kind() != ClassKind::Trait
                 {
-                    let total = info.templates.len();
+                    let total = info.templates().len();
                     let required = info
-                        .templates
+                        .templates()
                         .iter()
-                        .filter(|t| !info.template_defaults.contains_key(*t))
+                        .filter(|t| !info.template_defaults().contains_key(*t))
                         .count();
                     if required > 0 {
-                        let mut list = info.templates.join(", ");
+                        let mut list = info.templates().join(", ");
                         if required != total {
                             list.push_str(&format!(" ({required}-{total} required)"));
                         }
-                        out.push((format!("{} {name}", class_kind_word(info.kind)), list));
+                        out.push((format!("{} {name}", class_kind_word(info.kind())), list));
                     }
                 }
             }
@@ -481,8 +481,8 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|c| c.properties.get(p.name.as_ref()))
-                .map(|sig| sig.ty.clone())
+                .and_then(|c| c.properties().get(p.name.as_ref()))
+                .map(|sig| sig.ty().clone())
             else {
                 continue;
             };
@@ -551,8 +551,8 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|info| info.consts.get(c.name.as_ref()))
-                .map(|cs| cs.ty.clone())
+                .and_then(|info| info.consts().get(c.name.as_ref()))
+                .map(|cs| cs.ty().clone())
             else {
                 continue;
             };
@@ -645,8 +645,8 @@ impl<'a> Checker<'a> {
                 .map(TypeHint::to_string);
             let native_hint = native_hint_text.as_deref();
             let doc_ty = doc.as_ref().and_then(|d| d.params.get(name));
-            let explicit_mixed = match sig.and_then(|s| s.params.get(i)) {
-                Some(param_sig) => param_sig.explicit_mixed_hint,
+            let explicit_mixed = match sig.and_then(|s| s.params().get(i)) {
+                Some(param_sig) => param_sig.explicit_mixed_hint(),
                 None => mentions_mixed(native_hint, doc_ty),
             };
             if *ty == Type::Mixed(false) && !explicit_mixed {
@@ -724,7 +724,7 @@ impl<'a> Checker<'a> {
         }
 
         let return_explicit_mixed = match sig {
-            Some(s) => s.return_explicit_mixed_hint,
+            Some(s) => s.return_explicit_mixed_hint(),
             None => mentions_mixed(native_return, doc_return),
         };
         let return_ty = declared_return.cloned().unwrap_or(Type::Mixed(false));

@@ -103,23 +103,23 @@ impl Project {
         let mut subclassed: FxHashSet<String> = FxHashSet::default();
         let mut overridden: FxHashSet<(String, String)> = FxHashSet::default();
         for info in self.registry.classes.values() {
-            if let Some(parent) = info.extends.first() {
+            if let Some(parent) = info.extends().first() {
                 subclassed.insert(parent.to_ascii_lowercase());
             }
-            let mut ancestor = info.extends.first().cloned();
+            let mut ancestor = info.extends().first().cloned();
             let mut seen = FxHashSet::default();
             while let Some(a) = ancestor {
                 if !seen.insert(a.to_ascii_lowercase()) {
                     break;
                 }
-                for method in info.methods.keys() {
+                for method in info.methods().keys() {
                     overridden.insert((a.to_ascii_lowercase(), method.to_ascii_lowercase()));
                 }
                 ancestor = self
                     .registry
                     .classes
                     .get(&a)
-                    .and_then(|i| i.extends.first().cloned());
+                    .and_then(|i| i.extends().first().cloned());
             }
         }
 
@@ -163,8 +163,8 @@ impl Project {
         let attribute_names: Vec<String> =
             c.attrs.iter().map(|a| a.name.written.to_string()).collect();
         let lower = fqn.to_ascii_lowercase();
-        if !info.is_abstract
-            && !info.is_final
+        if !info.is_abstract()
+            && !info.is_final()
             && !subclassed.contains(&lower)
             && !is_doctrine_mapped(c, &attribute_names)
         {
@@ -178,16 +178,16 @@ impl Project {
                 .build(),
             );
         }
-        if info.is_final {
+        if info.is_final() {
             let inherited = |member: &str, of_method: bool| {
-                info.extends.first().is_some_and(|parent| {
+                info.extends().first().is_some_and(|parent| {
                     if of_method {
                         self.registry.lookup_method(parent, member).is_some()
                     } else {
                         self.registry.lookup_property(parent, member).is_some()
                     }
                 }) || info
-                    .implements
+                    .implements()
                     .iter()
                     .any(|i| of_method && self.registry.lookup_method(i, member).is_some())
             };
@@ -225,7 +225,7 @@ impl Project {
             }
             for k in &c.consts {
                 let from_parent = info
-                    .extends
+                    .extends()
                     .first()
                     .is_some_and(|parent| self.registry.lookup_const(parent, &k.name).is_some());
                 if k.visibility == Visibility::Protected && !from_parent {
@@ -244,7 +244,7 @@ impl Project {
                 }
             }
         }
-        if info.is_abstract {
+        if info.is_abstract() {
             for m in &c.methods {
                 let name = m.function.name.as_ref();
                 if m.is_abstract
@@ -301,7 +301,7 @@ impl Project {
                 };
                 let parent_does_something = self
                     .bodies()
-                    .body(&parent_sig.provenance)
+                    .body(parent_sig.provenance())
                     .is_some_and(|b| !b.is_empty());
                 let call = format!("parent::{}()", f.name);
                 let body = &f.body;
@@ -329,9 +329,9 @@ impl Project {
                     continue;
                 }
                 let needs_arguments = parent_sig
-                    .params
+                    .params()
                     .iter()
-                    .any(|p| !p.has_default && !p.variadic);
+                    .any(|p| !p.has_default() && !p.variadic());
                 let call_text = format!("parent::{}();", f.name);
                 if !found {
                     let fix = if needs_arguments {

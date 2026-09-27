@@ -1350,7 +1350,7 @@ impl<'a> Checker<'a> {
                     && types::Relation::structural()
                         .subtype(&self.infer_expr(&args[2].value, locals), &Type::String) =>
             {
-                let resolved = resolve_call_args(args, &sig.params);
+                let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_array_member(generic);
             }
@@ -1382,7 +1382,7 @@ impl<'a> Checker<'a> {
                         Box::new(Type::String),
                     );
                 }
-                let resolved = resolve_call_args(args, &sig.params);
+                let resolved = resolve_call_args(args, sig.params());
                 if let Some(name_ty) = resolved
                     .first()
                     .copied()
@@ -1534,7 +1534,7 @@ impl<'a> Checker<'a> {
                     && types::Relation::structural()
                         .subtype(&self.infer_expr(&args[1].value, locals), &Type::String) =>
             {
-                let resolved = resolve_call_args(args, &sig.params);
+                let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_array_member(generic);
             }
@@ -1547,7 +1547,7 @@ impl<'a> Checker<'a> {
                     && types::Relation::structural()
                         .subtype(&self.infer_expr(&args[0].value, locals), &Type::String) =>
             {
-                let resolved = resolve_call_args(args, &sig.params);
+                let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_array_member(generic);
             }
@@ -1557,7 +1557,7 @@ impl<'a> Checker<'a> {
             // arbitrary-depth `|`-chain, not just a bare constant, since
             // the flag is commonly OR'd with others.
             "json_encode" if args.len() >= 2 && contains_json_throw_on_error(&args[1].value) => {
-                let resolved = resolve_call_args(args, &sig.params);
+                let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_type_member(generic, &Type::False);
             }
@@ -1767,7 +1767,7 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        let resolved = resolve_call_args(args, &sig.params);
+        let resolved = resolve_call_args(args, sig.params());
         self.infer_call_return_type(sig, &resolved, locals)
     }
 
@@ -1780,7 +1780,7 @@ impl<'a> Checker<'a> {
     /// unchanged rather than picking a side.
     fn find_declared_parent_class(&self, class: &str) -> Option<Type> {
         let info = self.registry.classes.get(class)?;
-        Some(match info.extends.first() {
+        Some(match info.extends().first() {
             Some(parent) => Type::ClassString(Box::new(Type::Object(parent.into(), Vec::new()))),
             None => Type::False,
         })
@@ -2678,7 +2678,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
             if registry
                 .classes
                 .get(class.as_str())
-                .is_some_and(|info| info.is_final)
+                .is_some_and(|info| info.is_final())
             {
                 Type::StringLiteral(class.clone().to_string())
             } else {

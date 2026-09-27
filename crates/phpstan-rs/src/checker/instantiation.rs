@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
             .registry
             .classes
             .get(class.as_str())
-            .is_none_or(|info| !info.extends.is_empty());
+            .is_none_or(|info| !info.extends().is_empty());
         if has_parent {
             return;
         }
@@ -126,8 +126,8 @@ impl<'a> Checker<'a> {
         if is_static {
             self.check_new_static(span);
         }
-        let kind = info.kind;
-        let is_abstract = info.is_abstract;
+        let kind = info.kind();
+        let is_abstract = info.is_abstract();
         match kind {
             ClassKind::Trait => {
                 self.report(
@@ -174,7 +174,7 @@ impl<'a> Checker<'a> {
         let Some((owner, visibility)) = self
             .registry
             .lookup_method_with_owner(class, "__construct")
-            .map(|(owner, sig)| (owner, sig.visibility.clone()))
+            .map(|(owner, sig)| (owner, sig.visibility()))
         else {
             if has_args && !self.registry.has_unresolvable_ancestor(class) {
                 self.report(format!(
@@ -221,8 +221,8 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class.as_str()) else {
             return;
         };
-        let is_abstract = info.is_abstract;
-        if !info.is_final && !info.is_final_by_phpdoc && self.new_static_is_unsafe(&class) {
+        let is_abstract = info.is_abstract();
+        if !info.is_final() && !info.is_final_by_phpdoc() && self.new_static_is_unsafe(&class) {
             self.report_builder(
                 DiagnosticBuilder::new("unsafe usage of new static()".to_string(),
                     span,
@@ -241,7 +241,7 @@ impl<'a> Checker<'a> {
             .and_then(|(owner, _)| self.registry.classes.get(&owner))
             .is_some_and(|owner| {
                 owner
-                    .static_methods
+                    .static_methods()
                     .iter()
                     .any(|m| m.eq_ignore_ascii_case(&method))
             });
@@ -268,10 +268,10 @@ impl<'a> Checker<'a> {
             let Some(info) = registry.classes.get(c.as_str()) else {
                 break;
             };
-            if info.is_consistent_constructor {
+            if info.is_consistent_constructor() {
                 return false;
             }
-            current = info.extends.first().map(|p| p.to_string());
+            current = info.extends().first().map(|p| p.to_string());
         }
         let Some((owner, _)) = registry.lookup_method_with_owner(class, "__construct") else {
             return true;
@@ -283,8 +283,8 @@ impl<'a> Checker<'a> {
             return false;
         }
         if registry.classes.get(&owner).is_some_and(|info| {
-            info.final_methods.contains("__construct")
-                || info.final_methods_by_phpdoc.contains("__construct")
+            info.final_methods().contains("__construct")
+                || info.final_methods_by_phpdoc().contains("__construct")
         }) {
             return false;
         }
@@ -292,20 +292,20 @@ impl<'a> Checker<'a> {
         let mut current = registry
             .classes
             .get(&owner)
-            .and_then(|info| info.extends.first().cloned());
+            .and_then(|info| info.extends().first().cloned());
         while let Some(c) = current {
             let Some(info) = registry.classes.get(&c) else {
                 break;
             };
-            if info.methods.contains_key("__construct") {
+            if info.methods().contains_key("__construct") {
                 prototype_owner = c.clone();
             }
-            current = info.extends.first().cloned();
+            current = info.extends().first().cloned();
         }
         if registry
             .classes
             .get(&prototype_owner)
-            .is_some_and(|info| info.abstract_methods.contains("__construct"))
+            .is_some_and(|info| info.abstract_methods().contains("__construct"))
         {
             return false;
         }
@@ -317,7 +317,7 @@ impl<'a> Checker<'a> {
             && registry
                 .classes
                 .get(t.as_str())
-                .is_some_and(|info| info.abstract_methods.contains("__construct"))
+                .is_some_and(|info| info.abstract_methods().contains("__construct"))
         {
             return false;
         }

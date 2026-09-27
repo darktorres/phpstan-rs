@@ -43,7 +43,7 @@ pub(crate) fn find_dead_abstract_classes(registry: &Registry) -> Vec<String> {
         // Only a real, instantiable class counts as a witness - an
         // abstract subclass, an interface, or a trait proves nothing
         // about whether *this* class can ever actually be constructed.
-        if info.kind != ClassKind::Class || info.is_abstract {
+        if info.kind() != ClassKind::Class || info.is_abstract() {
             continue;
         }
         has_concrete_descendant.extend(registry.all_ancestor_names(fqn));
@@ -52,7 +52,7 @@ pub(crate) fn find_dead_abstract_classes(registry: &Registry) -> Vec<String> {
     registry
         .classes
         .iter()
-        .filter(|(_, info)| info.kind == ClassKind::Class && info.is_abstract)
+        .filter(|(_, info)| info.kind() == ClassKind::Class && info.is_abstract())
         .filter(|(fqn, _)| !has_concrete_descendant.contains(fqn.as_ref()))
         .map(|(fqn, _)| fqn.to_string())
         .collect()

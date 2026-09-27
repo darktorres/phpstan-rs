@@ -496,7 +496,7 @@ impl<'a> Checker<'a> {
                         self.registry
                             .class_template_bindings(name, args, "IteratorAggregate");
                     if let Some(sig) = self.registry.lookup_method(name, "getIterator") {
-                        let declared = self.resolve_pseudo(&sig.return_type, name);
+                        let declared = self.resolve_pseudo(sig.return_type(), name);
                         // Avoid infinite recursion on a (real but
                         // pathological) `getIterator(): static`-shaped
                         // declaration that resolved right back to this

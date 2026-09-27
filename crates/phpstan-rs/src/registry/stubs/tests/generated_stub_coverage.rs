@@ -94,7 +94,7 @@ fn array_map_s_real_stub_no_longer_miscounts_its_superseded_parameter() {
     let required = sig
         .params
         .iter()
-        .filter(|p| !p.variadic && !p.has_default)
+        .filter(|p| !p.variadic() && !p.has_default())
         .count();
     assert_eq!(required, 2, "array_map($callback, $array) is valid");
 }
@@ -110,7 +110,7 @@ fn array_keys_and_mt_rand_s_optional_trailing_params_are_not_miscounted() {
         let required = sig
             .params
             .iter()
-            .filter(|p| !p.variadic && !p.has_default)
+            .filter(|p| !p.variadic() && !p.has_default())
             .count();
         assert!(
             required <= 1,

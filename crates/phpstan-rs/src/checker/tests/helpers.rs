@@ -49,9 +49,9 @@ pub(super) fn all_diagnostics_for_with(
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     let mut registry = Registry::build(&program);
-    registry.merge_stubs(crate::php_stubs::generated_stubs());
-    registry.merge_stub_classes(crate::php_stubs::generated_stub_classes());
-    registry.merge_stub_constants(crate::php_stubs::generated_stub_constants());
+    registry.merge_stubs(crate::registry::stubs::generated_stubs());
+    registry.merge_stub_classes(crate::registry::stubs::generated_stub_classes());
+    registry.merge_stub_constants(crate::registry::stubs::generated_stub_constants());
     // Merging stubs can add classes and `extends` edges after
     // `Registry::build`'s own precompute ran.
     registry.precompute_ancestor_names();

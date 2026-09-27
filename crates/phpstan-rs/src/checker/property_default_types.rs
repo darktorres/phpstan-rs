@@ -29,7 +29,7 @@ impl<'a> Checker<'a> {
             let Some(default) = &p.default else {
                 continue;
             };
-            let Some(prop_sig) = info.properties.get(p.name.as_ref()) else {
+            let Some(prop_sig) = info.properties().get(p.name.as_ref()) else {
                 continue;
             };
             if p.type_hint.is_none()
@@ -43,7 +43,7 @@ impl<'a> Checker<'a> {
             {
                 continue;
             }
-            let property_ty = prop_sig.set_ty.as_ref().unwrap_or(&prop_sig.ty);
+            let property_ty = prop_sig.set_ty().as_ref().unwrap_or(prop_sig.ty());
             // `self::`/`static::` in the default resolve against the
             // declaring class, which isn't otherwise the current class
             // outside a method body.
@@ -53,7 +53,7 @@ impl<'a> Checker<'a> {
             if self.accepts(property_ty, &default_ty).yes() {
                 continue;
             }
-            let kind = if prop_sig.is_static {
+            let kind = if prop_sig.is_static() {
                 "Static property"
             } else {
                 "Property"

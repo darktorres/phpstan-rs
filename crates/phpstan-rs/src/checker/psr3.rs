@@ -407,7 +407,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(class.as_str())
-                .is_some_and(|info| info.kind == ClassKind::Enum),
+                .is_some_and(|info| info.kind() == ClassKind::Enum),
             Type::Union(members) => members.iter().all(|m| self.is_safe_log_value(m)),
             Type::Intersection(_) => self.is_literal_string(ty),
             _ => false,

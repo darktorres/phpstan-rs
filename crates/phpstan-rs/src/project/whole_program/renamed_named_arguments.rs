@@ -101,12 +101,12 @@ fn class_overrides(
     let own_method_names: FxHashSet<&str> =
         c.methods.iter().map(|m| m.function.name.as_ref()).collect();
     let mut trait_method_names: Vec<Arc<str>> = info
-        .methods
+        .methods()
         .keys()
         .filter(|name| {
             name.as_ref() != "__construct"
                 && !own_method_names.contains(name.as_ref())
-                && !info.abstract_methods.contains(*name)
+                && !info.abstract_methods().contains(*name)
         })
         .cloned()
         .collect();
@@ -125,7 +125,7 @@ fn method_overrides(
     let Some(info) = registry.classes.get(fqn) else {
         return;
     };
-    let Some(own_sig) = info.methods.get(method_name) else {
+    let Some(own_sig) = info.methods().get(method_name) else {
         return;
     };
     let Some((ancestor_owner, ancestor_sig, _)) =
@@ -133,20 +133,20 @@ fn method_overrides(
     else {
         return;
     };
-    if ancestor_sig.visibility == Visibility::Private {
+    if ancestor_sig.visibility() == Visibility::Private {
         return;
     }
-    for (i, ancestor_param) in ancestor_sig.params.iter().enumerate() {
-        let Some(own_param) = own_sig.params.get(i) else {
+    for (i, ancestor_param) in ancestor_sig.params().iter().enumerate() {
+        let Some(own_param) = own_sig.params().get(i) else {
             break;
         };
-        if ancestor_param.name != own_param.name {
+        if ancestor_param.name() != own_param.name() {
             out.push(RenamedParameterOverride {
                 prototype_class: ancestor_owner.clone(),
                 method: syntax::intern::intern(method_name),
-                prototype_param: ancestor_param.name.clone(),
+                prototype_param: ancestor_param.name().clone(),
                 overriding_class: syntax::intern::intern(fqn),
-                overriding_param: own_param.name.clone(),
+                overriding_param: own_param.name().clone(),
             });
         }
     }

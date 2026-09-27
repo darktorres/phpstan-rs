@@ -56,9 +56,9 @@ fn diagnostics_with(src: &str, rules: &[Box<dyn Rule>]) -> Vec<Diagnostic> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     let mut registry = Registry::build(&program);
-    registry.merge_stubs(crate::php_stubs::generated_stubs());
-    registry.merge_stub_classes(crate::php_stubs::generated_stub_classes());
-    registry.merge_stub_constants(crate::php_stubs::generated_stub_constants());
+    registry.merge_stubs(crate::registry::stubs::generated_stubs());
+    registry.merge_stub_classes(crate::registry::stubs::generated_stub_classes());
+    registry.merge_stub_constants(crate::registry::stubs::generated_stub_constants());
     registry.precompute_ancestor_names();
     registry.precompute_member_owners();
     let mut checker = Checker::new(&registry);

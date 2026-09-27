@@ -71,8 +71,8 @@ impl<'a> Checker<'a> {
     /// root gate `check_internal_function_call` applies - so an
     /// in-package call to your own `@internal` function never lights up.
     pub(crate) fn record_function_usage_token(&mut self, fqn: &str, sig: &FunctionSig, span: Span) {
-        let deprecated = !self.current_scope_deprecated && sig.deprecated.is_some();
-        let internal = sig.is_internal && self.should_report_internal_usage(fqn);
+        let deprecated = !self.current_scope_deprecated && sig.deprecated().is_some();
+        let internal = sig.is_internal() && self.should_report_internal_usage(fqn);
         self.record_usage_semantic_token(UsageTokenKind::Function, span, deprecated, internal);
     }
 
@@ -100,9 +100,9 @@ impl<'a> Checker<'a> {
     ) {
         let class = self.registry.classes.get(owner);
         let deprecated = !self.current_scope_deprecated
-            && (own_deprecated || class.is_some_and(|c| c.deprecated.is_some()));
+            && (own_deprecated || class.is_some_and(|c| c.deprecated().is_some()));
         let internal = class.is_some_and(|c| {
-            (own_internal || c.is_internal) && self.should_report_internal_usage(owner)
+            (own_internal || c.is_internal()) && self.should_report_internal_usage(owner)
         });
         self.record_usage_semantic_token(kind, span, deprecated, internal);
     }
@@ -114,9 +114,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn record_instantiation_usage_token(&mut self, class: &str, span: Span) {
         let info = self.registry.classes.get(class);
         let deprecated =
-            !self.current_scope_deprecated && info.is_some_and(|i| i.deprecated.is_some());
+            !self.current_scope_deprecated && info.is_some_and(|i| i.deprecated().is_some());
         let internal =
-            info.is_some_and(|i| i.is_internal) && self.should_report_internal_usage(class);
+            info.is_some_and(|i| i.is_internal()) && self.should_report_internal_usage(class);
         self.record_usage_semantic_token(UsageTokenKind::Class, span, deprecated, internal);
     }
 }

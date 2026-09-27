@@ -89,8 +89,10 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(owner) else {
             return;
         };
-        let own = info.method_access.get(method.to_ascii_lowercase().as_str());
-        let class_level: Option<&AccessAttributes> = is_public.then_some(&info.access);
+        let own = info
+            .method_access()
+            .get(method.to_ascii_lowercase().as_str());
+        let class_level: Option<&AccessAttributes> = is_public.then_some(info.access());
         if own.is_none() && class_level.is_none_or(|a| a.is_empty()) {
             return;
         }
@@ -176,14 +178,14 @@ impl<'a> Checker<'a> {
             return;
         };
         let uses: Vec<(String, Vec<std::sync::Arc<str>>)> = info
-            .uses
+            .uses()
             .iter()
             .filter_map(|t| {
                 let restriction = &self
                     .registry
                     .classes
                     .get(t.as_ref())?
-                    .access
+                    .access()
                     .restrict_trait_to;
                 (!restriction.is_empty()).then(|| (t.to_string(), restriction.clone()))
             })
@@ -217,25 +219,25 @@ impl<'a> Checker<'a> {
         for m in &c.methods {
             let checked = m.function.name.eq_ignore_ascii_case("__construct")
                 || info
-                    .method_access
+                    .method_access()
                     .get(m.function.name.to_ascii_lowercase().as_str())
                     .is_some_and(|a| a.check_injectable_version);
             if !checked {
                 continue;
             }
-            let Some(sig) = info.methods.get(m.function.name.as_ref()).or_else(|| {
-                info.methods
+            let Some(sig) = info.methods().get(m.function.name.as_ref()).or_else(|| {
+                info.methods()
                     .get(m.function.name.to_ascii_lowercase().as_str())
             }) else {
                 continue;
             };
             let findings: Vec<(Span, String, String, String)> = sig
-                .params
+                .params()
                 .iter()
                 .zip(&m.function.params)
                 .flat_map(|(param, decl)| {
                     let mut names = Vec::new();
-                    object_names(&param.ty, &mut names);
+                    object_names(param.ty(), &mut names);
                     names
                         .into_iter()
                         .filter_map(|name| {
@@ -262,7 +264,7 @@ impl<'a> Checker<'a> {
     /// subtype of, if any.
     fn injectable_version_of(&self, class: &str) -> Option<String> {
         let (canonical, info) = self.registry.lookup_class(class)?;
-        if info.access.injectable_version {
+        if info.access().injectable_version {
             return None;
         }
         self.registry
@@ -274,7 +276,7 @@ impl<'a> Checker<'a> {
                         .registry
                         .classes
                         .get(a.as_ref())
-                        .is_some_and(|i| i.access.injectable_version)
+                        .is_some_and(|i| i.access().injectable_version)
             })
             .map(|a| a.to_string())
     }

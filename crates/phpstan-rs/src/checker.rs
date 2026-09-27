@@ -1655,10 +1655,10 @@ impl<'a> Checker<'a> {
                         .iter()
                         .map(|s| s.to_string()),
                 );
-                if info.is_abstract || info.kind != ClassKind::Class {
+                if info.is_abstract() || info.kind() != ClassKind::Class {
                     for (other_fqn, other_info) in &self.registry.classes {
-                        if other_info.kind == ClassKind::Class
-                            && !other_info.is_abstract
+                        if other_info.kind() == ClassKind::Class
+                            && !other_info.is_abstract()
                             && self
                                 .registry
                                 .all_ancestor_names(other_fqn)
