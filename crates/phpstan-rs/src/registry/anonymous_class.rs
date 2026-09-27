@@ -84,6 +84,7 @@ pub(crate) fn collect_anonymous_classes(
         names.insert(expr.span, name.clone());
         let name: std::sync::Arc<str> = std::sync::Arc::from(name);
         let mut info = ClassReflection::from_decl(decl, &ctx);
+        info.is_anonymous = true;
         info.record_provenance(origin, &name, expr.span, &MemberSpans::of_class(decl));
         // Not `intern()`: every anonymous class in the whole corpus gets
         // its own unique md5-hashed name (file+line+index), so there is

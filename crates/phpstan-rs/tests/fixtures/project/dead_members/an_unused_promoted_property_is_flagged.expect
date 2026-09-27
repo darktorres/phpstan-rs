@@ -1,0 +1,1 @@
+a.php:3:77-3:79 property.unused L5 | Property Point::y is never used.

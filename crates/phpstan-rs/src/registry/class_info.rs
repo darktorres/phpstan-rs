@@ -569,10 +569,16 @@ pub struct ClassReflection {
     // `type_alias_case_refs`, a class can carry several `@mixin` tags
     // with no unique name to key by).
     pub(in crate::registry) mixin_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    // A `new class { ... }` expression's class.
+    pub(in crate::registry) is_anonymous: bool,
     pub(in crate::registry) provenance: Provenance,
 }
 
 impl ClassReflection {
+    pub fn is_anonymous(&self) -> bool {
+        self.is_anonymous
+    }
+
     pub fn kind(&self) -> ClassKind {
         self.kind
     }
@@ -1625,6 +1631,7 @@ impl ClassReflection {
         let doctrine_entity = compute_doctrine_entity(c, ctx, &properties);
 
         ClassReflection {
+            is_anonymous: false,
             provenance: Provenance::default(),
             kind: c.kind,
             is_abstract: c.is_abstract,
@@ -2142,6 +2149,7 @@ impl ClassReflection {
             .collect();
 
         ClassReflection {
+            is_anonymous: false,
             provenance: Provenance::default(),
             kind: ClassKind::Enum,
             is_abstract: false,

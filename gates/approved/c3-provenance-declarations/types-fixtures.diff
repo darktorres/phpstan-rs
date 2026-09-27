@@ -1,0 +1,22 @@
+--- old
++++ new
+@@ -7635,6 +7635,9 @@
+ project/composer_hygiene/production_code_using_an_autoload_dev_class_is_flagged: src/Uses.php:3:35 [App\Uses] this: App\Uses
+ project/dead_code/a_class_instantiated_from_a_different_file_is_not_flagged: b.php:1:7 [] 
+ project/dead_code/a_function_called_from_a_different_file_is_not_flagged: b.php:1:7 [] 
++project/dead_code/an_anonymous_class_is_never_flagged: a.php:4:5 [] 
++project/dead_code/an_anonymous_class_is_never_flagged: a.php:5:43 [class@anonymous] this: class@anonymous
++project/dead_code/an_anonymous_class_is_never_flagged: a.php:8:1 [] 
+ project/dead_enum_cases/a_case_produced_by_a_literal_from_call_is_not_flagged: a.php:1:82 [] 
+ project/dead_enum_cases/a_case_produced_by_a_literal_try_from_call_is_not_flagged: a.php:1:82 [] 
+ project/dead_enum_cases/a_case_referenced_by_bare_name_is_not_flagged_even_from_a_different_file: b.php:1:22 [] 
+@@ -7654,6 +7657,9 @@
+ project/dead_members/a_method_called_from_a_different_file_is_not_flagged: b.php:1:28 [] x: Foo (native Foo)
+ project/dead_members/a_property_read_from_a_subclass_is_not_flagged: b.php:1:46 [Bar] this: Bar
+ project/dead_members/a_tostring_method_is_never_flagged: a.php:1:58 [Foo] this: Foo
++project/dead_members/an_unused_promoted_property_is_flagged: b.php:2:21 [] p: Point (native Point)
++project/dead_members/an_unused_promoted_property_is_flagged: b.php:2:43 [] p: Point (native Point)
++project/dead_members/an_unused_promoted_property_is_flagged: b.php:3:1 [] 
+ project/duplicate_classes/a_class_exists_guarded_declaration_duplicated_across_two_files_is_not_flagged: a.php:1:7 [] 
+ project/duplicate_classes/a_class_exists_guarded_declaration_duplicated_across_two_files_is_not_flagged: a.php:1:38 [] 
+ project/duplicate_classes/a_class_exists_guarded_declaration_duplicated_across_two_files_is_not_flagged: a.php:1:40 [] 

@@ -63,16 +63,18 @@ pub(crate) fn find_dead_functions(registry: &Registry, use_sites: &UseSiteIndex)
 
 /// Every class/interface/trait/enum with zero recorded `RefTarget::Class`
 /// sites anywhere in the project - same shape as `find_dead_functions`
-/// above, for `Registry.classes` instead.
+/// above, for `Registry.classes` instead. An anonymous class is used
+/// where it is declared.
 pub(crate) fn find_dead_classes(registry: &Registry, use_sites: &UseSiteIndex) -> Vec<String> {
     registry
         .classes
-        .keys()
-        .filter(|fqn| {
-            use_sites
-                .references(&RefTarget::Class(fqn.to_string()))
-                .is_empty()
+        .iter()
+        .filter(|(fqn, info)| {
+            !info.is_anonymous()
+                && use_sites
+                    .references(&RefTarget::Class(fqn.to_string()))
+                    .is_empty()
         })
-        .map(|fqn| fqn.to_string())
+        .map(|(fqn, _)| fqn.to_string())
         .collect()
 }
