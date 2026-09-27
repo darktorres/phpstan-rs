@@ -1223,7 +1223,10 @@ Follow-ups:
   bound. Today `'no_such_function'`, `[1, 2]` and `'stdClass'` for
   `class-string<DateTimeInterface>` are accepted.
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
-  member covers (`A|B` for `B extends A` stays two members).
+  member covers (`A|B` for `B extends A` stays two members). Identical
+  members collapse too: a closure parameter today reaches
+  `Node|Node|Node|Node|Node|Node&Return_&Return_&Return_&Return_&Return_`
+  (D5).
 - **Display is unambiguous**: a string literal escapes its quotes (`'a\'b'`
   displays as `'a'b'`), and a callable's union return and a callable inside
   a union are parenthesized (`Closure(int): (int|string)` displays as
@@ -2328,6 +2331,14 @@ deleted; the file-size gate.
       $cb($save);`, and after `$f = 'h'; $f($s);` for `h(bool &$x)`, the
       variable is still `true` and `$save === false` is reported
       `identical.alwaysFalse` (`processArgs`; nsrt `bug-5615.php`);
+    - `||` narrowing on a union that isn't normalized loses members: on
+      `@param Node|Return_ $n` with `Return_ implements Node`, falling past
+      `if (!$n instanceof Expression && !$n instanceof Return_) { return; }`
+      leaves `Return_` where it is `Expression|Return_`, so a later
+      `$n instanceof Expression` is `instanceof.alwaysFalse`
+      (`rector/rules/DeadCode/Rector/Property/RemoveUnusedPrivatePropertyRector.php:166`,
+      through the closure parameter below); an `instanceof` expression is
+      typed `mixed` today, not `bool`;
     - the wrong values inside the families below land here too: `%`
       giving `never` (Arithmetic) and a pre-increment's old value
       (Increments).
@@ -2811,7 +2822,12 @@ building on the previous one:
     - by-reference `use` follows `processClosureScope`: an undefined
       variable is `null` in the outer scope, and afterwards it is the
       closure's type unioned with the previous one and generalized;
-    - a closure with by-reference uses converges like a loop;
+    - a closure with by-reference uses converges like a loop; any other
+      closure's body is entered once, from its declared parameter types.
+      Today a closure whose body returns after `if (!$node instanceof
+      Return_)` is re-entered six times with the narrowed `$node` unioned
+      into the parameter, which reads
+      `Node|Node|Node|Node|Node|Node&Return_&…` at the body's start;
     - a static closure has no `$this`: `static fn () => $this->p` isn't
       reported today (a static `function` already is `variable.undefined`),
       and PHP throws on it;
