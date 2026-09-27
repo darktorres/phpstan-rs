@@ -1628,7 +1628,13 @@ Follow-ups:
     `array<int>`, and the parent's `@param string|string[]` inherited onto
     `string|iterable|AbstractString` loses `AbstractString`: snapshot
     0a8fe69 has 15 `instanceof.alwaysFalse` in `symfony/string/ByteString.php`
-    and its siblings that the oracle doesn't report.
+    and its siblings that the oracle doesn't report. An inherited PHPDoc
+    type naming a subclass of the child's native class type applies as an
+    own one would: for a parent's `@return Baz` on `: Bar`, the child's
+    `r(): Bar` returns `Bar` today, and a parent's `@param Baz $o` leaves
+    `$o` as `Bar` in the child's body (an inherited `@return array<int>` on
+    `: array` already applies; nsrt `method-phpDocs-inheritdoc.php`,
+    `methodPhpDocs-implicitInheritance.php`).
 
   Class constants are typed through the `ConstantResolver` (C2's follow-up,
   which lands first), reading the ancestor level's constant declarations
@@ -1800,7 +1806,9 @@ Follow-ups:
     `@use Trait<T>` template bindings, and a trait member's aliases
     resolved in the trait's scope (`self` still the host);
   - PHPDoc inheritance carries `@phpstan-assert*`, `@param-out`,
-    `@phpstan-self-out`, `@throws` and method templates;
+    `@phpstan-self-out`, `@throws` and method templates, and a property
+    redeclared without `@var` keeps its parent's (`mixed` today; nsrt
+    `inherit-phpdoc-merging-var.php`);
   - `@phpstan-type` aliases apply in `@property`/`@method` tags and on
     enums, chained to any depth; an alias on an import cycle stays
     unresolved;
@@ -1979,7 +1987,10 @@ structural one, each fixtured:
 - a trait's `@method`/`@property` tags reach its hosts (`method.notFound`
   and `property.notFound` today);
 - a `@method` tag is not an override prototype and has no native types;
-- enums read `@method` and `@mixin`.
+- enums read `@method` and `@mixin`;
+- `@phpstan-require-extends Base` on an interface makes `Base`'s members
+  visible through the interface: `$i->x` for an `I $i` is
+  `property.notFound` today (nsrt `bug-10302-interface-extends.php`).
 
 The class-reflection data extensions take `registry::access_attributes`
 (ext-language-extensions) and `registry::class_info::doctrine_entity`
@@ -2823,6 +2834,11 @@ building on the previous one:
     `'one'|'two'` (nsrt `bug-14081.php`, `array-pop.php`, `array-shift.php`);
   - `gettype()` of a resource omits `'resource (closed)'`, as `is_resource`
     does (D3);
+  - `Throwable::getCode()` is `int`, but a `PDOException`'s code is a
+    string, so `is_string($t->getCode())` reads as always false;
+    `ThrowableReturnTypeExtension` gives `int|string` (benevolent) unless
+    the class narrows it. `Exception::getCode()` is `mixed` today (nsrt
+    `bug-6001.php`);
   - `trigger_error('…', E_USER_ERROR)` is `true` where it ends the script
     (`never`), so the code after it is reachable; before PHP 8.0 a level
     other than `E_USER_*` returns `false` (nsrt `trigger-error-php8.php`,
