@@ -1307,7 +1307,12 @@ Follow-ups:
     every direct `registry.classes`/`functions`/`global_constants` access
     outside `registry/` is converted (about 280, 23 of them in tests);
   - the builders read parse-time `resolved` names instead of re-resolving
-    through a `NameContext`.
+    through a `NameContext`;
+  - no result depends on the class map's iteration order, which folded
+    keys change: `classes_using_trait` returns its hosts sorted (they
+    order the per-host trait checks), and `doctrine_entity_for_table`
+    picks among entities mapping one table by name order instead of the
+    first found.
 - **Written results leave the signatures.** Everything a remaining pass
   writes moves out of the views the memo will own:
   - purity results go to a registry table keyed by function and by
@@ -1448,7 +1453,14 @@ Follow-ups:
   interner's entries nothing else holds. A closure gate is a test that
   applies a sequence of deltas and compares every query on the result with
   a fresh build of the final file set: a property test over the fixture
-  files, and one test per staleness case below.
+  files, and one test per staleness case below. With declarations kept per
+  file, whether a declaration holds its name is a provenance comparison:
+  the checker's rebuild-and-compare (`ClassReflection::from_decl` and
+  `from_enum_decl` in `oop.rs`, `from_decl` for a trait in
+  `function_decl.rs`) and a losing duplicate function's rebuilt signature
+  read the file's own declaration instead; the builder builds property-hook
+  signatures with their property, which `check_hook_phpdoc_types` reads
+  instead of synthesizing a `FunctionDecl`.
 - **Staleness fixes** (approved deltas), each with a closure gate, through
   the per-file declaration sets (which also hold what
   `unconditionally_declared_classes`/`_functions` record): anonymous
@@ -1502,7 +1514,9 @@ Follow-ups:
     pinning the union (`two_unconditional_*` in
     `stubs_and_conditional_declarations.rs`) are rewritten per case;
   - LSP navigation (`class_declaration`, `member_declaration`) uses the
-    folded keys.
+    folded keys;
+  - a table two entities map resolves to no entity, as
+    `repository_entity` already treats a repository two entities name.
 
 Gate: the gated steps' medians are lower than the phase start's
 (`xtask gatetime --since`); no stub class resolves unless something
