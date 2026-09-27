@@ -859,8 +859,9 @@ corpus, type, baseline, performance and build-time gates run locally
 12. **Oracles** (from Stage D), both against PHPStan 2.2.16:
     - `cargo xtask nsrt` runs `check-project` over
       `vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (15 s), with
-      `tests/PHPStan` as a scan directory and phpstan-src's composer
-      dependencies installed, and counts the `assertType`,
+      `tests/PHPStan` as a scan directory, phpstan-src's composer
+      dependencies installed and each file at a PHP version its `// lint`
+      header allows, and counts the `assertType`,
       `assertNativeType` and `assertVariableCertainty` mismatches after
       display normalization (Stage D lists the forms), by file and owning
       phase (`gates/nsrt/owners.toml`), wrong values first;
@@ -2009,7 +2010,9 @@ The second oracle is PHPStan's own inference suite,
 --php-version 8.5` with `tests/PHPStan` as a scan directory (the fixtures'
 classes live in `tests/PHPStan/Analyser/data`, which PHPStan loads through
 its `autoload-dev` classmap) and phpstan-src's composer dependencies
-installed (`nikic/php-parser`'s node classes). Mismatches are compared
+installed (`nikic/php-parser`'s node classes). A file whose `// lint`
+header excludes 8.5 runs at the highest version it allows (60 files, 47 of
+them `< 8.0` at 7.4). Mismatches are compared
 after a normalization of display forms that carry the same information:
 union member order, benevolent parentheses, shape key order,
 `array<(int|string), T>` as `array<T>`, a list shape's explicit keys
@@ -2017,12 +2020,12 @@ union member order, benevolent parentheses, shape key order,
 scope suffix (`T (function f(), argument)`), an accessory string's
 combined name (`non-falsy-lowercase-string` is
 `lowercase-string&non-falsy-string`) and a small integer range against its
-literals (`int<0, 1>` is `0|1`). phpstan-rs misses 11,429 at `76e738b4`.
-By asserted expression: 5,011 are variables, 3,450 are calls to functions
+literals (`int<0, 1>` is `0|1`). phpstan-rs misses 11,106 at `76e738b4`.
+By asserted expression: 4,788 are variables, 3,399 are calls to functions
 PHPStan types through an extension (E2; 413 of them `mixed`, among them
-`filter_var` 191 and `min`/`max` 198), 1,037 are operators (D3), 713 are
-method calls, 351 other function calls, 302 properties, 180 offsets and
-35 `new`. 105 are wrong values: every member of both types is a literal
+`filter_var` 191 and `min`/`max` 198), 1,016 are operators (D3), 707 are
+method calls, 347 other function calls, 300 properties, 179 offsets and
+35 `new`. 100 are wrong values: every member of both types is a literal
 and an expected literal is missing from phpstan-rs's type. Each wrong value
 is fixed first in its owning phase and is listed there. The count is a
 tracked number: each phase records it, and a phase that raises it has a
@@ -2038,7 +2041,7 @@ The mismatches span stages: `filterVar.php` (156 `mixed`),
 E2's built-in extensions, and the `methodPhpDocs-*` files are C's PHPDoc
 inheritance. The first `cargo xtask nsrt` run therefore checks in
 `gates/nsrt/owners.toml`, which names the owning phase (B4, C1–C10, D1–D6,
-E2) for each of the 1,371 mismatching files, split by line where a file
+E2) for each of the 1,360 mismatching files, split by line where a file
 spans phases. A phase is done when its files have no mismatches, or each
 remaining line is an approved deviation that names its runtime reason.
 `cargo xtask nsrt` reports by owner and lists the wrong values first, and
@@ -2707,13 +2710,13 @@ building on the previous one:
     `mb_convert_case('Česká republika', MB_CASE_UPPER)` is
     `'ČESKá REPUBLIKA'` (nsrt `str-casing.php`).
 
-  Then the functions `gates/nsrt/owners.toml` assigns to E2 (3,450 nsrt
+  Then the functions `gates/nsrt/owners.toml` assigns to E2 (3,399 nsrt
   mismatches on calls to functions PHPStan types through an extension),
   by count: `filter_var`/`filter_var_array` (353, 191 of them `mixed`),
   `array_column` (215), `min`/`max` (217, 198 `mixed`), `count` (115),
   `array_slice` (102), `sprintf`/`vsprintf` (136), `settype`'s narrowing
-  (`set-type-type-specifying.php`, 149), the preg `$matches` shapes
-  (`preg_match_shapes.php`, 225) and the BcMath functions and
+  (`set-type-type-specifying.php`, 156), the preg `$matches` shapes
+  (`preg_match_shapes.php`, 218) and the BcMath functions and
   `BcMath\Number` operators (`bcmath-*.php`, 304).
 
 Gate: the analyser's built-in-name allowlist.
