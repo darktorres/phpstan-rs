@@ -603,7 +603,9 @@ declares.
   - a public "is this usage internal / deprecated from this scope"
     predicate, used by rules and by the LSP semantic-token observer.
 - **Summaries API.** Whole-program summaries that feed inference, such as
-  purity and global-variable types (and later ROADMAP 85/87/88/90/94), run
+  purity and global-variable types (and later, from the ROADMAP: H2, H3,
+  U1-U4, U6 and P1; A5 and U5 are reflection enumeration queries instead;
+  H1, V1, V2 and Phase 90 are collector rules, not summaries), run
   as a fixed point before analysis. They are stored per reflection snapshot
   in `AnalysisContext` and declare invalidation keys. The invariant: per-file
   inference reads reflection plus summaries, and never collector output.
@@ -1500,7 +1502,14 @@ of them, so this gate (and C5's) gets a command first: `xtask gatetime
 commit's, failing on any step not lower.
 
 **C5. Locator chain and stub layer**, one commit each:
-- the stub layer's version key, decided first and recorded in Appendix F:
+- the stub layer's version key, decided first and recorded in Appendix F.
+  Its reach: phpstorm-stubs carries 2,234 `LanguageLevelTypeAware` and 598
+  `PhpStormStubsElementAvailable` attributes in 88 files; today the newest
+  reading wins for every project, so 185 declarations take a type from PHP
+  8.4 or later (134 at 8.4, 48 at 8.5, 3 at an unreleased 8.6) even for a
+  project whose range ends at 8.3. The index sees only the 35 top-level
+  function gates; member and parameter gates live inside the files, so the
+  layer parses per version.
   a project has a `PhpVersions` range (B8), not one version, and the key
   decides signature selection, the functionMap deltas (C6) and the
   version-specific `.stub` files (`socket_select.stub` vs
@@ -1556,17 +1565,38 @@ design.
 PHPDoc through the phpdoc grammar (TypeNode), never `parse_type_string`,
 which C7 deletes:
 - phpstan-src `.stub` PHPDoc overlays (approved delta, split per stub
-  file): today `patch_phpstan_stub_classes` takes only class templates,
+  file). PHPStan loads 31 of the files unconditionally (`conf/config.neon`
+  `stubFiles`) and 9 through five version-gated `StubFilesExtension`s -
+  `BcMathNumber` (8.4), `JsonValidate` (8.3), `ReflectionClass` (the
+  `WithLazyObjects` pair from 8.4), `ReflectionEnum` (enums, then the 8.4
+  pair), `SocketSelect` (8.0) - which port as `StubFilesExtension`'s
+  built-in implementors; today all 40 load whatever the version, both
+  variants of each pair included. today `patch_phpstan_stub_classes` takes only class templates,
   bounds, variance and property types; the 144 top-level functions in 13
   stub files (`core.stub` 63, `file.stub` 31, `arrayFunctions.stub` 16,
   `typeCheckingFunctions.stub` 16, `ctype.stub` 10, ...) and all method
   PHPDoc are new, and overlap the built-in typing E2 moves;
 - declarative patch entries;
 - the `functionMap.php` + deltas layer: `stub-sources` embeds
-  `resources/functionMap.php` and its six `functionMap_php*delta.php`
-  files (the `bleedingEdge` variants decided and recorded), the index and
-  its regeneration test cover them, and a `SignatureMapParser` port reads
-  them. It replaces `patch_functionmap_array_shapes`;
+  `resources/functionMap.php` (12,214 entries) and its seven
+  `functionMap_php{74,80,81,82,83,84,85}delta.php` files (the two
+  `bleedingEdge` files decided and recorded), the index and its
+  regeneration test cover them, and a `SignatureMapParser` port reads
+  them. It replaces `patch_functionmap_array_shapes`. PHPStan's merge rule
+  (`Php8SignatureMapProvider::mergeSignatures`) is the one to port: a
+  parameter's type is the native type decided against the stub's PHPDoc
+  decided against the functionMap type; the return type is the
+  functionMap's when the native return is an implicit `mixed`, else
+  decided the same way. The base those native signatures come from is
+  decided in the same commit and recorded in Appendix F: PHPStan's PHP 8
+  base is `phpstan/php-8-stubs` (php-src's own `*.stub.php`), not
+  phpstorm-stubs, which it uses for classes; `registry/stubs.rs`'s module
+  doc saying PHPStan doesn't use php-src's stubs is wrong;
+- `resources/functionMetadata.php` (1,756 entries, `hasSideEffects` and
+  `pureUnlessCallableIsImpureParameters`) is embedded as the builtin
+  purity source. Nothing reads it today, so a bare `strlen('x');` is not
+  `function.resultUnused` and a user function whose body only calls
+  `strlen()` is never pure (both reproduced); C9's summaries read it;
 - user `stub_paths` PHPStan semantics (approved delta). Today's behaviour,
   reproduced, which the delta replaces:
   - a `.stub` file given to `--stub-path`/`stub_paths` is not loaded at all
@@ -1666,7 +1696,11 @@ extract. Attribute arguments are evaluated to types (constants through
 the ConstantResolver, `new` and constant expressions included).
 
 **C9. Summaries.** Purity and global-variable inference leave reflection for
-the summaries API. The ROADMAP mapping is recorded. C9 creates
+the summaries API. The ROADMAP mapping, item by item (§3.8): summaries -
+H2, H3, U1-U4, U6, P1; reflection enumeration - A5, U5; collector rules
+(E1) - H1, V1, V2, Phase 90; neither - A2-A4 and A6 (per-file inference),
+C1 (`types`), P2 (the composer package context), D1 (a metrics rule).
+Builtin purity comes from C6's `functionMetadata`. C9 creates
 `AnalysisContext` in the package's future `analyser` module to hold them
 per reflection snapshot (§3.8); D6 extends it. `purity_dependencies` and
 `is_transitively_pure` leave `FunctionReflection`. Whether stubs have
@@ -2153,7 +2187,7 @@ Non-Registry keys follow the table.
 | md5 | reflection (anonymous-class naming) |
 | pcre2-sys | builtins (`pcre-validate`) |
 | rayon | project; reflection while it indexes stubs and runs purity in parallel (decided in C5) |
-| regex | config (globs), app, reflection where used, lsp |
+| regex | config (globs), app, lsp (reflection uses none) |
 | roxmltree | builtins (xml validators) |
 | rustc-hash | wherever used |
 | serde | every crate with a config section or serialized output |
