@@ -2858,7 +2858,9 @@ building on the previous one:
     >= 80400)`, `PHP_VERSION_ID` and the scope's `php_version()` (§3.8) are
     the configured range cut at 80400, so version-gated checks there read
     the narrowed range. C2 first types the constant over the configured
-    range; today it is the stub's `50306` whatever the configuration.
+    range; today `"php": "^8.1"` or `">=8.1"` leaves it the stub's `50306`
+    (`~8.3.0` gives `int<80300, 80399>`, and `">= 8.1"` gives
+    `int<50207, max>`, B8's grammar item).
 
 **D6. Engine APIs**, one commit each:
 - Scope API (§3.8's list);
