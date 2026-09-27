@@ -1021,7 +1021,8 @@ Follow-ups, one commit each, each with its test:
   invalid one is a load error; `count` is enforced.
 - **Error paths.** Every type error names its full dotted key path.
 - **Missing settings**, each with the phase that implements it:
-  universal object crates (`ReflectionSettings`, C8; replaces the
+  mixin exclude classes (`ReflectionSettings`, C8), universal object
+  crates (`ReflectionSettings`, C8; replaces the
   hard-coded `stdClass` in `checker/expr.rs`), global type aliases
   (`ReflectionSettings`, C7), a `php_version` range and patch version
   (C5), treatPhpDocTypesAsCertain (D2), polluteScopeWith* (D2),
@@ -1124,7 +1125,7 @@ Follow-ups:
   no old commit is rebuilt.
 - **Keys and data model** (structural; snapshots unchanged except where
   two classes' names differ only in case, which now collide under the
-  collision policy - an approved delta if the corpus has one):
+  collision policy; neither the corpus nor the stubs has such a pair):
   - class entries are keyed by the folded name (`Name::lower`, as
     `FunctionTable` keys functions) and hold the declared `Name`; the side
     map and `canonicalize_class_name_case` are deleted; method keys fold
@@ -1202,7 +1203,8 @@ Follow-ups:
     ancestors' inherited level;
   - **members**: each `@mixin` target's public methods and properties, at
     the target's inherited level, added where the class has none of that
-    name; then the member owners;
+    name (until C8's mixin extension replaces the copy); then the member
+    owners;
   - **final**: PHPDoc members the native type excludes dropped, the relation
     reading other classes' members level.
 
@@ -1307,20 +1309,15 @@ Follow-ups:
   - member resolution follows PHP: the class chain first, then interfaces;
   - trait composition: `insteadof`, visibility-changing `as`, a trait's
     `final` methods, an abstract method implemented by another trait,
-    `@use Trait<T>` template bindings, a trait's `@method` tags reaching
-    its hosts, and a trait member's aliases resolved in the trait's scope
-    (`self` still the host);
+    `@use Trait<T>` template bindings, and a trait member's aliases
+    resolved in the trait's scope (`self` still the host);
   - PHPDoc inheritance carries `@phpstan-assert*`, `@param-out`,
     `@phpstan-self-out`, `@throws` and method templates;
-  - a mixin brings in the target's inherited members too, and the targets'
-    own mixins, following the ancestor level's mixin closure (the class
-    itself excluded);
-  - a `@method` tag is not an override prototype and has no native types;
   - `@phpstan-type` aliases apply in `@property`/`@method` tags and on
     enums, chained to any depth; an alias on an import cycle stays
     unresolved;
-  - enums read `@deprecated` on cases, `@var` on constants, and `@method`/
-    `@mixin`/`@phpstan-require-*`;
+  - enums read `@deprecated` on cases, `@var` on constants, and
+    `@phpstan-require-*`;
   - promoted properties carry asymmetric visibility and their own
     `@deprecated`/`@internal`;
   - anonymous classes resolve names per namespace block, and diagnostics
@@ -1448,6 +1445,29 @@ ancestor reached through an unresolved edge (C4's ancestor level) answers
 `Maybe` (approved delta, fixture first): `instanceof`, override, `final`
 and `#[\Override]` checks through an unvendored parent stop treating it as
 known. Consumers needing certainty treat `Maybe` as unknown.
+
+The `@property`, `@method` and `@mixin` implementors replace C4's copies
+(the own level's tags, the members level's mixins): member lookup asks the
+native members (own, traits, ancestors) first and these extensions after,
+as `ClassReflection::hasMethod` does; a tag declared at the same or a
+closer hierarchy distance than the native member wins, as in
+`PhpClassReflectionExtension`. Behaviour fixes, one commit each after the
+structural one, each fixtured:
+- a mixin member never shadows a native one, inherited ones included
+  (`@mixin Mx` on a class whose parent declares `m()` types `$h->m()` by
+  `Mx::m()` today);
+- a mixin brings in the target's inherited members, the target's own
+  mixins (guarded per type and member against recursion, as PHPStan's
+  `inProcess`), and a used trait's mixins;
+- `@mixin Box<int>` binds `Box`'s templates;
+- a mixin method is static on a class with a native `__callStatic`
+  (`method.staticCall` today);
+- `mixin_exclude_classes` (`ReflectionSettings`) skips mixin types naming
+  those classes;
+- a trait's `@method`/`@property` tags reach its hosts (`method.notFound`
+  and `property.notFound` today);
+- a `@method` tag is not an override prototype and has no native types;
+- enums read `@method` and `@mixin`.
 
 The class-reflection data extensions take `registry::access_attributes`
 (ext-language-extensions) and `registry::class_info::doctrine_entity`
