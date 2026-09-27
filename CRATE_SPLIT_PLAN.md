@@ -1327,6 +1327,16 @@ Follow-ups:
   installed packages and no vendor context.
 - **`psr-0` autoload** entries count in `Autoload` (only `psr-4`, `classmap`
   and `files` are read).
+- **The root package's own autoload is context.** Analysing named files
+  loads `vendor/` but not the root package's `autoload`/`autoload-dev`
+  targets, so a class of the project that isn't named is unknown:
+  `check-project ./src/Piwigo/Activity/ActivityRepository.php` reports
+  `class.notFound` for `ActivityObject` (in `src/`, `Piwigo\` → `src/`),
+  `argument.type` with `mixed`, and `match.unhandled` on an exhaustive
+  `match` over it, 12 findings that naming the enum's file too removes.
+  PHPStan's autoloader covers the root package. The corpus oracle passes
+  phpstan-rs the files by name, so its 69 phpstan-rs-only findings under
+  `src/`, `install/` and `plugins/` at `76e738b4` include these.
 
 **B9. stub-sources.**
 - The generated index plus the xtask plus the regeneration test.
