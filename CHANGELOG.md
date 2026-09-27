@@ -82,6 +82,9 @@ User-visible changes: output, formats, flags, configuration and exit codes.
 - An integer range absorbs the integer constants and ranges it overlaps or
   touches: `0|positive-int` is `int<0, max>` and accepts one, and a
   variable narrowed both ways and merged is `int` again (`bda6df20`).
+- Inside a generic class its own templates stay templates: `$this` carries
+  them, and `parent::__construct()` binds the parent's templates through
+  `@extends` instead of their defaults (`40e45bdc`).
 
 ### Project
 - Licensed under MIT.
