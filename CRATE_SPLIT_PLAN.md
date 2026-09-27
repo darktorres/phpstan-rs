@@ -1229,7 +1229,9 @@ Follow-ups:
   displays as `'a'b'`), and a callable's union return and a callable inside
   a union are parenthesized (`Closure(int): (int|string)` displays as
   `Closure(int): int|string`, `(callable(): void)|null` as
-  `callable(): void|null`). A float literal keeps its decimal point:
+  `callable(): void|null`). A string with control characters displays
+  escaped in double quotes: `PHP_EOL` is `' '|' '` today, with the raw
+  line breaks between the quotes. A float literal keeps its decimal point:
   `@param 0|0.0|1.5 $x` displays as `0|0|1.5` today.
 - **Callable parameters** carry their names, and a callable its purity.
   `CallableParam` has no name today, so `$f(valu: 1)` on `fn (int $value)`
@@ -2347,7 +2349,11 @@ deleted; the file-size gate.
       its value: after `$cb = function (bool &$save) {…}; $save = true;
       $cb($save);`, and after `$f = 'h'; $f($s);` for `h(bool &$x)`, the
       variable is still `true` and `$save === false` is reported
-      `identical.alwaysFalse` (`processArgs`; nsrt `bug-5615.php`);
+      `identical.alwaysFalse` (`processArgs`; nsrt `bug-5615.php`). An
+      offset passed by reference keeps its value too: after
+      `test($array['key'])` for `test(array &$a)`, `$array['key']` is still
+      `array{}` (nsrt `bug-5077.php`; a plain variable argument gets the
+      parameter's type);
     - `||` narrowing on a union that isn't normalized loses members: on
       `@param Node|Return_ $n` with `Return_ implements Node`, falling past
       `if (!$n instanceof Expression && !$n instanceof Return_) { return; }`
@@ -2396,6 +2402,10 @@ deleted; the file-size gate.
       `$n ??= 1` are all `mixed` today where PHPStan has `2`, `(float|int)`
       and `1|string` (nsrt `binary.php`, `coalesce-assign.php`).
     - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
+    - **Magic constants** type as their values: `__LINE__`, `__CLASS__`,
+      `__FUNCTION__`, `__METHOD__`, `__NAMESPACE__`, `__TRAIT__` and
+      `__PROPERTY__` are all `mixed` today (nsrt `node-callback-scope.php`,
+      `property-hooks.php`).
   - **Arrays and offsets:**
     - **Offset reads** follow `ArrayDimFetchHandler`: a constant array read
       with a non-literal key uses the key's type. Today `$t = [10, 20];
@@ -2777,7 +2787,10 @@ building on the previous one:
     - destructuring a tagged union of shapes adds cross-variable
       conditional holders;
     - a Traversable iteratee adds `getIterator()`'s throw point;
-    - by-reference foreach leaves `ForeachValueByRefExpr`;
+    - by-reference foreach leaves `ForeachValueByRefExpr`, so a write to
+      the value variable is a write to the element: in `foreach ($a as $k
+      => &$v) { $v = 1; }`, `$a[$k]` is still `string` in the body today, a
+      wrong value (nsrt `overwritten-arrays.php`);
     - the loop always terminates only when the iteratee is non-empty and
       the body always terminates;
     - the post-loop scope includes the scope that never entered the loop:
