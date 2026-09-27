@@ -968,11 +968,10 @@ Follow-ups:
   (`unscoped` runs without composer, so Doctrine result typing is off), the
   A2 fixes and better inference. The review's false positives are the
   behaviour fixes below; `printf`'s doubled value report is fixed
-  (`ac70c6eb`), and so is an integer range's union with the constants and
-  ranges touching it (`bda6df20`). Each is one commit with its fixture:
-  - `parent::__construct()` binds the parent's templates through the
-    class's `@extends`, not the templates' defaults (Symfony's
-    `NodeDefinition`: `expects null|null, TParent|null given`);
+  (`ac70c6eb`), so is an integer range's union with the constants and
+  ranges touching it (`bda6df20`), and so are a class's own templates
+  inside its body (`40e45bdc`: `$this` and `parent::` calls kept them
+  as their defaults). Each is one commit with its fixture:
   - an `@extends` type argument is resolved before the bound check: an
     enum case (`BuiltinType<TypeIdentifier::ARRAY>`) and a constant
     wildcard (`AbstractLexer<DocLexer::T_*>`) fit their bounds;
