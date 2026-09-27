@@ -2093,82 +2093,20 @@ deleted; the file-size gate.
   record every node where they disagree, over the fixtures and the
   Piwigo corpus. The inventory is checked in. The merge then lands as one
   approved delta per class of disagreement, each with a fixture.
-- Behaviour commits, each with its fixture:
-  - `$this`/`static` inside a class body carry their bound class
-    (`Type::This`/`StaticRef` bound), displayed `$this(Base)`/
-    `static(Base)`, and `@return $this` rejects a returned `new static()`.
-  - **Arithmetic** follows PHPStan's `InitializerExprTypeResolver` (fixed
-    first): `int|float * 2` and `int|float + 1` are `int` today, so
-    `is_float($n * 2)` is reported always false; integer overflow is a
-    float. A float literal types as its value; `1.5` is `float` today.
-    `%` on ranges follows PHP's sign rule: `int<0, 30> % -9` and
-    `int<-30, 30> % -9` are `never` today where PHPStan has `int<0, 8>` and
-    `int<-8, 8>`, and a range divisor gives `int` (nsrt `bug-15242.php`).
-  - **Type-check calls** type as the constant the impossible-check logic
-    decides: `is_string($s)` with a `string` is `true`, `is_string($i)`
-    with an `int` is `false`, and `!`/`method_exists` follow. Today they are
-    `bool` although the rules report them, so `!is_int($c) &&
-    !is_string($c)` on `int|string` isn't `booleanAnd.alwaysFalse` (105
-    oracle findings phpstan-rs misses in snapshot 0a8fe69, e.g.
-    `nyholm/psr7/src/Response.php:75`), and the `throw` after an exhausted
-    `if` chain isn't `deadCode.unreachable` (57, e.g.
-    `nikic/php-parser/BuilderFactory.php:373`).
-  - **Identical** follows `resolveIdenticalType`: operand types that don't
-    intersect make `===` constant false. `identical_result` tests type
-    families only, so `1|2 === 7` isn't reported today.
-  - **Short ternary** follows `TernaryHandler`: `$a ?: $b` is `mixed` today
-    for every left operand (`int`, `string`, `?array`, `bool`, objects).
-  - **First-class callables** carry the callee's signature: `strlen(...)`
-    is a bare `Closure` today.
-  - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
-  - **Compound assignments** have the assigned value as their type
-    (`AssignOpHandler`): `$x = 1; $x += 1` as an expression, `$i /= 2` and
-    `$n ??= 1` are all `mixed` today where PHPStan has `2`, `(float|int)`
-    and `1|string` (nsrt `binary.php`, `coalesce-assign.php`).
-  - **Offset reads** follow `ArrayDimFetchHandler`: a constant array read
-    with a non-literal key uses the key's type. Today `$t = [10, 20];
-    $j = 1; $t[$j]` is `mixed` where PHPStan has `20`, `$t[$i]` for an
-    `int` is `mixed` where it has `10|20`, and on `array{a: int, b: string}`
-    both `$s[$v]` with `$v = 'a'` and `$s[$u]` with `'a'|'b'` are `mixed`.
-    `array_key_first()` of that shape is `string` instead of `'a'`.
-    String offsets are typed: `$s[$i]` on a `string` and even `'hello'[0]`
-    are `mixed` today, where PHPStan has `string` and `'h'` (and the union
-    of the characters for a non-literal key).
-  - **Array literals and appends** follow `ConstantArrayType`'s next-key
-    rule: after a negative key the next implicit key is the key + 1 on PHP
-    8.3+ and `0` before, after `PHP_INT_MAX` there is none (the append
-    fails), and appending to a shape keeps the shape. Today
-    `[-5 => 'a', 'b']` is plain `array`, appending `'y'` to `array{3: 'x'}`
-    gives `array<'y'|'x'>` instead of `array{3: 'x', 4: 'y'}`, and
-    `[PHP_INT_MAX => 1, 2]` gains a key `0` (nsrt `bug-15248.php`).
-  - **Key-producing assignments** follow `AssignHandler::specifyTypes`:
-    after `$k = array_key_first($a)` (and `array_key_last`,
-    `array_search`, `array_find_key`, `array_rand`), `$a[$k]` is known to
-    exist with the element type; after `$i = array_search(5, $a, true)`
-    and `$i !== false`, `$a[$i]` is `int` today where PHPStan has `5`.
-    `$c = count($l) - 1` makes `$l[$c]` exist on a non-empty list.
-  - **Arguments** follow `processArgs`: each argument is processed on the
-    scope the previous one left, and a closure argument's parameters are
-    resolved from its sibling arguments whatever their order.
-    `apply(function ($x) { … }, 1)` for `@param callable(T): void $cb` and
-    `@param T $v` gives `$x` the unresolved `T` today where PHPStan has
-    `1`. The intrinsic callback overrides (`array_map`, `array_filter`,
-    `array_walk`, `array_find`, `curl_setopt`, `implode`, `Closure::bind`)
-    rewrite the callback's parameters from the sibling arguments;
-    `array_map(fn ($x) => $x * 2, [1, 2])` is `array<int>` today where
-    PHPStan keeps `array{2, 4}`.
-  - **Closure types** follow `ClosureTypeResolver`: a closure that yields
-    is `Closure(): mixed` today instead of returning a `Generator`.
-  - **`new` into a generic property**: `$this->c = new Coll();` for a
-    `@var Coll<int>` property types the `new` as `Coll<int>`
-    (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
-  - **Increments** follow PHP: `$k = 'a'; $k++` leaves `'a'` today, and
-    `$n = null; $n++` leaves `int` where PHP gives `1`. The value of a
-    pre-increment is the new value: `$one = 1; ++$one` is `1` today, and
-    `'foo'` pre-incremented stays `'foo'` where PHP gives `'fop'`
-    (`''` → `'1'`, `'123'` → `124`; nsrt `pre-inc.php`, `pre-dec.php`,
-    `binary.php`).
-  - **Wrong values** the nsrt suite isolates, each a soundness fixture:
+- Behaviour commits, each with its fixture, soundness first (a wrong
+  type is worse than an imprecise one), then by handler family:
+  - **Soundness.** Each is a wrong value, not a lost precision:
+    - `is_resource()` on a `resource` is never always true, because a
+      resource may have been closed (fixed first). Snapshot 0a8fe69 has 52
+      `function.alreadyNarrowedType` for it that the oracle doesn't report,
+      e.g. `sebastian/environment/src/Console.php` and
+      `maxmind-db/reader/src/MaxMind/Db/Reader.php`;
+    - an assertion intersects with the current type and its negation
+      narrows the other branch (`specifyTypesFromAsserts`): for
+      `@phpstan-assert-if-true int $v`, the true branch on a `string $s`
+      is `int` today where PHPStan has `*NEVER*` (the assertion replaces
+      the type), and the false branch on `int|string` stays `int|string`
+      instead of `string` (nsrt `assert-docblock.php`);
     - unary minus on a literal union is ignored: `-$c` for `1|2` is `1|2`;
     - a float result is typed as an integer literal: `(float) 5` is `5`
       and `abs(0.0)` is `0`;
@@ -2184,15 +2122,103 @@ deleted; the file-size gate.
     - narrowing to a value the type excludes gives the value instead of
       `never`: after a `match ($i) { 0 => … }` caught in a `try` on
       `1|2|3|4`, `$i` is `0|1|2|3|4` (nsrt `match-expr.php:19`), and
-      `$i === 2` on `int<3, 5>` gives `2`.
-  - **Integer ranges** narrow at their ends: `$i !== 3` on `int<3, 5>`
-    leaves `int<3, 5>` today instead of `int<4, 5>` (nsrt
-    `integer-range-types.php`, whose other mismatches are B4's range
-    union).
-  - **Comparisons between constants fold**, including `null` and `bool`
-    operands by PHP's comparison table: `1 < null` and `null < 1` are
-    `bool` today where PHPStan has `false` and `true` (96 nsrt mismatches
-    in `comparison-operators.php`).
+      `$i === 2` on `int<3, 5>` gives `2`;
+    - the wrong values inside the families below land here too: `%`
+      giving `never` (Arithmetic) and a pre-increment's old value
+      (Increments).
+  - **Operators and literals:**
+    - **Arithmetic** follows PHPStan's `InitializerExprTypeResolver` (fixed
+      first): `int|float * 2` and `int|float + 1` are `int` today, so
+      `is_float($n * 2)` is reported always false; integer overflow is a
+      float. A float literal types as its value; `1.5` is `float` today.
+      `%` on ranges follows PHP's sign rule: `int<0, 30> % -9` and
+      `int<-30, 30> % -9` are `never` today where PHPStan has `int<0, 8>` and
+      `int<-8, 8>`, and a range divisor gives `int` (nsrt `bug-15242.php`).
+    - **Increments** follow PHP: `$k = 'a'; $k++` leaves `'a'` today, and
+      `$n = null; $n++` leaves `int` where PHP gives `1`. The value of a
+      pre-increment is the new value: `$one = 1; ++$one` is `1` today, and
+      `'foo'` pre-incremented stays `'foo'` where PHP gives `'fop'`
+      (`''` → `'1'`, `'123'` → `124`; nsrt `pre-inc.php`, `pre-dec.php`,
+      `binary.php`).
+    - **Identical** follows `resolveIdenticalType`: operand types that don't
+      intersect make `===` constant false. `identical_result` tests type
+      families only, so `1|2 === 7` isn't reported today.
+    - **Comparisons between constants fold**, including `null` and `bool`
+      operands by PHP's comparison table: `1 < null` and `null < 1` are
+      `bool` today where PHPStan has `false` and `true` (96 nsrt mismatches
+      in `comparison-operators.php`).
+    - **Integer ranges** narrow at their ends: `$i !== 3` on `int<3, 5>`
+      leaves `int<3, 5>` today instead of `int<4, 5>` (nsrt
+      `integer-range-types.php`, whose other mismatches are B4's range
+      union).
+    - **Short ternary** follows `TernaryHandler`: `$a ?: $b` is `mixed` today
+      for every left operand (`int`, `string`, `?array`, `bool`, objects).
+    - **Compound assignments** have the assigned value as their type
+      (`AssignOpHandler`): `$x = 1; $x += 1` as an expression, `$i /= 2` and
+      `$n ??= 1` are all `mixed` today where PHPStan has `2`, `(float|int)`
+      and `1|string` (nsrt `binary.php`, `coalesce-assign.php`).
+    - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
+  - **Arrays and offsets:**
+    - **Offset reads** follow `ArrayDimFetchHandler`: a constant array read
+      with a non-literal key uses the key's type. Today `$t = [10, 20];
+      $j = 1; $t[$j]` is `mixed` where PHPStan has `20`, `$t[$i]` for an
+      `int` is `mixed` where it has `10|20`, and on `array{a: int, b: string}`
+      both `$s[$v]` with `$v = 'a'` and `$s[$u]` with `'a'|'b'` are `mixed`.
+      `array_key_first()` of that shape is `string` instead of `'a'`.
+      String offsets are typed: `$s[$i]` on a `string` and even `'hello'[0]`
+      are `mixed` today, where PHPStan has `string` and `'h'` (and the union
+      of the characters for a non-literal key).
+    - **Array literals and appends** follow `ConstantArrayType`'s next-key
+      rule: after a negative key the next implicit key is the key + 1 on PHP
+      8.3+ and `0` before, after `PHP_INT_MAX` there is none (the append
+      fails), and appending to a shape keeps the shape. Today
+      `[-5 => 'a', 'b']` is plain `array`, appending `'y'` to `array{3: 'x'}`
+      gives `array<'y'|'x'>` instead of `array{3: 'x', 4: 'y'}`, and
+      `[PHP_INT_MAX => 1, 2]` gains a key `0` (nsrt `bug-15248.php`).
+    - **Key-producing assignments** follow `AssignHandler::specifyTypes`:
+      after `$k = array_key_first($a)` (and `array_key_last`,
+      `array_search`, `array_find_key`, `array_rand`), `$a[$k]` is known to
+      exist with the element type; after `$i = array_search(5, $a, true)`
+      and `$i !== false`, `$a[$i]` is `int` today where PHPStan has `5`.
+      `$c = count($l) - 1` makes `$l[$c]` exist on a non-empty list.
+  - **Calls, closures and objects:**
+    - `$this`/`static` inside a class body carry their bound class
+      (`Type::This`/`StaticRef` bound), displayed `$this(Base)`/
+      `static(Base)`, and `@return $this` rejects a returned `new static()`.
+    - **Type-check calls** type as the constant the impossible-check logic
+      decides: `is_string($s)` with a `string` is `true`, `is_string($i)`
+      with an `int` is `false`, and `!`/`method_exists` follow. Today they are
+      `bool` although the rules report them, so `!is_int($c) &&
+      !is_string($c)` on `int|string` isn't `booleanAnd.alwaysFalse` (105
+      oracle findings phpstan-rs misses in snapshot 0a8fe69, e.g.
+      `nyholm/psr7/src/Response.php:75`), and the `throw` after an exhausted
+      `if` chain isn't `deadCode.unreachable` (57, e.g.
+      `nikic/php-parser/BuilderFactory.php:373`).
+    - **First-class callables** carry the callee's signature: `strlen(...)`
+      is a bare `Closure` today.
+    - **Arguments** follow `processArgs`: each argument is processed on the
+      scope the previous one left, and a closure argument's parameters are
+      resolved from its sibling arguments whatever their order.
+      `apply(function ($x) { … }, 1)` for `@param callable(T): void $cb` and
+      `@param T $v` gives `$x` the unresolved `T` today where PHPStan has
+      `1`. The intrinsic callback overrides (`array_map`, `array_filter`,
+      `array_walk`, `array_find`, `curl_setopt`, `implode`, `Closure::bind`)
+      rewrite the callback's parameters from the sibling arguments;
+      `array_map(fn ($x) => $x * 2, [1, 2])` is `array<int>` today where
+      PHPStan keeps `array{2, 4}`.
+    - **Closure types** follow `ClosureTypeResolver`: a closure that yields
+      is `Closure(): mixed` today instead of returning a `Generator`.
+    - **`new` into a generic property**: `$this->c = new Coll();` for a
+      `@var Coll<int>` property types the `new` as `Coll<int>`
+      (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
+    - **Function scope effects** follow `FuncCallScopeEffectsHelper`:
+      - `array_pop`/`array_shift`/`array_push`/`array_unshift` keep a
+        constant array's shape: after `array_pop($l)` on `[1, 2, 3]`, `$l` is
+        `list<1|2|3>` today;
+      - `fopen()`/`file_get_contents()` define `$http_response_header`,
+        which is `variable.undefined` today;
+      - `json_encode`/`json_decode` drop `json_last_error()`;
+        `file_put_contents` drops `file_get_contents()` of the same path.
   - **Narrowing gaps** in the handlers' `specifyTypes`:
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
       `if ($e === E::A) { return; }` and in a `match` `default` arm (with
@@ -2213,22 +2239,11 @@ deleted; the file-size gate.
       gives `never`), so the checks inside that branch are reported
       against `string`: nine `function.impossibleType` in `composer/pcre`'s
       `Preg.php` copies where the oracle has `*NEVER*`;
-    - `is_resource()` on a `resource` is never always true, because a
-      resource may have been closed (fixed first). Snapshot 0a8fe69 has 52
-      `function.alreadyNarrowedType` for it that the oracle doesn't report,
-      e.g. `sebastian/environment/src/Console.php` and
-      `maxmind-db/reader/src/MaxMind/Db/Reader.php`;
     - boolean composition through `!`/`&&`/`||` (the recipes above):
       `assert(!(is_int($v) && $v < 0) && !(is_int($v) && $v >= 1))` leaves
       `$v` as `int` today where PHPStan has `0` (nsrt `bug-15039.php`);
     - `$b?->c->n === 1` doesn't narrow `$b` to non-null
       (`createNullsafeTypes`);
-    - an assertion intersects with the current type and its negation
-      narrows the other branch (`specifyTypesFromAsserts`): for
-      `@phpstan-assert-if-true int $v`, the true branch on a `string $s`
-      is `int` today where PHPStan has `*NEVER*` (the assertion replaces
-      the type), and the false branch on `int|string` stays `int|string`
-      instead of `string` (nsrt `assert-docblock.php`);
     - a conditional `@phpstan-assert` type resolves against the call's
       arguments and parameter defaults (`ConditionalTypeResolver::resolveForCall`):
       `@phpstan-assert ($allow_null is true ? string|null : string) $input`
@@ -2254,14 +2269,6 @@ deleted; the file-size gate.
         with a non-empty literal → `$s` non-empty or non-falsy;
       - `strtolower($s) === 'abc'` → additionally lowercase on the other
         side.
-  - **Function scope effects** follow `FuncCallScopeEffectsHelper`:
-    - `array_pop`/`array_shift`/`array_push`/`array_unshift` keep a
-      constant array's shape: after `array_pop($l)` on `[1, 2, 3]`, `$l` is
-      `list<1|2|3>` today;
-    - `fopen()`/`file_get_contents()` define `$http_response_header`,
-      which is `variable.undefined` today;
-    - `json_encode`/`json_decode` drop `json_last_error()`;
-      `file_put_contents` drops `file_get_contents()` of the same path.
   - **Deep expressions** don't overflow the stack: the handlers iterate
     over left-deep binary chains. A 32,000-term `.` chain aborts
     `check-project` with a stack overflow today, though the parser handles
