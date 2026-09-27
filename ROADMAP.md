@@ -4340,8 +4340,10 @@ Every semantic rule below is read from the installed Latte's own source -
 `Essential/CoreExtension.php`, `Essential/Passes.php`, the
 `Essential/Nodes/*` node classes, `Runtime/Template.php`,
 `Loaders/FileLoader.php`), cited where each rule is stated.
-Latte 3.x is supported; another major version is reported once and its
-templates are skipped.
+The grammar and semantics are those of Latte 3.1, the corpus's line;
+templates under another minor or major version are still analysed, with
+one notice that they're read as 3.1, and a version this phase's rules
+aren't re-verified against is added only after the same source reading.
 
 **What Piwigo's pipeline has to do today** (the corpus analyses its
 output as plain PHP under `_analysis/phpstan-latte/`):
@@ -4419,8 +4421,9 @@ default) decides whether the lowered code is checked under
 `strict_types=1`, as the compiled template declares it; `Dedent` changes
 only whitespace, so nothing models it; the content type
 decides the HTML-only behaviour (URL checking, the `<script>` rules),
-changing where a `{contentType}` tag or an element's own context
-(`<script>`, `<style>`, an attribute) switches it; `MigrationWarnings`
+changed by a `{contentType}` in the header (or, for an HTML type, inside
+a `<script>` element - the one place outside the header Latte allows it)
+and by each element's own context (`<script>`, `<style>`, an attribute); `MigrationWarnings`
 turns the runtime deprecations Latte gates on it (an `n:attr` given a
 non-array, ...) into findings; and
 a sandboxed engine's `Policy`, when written with literals
@@ -4461,7 +4464,8 @@ them:
 - an included file: its arguments plus the includer's parameter array -
   not the includer's `{var}` locals (`createTemplate($name, $args +
   $this->params)`);
-- a layout parent (`{extends}`/`{layout}`): its arguments plus the
+- a layout parent (`{extends}`/`{layout}`, where `auto` asks the loader
+  for the layout and `none` has none): its arguments plus the
   child's prepared variables, with the child's blocks rendered in the
   parent's place;
 - a block `{import}` brings in: the importing template's parameter array,
@@ -4578,17 +4582,21 @@ fixture set stands in for its oracle.
 
 **182f — Checks.** Latte's own compile-time errors, each a diagnostic
 where Latte would throw a `CompileException`: the validations in the node
-classes (`{parameters}`/`{templateType}` outside the header, an unclosed
-or mismatched tag, an unknown tag, `n:else` without its `n:if`/
-`n:foreach`, ...) and in
-the core passes (`$this`/`$GLOBALS`/`$ʟ_*` - a deprecation unless
-`StrictParsing`, an error with it; `{first}`/`{last}`/`{sep}` outside a
-`foreach`; a registered function used as a partial `fn(...)`; a print
-followed by quotes inside `<script>`; a `foreach` variable overwriting
-one in scope, without `ScopedLoopVariables`; strict-HTML errors under
-`StrictParsing`). Then, with `latte.*` identifiers:
+classes (`{parameters}`, `{templateType}`, `{extends}`/`{layout}` and
+`{contentType}` outside the header, an unclosed or mismatched tag, an
+unknown tag, `n:else` without its `n:if`/`n:foreach`, ...) and in the
+core passes (`$GLOBALS` and `$ʟ_*` always; `$this` and `$__*` a
+deprecation unless `StrictParsing`, an error with it; `{first}`/
+`{last}`/`{sep}` outside a `foreach`; a registered function used as a
+partial `fn(...)`; a print followed by quotes inside `<script>`;
+strict-HTML errors under `StrictParsing`). Then, with `latte.*` identifiers:
 - an unknown filter or function (an unknown tag is Latte's own compile
   error, above);
+- a `{foreach}` key or value variable named like one of the template's
+  parameters, without `ScopedLoopVariables` - Latte's own
+  `overwrittenVariablesPass` makes that a runtime notice
+  ("Variable $x overwritten in foreach") when the template is rendered
+  directly or as a layout parent;
 - a template `{include}`/`{embed}`/`{import}`/`{extends}`/`{layout}`
   names that doesn't exist, and an `{include block}` no template in the
   chain defines;
