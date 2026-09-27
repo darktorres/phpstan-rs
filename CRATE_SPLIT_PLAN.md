@@ -3045,7 +3045,11 @@ derived node, each listing its Appendix A rows:
   phpstan-rs misses). A read inside `isset()`/`??`/`empty()` can't fail
   and stays unreported (331 PHPStan reports on `mixed`);
 - (e) declarations, generics checks and PHPDoc;
-- (f) control flow, returns, throws and generators;
+- (f) control flow, returns, throws and generators; a return type that
+  includes `void` accepts falling off the end (fixed first): `@return
+  void|int` on a function that returns only on some paths is
+  `return.missing` today, 10 of the corpus oracle's 38 phpstan-rs-only
+  `return.missing` (the `php_codesniffer` sniffs' `process()`);
 - (g) the restricted-usage framework: `@internal` core, deprecation
   (ext-deprecation-rules), disallowed-calls, and `phpstan_api`;
 - (h) `FileAssertRule`, the dump rules and the four asserts;
@@ -3472,8 +3476,8 @@ its owner. Non-Registry keys follow the table.
   variables as maybe-defined (D5), loop/switch termination (D2) and
   `is_resource()` never always true (D3), impure `$this` calls
   dropping `$this->…` narrowing (D5) and `finally` reads of variables the
-  `try` assigns (D5), each a false positive on ordinary code; D2 and D5
-  name the interim fix.
+  `try` assigns (D5) and `return.missing` on a `void|…` return type (E3f),
+  each a false positive on ordinary code; D2 and D5 name the interim fix.
 - **Stage D order.** Structure before semantics: holders (D1), statement
   results and handlers (D2), one inference path with the TypeSpecifier
   (D3), the sink (D4), then the semantics (D5) and the public APIs (D6).
