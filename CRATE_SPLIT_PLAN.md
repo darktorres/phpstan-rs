@@ -1158,7 +1158,8 @@ diagnostics 2, composer 2).
 
 A bug below that sits in code a later Stage C phase rewrites gets a fixture
 first and is fixed in that phase, as its own behaviour commit after the
-structural one (Appendix F).
+structural one (Appendix F). Every approved delta and behaviour fix is
+noted in `CHANGELOG.md` with its commit.
 
 **C1. config.**
 - Schema, owner sections, the shim, `--set`, deletion of per-rule flags
@@ -1349,6 +1350,10 @@ Follow-ups:
     declaration; the declaration keeps its parsed doc blocks, and the rules
     re-parsing a declaration's doc comment (about 25 sites in `checker/`)
     read them; the snapshots split it per file;
+  - `Project::finish_loading` keeps only the whole-program passes and
+    stays the batch entry point (69 call sites, until F1's Session), and
+    every comment naming a deleted pass (about 100 outside `registry/`)
+    is rewritten;
   - `index_and_flatten` is deleted and `Registry::build` only indexes
     (until its callers move onto `apply`); the stub pass still resolves
     each stub file's classes within that file (until C5's stub layer),
