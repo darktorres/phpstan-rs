@@ -29,6 +29,9 @@ User-visible changes: output, formats, flags, configuration and exit codes.
   same pass, instead of re-checking every file (`78047041`, `ee2eb7a4`).
 - The language server's workspace check runs its files in parallel
   (`06a56b58`).
+- Startup is faster: the embedded stubs are parsed and indexed in
+  parallel, and PHPDoc inheritance no longer recomputes a class's
+  ancestor bindings for each method (`5c0a1c49`, `2ce9c82c`).
 
 ### Language server
 - `restricted_symbols` path zones (`allow_in`, `allow_except_in`) apply in

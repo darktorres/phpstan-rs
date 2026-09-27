@@ -441,11 +441,12 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
     library the fixtures already built. Both benches take 15 s there,
     against ~82 s in debug;
   - the test manifest lists each target from the profile it runs in.
-- **Still open:** the dev-profile `opt-level` experiment and lib tests in
-  an optimized profile. Each needs full dependency rebuilds and suite
-  runs to measure. A side result: the gate-profile lib test run took
-  47 s against 124 s in debug, but that doesn't count its separate
-  compile. Whether to run them is the user's call.
+- **Stopped at the user's request, in favour of profiling (S13–S15):**
+  the dev-profile `opt-level` experiment and lib tests in an optimized
+  profile. Only the debug baseline was measured: lib suite 156 s, cli
+  suite 179 s, and 10–11 s to rebuild the lib-test and cli targets after
+  an engine or a lexer edit. A side result: the gate-profile lib test run
+  took 47 s against 124 s in debug, not counting its separate compile.
 - The commit records every measurement, whichever way each decision
   goes.
 
@@ -571,24 +572,27 @@ Each is a targeted edit in the step's own commit:
   compared with the §2 table.
 - CHANGELOG notes the `check-project` speedup from S2–S7.
 
-**Result** (6e186945): every S0–S12 commit is in, and one `cargo xtask
-gates` run passes. Every snapshot is byte-identical to the S3a
-recording (`78047041`), so no approved delta was needed: S3a, S5a, S6
-and S7's possible behaviour changes changed nothing on the corpus or
-the fixtures. The quick tier took 1,008 s (16.8 min), against 2,252 s
+**Result** (39a4d07c): S0–S15 are done, S11 as far as the user wanted it.
+One `cargo xtask gates` run passes, and every snapshot is byte-identical
+to the S3a recording (`78047041`) through `6e186945`, so no approved
+delta was needed. The quick tier took 814 s (13.6 min), against 2,252 s
 (37.5 min) at `8682ba07`:
 
 | Step | Before | After |
 |---|---|---|
-| corpus step | 667 s | 172 s (gate build 84 s, scoped 27 s, all-on 32 s, determinism 28 s) |
+| corpus step | 667 s | 152 s (gate build 80 s, scoped 25 s, all-on 24 s, determinism 23 s) |
 | `cargo bench --no-run` | 570 s | `--full` only |
-| benches in test mode | ~82 s (debug) | 14 s (gate profile) |
+| benches in test mode | ~82 s (debug) | 11 s, plus an 85 s gate-profile build the fixtures reuse |
 | type-dump compression | 45 s | 0.6 s |
-| `--no-default-features` | 75 s (build) | 8 s (check) |
-| fixture suite | 483 s | 391 s |
-| lib + cli tests (debug) | 124 s + 173 s | 172 s + 200 s |
+| `--no-default-features` | 75 s (build) | 7 s (check) |
+| fixture suite | 483 s | 270 s |
+| lib tests (debug) | 124 s | 73 s |
+| cli tests (debug) | 173 s | 151 s |
 
-What's left is the debug lib and cli tests (~6 min) and the fixture
-suite (~6.5 min), each dominated by stub setup that §4 leaves to C4/C5.
-S11's open question, running the debug tests in an optimized profile,
-is the user's call.
+A debug `check-project` spawn on one file went from 11.8 s to 3.7 s
+(S13/S14). The single-long-line scaling test moved to its own test
+binary (`39a4d07c`): it times real runs, and inside `cli.rs` it competed
+with 44 tests whose spawned binaries now parse stubs on every core.
+
+What's left is the per-test stub setup in the fixtures and the lib and
+cli tests, which §4 leaves to C4/C5.
