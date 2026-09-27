@@ -2367,6 +2367,10 @@ deleted; the file-size gate.
       `$n instanceof Expression` is `instanceof.alwaysFalse`
       (`rector/rules/DeadCode/Rector/Property/RemoveUnusedPrivatePropertyRector.php:166`,
       where D5's closure re-entry produces the unnormalized union);
+    - `is_a($cls, A::class, true)` on a `string` narrows it to the object
+      `A` instead of `class-string<A>`, so `strlen($cls)` in that branch is
+      `argument.type` "A given" and the merge after it leaves `A|string`
+      (`IsAFunctionTypeSpecifyingExtension`);
     - the wrong values inside the families below land here too: `%`
       giving `never` (Arithmetic) and a pre-increment's old value
       (Increments).
@@ -3029,6 +3033,18 @@ building on the previous one:
     type (304 nsrt `*NEVER*` expectations, most of them in these
     functions' `-php8` files, `round-php8*.php`, `math.php` and the BcMath
     files).
+
+  - the built-in narrowing predicates follow the 2.2.16
+    `*TypeSpecifyingExtension`s; compared one by one, these leave the type
+    wider today: `array_key_exists($k, $a)` doesn't narrow `$k` to the key
+    type, `ctype_digit($s)` doesn't give `numeric-string`,
+    `function_exists($s)` doesn't give `callable-string`, `class_exists($c)`
+    and `is_subclass_of($c, A::class)` on a string don't give
+    `class-string`/`class-string<A>`, `array_search($v, $a, true) !== false`
+    doesn't make `$a` non-empty, and `ReflectionClass::isSubclassOf(A::class)`
+    leaves `ReflectionClass<A|object>`. `in_array`, `is_a` on an object,
+    `str_contains`, `count`, `defined`/`define` and the `is_*` family already
+    match.
 
   Then the functions `gates/nsrt/owners.toml` assigns to E2 (3,399 nsrt
   mismatches on calls to functions PHPStan types through an extension),
