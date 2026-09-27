@@ -13,7 +13,7 @@ User-visible changes: output, formats, flags, configuration and exit codes.
   overlays stay at the top level. A key in its old top-level place still
   loads, with a warning naming its new place; setting both is an error.
 - An unknown key is reported by its full dotted path
-  (`rules.check_bogus`).
+  (`rules.check_bogus`) (`4c18d661`).
 - Extensions activate as PHPStan's extension installer would load them:
   an `[ext.<name>]` table's `enabled`, or, unset, whether one of the
   extension's packages is installed in the composer root
@@ -24,10 +24,10 @@ User-visible changes: output, formats, flags, configuration and exit codes.
   table; the extras have no package and stay off unless enabled. Doctrine
   query result types, Pest's `$this` binding and the
   php-language-extensions attributes apply only while their extension is
-  active (`[ext.doctrine]`, `[ext.pest]`, `[ext.language-extensions]`).
+  active (`[ext.doctrine]`, `[ext.pest]`, `[ext.language-extensions]`) (`4c18d661`).
 - `check-project` drops its per-check flags (`--check-dead-code`,
   `--strict-mixed-arrays`, ...) for `--set KEY=VALUE`, which sets any
-  config key over the file: `--set rules.check_dead_code=true`.
+  config key over the file: `--set rules.check_dead_code=true` (`4c18d661`).
 
 ### Output
 - Diagnostics come in one total order - position, then identifier, message
