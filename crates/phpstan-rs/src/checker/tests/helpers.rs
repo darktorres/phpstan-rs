@@ -5,39 +5,6 @@ use diagnostics::Diagnostic;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 
-/// Families that fire on almost any minimal, deliberately untyped test
-/// snippet (untyped declarations, discarded pure calls and expressions,
-/// declared union members a trivial body never produces). The white-box
-/// tests left here assert on other things, so `diagnostics_for` leaves
-/// these out; `all_diagnostics_for` keeps everything.
-fn is_incidental(d: &Diagnostic) -> bool {
-    d.identifier.starts_with("missingType.")
-        || matches!(
-            d.identifier.as_str(),
-            "function.resultUnused"
-                | "method.resultUnused"
-                | "staticMethod.resultUnused"
-                | "new.resultUnused"
-                | "expr.resultUnused"
-                | "return.unusedType"
-                | "property.unusedType"
-                | "staticProperty.unusedType"
-        )
-}
-
-pub(super) fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
-    diagnostics_for_with(src, |_| {})
-}
-
-pub(super) fn diagnostics_for_with(
-    src: &str,
-    configure: impl FnOnce(&mut CheckSettings),
-) -> Vec<Diagnostic> {
-    let mut diagnostics = all_diagnostics_for_with(src, configure);
-    diagnostics.retain(|d| !is_incidental(d));
-    diagnostics
-}
-
 pub(super) fn all_diagnostics_for(src: &str) -> Vec<Diagnostic> {
     all_diagnostics_for_with(src, |_| {})
 }

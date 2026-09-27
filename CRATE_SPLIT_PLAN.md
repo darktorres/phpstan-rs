@@ -950,8 +950,6 @@ Follow-ups:
   no-default-features tests, so the docs, machete and deny steps never ran,
   and 162 commits since are unpushed. Every step passes locally; a passing
   run is recorded.
-- **The rest of A2's conversion.** `checker/tests/key_value_of.rs`'s three
-  `assertType` tests become fixtures.
 
 ### Stage B: workspace and leaf layers
 
