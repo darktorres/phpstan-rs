@@ -868,8 +868,9 @@ corpus, type, baseline, performance and build-time gates run locally
     - `cargo xtask oracle` runs the phar (copied out of the corpus's
       `vendor/phpstan/phpstan`) over the corpus files with
       engine-sensitive diagnostics, with the corpus autoloader as the only
-      bootstrap, and lists the phpstan-rs-only and PHPStan-only findings
-      by identifier; files that raise PHPStan internal errors are excluded
+      bootstrap, runs phpstan-rs over the same files at the same level
+      (10), and lists the phpstan-rs-only and PHPStan-only findings by
+      identifier; files that raise PHPStan internal errors are excluded
       and listed.
 
     Both record under `.corpus-runs/gate/{nsrt,oracle}/<hash>`. A count
@@ -2022,12 +2023,21 @@ Gate 12 runs both oracles below. The oracle is real PHPStan 2.2.16 over
 the corpus files with engine-sensitive diagnostics: the phar copied
 outside `vendor/` (so the
 corpus's extensions don't load), Piwigo's `vendor/autoload.php` as the only
-bootstrap file, level 10, run from a directory with no `vendor/`. Files
-that raise internal errors (missing optional classes, php-standard-library
-function redeclaration) are excluded. For snapshot 0a8fe69 this leaves 941
-files and 784 phpstan-rs-only findings among the engine identifiers; each
-phase reruns the comparison, and every phpstan-rs-only finding it names is
-a fixture.
+bootstrap file, level 10, run from a directory with no `vendor/`.
+phpstan-rs runs at `--level 10` too: with the level unset it skips the
+level-10 implicit-`mixed` checks (§1's level row), which turned 2,519
+`offsetAccess.nonOffsetAccessible` into apparent misses. Both sides are
+filtered to the engine identifiers. Files that raise internal errors
+(missing optional classes, php-standard-library function redeclaration)
+are excluded, which leaves 941 files. At `76e738b4` phpstan-rs has 1,652
+findings PHPStan doesn't, 1,009 of them `offsetAccess.nonOffsetAccessible`
+(970 on `mixed`), and misses 2,010, among them 735
+`offsetAccess.nonOffsetAccessible`, 282 `foreach.nonIterable`, 263
+`offsetAccess.notFound` and 243 `function.alreadyNarrowedType` (188 of
+those are `assert()` of `true`, which phpstan-rs reports as
+`assert.alreadyNarrowedType`). The counts that cite snapshot 0a8fe69 below
+come from the earlier run with the level unset. Each phase reruns the
+comparison, and every phpstan-rs-only finding it names is a fixture.
 
 The second oracle is PHPStan's own inference suite,
 `vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (1,688 files, 18,480
@@ -2293,7 +2303,13 @@ deleted; the file-size gate.
       `array_key_first()` of that shape is `string` instead of `'a'`.
       String offsets are typed: `$s[$i]` on a `string` and even `'hello'[0]`
       are `mixed` today, where PHPStan has `string` and `'h'` (and the union
-      of the characters for a non-literal key).
+      of the characters for a non-literal key). An `ArrayAccess` object's
+      offset reads `offsetGet`'s return type with the class's template
+      arguments: `$a[0]` on `SplFixedArray<SplFixedArray<int>>`,
+      `ArrayAccess<int, string>` or `ArrayObject<string, int>` is `mixed`
+      today, so every nested read is a level-10
+      `offsetAccess.nonOffsetAccessible` (37 in
+      `bacon-qr-code/src/Encoder/MaskUtil.php` alone).
     - **Array literals and appends** follow `ConstantArrayType`'s next-key
       rule: after a negative key the next implicit key is the key + 1 on PHP
       8.3+ and `0` before, after `PHP_INT_MAX` there is none (the append
@@ -2336,6 +2352,16 @@ deleted; the file-size gate.
       rewrite the callback's parameters from the sibling arguments;
       `array_map(fn ($x) => $x * 2, [1, 2])` is `array<int>` today where
       PHPStan keeps `array{2, 4}`.
+    - **By-reference out types of built-in functions** apply to the
+      argument: after `exec($c, $out)`, `parse_str($s, $ps)`,
+      `preg_match_all($p, $s, $mm)` or `preg_match` with a non-constant
+      pattern, the variable is `mixed` today where PHPStan has the
+      signature's out type (`array<string>` for `$out`), and at level 9+
+      the call itself is reported `argument.type` "mixed given" for the
+      variable PHP creates (E3c). A user function's `@param-out` already
+      applies. `composer/semver`'s `VersionParser.php` has 41 level-10
+      `offsetAccess.nonOffsetAccessible` from it, in each of its three
+      copies.
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
       is `Closure(): mixed` today instead of returning a `Generator`.
     - **`new` into a generic property**: `$this->c = new Coll();` for a
@@ -2815,7 +2841,10 @@ Gate: the analyser's built-in-name allowlist.
 derived node, each listing its Appendix A rows:
 - (a) file-level (`keywords`, `whitespace`, RequireFileExists over the VFS
   from `includes.rs`);
-- (b) expression-level;
+- (b) expression-level; the level-9/10 `mixed` checks cover every
+  expression rule: a `foreach` over `mixed` (`foreach.nonIterable`) and an
+  `echo` of `mixed` (`echo.nonString`) aren't reported today at
+  `--level 10` (282 and 39 corpus oracle findings phpstan-rs misses);
 - (c) calls and member access (a by-reference argument PHP creates on
   the call is not type-checked against the parameter);
 - (d) assignments and properties (`uninitialized` and
