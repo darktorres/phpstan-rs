@@ -2432,7 +2432,10 @@ deleted; the file-size gate.
     - **Type-check calls** type as the constant the impossible-check logic
       decides: `is_string($s)` with a `string` is `true`, `is_string($i)`
       with an `int` is `false`, and `!`/`method_exists`/`instanceof` follow
-      (an `instanceof` expression is `mixed` today, not even `bool`). A
+      (an `instanceof` expression is `mixed` today, not even `bool`, so on
+      `?Req $x`, `$x instanceof Req || $x === null` isn't
+      `booleanOr.alwaysTrue`: 11 corpus oracle findings, e.g.
+      `amphp/http-client/src/Interceptor/ModifyRequest.php:35`). A
       call with `@phpstan-assert*` tags is a type-check call too: PHPUnit's
       `assertNull($bool)` is `staticMethod.impossibleType` and
       `$a->assertInt($int)` `method.alreadyNarrowedType`, unreported today
