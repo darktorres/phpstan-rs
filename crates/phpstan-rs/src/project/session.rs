@@ -678,15 +678,7 @@ impl Session {
             lex_warnings,
         } = loaded;
 
-        // `Project` has no interior mutability a panic could leave
-        // half-updated beyond `OnceLock`s that stay unset, so continuing
-        // past a caught panic is sound.
-        let property_assign_facts = Arc::new(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                project.collect_property_assign_facts()
-            }))
-            .unwrap_or_default(),
-        );
+        let property_assign_facts = Arc::new(project.collect_property_assign_facts(&self.pool));
         type CheckOutcome = Result<FileCheck, String>;
         let needs_tier_2 = Self::flag(self.config.check_dead_enum_cases)
             || Self::flag(self.config.check_dead_members);

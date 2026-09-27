@@ -60,6 +60,7 @@ fn bench_vendored_corpus(c: &mut Criterion) {
          (git submodule update --init)"
     );
 
+    let pool = project::worker_pool();
     c.bench_function("load_and_check_vendored_corpus", |b| {
         b.iter(|| {
             let mut project = Project::new();
@@ -67,7 +68,7 @@ fn bench_vendored_corpus(c: &mut Criterion) {
                 let _ = project.load_file(path.clone(), source);
             }
             project.finish_loading();
-            std::hint::black_box(project.check_all());
+            std::hint::black_box(project.check_all(&pool));
         });
     });
 }

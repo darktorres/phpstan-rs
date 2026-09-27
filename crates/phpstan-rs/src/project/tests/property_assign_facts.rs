@@ -128,3 +128,39 @@ fn facts_only_mode_agrees_with_the_full_pass_on_a_pest_test_closures_property_wr
         "expected both $this->x writes inside the Pest closure to be recorded, got: {facts_only:?}"
     );
 }
+
+#[test]
+fn a_file_whose_facts_panic_costs_only_its_own_facts() {
+    let mut project = Project::new();
+    let panicking = PathBuf::from("facts_panic_injected_a.php");
+    project
+        .load_file(
+            panicking.clone(),
+            r#"<?php
+                class A {
+                    /** @var int|string */
+                    private $x;
+                    public function set(): void { $this->x = 1; }
+                }
+            "#,
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("facts_panic_survivor_b.php"),
+            r#"<?php
+                class B {
+                    /** @var int|string */
+                    private $y;
+                    public function set(): void { $this->y = 1; }
+                }
+            "#,
+        )
+        .unwrap();
+    project.finish_loading();
+    super::panic_injection::inject_panic(&panicking);
+
+    let facts = project.collect_property_assign_facts(&crate::project::worker_pool());
+    assert!(!facts.contains_key("A"), "facts: {facts:?}");
+    assert!(facts.contains_key("B"), "facts: {facts:?}");
+}

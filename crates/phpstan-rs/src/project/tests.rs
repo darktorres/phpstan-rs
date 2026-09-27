@@ -10,6 +10,7 @@ mod file_discovery_and_misc;
 mod file_removal;
 mod incremental_updates;
 mod inline_ignore_comments;
+pub(super) mod panic_injection;
 mod php_version_setter;
 mod phpstan_api_gating;
 mod property_assign_facts;

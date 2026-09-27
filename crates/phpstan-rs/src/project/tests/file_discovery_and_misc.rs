@@ -43,7 +43,7 @@ fn check_all_covers_every_loaded_file_not_just_one() {
         .unwrap();
     project.finish_loading();
 
-    let all = project.check_all();
+    let all = project.check_all(&crate::project::worker_pool());
     assert_eq!(project.file_count(), 2);
     assert_eq!(all.len(), 2);
     assert!(all[&PathBuf::from("good.php")].is_empty());
@@ -71,7 +71,7 @@ fn check_paths_restricts_output_but_keeps_whole_project_facts() {
         .unwrap();
     project.finish_loading();
 
-    let result = project.check_paths(&[PathBuf::from("bad.php")]);
+    let result = project.check_paths(&[PathBuf::from("bad.php")], &crate::project::worker_pool());
 
     assert_eq!(result.len(), 1, "got: {result:?}");
     assert!(
@@ -99,7 +99,7 @@ fn check_paths_isolating_panics_behaves_like_check_paths_when_nothing_panics() {
     project.finish_loading();
     let paths = vec![PathBuf::from("good.php"), PathBuf::from("bad.php")];
 
-    let expected = project.check_paths(&paths);
+    let expected = project.check_paths(&paths, &crate::project::worker_pool());
     let (actual, panics) =
         project.check_paths_isolating_panics(&paths, &crate::project::worker_pool());
 
@@ -206,7 +206,7 @@ fn deferred_registry_passes_all_run_through_the_real_project_path() {
         .unwrap();
     project.finish_loading();
 
-    let all = project.check_all();
+    let all = project.check_all(&crate::project::worker_pool());
     let consumer_diagnostics = &all[&PathBuf::from("consumer.php")];
     // Only the @phpstan-import-type call is a real type mismatch (string
     // isn't int) - @mixin's count() and @method's getX() both return int

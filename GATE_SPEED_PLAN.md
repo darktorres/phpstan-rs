@@ -214,8 +214,12 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   `check_paths` stays panic-transparent, as its tests expect.
   After this, a file that panics contributes no facts, and the other
   files keep theirs. This matches the main pass and F1's panic
-  isolation. The corpus has no panics, so snapshots don't change. A
-  fixture that injects a panic covers the new behaviour.
+  isolation. The corpus has no panics, so snapshots don't change. S5b
+  and S5c land as one commit: the per-file `catch_unwind` is the
+  parallel loop's body. A lib test injects a panic through a
+  `#[cfg(test)]` hook (`project/tests/panic_injection.rs`) and checks
+  that only that file's facts are lost. It's a lib test rather than a
+  fixture, because fixtures link the library without `cfg(test)`.
 - Verify: `project/property_assign_facts` and `checker/property_assignment`
   identical; LSP tests pass.
 

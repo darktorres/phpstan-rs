@@ -1837,29 +1837,42 @@ impl Project {
 
     /// The collect half of the two-pass (collect-then-consume) checking
     /// architecture: runs the checker once over every currently-loaded
-    /// file purely to gather `Checker::property_assign_facts` (this
-    /// pass's own diagnostics are discarded - `check_file`/`check_file_
-    /// with_property_assign_facts` are the real, diagnostic-producing
-    /// pass), then merges every file's own per-fqn/per-property
-    /// contribution into one whole-project map. A trait re-checked once
-    /// per host (`check_trait_methods`) already attributes its own
-    /// contribution to each host's real fqn (see `property_assign_facts`'s
-    /// own doc comment), so merging here needs no extra trait-awareness
-    /// of its own - just concatenating every file's own per-key `Vec`, in
-    /// path order, so the result doesn't depend on how the file map was
-    /// built.
-    pub fn collect_property_assign_facts(&self) -> PropertyAssignFacts {
-        let mut merged: PropertyAssignFacts = FxHashMap::default();
-        let mut files: Vec<(&PathBuf, &FileState)> = self.files.iter().collect();
+    /// file that may write a private property, purely to gather
+    /// `Checker::property_assign_facts` (this pass's own diagnostics are
+    /// discarded - `check_file`/`check_file_with_property_assign_facts`
+    /// are the real, diagnostic-producing pass), then merges every file's
+    /// own per-fqn/per-property contribution into one whole-project map.
+    /// A trait re-checked once per host (`check_trait_methods`) already
+    /// attributes its own contribution to each host's real fqn (see
+    /// `property_assign_facts`'s own doc comment), so merging here needs
+    /// no extra trait-awareness of its own - just concatenating every
+    /// file's own per-key `Vec`.
+    ///
+    /// Files are checked in parallel on `pool` and merged in path order,
+    /// so the result doesn't depend on scheduling or on how the file map
+    /// was built. A file whose check panics contributes nothing; the
+    /// others keep their facts.
+    pub fn collect_property_assign_facts(&self, pool: &rayon::ThreadPool) -> PropertyAssignFacts {
+        let mut files: Vec<(&PathBuf, &FileState)> = self
+            .files
+            .iter()
+            .filter(|(_, file)| self.file_may_write_private_property(file))
+            .collect();
         files.sort_by(|a, b| a.0.cmp(b.0));
-        for (_, file) in files {
-            if !self.file_may_write_private_property(file) {
-                continue;
-            }
-            let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
-            checker.set_facts_only(true);
-            checker.check_program(&file.ast);
-            for (fqn, props) in checker.take_property_assign_facts() {
+        let per_file: Vec<Option<PropertyAssignFacts>> = pool.install(|| {
+            files
+                .par_iter()
+                .map(|(path, file)| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        self.file_property_assign_facts(path, file)
+                    }))
+                    .ok()
+                })
+                .collect()
+        });
+        let mut merged: PropertyAssignFacts = FxHashMap::default();
+        for facts in per_file.into_iter().flatten() {
+            for (fqn, props) in facts {
                 let entry = merged.entry(fqn).or_default();
                 for (prop, mut types) in props {
                     entry.entry(prop).or_default().append(&mut types);
@@ -1867,6 +1880,18 @@ impl Project {
             }
         }
         merged
+    }
+
+    /// One file's contribution to `collect_property_assign_facts`.
+    fn file_property_assign_facts(&self, path: &Path, file: &FileState) -> PropertyAssignFacts {
+        #[cfg(test)]
+        tests::panic_injection::panic_if_injected(path);
+        #[cfg(not(test))]
+        let _ = path;
+        let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
+        checker.set_facts_only(true);
+        checker.check_program(&file.ast);
+        checker.take_property_assign_facts()
     }
 
     /// Runs the checker over exactly `paths` (which must already be
@@ -1877,11 +1902,16 @@ impl Project {
     /// file regardless of `paths` (see `collect_property_assign_facts`'s
     /// own doc comment for why: a trait-donated property write
     /// discovered in a file outside `paths` must still reach a host
-    /// inside it). Panic-transparent - a real checker panic propagates
-    /// to the caller, which is what a unit test wants; see
-    /// `check_paths_isolating_panics` for the batch-safe counterpart.
-    pub fn check_paths(&self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        let facts = Arc::new(self.collect_property_assign_facts());
+    /// inside it). The facts pass runs on `pool`. Panic-transparent - a
+    /// real checker panic in `paths` propagates to the caller, which is
+    /// what a unit test wants; see `check_paths_isolating_panics` for the
+    /// batch-safe counterpart.
+    pub fn check_paths(
+        &self,
+        paths: &[PathBuf],
+        pool: &rayon::ThreadPool,
+    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let facts = Arc::new(self.collect_property_assign_facts(pool));
         paths
             .iter()
             .map(|path| {
@@ -1915,7 +1945,8 @@ impl Project {
     ) -> CheckPathsIsolatingPanics {
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let outcomes = pool.install(|| self.check_paths_catching_panics(paths));
+        let facts = Arc::new(self.collect_property_assign_facts(pool));
+        let outcomes = pool.install(|| self.check_paths_catching_panics(paths, &facts));
         std::panic::set_hook(default_hook);
 
         let mut results = FxHashMap::default();
@@ -1932,22 +1963,17 @@ impl Project {
         (results, panics)
     }
 
-    /// `check_paths_isolating_panics`' work, run on its pool.
+    /// `check_paths_isolating_panics`' per-path checks, run on its pool.
     fn check_paths_catching_panics(
         &self,
         paths: &[PathBuf],
+        facts: &Arc<PropertyAssignFacts>,
     ) -> Vec<(PathBuf, Result<Vec<Diagnostic>, String>)> {
-        let facts = Arc::new(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.collect_property_assign_facts()
-            }))
-            .unwrap_or_default(),
-        );
         paths
             .par_iter()
             .map(|path| {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.check_file_with_property_assign_facts(path, &facts)
+                    self.check_file_with_property_assign_facts(path, facts)
                 }))
                 .map_err(|payload| {
                     payload
@@ -1970,8 +1996,8 @@ impl Project {
     /// corpus at once, rather than one file (and its
     /// transitively-affected dependents) at a time the way `update_file`
     /// does.
-    pub fn check_all(&self) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
-        self.check_paths(&self.files.keys().cloned().collect::<Vec<_>>())
+    pub fn check_all(&self, pool: &rayon::ThreadPool) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        self.check_paths(&self.files.keys().cloned().collect::<Vec<_>>(), pool)
     }
 
     /// Resolves one whole-program finding's own reportable location and
