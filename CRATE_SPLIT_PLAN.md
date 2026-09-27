@@ -3060,8 +3060,9 @@ derived node, each listing its Appendix A rows:
   scope's parameter types: after `if ($lazy) { return …; }`, nette's
   `Strings::matchAll` returns a `list` against `($lazy is true ? Generator
   : list)`, and `return is_int($value);` under `@return ($value is int ?
-  true : false)` returns `bool`; both are `return.type` today (12 in the
-  corpus, e.g. `nette/utils/src/Utils/Strings.php:538`,
+  true : false)` returns `bool`; both are `return.type` today (phpstan-rs
+  reports 12 against a conditional in the corpus; PHPStan reports 1 of the
+  5 checked, e.g. not `nette/utils/src/Utils/Strings.php:538` or
   `latte/Essential/Filters.php:728`);
 - (g) the restricted-usage framework: `@internal` core, deprecation
   (ext-deprecation-rules), disallowed-calls, and `phpstan_api`;
