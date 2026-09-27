@@ -1081,6 +1081,22 @@ loader and the schema. Open (review of 2026-09-27), one commit each:
   parent directory (reproduced), while the baseline normalizes the same
   paths. `path` resolves against the config file's directory, as PHPStan
   resolves it, and is compared as a normalized path.
+- **`restricted_symbols` entries fail silently too.** A `method`,
+  `staticMethod`, `property`, `staticProperty` or `classConstant` entry
+  without `class` is dropped by `RestrictedSymbols::compile`; and
+  `compile` keys entries by symbol with last-insert-wins while
+  `DisallowedCallsSettings::entries` appends the presets after the user's
+  own entries, so a preset silently replaces a user's entry for the same
+  symbol (traced). A missing `class` is a load error, and a user entry wins
+  over a preset's for its symbol.
+- **The C1 tests don't cover what C1 promised.** `config/src/tests.rs` and
+  `app/tests.rs` test top-level unknown keys only - no nested key, no
+  `--set` of an unknown key, no type error's key path - and
+  `loads_every_ignore_error_field_combination` loads a `path`-only
+  `[[ignore_errors]]` entry, which the requirement above makes a load
+  error (no config in the fixtures or the corpus uses one). Each open item
+  above lands with its test. The activation package names were checked
+  against Packagist; all seventeen exist.
 - **`[[assertions]]`/`[[class_argument_returns]]` fail silently.** A type
   string is not parsed at load (a typo becomes a class name), and an
   entry naming a missing function, method or parameter is skipped
@@ -1333,7 +1349,12 @@ named, as its own behaviour commit after that phase's structural commit
     properties and constants later-wins, hierarchy first-wins-if-set, flag
     sets unioned so `final`/`abstract` leak across). Each case gets its own
     operation; `insert_built_decl`'s enum arm bypasses the collision policy
-    entirely (traced).
+    entirely (traced). The registry tests that pin today's union
+    (`two_unconditional_class_declarations_merge_instead_of_replacing`,
+    `two_unconditional_function_declarations_with_a_disjoint_type_at_one_position_union_it`
+    and their siblings in `stubs_and_conditional_declarations.rs`) are
+    rewritten per case, each keeping its name only where its case keeps
+    its meaning.
   - **More incremental staleness:** the dead-code escape sets
     (`Project::escaped_enum_cases`, `escaped_member_classes`) only grow;
     an edit or a removal never takes a file's contributions out.
@@ -1377,7 +1398,12 @@ named, as its own behaviour commit after that phase's structural commit
   - `global_vars` counts only assignment statements, so a global also
     bound by `foreach`, destructuring or a by-reference argument keeps the
     literal of its first assignment (`function.alreadyNarrowedType` three
-    times, reproduced); its expression typing drops unkeyed array items
+    times, reproduced), and a top-level append (`$items[] = 'x'`) adds
+    nothing, so `$items = ['a' => 1]` stays `array{a: 1}` and a correct
+    `is_string()` over its values is `function.impossibleType`
+    (reproduced) - the registry test
+    `a_bare_top_level_append_contributes_nothing` asserts that behaviour
+    and flips with the fix; its expression typing drops unkeyed array items
     (`['en', 'fr']` is `array{}`), takes call returns raw (templates,
     `static`, dynamic return types unresolved) and resolves `self::` as
     `Ns\self` (traced);
