@@ -1159,7 +1159,10 @@ Follow-ups:
   through generic arguments (by ancestor bindings), callables, shapes, array
   keys and iterables, unioning every binding (behaviour fix, each case
   fixtured: `@param T $a, T $b` infers `1` for `(1, 2)`; `array<K, V>` keys,
-  `ArrayObject<int, T>`, `callable(): T` and `array{x: T}` infer nothing).
+  `ArrayObject<int, T>`, `callable(): T` and `array{x: T}` infer nothing;
+  `@param T ...$v` binds only the first argument, so `collect('a', 'b',
+  'c')` returning `T` is `'a'`, a wrong value, where PHPStan has
+  `'a'|'b'|'c'`: nsrt `bug-2572.php`, `bug-7704.php`).
 - **Late types.** `new<T>` and `template-type<...>` get variants (PHPStan's
   `NewObjectType` and `GetTemplateTypeType`); `int-mask<>`/`int-mask-of<>`
   resolve in C7's resolver instead of reading as `int`; `key-of<C::ARR>`
@@ -1176,7 +1179,12 @@ Follow-ups:
   displays as `'a'b'`), and a callable's union return and a callable inside
   a union are parenthesized (`Closure(int): (int|string)` displays as
   `Closure(int): int|string`, `(callable(): void)|null` as
-  `callable(): void|null`).
+  `callable(): void|null`). A float literal keeps its decimal point:
+  `@param 0|0.0|1.5 $x` displays as `0|0|1.5` today.
+- **Callable parameters** carry their names, and a callable its purity.
+  `CallableParam` has no name today, so `$f(valu: 1)` on `fn (int $value)`
+  isn't reported and a conditional return `($value is int ? …)` can't bind
+  its parameter; `pure-callable(int): int` reads as `callable(int): int`.
 - **`iterable<K, V>`** keeps its arguments (behaviour fix). It is
   `array<V>|Traversable` today, the key and `Traversable`'s arguments lost,
   so a `foreach` over `iterable<int, string>` yields `mixed` key and value,
