@@ -2041,9 +2041,13 @@ By asserted expression: 4,788 are variables, 3,399 are calls to functions
 PHPStan types through an extension (E2; 413 of them `mixed`, among them
 `filter_var` 191 and `min`/`max` 198), 1,016 are operators (D3), 707 are
 method calls, 347 other function calls, 300 properties, 179 offsets and
-35 `new`. 100 are wrong values: every member of both types is a literal
-and an expected literal is missing from phpstan-rs's type. Each wrong value
-is fixed first in its owning phase and is listed there. The count is a
+35 `new`. Two classes are flagged as possible wrong values: 100 where
+every member of both types is a literal and an expected literal is missing
+from phpstan-rs's type, and 65 where phpstan-rs has literals and PHPStan
+the general type covering them. Each flagged line is either a wrong value,
+fixed first in its owning phase and listed there, or phpstan-rs being
+right at runtime (after `assert(($a[1] ?? null) === null)`, `$a[1]` is
+`null`, where PHPStan keeps `object|null`), an approved deviation. The count is a
 tracked number: each phase records it, and a phase that raises it has a
 named reason in its commit. The suite's other two assertions,
 `assertNativeType` (313 calls) and `assertVariableCertainty` (681), are
