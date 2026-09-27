@@ -34,11 +34,8 @@ pub use codeframe::render_friendly;
 /// Selects how `check-project` renders its diagnostics. `Text` (the
 /// default) is this project's original human-readable format; `Json`,
 /// `Checkstyle` and `Junit` are CI-consumable additions, and `Friendly` a
-/// richer terminal rendering. A plain
-/// `#[derive(clap::ValueEnum)]` rather than hand-rolled `FromStr`/error
-/// message - clap already renders a helpful "invalid value 'x' for
-/// '--format <FORMAT>' [possible values: text, json, checkstyle, junit, friendly]" on a bad
-/// value for free.
+/// richer terminal rendering. clap's `ValueEnum` rejects any other value
+/// with `invalid value 'x' for '--format <FORMAT>'` and the possible values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum OutputFormat {

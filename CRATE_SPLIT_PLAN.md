@@ -926,10 +926,6 @@ Follow-ups:
   the performance gate compares every commit with its parent (§4.8).
 - **CI** runs `xtask modgraph`, `xtask arch` and the test-name manifest,
   none of which needs the corpus.
-- **Docs lint.** `rustdoc::broken_intra_doc_links` is `deny` in
-  `[workspace.lints]`, and `cargo doc` runs with `RUSTDOCFLAGS=-D warnings`
-  in CI and `xtask gates` (one warning today: an unescaped `<FORMAT>` in
-  `output.rs`).
 - **CI green.** The one recorded Rust CI run (`867d9cb3`) failed at the
   no-default-features tests, so the docs, machete and deny steps never ran,
   and 162 commits since are unpushed. Every step passes locally; a passing

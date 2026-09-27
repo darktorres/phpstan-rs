@@ -1444,7 +1444,9 @@ fn gate_steps(full: bool, hash: &str, timings: &mut Timings) -> Result<(), Strin
     timings.time("module graph", |_| modgraph::modgraph(&root(), &[]))?;
     timings.time("arch", |_| arch::arch(&root()))?;
     timings.time("doc", |_| {
-        run(cargo().args(["doc", "--workspace", "--no-deps", "--quiet"]))
+        run(cargo()
+            .args(["doc", "--workspace", "--no-deps", "--quiet"])
+            .env("RUSTDOCFLAGS", "-D warnings"))
     })?;
     timings.time("fuzz check", |_| {
         run(cargo().args([

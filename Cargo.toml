@@ -34,7 +34,7 @@ unreachable_pub = "warn"
 unsafe_code = "deny"
 
 [workspace.lints.rustdoc]
-broken_intra_doc_links = "warn"
+broken_intra_doc_links = "deny"
 
 # Thin LTO with one codegen unit: about 5% faster on the scoped Piwigo
 # run (26.7 s vs 28.0 s) for a ~3x longer release build, and it keeps
