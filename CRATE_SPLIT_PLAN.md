@@ -1056,7 +1056,10 @@ loader and the schema. Open (review of 2026-09-27), one commit each:
   directory.
 - **Docs:** no config reference exists (the README documents no keys);
   one is written from the section doc comments, and §2's L2 line is
-  corrected.
+  corrected. The `check-project` help is stale: `--php-version` says an
+  unset version leaves the version rules nothing to check, though B8
+  defaults it from composer, and `--level` says unset reports everything,
+  though the session caps it at `DEFAULT_REPORT_LEVEL` (6).
 
 **C2. Settings leave `Registry`**, following Appendix B:
 - `RuleLevelHelper` and `ConstantResolver` land in the package's future
@@ -1067,6 +1070,22 @@ loader and the schema. Open (review of 2026-09-27), one commit each:
 Gate: no setting read under reflection.
 
 Open (review of 2026-09-27):
+- **A version range types `PHP_VERSION_ID` as the stub's literal.**
+  `ConstantResolver::global_constant_type` asks
+  `Registry::php_version_consensus`, which answers only when the range's
+  two ends agree; for any range they differ, so the lookup falls through
+  to the phpstorm-stubs `define('PHP_VERSION_ID', 50306)`. With composer's
+  `"php": "^7.4 || ^8.0"` (B8's default range), `if (PHP_VERSION_ID >=
+  80000)` is reported `greaterOrEqual.alwaysFalse` (reproduced); the same
+  holds for `PHP_MAJOR_VERSION`/`PHP_MINOR_VERSION`. Fixed first, as its
+  own behaviour commit: a predefined constant is typed over the whole
+  range (`int<min.id, max.id + 99>`, the major and minor as ranges or
+  unions) and never falls back to the stub's value.
+- **`dynamic_constant_names` details:** a global name is matched exactly,
+  where PHP folds a constant's namespace prefix (the stub index's own
+  rule); and `generalize` turns a shape into `array<array-key, …>`,
+  dropping list-ness and the key type, and builds an unflattened union of
+  its values.
 - **The gate doesn't exist.** `xtask arch` enforces the `Diagnostic`
   literal, `$$`, print and path rules only; "no setting read under
   reflection" is added (no `*Settings` type, `CheckSettings` or
@@ -1105,6 +1124,22 @@ Landed as C3a-C3d (`dcc67ce5`, `bfce0e9f`, `49e6d9b1`, `41874e77`,
   with a `classes_lowercase` side map and a `canonicalize_class_name_case`
   pass; `class_declaration` looks up case-sensitively. §3.5 left class
   keys to C3. Scheduled in C4.
+- **Member names are matched by declared spelling.** Methods are keyed by
+  declared spelling; `lookup_method` falls back to a linear scan on a
+  miss, but the flag sets and the 12 direct `methods().get()` sites in
+  the checker don't. Reproduced: `class D extends C { function BAR() }`
+  over `final public function bar()` in `C` reports only
+  `method.nameCase`, not the override of a final method (a PHP fatal
+  error). Method keys fold case (like `FunctionTable`); property and
+  constant keys stay exact. Scheduled in C4.
+- **Accessors return the storage.** C3d's accessors (47 of them) hand out
+  `&FxHashMap`/`&FxHashSet`/`&Vec`/`&IndexMap` (`methods()`,
+  `properties()`, `consts()`, `final_methods()`, `template_bounds()`,
+  ...), so the storage shape is still the API, and `Registry::classes`,
+  `functions` and `global_constants` are `pub` maps read directly (124
+  `registry.classes.get`/`contains_key` in the checker, case-sensitive).
+  Opaque means queries (`method(name)`, `is_final_method(name)`,
+  `template_params()`), which C4's snapshots need anyway. Scheduled in C4.
 - **Parallel collections remain.** Templates are five parallel structures
   (`templates`, `template_bounds`, `template_defaults`,
   `covariant_templates`, `contravariant_templates`), and member flags are
@@ -1138,9 +1173,11 @@ Landed as C3a-C3d (`dcc67ce5`, `bfce0e9f`, `49e6d9b1`, `41874e77`,
   (`OnceLock` re-entrance deadlocks). A cyclic `extends`/`implements`/
   `use` is detected and resolved as broken, with a test;
 - the C3 residue: class keys as case-insensitive `Name` (the lowercase side
-  map and `canonicalize_class_name_case` deleted), `Vec<TemplateParam>`
-  and per-member flags, build scratch in the builder, provenance as the
-  only location record;
+  map and `canonicalize_class_name_case` deleted) and case-folded method
+  keys, `Vec<TemplateParam>` and per-member flags, build scratch in the
+  builder, provenance as the only location record, and query accessors
+  in place of the storage-returning ones and the `pub` maps (every direct
+  `registry.classes`/`functions`/`global_constants` access converted);
 - `ReflectionBuilder::apply` snapshots, which own their names: the
   registry's and checker's calls to the process-wide
   `syntax::intern::intern` (about 100) go through the project's interner.
@@ -1189,7 +1226,17 @@ longer re-runs every pass over the stub classes for each project.
   follows;
 - provenance queries: `built_in_stub_classes` and `stub_provided_functions`
   become queries against the index (the other two sets went to C4);
-- the enumeration APIs;
+- the enumeration APIs. Each whole-registry iteration would force every
+  lazy stub class, so each moves onto a scoped query:
+  `native_type_hints.rs`'s two scans (every class, `is_subclass_of`, per
+  member) onto `subclasses_of`; `Project::run_reflection_rules` (every
+  class and function, stubs included) onto the project layer;
+  `repository_entity`'s scan onto ext-doctrine's data (E4 keeps it until
+  then); the LSP workspace-symbol function list onto the project layer.
+  The index records `parent`/`interfaces` for its first declaration only,
+  so for a class declared differently per version
+  (`couchbase`/`couchbase_v2`) `subclasses_of` must read each
+  declaration's ancestors: the index records them per declaration;
 - version-based skip-polyfill (approved delta);
 - version-dependent signature selection (approved delta);
 - a panic-injection test.
