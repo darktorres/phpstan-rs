@@ -2900,12 +2900,7 @@ building on the previous one:
       `if.alwaysFalse` (8 corpus findings). The deviation: inside the body
       it is the union of its type at creation and every value the
       enclosing function or its closures assign to it (today `null|never`,
-      and unreported). After the closure, the variable is `mixed` today:
-      symfony/console's `$commandList`, shared by `use (&$commandList)`
-      with an `array_filter` callback, reads as `mixed`, so
-      `$commandList[$cmd]->isHidden()` is `offsetAccess.nonOffsetAccessible`
-      and `method.nonObject` at level 10
-      (`rector/vendor/symfony/console/Application.php:657`);
+      and unreported);
     - a closure with by-reference uses converges like a loop; any other
       closure's body is entered once, from its declared parameter types.
       Today a closure whose body returns after `if (!$node instanceof
