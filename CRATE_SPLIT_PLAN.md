@@ -2174,7 +2174,16 @@ deleted; the file-size gate.
       `'foo'` instead of the subclass's `'bar'` (nsrt `bug-13828.php`);
     - narrowing to a value the type excludes gives the value instead of
       `never`: after a `match ($i) { 0 => … }` caught in a `try` on
-      `1|2|3|4`, `$i` is `0|1|2|3|4` (nsrt `match-expr.php:19`).
+      `1|2|3|4`, `$i` is `0|1|2|3|4` (nsrt `match-expr.php:19`), and
+      `$i === 2` on `int<3, 5>` gives `2`.
+  - **Integer ranges** narrow at their ends: `$i !== 3` on `int<3, 5>`
+    leaves `int<3, 5>` today instead of `int<4, 5>` (nsrt
+    `integer-range-types.php`, whose other mismatches are B4's range
+    union).
+  - **Comparisons between constants fold**, including `null` and `bool`
+    operands by PHP's comparison table: `1 < null` and `null < 1` are
+    `bool` today where PHPStan has `false` and `true` (96 nsrt mismatches
+    in `comparison-operators.php`).
   - **Narrowing gaps** in the handlers' `specifyTypes`:
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
       `if ($e === E::A) { return; }` and in a `match` `default` arm (with
