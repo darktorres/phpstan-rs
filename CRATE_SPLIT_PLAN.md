@@ -1406,7 +1406,11 @@ Follow-ups:
   `doctrine_entity_table_index` included, at no cost while none has been
   read; the collision policy reads declarations only. Trait and mixin
   members no longer outlive a change to their source (§1), its closure
-  test landing with the snapshots.
+  test landing with the snapshots:
+  `removing_a_files_trait_does_not_retroactively_unbake_its_members_from_existing_users`
+  (`project/tests/file_removal.rs`) inverts, renamed through
+  `gates/test-renames`, and `remove_files`' known-limitation doc comment
+  goes.
 
   `has_unresolvable_ancestor` reads the unresolved edges. The boolean
   `is_subclass_of` keeps counting an unresolved name as an ancestor until
@@ -1643,6 +1647,11 @@ ancestor reached through an unresolved edge (C4's ancestor level) answers
 `Maybe` (approved delta, fixture first): `instanceof`, override, `final`
 and `#[\Override]` checks through an unvendored parent stop treating it as
 known. Consumers needing certainty treat `Maybe` as unknown.
+`removing_a_files_direct_ancestor_does_not_unstick_the_subclass_relationship_either`
+and the `Grandchild`/`Child` assertion of
+`removing_a_files_class_does_stop_a_transitive_ancestor_relationship_through_it`
+(`project/tests/file_removal.rs`) answer `Maybe`, renamed through
+`gates/test-renames`.
 
 The `@property`, `@method` and `@mixin` implementors replace C4's copies
 (the own level's tags, the members level's mixins): member lookup asks the
