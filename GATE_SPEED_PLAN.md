@@ -94,7 +94,7 @@ thread does 57% of all CPU work:
 - `Project::new`: ~65 ms to clone and merge the stubs;
 - `finish_loading`: ~145 ms to re-run every registry pass over the stub
   classes;
-- `analyse`: ~38 ms on a one-line file, cause not yet profiled (S8).
+- `analyse`: ~38 ms on a one-line file (~4 ms after S5 and S6; see S8).
 
 Each fixture also builds its own worker pool sized to all cores, so 8
 parallel fixtures run 64 threads. About a third of the CPU goes to
@@ -309,17 +309,15 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   composer tests pass; `cargo xtask arch` passes.
 
 ### S8. Stub-proportional work in per-project passes (engine)
-- Profile a one-line fixture's `analyse` (~38 ms).
-- Whatever the profile shows as proportional to the stubs rather than
-  to the project is made project-proportional, where the result can't
-  change. Project-level passes (`check_whole_program`,
-  `check_class_shapes`, `check_banned`, `check_architecture`) are
-  candidates. At least one returns early under a fixture's default
-  settings: `class_shape.rs:105`'s walk over every class only runs when
-  closed-class or parent-call checks are on. So the profile decides,
-  not guesses.
-- Verify: the profiled fixtures identical. The profile before and after
-  the change is the step's own evidence, not a separate timing run.
+- Profiled at S7 with timers around `analyse`'s parts, over
+  `checker/cast_and_coercion`: a one-line fixture's `analyse` now takes
+  ~4 ms, not ~38 ms. The facts pass and the main check take under 1 ms
+  each. The rest is ~2.5 ms of project-level passes after
+  `check_whole_program`, about 1 s across the whole suite on 8 threads.
+- The drop came from S6, which removed the linear scan over every
+  function on each namespaced-call miss, and from S5.
+- No change: the remaining 2.5 ms isn't material next to the ~210 ms of
+  stub setup §4 leaves to C4/C5.
 
 ### S9. Analysis result, finalizer and CLI entry point in the library, plus a gate runner
 - **S9a:** F1's `AnalysisResult` and finalizer land now. `analyse`
