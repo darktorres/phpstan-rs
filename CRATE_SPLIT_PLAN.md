@@ -2159,10 +2159,20 @@ deleted; the file-size gate.
       `maxmind-db/reader/src/MaxMind/Db/Reader.php`;
     - `$b?->c->n === 1` doesn't narrow `$b` to non-null
       (`createNullsafeTypes`);
+    - a conditional `@phpstan-assert` type resolves against the call's
+      arguments and parameter defaults (`ConditionalTypeResolver::resolveForCall`):
+      `@phpstan-assert ($allow_null is true ? string|null : string) $input`
+      called as `trueCheck($a)` leaves `$a` as the unresolved conditional
+      today (nsrt `bug-9435.php`);
     - none of `EqualityTypeSpecifyingHelper`'s call comparisons narrow
       today (each reproduced):
       - `count($a) === 3` → a 3-element shape;
       - `count($a) === count($b)` → shared non-emptiness;
+      - `count($l) > 2` on a list → the offsets it proves
+        (`specifyTypesForCountFuncCall`): today `$l` stays `list<int>`
+        instead of `non-empty-list<int>&hasOffsetValue(1, int)&
+        hasOffsetValue(2, int)`, and `array_key_exists(1, $l)` stays
+        `bool` (nsrt `bug-13747.php`);
       - `strlen($s) === 0` → `''`;
       - `array_key_first($a) !== null` (and `array_key_last`,
         `array_find_key`) → non-empty;
@@ -2297,6 +2307,12 @@ assignments inside `assert()`.
     called immediately (`InvalidateExprNode`): after
     `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
     its narrowing today.
+  - A write to a typed property stores the value as PHP coerces it to the
+    native type (`toCoercedArgumentType` under coercive typing) and
+    intersected with it: after `$this->foo = '123'` on an `int` property
+    `$this->foo` is `123`, `$this->f = 1` on a `float` is `1.0`, and
+    `$this->data = $m` with `$m !== null` on `?array` is `array`. Today they
+    stay `int`, `float` and `array|null` (nsrt `bug-12393b.php`).
   - A write to an offset that exists keeps the array a list
     (`AssignHandler::shouldKeepList`). Today both `$l[0] = 7` on a
     `non-empty-list<int>` and `foreach ($l as $i => $v) { $l[$i] = $v + 1; }`
