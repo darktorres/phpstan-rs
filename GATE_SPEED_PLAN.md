@@ -20,17 +20,18 @@ early; each edit goes in with the step that causes it.
   with no delta.
 - No gate loses coverage. A check moves out of the quick tier only if it
   is redundant there. `--full` and CI keep running it.
-- One commit per step, verified before the next starts:
-  - engine steps check the corpus (`cargo xtask corpus`, then
-    `compare`), and the fixture directories of the rules and modules
-    they touch, byte-identical (`cargo test --profile gate --test
-    fixtures -- <dir>`);
-  - harness steps check the suite they touch;
-  - the whole fixture suite and the full `gates` run happen once, at
-    the end (§6). That's where rule 1's fixture identity is confirmed
-    for everything the per-step directories didn't cover.
-- Each commit message records the step's before and after wall times,
-  measured on an idle machine from S0's timing file.
+- One commit per step, checked cheaply before the next starts: fmt,
+  clippy, the unit tests of the touched modules, and the fixture
+  directories each step names, byte-identical
+  (`cargo test --profile gate --test fixtures -- <dir>`).
+- No per-step timing and no per-step corpus run. The corpus runs only at
+  S3a, whose type-snapshot delta has to be recorded and approved, and
+  once at the end (§6), together with the whole fixture suite, the full
+  `gates` run and the timing against §2.
+- If the final run shows a change no approved delta covers, it is traced
+  to the step that caused it. That change then lands as its own
+  behaviour commit with an approved delta, per the rule above, before
+  the plan is done.
 
 ## 2. Measured state
 
@@ -108,8 +109,8 @@ The order is the order of the sections below.
 - `gates` and `corpus` print each step's wall time and write
   `.corpus-runs/gate/gatetime/<hash>.<command>.tsv` (step, seconds), with
   `gates`, `gates-full` or `corpus` as the command. The file is written
-  even when a step fails. Every later step reads its before and after
-  times from it.
+  even when a step fails. The baseline in §2 and the final run in §6
+  come from it.
 - `cargo test` runs its test binaries one after another, so each
   target's own time (lib, cli, each crate's tests, fixtures) is recorded
   separately from libtest's `finished in` summary.
@@ -140,8 +141,7 @@ This is the collector shape of crate-split §3.8.
   earlier passes are kept. That's identical today in both the facts pass
   and the main pass, so output is unchanged. Keeping only final-pass
   data is the Stage D dispatcher's job ("drops non-final-pass output").
-- Verify: corpus identical, all-on in particular;
-  `project/renamed_named_arguments` identical.
+- Verify: `project/renamed_named_arguments` identical.
 
 ### S3. Type dump from the main pass (engine and gate)
 - `--dump-types` and `PHPSTAN_RS_DUMP_TYPES` go through
@@ -167,9 +167,10 @@ This is the collector shape of crate-split §3.8.
   in a library.
 - E6 later re-expresses the dump as an observer on the main pass; the
   single-pass property this step establishes carries over.
-- Verify: corpus diagnostics identical at both commits; the S3a delta
-  reviewed; S3b's type snapshots identical to S3a's; recorded-run and
-  fixture-suite times recorded.
+- Verify:
+  - at S3a, a corpus run, with its type-snapshot delta reviewed;
+  - at S3b, the type dumps of `project/property_assign_facts` and
+    `checker/narrowing` identical to S3a's.
 
 ### S4. One injected worker pool (engine and harness)
 - `Session` stops building a pool per session. It takes a shared
@@ -183,8 +184,8 @@ This is the collector shape of crate-split §3.8.
   same process-wide pool and passes it to `Project`, which S5b's
   parallel facts pass needs. The re-checked paths run on that pool too.
   F1 later moves the LSP onto `Session`, which then carries the pool.
-- Verify: fixture suite passes; `types-fixtures` identical; suite time
-  recorded.
+- Verify: `checker/cast_and_coercion` and `project/property_assign_facts`
+  identical; LSP tests pass.
 
 ### S5. Property-assign facts in parallel, in a defined order (engine)
 This is the per-file-then-merge summary shape of crate-split §3.8.
@@ -206,8 +207,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   files keep theirs. This matches the main pass and F1's panic
   isolation. The corpus has no panics, so snapshots don't change. A
   fixture that injects a panic covers the new behaviour.
-- Verify: corpus identical to S5a; `project/property_assign_facts` and
-  `checker/property_assignment` identical; LSP tests pass.
+- Verify: `project/property_assign_facts` and `checker/property_assignment`
+  identical; LSP tests pass.
 
 ### S6. Case-folded function keys, pulled forward from C5 (engine)
 - The C5 item "a case-folded function key map replacing the linear
@@ -232,9 +233,9 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Before changing the map, list the case-colliding keys in the stubs
   and the corpus. If any exist and output changes, that lands as S6a
   with its approved delta.
-- Verify: corpus identical (after S6a); `checker/symbol_existence`
-  (which holds 28 of the 39 `nameCase` fixtures) and `checker/codemods`
-  identical; registry and LSP tests pass.
+- Verify: `checker/symbol_existence` (which holds 28 of the 39
+  `nameCase` fixtures) and `checker/codemods` identical; registry and
+  LSP tests pass.
 
 ### S7. Composer hygiene without engine I/O (engine)
 - The session resolves its root to an absolute path once, at intake,
@@ -273,8 +274,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   F1's VFS replaces them, because each lookup there also records a
   dependency for F2's result cache; building that ahead of F2 would be
   thrown away.
-- Verify: corpus identical, all-on in particular;
-  `project/composer_hygiene`, `checker/includes`,
+- Verify: `project/composer_hygiene`, `checker/includes`,
   `project/phpstan_api_gating` and `checker/phpstan_api` identical;
   composer tests pass; `cargo xtask arch` passes.
 
@@ -288,8 +288,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   settings: `class_shape.rs:105`'s walk over every class only runs when
   closed-class or parent-call checks are on. So the profile decides,
   not guesses.
-- Verify: corpus and fixtures identical; per-fixture `analyse` time
-  recorded.
+- Verify: the profiled fixtures identical. The profile before and after
+  the change is the step's own evidence, not a separate timing run.
 
 ### S9. Analysis result, finalizer and CLI entry point in the library, plus a gate runner
 - **S9a:** F1's `AnalysisResult` and finalizer land now. `analyse`
@@ -365,7 +365,9 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Quick tier: 3 analyses instead of 6. `--full`: 2 fewer unscoped runs.
 - Per-level runs stay real runs. Under crate-split §3.9 the level decides
   which rules run, and only a level-specific run shows that.
-- Verify: `compare` finds every snapshot identical.
+- Verify: cli tests pass. The corpus pipeline it rewires runs for real
+  in the final run (§6), where `compare` must find every snapshot
+  identical.
 
 ### S10. Quick-tier redundancy (xtask)
 - `cargo bench --no-run` leaves the quick tier: `test --all-targets`
