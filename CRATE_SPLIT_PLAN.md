@@ -2885,7 +2885,12 @@ derived node, each listing its Appendix A rows:
   the call is not type-checked against the parameter);
 - (d) assignments and properties (`uninitialized` and
   `uninitialized_dataflow` rewritten over the ClassPropertiesNode
-  initialization state, with the dataflow walker deleted);
+  initialization state, with the dataflow walker deleted); an offset write
+  or append checks its container as a read does: `$i['x'] = 3` on an `int`
+  throws at runtime and isn't reported today, and at level 10 neither is
+  `$m['k'] = 1` or `$m[] = 2` on `mixed` (383 corpus oracle findings
+  phpstan-rs misses). A read inside `isset()`/`??`/`empty()` can't fail
+  and stays unreported (331 PHPStan reports on `mixed`);
 - (e) declarations, generics checks and PHPDoc;
 - (f) control flow, returns, throws and generators;
 - (g) the restricted-usage framework: `@internal` core, deprecation
