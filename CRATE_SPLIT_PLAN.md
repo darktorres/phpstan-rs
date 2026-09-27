@@ -1990,11 +1990,12 @@ fixture before its phase's structural commit.
   - **Constant conditions prune branches** (`IfHandler`): an `if` whose
     condition type is `true` skips the `else`/`elseif` merge, and a
     `false` condition drops its branch. The condition's type is the PHPDoc
-    type, or the native type when `treatPhpDocTypesAsCertain` is off. After `$flag = true;
-    if ($flag) { $x = 1; }`, `echo $x` is `variable.undefined` today.
+    type, or the native type when `treatPhpDocTypesAsCertain` is off.
+    After `$flag = true; if ($flag) { $x = 1; }`, `echo $x` is
+    `variable.undefined` today.
 
 **D3. One inference path.** ExprHandlers, per-`NodeId` results, `infer_expr`
-deleted, RefCell channels removed; the file-size gate.
+deleted; the file-size gate.
 - An ExprHandler has three parts, as in 2.2.16: processing, type
   resolution, and its `specifyTypes`. The TypeSpecifier is built here, as
   the dispatcher over the handlers' `specifyTypes`; D6 only makes it
@@ -2100,8 +2101,13 @@ deleted, RefCell channels removed; the file-size gate.
     it; 8,000 terms take 29 s with literals and 58 s with variables
     (quadratic).
 
-**D4. NodeCallback sink and result storage** (approved deltas for
-`return.unusedType`, `throws.*` and `property.unusedType`).
+**D4. NodeCallback sink, observers and result storage** (approved deltas
+for `return.unusedType`, `throws.*` and `property.unusedType`).
+- The RefCell recording channels (`probe_hit`, `probe_var_provenance`,
+  `member_ref_sites`, `escaped_enums`, `escaped_member_classes`) become
+  observer events; `by_ref_empty_dim_args` becomes the by-ref argument
+  context on the resolved call (Appendix C). The observer interface is
+  internal here; D6 publishes it.
 - `ExpressionResultStorage` keeps each node's before-scope, and rule type
   queries are answered from it.
 - A node's callback fires post-order with its before-scope. A call then
@@ -2119,7 +2125,10 @@ deleted, RefCell channels removed; the file-size gate.
   and `checker.rs:2127`.
 
 **D5. Convergence onto PHPStan semantics**, one approved-delta commit each,
-with a fixture per transition and trigger, on D1–D4's structure:
+with a fixture per transition and trigger, on D1–D4's structure. Where
+PHPStan's rule is less correct at runtime, runtime correctness wins and
+the deviation is named here: eval defining variables (§3.8), and
+assignments inside `assert()`.
 - guards (each kind), `method_exists()`/`property_exists()`/
   `array_key_exists()` producing B4's `HasMethod`/`HasProperty`/`HasOffset`
   intersection members instead of the `guarded_methods`/
@@ -2161,6 +2170,12 @@ with a fixture per transition and trigger, on D1–D4's structure:
     at level 1 as "Variable $x might not be defined."
   - A merge keeps a Maybe holder only for variables, function calls and
     virtual keys, and drops superglobals.
+  - An assignment inside `assert()` is Maybe afterwards, because
+    `zend.assertions = -1` compiles the call out; PHPStan treats it as
+    definite. Today `\assert((bool) ($trace = debug_backtrace()));`
+    followed by `$trace ?? false` is `nullCoalesce.variable`
+    (`amphp/amp/src/TimeoutCancellation.php:30`,
+    `SignalCancellation.php:41`).
 - rememberPossiblyImpureFunctionValues: the analysis behaves as `false`
   today (of the 12 lines flipping it changes in PHPStan 2.2.16's output,
   over `gates/phpstan-oracle/`'s probes and its test fixtures, phpstan-rs
@@ -2293,14 +2308,14 @@ with a fixture per transition and trigger, on D1–D4's structure:
     then the constructor, then instance methods, with properties and
     their hooks last.
   - **Constructor first**: the constructor is analysed before the other
-    methods. A private method called on `$this` from the constructor
-    contributes the properties it initializes (`CalledMethodProcessor`,
-    `mergeInitializedProperties`). Its end scope seeds them with readonly `$this` properties,
-    `PropertyInitializationExpr`, `class_exists`/`function_exists`
-    holders and constants (`rememberConstructorScope`). A class with
-    custom serialization is excluded. Today a `function_exists('f')` guard
-    in the constructor still leaves `f()` in another method as
-    `function.notFound`.
+    methods, and its end scope seeds them with readonly `$this`
+    properties, `PropertyInitializationExpr`, `class_exists`/
+    `function_exists` holders and constants (`rememberConstructorScope`).
+    A class with custom serialization is excluded. A private method called
+    on `$this` from the constructor contributes the properties it
+    initializes (`CalledMethodProcessor`, `mergeInitializedProperties`).
+    Today a `function_exists('f')` guard in the constructor still leaves
+    `f()` in another method as `function.notFound`.
   - **Closures**:
     - `->call($obj)`, `Closure::bind()` and `bindTo()` bind `$this` and the
       scope class (`enterClosureCall`, `enterClosureBind`, `restoreThis`);
@@ -2336,10 +2351,11 @@ with a fixture per transition and trigger, on D1–D4's structure:
 - Scope API (§3.8's list);
 - TypeSpecifier made public, with the type-specifying extension hooks;
 - returned-error `Rule` and dispatcher;
-- derived-node catalogue plus the site-mapping table, recounted at D6 (543
-  report sites at `76e738b4`);
+- the rest of the derived-node catalogue (D2 and D4 emit the execution-end,
+  unreachable-statement and call-expression nodes) plus the site-mapping
+  table, recounted at D6 (543 report sites at `76e738b4`);
 - Collector with collected data;
-- Observer;
+- Observer (published from D4's internal interface);
 - the extension-trait registry;
 - the concurrency / state model;
 - `AnalysisContext` completed (C9 created it for the summaries);
