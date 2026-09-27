@@ -1114,11 +1114,14 @@ Follow-ups:
   one no-native-type encoding (`Option<Type>`).
 
 **C4. Snapshots and lazy resolution**, one commit each, in this order:
-- **`xtask gatetime --since <hash>`**: runs the gated steps (the fixture
-  suite and the lib tests; C5 adds the cli tests) N = 3 times, records their
-  medians under `.corpus-runs/gate/gatetime/<hash>.gatetime.tsv`, and fails
-  on any gated step whose median isn't lower than `<hash>`'s. The phase
-  start's medians are recorded before the next commit.
+- **`xtask gatetime`**: `--record` runs HEAD's gated steps (the fixture
+  suite and the lib tests; C5 adds the cli tests) N = 3 times each, with
+  the binaries prebuilt and the same profile and environment `gates` uses
+  (the fixture suite with type dumps on), and writes their medians to
+  `.corpus-runs/gate/gatetime/<hash>.gatetime.tsv`; `--since <hash>` does
+  the same for HEAD and fails on any gated step whose median isn't lower
+  than `<hash>`'s. The phase start is recorded before the next commit, so
+  no old commit is rebuilt.
 - **Keys and data model** (structural; snapshots unchanged except where
   two classes' names differ only in case, which now collide under the
   collision policy - an approved delta if the corpus has one):
@@ -1133,14 +1136,9 @@ Follow-ups:
   - `Vec<TemplateParam>` and per-member flags; every native type is an
     `Option<Type>`; accessors return `Option<&T>`/`&[T]`; each doc comment
     is parsed once;
-  - build scratch (`method_tags`, `trait_aliases`, `redeclared_methods`,
-    `resolved_trait_conflicts`, the `*case_refs`, `type_imports`) leaves
-    `ClassReflection` for the per-file declaration, which is the memo's
-    input; the rules reading it (duplicate methods, trait conflicts and
-    aliases, class-name case and internal-usage checks on PHPDoc types)
-    query the declaration;
-  - provenance is the only location record (`Origin::Unknown`, `is_stub`,
-    `phpstan_class_files`, `function_decl_sites` gone);
+  - provenance is the only location record (`Origin::Unknown`, `is_stub`
+    and `function_decl_sites` gone; C3's follow-up already deleted
+    `phpstan_class_files`);
   - query accessors replace the storage-returning ones and the `pub` maps;
     every direct `registry.classes`/`functions`/`global_constants` access
     outside `registry/` is converted (about 280, 23 of them in tests);
@@ -1158,6 +1156,8 @@ Follow-ups:
   delta, listed in the commit): it merges the stubs before resolving,
   instead of resolving the test program alone and then recomputing only
   ancestors and member owners, so its classes resolve against the stubs.
+  Until the memo lands, each harness run pays the passes over the stubs;
+  only the phase end is timed.
 - **Per-class memoized resolution** replacing the passes:
   - per-class memos: `flatten_traits`, `resolve_method_tags`,
     `precompute_member_owners`, `resolve_deferred_type_imports`,
@@ -1171,18 +1171,28 @@ Follow-ups:
     `resolve_transitive_purity` (classifying only functions, and classes
     with a member, trait or mixin, from an analysed or context file) and
     `infer_global_variables`;
-  - `Registry::build` and `index_and_flatten` are deleted; the stub pass
-    still resolves each stub file's classes within that file (until C5's
-    stub layer), without global-variable inference.
+  - each name keeps its merged declaration beside its memo, the memo's
+    input: build scratch (`method_tags`, `trait_aliases`,
+    `redeclared_methods`, `resolved_trait_conflicts`, the `*case_refs`,
+    `type_imports`) leaves `ClassReflection` for it, and the rules reading
+    that scratch (duplicate methods, trait conflicts and aliases,
+    class-name case and internal-usage checks on PHPDoc types) query the
+    declaration; the snapshots split it per file;
+  - `index_and_flatten` is deleted and `Registry::build` only indexes
+    (until its callers move onto `apply`); the stub pass still resolves
+    each stub file's classes within that file (until C5's stub layer),
+    without global-variable inference.
 
   The memo has five levels, each a per-class `OnceLock`. A level reads the
   declarations, a lower level of any class, and the same level only along
   an ancestor edge:
   - **ancestors** (declarations only): the `extends`/`implements` closure
     in resolution order, the `use` closure in composition order, the
-    `@mixin` targets, the unresolved edges (a declared name no class
-    answers to, with the class declaring it), and the class's constant
-    declarations composed with its traits';
+    `@mixin` targets - each edge naming its target by the declared
+    spelling, as `canonicalize_class_name_case` does today - the unresolved
+    edges (a declared name no class answers to, as written, with the class
+    declaring it), and the class's constant declarations composed with its
+    traits';
   - **own**: own members composed with the `use` closure's declared
     members (a trait's `@method` tags stay its own), `@method` tags, then
     every type resolved in the class's context - imported aliases,
@@ -1197,7 +1207,8 @@ Follow-ups:
     reading other classes' members level.
 
   Class constants are typed through the `ConstantResolver` (C2's follow-up,
-  which lands first), reading the ancestor level's constant declarations; a
+  which lands first), reading the ancestor level's constant declarations
+  with the class's imported aliases substituted; a
   constant reference cycle, found from the declarations with `*` patterns
   expanded against the ancestor level, types as `mixed`, with a test. An
   enum's `value-of` reads its cases from the declaration. A function
@@ -1214,8 +1225,11 @@ Follow-ups:
   cell retryable (a panic-injection test and a parallel-resolution test
   over cyclic fixtures). A level stores what it changes and shares the rest
   with the level below (member maps behind `Arc`). Within this commit any
-  declaration or `ReflectionSettings` change resets every memo, at no cost
-  while none has been read; the collision policy reads declarations only.
+  declaration or `ReflectionSettings` change resets every memo,
+  `doctrine_entity_table_index` included, at no cost while none has been
+  read; the collision policy reads declarations only. Trait and mixin
+  members no longer outlive a change to their source (§1), its closure
+  test landing with the snapshots.
 
   `has_unresolvable_ancestor` reads the unresolved edges. The boolean
   `is_subclass_of` keeps counting an unresolved name as an ancestor until
@@ -1229,14 +1243,17 @@ Follow-ups:
   cycles), `class_shape`, `classes_using_trait`,
   `doctrine_entity_for_table`, `repository_entity`,
   `Project::run_reflection_rules` (nothing resolved when no rule is
-  registered), LSP workspace symbols and completion.
+  registered), LSP workspace symbols and completion; the `demo` command
+  resolves everything it prints.
 
-  One approved delta, fixtured: a method two nested traits both supply
-  resolves by `use` order, depth-first. Purity moving after resolution
-  changes nothing (its `void` gate reads a return type the declaration
-  already reconciled with the native one, and its lookups read names,
-  visibility and finality, which no later step rewrites), with a fixture
-  pinning `@return null` on `: void`.
+  Approved deltas, each fixtured: a method two nested traits both supply
+  resolves by `use` order, depth-first; a constant on a reference cycle
+  types as `mixed` (today `const A = [self::B]; const B = self::A;` types
+  `A` as nine nested `array{0: ...}` around `mixed`). Purity moving after
+  resolution changes nothing (its `void` gate reads a return type the
+  declaration already reconciled with the native one, and its lookups read
+  names, visibility and finality, which no later step rewrites), with a
+  fixture pinning `@return null` on `: void`.
 
   The commit runs the full gate tier; peak RSS stays at or below the phase
   start. A test pins that loading a project and checking one file resolves
@@ -1256,16 +1273,20 @@ Follow-ups:
   C9. Snapshots own their names: the registry's and checker's
   `syntax::intern::intern` calls (about 100) go through the project's
   interner; the stub layer's names stay global; `apply` sweeps the session
-  interner's entries nothing else holds.
+  interner's entries nothing else holds. A closure gate is a test that
+  applies a sequence of deltas and compares every query on the result with
+  a fresh build of the final file set: a property test over the fixture
+  files, and one test per staleness case below.
 - **Staleness fixes** (approved deltas), each with a closure gate, through
   the per-file declaration sets (which also hold what
-  `unconditionally_declared_classes`/`_functions` record): the two in §1;
+  `unconditionally_declared_classes`/`_functions` record): anonymous
+  classes removed with their file version (§1);
   a file's global constants are removed with it; removing a class or
   function declaration merged onto, or replacing, a built-in keeps the
   built-in; removing one of two same-named declarations keeps the other;
-  `stub_provided_functions`, `names_with_assert_tags`,
-  `doctrine_entity_table_index` and the dead-code escape sets
-  (`escaped_enum_cases`, `escaped_member_classes`) follow their files.
+  `stub_provided_functions`, `names_with_assert_tags` and the dead-code
+  escape sets (`escaped_enum_cases`, `escaped_member_classes`) follow their
+  files.
 - **Registry tests** (188, `registry/tests` and `registry/stubs/tests`) and
   the other `Registry::build` callers (the checker test harness,
   `phpstan_api`, `rule`, `doctrine` result-shape and `main` tests, the demo)
@@ -1717,7 +1738,7 @@ moves in the phase named.
 | php_date_parser | builtins | E2 |
 | regex_groups, pcre_validate | builtins::regex | E2 |
 | php_stubs + build.rs | stub-sources (sources, index) + reflection::stubs (layer) | B9/C5 |
-| registry/* (declarations, hierarchy, index, resolve, name_context, class_info, function_sig, generics, super_type, anonymous_class) | reflection | C3–C10 |
+| registry/* (index, resolve, hierarchy, generics, relation, name_context, class_info, function_sig, function_table, provenance, reflection_attribute, bodies, type_node, settings, stubs, anonymous_class; C4 adds the builder, the memo levels and the snapshot) | reflection | C3–C10 |
 | registry/assignability | types (unified relation) + analyser RuleLevelHelper | B4/C2 |
 | registry/assertion_table, assertion_tables | reflection overlays; defaults → ext-nette-tester / ext-mockery | C6 |
 | checker/predefined_constants, checker/constant_resolver | reflection ConstantResolver | C2 |
