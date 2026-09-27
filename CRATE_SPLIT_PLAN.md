@@ -2171,6 +2171,9 @@ deleted; the file-size gate.
     - unary minus on a literal union is ignored: `-$c` for `1|2` is `1|2`;
     - a float result is typed as an integer literal: `(float) 5` is `5`
       and `abs(0.0)` is `0`;
+    - `===` treats a float literal as the equal integer: on
+      `@param 0|0.0|1.5 $x`, `if ($x === 0) { return; }` leaves `1.5`, so
+      the `$x === 0.0` branch that follows is typed `1.5`;
     - loose comparison is evaluated with the wrong table: `'0' == null` is
       `true` and reported `equal.alwaysTrue`, where PHP 8 gives `false`
       (nsrt `loose-comparisons.php:325`, `:460`; the table's other 192
@@ -2546,6 +2549,9 @@ building on the previous one:
     - by-reference foreach leaves `ForeachValueByRefExpr`;
     - the loop always terminates only when the iteratee is non-empty and
       the body always terminates;
+    - the post-loop scope includes the scope that never entered the loop:
+      after `$e = null; foreach ($maybeEmpty as $e) {}`, `$e` is `1|2|3`
+      today, a wrong value (nsrt `foreach-loop-variables.php`);
     - with `polluteScopeWithAlwaysIterableForeach` off (strict-rules), the
       body's assignments after a non-empty foreach are Maybe
       (`processAlwaysIterableForeachScopeWithoutPollute`), and the body
@@ -2560,6 +2566,9 @@ building on the previous one:
     - an assignment on the right of `&&`/`||` is Maybe afterwards:
       `$c || ($y = 1); echo $y ?? 2;` is `nullCoalesce.variable` today, and
       `if ($c && ($z = 2) > 1) {}` leaves `$z` as `2`;
+    - an increment on the right of `&&` counts: in a loop,
+      `$foo && $i++;` leaves `$i` as `0` today, a wrong value (nsrt
+      `foreach-loop-variables.php`);
     - a `never` operand or arm keeps the other side's scope:
       `$v = $x !== null ? $x : throw new E();` leaves `$x` as `int|null`
       today (`$x !== null || throw` already narrows);
