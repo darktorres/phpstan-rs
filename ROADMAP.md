@@ -4467,7 +4467,9 @@ place gives it, and a variable some place doesn't give is possibly
 undefined there.
 
 Core tags (`CoreExtension::getTags()`) lower to their PHP meaning:
-- control flow: `if`/`elseif`/`else`, `n:else`, `ifset`, `ifchanged`,
+- control flow: `if`/`elseif`/`else`, `n:else`, `ifset` (narrowing as
+  `isset()` does, and `{ifset block name}`/`{ifset #name}` testing a
+  block's existence), `ifchanged`,
   `switch`, `for`, `while`, `skipIf`/`breakIf`/`continueIf`/`exitIf`,
   `try`/`rollback`; `foreach` with `{else}`, `$iterator` typed
   `Latte\Essential\CachingIterator` over the loop's iterable and chained
@@ -4483,7 +4485,9 @@ Core tags (`CoreExtension::getTags()`) lower to their PHP meaning:
   `RawPhpExtension`);
 - output: `{$x}`/`{=...}`, `n:attr`, `n:class`, `n:tag`, `contentType`,
   `spaceless`, `dump`/`trace`/`debugbreak`;
-- structure: `block`, `define`, `include` (file and block), `embed`,
+- structure: `block`, `define`, `include` (file, block, and `parent`/
+  `this` inside a block, rendering the overridden or current block),
+  `embed`,
   `import`, `extends`/`layout`, `varType`, `templateType`,
   `templatePrint`/`varPrint`.
 
@@ -4569,6 +4573,12 @@ one in scope, without `ScopedLoopVariables`; strict-HTML errors under
   `__toString()`);
 - a `{varType}` or `{parameters}` type contradicting `{templateType}`'s
   for the same variable;
+- arguments against the signature they're passed to, as a call's are:
+  an `{include}` of a `{define}` or of a file whose `{parameters}` declare
+  types, and an `{extends}`/`{layout}`/`{embed}` of one - wrong types,
+  unknown named arguments, missing required parameters;
+- a `{parameters}`, `{define}` or `{var}` default its declared type doesn't
+  accept, as a PHP parameter default is checked;
 - a `{define}` never rendered (opt-in, with dead code);
 - a filter applied to content (`{block|name}`, `{include ...|name}`,
   `{capture|name}`) that isn't content-aware (no `FilterInfo` first
@@ -4608,7 +4618,11 @@ templates reading it, and editing a template re-checks those including,
 embedding or extending it. `{* @phpstan-ignore <identifier> *}` suppresses
 as the PHP comment does, and baseline entries key on the `.latte` path.
 The Session discovers `*.latte` files as their own file kind (crate split
-F1's VFS), in parallel with PHP files and under the same result cache.
+F1's VFS), in parallel with PHP files and under the same result cache:
+templates under the analysed paths are analysed and reported, and ones
+elsewhere that a template includes, embeds, imports or extends (a
+vendor package's) load as context, resolved but never reported, the way
+vendor PHP loads.
 
 **182h — Language server.** Diagnostics for `.latte` documents; hover,
 go-to-definition and completion inside tag expressions, over the same
