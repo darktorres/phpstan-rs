@@ -1674,7 +1674,9 @@ Follow-ups:
 
 Gate: the gated steps' medians are lower than the phase start's
 (`xtask gatetime --since`); no stub class resolves unless something
-reaches it.
+reaches it. The keys, memo and snapshot commits each run the full gate
+tier (§4): they change every lookup's hashing, the resolution path, and
+the LSP's per-edit invalidation.
 
 **C5. Locator chain and stub layer**, one commit each:
 - the stub layer's version key over a `PhpVersions` range, decided first
