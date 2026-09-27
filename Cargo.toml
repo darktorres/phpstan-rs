@@ -30,7 +30,7 @@ sqlparser = "0.63.0"
 toml = "0.8"
 
 [workspace.lints.rust]
-unreachable_pub = "warn"
+unreachable_pub = "deny"
 unsafe_code = "deny"
 
 [workspace.lints.rustdoc]
