@@ -28,6 +28,9 @@ User-visible changes: output, formats, flags, configuration and exit codes.
 - `check-project` drops its per-check flags (`--check-dead-code`,
   `--strict-mixed-arrays`, ...) for `--set KEY=VALUE`, which sets any
   config key over the file: `--set rules.check_dead_code=true` (`4c18d661`).
+- `restricted_symbols`' attribute contexts (`allow_in_class_with_attributes`
+  and the rest) match an attribute's resolved class name, so an imported
+  `#[Route]` matches its fully qualified pattern (`49e6d9b1`).
 
 ### Output
 - Diagnostics come in one total order - position, then identifier, message
@@ -63,6 +66,8 @@ User-visible changes: output, formats, flags, configuration and exit codes.
   the language server, with no ignore list or baseline configured, and its
   project resolves paths against the workspace root (`00a4b609`).
 - `initialize` reports the binary's version (`4f1b3148`).
+- `workspace/symbol` lists a method and a property of the same name both,
+  each under the class-like declaring it (`dcc67ce5`).
 
 ### Analysis
 - Fixes to inference and to false positives, each listed in
