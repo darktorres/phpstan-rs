@@ -2012,11 +2012,6 @@ deleted, RefCell channels removed; the file-size gate.
       are applied to.
   - The recipes replace `branch_implied_facts` and
     `pending_or_disjunctions`.
-- `ExpressionResultStorage` keeps each node's before-scope, and rule type
-  queries are answered from it.
-- A node's callback fires post-order with its before-scope. A call then
-  emits its call-expression node, so the impossible-check rules see the
-  processed call.
 - Assignment is two-phase (`PreparedAssignTarget`/`AssignTargetWalkMode`):
   the target's sub-expressions in PHP's evaluation order, then the value,
   then the write.
@@ -2043,6 +2038,9 @@ deleted, RefCell channels removed; the file-size gate.
     for every left operand (`int`, `string`, `?array`, `bool`, objects).
   - **First-class callables** carry the callee's signature: `strlen(...)`
     is a bare `Closure` today.
+  - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
+  - **Increments** follow PHP: `$k = 'a'; $k++` leaves `'a'` today, and
+    `$n = null; $n++` leaves `int` where PHP gives `1`.
   - **Narrowing gaps** in the handlers' `specifyTypes`:
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
       `if ($e === E::A) { return; }` and in a `match` `default` arm;
@@ -2063,8 +2061,13 @@ deleted, RefCell channels removed; the file-size gate.
     it; 8,000 terms take 29 s with literals and 58 s with variables
     (quadratic).
 
-**D4. NodeCallback sink** (approved deltas for `return.unusedType`,
-`throws.*` and `property.unusedType`).
+**D4. NodeCallback sink and result storage** (approved deltas for
+`return.unusedType`, `throws.*` and `property.unusedType`).
+- `ExpressionResultStorage` keeps each node's before-scope, and rule type
+  queries are answered from it.
+- A node's callback fires post-order with its before-scope. A call then
+  emits its call-expression node, so the impossible-check rules see the
+  processed call.
 - Non-final passes and quiet evaluations run with a Noop sink.
 - Gatherer frames collect return statements, yields, execution ends and
   impure points outside the rule sink, as `NodeScopeResolver::pushNodeGatherer`
@@ -2156,6 +2159,10 @@ with a fixture per transition and trigger, on D1–D4's structure:
 - references (`IntertwinedVariableByReferenceWithExpr`):
   - After `$b = &$a; $b = 'x';`, `$a` is still `1`, and
     `if ($a === 'x')` is reported `identical.alwaysFalse`.
+  - `$block = &$this->blocks[$l][$n]` types `$block` as the element type,
+    although a reference to a missing offset creates it as `null`, so
+    `$block ??= new Block()` is `nullCoalesce.variable` today
+    (`latte/Runtime/Template.php:326`).
   - After `$ref = &$list; $ref[] = 5;`, `count($list) > 0` is reported
     `greater.alwaysFalse`.
 - the transition set:
@@ -2187,6 +2194,28 @@ with a fixture per transition and trigger, on D1–D4's structure:
     fixpoint like a loop (`resolveBackwardGotoScope`). In
     `retry: $i++; if ($i < 3) { goto retry; }`, `$i < 3` is reported
     `smaller.alwaysTrue` today and `$i` is `1|never`.
+  - **Short-circuit scopes** follow `BooleanAndHandler`/`BooleanOrHandler`/
+    `TernaryHandler`/`NullsafeShortCircuitingHelper`:
+    - an assignment on the right of `&&`/`||` is Maybe afterwards:
+      `$c || ($y = 1); echo $y ?? 2;` is `nullCoalesce.variable` today, and
+      `if ($c && ($z = 2) > 1) {}` leaves `$z` as `2`;
+    - a `never` operand or arm keeps the other side's scope:
+      `$v = $x !== null ? $x : throw new E();` leaves `$x` as `int|null`
+      today (`$x !== null || throw` already narrows);
+    - a nullsafe call's arguments are evaluated only when the receiver
+      isn't null: after `$q?->m($e ??= new E())`, `$e ?? …` is
+      `nullCoalesce.variable` today (`amphp/http-server/Http2Driver.php:726`).
+  - **For** follows `ForHandler`:
+    - a loop whose first condition is `true` runs at least once: after
+      `for ($i = 0; $i < 10; $i++) { $x = 1; }`, `echo $x` is
+      `variable.undefined` today;
+    - the exit scope applies the condition's falsey narrowing after
+      generalization: `$i` is `0|1|2|3|4|5` in that body and `0|…|6` after
+      it today, where PHP ends at 10;
+    - `for ($i = 0; $i < count($a); $i++)` knows `$a[$i]`
+      (`inferForLoopExpressions`);
+    - `polluteScopeWithLoopInitialAssignments` decides whether the init
+      assignments survive a loop that may not run.
   - **Switch** follows `SwitchHandler`:
     - each case body is entered with `$subject == $case` true, merged with
       the previous case's fall-through;
