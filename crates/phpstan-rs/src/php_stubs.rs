@@ -42,6 +42,8 @@
 
 use std::sync::Arc;
 
+use rayon::prelude::*;
+
 use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
@@ -895,6 +897,50 @@ fn patch_datetime_fluent_returns(classes: &mut [(Arc<str>, ClassInfo)]) {
     }
 }
 
+/// One stub file's declarations, in the order its registry yields them.
+struct StubFileDeclarations {
+    functions: Vec<(Arc<str>, FunctionSig)>,
+    classes: Vec<(Arc<str>, ClassInfo)>,
+    constants: Vec<(Arc<str>, Type)>,
+}
+
+/// Lexes, parses and indexes one embedded stub file.
+fn index_stub_file(source: &str) -> StubFileDeclarations {
+    let tokens = Lexer::new(source).tokenize_with_spans();
+    let mut program = Parser::new(tokens)
+        .parse_program()
+        .expect("vendored phpstorm-stubs source failed to parse");
+    crate::stub_attributes::apply_stub_attributes(&mut program);
+    let registry = Registry::index_and_flatten(&program);
+    StubFileDeclarations {
+        functions: registry
+            .functions
+            .into_iter()
+            .map(|(name, mut sig)| {
+                // See `FunctionSig::is_stub`'s own doc comment: a stub
+                // file's own body is never real - `Registry::
+                // index_and_flatten` has no way to know that on its own,
+                // so this is set here instead, the one place that does.
+                sig.is_stub = true;
+                (name, sig)
+            })
+            .collect(),
+        classes: registry
+            .classes
+            .into_iter()
+            .map(|(name, mut info)| {
+                // Same reasoning one level down: every method a stub
+                // class declares has an equally empty, unreal body.
+                for sig in info.methods.values_mut() {
+                    sig.is_stub = true;
+                }
+                (name, info)
+            })
+            .collect(),
+        constants: registry.global_constants.into_iter().collect(),
+    }
+}
+
 fn generated_stub_data() -> &'static GeneratedStubData {
     static CACHE: std::sync::LazyLock<GeneratedStubData> = std::sync::LazyLock::new(|| {
         let mut seen_functions = rustc_hash::FxHashSet::default();
@@ -909,23 +955,20 @@ fn generated_stub_data() -> &'static GeneratedStubData {
             .iter()
             .map(|e| Some(*e))
             .chain(std::iter::repeat(None));
-        for (source, extension) in PHPSTORM_STUBS_SOURCES
+        let files: Vec<(&'static str, Option<&'static str>)> = PHPSTORM_STUBS_SOURCES
             .iter()
             .chain(PHPSTAN_SRC_SOURCES.iter())
+            .copied()
             .zip(extensions)
-        {
-            let tokens = Lexer::new(source).tokenize_with_spans();
-            let mut program = Parser::new(tokens)
-                .parse_program()
-                .expect("vendored phpstorm-stubs source failed to parse");
-            crate::stub_attributes::apply_stub_attributes(&mut program);
-            let registry = Registry::index_and_flatten(&program);
-            for (name, mut sig) in registry.functions {
-                // See `FunctionSig::is_stub`'s own doc comment: a stub
-                // file's own body is never real - `Registry::
-                // index_and_flatten` has no way to know that on its own,
-                // so this is set here instead, the one place that does.
-                sig.is_stub = true;
+            .collect();
+        // Each file indexes on its own; merging stays sequential, in file
+        // order, so which declaration wins doesn't depend on scheduling.
+        let indexed: Vec<StubFileDeclarations> = files
+            .par_iter()
+            .map(|(source, _)| index_stub_file(source))
+            .collect();
+        for ((_, extension), file) in files.into_iter().zip(indexed) {
+            for (name, sig) in file.functions {
                 if seen_functions.insert(name.clone()) {
                     if let Some(extension) = extension {
                         function_extensions.insert(name.to_ascii_lowercase(), extension);
@@ -933,12 +976,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
                     functions.push((name, sig));
                 }
             }
-            for (name, mut info) in registry.classes {
-                // Same reasoning one level down: every method a stub
-                // class declares has an equally empty, unreal body.
-                for sig in info.methods.values_mut() {
-                    sig.is_stub = true;
-                }
+            for (name, info) in file.classes {
                 if seen_classes.insert(name.clone()) {
                     if let Some(extension) = extension {
                         class_extensions.insert(name.to_ascii_lowercase(), extension);
@@ -946,7 +984,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
                     classes.push((name, info));
                 }
             }
-            for (name, ty) in registry.global_constants {
+            for (name, ty) in file.constants {
                 register_global_constant(&mut merged_constants, name, ty);
             }
         }
