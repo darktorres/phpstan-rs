@@ -960,12 +960,39 @@ commit); the unsorted corpus comparison starts here.
 - a dynamic method call is impure.
 
 Follow-ups:
-- **Full tier.** `xtask gates --full` runs now and at the end of every phase
-  from here. The unscoped and level 0–10 artifacts were last recorded at
-  `1e5e42be` (Stage A); the first run's diff against them is reviewed line
-  by line as one catch-up delta (`compare --full --against 1e5e42be`: the
-  commits between add approved deltas of their own, so no base is chosen
-  past them).
+- **Full tier.** `xtask gates --full` runs at the end of every phase. The
+  catch-up run (`25d63876` against `1e5e42be`) is reviewed: levels 0–8 of
+  `scoped` and `all-on` change exactly as the quick tier's approved deltas
+  do; levels 9–10 and `unscoped` add the call-parameters wording
+  (`976956bc`), sub-name spans, extension activation by installed package
+  (`unscoped` runs without composer, so Doctrine result typing is off), the
+  A2 fixes and better inference. The review's false positives are the
+  behaviour fixes below; `printf`'s doubled value report is fixed
+  (`ac70c6eb`). Each is one commit with its fixture:
+  - a `0|positive-int` parameter accepts `int<0, max>`: a union of an
+    integer and an adjacent range is one range (`composer/pcre`'s
+    `ReplaceResult`);
+  - `parent::__construct()` binds the parent's templates through the
+    class's `@extends`, not the templates' defaults (Symfony's
+    `NodeDefinition`: `expects null|null, TParent|null given`);
+  - an `@extends` type argument is resolved before the bound check: an
+    enum case (`BuiltinType<TypeIdentifier::ARRAY>`) and a constant
+    wildcard (`AbstractLexer<DocLexer::T_*>`) fit their bounds;
+  - a `foreach` over a value that isn't provably an array is a throw point
+    (iterating calls user code), so a catch after it sees the state before
+    and between iterations (PSL's `$iterating` checks:
+    `match.alwaysFalse`, `if.alwaysFalse`);
+  - an object whose class declares `__invoke()` is a subtype of `callable`
+    (Monolog's `ProcessorInterface|callable` PHPDoc on a `callable`
+    parameter);
+  - `null === $x || $x === (string) (int) $x` keeps `$x`'s string in the
+    true branch (Symfony's `DeepClone`: `notIdentical.alwaysFalse`);
+  - a static call with a dynamic name (`Assert::$name()`) is a throw point
+    for `@throws` (PHPUnit's `Phpt\TestCase`: `throws.unusedType`);
+  - a type alias used through another alias resolves at any depth
+    (Symfony's `AppReference`: `class.notFound` on its `@psalm-type`s);
+  - `method_exists()` on a property narrows it (Symfony's `Router`); D's
+    `HasMethod` narrowing, reported since Stage A.
 - **Performance and build time** record their first results; from then on
   the performance gate compares every commit with its parent (§4.8).
 - **CI green.** The one recorded Rust CI run (`867d9cb3`) failed at the
