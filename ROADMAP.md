@@ -4243,7 +4243,7 @@ ignore or the fix to disk.
 level is mostly a filter on finished results
 (`project/session.rs`: `diagnostics.retain(|d| d.level <= self.level)`,
 applied before inline ignores and `ignore_errors`). It isn't purely a
-filter yet: `Registry::configured_level` drives emission-time acceptance
+filter yet: `CheckSettings.rule_levels` drives emission-time acceptance
 at thresholds 7/8/9/10, and some sites compute their level at runtime.
 Levels phase E5 of the crate split turns every computed-level site into a
 named parameter with a level. After that, the viewer's scan runs at max
@@ -4899,6 +4899,261 @@ before defaulting to another full revert.
   members a test reads directly). The real fix needed registering the
   anonymous class's own full declaration under a stable synthetic name.
 
+## Part 14: Onboarding
+
+### Phase 183 — `phpstan.neon` as a config source, and `phpstan-rs init` (§AU)
+
+A project adopting phpstan-rs writes `phpstan-rs.toml` by hand, and one
+already on PHPStan re-types its `phpstan.neon`. Piwigo's hand-written
+toml shows the cost: 55 individual `paths` standing in for the NEON's
+glob `excludePaths`, 1 of its 36 `ignoreErrors` entries mirrored, none of
+its rationale comments kept. Piwigo also keeps running PHPStan, so the
+two files drift. This phase reads `phpstan.neon` directly, as a live
+config source, and adds `phpstan-rs init`, which scans a project, links
+or converts its NEON, and picks a level by running the analysis.
+
+Targets PHPStan 2.2.16, the release `vendor/phpstan-src` is pinned at.
+Each later PHPStan release re-runs the level oracle below as part of
+the submodule bump.
+
+**The parameter table.** Every `parametersSchema.neon` parameter, every
+feature toggle, and the parameters of every extension phpstan-rs has a
+section for, classified from measurements, not from reading config.
+Probe files and PHPStan's own rule fixtures ran through real PHPStan
+(its phar copied outside any `vendor/`, so no project autoloader loads
+extensions) and through phpstan-rs, at every level 0-10 and with
+bleedingEdge. A parameter whose default phpstan-rs matches was also run
+with that parameter flipped; the row counts as verified only when the
+flip changes PHPStan's output, and phpstan-rs was checked on exactly the
+lines it changed. Buckets:
+- **M** maps to an existing key;
+- **S** maps once a crate-split phase lands;
+- **K** needs a key (crate-split C1 "Missing settings");
+- **N** no engine concept (a Known entry below);
+- **=** phpstan-rs matches PHPStan's default; a non-default value warns;
+- **X** no meaning here;
+- **>** phpstan-rs already reports what the toggle adds; imported
+  silently.
+
+Core parameters:
+- The 18 level-file parameters: S (E5, named as keys in §3.9). Matching
+  first levels: `checkExtraArguments` 1, class name case 0,
+  `checkFunctionArgumentTypes`/`checkArgumentsPassedByReference` 5,
+  impossible type checks 4, `varTag.nativeType` 2, `checkMissingTypehints`
+  6, `checkNullables` 8, `checkExplicitMixed` 9, `checkImplicitMixed` 10.
+  The divergences are E5's approved-delta list.
+- M: `checkBenevolentUnionTypes`, `checkFunctionNameCase`,
+  `checkMissingCallableSignature`, `checkUninitializedProperties`, the
+  three `checkTooWide*`, `checkDynamicProperties` (isset/empty/`??`
+  scope), `dynamicConstantNames`, `phpVersion` (single), `paths`,
+  `level`, `scanFiles`, `scanDirectories`, `reportUnmatchedIgnoredErrors`.
+  Partial: `checkStrictPrintfPlaceholderTypes` (phpstan-rs's check is
+  PHPStan's strict mode: `"abc"` rejected for `%d`, a decimal-int string
+  accepted), `bootstrapFiles` (loaded as scan context; runtime effects
+  not reproduced), `stubFiles` (only entries the project's own config
+  files contribute, tracked per list element).
+- S: a `phpVersion` range (C5); `typeAliases` (C7);
+  `universalObjectCratesClasses`, `mixinExcludeClasses` (C8);
+  `additionalConstructors`, `propertyAlwaysWrittenTags`/`ReadTags` (D6
+  implementors, keys from C1); `treatPhpDocTypesAsCertain` (D2, Phase
+  180) and `polluteScopeWith*` (D2), where phpstan-rs matches PHPStan's
+  default `true`; `rememberPossiblyImpureFunctionValues` (D2), where
+  phpstan-rs behaves as `false` (it agrees with the flip on 9 of the 12
+  lines the flip changes); `earlyTerminating*` (D3); `exceptions.*`
+  (E3f; `uncheckedExceptionClasses` defaults to `[Error]` from 2.2.16);
+  `tips.*` (§3.7).
+- K: `excludePaths`, `fileExtensions`, `reportIgnoresWithoutComments`,
+  `usePathConstantsAsConstantString`, `checkInternalClassCaseSensitivity`.
+- =, verified by flipping: `checkExplicitMixedMissingReturn`,
+  `inferPrivatePropertyTypeFromConstructor`,
+  `reportMaybesInMethodSignatures`, `reportMaybesInPropertyPhpDocTypes`,
+  `reportStaticMethodSignatures`, `reportAnyTypeWideningInVarTag`,
+  `reportNonIntStringArrayKey`, `reportPossiblyNonexistentGeneralArrayOffset`,
+  `reportPossiblyNonexistentConstantArrayOffset`,
+  `checkMissingOverrideMethodAttribute`/`PropertyAttribute`,
+  `reportAlwaysTrueInLastCondition`, `reportUnsafeArrayStringKeyCasting`
+  (where phpstan-rs agrees with a flip on a line, the line is one its
+  stricter defaults already report, or a check it lacks - a PHPDoc-only
+  signature conflict - that the flip happens to remove). Mostly =,
+  partly stricter: `checkDynamicProperties` (8 of the 33 lines
+  its flip adds are already reported), `reportWrongPhpDocTypeInVarTag`
+  (5 of 16).
+- X: `cliArgumentsVariablesRegistered` (PHPStan derives it from
+  `register_argc_argv`; a config value changes nothing), `parallel.*`,
+  `cache.*`, `tmpDir`, `resultCache*`, `rootDir`,
+  `currentWorkingDirectory`, `sysGetTempDir`, `env`, `editorUrl*`,
+  `errorFormat`, `tipsOfTheDay`, `internalErrorsCountLimit`, `pro.*`,
+  `parametersNotInvalidatingCache`, the Nette and internal parameters;
+  `strictRulesInstalled`/`deprecationRulesInstalled` are extension
+  activation.
+
+Feature toggles (`bleedingEdge` sets them all):
+- `>`: `skipCheckGenericClasses` (phpstan-rs skips none),
+  `checkDateIntervalConstructor`, `magicDirInInclude`, `newOnNonObject`,
+  `newStaticInAbstractClassStaticMethod`, `unusedLabel`,
+  `checkParameterCastableToNumberFunctions` (8 of bleedingEdge's 12
+  fixture findings), `finiteTypesInHaystack` (9 of 11),
+  `checkDynamicConstantNameValues`, `checkPrintfParameterTypes` (45
+  findings against bleedingEdge's 21 on its fixture),
+  `checkExtensionsForComparisonOperators`,
+  `reportPreciseLineForUnusedFunctionParameter`, `rawMessageInBaseline`.
+- M: `internalTag` → `rules.check_internal_usage`.
+- N: `reportTooWideBool`, `checkNonStringableDynamicAccess`,
+  `switchConditionAlwaysFalse`, `assignToByRefForeachExpr`,
+  `reportMethodPurityOverride`, `sortWithoutEffect` (new in 2.2.16);
+  `unnecessaryNullCoalesce` is Phase 134's.
+- =: `reportNestedTooWideType` (off in bleedingEdge too),
+  `checkImportedClassNameCase`. X: `curlSetOptArrayTypes` (declared, no
+  consumer in 2.2.16). S (C6): `stricterFunctionMap`.
+
+Extensions (schemas read at each package's release):
+- phpstan-strict-rules: `booleansInConditions`/`booleansInLoopConditions`,
+  `uselessCast`, `requireParentConstructorCall`,
+  `disallowedImplicitArrayCreation`, `overwriteVariablesWithLoop`,
+  `numericOperandsInArithmeticOperators`, `strictFunctionCalls`,
+  `dynamicCallOnStaticMethod`, `switchConditionsMatchingType`,
+  `strictArrayFilter`, `illegalConstructorMethodCall` map to their
+  `[ext.strict-rules]` keys; `disallowedBacktick`/`disallowedEmpty` to
+  `rules.banned.constructs` (`backticks`, `empty`);
+  `matchingInheritedMethodNames` to `rules.check_function_name_case`;
+  `allRules` to the section default. N: `disallowedLooseComparison`,
+  `disallowedShortTernary`, `noVariableVariables`, `closureUsesThis`
+  (phpstan-rs's `closure.useThis` is PHP's own lexical-`$this` error).
+  The core parameters its `rules.neon` sets follow activation (C1).
+- phpstan-phpunit: its core parameters as above;
+  `convertUnionToIntersectionType` S (C1 "Activation reaches library
+  typing"); `reportMissingDataProviderReturnType` N.
+- phpstan-doctrine: `objectManagerLoader` X; the repository and query
+  builder classes and `allCollectionsSelectable` K (Phase 168's
+  inference); `reportDynamicQueryBuilders`, `reportUnknownTypes`,
+  `allowNullablePropertyForRequiredField`, `literalString` N.
+- shipmonk/phpstan-rules: comparable types → `check_comparable_types`;
+  `enforceEnumMatch` + `forbidMatchDefaultArmForEnums` →
+  `check_enum_exhaustiveness`; the three `forbidNullIn*` →
+  `check_null_coercion`; `forbidUnusedException` →
+  `ext.extras.check_new_exception_discarded`;
+  `requirePreviousExceptionPass` → `check_exception_hygiene` (partial);
+  `enforceNativeReturnTypehint` → `check_native_type_hints` (partial);
+  `forbidCustomFunctions` → `restricted_symbols`; the other rules N.
+  A grouped key given mixed upstream settings warns.
+- shipmonk/dead-code-detector: `detect.*` → `rules.check_dead_members`
+  and `check_dead_enum_cases` (grouped); `usageProviders.*`,
+  `trackMixedAccess`, `reportTransitivelyDeadMethodAsSeparateError` N.
+- sfp-phpstan-psr-log: `contextKeyOriginalPattern` →
+  `psr3_context_key_pattern`; `enableContextRequireExceptionKeyRule` →
+  `check_psr3_exception_context`; the other three `enable*` →
+  `check_psr3_logging` (grouped); `reportContextExceptionLogLevel` N.
+- sidz: both parameters M. voku: all four N. php-language-extensions:
+  `mode`, `testNamespace` N. slam, mockstan, staabm/phpstan-psr3:
+  activation only. phpstan-dba: no parameters (`init` proposes
+  `[ext.sql.reflection]`). type-coverage: Phase 156. phpstan-symfony: N.
+- phpstan-disallowed-calls → `restricted_symbols`, partial; N fields:
+  `allowInFunctions*`, `allowParamsInAllowed*`,
+  `allowExceptParams*`/`disallowParams*`, parameter flags,
+  case-insensitive parameters, `classPattern`, `definedIn`, `exclude`,
+  `errorIdentifier`, `errorTip`; N kinds: namespaces, global constants,
+  enums, superglobals, attributes, control structures, keywords.
+- Extension stubs (doctrine 48, phpunit 7, symfony 12, plus their
+  `phpstan.stubFilesExtension` services) are embedded by the matching
+  phpstan-rs ext module when it's active, each with its own corpus
+  delta, never copied into the user's config.
+
+**183a. `crates/neon`.** A leaf crate: the full nette/neon syntax,
+comments kept as trivia on the node they precede, and resolution ported
+from PHPStan's `NeonAdapter::process` plus Nette's merge:
+- includes (later files win, lists append, maps recurse), `key!`,
+  entities, the `(?)` optional exclude path;
+- `%currentWorkingDirectory%`, `%rootDir%`, `%env.X%`, `%tmpDir%`;
+- `expandRelativePaths`, skipping values with `%` or a leading `*`;
+- a flat `excludePaths` list is `analyseAndScan`;
+- every list element records the file that contributed it;
+- the base layer is phpstan-src's `conf/` at the pinned tag, embedded like
+  `stub-sources`, plus each installed package's `extra.phpstan.includes`
+  (installed.json), which is where the extension installer gets them. A
+  project whose installed `phpstan/phpstan` differs from the pin gets a
+  warning.
+
+Gates: nette/neon's own tests (vendored first); a fuzz target; every
+`.neon` in phpstan-src's `conf/` and in Piwigo's `vendor/` parses; the
+phar's re-encoded `conf/` (comments stripped, `structure([...])` written
+`structure({...})`) resolves identically to the tag's; and the resolved
+parameters equal `phpstan dump-parameters --json` from the pinned phar
+for Piwigo's `phpstan.neon` and `phpstan-extensions.neon` and every
+fixture, minus the keys it strips (`analysedPaths`, `debugMode`,
+`productionMode`, `tempDir`, `__validate`, the editor ones).
+`dump-parameters` runs `bootstrapFiles`, so Piwigo's needs phpstan-dba's
+database.
+
+**183b. Live source.** `phpstan_config = "phpstan.neon"` in the TOML.
+Each run resolves it and maps it by the table; TOML keys win. A value is
+written wherever it differs from phpstan-rs's default, which is not
+PHPStan's: an unset NEON level is PHPStan's `0`, not phpstan-rs's 6, and
+`reportUnmatchedIgnoredErrors` defaults to true. One warning per N or =
+row set away from its default and per grouped key given mixed settings;
+none for `>` rows. `Baseline::load` reads a `.neon` baseline
+(`message` and `rawMessage`; a `#^...$#` pattern is un-escaped to its
+literal message, else matched as a pattern). The LSP watches the whole
+include set.
+
+**183c. `phpstan-rs init [dir]`.**
+- `--link` (the default when `phpstan/phpstan` is required) writes
+  `phpstan_config` plus phpstan-rs-only keys; `--convert` writes a
+  standalone TOML through `toml_edit`, keeping the NEON's comments and
+  entry order, and converts `baseline.neon` to the JSON baseline
+  (`convert-baseline` accepts `.neon` too). Several NEON files: `--from`
+  or a prompt.
+- The scan: Composer `autoload`/`autoload-dev` roots, else the top-level
+  directories holding PHP; `exclude-from-classmap` → `exclude_paths`;
+  symlinked directories resolving inside an analysed one (Piwigo's
+  `public/themes`) and unparseable test fixtures → proposed excludes;
+  `php_version` only without a Composer constraint; active extensions
+  listed with their opt-in keys commented out; `*.stub(.php)` and
+  `stubs/` → `stub_paths`; SQL DDL dumps with `doctrine/dbal` installed →
+  a proposed `[ext.sql.reflection]`.
+- The output is checked against `app::config_schema()` before it's
+  written; an existing config needs `--update` (re-scan, diff, edit in
+  place keeping the user's edits) or `--force`.
+- Imported message-only `ignoreErrors` entries that matched nothing in
+  the level run are listed.
+
+**183d. Level selection.** One "findings per level" function in `app`,
+which Phase 181 also uses. The level only reaches checking through
+`CheckSettings.rule_levels`, so the project is parsed and indexed once
+and re-checked per level 0-10; after E5 and F1, one max scan tagged per
+level replaces the re-checks. `init` offers the highest level with no
+findings, a chosen level plus a generated baseline, or the NEON's level.
+Flags: `--from`, `--link`/`--convert`, `--level <n|max>`,
+`--baseline[=path]`, `--no-analyse`, `--yes`, `--dry-run`, `--update`,
+`--force`; prompts only on a TTY. `app::init` holds the logic,
+`main/init.rs` the command.
+
+**183e. Editor.** The VS Code extension offers "Initialize config" for a
+workspace without one, previewing `init --dry-run --yes`.
+
+**Gates.**
+- The level oracle: the probe corpus and PHPStan's rule fixtures, run
+  through the pinned phar and phpstan-rs at every level and with
+  bleedingEdge, plus the per-parameter flip runs, kept as
+  `gates/phpstan-oracle/`. 183d's per-level counts agree with it, and
+  each E5 approved delta moves a row of it.
+- Fixture projects (Composer, none, a path-repository monorepo, NEON with
+  includes, a baseline and the extension installer); every generated TOML
+  loads.
+- Piwigo, linked and converted: the same analysed and context files as
+  the hand-written toml, and an output that differs by exactly the
+  findings the newly imported ignores suppress, each reviewed; runs
+  `LC_ALL=C sort`ed under `.corpus-runs/`. The hand-written toml is then
+  retired.
+
+**Depends on:** crate-split C1's config amendments (excludes, the
+matcher, the `ignore_errors` shape, discovery); C5, C6, C7, C8, D2, D3,
+D6, E3, E3f and E5 for their rows; F1 for the single-scan route. 183a and
+the scan half of 183c can start now.
+
+**Effort: very large** (the NEON resolver with its oracle gate, and the
+mapping).
+
+
 ---
 
 # Known limitations
@@ -5006,6 +5261,43 @@ a specific, corpus-checked reason to stay deferred.
 - `token_get_all()` returns bare `array` - confirmed not a gap versus
   real PHPStan specifically (no dynamic-return-type extension exists for
   it there either).
+- **Core checks the Phase 183 level oracle found missing or short**
+  (PHPStan's first level in brackets). Missed cases of existing checks:
+  a class name in the wrong case reached through a `use` import (0); a
+  function with an empty body and a return type, `return.missing` (0); a
+  write to an undefined property, `property.notFound` (2; reads are
+  reported); a maybe-missing offset of a constant-array union (7);
+  `in_array()` proven always or never true (4); `curl_setopt_array()`
+  option value types (5). Checks with no counterpart: `array.duplicateKey`
+  (0), `void.pure` (2), `impure.echo` (2), `array.invalidKey` (3),
+  `new.resultUnused` (4), `function.resultUnused` (4), `echo.nonString`
+  (10); and the PHPDoc-only child parameter type conflict (3) and `@var
+  array` without a value type (6) that E5's table lists.
+- **bleedingEdge checks with no counterpart**: `return.tooWideBool`,
+  `property.nameNotString`, `switch.alwaysFalse`/`alwaysTrue`,
+  `assign.byRefForeachExpr`, `method.impureOverridePureUnlessCallable`,
+  `sortArray.noop`/`empty`/`list` (2.2.16's `sortWithoutEffect`), and
+  printf's lax placeholder mode.
+- **Extension options with no counterpart** (Phase 183's table):
+  phpstan-strict-rules' `disallowedLooseComparison`,
+  `disallowedShortTernary`, `noVariableVariables`, `closureUsesThis`;
+  phpstan-phpunit's `reportMissingDataProviderReturnType`;
+  phpstan-doctrine's `reportDynamicQueryBuilders`, `reportUnknownTypes`,
+  `allowNullablePropertyForRequiredField`, `literalString`; the
+  shipmonk/phpstan-rules rules beyond the ones mapped; dead-code-detector's
+  usage providers; voku's four options; php-language-extensions' `mode`
+  and `testNamespace`; sfp-phpstan-psr-log's
+  `reportContextExceptionLogLevel`; phpstan-disallowed-calls' missing
+  entry fields and kinds; phpstan-symfony.
+- **Suspected false positives the Phase 183 fixtures exposed**, each
+  needing a fixture: `dirname(__DIR__, 2)` reports `argument.type ...
+  mixed given` at level 10 (`__DIR__` as an argument types as `mixed`),
+  and the result is `string` rather than `non-empty-string`, so a
+  `define()` of it breaks a `non-empty-string` dynamic constant; `return
+  $x ?? null` with a maybe-defined `$x` reports `return.type ... got
+  mixed` (D2's certainty); PHPStan's printf fixture draws `class.notFound`
+  and `varTag.unresolvableType` findings PHPStan doesn't; its
+  `curl-setopt-array.php` draws 7 findings to PHPStan's 5.
 
 ## Permanent design boundaries (not planned, by choice)
 
