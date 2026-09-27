@@ -858,10 +858,12 @@ corpus, type, baseline, performance and build-time gates run locally
     `.git-blame-ignore-revs`.
 12. **Oracles** (from Stage D), both against PHPStan 2.2.16:
     - `cargo xtask nsrt` runs `check-project` over
-      `vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (14 s) and counts the
-      `assertType`, `assertNativeType` and `assertVariableCertainty`
-      mismatches after display normalization, by class, file and owning
-      phase (`gates/nsrt/owners.toml`);
+      `vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (15 s), with
+      `tests/PHPStan` as a scan directory and phpstan-src's composer
+      dependencies installed, and counts the `assertType`,
+      `assertNativeType` and `assertVariableCertainty` mismatches after
+      display normalization (Stage D lists the forms), by file and owning
+      phase (`gates/nsrt/owners.toml`), wrong values first;
     - `cargo xtask oracle` runs the phar (copied out of the corpus's
       `vendor/phpstan/phpstan`) over the corpus files with
       engine-sensitive diagnostics, with the corpus autoloader as the only
@@ -1127,8 +1129,7 @@ Follow-ups:
   `never` is absorbed (`$c ? 1 : throw new E()` is `1|never` today, 48
   nsrt mismatches), and integer ranges merge when they overlap or touch
   (`int<10, 20>|int<5, 25>` stays unmerged today, and
-  `@param int<0, 5>|int<6, 9>` widens to `int`). `true|false` is `bool`;
-  it stays two members today (40 nsrt mismatches). Constant arrays union by
+  `@param int<0, 5>|int<6, 9>` widens to `int`). Constant arrays union by
   `processArrayTypes`/`reduceArrays` with tagged unions preserved: shapes
   merge only when lossless, `array{}` stays its own member unless an
   all-optional shape absorbs it, and same-key-set variants merge per
@@ -1175,9 +1176,7 @@ Follow-ups:
   displays as `'a'b'`), and a callable's union return and a callable inside
   a union are parenthesized (`Closure(int): (int|string)` displays as
   `Closure(int): int|string`, `(callable(): void)|null` as
-  `callable(): void|null`). A list shape displays without keys: `['one']`
-  is `array{0: 'one'}` today where PHPStan has `array{'one'}` (in 703 nsrt
-  mismatches' actual types).
+  `callable(): void|null`).
 - **`iterable<K, V>`** keeps its arguments (behaviour fix). It is
   `array<V>|Traversable` today, the key and `Traversable`'s arguments lost,
   so a `foreach` over `iterable<int, string>` yields `mixed` key and value,
@@ -1999,32 +1998,43 @@ a fixture.
 The second oracle is PHPStan's own inference suite,
 `vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (1,688 files, 18,480
 `assertType` and 313 `assertNativeType` calls), checked by `check-project
---php-version 8.5`. Compared after display normalization (union member
-order, benevolent parentheses, shape key order, `array<(int|string), T>`
-as `array<T>`), phpstan-rs misses 11,515 at `76e738b4`. By class: 2,099
-are `mixed` (mostly function and method return-type extensions), 900 lose
-an accessory (`non-empty-`, `non-falsy-`, `numeric-`, case), 826 are
-integer ranges, 599 expect `true`/`false` where phpstan-rs has `bool` (D3's
-type-check calls), 474 lose a shape, 476 generalize a literal, 340 expect
-`*NEVER*`, 289 expect `*ERROR*`, 48 keep `never` in a union (B4). The
-count is a tracked number: each D phase records it, and a phase that
-raises it has a named reason in its commit. The suite's other two
-assertions, `assertNativeType` (313 calls) and `assertVariableCertainty`
-(681), are ignored today; the assertion DSL reads both before D1, so D5's
-natives and certainty are measured by the same suite. `cargo xtask nsrt`
-and `cargo xtask oracle` land with it, and their first recorded counts are
-D1's baseline.
+--php-version 8.5` with `tests/PHPStan` as a scan directory (the fixtures'
+classes live in `tests/PHPStan/Analyser/data`, which PHPStan loads through
+its `autoload-dev` classmap) and phpstan-src's composer dependencies
+installed (`nikic/php-parser`'s node classes). Mismatches are compared
+after a normalization of display forms that carry the same information:
+union member order, benevolent parentheses, shape key order,
+`array<(int|string), T>` as `array<T>`, a list shape's explicit keys
+(`array{0: 'a'}` is `array{'a'}`), `true|false` as `bool`, a template's
+scope suffix (`T (function f(), argument)`), an accessory string's
+combined name (`non-falsy-lowercase-string` is
+`lowercase-string&non-falsy-string`) and a small integer range against its
+literals (`int<0, 1>` is `0|1`). phpstan-rs misses 11,429 at `76e738b4`.
+By asserted expression: 5,011 are variables, 3,450 are calls to functions
+PHPStan types through an extension (E2; 413 of them `mixed`, among them
+`filter_var` 191 and `min`/`max` 198), 1,037 are operators (D3), 713 are
+method calls, 351 other function calls, 302 properties, 180 offsets and
+35 `new`. 105 are wrong values: every member of both types is a literal
+and an expected literal is missing from phpstan-rs's type. Each wrong value
+is fixed first in its owning phase and is listed there. The count is a
+tracked number: each phase records it, and a phase that raises it has a
+named reason in its commit. The suite's other two assertions,
+`assertNativeType` (313 calls) and `assertVariableCertainty` (681), are
+ignored today; the assertion DSL reads both before D1, so D5's natives and
+certainty are measured by the same suite. `cargo xtask nsrt` and `cargo
+xtask oracle` land with it, and their first recorded counts are D1's
+baseline.
 
-The mismatches span stages: of the 2,099 `mixed`, `filterVar.php` (156),
-`set-type-type-specifying.php` (149) and the `minmax-*` files are E2's
-built-in extensions, and the `methodPhpDocs-*` files are C's PHPDoc
+The mismatches span stages: `filterVar.php` (156 `mixed`),
+`set-type-type-specifying.php` (149) and the `minmax-*` files (140) are
+E2's built-in extensions, and the `methodPhpDocs-*` files are C's PHPDoc
 inheritance. The first `cargo xtask nsrt` run therefore checks in
 `gates/nsrt/owners.toml`, which names the owning phase (B4, C1–C10, D1–D6,
-E2) for each of the 1,379 mismatching files, split by line where a file
+E2) for each of the 1,371 mismatching files, split by line where a file
 spans phases. A phase is done when its files have no mismatches, or each
 remaining line is an approved deviation that names its runtime reason.
-`cargo xtask nsrt` reports by owner, and the corpus oracle's phpstan-rs-only
-identifiers get owners the same way.
+`cargo xtask nsrt` reports by owner and lists the wrong values first, and
+the corpus oracle's phpstan-rs-only identifiers get owners the same way.
 
 **D1. Holder storage (byte-identical).**
 - Every `Locals` map moves into holder storage with its current per-kind
