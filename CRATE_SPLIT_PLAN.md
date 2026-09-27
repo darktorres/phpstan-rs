@@ -1035,7 +1035,17 @@ Follow-ups, behaviour fixes:
 - **Shebang.** A leading `#!` line is not a statement
   (`declareStrictTypes.notFirst` after one today).
 - **PHP 8 precedence.** `+`/`-` bind tighter than `.`, and `.` looser than
-  `<<`/`>>` (`"sum: " . $a + $b` reports `binaryOp.invalid` today).
+  `<<`/`>>` (`"sum: " . $a + $b` reports `binaryOp.invalid` today). An
+  arrow function's body, `throw`'s operand and `include`/`require`'s
+  operand bind looser than `and`/`or`/`xor`, as PHP's grammar orders
+  `T_THROW`, `PREC_ARROW_FUNCTION` and `T_INCLUDE` below `T_LOGICAL_OR`;
+  the parser reads them with `parse_assignment`, which stops before those
+  operators. `static fn (?bool $m, Constraint $c): bool => $m xor
+  $c->evaluate($other)` ends the body at `xor`, so `$c` is reported
+  `variable.undefined` and the `xor` `logicalXor.resultUnused`
+  (`phpunit/src/Framework/Constraint/Operator/LogicalXor.php:64`), and
+  `include 'a.php' or die()` is read as including `a.php` where PHP
+  includes `'1'`.
 - **Assignment as an operand** at every binary operator, by one grammar rule
   instead of the per-level patches: `$a ?? $b = 1`, `1 | $g = 2` and
   `2 * $i = 3` report `assign.invalidExpr` and `variable.undefined` today.
