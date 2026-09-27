@@ -455,6 +455,65 @@ wait on an explicit signal from the server's run loop, such as a
 debounce-drained notification the test can observe, so the test is
 neither slow nor timing-dependent.
 
+### S13–S15: from profiling the test suites
+
+After S12, `perf` with frame pointers over three workloads: 257 fixtures
+(gate profile), the whole lib-test binary (debug) and one debug
+`check-project` spawn as a cli test makes. Profiling builds live in
+`target/prof`.
+
+- Fixtures: the analysis itself is 0.5% of samples. `finish_loading`'s
+  passes over the stub classes take 21.8% on the calling thread, plus
+  their parallel part on the pool. `Project::new`'s stub copy takes 14.3%,
+  and dropping that copy 10.6%. About 48% of samples are idle pool
+  threads spinning in `sched_yield`.
+- Lib tests: 51% of samples are under `flatten_phpdoc_inheritance_one_pass`'s
+  parallel closure, 32.5% in `Registry::all_ancestor_names` and about 30%
+  in hashing.
+- CLI spawn: 11.8 s for a one-line file, 59% of it `generated_stub_data`
+  lexing, parsing and indexing the 2,351 stub files one after another.
+
+### S13. Ancestor bindings computed once per class (engine)
+- `flatten_phpdoc_inheritance_one_pass` rebuilds a class's ancestor
+  template bindings (`all_ancestor_names`, then `class_template_bindings`
+  per templated ancestor) for every method that needs a backfill, on
+  every fixed-point pass. They depend only on the class's declared
+  hierarchy and template arguments, which the pass never changes.
+- `flatten_phpdoc_inheritance` keeps one memo per class for the whole
+  fixed point, filled lazily from the parallel closure (a `OnceLock` per
+  class, prepared before the first pass). A method asks for the bindings
+  only once a backfill candidate passes its cheaper checks. Output is
+  identical.
+- Replacing the whole-registry fixed point with per-class resolution is
+  C4's job, so the pass keeps its shape.
+- Verify: `checker/generics_and_templates`, `checker/oop_overrides_and_inheritance`
+  and `checker/type_declarations` identical; registry tests pass.
+
+### S14. Stub data generated in parallel (engine)
+- `generated_stub_data` lexes, parses, rewrites stub attributes and
+  indexes each of the 2,351 files one after another. That per-file work is
+  independent: it runs on rayon, and the results are merged
+  sequentially in today's file order, so which declaration wins, the
+  extension maps and the constant merge are identical.
+- The `LazyLock` runs on whichever thread first asks. So the parallel
+  part runs on the global rayon pool, not the checker's worker pool:
+  stub files are flat declarations, far from the parser's recursion
+  limits.
+- C5 replaces `generated_stub_data` with lazy resolution from the
+  `stub-sources` index; its gate compares against this function's result.
+- Verify: the `php_stubs` tests and the stub-index regeneration test
+  pass; a cli test spawn is timed before and after.
+
+### S15. Pool and test-thread sizing (measure, then decide)
+- About 48% of fixture samples are pool threads spinning between each
+  fixture's tiny jobs, taking CPU from the 8 test threads. The lib tests'
+  registry passes run their `par_iter`s on the global rayon pool, which
+  has the same effect.
+- Measure the fixture suite with the harness pool at 1, 2 and all cores,
+  and the lib suite with `RAYON_NUM_THREADS` at 1, 2 and all cores. Adopt
+  the fastest setting: the harness takes its pool size from the
+  measurement, and the gate sets the lib tests' global pool size.
+
 ## 4. Deferred to Stages C–F
 
 These are the largest remaining costs. The C4, C5 and D designs remove
