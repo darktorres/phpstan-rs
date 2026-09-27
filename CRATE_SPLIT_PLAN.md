@@ -1114,6 +1114,13 @@ Follow-ups:
   an intersection of a class and its subclass is the subclass. In
   `while ($foo instanceof Dim) { …; $foo = $bar; }` with `Dim extends Expr`,
   the second pass sees `$foo` as `Expr&Dim` today.
+- **Error type.** PHPStan's `ErrorType` is a variant: the result of an
+  operation the rules report as invalid, a read of an undefined member, or
+  destructuring a non-array. It accepts and is accepted by everything, so a
+  reported error doesn't cascade. Today the rule reports and the expression
+  keeps a guessed type: `-'blabla'` is `int`, `$c / 0` is `int|float`,
+  `$o->missing` and `[$a] = 5` give `mixed` (289 nsrt `*ERROR*`
+  expectations). D3's handlers produce it.
 - **Subtracted types.** `mixed~T` and `object~T`/`Foo~Bar` (PHPStan's
   `subtractedType`) are variants: narrowing `mixed` away from a type keeps
   what was removed. Today `$m !== null`, `isset($m)` and `!is_int($m)` on a
