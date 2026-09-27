@@ -2424,8 +2424,7 @@ deleted; the file-size gate.
       `bacon-qr-code/src/Encoder/MaskUtil.php` alone). A union container
       reads each member: `$list[$k]` on `array<string, C>|null` is `mixed`
       today where it is `C|null` (a `null` container reads `null`), so
-      `$list[$k]->isHidden()` is `method.nonObject` "on mixed"
-      (`symfony/console/Application.php:657`, `:828`).
+      `$list[$k]->isHidden()` is `method.nonObject` "on mixed".
     - **Array literals and appends** follow `ConstantArrayType`'s next-key
       rule: after a negative key the next implicit key is the key + 1 on PHP
       8.3+ and `0` before, after `PHP_INT_MAX` there is none (the append
@@ -2901,7 +2900,12 @@ building on the previous one:
       `if.alwaysFalse` (8 corpus findings). The deviation: inside the body
       it is the union of its type at creation and every value the
       enclosing function or its closures assign to it (today `null|never`,
-      and unreported);
+      and unreported). After the closure, the variable is `mixed` today:
+      symfony/console's `$commandList`, shared by `use (&$commandList)`
+      with an `array_filter` callback, reads as `mixed`, so
+      `$commandList[$cmd]->isHidden()` is `offsetAccess.nonOffsetAccessible`
+      and `method.nonObject` at level 10
+      (`rector/vendor/symfony/console/Application.php:657`);
     - a closure with by-reference uses converges like a loop; any other
       closure's body is entered once, from its declared parameter types.
       Today a closure whose body returns after `if (!$node instanceof
