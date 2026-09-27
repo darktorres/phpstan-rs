@@ -2302,139 +2302,154 @@ for `return.unusedType`, `throws.*` and `property.unusedType`).
 with a fixture per transition and trigger, on D1–D4's structure. Where
 PHPStan's rule is less correct at runtime, runtime correctness wins and
 the deviation is named here: eval defining variables (§3.8), and
-assignments inside `assert()`.
-- guards (each kind), `method_exists()`/`property_exists()`/
-  `array_key_exists()` producing B4's `HasMethod`/`HasProperty`/`HasOffset`
-  intersection members instead of the `guarded_methods`/
-  `guarded_properties` side sets;
-- `container_field_facts` folding;
-- conditional holders with `mergeWith`: `ScopeOps::createConditionalExpressions`,
-  including the holders that record a variable as undefined on the other
-  side, `preserveVacuousConditionals` and `withoutPreciseClassConstantFetches`;
-  they replace `discriminant_array_facts` (nsrt `bug-5051.php` checks the
-  flag-correlation cases). A variable defined under one
-  condition and read under a correlated one is `variable.undefined` today:
-  `symfony/filesystem/Filesystem.php:190` reads `$origFile`, which only the
-  `$isRecursive`-dependent branch defines;
-- conditional holders created at assignment (`AssignHandler`), replacing
-  `condition_aliases`, its lazy AST replay and `record_if_body_flag_alias`:
-  - the assigned expression's sure and sure-not types, guarded by the
-    variable's truthiness;
-  - a ternary whose arm value only one arm produces;
-  - `$v = match (…)`, reusing the `if`-chain merge, so narrowing `$v`
-    narrows the subject: after `$v = match ($k) { 1 => 'a', default =>
-    'b' }`, `$v === 'a'` leaves `$k` as `int` today;
-  - derived assignments carrying the source's holders;
-  - `$has = in_array($n, [1, 2], true)` implying `$n` on `!$has`: `$n` stays
-    `1|2|3` today;
-  - `$ok = preg_match(…, $m)` narrowing `$m` on `$ok`: it doesn't today;
-  - `$first = $arr === [] ? null : 1` narrowing `$arr` on
-    `$first !== null`: it doesn't today;
-  - projection limited by `isExprSafeToProjectThroughVariable`: variables,
-    property and dim fetches and calls always, anything else only when the
-    right side has no impure points.
-- certainty plus maybe-undefined (level-gated), with each variable's
-  certainty added to the type snapshot:
-  - A maybe-defined variable is reported today as `undefined variable` at
-    level 0, where PHPStan reports "might not be defined" at level 1.
-    `$x ?? null` on one types as `mixed`.
-  - After a foreach that may not run, the value variable is dropped, and
-    a read of it is `variable.undefined`.
-  - At a file's top level every unknown variable is Maybe
-    (`canAnyVariableExist`), because the including scope may define it.
-    `echo $x;` in a script file is `variable.undefined` at level 0 today;
-    snapshot 0a8fe69 has 75 of them in `<main>`. `$argc`/`$argv` there
-    are `int<1, max>`/`non-empty-list<string>` (they are `int` and
-    `array<(int|string), mixed>` today). Fixed first: before D5,
-    an unknown variable read outside any function or closure is reported
-    at level 1 as "Variable $x might not be defined."
-  - A merge keeps a Maybe holder only for variables, function calls and
-    virtual keys, and drops superglobals.
-  - A truthy `??` proves its left side defined and non-null in that branch,
-    as `isset()` already does: after `if ($c) { $foo = 'bar'; }`,
-    `if ($foo ?? null) { return $foo; }` reports `$foo` undefined today
-    (nsrt `bug-10224.php`; the suite's certainty files
-    `dependent-variable-certainty.php`, `falsey-isset-certainty.php`,
-    `falsey-empty-certainty.php` and `falsey-ternary-certainty.php` are
-    D5's certainty fixtures).
-  - An assignment inside `assert()` is Maybe afterwards, because
-    `zend.assertions = -1` compiles the call out; PHPStan treats it as
-    definite. Today `\assert((bool) ($trace = debug_backtrace()));`
-    followed by `$trace ?? false` is `nullCoalesce.variable`
-    (`amphp/amp/src/TimeoutCancellation.php:30`,
-    `SignalCancellation.php:41`).
-- rememberPossiblyImpureFunctionValues: the analysis behaves as `false`
-  today (of the 12 lines flipping it changes in PHPStan 2.2.16's output,
-  over `gates/phpstan-oracle/`'s probes and its test fixtures, phpstan-rs
-  agrees with the flipped run on 9); the `true`
-  behaviour, PHPStan's default, comes with the key. Call results aren't
-  remembered at all today: after `if ($x->getY() !== null)`,
-  `$x->getY()` is still `Y|null`, even when the method is `@phpstan-pure`.
-- `afterExtractCall` replacing extract/eval truncation:
-  - Today an `extract()`/`eval()` drops every diagnostic of its function
-    body. At file top level it drops every diagnostic after the file
-    pre-scan, so the class methods' `return.type` errors disappear too.
-  - `extract()` of a constant array assigns its keys as variables, with
-    optional keys Maybe; only another argument sets `afterExtractCall`.
-  - `afterExtractCall` clears the conditional holders and makes every
-    unknown variable Maybe. It doesn't invalidate the holders.
-- invalidation unification (receiver rebind, by-ref, declare purges):
-  - An impure method call drops its receiver's holders
-    (`MethodCallHandler`); a static call through `self`/`static`/`parent`
-    drops `$this`'s. Today `if ($p->v !== null) { $p->reset(); }` keeps
-    `$p->v` as `int`, and the same holds on `$this`, after
-    `parent::reset()` and after `self::reset()`. On ordinary code this is
-    `$this->hasChanged = false; $this->refactorCall($node);
-    if ($this->hasChanged)` reported `if.alwaysFalse`: ten in rector's rules
-    (e.g. `rector/rules/Arguments/Rector/ClassMethod/ArgumentAdderRector.php:120`),
-    none of which the oracle reports. Fixed first: before D5, a call on
-    `$this` not known to be pure drops the `$this->…` narrowing entries.
-  - A closure's property writes invalidate the outer scope where it is
-    called immediately (`InvalidateExprNode`): after
-    `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
-    its narrowing today.
-  - A write to a typed property stores the value as PHP coerces it to the
-    native type (`toCoercedArgumentType` under coercive typing) and
-    intersected with it: after `$this->foo = '123'` on an `int` property
-    `$this->foo` is `123`, `$this->f = 1` on a `float` is `1.0`, and
-    `$this->data = $m` with `$m !== null` on `?array` is `array`. Today they
-    stay `int`, `float` and `array|null` (nsrt `bug-12393b.php`).
-  - A write to an offset that exists keeps the array a list
-    (`AssignHandler::shouldKeepList`). Today both `$l[0] = 7` on a
-    `non-empty-list<int>` and `foreach ($l as $i => $v) { $l[$i] = $v + 1; }`
-    leave `array<int, int>`, and passing `$l` on to a `list<int>`
-    parameter is `argument.type`.
-  - Narrowing an offset narrows its container
-    (`specifyExpressionTypeInPlace`): the container gains
-    `HasOffsetValue` for a constant key and becomes offset-accessible
-    when it wasn't known to be an array. After
-    `if (is_int($a['k']))`, `$a` is still `array<string, mixed>` today,
-    and a `mixed` container stays `mixed`.
-  - `unset($arr['a'])` removes the key from the shape; today the shape
-    keeps `a: int`, and `$arr['a']` afterwards isn't reported.
-  - Volatile expressions, dropped after an impure call, `new`, `eval` or
-    `include`: `ob_get_level()`, `openssl_error_string()`, superglobals and
-    their offsets, and negative existence checks.
-  - `clearstatcache()`/`unlink()` drop the stat family (`file_exists`,
-    `is_file`, `filemtime`, …); `openssl_*` drops `openssl_error_string()`.
-  - A function, class or trait declaration drops the negative existence
-    check for its name.
-  - The output-buffer level delta.
-- references (`IntertwinedVariableByReferenceWithExpr`):
-  - After `$b = &$a; $b = 'x';`, `$a` is still `1`, and
-    `if ($a === 'x')` is reported `identical.alwaysFalse`.
-  - After `$b = &$a[0]; $b = 'x';`, `$a` is still `array{1, 2}`.
-  - References inside array literals (`processArrayByRefItems`): after
-    `$b = ['key' => &$a]; $b['key'] = 42;`, `$a` is still `'hello'`, and
-    `$a = [1, 2, &$x]; $x = 5;` leaves `array{1, 2, 0}` (nsrt
-    `bug-14333.php`, `bug-15246.php`).
-  - `$block = &$this->blocks[$l][$n]` types `$block` as the element type,
-    although a reference to a missing offset creates it as `null`, so
-    `$block ??= new Block()` is `nullCoalesce.variable` today
-    (`latte/Runtime/Template.php:326`).
-  - After `$ref = &$list; $ref[] = 5;`, `count($list) > 0` is reported
-    `greater.alwaysFalse`.
-- the transition set:
+assignments inside `assert()`. The groups land in this order, each
+building on the previous one:
+
+- **Holder model:**
+  - natives as full holders plus `native_type_of`;
+  - virtual keys: property-initialized, parameter original value, by-ref
+    intertwining, always-remembered, possibly-impure call, clone
+    reinitialization, original foreach key and value, foreach value by
+    reference;
+  - convergence equality: `MutatingScope::equals` compares the context,
+    holders with certainty, natives and the conditional holders;
+  - provenance as holder metadata;
+  - non-holder scope state;
+  - guards (each kind), `method_exists()`/`property_exists()`/
+    `array_key_exists()` producing B4's `HasMethod`/`HasProperty`/`HasOffset`
+    intersection members instead of the `guarded_methods`/
+    `guarded_properties` side sets;
+  - `container_field_facts` folding;
+- **Certainty:**
+  - certainty plus maybe-undefined (level-gated), with each variable's
+    certainty added to the type snapshot:
+    - A maybe-defined variable is reported today as `undefined variable` at
+      level 0, where PHPStan reports "might not be defined" at level 1.
+      `$x ?? null` on one types as `mixed`.
+    - After a foreach that may not run, the value variable is dropped, and
+      a read of it is `variable.undefined`.
+    - At a file's top level every unknown variable is Maybe
+      (`canAnyVariableExist`), because the including scope may define it.
+      `echo $x;` in a script file is `variable.undefined` at level 0 today;
+      snapshot 0a8fe69 has 75 of them in `<main>`. `$argc`/`$argv` there
+      are `int<1, max>`/`non-empty-list<string>` (they are `int` and
+      `array<(int|string), mixed>` today). Fixed first: before D5,
+      an unknown variable read outside any function or closure is reported
+      at level 1 as "Variable $x might not be defined."
+    - A merge keeps a Maybe holder only for variables, function calls and
+      virtual keys, and drops superglobals.
+    - A truthy `??` proves its left side defined and non-null in that branch,
+      as `isset()` already does: after `if ($c) { $foo = 'bar'; }`,
+      `if ($foo ?? null) { return $foo; }` reports `$foo` undefined today
+      (nsrt `bug-10224.php`; the suite's certainty files
+      `dependent-variable-certainty.php`, `falsey-isset-certainty.php`,
+      `falsey-empty-certainty.php` and `falsey-ternary-certainty.php` are
+      D5's certainty fixtures).
+    - An assignment inside `assert()` is Maybe afterwards, because
+      `zend.assertions = -1` compiles the call out; PHPStan treats it as
+      definite. Today `\assert((bool) ($trace = debug_backtrace()));`
+      followed by `$trace ?? false` is `nullCoalesce.variable`
+      (`amphp/amp/src/TimeoutCancellation.php:30`,
+      `SignalCancellation.php:41`).
+- **Conditional holders:**
+  - conditional holders with `mergeWith`: `ScopeOps::createConditionalExpressions`,
+    including the holders that record a variable as undefined on the other
+    side, `preserveVacuousConditionals` and `withoutPreciseClassConstantFetches`;
+    they replace `discriminant_array_facts` (nsrt `bug-5051.php` checks the
+    flag-correlation cases). A variable defined under one
+    condition and read under a correlated one is `variable.undefined` today:
+    `symfony/filesystem/Filesystem.php:190` reads `$origFile`, which only the
+    `$isRecursive`-dependent branch defines;
+  - conditional holders created at assignment (`AssignHandler`), replacing
+    `condition_aliases`, its lazy AST replay and `record_if_body_flag_alias`:
+    - the assigned expression's sure and sure-not types, guarded by the
+      variable's truthiness;
+    - a ternary whose arm value only one arm produces;
+    - `$v = match (…)`, reusing the `if`-chain merge, so narrowing `$v`
+      narrows the subject: after `$v = match ($k) { 1 => 'a', default =>
+      'b' }`, `$v === 'a'` leaves `$k` as `int` today;
+    - derived assignments carrying the source's holders;
+    - `$has = in_array($n, [1, 2], true)` implying `$n` on `!$has`: `$n` stays
+      `1|2|3` today;
+    - `$ok = preg_match(…, $m)` narrowing `$m` on `$ok`: it doesn't today;
+    - `$first = $arr === [] ? null : 1` narrowing `$arr` on
+      `$first !== null`: it doesn't today;
+    - projection limited by `isExprSafeToProjectThroughVariable`: variables,
+      property and dim fetches and calls always, anything else only when the
+      right side has no impure points.
+- **Invalidation:**
+  - invalidation unification (receiver rebind, by-ref, declare purges):
+    - An impure method call drops its receiver's holders
+      (`MethodCallHandler`); a static call through `self`/`static`/`parent`
+      drops `$this`'s. Today `if ($p->v !== null) { $p->reset(); }` keeps
+      `$p->v` as `int`, and the same holds on `$this`, after
+      `parent::reset()` and after `self::reset()`. On ordinary code this is
+      `$this->hasChanged = false; $this->refactorCall($node);
+      if ($this->hasChanged)` reported `if.alwaysFalse`: ten in rector's rules
+      (e.g. `rector/rules/Arguments/Rector/ClassMethod/ArgumentAdderRector.php:120`),
+      none of which the oracle reports. Fixed first: before D5, a call on
+      `$this` not known to be pure drops the `$this->…` narrowing entries.
+    - A closure's property writes invalidate the outer scope where it is
+      called immediately (`InvalidateExprNode`): after
+      `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
+      its narrowing today.
+    - A write to a typed property stores the value as PHP coerces it to the
+      native type (`toCoercedArgumentType` under coercive typing) and
+      intersected with it: after `$this->foo = '123'` on an `int` property
+      `$this->foo` is `123`, `$this->f = 1` on a `float` is `1.0`, and
+      `$this->data = $m` with `$m !== null` on `?array` is `array`. Today they
+      stay `int`, `float` and `array|null` (nsrt `bug-12393b.php`).
+    - A write to an offset that exists keeps the array a list
+      (`AssignHandler::shouldKeepList`). Today both `$l[0] = 7` on a
+      `non-empty-list<int>` and `foreach ($l as $i => $v) { $l[$i] = $v + 1; }`
+      leave `array<int, int>`, and passing `$l` on to a `list<int>`
+      parameter is `argument.type`.
+    - Narrowing an offset narrows its container
+      (`specifyExpressionTypeInPlace`): the container gains
+      `HasOffsetValue` for a constant key and becomes offset-accessible
+      when it wasn't known to be an array. After
+      `if (is_int($a['k']))`, `$a` is still `array<string, mixed>` today,
+      and a `mixed` container stays `mixed`.
+    - `unset($arr['a'])` removes the key from the shape; today the shape
+      keeps `a: int`, and `$arr['a']` afterwards isn't reported.
+    - Volatile expressions, dropped after an impure call, `new`, `eval` or
+      `include`: `ob_get_level()`, `openssl_error_string()`, superglobals and
+      their offsets, and negative existence checks.
+    - `clearstatcache()`/`unlink()` drop the stat family (`file_exists`,
+      `is_file`, `filemtime`, …); `openssl_*` drops `openssl_error_string()`.
+    - A function, class or trait declaration drops the negative existence
+      check for its name.
+    - The output-buffer level delta.
+  - references (`IntertwinedVariableByReferenceWithExpr`):
+    - After `$b = &$a; $b = 'x';`, `$a` is still `1`, and
+      `if ($a === 'x')` is reported `identical.alwaysFalse`.
+    - After `$b = &$a[0]; $b = 'x';`, `$a` is still `array{1, 2}`.
+    - References inside array literals (`processArrayByRefItems`): after
+      `$b = ['key' => &$a]; $b['key'] = 42;`, `$a` is still `'hello'`, and
+      `$a = [1, 2, &$x]; $x = 5;` leaves `array{1, 2, 0}` (nsrt
+      `bug-14333.php`, `bug-15246.php`).
+    - `$block = &$this->blocks[$l][$n]` types `$block` as the element type,
+      although a reference to a missing offset creates it as `null`, so
+      `$block ??= new Block()` is `nullCoalesce.variable` today
+      (`latte/Runtime/Template.php:326`).
+    - After `$ref = &$list; $ref[] = 5;`, `count($list) > 0` is reported
+      `greater.alwaysFalse`.
+  - `afterExtractCall` replacing extract/eval truncation:
+    - Today an `extract()`/`eval()` drops every diagnostic of its function
+      body. At file top level it drops every diagnostic after the file
+      pre-scan, so the class methods' `return.type` errors disappear too.
+    - `extract()` of a constant array assigns its keys as variables, with
+      optional keys Maybe; only another argument sets `afterExtractCall`.
+    - `afterExtractCall` clears the conditional holders and makes every
+      unknown variable Maybe. It doesn't invalidate the holders.
+  - rememberPossiblyImpureFunctionValues: the analysis behaves as `false`
+    today (of the 12 lines flipping it changes in PHPStan 2.2.16's output,
+    over `gates/phpstan-oracle/`'s probes and its test fixtures, phpstan-rs
+    agrees with the flipped run on 9); the `true`
+    behaviour, PHPStan's default, comes with the key. Call results aren't
+    remembered at all today: after `if ($x->getY() !== null)`,
+    `$x->getY()` is still `Y|null`, even when the method is `@phpstan-pure`.
+- **Control-flow transitions:**
   - **Loops** follow `LOOP_SCOPE_ITERATIONS = 3` with `generalizeWith` after
     the first pass, then the final walk. Today there are up to 6 passes and
     no generalization: `$i = 0; while (c()) { $i++; }` leaves `$i` as
@@ -2442,6 +2457,17 @@ assignments inside `assert()`.
     leaves seven literal strings. The 14 `loop_depth` guards that suppress
     rules inside loops are deleted with it. The doc comments saying 3
     passes (`converge_loop_body`, `check_foreach`) go too.
+  - **For** follows `ForHandler`:
+    - a loop whose first condition is `true` runs at least once: after
+      `for ($i = 0; $i < 10; $i++) { $x = 1; }`, `echo $x` is
+      `variable.undefined` today;
+    - the exit scope applies the condition's falsey narrowing after
+      generalization: `$i` is `0|1|2|3|4|5` in that body and `0|…|6` after
+      it today, where PHP ends at 10;
+    - `for ($i = 0; $i < count($a); $i++)` knows `$a[$i]`
+      (`inferForLoopExpressions`);
+    - `polluteScopeWithLoopInitialAssignments` decides whether the init
+      assignments survive a loop that may not run.
   - **Foreach** follows `ForeachHandler`:
     - the body sees the iteratee narrowed by `!== []`, and the post-loop
       scope merges `=== [] || is_object()`; today `$arr` in the body is
@@ -2474,17 +2500,6 @@ assignments inside `assert()`.
     - a nullsafe call's arguments are evaluated only when the receiver
       isn't null: after `$q?->m($e ??= new E())`, `$e ?? …` is
       `nullCoalesce.variable` today (`amphp/http-server/Http2Driver.php:726`).
-  - **For** follows `ForHandler`:
-    - a loop whose first condition is `true` runs at least once: after
-      `for ($i = 0; $i < 10; $i++) { $x = 1; }`, `echo $x` is
-      `variable.undefined` today;
-    - the exit scope applies the condition's falsey narrowing after
-      generalization: `$i` is `0|1|2|3|4|5` in that body and `0|…|6` after
-      it today, where PHP ends at 10;
-    - `for ($i = 0; $i < count($a); $i++)` knows `$a[$i]`
-      (`inferForLoopExpressions`);
-    - `polluteScopeWithLoopInitialAssignments` decides whether the init
-      assignments survive a loop that may not run.
   - **Switch** follows `SwitchHandler`:
     - each case body is entered with `$subject == $case` true, merged with
       the previous case's fall-through;
@@ -2512,6 +2527,7 @@ assignments inside `assert()`.
   - **Expression statements** apply their `specifyTypes` with the null
     context, so assertion calls narrow, and an equality assertion's result
     is remembered as `true`.
+- **Class and function context:**
   - **Class member order** follows `ClassLikeHandler`: static methods,
     then the constructor, then instance methods, with properties and
     their hooks last.
@@ -2548,16 +2564,7 @@ assignments inside `assert()`.
       Snapshot 0a8fe69 has 12 `$this` hits, among them
       `collision/ResultReflection.php:19`. The bound closure's read also
       leaves `property.onlyWritten` on `$n`.
-- natives as full holders plus `native_type_of`;
-- convergence equality: `MutatingScope::equals` compares the context,
-  holders with certainty, natives and the conditional holders;
-- virtual keys: property-initialized, parameter original value, by-ref
-  intertwining, always-remembered, possibly-impure call, clone
-  reinitialization, original foreach key and value, foreach value by
-  reference;
-- provenance as holder metadata;
-- non-holder scope state;
-- the PHP version via `PHP_VERSION_ID`.
+  - the PHP version via `PHP_VERSION_ID`.
 
 **D6. Engine APIs**, one commit each:
 - Scope API (§3.8's list);
