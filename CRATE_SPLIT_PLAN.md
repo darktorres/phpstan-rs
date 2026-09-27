@@ -860,7 +860,8 @@ corpus, type, baseline, performance and build-time gates run locally
     - `cargo xtask nsrt` runs `check-project` over
       `vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (14 s) and counts the
       `assertType`, `assertNativeType` and `assertVariableCertainty`
-      mismatches after display normalization, by class and file;
+      mismatches after display normalization, by class, file and owning
+      phase (`gates/nsrt/owners.toml`);
     - `cargo xtask oracle` runs the phar (copied out of the corpus's
       `vendor/phpstan/phpstan`) over the corpus files with
       engine-sensitive diagnostics, with the corpus autoloader as the only
@@ -2013,6 +2014,17 @@ assertions, `assertNativeType` (313 calls) and `assertVariableCertainty`
 natives and certainty are measured by the same suite. `cargo xtask nsrt`
 and `cargo xtask oracle` land with it, and their first recorded counts are
 D1's baseline.
+
+The mismatches span stages: of the 2,099 `mixed`, `filterVar.php` (156),
+`set-type-type-specifying.php` (149) and the `minmax-*` files are E2's
+built-in extensions, and the `methodPhpDocs-*` files are C's PHPDoc
+inheritance. The first `cargo xtask nsrt` run therefore checks in
+`gates/nsrt/owners.toml`, which names the owning phase (B4, C1–C10, D1–D6,
+E2) for each of the 1,379 mismatching files, split by line where a file
+spans phases. A phase is done when its files have no mismatches, or each
+remaining line is an approved deviation that names its runtime reason.
+`cargo xtask nsrt` reports by owner, and the corpus oracle's phpstan-rs-only
+identifiers get owners the same way.
 
 **D1. Holder storage (byte-identical).**
 - Every `Locals` map moves into holder storage with its current per-kind
