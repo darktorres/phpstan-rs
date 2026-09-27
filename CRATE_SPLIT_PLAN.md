@@ -1168,7 +1168,11 @@ Follow-ups:
   a literal becomes its general type unless the template is covariant or
   its bound is scalar. Today `new Box(1)` is `Box<1>`, so `$b->set(2)` on
   `@param T $v` is reported `argument.type` (nsrt `generics.php`,
-  `nested-generic-incomplete-constructor.php`).
+  `nested-generic-incomplete-constructor.php`). A union parameter binds `T`
+  only from what its other members don't cover: `@param T|null $x` called
+  with `null` or nothing, and `@param T|int|float $p` called with `1`,
+  leave `T` unbound (`mixed`); today they bind `null` and `1` (nsrt
+  `bug-8441.php`, `generic-unions.php`).
 - **Late types.** `new<T>` and `template-type<...>` get variants (PHPStan's
   `NewObjectType` and `GetTemplateTypeType`); `int-mask<>`/`int-mask-of<>`
   resolve in C7's resolver instead of reading as `int`; `key-of<C::ARR>`
@@ -2491,7 +2495,8 @@ building on the previous one:
       (`MethodCallHandler`); a static call through `self`/`static`/`parent`
       drops `$this`'s. Today `if ($p->v !== null) { $p->reset(); }` keeps
       `$p->v` as `int`, and the same holds on `$this`, after
-      `parent::reset()` and after `self::reset()`. On ordinary code this is
+      `parent::reset()`, after `self::reset()` and after a dynamic name,
+      `$this->{'reset'}()` (nsrt `bug-3831.php`). On ordinary code this is
       `$this->hasChanged = false; $this->refactorCall($node);
       if ($this->hasChanged)` reported `if.alwaysFalse`: ten in rector's rules
       (e.g. `rector/rules/Arguments/Rector/ClassMethod/ArgumentAdderRector.php:120`),
