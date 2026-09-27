@@ -121,14 +121,19 @@ The order is the order of the sections below.
 
 ### S2. Named-argument facts without a second pass (engine)
 This is the collector shape of crate-split §3.8.
-- The rename overrides come from a walk over each loaded file's class
-  declarations, with registry lookups, and no checker. Today's recording
-  runs once per `ClassDecl` the traversal reaches, so the walk covers:
-  - named, anonymous and nested classes, wherever they are declared;
+- The rename overrides come from a walk over each loaded file's
+  top-level statements, with registry lookups and no checker. Today's
+  recording runs only in `check_program`'s top-level loop, so the walk
+  covers exactly that:
+  - top-level `ClassDecl` statements, with names resolved against the
+    `namespace` and `use` statements seen so far in the file. Nested,
+    conditional and anonymous classes aren't reached today, and enums
+    are a separate statement kind;
   - each class's own methods in source order, then its used-trait
-    methods sorted, as `record_named_argument_renames` does.
+    methods sorted, as `record_named_argument_renames` did.
 
-  It lives next to `find_method_signature_prototype`.
+  It lives in the rule's own module, `whole_program/renamed_named_arguments.rs`,
+  with the cross-referencing.
 - The named-argument call sites are collected by the main check pass
   of the analysed files, as per-file data merged on the main thread in
   sorted path order.
@@ -139,7 +144,11 @@ This is the collector shape of crate-split §3.8.
   are deleted, and `check_whole_program` reads the collected data.
 - Loop bodies are checked several times, and call sites recorded on
   earlier passes are kept. That's identical today in both the facts pass
-  and the main pass, so output is unchanged. Keeping only final-pass
+  and the main pass.
+- One real difference: the main pass has the cross-file property-assign
+  facts and the facts pass didn't, so a receiver typed through a
+  property can resolve differently. If the final run shows a changed
+  `argument.parameterRenamedInSubtype`, it comes from here. Keeping only final-pass
   data is the Stage D dispatcher's job ("drops non-final-pass output").
 - Verify: `project/renamed_named_arguments` identical.
 

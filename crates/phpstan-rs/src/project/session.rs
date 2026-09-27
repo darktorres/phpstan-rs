@@ -18,9 +18,9 @@ use crate::{
     architecture, assertion_tables, banned, doctrine_functions, ignore_errors, parent_calls,
     restricted_symbols,
 };
-use syntax::token::Span;
 
-use super::{ParsedFile, Project};
+use super::whole_program::renamed_named_arguments::merge_named_argument_calls;
+use super::{FileCheck, ParsedFile, Project};
 use diagnostics::{self, Diagnostic};
 
 /// The level reported when neither the command line nor the config sets
@@ -682,12 +682,7 @@ impl Session {
             }))
             .unwrap_or_default(),
         );
-        type MemberRefData = (
-            Vec<(Span, String, String)>,
-            FxHashSet<String>,
-            FxHashSet<String>,
-        );
-        type CheckOutcome = Result<(Vec<Diagnostic>, Option<MemberRefData>), String>;
+        type CheckOutcome = Result<FileCheck, String>;
         let needs_tier_2 = Self::flag(self.config.check_dead_enum_cases)
             || Self::flag(self.config.check_dead_members);
         let checked_results: Vec<(PathBuf, CheckOutcome)> = pool.install(|| {
@@ -695,26 +690,7 @@ impl Session {
                 .par_iter()
                 .map(|path| {
                     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        if needs_tier_2 {
-                            let (diagnostics, member_refs, escaped_enums, escaped_member_classes) =
-                                project
-                                    .check_file_with_property_assign_facts_collecting_member_refs(
-                                        path,
-                                        &property_assign_facts,
-                                    );
-                            (
-                                diagnostics,
-                                Some((member_refs, escaped_enums, escaped_member_classes)),
-                            )
-                        } else {
-                            (
-                                project.check_file_with_property_assign_facts(
-                                    path,
-                                    &property_assign_facts,
-                                ),
-                                None,
-                            )
-                        }
+                        project.check_analysed_file(path, &property_assign_facts, needs_tier_2)
                     }));
                     let outcome = outcome.map_err(|payload| {
                         payload
@@ -749,24 +725,27 @@ impl Session {
 
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
+        let mut named_argument_calls = Vec::new();
         for (path, outcome) in checked_results {
             match outcome {
-                Ok((diagnostics, member_data)) => {
-                    if let Some((member_refs, escaped_enums, escaped_member_classes)) = member_data
-                    {
+                Ok(check) => {
+                    if needs_tier_2 {
                         project.seed_member_refs(
                             &path,
-                            member_refs,
-                            escaped_enums,
-                            escaped_member_classes,
+                            check.member_refs,
+                            check.escaped_enums,
+                            check.escaped_member_classes,
                         );
                     }
-                    results.insert(path, diagnostics);
+                    named_argument_calls.push((path.clone(), check.named_argument_calls));
+                    results.insert(path, check.diagnostics);
                 }
                 Err(msg) => check_panics.push((path, msg)),
             }
         }
         check_panics.sort();
+        named_argument_calls.sort_by(|a, b| a.0.cmp(&b.0));
+        let named_argument_calls = merge_named_argument_calls(named_argument_calls);
         if needs_tier_2 {
             project.mark_member_index_built();
         }
@@ -776,7 +755,7 @@ impl Session {
                 results.entry(path).or_default().extend(diags);
             }
         };
-        extend(project.check_whole_program());
+        extend(project.check_whole_program(&named_argument_calls));
         if Self::flag(self.config.check_mock_hygiene) {
             let banned = self.config.mock_banned_classes.clone().unwrap_or_default();
             extend(project.check_mock_hygiene(&banned));

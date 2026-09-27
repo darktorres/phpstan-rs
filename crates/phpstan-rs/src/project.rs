@@ -188,19 +188,20 @@ pub struct Project {
 /// (message, not a diagnostic list) instead of completing.
 pub type CheckPathsIsolatingPanics = (FxHashMap<PathBuf, Vec<Diagnostic>>, Vec<(PathBuf, String)>);
 
-/// The result of `check_file_impl`'s own Tier-2-collecting mode
-/// (`check_file_and_member_refs`/`check_file_with_property_assign_
-/// facts_collecting_member_refs`): a file's diagnostics, its own
-/// member-reference sites, the `Enum` classes it saw escape (see
-/// `Checker::escaped_enums`'s own doc comment), and the classes it saw
-/// escape via a genuinely dynamic member access (see `Checker::
-/// escaped_member_classes`'s own doc comment).
-pub type CheckWithMemberRefs = (
-    Vec<Diagnostic>,
-    Vec<(Span, String, String)>,
-    FxHashSet<String>,
-    FxHashSet<String>,
-);
+/// Everything one main-pass check of a file produces.
+pub(crate) struct FileCheck {
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    /// Member-reference sites; empty unless member references were
+    /// collected.
+    pub(crate) member_refs: Vec<(Span, String, String)>,
+    /// The `Enum` classes the file let escape (`Checker::escaped_enums`).
+    pub(crate) escaped_enums: FxHashSet<String>,
+    /// The classes the file let escape through a dynamic member access
+    /// (`Checker::escaped_member_classes`).
+    pub(crate) escaped_member_classes: FxHashSet<String>,
+    /// Named-argument call sites against overridable methods.
+    pub(crate) named_argument_calls: checker::NamedArgumentCallFacts,
+}
 
 impl Project {
     /// What this project's names are interned into; a file parsed for it
@@ -1130,9 +1131,13 @@ impl Project {
         }
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         for path in paths {
-            let (_, member_refs, escaped_enums, escaped_member_classes) =
-                self.check_file_impl(&path, None, true);
-            self.seed_member_refs(&path, member_refs, escaped_enums, escaped_member_classes);
+            let check = self.check_file_impl(&path, None, true);
+            self.seed_member_refs(
+                &path,
+                check.member_refs,
+                check.escaped_enums,
+                check.escaped_member_classes,
+            );
         }
         self.mark_member_index_built();
     }
@@ -1142,8 +1147,8 @@ impl Project {
     /// cases`/`escaped_member_classes` - the per-file work `ensure_
     /// member_index_built`'s own loop body does above, factored out so
     /// `check-project`'s own primary pass can feed it data it already
-    /// computed inline (via `check_file_with_property_assign_facts_
-    /// collecting_member_refs`) instead of `ensure_member_index_built`
+    /// computed inline (via `check_analysed_file`) instead of
+    /// `ensure_member_index_built`
     /// re-deriving it via a second, redundant pass. Caller must call
     /// `mark_member_index_built` once every file has been seeded.
     pub fn seed_member_refs(
@@ -1522,7 +1527,7 @@ impl Project {
     /// is the batch counterpart that does.
     #[hotpath::measure]
     pub fn check_file(&self, path: &Path) -> Vec<Diagnostic> {
-        self.check_file_impl(path, None, false).0
+        self.check_file_impl(path, None, false).diagnostics
     }
 
     /// The Tier-2 (member-reference) counterpart of `check_file` - the
@@ -1538,9 +1543,8 @@ impl Project {
         &self,
         path: &Path,
     ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
-        let (diagnostics, member_refs, _escaped_enums, _escaped_member_classes) =
-            self.check_file_impl(path, None, true);
-        (diagnostics, member_refs)
+        let check = self.check_file_impl(path, None, true);
+        (check.diagnostics, check.member_refs)
     }
 
     /// The two-pass counterpart of `check_file` - `facts` is the whole-
@@ -1554,25 +1558,21 @@ impl Project {
         path: &Path,
         facts: &Arc<PropertyAssignFacts>,
     ) -> Vec<Diagnostic> {
-        self.check_file_impl(path, Some(facts), false).0
+        self.check_file_impl(path, Some(facts), false).diagnostics
     }
 
-    /// `check_file_with_property_assign_facts`'s own Tier-2-collecting
-    /// sibling - the property-assign-facts-aware counterpart of
-    /// `check_file_and_member_refs`, letting `check-project`'s own
-    /// already-parallel primary pass collect Tier-2 member-ref/escaped-
-    /// enum data inline (via `seed_member_refs`/`mark_member_index_built`
-    /// below) instead of `ensure_member_index_built` paying for a wholly
-    /// separate, redundant second `Checker` pass over every file
-    /// afterward. Only used when at least one whole-program check that
-    /// needs Tier 2 (e.g. `check_dead_enum_cases`) is enabled - see
-    /// `main/check_project.rs`'s own primary loop.
-    pub fn check_file_with_property_assign_facts_collecting_member_refs(
+    /// The session's main-pass check of an analysed file, with the
+    /// project-wide property-assign `facts`: its diagnostics and the data
+    /// the whole-program checks read afterwards. With
+    /// `collect_member_refs`, the Tier-2 member-reference data too (fed to
+    /// `seed_member_refs`), so no second pass is needed for it.
+    pub(crate) fn check_analysed_file(
         &self,
         path: &Path,
         facts: &Arc<PropertyAssignFacts>,
-    ) -> CheckWithMemberRefs {
-        self.check_file_impl(path, Some(facts), true)
+        collect_member_refs: bool,
+    ) -> FileCheck {
+        self.check_file_impl(path, Some(facts), collect_member_refs)
     }
 
     /// A bare, un-run `Checker` for `path` plus its AST, for an LSP
@@ -1625,14 +1625,15 @@ impl Project {
         path: &Path,
         cross_file_property_assign_facts: Option<&Arc<PropertyAssignFacts>>,
         collect_member_refs: bool,
-    ) -> CheckWithMemberRefs {
+    ) -> FileCheck {
         let Some(file) = self.files.get(path) else {
-            return (
-                Vec::new(),
-                Vec::new(),
-                FxHashSet::default(),
-                FxHashSet::default(),
-            );
+            return FileCheck {
+                diagnostics: Vec::new(),
+                member_refs: Vec::new(),
+                escaped_enums: FxHashSet::default(),
+                escaped_member_classes: FxHashSet::default(),
+                named_argument_calls: FxHashMap::default(),
+            };
         };
         let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
@@ -1651,6 +1652,7 @@ impl Project {
         let member_refs = checker.take_member_ref_sites();
         let escaped_enums = checker.take_escaped_enums();
         let escaped_member_classes = checker.take_escaped_member_classes();
+        let named_argument_calls = checker.take_named_argument_call_facts();
         let mut diagnostics = checker.into_diagnostics();
         if self.registry.check_duplicate_function_declarations {
             diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
@@ -1719,12 +1721,13 @@ impl Project {
                         .is_some_and(|ids| ids.iter().any(|id| **id == *d.identifier))
             });
         }
-        (
+        FileCheck {
             diagnostics,
             member_refs,
             escaped_enums,
             escaped_member_classes,
-        )
+            named_argument_calls,
+        }
     }
 
     pub fn registry(&self) -> &Registry {
@@ -1845,43 +1848,6 @@ impl Project {
             }
         }
         merged
-    }
-
-    /// Phase 82's named-argument-rename feature - the collect half,
-    /// mirroring `collect_property_assign_facts`'s own two-pass shape
-    /// exactly, but gathering both of `checker::named_argument_renames`'s
-    /// fact kinds from the same throwaway per-file pass, and (unlike
-    /// `PropertyAssignFacts`, which only aggregates types) tagging each
-    /// named-argument call site's own span with the file it came from -
-    /// `whole_program::renamed_named_arguments`'s own cross-
-    /// referencing pass reports directly at that site, not through
-    /// `decl_locations`. Runs over every loaded file unconditionally
-    /// (like `collect_property_assign_facts`) - a rename could be
-    /// declared in one file and called against from any other.
-    pub(crate) fn collect_named_argument_facts(
-        &self,
-    ) -> (
-        NamedArgumentCallFactsWithPath,
-        checker::RenamedParameterOverrideFacts,
-    ) {
-        let mut calls: NamedArgumentCallFactsWithPath = FxHashMap::default();
-        let mut overrides: checker::RenamedParameterOverrideFacts = Vec::new();
-        for path in self.files.keys() {
-            let Some(file) = self.files.get(path) else {
-                continue;
-            };
-            let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
-            checker.set_facts_only(true);
-            checker.check_program(&file.ast);
-            for (key, spans) in checker.take_named_argument_call_facts() {
-                calls
-                    .entry(key)
-                    .or_default()
-                    .extend(spans.into_iter().map(|span| (path.clone(), span)));
-            }
-            overrides.extend(checker.take_renamed_parameter_override_facts());
-        }
-        (calls, overrides)
     }
 
     /// Runs the checker over exactly `paths` (which must already be
@@ -2025,7 +1991,8 @@ impl Project {
     /// `results`, merging this method's own return value in before
     /// level-filtering/`ignore_errors`/baseline (so `@phpstan-ignore`/
     /// baseline suppression apply to a whole-program finding exactly
-    /// like an ordinary one).
+    /// like an ordinary one). `named_argument_calls` is the primary pass's
+    /// named-argument call sites, merged in path order.
     ///
     /// `check_dead_enum_cases` and `check_dead_members` both need
     /// `ensure_member_index_built`'s own Tier-2 use-site index - a real
@@ -2045,7 +2012,10 @@ impl Project {
     /// directly off `Registry.classes`' own already-resolved fields, so
     /// each costs nothing beyond its own traversal regardless of how
     /// large the project is.
-    pub fn check_whole_program(&mut self) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    pub(crate) fn check_whole_program(
+        &mut self,
+        named_argument_calls: &NamedArgumentCallFactsWithPath,
+    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
 
         if self.registry.check_dead_enum_cases {
@@ -2190,10 +2160,20 @@ impl Project {
         }
 
         if self.registry.check_renamed_named_arguments {
-            let (calls, overrides) = self.collect_named_argument_facts();
+            let mut programs: Vec<(&PathBuf, &[Stmt])> = self
+                .files
+                .iter()
+                .map(|(path, file)| (path, file.ast.as_slice()))
+                .collect();
+            programs.sort_by(|a, b| a.0.cmp(b.0));
+            let overrides = whole_program::renamed_named_arguments::renamed_parameter_overrides(
+                &self.registry,
+                programs.into_iter().map(|(_, ast)| ast),
+            );
             let collisions =
                 whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
-                    &calls, &overrides,
+                    named_argument_calls,
+                    &overrides,
                 );
             for (path, span, message) in collisions {
                 if let Some(d) = self.whole_program_diagnostic(

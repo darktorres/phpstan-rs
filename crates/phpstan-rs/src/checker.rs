@@ -906,11 +906,9 @@ pub struct Checker<'a> {
     // `check_too_wide_property_types`, this project's own
     // `TooWideFunctionReturnTypehintRule`-equivalent for properties.
     pub(crate) property_assign_facts: PropertyAssignFacts,
-    // Phase 82's named-argument-rename feature - see `checker::named_
-    // argument_renames`'s own module doc comment for the full two-fact,
-    // whole-project-fixed-point architecture these feed.
+    // Named-argument call sites against overridable methods - see
+    // `checker::named_argument_renames`'s module doc comment.
     pub(crate) named_argument_call_facts: NamedArgumentCallFacts,
-    pub(crate) renamed_parameter_override_facts: RenamedParameterOverrideFacts,
     // The project-wide merge of every file's own `property_assign_facts`
     // - set via `set_cross_file_property_assign_facts` (by `Project::
     // check_file`, from a first, fact-collecting pass over every loaded
@@ -1235,9 +1233,7 @@ pub(crate) use duplicates::class_kind_identifier;
 pub(crate) use expr::{build_matched_shape, int_range_bounds, normalize_int_range};
 pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::{ITERABLE_GENERIC_CLASS_NAMES, class_kind_word};
-pub(crate) use named_argument_renames::{
-    NamedArgumentCallFacts, RenamedParameterOverride, RenamedParameterOverrideFacts,
-};
+pub(crate) use named_argument_renames::NamedArgumentCallFacts;
 pub(crate) use narrowing::{
     array_value_type_for_key, count_call_operand, is_known_single_value, is_real_variable_key,
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
@@ -1314,7 +1310,6 @@ impl<'a> Checker<'a> {
             by_ref_empty_dim_args: Default::default(),
             property_assign_facts: FxHashMap::default(),
             named_argument_call_facts: FxHashMap::default(),
-            renamed_parameter_override_facts: Vec::new(),
             cross_file_property_assign_facts: None,
             facts_only: false,
             external_rules: &[],
@@ -1807,12 +1802,6 @@ impl<'a> Checker<'a> {
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.
                     let fqn = self.name_ctx.declared_name(&c.name);
-                    // Always on, even in `facts_only` mode - see
-                    // `checker::named_argument_renames`'s own module doc
-                    // comment for why this is a deliberately leaner
-                    // duplicate of `check_method_overrides` below, not a
-                    // shared call.
-                    self.record_named_argument_renames(&fqn, c);
                     if !self.facts_only {
                         self.check_class_generic_bounds(&fqn, c);
                         let description = match c.kind {
