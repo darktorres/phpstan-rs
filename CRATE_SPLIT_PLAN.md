@@ -1352,7 +1352,8 @@ Follow-ups:
   - `index_and_flatten` is deleted and `Registry::build` only indexes
     (until its callers move onto `apply`); the stub pass still resolves
     each stub file's classes within that file (until C5's stub layer),
-    without global-variable inference.
+    under default reflection inputs (it is process-wide), without
+    global-variable inference.
 
   The memo has five levels, each a per-class `OnceLock`. A level reads the
   declarations, a lower level of any class, and the same level only along
@@ -1398,8 +1399,10 @@ Follow-ups:
   `check-project`'s per-file `catch_unwind` resumes cleanly (a
   panic-injection test and a parallel-resolution test over cyclic
   fixtures). A level stores what it changes and shares the rest
-  with the level below (member maps behind `Arc`). Within this commit any
-  declaration or `ReflectionSettings` change resets every memo,
+  with the level below (member maps behind `Arc`). Within this commit a
+  change to any reflection input - a declaration, `ReflectionSettings`, the
+  resolved `PhpVersions` range, or the assertion tables (until C6) -
+  resets every memo,
   `doctrine_entity_table_index` included, at no cost while none has been
   read; the collision policy reads declarations only. Trait and mixin
   members no longer outlive a change to their source (§1), its closure
@@ -1444,23 +1447,27 @@ Follow-ups:
   memo records every folded class and constant
   name it looked up, absent ones included, through a per-resolution read
   set the hierarchy and the lookups append to; a delta invalidates the
-  transitive readers of the names it changes, a `ReflectionSettings`
-  change invalidates everything, and the new snapshot inherits every
-  other memo. Purity and global-variable inference rerun per snapshot until
-  C9. Snapshots own their names: the registry's and checker's
+  transitive readers of the names it changes, a change to any other
+  reflection input invalidates everything, and the new snapshot inherits
+  every other memo. Purity and global-variable inference rerun per snapshot
+  until C9. Snapshots own their names: the registry's and checker's
   `syntax::intern::intern` calls (about 100) go through the project's
   interner; the stub layer's names stay global; `apply` sweeps the session
   interner's entries nothing else holds. A closure gate is a test that
-  applies a sequence of deltas and compares every query on the result with
-  a fresh build of the final file set: a property test over the fixture
-  files, and one test per staleness case below. With declarations kept per
-  file, whether a declaration holds its name is a provenance comparison:
-  the checker's rebuild-and-compare (`ClassReflection::from_decl` and
+  applies a sequence of deltas and compares every query on the result with a
+  fresh build of the final file set: a property test over the fixture files,
+  and one test per staleness case below. With declarations kept per file,
+  whether a declaration holds its name is a provenance comparison: the
+  checker's rebuild-and-compare (`ClassReflection::from_decl` and
   `from_enum_decl` in `oop.rs`, `from_decl` for a trait in
   `function_decl.rs`) and a losing duplicate function's rebuilt signature
   read the file's own declaration instead; the builder builds property-hook
   signatures with their property, which `check_hook_phpdoc_types` reads
-  instead of synthesizing a `FunctionDecl`.
+  instead of synthesizing a `FunctionDecl`. The per-file sets also answer
+  what `Project` indexes separately today: `DuplicateClassSites` and
+  `DuplicateFunctionSites` (with their own declaration walks) are deleted
+  for a query over them, and `FileState.functions`/`classes` become the
+  file's set.
 - **Staleness fixes** (approved deltas), each with a closure gate, through
   the per-file declaration sets (which also hold what
   `unconditionally_declared_classes`/`_functions` record): anonymous
@@ -1477,8 +1484,9 @@ Follow-ups:
   move onto `ReflectionBuilder::apply` and the query accessors, names kept.
 - **Behaviour fixes**, one commit each after the structural ones:
   - declarations below the top level are indexed (inside function bodies,
-    `try`, `switch`), conditional, through one Visitor walk shared with
-    `declared_names` and the stub-index generator;
+    `try`, `switch`), conditional, through one Visitor walk that also
+    replaces `declared_names`, `collect_anonymous_classes` and the
+    stub-index generator's walk;
   - class names resolve case-insensitively where a type's or a literal's
     name is looked up, and a type's class name takes the declared spelling
     where the type is resolved: `$s->nope()` on a parameter typed `square`
@@ -1507,7 +1515,7 @@ Follow-ups:
   - promoted properties carry asymmetric visibility and their own
     `@deprecated`/`@internal`;
   - anonymous classes resolve names per namespace block, and diagnostics
-    name them `class@anonymous`; `anonymous_class.rs` becomes a Visitor;
+    name them `class@anonymous`;
   - `merge` splits into one operation per case (phpstorm-stubs overload,
     stub override, polyfill onto a built-in, duplicate declaration), with
     the enum arm under the same collision policy; the registry tests
