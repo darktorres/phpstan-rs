@@ -4339,7 +4339,7 @@ Every semantic rule below is read from the installed Latte's own source -
 3.1.6 on the corpus (`Compiler/TemplateGenerator.php`,
 `Essential/CoreExtension.php`, `Essential/Passes.php`, the
 `Essential/Nodes/*` node classes, `Runtime/Template.php`,
-`Loaders/FileLoader.php`) - and each sub-phase names the file it follows.
+`Loaders/FileLoader.php`), cited where each rule is stated.
 Latte 3.x is supported; another major version is reported once and its
 templates are skipped.
 
@@ -4370,9 +4370,10 @@ findings are born on template lines.
 `{var}`, 51 `{include}`, 27 `{layout}`, 15 `{_}`; 289 `n:if`, 148
 `n:foreach`, 58 `n:attr`. The engine enables `Feature::Dedent` and
 `Feature::ScopedLoopVariables` (`src/Piwigo/Template/LatteEngine.php`).
-The 978 `property.unused` findings on `*\Projection\*View` classes
-approved in C3 (`gates/approved/c3-provenance-declarations`) are View
-properties read only by templates.
+Most of the 978 `property.unused` findings on `*\Projection\*View`
+classes approved in C3 (`gates/approved/c3-provenance-declarations`) are
+View properties no PHP code reads; how many of them a template reads is
+182g's delta.
 
 **182a — Latte syntax.** A lossless front end for Latte 3 in its own crate
 (`latte-syntax`, depending on `syntax` only), following
@@ -4400,8 +4401,9 @@ properties read only by templates.
 Gates, over every corpus template: printing the tree back reproduces the
 source byte for byte; and each tag and print Latte's compiler marks with
 `/* pos L:C */` in its output has a node at that line and column, and
-each tag and print node has its marker - a structural oracle from the
-real compiler, needing no semantic agreement.
+each tag or print node that compiles to code (not `{varType}`,
+`{templateType}`, `{parameters}` or a comment) has its marker - a
+structural oracle from the real compiler, needing no semantic agreement.
 
 **182b — Engine configuration.** A template's meaning depends on the
 `Latte\Engine` rendering it: the features (`StrictTypes`,
@@ -4414,7 +4416,8 @@ where it's written with literals (`setFeature(Feature::X)`,
 `addFunction('name', ...)`, `addFilterLoader(...)`, `addProvider(...)`),
 and each is overridable under `[ext.latte]`. `StrictTypes` (on by
 default) decides whether the lowered code is checked under
-`strict_types=1`, as the compiled template declares it; the content type
+`strict_types=1`, as the compiled template declares it; `Dedent` changes
+only whitespace, so nothing models it; the content type
 decides the HTML-only behaviour (URL checking, the `<script>` rules),
 changing where a `{contentType}` tag or an element's own context
 (`<script>`, `<style>`, an attribute) switches it; `MigrationWarnings`
@@ -4460,7 +4463,10 @@ them:
   $this->params)`);
 - a layout parent (`{extends}`/`{layout}`): its arguments plus the
   child's prepared variables, with the child's blocks rendered in the
-  parent's place.
+  parent's place;
+- a block `{import}` brings in: the importing template's parameter array,
+  as the imported template is created with it (`createTemplate($name,
+  $this->params, 'import')`).
 
 A unit rendered from several places starts with the union of what each
 place gives it, and a variable some place doesn't give is possibly
@@ -4496,7 +4502,9 @@ escaping call; its own check (182f) asks whether the value can be
 printed. A tag nothing registers is reported (182f), its arguments still
 checked as expressions.
 
-**182d — Types.** Beyond the parameters and locals 182c builds:
+**182d — Types.** Beyond the parameters and locals 182c builds, in
+precedence order - a declared type wins over an inferred one, and an
+inferred one only types a variable nothing declares:
 - `{templateType Cls}`: each of `Cls`'s public properties types the
   parameter of that name, as `render()` passes an object
   (`Helpers::resolveParams()`: `get_object_vars()` from outside the class,
@@ -4513,6 +4521,12 @@ checked as expressions.
   parameter array or object): each parameter's type at each site, unioned
   over the sites;
 - otherwise `mixed`.
+
+The render sites are also checked against what the template declares:
+a PHP render call whose array or object passes a parameter the
+template's `{parameters}` or `{templateType}` types differently, or
+leaves out a required `{parameters}` entry, is reported like a call
+argument (`latte.render.*`).
 
 In the closed set a `{parameters}` template has, an undeclared variable
 is undefined for certain: the ordinary `variable.undefined` reports it.
@@ -4553,19 +4567,28 @@ nothing else registers can't be called unknown; it becomes `mixed` and
 the unknown-filter check stays quiet. A custom tag is PHP code run at
 compile time and can't be read: `[ext.latte] tags` maps one to a core
 tag's meaning (Piwigo's `{_ ...}` behaves as `TranslatorExtension`'s
-`{translate}`).
+`{translate}`). The companion extensions of Latte's own ecosystem are
+the exception, as their packages are known: nette/application's
+`UIExtension` (`{link}`, `n:href`, `{plink}`, `{control}`,
+`{snippet}`/`{snippetArea}`, ...) and nette/forms' `FormsExtension`
+(`{form}`, `n:name`, `{input}`, `{label}`, ...) get their semantics when
+the package is installed, read from its own node classes - most Latte
+templates are Nette applications'. The corpus uses neither, so a
+fixture set stands in for its oracle.
 
 **182f — Checks.** Latte's own compile-time errors, each a diagnostic
 where Latte would throw a `CompileException`: the validations in the node
 classes (`{parameters}`/`{templateType}` outside the header, an unclosed
-or mismatched tag, `n:else` without its `n:if`/`n:foreach`, ...) and in
+or mismatched tag, an unknown tag, `n:else` without its `n:if`/
+`n:foreach`, ...) and in
 the core passes (`$this`/`$GLOBALS`/`$ʟ_*` - a deprecation unless
 `StrictParsing`, an error with it; `{first}`/`{last}`/`{sep}` outside a
 `foreach`; a registered function used as a partial `fn(...)`; a print
 followed by quotes inside `<script>`; a `foreach` variable overwriting
 one in scope, without `ScopedLoopVariables`; strict-HTML errors under
 `StrictParsing`). Then, with `latte.*` identifiers:
-- an unknown tag, filter or function;
+- an unknown filter or function (an unknown tag is Latte's own compile
+  error, above);
 - a template `{include}`/`{embed}`/`{import}`/`{extends}`/`{layout}`
   names that doesn't exist, and an `{include block}` no template in the
   chain defines;
@@ -4626,8 +4649,9 @@ vendor PHP loads.
 
 **182h — Language server.** Diagnostics for `.latte` documents; hover,
 go-to-definition and completion inside tag expressions, over the same
-lowered units; go-to-definition from `{include}`/`{extends}`/`{block}` to
-the template and block they name. The VSCode extension registers the
+lowered units; completion of tag names after `{`, filter names after
+`|`, and template and block names in `{include}`/`{extends}`/`{block}`;
+go-to-definition from those to the template and block they name. The VSCode extension registers the
 `latte` language.
 
 **182i — Retiring the compiled output on the corpus.** Once 182a-g match
@@ -4654,7 +4678,8 @@ per sub-phase.
   compiled by the real installed Latte; the set of templates Latte
   rejects, and where, must equal ours.
 
-**Architecture.** `latte-syntax` is a leaf crate beside `syntax`;
+**Architecture.** `latte-syntax` sits directly above `syntax` and below
+everything else;
 everything else lives in an `ext-latte` crate: it registers the `.latte`
 file kind, the lowering, the type sources, the filter and function
 resolution and the checks through the Session's and the analyser's
