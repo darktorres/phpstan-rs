@@ -2359,9 +2359,9 @@ deleted; the file-size gate.
       signature's out type (`array<string>` for `$out`), and at level 9+
       the call itself is reported `argument.type` "mixed given" for the
       variable PHP creates (E3c). A user function's `@param-out` already
-      applies. `composer/semver`'s `VersionParser.php` has 41 level-10
-      `offsetAccess.nonOffsetAccessible` from it, in each of its three
-      copies.
+      applies. 25 of the 26 lines of `composer/semver`'s `VersionParser.php`
+      with level-10 `offsetAccess.nonOffsetAccessible` read such a
+      `$matches` (41 findings, in each of its three copies).
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
       is `Closure(): mixed` today instead of returning a `Generator`.
     - **`new` into a generic property**: `$this->c = new Coll();` for a
