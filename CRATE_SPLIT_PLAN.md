@@ -1478,9 +1478,10 @@ Follow-ups:
   - **inherited**: PHPDoc inheritance and property hooks from the
     ancestors' inherited level;
   - **members**: each `@mixin` target's public methods and properties, at
-    the target's inherited level, added where the class has none of that
-    name (until C8's mixin extension replaces the copy); then the member
-    owners;
+    the target's inherited level, added where the class's own level has
+    none of that name - an inherited one doesn't stop it, as today (until
+    C8's mixin extension replaces the copy and fixes that); then the
+    member owners;
   - **final**: PHPDoc members the native type excludes dropped, the relation
     reading other classes' members level.
 
