@@ -140,8 +140,10 @@ pub(super) fn run_with_capabilities(
 /// reading its first message. Instead, a harmless sentinel request is
 /// sent right after `before` and its own response is polled for - proof
 /// that everything before it has already been fully, synchronously
-/// processed - before sleeping a real margin past `DEFAULT_DEBOUNCE`
-/// (now measured from a confirmed starting point) and sending `after`.
+/// processed. Then each file a `didChange` in `before` edited is waited
+/// for: the debounce worker writes its `publishDiagnostics` (or, when the
+/// edit fails to parse, a `window/logMessage`) once it has applied the
+/// edit, after the sentinel's response. Only then is `after` sent.
 pub(super) fn run_across_debounce(dir: &TempDir, before: &[Value], after: &[Value]) -> Vec<Value> {
     const SENTINEL_ID: i64 = 999_999;
 
@@ -169,14 +171,37 @@ pub(super) fn run_across_debounce(dir: &TempDir, before: &[Value], after: &[Valu
         json!({"line": 0, "character": 0}),
     )))
     .unwrap();
-    while !decode_all(&writer.lock().unwrap())
+    let changed: Vec<Value> = before
         .iter()
-        .any(|m| m["id"] == json!(SENTINEL_ID))
-    {
+        .filter(|m| m["method"] == "textDocument/didChange")
+        .map(|m| m["params"]["textDocument"]["uri"].clone())
+        .collect();
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let messages = decode_all(&writer.lock().unwrap());
+        let applied = messages
+            .iter()
+            .position(|m| m["id"] == json!(SENTINEL_ID))
+            .is_some_and(|sentinel| {
+                let later = &messages[sentinel + 1..];
+                later.iter().any(|m| m["method"] == "window/logMessage")
+                    || changed.iter().all(|uri| {
+                        later.iter().any(|m| {
+                            m["method"] == "textDocument/publishDiagnostics"
+                                && m["params"]["uri"] == *uri
+                        })
+                    })
+            });
+        if applied {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the debounced edits in `before` were never applied"
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
 
-    std::thread::sleep(Duration::from_millis(500));
     for m in after {
         tx.send(to_message(m.clone())).unwrap();
     }
