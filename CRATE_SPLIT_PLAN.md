@@ -1998,7 +1998,9 @@ count is a tracked number: each D phase records it, and a phase that
 raises it has a named reason in its commit. The suite's other two
 assertions, `assertNativeType` (313 calls) and `assertVariableCertainty`
 (681), are ignored today; the assertion DSL reads both before D1, so D5's
-natives and certainty are measured by the same suite.
+natives and certainty are measured by the same suite. `cargo xtask nsrt`
+and `cargo xtask oracle` land with it, and their first recorded counts are
+D1's baseline.
 
 **D1. Holder storage (byte-identical).**
 - Every `Locals` map moves into holder storage with its current per-kind
