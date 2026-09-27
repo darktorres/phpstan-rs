@@ -1126,7 +1126,17 @@ Follow-ups:
   `never` is absorbed (`$c ? 1 : throw new E()` is `1|never` today, 48
   nsrt mismatches), and integer ranges merge when they overlap or touch
   (`int<10, 20>|int<5, 25>` stays unmerged today, and
-  `@param int<0, 5>|int<6, 9>` widens to `int`).
+  `@param int<0, 5>|int<6, 9>` widens to `int`). `true|false` is `bool`;
+  it stays two members today (40 nsrt mismatches). Constant arrays union by
+  `processArrayTypes`/`reduceArrays` with tagged unions preserved: shapes
+  merge only when lossless, `array{}` stays its own member unless an
+  all-optional shape absorbs it, and same-key-set variants merge per
+  position only past `ARRAY_COUNT_LIMIT`. Today `merge_array_shape_pair`
+  merges every pair: `$c ? ['t' => 'a', 'v' => 1] : ['t' => 'b', 'v' =>
+  's']` is `array{t: 'a'|'b', v: 1|'s'}`, so `$a['t'] === 'a'` leaves
+  `$a['v']` as `1|'s'`, and `if ($c) { $l = ['x']; }` gives `array{0?:
+  'x'}` instead of `array{}|array{'x'}` (163 nsrt mismatches);
+  `union_types_keep_shapes_distinct` is deleted.
 - **Intersections reduce** by the class hierarchy (`TypeCombinator::intersect`):
   an intersection of a class and its subclass is the subclass. In
   `while ($foo instanceof Dim) { …; $foo = $bar; }` with `Dim extends Expr`,
@@ -1164,7 +1174,9 @@ Follow-ups:
   displays as `'a'b'`), and a callable's union return and a callable inside
   a union are parenthesized (`Closure(int): (int|string)` displays as
   `Closure(int): int|string`, `(callable(): void)|null` as
-  `callable(): void|null`).
+  `callable(): void|null`). A list shape displays without keys: `['one']`
+  is `array{0: 'one'}` today where PHPStan has `array{'one'}` (in 703 nsrt
+  mismatches' actual types).
 - **`iterable<K, V>`** keeps its arguments (behaviour fix). It is
   `array<V>|Traversable` today, the key and `Traversable`'s arguments lost,
   so a `foreach` over `iterable<int, string>` yields `mixed` key and value,
