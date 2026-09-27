@@ -507,3 +507,29 @@ fn an_intersection_of_arrays_is_one_array_with_every_refinement() {
         assert_eq!(ty.to_string(), "non-empty-list<int>", "{written}");
     }
 }
+
+#[test]
+fn an_integer_range_absorbs_the_constants_and_ranges_touching_it() {
+    let range = |min, max| Type::IntRange(min, max);
+    assert_eq!(
+        union_types(Type::IntLiteral(0), range(Some(1), None)),
+        range(Some(0), None)
+    );
+    assert_eq!(
+        union_types(range(Some(1), Some(5)), range(Some(6), Some(9))),
+        range(Some(1), Some(9))
+    );
+    assert_eq!(
+        union_types(range(None, Some(0)), range(Some(1), None)),
+        Type::Int
+    );
+    assert_eq!(
+        union_types(range(Some(3), Some(5)), Type::IntLiteral(1)),
+        Type::Union(vec![range(Some(3), Some(5)), Type::IntLiteral(1)])
+    );
+    assert_eq!(
+        union_types(Type::IntLiteral(1), Type::IntLiteral(2)),
+        Type::Union(vec![Type::IntLiteral(1), Type::IntLiteral(2)])
+    );
+    assert_eq!(parse_type_string("0|positive-int"), range(Some(0), None));
+}

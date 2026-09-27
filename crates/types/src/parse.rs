@@ -24,7 +24,7 @@ pub fn parse_type_string(raw: &str) -> Type {
     let pipe_parts = split_top_level(s, '|');
     let amp_parts = split_top_level(s, '&');
     let ty = if pipe_parts.len() > 1 {
-        let members: Vec<Type> = pipe_parts.into_iter().map(parse_type_atom).collect();
+        let mut members: Vec<Type> = pipe_parts.into_iter().map(parse_type_atom).collect();
         // `Mixed` already includes every other possible value, so a
         // union with `Mixed` alongside anything else (real shape:
         // `end()`'s stub `@return mixed|false`) is simply `Mixed` -
@@ -36,7 +36,12 @@ pub fn parse_type_string(raw: &str) -> Type {
         if members.contains(&Type::Mixed(false)) {
             return Type::Mixed(false);
         }
-        Type::Union(members)
+        crate::union::merge_int_ranges(&mut members);
+        if members.len() == 1 {
+            members.pop().expect("one member")
+        } else {
+            Type::Union(members)
+        }
     } else if amp_parts.len() > 1 {
         crate::intersect_types(amp_parts.into_iter().map(parse_type_atom).collect())
     } else {

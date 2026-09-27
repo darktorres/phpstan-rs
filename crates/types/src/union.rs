@@ -159,6 +159,7 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     // merge like `$file_path = null; foreach (...) { $file_path = $row; }`
     // - `Type::Null` is not a subtype of `Type::String`, so `string|null`
     // is correctly still kept apart.
+    merge_int_ranges(&mut members);
     let has_general_array = members.iter().any(|m| matches!(m, Type::Array(_, _)));
     if has_general_array {
         members.retain(|m| !matches!(m, Type::ArrayShape(shape) if shape.is_empty_array()));
@@ -212,6 +213,74 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     } else {
         Type::Union(members)
     }
+}
+
+/// PHPStan's `IntegerRangeType::tryUnion`: a range and every integer
+/// constant or range overlapping or touching it become one range
+/// (`0|int<1, max>` is `int<0, max>`). Constants with no range among them
+/// stay constants (`1|2`). The merged range takes the place of its first
+/// member.
+pub(crate) fn merge_int_ranges(members: &mut Vec<Type>) {
+    if !members.iter().any(|m| matches!(m, Type::IntRange(..))) {
+        return;
+    }
+    let mut intervals: Vec<(usize, Option<i64>, Option<i64>, bool)> = members
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| match m {
+            Type::IntRange(min, max) => Some((i, *min, *max, true)),
+            Type::IntLiteral(n) => Some((i, Some(*n), Some(*n), false)),
+            _ => None,
+        })
+        .collect();
+    // Unbounded below sorts first.
+    intervals.sort_by_key(|&(_, min, _, _)| min.map_or((0, 0), |n| (1, n)));
+    let touches = |max: Option<i64>, min: Option<i64>| match (max, min) {
+        (None, _) | (_, None) => true,
+        (Some(max), Some(min)) => max.checked_add(1).is_none_or(|next| next >= min),
+    };
+    let mut replaced: Vec<(usize, Type)> = Vec::new();
+    let mut removed: Vec<usize> = Vec::new();
+    let mut cluster: Vec<(usize, Option<i64>, Option<i64>, bool)> = Vec::new();
+    let mut flush = |cluster: &mut Vec<(usize, Option<i64>, Option<i64>, bool)>| {
+        if cluster.len() > 1 && cluster.iter().any(|&(.., is_range)| is_range) {
+            let min = cluster[0].1;
+            let max = cluster
+                .iter()
+                .map(|&(_, _, max, _)| max)
+                .reduce(|a, b| a.zip(b).map(|(a, b)| a.max(b)))
+                .flatten();
+            let first = cluster.iter().map(|&(i, ..)| i).min().expect("non-empty");
+            let merged = match (min, max) {
+                (None, None) => Type::Int,
+                (min, max) => Type::IntRange(min, max),
+            };
+            replaced.push((first, merged));
+            removed.extend(cluster.iter().map(|&(i, ..)| i).filter(|&i| i != first));
+        }
+        cluster.clear();
+    };
+    for interval in intervals {
+        let reaches = cluster
+            .iter()
+            .map(|&(_, _, max, _)| max)
+            .reduce(|a, b| a.zip(b).map(|(a, b)| a.max(b)))
+            .flatten();
+        if !cluster.is_empty() && !touches(reaches, interval.1) {
+            flush(&mut cluster);
+        }
+        cluster.push(interval);
+    }
+    flush(&mut cluster);
+    for (i, merged) in replaced {
+        members[i] = merged;
+    }
+    let mut index = 0;
+    members.retain(|_| {
+        let keep = !removed.contains(&index);
+        index += 1;
+        keep
+    });
 }
 
 /// The union cap's second fallback: each extension payload widened the
