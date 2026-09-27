@@ -4472,9 +4472,10 @@ them:
   for the layout and `none` has none): its arguments plus the
   child's prepared variables, with the child's blocks rendered in the
   parent's place;
-- a block `{import}` brings in: the importing template's parameter array,
-  as the imported template is created with it (`createTemplate($name,
-  $this->params, 'import')`).
+- a block `{import}` brings in: the `{import}`'s arguments plus the
+  importing template's parameter array, as the imported template is
+  created with them (`createTemplate($name, $args + $this->params,
+  'import')`).
 
 A unit rendered from several places starts with the union of what each
 place gives it, and a variable some place doesn't give is possibly
@@ -4485,7 +4486,9 @@ Core tags (`CoreExtension::getTags()`) lower to what each node class's
 name:
 - control flow: `if`/`elseif`/`else`, `n:else`, `ifset` (narrowing as
   `isset()` does, and `{ifset block name}`/`{ifset #name}` testing a
-  block's existence), `ifchanged`; `switch` comparing strictly (`===`,
+  block's existence), `ifchanged` (its arguments compared strictly with
+  their previous iteration's, or with none its own rendered output, with
+  an `{else}`); `switch` comparing strictly (`===`,
   `in_array(..., true)` for a `{case a, b}` list) with no fallthrough,
   so an `if` chain rather than PHP's loose, falling-through `switch`;
   `for`; `while`, including the `{while}...{/while $cond}` form that tests
@@ -4496,7 +4499,10 @@ name:
   `{else}`, `$iterator` typed
   `Latte\Essential\CachingIterator` over the loop's iterable and chained
   to the enclosing loop's (`getParent()`), `{first}`/`{last}`/`{sep}`/
-  `{iterateWhile}` read through it, and, under `ScopedLoopVariables`, the
+  `{iterateWhile}` read through it - `{iterateWhile}` advancing the
+  loop's own iterator and reassigning the loop's key and value variables
+  from `$iterator->key()`/`current()`, with a form testing after its
+  body - and, under `ScopedLoopVariables`, the
   loop's key and value variables live only inside the loop, the outer
   ones restored after it;
 - variables: `var` (a declared type kept, which Latte parses and
@@ -4508,7 +4514,9 @@ name:
   wrapped back into `Html` in HTML text - never `false`, the buffer being
   its own), `parameters`, `do`, `php` (with
   `RawPhpExtension`);
-- output: `{$x}`/`{=...}`, `n:attr`, `n:class`, `n:tag`, `contentType`,
+- output: `{$x}`/`{=...}`, `n:attr`, `n:class` (its truthy arguments
+  joined with `implode()`, so each is printed), `n:tag`, `n:ifcontent`,
+  `contentType`,
   `spaceless`, `dump`/`trace`/`debugbreak`; an unquoted attribute value
   `name={expr}` in HTML renders by the attribute's kind
   (`ExpressionAttributeNode`, `HtmlHelpers::classifyAttributeType()`):
@@ -4525,7 +4533,9 @@ name:
   and the anonymous `{block|filter}` that only filters its content),
   `define`, `include` (file - `with blocks` also bringing its blocks into
   the including template - block, and `parent`/`this` inside a block,
-  rendering the overridden or current block), `embed`,
+  rendering the overridden or current block), `embed` (of a block or a
+  file - explicit, or a bare name meaning a block - its content outside a
+  `{block}` becoming the implicit `{block default}`),
   `import`, `extends`/`layout`, `varType`, `templateType`,
   `templatePrint`/`varPrint`.
 
@@ -4597,8 +4607,10 @@ resolved to its real signature: a first-class callable
 
 With a filter loader registered (`addFilterLoader`), a filter name
 nothing else registers can't be called unknown; it becomes `mixed` and
-the unknown-filter check stays quiet. A custom tag is PHP code run at
-compile time and can't be read: `[ext.latte] tags` maps one to a core
+the unknown-filter check stays quiet. `{translate}...{/translate}` and `{_ ...}` (`TranslatorExtension`) are the
+`translate` filter over their content or argument, typed by the
+translator callable the extension is constructed with. A custom tag is
+PHP code run at compile time and can't be read: `[ext.latte] tags` maps one to a core
 tag's meaning (Piwigo's `{_ ...}` behaves as `TranslatorExtension`'s
 `{translate}`). The companion extensions of Latte's own ecosystem are
 the exception, as their packages are known: nette/application's
@@ -4615,7 +4627,10 @@ classes (`{parameters}`, `{templateType}`, `{extends}`/`{layout}` and
 `{contentType}` outside the header, an unclosed or mismatched tag, an
 unknown tag, `n:else` without its `n:if`/`n:foreach`, a block name used
 twice in one layer, `n:tag` on `<script>`/`<style>`, a `|noescape` where
-no filter is expected, ...) and in the
+no filter is expected, `{iterateWhile}` outside a `{foreach}`, `n:class`
+beside a `class` attribute, `n:ifcontent` on an empty element,
+`n:embed`, loose content beside an explicit `{block default}` in an
+`{embed}`, `{spaceless}` where it can't apply, ...) and in the
 core passes (`$GLOBALS` and `$ʟ_*` always; `$this` and `$__*` a
 deprecation unless `StrictParsing`, an error with it; a registered
 function used as a partial `fn(...)`; a print followed by quotes inside
