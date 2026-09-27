@@ -2198,7 +2198,13 @@ deleted; the file-size gate.
       `'foo   '` leaves `'foo'`;
     - late static binding of a constant in an inherited method:
       `$bar->test()` returning `static::FOO_BAR` gives the parent's
-      `'foo'` instead of the subclass's `'bar'` (nsrt `bug-13828.php`);
+      `'foo'` instead of the subclass's `'bar'` (nsrt `bug-13828.php`).
+      Inside the class, `static::`/`$this::` of a constant that isn't
+      final gives its value where a subclass may override it: `static::X`
+      for `const X = 1` is `1` where PHPStan has `mixed`, and for
+      `/** @var string */ const T = 'bar'` is `'bar'` where it has
+      `string`; `self::T` is `'foo'`, the value, and it is `string` today
+      (`ClassConstFetchHandler`; nsrt `class-constant-types.php`);
     - narrowing to a value the type excludes gives the value instead of
       `never`: after a `match ($i) { 0 => … }` caught in a `try` on
       `1|2|3|4`, `$i` is `0|1|2|3|4` (nsrt `match-expr.php:19`), and
