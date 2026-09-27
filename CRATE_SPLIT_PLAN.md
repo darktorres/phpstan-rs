@@ -1594,7 +1594,9 @@ Follow-ups:
     name is looked up, and a type's class name takes the declared spelling
     where the type is resolved: `$s->nope()` on a parameter typed `square`
     (class `Square`) reports `method.notFound`, and messages print
-    `Square`; the exact class accessors are deleted;
+    `Square`; a written union collapses members naming one class
+    (`@param Foo|foo` is `Foo|foo` today); the exact class accessors are
+    deleted;
   - duplicate class-like and function declarations compare names
     case-insensitively (`class Foo` beside `class FOO`, `bar()` beside
     `BAR()` go unreported by `class.duplicate` and the function check
