@@ -2432,7 +2432,12 @@ deleted; the file-size gate.
     - **Type-check calls** type as the constant the impossible-check logic
       decides: `is_string($s)` with a `string` is `true`, `is_string($i)`
       with an `int` is `false`, and `!`/`method_exists`/`instanceof` follow
-      (an `instanceof` expression is `mixed` today, not even `bool`). Today
+      (an `instanceof` expression is `mixed` today, not even `bool`). A
+      call with `@phpstan-assert*` tags is a type-check call too: PHPUnit's
+      `assertNull($bool)` is `staticMethod.impossibleType` and
+      `$a->assertInt($int)` `method.alreadyNarrowedType`, unreported today
+      (16 `method.impossibleType` the corpus oracle finds in
+      `php-openapi/openapi/tests/spec/SchemaTest.php`). Today
       the calls are `bool` although the rules report them, so `!is_int($c) &&
       !is_string($c)` on `int|string` isn't `booleanAnd.alwaysFalse` (105
       oracle findings phpstan-rs misses in snapshot 0a8fe69, e.g.
