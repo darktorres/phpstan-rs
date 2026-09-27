@@ -1319,6 +1319,11 @@ Follow-ups:
     `FunctionTable` keys functions) and hold the declared `Name`; the side
     map and `canonicalize_class_name_case` are deleted; method keys fold
     case, `method_access` included; property and constant keys stay exact;
+  - a folded key never allocates at lookup: a `&str` is hashed and
+    compared case-insensitively in place (FxHash over ASCII-lowercased
+    bytes, `eq_ignore_ascii_case`), a `Name` through its stored `lower()`;
+    `FunctionTable`, which lowercases into a new `String` for any name with
+    an uppercase letter today, moves onto the same key type;
   - a lookup that compares spelling today (a type's or a literal's class
     name, a method name at the magic-method and override sites) goes
     through an explicit exact-spelling accessor, so nothing changes until
