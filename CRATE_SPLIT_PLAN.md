@@ -1051,6 +1051,17 @@ loader and the schema. Open (review of 2026-09-27), one commit each:
 - **`test.risky` is activated by `phpstan/phpstan-phpunit`,** which has no
   such rule; it is a phpstan-rs rule and its activation moves to its own
   owner (ext-extras or an explicit key), with the corpus delta re-reviewed.
+- **`ignore_errors.path` depends on how the run was invoked.** The glob is
+  matched against the analysed path as spelled on the command line
+  (`ignore_errors::filter` uses `file.display()`): `path = "src/*"` ignores
+  the error for `check-project src` but not for `./src` or from the
+  parent directory (reproduced), while the baseline normalizes the same
+  paths. `path` resolves against the config file's directory, as PHPStan
+  resolves it, and is compared as a normalized path.
+- **`[[assertions]]`/`[[class_argument_returns]]` fail silently.** A type
+  string is not parsed at load (a typo becomes a class name), and an
+  entry naming a missing function, method or parameter is skipped
+  without a word at apply time. Both are load errors.
 - **`--set` paths** resolve against the config file's directory, unlike
   every other command-line path; they resolve against the working
   directory.
@@ -1214,6 +1225,12 @@ Landed as C3a-C3d (`dcc67ce5`, `bfce0e9f`, `49e6d9b1`, `41874e77`,
   `Option<Type>`. Flags are split too: `PropertyReflection` carries
   `is_static`/`is_abstract`, but its finality lives in the class's
   `final_properties` set. Both go with C4's per-member flags.
+- **PHPStan's own embedded classes are never "PHPStan code".**
+  `checker::phpstan_api::is_phpstan_code` looks the class up in
+  `phpstan_class_files` (exact case) and requires a `vendor/` path
+  segment, so a class known only from the embedded phpstan-src sources
+  (provenance `Origin::Phpstan`) doesn't count (traced). It becomes a
+  provenance query with the map's deletion.
 - **Attribute arguments are partly evaluated:** constants and class
   constants stay unresolved names, a bare constant name is not
   namespace-resolved, and `new` (allowed in attribute arguments since PHP
@@ -1293,6 +1310,23 @@ named, as its own behaviour commit after that phase's structural commit
     sets unioned so `final`/`abstract` leak across). Each case gets its own
     operation; `insert_built_decl`'s enum arm bypasses the collision policy
     entirely (traced).
+  - **More incremental staleness:** the dead-code escape sets
+    (`Project::escaped_enum_cases`, `escaped_member_classes`) only grow;
+    an edit or a removal never takes a file's contributions out.
+  - **The registry's own tests are white-box on what C4 replaces:** the
+    188 tests under `registry/tests` and `registry/stubs/tests` build
+    through `Registry::build` (provenance `Origin::Unknown`) and index
+    `.classes[...]`/`.functions[...]` directly at 98 sites. They move onto
+    `ReflectionBuilder::apply` and the query accessors with their names
+    kept (gate 3).
+  - **The language server's navigation is exact-case too:**
+    `class_declaration`/`member_declaration` look up by exact name, so
+    go-to-definition on a differently cased reference finds nothing
+    (traced).
+  - **`TemplateParam`s are rebuilt from the parallel maps in four places**
+    (`own_template_args`, `class_template_params_for` in `checker/
+    resolve.rs`, the ReflectionClass patch, `build_template_params`);
+    `Vec<TemplateParam>` leaves one.
   - Smaller: `method_access` is keyed lowercase (a third key convention);
     doc comments are re-parsed per method; accessors return `&Option<T>`
     and `&Vec<T>` rather than `Option<&T>` and `&[T]`; the stub pass runs
@@ -1393,7 +1427,11 @@ named, as its own behaviour commit after that phase's structural commit
 
 Gate: the fixture suite's and the lib tests' wall times (`gatetime`) are
 recorded and lower than at the phase's start; per-class resolution no
-longer re-runs every pass over the stub classes for each project.
+longer re-runs every pass over the stub classes for each project. Today
+`xtask` only writes `gatetime/<hash>.<command>.tsv`; nothing compares two
+of them, so this gate (and C5's) gets a command first: `xtask gatetime
+--since <hash>`, the median of N runs per step against the phase-start
+commit's, failing on any step not lower.
 
 **C5. Locator chain and stub layer**, one commit each:
 - the stub layer's version key, decided first and recorded in Appendix F:
@@ -1421,7 +1459,9 @@ longer re-runs every pass over the stub classes for each project.
   member) onto `subclasses_of`; `Project::run_reflection_rules` (every
   class and function, stubs included) onto the project layer;
   `repository_entity`'s scan onto ext-doctrine's data (E4 keeps it until
-  then); the LSP workspace-symbol function list onto the project layer.
+  then); the LSP workspace-symbol function list onto the project layer;
+  LSP completion's class and function candidate lists (`lsp/completion.rs`,
+  every class and function, stubs included) onto `names(kind, layer)`.
   The index records `parent`/`interfaces` for its first declaration only,
   so for a class declared differently per version
   (`couchbase`/`couchbase_v2`) `subclasses_of` must read each
@@ -1479,7 +1519,19 @@ going through the node's printed text) and the checker's
   `restricted_symbol_usage`, `phpdoc_unresolvable`, `missing_typehint`,
   `native_type_hints`, `narrowing`, `preg_shapes`, `array_ops`,
   `doctrine/result_shape`, `constant_resolver`, `name_context`,
-  `function_sig`, `assertion_table` and `deps`, each listed in the commit.
+  `function_sig`, `assertion_table` and `deps`, each listed in the commit;
+- native type hints go the same way: about 85 sites print a `TypeHint`
+  node (`TypeHint::to_string`) and re-parse it with
+  `parse_native_type_string`. The resolver takes `syntax` `TypeHint`
+  nodes directly, and `parse_native_type_string` goes with
+  `parse_type_string`;
+- one resolver, one scope: today the registry (`from_decl`: templates
+  marked, names resolved, class aliases substituted, deferred value-of)
+  and the checker (`resolve_written_type`: templates and names, with
+  aliases applied separately at three call sites) each assemble their own
+  pipeline. The TypeNodeResolver takes one name scope - namespace and
+  `use` imports, active templates, class aliases, the current class for
+  `self` - and both use it.
 
 **C8. Reflection extension points** (§3.5), with the built-in implementors
 (universal object crates among them, from C1's `ReflectionSettings` key).
