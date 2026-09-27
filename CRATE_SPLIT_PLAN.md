@@ -924,8 +924,6 @@ Follow-ups:
   past them).
 - **Performance and build time** record their first results; from then on
   the performance gate compares every commit with its parent (§4.8).
-- **CI** runs `xtask modgraph`, `xtask arch` and the test-name manifest,
-  none of which needs the corpus.
 - **CI green.** The one recorded Rust CI run (`867d9cb3`) failed at the
   no-default-features tests, so the docs, machete and deny steps never ran,
   and 162 commits since are unpushed. Every step passes locally; a passing

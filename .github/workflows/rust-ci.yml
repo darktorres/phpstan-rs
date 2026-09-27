@@ -15,7 +15,10 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
+      # The test-name manifest searches the whole history for its base.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # build.rs embeds vendor/phpstan-src/src; the other submodules are
       # test corpora the build never reads.
       - name: Fetch the phpstan-src submodule
@@ -41,6 +44,26 @@ jobs:
         run: cargo test --workspace --all-targets
       - name: Fixture suite
         run: cargo test --profile gate --test fixtures
+      - name: Module graph
+        run: cargo xtask modgraph
+      - name: Architecture rules
+        run: cargo xtask arch
+      # The last run's manifest is the base when that run was an ancestor.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .corpus-runs/gate/tests
+          key: test-manifest-${{ github.sha }}
+          restore-keys: test-manifest-
+      - name: Test-name manifest
+        run: cargo xtask tests
+      - name: Keep only this run's manifest
+        run: >
+          find .corpus-runs/gate/tests -name '*.txt'
+          ! -name '${{ github.sha }}.txt' -delete
+      - uses: actions/cache/save@v4
+        with:
+          path: .corpus-runs/gate/tests
+          key: test-manifest-${{ github.sha }}
       - name: Tests without default features
         run: cargo test --workspace --no-default-features
       - name: Docs
