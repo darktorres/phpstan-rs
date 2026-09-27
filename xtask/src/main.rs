@@ -2,7 +2,8 @@
 //!
 //! Snapshots live under `.corpus-runs/gate/<artifact>/<commit>.<ext>`
 //! (gitignored), keyed by the full hash of the commit the binary was
-//! built from. `compare` checks HEAD's snapshots against its parent's:
+//! built from. `compare` checks HEAD's snapshots against its parent's
+//! (or, when the parent has none, the nearest ancestor that has them):
 //! every artifact must be byte-identical unless HEAD's own commit adds
 //! `gates/approved/<slug>/<artifact>.diff` holding exactly the expected
 //! `diff -u` output.
@@ -57,7 +58,8 @@ const USAGE: &str = "usage: cargo xtask <command>
   gates [--full]         every gate for HEAD (quick tier by default)
   corpus [--full]        record HEAD's corpus, type and baseline snapshots
   compare [--full] [--against <hash>]
-                         diff HEAD's snapshots against its parent's
+                         diff HEAD's snapshots against its parent's (or
+                         the nearest ancestor that has them)
   perf                   record wall time and peak memory of the scoped run
   buildtime              record incremental rebuild times
   tests                  record and check the test-name manifest
@@ -68,9 +70,9 @@ const USAGE: &str = "usage: cargo xtask <command>
   stub-index             regenerate crates/stub-sources/index.tsv
   baseline               generate the reference baselines (Stage A only)
   approve <slug> [--full] [--against <commit>]
-                         write HEAD's snapshot diffs against its parent (or
-                         <commit>) to gates/approved/<slug>/ (then amend
-                         them in)
+                         write HEAD's snapshot diffs against the same base
+                         as compare (or <commit>) to gates/approved/<slug>/
+                         (then amend them in)
   rekey <old-hash>       move <old-hash>'s snapshots to HEAD after an amend
                          that only added gates/ files
 
@@ -752,8 +754,47 @@ fn baseline_check(hash: &str, timings: &mut Timings) -> Result<(), String> {
 
 // --- comparison ------------------------------------------------------------
 
-fn parent_hash() -> Result<String, String> {
-    git(&["rev-parse", "HEAD~1"])
+/// The nearest proper ancestor of HEAD that has every snapshot `compare`
+/// checks (an artifact no older commit has counts as present: it starts
+/// at HEAD). Usually HEAD's parent; an ancestor whose gate run failed
+/// before recording is skipped. A skipped commit that adds an approved
+/// delta can't be skipped: `compare` only reads HEAD's own deltas.
+fn comparison_base(full: bool) -> Result<String, String> {
+    let hash = head_hash()?;
+    let artifacts = compared_artifacts(full);
+    let ancestors = git(&["rev-list", "--max-count=200", "HEAD~1"])?;
+    let mut skipped: Vec<String> = Vec::new();
+    for ancestor in ancestors.lines() {
+        let complete = artifacts.iter().all(|(artifact, ext)| {
+            snapshot_path(artifact, ancestor, ext).exists()
+                || !artifact_recorded_before(artifact, &hash)
+        });
+        if complete {
+            if let Some(commit) = skipped
+                .iter()
+                .find(|commit| adds_approved_delta(commit).unwrap_or(true))
+            {
+                return Err(format!(
+                    "{commit} has no snapshots but adds an approved delta; record its snapshots, or compare with --against"
+                ));
+            }
+            if !skipped.is_empty() {
+                eprintln!(
+                    "comparing against {ancestor}: {} newer commit(s) have no snapshots",
+                    skipped.len()
+                );
+            }
+            return Ok(ancestor.to_string());
+        }
+        skipped.push(ancestor.to_string());
+    }
+    Err("no ancestor within 200 commits has a complete snapshot set".to_string())
+}
+
+/// Whether `commit` adds or changes a file under `gates/approved/`.
+fn adds_approved_delta(commit: &str) -> Result<bool, String> {
+    let changed = git(&["show", "--name-only", "--format=", commit])?;
+    Ok(changed.lines().any(|p| p.starts_with("gates/approved/")))
 }
 
 /// `gates/approved/*/<artifact>.diff` files HEAD's own commit adds or
@@ -830,7 +871,7 @@ fn compare(args: &[String]) -> Result<(), String> {
             "rev-parse",
             args.get(i + 1).ok_or("--against needs a hash")?,
         ])?,
-        None => parent_hash()?,
+        None => comparison_base(full)?,
     };
     let hash = head_hash()?;
     let mut failures = Vec::new();
@@ -894,7 +935,7 @@ fn approve(args: &[String]) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
     let parent = match against {
         Some(commit) => git(&["rev-parse", commit])?,
-        None => parent_hash()?,
+        None => comparison_base(full)?,
     };
     let hash = head_hash()?;
     let dir = root().join("gates/approved").join(slug);
