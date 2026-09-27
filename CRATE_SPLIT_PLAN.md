@@ -1348,9 +1348,9 @@ Follow-ups:
   than `<hash>`'s. The phase start is recorded before the next commit, so
   no old commit is rebuilt.
 - **Keys and data model** (structural, except that two class-like
-  declarations whose names differ only in case are one name, as in PHP,
-  and meet under the collision policy instead of standing as two classes -
-  an approved delta, fixtured):
+  declarations, or two methods of one class, whose names differ only in
+  case are one name, as in PHP, and meet under the collision policy
+  instead of standing as two - an approved delta, fixtured):
   - class entries are keyed by the folded name (`Name::lower`, as
     `FunctionTable` keys functions) and hold the declared `Name`; the side
     map and `canonicalize_class_name_case` are deleted; method keys fold
@@ -1374,9 +1374,11 @@ Follow-ups:
     `explicit_mixed_hint` flags derive from the native and PHPDoc
     `Option`s; accessors return `Option<&T>`/`&[T]`; the builder
     parses each doc comment once (a method's is parsed per use today);
-  - provenance is the only location record (`Origin::Unknown`, `is_stub`
-    and `function_decl_sites` gone; C3's follow-up already deleted
-    `phpstan_class_files`), and the six comments citing the deleted
+  - provenance is the only location record (`is_stub` and
+    `function_decl_sites` gone; C3's follow-up already deleted
+    `phpstan_class_files`; the `.stub` class pass records each embedded
+    `.stub` file as `Origin::Phpstan`, and `Origin::Unknown` goes with
+    `Registry::build`), and the six comments citing the deleted
     `project/decl_locations.rs`/`Project::decl_locations` are corrected;
   - query accessors replace the storage-returning ones and the `pub` maps;
     every direct `registry.classes`/`functions`/`global_constants` access
@@ -1432,10 +1434,10 @@ Follow-ups:
     is rewritten;
   - `index_and_flatten` is deleted; `Registry::build` indexes and runs the
     whole-program passes as `finish_loading` does (its callers' purity and
-    global-variable tests read them) until its callers move onto `apply`; the stub pass still resolves
-    each stub file's classes within that file (until C5's stub layer),
-    under default reflection inputs (it is process-wide), without
-    global-variable inference.
+    global-variable tests read them) until its callers move onto `apply`;
+    the stub pass still resolves each stub file's classes within that file
+    (until C5's stub layer), under default reflection inputs (it is
+    process-wide), without global-variable inference.
 
   The memo has five levels, each a per-class `OnceLock`. A level reads the
   declarations, a lower level of any class, and the same level only along
@@ -1594,7 +1596,8 @@ Follow-ups:
 - **Registry tests** (188, `registry/tests` and `registry/stubs/tests`) and
   the other `Registry::build` callers (the checker test harness,
   `phpstan_api`, `rule`, `doctrine` result-shape and `main` tests, the demo)
-  move onto `ReflectionBuilder::apply` and the query accessors, names kept.
+  move onto `ReflectionBuilder::apply` and the query accessors, names kept;
+  `Registry::build` and `Origin::Unknown` are deleted.
 - **Behaviour fixes**, one commit each after the structural ones:
   - declarations below the top level are indexed (inside function bodies,
     `try`, `switch`), conditional, through one Visitor walk that also
