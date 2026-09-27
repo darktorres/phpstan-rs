@@ -908,7 +908,9 @@ Follow-ups:
 - **Full tier.** `xtask gates --full` runs now and at the end of every phase
   from here. The unscoped and level 0–10 artifacts were last recorded at
   `1e5e42be` (Stage A); the first run's diff against them is reviewed line
-  by line as one catch-up delta.
+  by line as one catch-up delta. `compare` and the test-name manifest look
+  back 200 commits for a base (245 separate HEAD from `1e5e42be`, so the
+  full tier fails without `--against`); both search every ancestor.
 - **Performance and build time** record their first results; from then on
   the performance gate compares every commit with its parent (§4.8).
 - **CI** runs `xtask modgraph`, `xtask arch` and the test-name manifest,
@@ -1082,7 +1084,17 @@ Follow-ups:
   `ArrayObject<int, T>`, `callable(): T` and `array{x: T}` infer nothing).
 - **Late types.** `new<T>` and `template-type<...>` get variants (PHPStan's
   `NewObjectType` and `GetTemplateTypeType`); `int-mask<>`/`int-mask-of<>`
-  resolve in C7's resolver instead of reading as `int`.
+  resolve in C7's resolver instead of reading as `int`; `key-of<C::ARR>`
+  resolves like `value-of<C::ARR>` (it reads as `mixed`).
+- **Callability and class-strings in `accepts`** (behaviour fix): a string
+  literal is callable only when it names an existing function or
+  `Class::method`, an array only as `[object|class-string, method]` with the
+  method existing, and a class-string literal must name a class within the
+  bound. Today `'no_such_function'`, `[1, 2]` and `'stdClass'` for
+  `class-string<DateTimeInterface>` are accepted.
+- **Class-aware unions.** With C8's hierarchy, a union drops members another
+  member covers (`A|B` for `B extends A` stays two members).
+- **Literal display** escapes: `'a\'b'` displays as `'a'b'`.
 - **Typed templates.** `TemplateParam`'s name is a `Name` and its scope an
   enum (class, function, method, callable) instead of `Option<String>` with
   a `"callable"` sentinel; a `Conditional`'s subject is an enum (parameter
@@ -1104,6 +1116,10 @@ space and cuts each line at `//` (so a `'http://a'` type breaks);
 lexer. One splitter remains, `DocBlock` is built from its `PhpDocNode`, and
 `phpdoc_unresolvable`, `generics/ancestors` and `unknown_phpstan_tags` read
 that parse (C4's store of parsed doc blocks holds it).
+
+Follow-up: **PHPDoc number literals** follow phpdoc-parser: hex, octal and
+binary, `_` separators and exponents (`int<0, 0xFF>`, `int<0, 1_000>` and
+`1e3` report `phpDoc.parseError` and read as `mixed` today).
 
 **B6. sql.**
 - Its own column-type model, `[sql_reflection]` parsing, and `SqlContext`
@@ -1128,8 +1144,12 @@ fixture first.
 - Extract `diagnostics`. The ignore / baseline pipeline stays in the
   package's future `project` module.
 
-Follow-up: `DiagnosticFix::within` (a text search for a name whose span is
-missing) is deleted; its two sites use the name's span.
+Follow-ups:
+- `DiagnosticFix::within` (a text search for a name whose span is missing)
+  is deleted; its two sites use the name's span.
+- **Baseline paths** are relative to the baseline file's directory, as in
+  PHPStan. Today they are the analysed paths as spelled, so running from
+  another directory with the same baseline reports every baselined error.
 
 **B8. composer.** The package context is computed once. Extract. The
 default `PhpVersions` range comes from it (§3.2): composer
@@ -1143,6 +1163,11 @@ Follow-ups:
 - **No global panic hook.** `discover_vendor_context` replaces the process
   panic hook while it parses, which races parallel analysis; the parse
   already returns its errors.
+- **`config.vendor-dir`** is read: the manifest and the vendor discovery
+  hardcode `vendor/`, so a project with its own vendor directory gets no
+  installed packages and no vendor context.
+- **`psr-0` autoload** entries count in `Autoload` (only `psr-4`, `classmap`
+  and `files` are read).
 
 **B9. stub-sources.**
 - The generated index plus the xtask plus the regeneration test.
@@ -1745,6 +1770,11 @@ deleted, RefCell channels removed; the file-size gate.
 - `$this`/`static` inside a class body carry their bound class
   (`Type::This`/`StaticRef` bound), displayed `$this(Base)`/`static(Base)`,
   and `@return $this` rejects a returned `new static()`.
+- **Arithmetic** follows PHPStan's `InitializerExprTypeResolver` (fixed
+  first): `int|float * 2` and `int|float + 1` are `int` today, so
+  `is_float($n * 2)` is reported always false; integer overflow is a float.
+- **Short ternary** on an object keeps its type: `$a ?: null` and
+  `$na ?: $a` are `mixed` today.
 
 **D5. NodeCallback sink** (approved deltas for `return.unusedType`,
 `throws.*` and `property.unusedType`).
@@ -2204,8 +2234,9 @@ its owner. Non-Registry keys follow the table.
   `doctrine_entity`) move onto class-reflection data extensions in C8.
 - **Bugs in code a later phase rewrites.** A fixture first; the fix is that
   phase's own behaviour commit (approved delta) after its structural
-  commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2) and
-  C3a's `property.unused` delta.
+  commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2),
+  C3a's `property.unused` delta and `int|float` arithmetic (D4), each a
+  false positive on ordinary code.
 - **Stage B follow-ups before C5.** The AST and type API changes they make
   (declaration names, trait adaptations, language-construct nodes, byte
   strings, one subtyping relation) land before C5–C8 build on them; the
