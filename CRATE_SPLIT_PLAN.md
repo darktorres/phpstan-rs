@@ -1337,8 +1337,10 @@ Follow-ups:
   - query accessors replace the storage-returning ones and the `pub` maps;
     every direct `registry.classes`/`functions`/`global_constants` access
     outside `registry/` is converted (about 280, 23 of them in tests);
-  - the builders read parse-time `resolved` names instead of re-resolving
-    through a `NameContext`;
+  - the builders read the AST's parse-time `QualifiedName::resolved`
+    (`extends`, `implements`, `use`, native type hints) instead of
+    re-resolving it through a `NameContext`; PHPDoc names, which are text,
+    keep the file's name scope until C7's one scope;
   - no result depends on the class map's iteration order, which folded
     keys change: `classes_using_trait` returns its hosts sorted (they
     order the per-host trait checks), and `doctrine_entity_for_table`
