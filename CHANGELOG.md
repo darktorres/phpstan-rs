@@ -77,6 +77,8 @@ User-visible changes: output, formats, flags, configuration and exit codes.
 - `check_dead_members` reports an unused constructor-promoted property like
   any other property (`dcc67ce5`), and `check_dead_code` never reports an
   anonymous class unused (`69b97cb1`).
+- `printf()` accepts `bool` and `null` values, and a value no printf
+  function accepts is reported once instead of twice (`ac70c6eb`).
 
 ### Project
 - Licensed under MIT.
