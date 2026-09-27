@@ -2119,6 +2119,13 @@ deleted; the file-size gate.
     String offsets are typed: `$s[$i]` on a `string` and even `'hello'[0]`
     are `mixed` today, where PHPStan has `string` and `'h'` (and the union
     of the characters for a non-literal key).
+  - **Array literals and appends** follow `ConstantArrayType`'s next-key
+    rule: after a negative key the next implicit key is the key + 1 on PHP
+    8.3+ and `0` before, after `PHP_INT_MAX` there is none (the append
+    fails), and appending to a shape keeps the shape. Today
+    `[-5 => 'a', 'b']` is plain `array`, appending `'y'` to `array{3: 'x'}`
+    gives `array<'y'|'x'>` instead of `array{3: 'x', 4: 'y'}`, and
+    `[PHP_INT_MAX => 1, 2]` gains a key `0` (nsrt `bug-15248.php`).
   - **Key-producing assignments** follow `AssignHandler::specifyTypes`:
     after `$k = array_key_first($a)` (and `array_key_last`,
     `array_search`, `array_find_key`, `array_rand`), `$a[$k]` is known to
@@ -2144,7 +2151,8 @@ deleted; the file-size gate.
     `$n = null; $n++` leaves `int` where PHP gives `1`.
   - **Narrowing gaps** in the handlers' `specifyTypes`:
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
-      `if ($e === E::A) { return; }` and in a `match` `default` arm;
+      `if ($e === E::A) { return; }` and in a `match` `default` arm (with
+      `$this` as the subject inside the enum too: nsrt `bug-8486.php`);
     - `!empty($v)` on an `int` leaves `int`;
     - `gettype($y)` compared with a type name narrows, in `===` and in a
       `switch`: `case "integer"` leaves `$y` as the whole union today (nsrt
@@ -2163,6 +2171,9 @@ deleted; the file-size gate.
       `function.alreadyNarrowedType` for it that the oracle doesn't report,
       e.g. `sebastian/environment/src/Console.php` and
       `maxmind-db/reader/src/MaxMind/Db/Reader.php`;
+    - boolean composition through `!`/`&&`/`||` (the recipes above):
+      `assert(!(is_int($v) && $v < 0) && !(is_int($v) && $v >= 1))` leaves
+      `$v` as `int` today where PHPStan has `0` (nsrt `bug-15039.php`);
     - `$b?->c->n === 1` doesn't narrow `$b` to non-null
       (`createNullsafeTypes`);
     - a conditional `@phpstan-assert` type resolves against the call's
