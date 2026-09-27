@@ -1407,7 +1407,8 @@ Follow-ups:
     keys change: `classes_using_trait` returns its hosts sorted (they
     order the per-host trait checks), and `doctrine_entity_for_table`
     picks among entities mapping one table by name order instead of the
-    first found.
+    first found (an approved delta where two entities map one table,
+    fixtured).
 - **Written results leave the signatures.** Everything a remaining pass
   writes moves out of the views the memo will own:
   - purity results go to a registry table keyed by function and by
@@ -1550,31 +1551,32 @@ Follow-ups:
   files, then analysed files, each by path, the order `check-project` and
   the LSP's workspace load use today - not in arrival order, so a file
   created or opened later lands where a fresh load would put it and a delta
-  gives what a fresh load gives. Declarations are shared between snapshots
-  by `Arc`; memo cells are not: a new snapshot starts with fresh cells,
-  seeded with every value already computed and not invalidated, so a cell an
-  older snapshot fills after the apply never reaches the new one. Each memo
-  records every folded class and constant name it looked up, absent ones
-  included, through a per-resolution read set the hierarchy and the lookups
-  append to; a delta invalidates the transitive readers of the names it
-  changes, a change to any other reflection input invalidates everything,
-  and the new snapshot inherits every other memo. Purity and global-variable
-  inference rerun per snapshot until C9. Snapshots own their names: the
-  registry's and checker's `syntax::intern::intern` calls (about 100) go
-  through the project's interner; the stub layer's names stay global;
-  `apply` sweeps the session interner's entries nothing else holds. A
-  closure gate is a test that applies a sequence of deltas and compares
-  every query on the result with a fresh build of the final file set: a
-  property test over the fixture files, and one test per staleness case
-  below. With declarations kept per file, the checker stops rebuilding
-  reflection from the AST: the rebuild-and-compare sites
-  (`ClassReflection::from_decl` and `from_enum_decl` in `oop.rs`,
-  `from_decl` for a trait in `function_decl.rs`) and a losing duplicate
-  function's rebuilt signature read the file's own declaration, comparing
-  as today; the builder builds property-hook signatures with their
-  property, the same signature `check_hook_phpdoc_types` synthesizes a
-  `FunctionDecl` for today.
-  The per-file sets also answer what `Project` indexes separately today:
+  gives what a fresh load gives (an approved delta the language server
+  shows: such a file no longer wins a name collision by arriving last).
+  Declarations are shared between snapshots by `Arc`; memo cells are not: a
+  new snapshot starts with fresh cells, seeded with every value already
+  computed and not invalidated, so a cell an older snapshot fills after the
+  apply never reaches the new one. Each memo records every folded class and
+  constant name it looked up, absent ones included, through a per-resolution
+  read set the hierarchy and the lookups append to; a delta invalidates the
+  transitive readers of the names it changes, a change to any other
+  reflection input invalidates everything, and the new snapshot inherits
+  every other memo. Purity and global-variable inference rerun per snapshot
+  until C9. Snapshots own their names: the registry's and checker's
+  `syntax::intern::intern` calls (about 100) go through the project's
+  interner; the stub layer's names stay global; `apply` sweeps the session
+  interner's entries nothing else holds. A closure gate is a test that
+  applies a sequence of deltas and compares every query on the result with a
+  fresh build of the final file set: a property test over the fixture files,
+  and one test per staleness case below. With declarations kept per file,
+  the checker stops rebuilding reflection from the AST: the
+  rebuild-and-compare sites (`ClassReflection::from_decl` and
+  `from_enum_decl` in `oop.rs`, `from_decl` for a trait in
+  `function_decl.rs`) and a losing duplicate function's rebuilt signature
+  read the file's own declaration, comparing as today; the builder builds
+  property-hook signatures with their property, the same signature
+  `check_hook_phpdoc_types` synthesizes a `FunctionDecl` for today. The
+  per-file sets also answer what `Project` indexes separately today:
   `DuplicateClassSites` and `DuplicateFunctionSites` (with their own
   declaration walks) are deleted for a query over them that groups by exact
   spelling, as the indexes do, and `FileState.functions`/`classes` become
