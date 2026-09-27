@@ -1059,7 +1059,30 @@ loader and the schema. Open (review of 2026-09-27), one commit each:
   corrected. The `check-project` help is stale: `--php-version` says an
   unset version leaves the version rules nothing to check, though B8
   defaults it from composer, and `--level` says unset reports everything,
-  though the session caps it at `DEFAULT_REPORT_LEVEL` (6).
+  though the session caps it at `DEFAULT_REPORT_LEVEL` (6); `--stub-path`
+  points at a `check_duplicate_class_declarations` flag "above" that no
+  longer exists, and `--format` at the deleted `config.rs`. The
+  CHANGELOG's "an unknown key is reported by its full dotted path" holds
+  only at a section's own level (the nested-keys item), and it doesn't
+  mention C3a's output change. `declared_php_versions` carries
+  `composer_roots`' doc comment (`project/session.rs`).
+- **One composer root decides activation.** `Session::resolve` discovers a
+  composer root per analysed directory and loads each one's vendor
+  context, and `phpstan_api_check_enabled` ORs over all of them, but the
+  PHP versions and extension activation come from the root that is the
+  working directory only. One rule for all three: every discovered root's
+  manifest counts.
+- **Pest's risky tests are switched by `ext.phpunit.check_risky_tests`.**
+  Appendix A splits risky tests between ext-phpunit (methods) and ext-pest
+  (`it`/`test` closures); `[ext.pest]` has only `enabled`. Each owner gets
+  its own key.
+- **Key names.** Several keys repeat their section
+  (`ext.psr3.check_psr3_logging`, `ext.psr3.psr3_context_key_pattern`,
+  `ext.sidz.magic_number_exemptions`), and section names are kebab-case
+  (`strict-rules`, `deprecation-rules`) while `rules.class_shape` and
+  every key are snake_case. The shim is the one chance to settle names
+  without a second migration: one casing, no repeated prefixes, and a
+  PHPStan parameter's own name wherever one exists.
 
 **C2. Settings leave `Registry`**, following Appendix B:
 - `RuleLevelHelper` and `ConstantResolver` land in the package's future
@@ -1081,6 +1104,21 @@ Open (review of 2026-09-27):
   own behaviour commit: a predefined constant is typed over the whole
   range (`int<min.id, max.id + 99>`, the major and minor as ranges or
   unions) and never falls back to the stub's value.
+- **`ConstantResolver` is in the wrong layer.** Reflection resolves
+  constants too, bypassing it: `resolve_constant_named_types` substitutes a
+  constant-named PHPDoc type straight from `Registry::global_constants`
+  (`registry/resolve.rs` `constant_named_type`), and class-constant
+  initializers are typed at registry build. PHPStan's `ConstantResolver`
+  is what its reflection-side `InitializerExprTypeResolver` calls. It
+  moves to `reflection` (L3), `dynamic_constant_names` becomes a
+  `ReflectionSettings` key, Appendix B's row follows, and reflection's
+  constant reads go through it.
+- **Constant lookups outside the resolver fold nothing.**
+  `checker/imports.rs` checks `use const` with an exact
+  `global_constants.contains_key`, but PHP folds a constant's namespace
+  prefix: `use const foo\BAR;` against `namespace Foo { const BAR = 1; }`
+  reports `constant.notFound` twice, at the import and at the use
+  (reproduced). Every constant lookup goes through one folded key.
 - **`dynamic_constant_names` details:** a global name is matched exactly,
   where PHP folds a constant's namespace prefix (the stub index's own
   rule); and `generalize` turns a shape into `array<array-key, …>`,
@@ -1157,6 +1195,25 @@ Landed as C3a-C3d (`dcc67ce5`, `bfce0e9f`, `49e6d9b1`, `41874e77`,
   duplicates the origin; `phpstan_class_files` and `function_decl_sites`
   are parallel location stores; comments cite `project/decl_locations.rs`
   and `Project::decl_locations`, which no longer exist. Scheduled in C4.
+- **Parse-time resolved names are never read.** B3's `QualifiedName`
+  keeps `written` and `resolved`, and the audit marks it OK, but nothing
+  outside `syntax` reads `.resolved` or `ResolvedName`: about 90 sites
+  re-resolve the written name through a `NameContext`, among them the
+  reflection builders (`class_info.rs` 9, `class_info/doctrine_entity.rs`
+  5, `reflection_attribute.rs` 3, `access_attributes.rs` 3,
+  `global_vars.rs` 3, `function_sig/generics.rs`). One visible effect:
+  `NameContext::resolve` has no `self`/`parent`/`static` case, so
+  `#[Attr(self::X)]` in namespace `App` records the class `App\self`
+  (traced through `reflection_attribute.rs`). The reflection sites read
+  `resolved` in C4; the checker's go with D4, and Appendix C's `name_ctx`
+  is deleted rather than moved to file state.
+- **No-native-type is encoded three ways:** `PropertyReflection::
+  has_native_type` beside `ty_native: Type`, the
+  `explicit_mixed_hint`/`return_explicit_mixed_hint` flags, and
+  `ConstantReflection::native_ty: Option<Type>`. Each native type is an
+  `Option<Type>`. Flags are split too: `PropertyReflection` carries
+  `is_static`/`is_abstract`, but its finality lives in the class's
+  `final_properties` set. Both go with C4's per-member flags.
 - **Attribute arguments are partly evaluated:** constants and class
   constants stay unresolved names, a bare constant name is not
   namespace-resolved, and `new` (allowed in attribute arguments since PHP
@@ -1164,9 +1221,26 @@ Landed as C3a-C3d (`dcc67ce5`, `bfce0e9f`, `49e6d9b1`, `41874e77`,
   ConstantResolver and the hierarchy are at hand.
 
 **C4. Snapshots and lazy resolution**, one commit each:
-- per-class memoized resolution replacing the passes. Which passes go here
-  is enumerated: `resolve_transitive_purity` and `infer_global_variables`
-  are whole-program and stay until C9, `apply_assertion_table` until C6.
+- per-class memoized resolution replacing the passes. Today's 15 passes
+  (16 calls) and where each goes:
+  - per-class memos here: `flatten_traits`, `resolve_method_tags`,
+    `precompute_member_owners` (twice), `resolve_deferred_type_imports`,
+    `resolve_deferred_value_of`, `flatten_phpdoc_inheritance`,
+    `inherit_property_hooks`, `resolve_deferred_mixins`,
+    `precompute_ancestor_names`, `drop_doc_members_excluded_by_native`,
+    `resolve_constant_named_types` (through the ConstantResolver, C2);
+  - deleted by `Name` keys: `canonicalize_class_name_case`;
+  - C6: `apply_assertion_table`;
+  - C9: `resolve_transitive_purity`, `infer_global_variables`.
+
+  The three lists are not the same list: `index_and_flatten` (each stub
+  file, `Registry::build`) runs the second `precompute_member_owners`
+  last, after `drop_doc_members_excluded_by_native`, while
+  `finish_loading` and `update_file` run it before, with purity between,
+  so their owner maps can name a member the drop removed. Stub classes
+  are flattened within their own file at stub load and again per
+  project. The memo has one order, and a fixture pins the dropped-member
+  case.
   The memo has levels - ancestors, then members, then inherited PHPDoc -
   and a hierarchy query made while resolving members reads only the
   ancestor level, so resolution never re-enters a class's own cell
@@ -1308,7 +1382,12 @@ registry build) and three inside `types`, whose API takes a
 subclass of `Foo` doesn't pick `A`), `intersection.rs`'s `narrower`
 (`Foo&SubFoo` isn't collapsed) and `coercion.rs`'s string check.
 `ClassHierarchy` gains the enum-cases query §3.2 lists, with the first
-relation that needs it. The class-reflection data extensions take their
+relation that needs it. The trait itself is redone for the reflection
+it now fronts: it takes `&str` names where §3.2 has `Name`; it allocates
+on every call (`ancestor_names` returns a `Vec`,
+`ancestor_template_bindings` an `FxHashMap<String, Type>`) where the
+memoized views can lend; and `ClassFacts::templates` is `&[Arc<str>]`,
+not the `TemplateParam`s C4 introduces. The class-reflection data extensions take their
 first non-built-in implementors here: `registry::access_attributes`
 (ext-language-extensions) and `registry::class_info::doctrine_entity`
 (ext-doctrine) move onto them in the package's future ext modules, and
