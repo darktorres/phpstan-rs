@@ -1852,6 +1852,15 @@ Follow-ups:
     `final` methods, an abstract method implemented by another trait,
     `@use Trait<T>` template bindings, and a trait member's aliases
     resolved in the trait's scope (`self` still the host);
+  - each `@extends`/`@implements` tag binds only the parent it names: with
+    `@extends Prov<T>` and `@extends \IteratorAggregate<string, T>` on one
+    interface, `Coll<int>::get()` (`@return T` in `Prov`) is `string` today,
+    a wrong value, and iterating it gives `mixed` instead of `int`.
+    Symfony's `ServiceCollectionInterface` has that shape, so every
+    `ServiceLocator<…>::get()` is `string`, and deptrac's
+    `$collector instanceof CollectorInterface` after one is reported
+    `instanceof.alwaysFalse` (`deptrac/src/Core/Layer/CollectorProvider.php:27`,
+    `Supportive/OutputFormatter/FormatterProvider.php:28`);
   - PHPDoc inheritance carries `@phpstan-assert*`, `@param-out`,
     `@phpstan-self-out`, `@throws` and method templates, and a property
     redeclared without `@var` keeps its parent's (`mixed` today; nsrt
