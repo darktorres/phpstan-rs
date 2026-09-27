@@ -88,13 +88,14 @@ L2  config        loader and section-owner registry with schema
 L3  reflection    ReflectionProvider snapshots, locator chain, stub layer
                   (PHP-version keyed), PHPDoc overlay layer, TypeNodeResolver,
                   class-reflection / deprecation extension traits,
-                  ReflectionAttribute, provenance, implements ClassHierarchy
+                  ReflectionAttribute, provenance, ConstantResolver,
+                  implements ClassHierarchy
                                     (syntax, types, phpdoc, stub-sources, composer, config)
 L4  analyser      engine: holder scope, ExprHandlers, results, TypeSpecifier,
                   NodeCallback sink, Scope API, Rule/Collector/Observer,
                   derived nodes, extension-trait registry, RuleLevelHelper,
-                  ConstantResolver, AnalysisContext, summaries API, reference
-                  collector. Emits nothing
+                  AnalysisContext, summaries API, reference collector.
+                  Emits nothing
                                     (reflection and below; no composer, no I/O)
 L5  builtins      = phpstan-src/src/Type/Php: always registered, can't be
                   switched off; incl. regex + PCRE validation (`pcre-validate`)
@@ -294,8 +295,14 @@ Each index entry records:
 - the ordered list of declaring files, with corpus priority;
 - the precomputed constant collapse;
 - extension name;
-- parent and interfaces (for `implementors_of`/`subclasses_of`);
+- parent and interfaces per declaration (for `implementors_of`/
+  `subclasses_of`; a class declared per PHP version can differ);
 - PHP-version gates.
+
+The index covers `resources/functionMap.php` and its per-version deltas
+too, once C6 embeds them. Its generator and reflection's declaration walk
+are one Visitor-based walk, so the two can't disagree on what a file
+declares.
 
 ### 3.5 reflection
 - **Data model.** Opaque `ClassReflection`, `MethodReflection`,
@@ -375,17 +382,34 @@ Each index entry records:
 
   Built-in implementors: `@property`/`@method`/`@mixin`/require-extends/
   universal object crates.
-- **No settings.** Level-dependent acceptance leaves for `RuleLevelHelper`,
-  dynamic constants for `ConstantResolver`, and the `phpstan_api` file
-  recording becomes unconditional. Gate: no setting read under
-  `crates/reflection`.
+- **No settings, only reflection inputs.** Level-dependent acceptance
+  leaves for `RuleLevelHelper`, and the `phpstan_api` file recording
+  becomes unconditional. What reflection reads is `ReflectionSettings`
+  alone (§3.6); nothing else from the configuration. Gate: no other
+  settings type named under `crates/reflection`.
+- **Keys.** Class and function names are the case-insensitive `Name`;
+  method names fold case; property and constant names stay exact, and a
+  global constant folds only its namespace prefix - PHP's own rules. There
+  is one lookup per kind and no side map.
+- **`ConstantResolver`** (declared, predefined and version-aware over the
+  whole `PhpVersions` range, plus `dynamicConstantNames`) lives here, as
+  the reflection-side initializer and PHPDoc-type resolution needs it;
+  the analyser reads constants through it.
 
 ### 3.6 config
 - Global keys plus per-owner tables (`[rules.*]`, `[ext.<name>]`, the
   existing tables re-homed).
-- Each owner registers a typed serde section with `deny_unknown_fields`.
-  The loader rejects unowned sections and keys, reporting the full key path
-  (a `parametersSchema` equivalent).
+- Each owner registers a typed serde section with `deny_unknown_fields`,
+  on the section and on every struct nested in it (arrays of tables
+  included). The loader rejects unowned sections and keys, and reports
+  every error - an unknown key, a type mismatch, an invalid regex or type
+  string, an entry naming a symbol that doesn't exist - by its full key
+  path (a `parametersSchema` equivalent).
+- Every path in the file (`paths`, `scan_paths`, `stub_paths`,
+  `ignore_errors.path`, the baseline, the SQL schema) resolves against the
+  config file's directory; paths given on the command line resolve against
+  the working directory. Both the CLI and the LSP resolve them through the
+  same function.
 - A one-release compatibility shim maps the old flat `check_*` keys, with a
   warning. The Piwigo toml, README and VSCode docs migrate in the same
   commit.
@@ -394,7 +418,8 @@ Each index entry records:
 - Settings split three ways, following Appendix B:
   - `SessionSettings`;
   - `ReflectionSettings` (scan/stub paths, composer toggle, universal
-    object crates, type aliases, PHP version range);
+    object crates, type aliases, PHP version range, dynamic constant
+    names);
   - `EngineSettings` (treatPhpDocTypesAsCertain, polluteScope*,
     early-terminating calls, exception model,
     rememberPossiblyImpureFunctionValues).
@@ -572,8 +597,6 @@ Each index entry records:
   - `RuleLevelHelper` (checkNullables, checkThisOnly, checkUnionTypes,
     checkExplicitMixed, checkImplicitMixed, checkBenevolentUnionTypes,
     strictMixedArrays; `accepts`/`find_type_to_check`);
-  - `ConstantResolver` (declared, predefined and version-aware, plus
-    `dynamicConstantNames`);
   - the reference-site collector (class / function / member refs, enum and
     member-class escapes, declaration locations), below both `rules` and
     `lsp`;
@@ -785,7 +808,7 @@ Piwigo checkout and a stable machine, so they run locally.
     stays:
     - analyser constructs no `Diagnostic`/`RuleError`, contains no
       identifier literals and does no diagnostics-vector mutation;
-    - no setting is read under reflection;
+    - reflection reads no settings type but `ReflectionSettings`;
     - no `Locals` map outside the holder model;
     - no engine I/O (its path-resolution part enforced early by
       GATE_SPEED_PLAN S7: no `current_dir`, `canonicalize` or
@@ -1096,12 +1119,13 @@ loader and the schema. Open (review of 2026-09-27), one commit each:
   PHPStan parameter's own name wherever one exists.
 
 **C2. Settings leave `Registry`**, following Appendix B:
-- `RuleLevelHelper` and `ConstantResolver` land in the package's future
-  `analyser` modules;
+- `RuleLevelHelper` lands in the package's future `analyser` module and
+  `ConstantResolver` in the checker (landed); `ConstantResolver` moves on
+  to `reflection` (below);
 - rule and extension settings go to their owner modules;
 - `phpstan_api` recording becomes unconditional.
 
-Gate: no setting read under reflection.
+Gate: reflection reads no settings type but `ReflectionSettings`.
 
 Open (review of 2026-09-27):
 - **A version range types `PHP_VERSION_ID` as the stub's literal.**
@@ -1623,7 +1647,7 @@ deleted, RefCell channels removed; the file-size gate.
 - Observer;
 - the extension-trait registry;
 - the concurrency / state model;
-- `AnalysisContext`;
+- `AnalysisContext` completed (C9 created it for the summaries);
 - `InternalRule` deletion;
 - porting the external `Rule`/`ReflectionRule` users.
 
@@ -1703,7 +1727,10 @@ lands here, each its own commit:
 
 **E4. Extension modules.**
 - Order:
-  1. ext-doctrine's reflection data extension;
+  1. ext-doctrine's remaining modules (its reflection data extension moved
+     in C8, and E4 fixes its entity metadata: only mapped properties are
+     fields, `#[MappedSuperclass]` and trait fields are included, docblock
+     `@ORM` annotations are read);
   2. ext-sql;
   3. ext-phpunit, ext-codeception, ext-mockery and ext-mockstan, after E1;
   4. ext-pest (closure-this, the file-set hook, pest risky tests);
@@ -1846,10 +1873,11 @@ moves in the phase named.
 | registry/* (declarations, hierarchy, index, resolve, name_context, class_info, function_sig, generics, super_type, anonymous_class) | reflection | C3–C10 |
 | registry/assignability | types (unified relation) + analyser RuleLevelHelper | B4/C2 |
 | registry/assertion_table, assertion_tables | reflection overlays; defaults → ext-nette-tester / ext-mockery | C6 |
-| registry/dynamic_constants, checker/predefined_constants | analyser ConstantResolver | C2 |
+| checker/predefined_constants, checker/constant_resolver (registry/dynamic_constants was folded in at C2) | reflection ConstantResolver | C2 |
+| checker/rule_level_helper | analyser RuleLevelHelper | C2/E5 |
 | registry/purity, registry/global_vars | analyser summaries | C9 |
-| registry/access_attributes | ext-language-extensions (class-reflection data ext) | E4 |
-| registry/class_info/doctrine_entity | ext-doctrine (class-reflection data ext) | E4 |
+| registry/access_attributes | ext-language-extensions (class-reflection data ext) | C8 |
+| registry/class_info/doctrine_entity | ext-doctrine (class-reflection data ext) | C8 |
 | restricted_symbols, banned | ext-disallowed-calls (restricted-usage ext); banned constructs → rules | E3g/E1 |
 | architecture | rules (collector rule) | E1 |
 | parent_calls | rules::class_shape mechanism; defaults → ext-phpunit / ext-codeception | E1/E4 |
@@ -1966,7 +1994,7 @@ Non-Registry keys follow the table.
 | check_missing_callable_signature | missing_typehint | rules param (`checkMissingCallableSignature`) |
 | phpstan_api_check_enabled | phpstan_api, registry/index | rules (derived from the package context; recording unconditional) |
 | restricted_symbols | restricted_symbol_usage, filter_by_path | ext-disallowed-calls |
-| dynamic_constant_names | registry/dynamic_constants, oop | ConstantResolver (EngineSettings) |
+| dynamic_constant_names | checker/constant_resolver, oop | ConstantResolver (ReflectionSettings) |
 | doctrine_custom_functions | doctrine/result_shape | ext-doctrine |
 | php_version | everywhere | ReflectionSettings / AnalysisContext (a `PhpVersions` range) |
 | configured_assertions, configured_class_argument_returns | registry/assertion_table | reflection overlay compilation |
@@ -1991,7 +2019,8 @@ Non-Registry keys follow the table.
 | diagnostics | deleted (returned errors) |
 | semantic_tokens, probe_span, probe_hit, probe_var_provenance, collect_inlay_hints, inlay_param_name_hints, inlay_local_type_hints | LSP observers |
 | collect_member_refs, member_ref_sites, escaped_enums, escaped_member_classes | reference-site collector |
-| name_ctx, current_file, anonymous_class_names, current_anonymous_class | file state (anonymous names from reflection) |
+| name_ctx | deleted (parse-time resolved names, D4) |
+| current_file, anonymous_class_names, current_anonymous_class | file state (anonymous names from reflection) |
 | current_class, current_method, current_method_templates, current_class_attrs, current_method_attrs, current_trait | Scope (class / function / trait context) |
 | current_scope_deprecated | Scope query (deprecation predicate) |
 | saw_dynamic_var_construct | scope `afterExtractCall` |
@@ -2065,6 +2094,24 @@ Non-Registry keys follow the table.
   parse errors, unmatched ignores, project-level findings and stale
   baseline entries. `RuleError` names only what a rule returns, before the
   dispatcher locates it - PHPStan's `RuleError` → `Error` split.
+- **ConstantResolver's layer.** In `reflection`, with
+  `dynamic_constant_names` a `ReflectionSettings` key: reflection's own
+  constant-initializer and PHPDoc-type resolution needs it, as PHPStan's
+  `InitializerExprTypeResolver` calls it. Supersedes C2's analyser
+  placement.
+- **Stage C ordering.** C6 stays before C7: its overlay entries and the
+  functionMap layer parse types with the phpdoc grammar (TypeNode), never
+  `parse_type_string`, so C7 deletes nothing C6 depends on. C9 creates
+  `AnalysisContext` (for the summaries) and D6 completes it, so the
+  summaries have no interim home. The two ext data modules
+  (`access_attributes`, `doctrine_entity`) move onto class-reflection data
+  extensions in C8, so C10 extracts a `reflection` with no ext code in it.
+- **Review findings are fixed where the code is rewritten.** A bug found in
+  code a later Stage C phase rewrites gets a fixture now and is fixed as
+  that phase's own behaviour commit (approved delta) after its structural
+  commit, not patched into code about to be replaced. Exceptions, fixed
+  first because they are wrong output today in code that stays: the
+  `PHP_VERSION_ID` range typing (C2) and C3a's `property.unused` delta.
 - **Subtyping home.** A ClassHierarchy oracle trait in `types` with one
   tri-state relation, implemented by reflection. ExtensionTypeData hooks
   take `&dyn ClassHierarchy`. Level-dependent acceptance lives in
@@ -2073,8 +2120,9 @@ Non-Registry keys follow the table.
   load. There is no engine extension.
 - **ext-sql and ext-doctrine.** No crate edge between them. ext-sql owns the
   DBAL Connection / QueryBuilder typing. ext-doctrine publishes entity
-  metadata through a reflection data extension. DQL typing reads the schema
-  from `sql`. Commit order: ext-doctrine's reflection extension first.
+  metadata through a reflection data extension, which lands in C8 so
+  `reflection` can be extracted in C10. DQL typing reads the schema from
+  `sql`.
 - **Stub index.** Checked in, generated by an xtask, and verified by a
   regeneration test. `stub-sources` has no build-dependency on the parser.
 - **Fixture timing.** Recorded in A2 from the Stage-A binary, behind a
