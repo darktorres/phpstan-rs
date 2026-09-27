@@ -241,7 +241,7 @@ fn merge_stubs_does_not_override_user_functions() {
             is_internal: false,
             is_api: false,
             has_override_attr: false,
-            attrs: Vec::new(),
+            attributes: Vec::new(),
             deprecated: None,
             throws: None,
             assert_if_true: Vec::new(),

@@ -617,15 +617,15 @@ pub struct Checker<'a> {
     pub(crate) current_method_templates: rustc_hash::FxHashMap<String, types::TemplateParam>,
     // `checker::restricted_symbol_usage`'s own `allow_in_class_with_
     // attributes`/`allow_except_in_class_with_attributes` matching - the
-    // enclosing class's own directly-declared attribute names (`Registry::
-    // ClassInfo::attrs`, looked up by `current_class` at the same choke
-    // point that field is set). Empty for a top-level function/no
-    // enclosing class.
+    // enclosing class's own attribute names, resolved (`ClassInfo::
+    // attributes`, looked up by `current_class` at the same choke point
+    // that field is set). Empty for a top-level function/no enclosing
+    // class.
     pub(crate) current_class_attrs: Vec<Arc<str>>,
     // Same as `current_class_attrs`, for `allow_in_methods_with_
     // attributes`/`allow_except_in_methods_with_attributes` - the
-    // function/method declaration's own attributes (`FunctionDecl::attrs`),
-    // set directly from the AST, no registry lookup needed. Deliberately
+    // function/method declaration's own attribute names, resolved,
+    // read directly from the AST, no registry lookup needed. Deliberately
     // not reset for a nested closure/arrow-fn body (PHP has no attribute
     // syntax for either) - a restricted call textually inside a closure
     // literal defined inside an attributed method still counts as "in

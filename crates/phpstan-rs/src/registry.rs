@@ -18,6 +18,7 @@ mod index;
 mod name_context;
 pub mod provenance;
 mod purity;
+pub mod reflection_attribute;
 mod relation;
 mod resolve;
 pub mod settings;
@@ -47,6 +48,7 @@ pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_typ
 pub use provenance::{Origin, Provenance};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
+pub use reflection_attribute::{AttributeArgument, AttributeValue, ReflectionAttribute};
 pub(crate) use type_node::{mentions_mixed, parse_type_node};
 
 /// Real PHPStan's own `ApiRuleHelper::isPhpStanName()` - whether

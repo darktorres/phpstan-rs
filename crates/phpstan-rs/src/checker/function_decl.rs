@@ -968,13 +968,18 @@ impl<'a> Checker<'a> {
         let previous_class_attrs = std::mem::take(&mut self.current_class_attrs);
         self.current_class_attrs = class_name
             .and_then(|c| self.registry.classes.get(c))
-            .map(|info| info.attrs.clone())
+            .map(|info| {
+                info.attributes
+                    .iter()
+                    .map(|a| a.name_arc().clone())
+                    .collect()
+            })
             .unwrap_or_default();
         let previous_method_attrs = std::mem::take(&mut self.current_method_attrs);
         self.current_method_attrs = f
             .attrs
             .iter()
-            .map(|a| syntax::intern::intern(&a.name))
+            .map(|a| syntax::intern::intern(&self.name_ctx.resolve(&a.name)))
             .collect();
         // Mirrors real PHPStan's `DeprecatedScopeHelper` - suppresses
         // every deprecated-usage diagnostic from within a deprecated

@@ -26,6 +26,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         provenance: registry::Provenance::default(),
         params: vec![
             registry::ParamSig {
+                attributes: Vec::new(),
                 name: "x".to_string().into(),
                 ty: types::Type::Int,
                 ty_native: types::Type::Int,
@@ -41,6 +42,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
                 out_ty: None,
             },
             registry::ParamSig {
+                attributes: Vec::new(),
                 name: "rest".to_string().into(),
                 ty: types::Type::String,
                 ty_native: types::Type::String,
@@ -69,7 +71,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         is_internal: false,
         is_api: false,
         has_override_attr: false,
-        attrs: Vec::new(),
+        attributes: Vec::new(),
         deprecated: None,
         throws: None,
         assert_if_true: Vec::new(),

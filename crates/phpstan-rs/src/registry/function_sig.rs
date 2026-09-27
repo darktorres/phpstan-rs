@@ -1,3 +1,4 @@
+use crate::registry::reflection_attribute::ReflectionAttribute;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
@@ -80,6 +81,7 @@ pub struct ParamSig {
     // back to the native/`@param` type, matching real PHPStan's
     // `getOutType() ?? getType()`.
     pub out_ty: Option<Type>,
+    pub attributes: Vec<ReflectionAttribute>,
 }
 
 #[derive(Debug, Clone)]
@@ -166,16 +168,8 @@ pub struct FunctionSig {
     // getAgentInfo()`) - `@method` only ever documents a
     // magic-`__call`-backed capability, never a requirement.
     pub is_magic: bool,
-    // `#[Attr]` groups on this declaration's own attribute list, by
-    // short (as-written, un-lowercased) name - `Checker::current_class_
-    // attrs`/`current_method_attrs`'s own persistent, per-signature
-    // equivalent (those only ever hold the *currently-executing*
-    // method's own attrs; `restricted_symbols`' own `allowInClassWith
-    // MethodAttributes` needs every sibling method's, which only a
-    // field on the signature itself, reachable via `ClassInfo::methods`,
-    // can provide). Populated the identical way `current_method_attrs`
-    // already is (`f.attrs.iter().map(|a| intern(&a.name)).collect()`).
-    pub attrs: Vec<Arc<str>>,
+    // This declaration's own attributes, names resolved.
+    pub attributes: Vec<ReflectionAttribute>,
     pub provenance: crate::registry::provenance::Provenance,
 }
 
@@ -498,6 +492,7 @@ impl FunctionSig {
                     .and_then(|d| d.param_out.get(p.name.as_ref()))
                     .map(&resolve_doc_type);
                 ParamSig {
+                    attributes: ReflectionAttribute::all(&p.attrs, ctx),
                     name: p.name.clone(),
                     ty,
                     ty_native,
@@ -553,11 +548,7 @@ impl FunctionSig {
         let must_use_result =
             crate::registry::access_attributes::has_must_use_result(&f.attrs, ctx);
         let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
-        let attrs: Vec<Arc<str>> = f
-            .attrs
-            .iter()
-            .map(|a| syntax::intern::intern(&a.name))
-            .collect();
+        let attributes = ReflectionAttribute::all(&f.attrs, ctx);
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
         let is_api = doc.as_ref().is_some_and(|d| d.api);
@@ -614,7 +605,7 @@ impl FunctionSig {
             is_internal,
             is_api,
             has_override_attr,
-            attrs,
+            attributes,
             deprecated,
             throws,
             assert_if_true,
@@ -654,6 +645,7 @@ impl FunctionSig {
             let b = other_params.next();
             let merged = match (a, b) {
                 (Some(a), Some(b)) => ParamSig {
+                    attributes: b.attributes,
                     // Later declaration wins on conflict, matching
                     // `ClassInfo::merge`'s own convention.
                     name: b.name,
@@ -746,7 +738,11 @@ impl FunctionSig {
             // Both real overloads' own attributes are real, independent
             // facts worth checking - concatenated, not chosen between,
             // matching `case_refs`'s own identical reasoning below.
-            attrs: self.attrs.into_iter().chain(other.attrs).collect(),
+            attributes: self
+                .attributes
+                .into_iter()
+                .chain(other.attributes)
+                .collect(),
             // Same permissive "either overload's own marker wins" as
             // `no_discard`/`is_internal` above.
             deprecated: self.deprecated.or(other.deprecated),

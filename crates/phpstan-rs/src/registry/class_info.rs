@@ -9,6 +9,7 @@ use crate::registry::function_sig::{
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::registry::provenance::{Origin, Provenance};
+use crate::registry::reflection_attribute::ReflectionAttribute;
 use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
@@ -160,6 +161,7 @@ pub struct PropertySig {
     // `set_ty`'s case_refs equivalent - `property_hook_set_type` never
     // collected these, unlike the sibling `ty` field above.
     pub set_case_refs: Vec<(Arc<str>, Arc<str>)>,
+    pub attributes: Vec<ReflectionAttribute>,
     pub provenance: Provenance,
 }
 
@@ -185,6 +187,7 @@ pub struct ConstSig {
     // `@deprecated` on this constant's own doc comment - direct mirror of
     // `PropertySig::deprecated`. Always `None` for an enum case.
     pub deprecated: Option<String>,
+    pub attributes: Vec<ReflectionAttribute>,
     pub provenance: Provenance,
 }
 
@@ -346,15 +349,8 @@ pub struct ClassInfo {
     // default parameter value - see `compute_attribute_targets`'s doc
     // comment).
     pub attribute_targets: Option<u32>,
-    // This class's own directly-declared attribute names (`#[Foo]
-    // #[Bar] class X {}` -> `["Foo", "Bar"]`), as raw, as-written text
-    // (never resolved to an FQN) - `checker::restricted_symbol_usage`'s
-    // own `allow_in_class_with_attributes`/`allow_except_in_class_with_
-    // attributes` matching is the one consumer, via `Checker::current_
-    // class_attrs`. Distinct from `attribute_targets` above (whether
-    // *this* class is itself usable as an attribute) - this is what's
-    // attached *to* this class's own declaration instead.
-    pub attrs: Vec<Arc<str>>,
+    // This class's own attributes, names resolved.
+    pub attributes: Vec<ReflectionAttribute>,
     // For a backed enum only, each case's literal backing value
     // (`StringLiteral`/`IntLiteral`), keyed by case name - lets
     // `::from()`/`::tryFrom()` narrow a literal-argument call to the
@@ -797,6 +793,7 @@ impl ClassInfo {
                 (
                     p.name.clone(),
                     PropertySig {
+                        attributes: ReflectionAttribute::all(&p.attrs, ctx),
                         provenance: Provenance::default(),
                         ty,
                         ty_native,
@@ -921,6 +918,7 @@ impl ClassInfo {
                 properties.insert(
                     p.name.clone(),
                     PropertySig {
+                        attributes: ReflectionAttribute::all(&p.attrs, ctx),
                         provenance: Provenance::default(),
                         ty,
                         ty_native,
@@ -978,6 +976,7 @@ impl ClassInfo {
                     collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                     let ty = resolve_names_in_type(ty, ctx);
                     PropertySig {
+                        attributes: Vec::new(),
                         provenance: Provenance::default(),
                         doc_ty: None,
                         ty,
@@ -1070,6 +1069,7 @@ impl ClassInfo {
                 (
                     cc.name.clone(),
                     ConstSig {
+                        attributes: ReflectionAttribute::all(&cc.attrs, ctx),
                         provenance: Provenance::default(),
                         ty,
                         visibility: cc.visibility.clone(),
@@ -1324,7 +1324,7 @@ impl ClassInfo {
             mixin_case_refs,
             deprecated,
             attribute_targets,
-            attrs: c.attrs.iter().map(|a| intern(&a.name)).collect(),
+            attributes: ReflectionAttribute::all(&c.attrs, ctx),
             enum_case_values: FxHashMap::default(),
             type_aliases,
             type_alias_case_refs,
@@ -1443,7 +1443,7 @@ impl ClassInfo {
                 is_internal: false,
                 is_api: false,
                 has_override_attr: false,
-                attrs: Vec::new(),
+                attributes: Vec::new(),
                 deprecated: None,
                 throws: None,
                 assert_if_true: Vec::new(),
@@ -1464,6 +1464,7 @@ impl ClassInfo {
         if let Some(backing) = e.backing_type.as_ref().map(TypeHint::to_string) {
             let backing_ty = types::parse_type_string(&backing);
             let value_param = ParamSig {
+                attributes: Vec::new(),
                 name: intern("value"),
                 ty: backing_ty.clone(),
                 ty_native: backing_ty,
@@ -1496,7 +1497,7 @@ impl ClassInfo {
                     is_internal: false,
                     is_api: false,
                     has_override_attr: false,
-                    attrs: Vec::new(),
+                    attributes: Vec::new(),
                     deprecated: None,
                     // `from()` throws a real `ValueError` when no case
                     // matches - unlike `tryFrom()`, which returns `null`
@@ -1529,7 +1530,7 @@ impl ClassInfo {
                     is_internal: false,
                     is_api: false,
                     has_override_attr: false,
-                    attrs: Vec::new(),
+                    attributes: Vec::new(),
                     deprecated: None,
                     throws: None,
                     assert_if_true: Vec::new(),
@@ -1550,6 +1551,7 @@ impl ClassInfo {
                 (
                     cc.name.clone(),
                     ConstSig {
+                        attributes: ReflectionAttribute::all(&cc.attrs, ctx),
                         provenance: Provenance::default(),
                         ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         visibility: cc.visibility.clone(),
@@ -1574,6 +1576,7 @@ impl ClassInfo {
             consts.insert(
                 case.name.clone(),
                 ConstSig {
+                    attributes: ReflectionAttribute::all(&case.attrs, ctx),
                     provenance: Provenance::default(),
                     ty: Type::EnumCase(Name::from(&*fqn), Name::from(&*case.name)),
                     visibility: Visibility::Public,
@@ -1636,6 +1639,7 @@ impl ClassInfo {
         properties.insert(
             intern("name"),
             PropertySig {
+                attributes: Vec::new(),
                 provenance: Provenance::default(),
                 doc_ty: None,
                 ty: Type::String,
@@ -1700,6 +1704,7 @@ impl ClassInfo {
             properties.insert(
                 intern("value"),
                 PropertySig {
+                    attributes: Vec::new(),
                     provenance: Provenance::default(),
                     doc_ty: None,
                     ty: value_ty,
@@ -1867,7 +1872,7 @@ impl ClassInfo {
             mixin_case_refs: Vec::new(),
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             attribute_targets: compute_attribute_targets(&e.attrs),
-            attrs: e.attrs.iter().map(|a| intern(&a.name)).collect(),
+            attributes: ReflectionAttribute::all(&e.attrs, ctx),
             enum_case_values,
             type_aliases: FxHashMap::default(),
             type_alias_case_refs: FxHashMap::default(),

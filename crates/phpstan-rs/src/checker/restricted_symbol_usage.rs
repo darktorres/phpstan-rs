@@ -546,7 +546,7 @@ impl<'a> Checker<'a> {
         };
         info.methods
             .values()
-            .flat_map(|sig| sig.attrs.iter().cloned())
+            .flat_map(|sig| sig.attributes.iter().map(|a| a.name_arc().clone()))
             .collect()
     }
 

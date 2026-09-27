@@ -622,14 +622,14 @@ impl<'a> Checker<'a> {
         // missing native return type counts as `mixed`, and
         // `#[\ReturnTypeWillChange]` on either side opts out.
         let tentative = ancestor_sig.is_stub
-            && has_attr(&ancestor_sig.attrs, "TentativeType")
+            && has_attr(&ancestor_sig.attributes, "TentativeType")
             && self
                 .registry
                 .php_supports_somewhere(types::php_version::PhpFeature::TentativeReturnTypes)
                 != Some(false);
         if tentative {
-            let will_change = has_attr(&own_sig.attrs, "ReturnTypeWillChange")
-                || has_attr(&ancestor_sig.attrs, "ReturnTypeWillChange");
+            let will_change = has_attr(&own_sig.attributes, "ReturnTypeWillChange")
+                || has_attr(&ancestor_sig.attributes, "ReturnTypeWillChange");
             let ancestor_ty = &ancestor_sig.return_type_native;
             let own_ty = &own_sig.return_type_native;
             // The child's own `self`/`static` is its own class, which a
@@ -695,12 +695,10 @@ struct DeclSpans {
     override_removal: Option<Span>,
 }
 
-fn has_attr(attrs: &[std::sync::Arc<str>], name: &str) -> bool {
-    attrs.iter().any(|a| {
-        a.rsplit('\\')
-            .next()
-            .is_some_and(|last| last.eq_ignore_ascii_case(name))
-    })
+fn has_attr(attributes: &[crate::registry::ReflectionAttribute], name: &str) -> bool {
+    attributes
+        .iter()
+        .any(|a| a.short_name().eq_ignore_ascii_case(name))
 }
 
 /// Whether an ancestor's native return type invokes the `static`

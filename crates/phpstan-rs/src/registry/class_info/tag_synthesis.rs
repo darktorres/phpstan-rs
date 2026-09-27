@@ -95,6 +95,7 @@ pub(crate) fn method_tag_sig(
                     .map(resolve)
                     .unwrap_or((Type::Mixed(false), Vec::new()));
             ParamSig {
+                attributes: Vec::new(),
                 name: intern(&p.name),
                 ty: ty.clone(),
                 ty_native: ty,
@@ -129,7 +130,7 @@ pub(crate) fn method_tag_sig(
         has_override_attr: false,
         // A magic `@method` tag has no real declaration to carry
         // attributes on at all.
-        attrs: Vec::new(),
+        attributes: Vec::new(),
         deprecated: None,
         throws: None,
         assert_if_true: Vec::new(),
