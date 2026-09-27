@@ -1123,9 +1123,10 @@ Follow-ups:
   the same for HEAD and fails on any gated step whose median isn't lower
   than `<hash>`'s. The phase start is recorded before the next commit, so
   no old commit is rebuilt.
-- **Keys and data model** (structural; snapshots unchanged except where
-  two classes' names differ only in case, which now collide under the
-  collision policy; neither the corpus nor the stubs has such a pair):
+- **Keys and data model** (structural, except that two class-like
+  declarations whose names differ only in case are one name, as in PHP,
+  and meet under the collision policy instead of standing as two classes -
+  an approved delta, fixtured):
   - class entries are keyed by the folded name (`Name::lower`, as
     `FunctionTable` keys functions) and hold the declared `Name`; the side
     map and `canonicalize_class_name_case` are deleted; method keys fold
@@ -1302,6 +1303,10 @@ Follow-ups:
     where the type is resolved: `$s->nope()` on a parameter typed `square`
     (class `Square`) reports `method.notFound`, and messages print
     `Square`; the exact class accessors are deleted;
+  - duplicate class-like and function declarations compare names
+    case-insensitively (`class Foo` beside `class FOO`, `bar()` beside
+    `BAR()` go unreported by `class.duplicate` and the function check
+    today);
   - member names fold case everywhere: abstract-method implementation,
     final-method overrides, constructors (`__Construct` promotes its
     properties), `__toString` making a class `Stringable`, the magic-method
