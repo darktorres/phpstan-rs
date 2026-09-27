@@ -4385,7 +4385,9 @@ properties read only by templates.
 - tags as `(name, arguments, modifiers)`: paired and void, `{/tag}` and
   `{/}` closers, `n:` attributes including the automatic `n:inner-`/
   `n:tag-` forms of every pair tag, and `n:else`/`n:elseif`/`n:ifcontent`;
-- arguments parsed by `syntax`'s expression parser in a Latte mode whose
+- arguments parsed by `syntax`'s expression parser in a Latte mode (a
+  grammar switch in the `syntax` crate itself, so both grammars share one
+  parser) whose
   grammar is `TagParserData`'s (Latte's own generated LALR tables), not
   PHP's: Latte's additions - filter chains `|name:arg1, arg2`, `in`, the
   `key: value` argument shorthand, unquoted words where a tag accepts them
@@ -4413,7 +4415,11 @@ where it's written with literals (`setFeature(Feature::X)`,
 and each is overridable under `[ext.latte]`. `StrictTypes` (on by
 default) decides whether the lowered code is checked under
 `strict_types=1`, as the compiled template declares it; the content type
-decides the HTML-only behaviour (URL checking, the `<script>` rules); and
+decides the HTML-only behaviour (URL checking, the `<script>` rules),
+changing where a `{contentType}` tag or an element's own context
+(`<script>`, `<style>`, an attribute) switches it; `MigrationWarnings`
+turns the runtime deprecations Latte gates on it (an `n:attr` given a
+non-array, ...) into findings; and
 a sandboxed engine's `Policy`, when written with literals
 (`SecurityPolicy::createSafePolicy()` and its `allow*()` calls), is
 checked (182f). A project can configure
@@ -4444,8 +4450,9 @@ them:
   otherwise, so even a `{parameters}` template's blocks see an open set -
   then, over it, the variables where it's rendered (`get_defined_vars()`
   at the block's own position, or at the `{include block}` that renders
-  it), or, for a `{define}` that declares parameters, just those
-  parameters, their declared types kept (Latte parses and discards them);
+  it), or, for a `{define}` that declares parameters, those parameters
+  instead of the render site's variables, their declared types kept
+  (Latte parses and discards them);
   a dynamic block (a name computed at runtime) gets no parameter array,
   and an embedded block reads the `{embed}`'s layer (`varStack`);
 - an included file: its arguments plus the includer's parameter array -
@@ -4563,6 +4570,11 @@ one in scope, without `ScopedLoopVariables`; strict-HTML errors under
 - a `{varType}` or `{parameters}` type contradicting `{templateType}`'s
   for the same variable;
 - a `{define}` never rendered (opt-in, with dead code);
+- a filter applied to content (`{block|name}`, `{include ...|name}`,
+  `{capture|name}`) that isn't content-aware (no `FilterInfo` first
+  parameter) while the content is HTML - Latte throws at runtime there
+  (`FilterExecutor::filterContent()`: "called with incompatible content
+  type", suggesting `|stripHtml` first);
 - in a sandboxed engine, a tag, filter, function, method or property its
   `Policy` doesn't allow, as Latte's `SecurityViolationException`.
 
@@ -4584,9 +4596,13 @@ and properties, argument types (filters and functions included),
 `foreach` over a non-iterable, possibly-null access, and the rest.
 
 **182g — Whole-program integration.** A template reads through the
-use-site index like PHP code, so a View property or method used only by a
-template counts as used: the C3-approved View `property.unused` findings
-go away, as an approved delta. A template's calls, class references and
+use-site index like PHP code: a method called or a property read on a
+value in a template is a use. A template variable `{templateType Cls}`
+types is `Cls`'s property of that name, so reading `$title` in the
+template uses `Cls::$title` - the link the corpus's View classes have to
+their templates. The C3-approved View `property.unused` findings for
+properties templates read go away, as an approved delta; properties no
+template reads stay reported. A template's calls, class references and
 template references are dependencies: editing a PHP class re-checks the
 templates reading it, and editing a template re-checks those including,
 embedding or extending it. `{* @phpstan-ignore <identifier> *}` suppresses
