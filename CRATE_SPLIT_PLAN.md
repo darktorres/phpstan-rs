@@ -1430,8 +1430,9 @@ Follow-ups:
     stays the batch entry point (69 call sites, until F1's Session), and
     every comment naming a deleted pass (about 100 outside `registry/`)
     is rewritten;
-  - `index_and_flatten` is deleted and `Registry::build` only indexes
-    (until its callers move onto `apply`); the stub pass still resolves
+  - `index_and_flatten` is deleted; `Registry::build` indexes and runs the
+    whole-program passes as `finish_loading` does (its callers' purity and
+    global-variable tests read them) until its callers move onto `apply`; the stub pass still resolves
     each stub file's classes within that file (until C5's stub layer),
     under default reflection inputs (it is process-wide), without
     global-variable inference.
