@@ -135,6 +135,22 @@ fn patch_usleep(stubs: &mut [(Arc<str>, FunctionReflection)]) {
     }
 }
 
+/// `printf()`'s phpstorm-stubs PHPDoc narrows `mixed ...$values` to
+/// `string|int|float`; `functionMap.php` covers `printf`, so PHPStan never
+/// reads that tag. The values take `functionMap.php`'s type, which the
+/// printf rule checks, as for `sprintf` and `fprintf`.
+fn patch_printf_values(stubs: &mut [(Arc<str>, FunctionReflection)]) {
+    for (name, sig) in stubs.iter_mut() {
+        if name.as_ref() != "printf" {
+            continue;
+        }
+        if let Some(values) = sig.params.iter_mut().find(|p| p.variadic()) {
+            values.ty = values.ty_native.clone();
+            values.doc_ty = None;
+        }
+    }
+}
+
 /// The `array_udiff`/`array_uintersect`/`array_diff_ukey` family takes its
 /// comparison callback(s) as the last argument(s) of the variadic
 /// `...$rest`, which phpstorm-stubs types `array` only; `$rest` holds
@@ -1001,6 +1017,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_array_multisort_by_ref(&mut functions);
         patch_debug_backtrace(&mut functions);
         patch_usleep(&mut functions);
+        patch_printf_values(&mut functions);
         patch_array_callback_family(&mut functions);
         patch_functionmap_array_shapes(&mut functions);
         patch_reflection_class_constructor_template(&mut classes);

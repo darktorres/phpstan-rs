@@ -1,0 +1,4 @@
+7:20-7:22 argument.type L5 | Parameter #2 ...$values of function printf expects bool|float|int|string|null, mixed given.
+8:20-8:29 argument.type L5 | Parameter #2 ...$values of function printf expects bool|float|int|string|null, mixed given.
+9:24-9:26 argument.type L5 | Parameter #2 ...$values of function sprintf expects bool|float|int|string|null, mixed given.
+10:28-10:30 argument.type L5 | Parameter #3 ...$values of function fprintf expects bool|float|int|string|null, mixed given.
