@@ -2118,6 +2118,10 @@ deleted; the file-size gate.
   - **First-class callables** carry the callee's signature: `strlen(...)`
     is a bare `Closure` today.
   - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
+  - **Compound assignments** have the assigned value as their type
+    (`AssignOpHandler`): `$x = 1; $x += 1` as an expression, `$i /= 2` and
+    `$n ??= 1` are all `mixed` today where PHPStan has `2`, `(float|int)`
+    and `1|string` (nsrt `binary.php`, `coalesce-assign.php`).
   - **Offset reads** follow `ArrayDimFetchHandler`: a constant array read
     with a non-literal key uses the key's type. Today `$t = [10, 20];
     $j = 1; $t[$j]` is `mixed` where PHPStan has `20`, `$t[$i]` for an
@@ -2190,6 +2194,9 @@ deleted; the file-size gate.
       `if ($e === E::A) { return; }` and in a `match` `default` arm (with
       `$this` as the subject inside the enum too: nsrt `bug-8486.php`);
     - `!empty($v)` on an `int` leaves `int`;
+    - `$x instanceof $classString` narrows by the class-string's class:
+      with `class-string<Foo> $cs`, `$subject` stays `mixed` today (nsrt
+      `instanceof.php`);
     - `gettype($y)` compared with a type name narrows, in `===` and in a
       `switch`: `case "integer"` leaves `$y` as the whole union today (nsrt
       `bug-6901.php`);
