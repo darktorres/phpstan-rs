@@ -4417,6 +4417,12 @@ View properties no PHP code reads; how many of them a template reads is
   (`{include file.latte}`, `{block name}`) - and none of the PHP syntax
   Latte's grammar leaves out, which is a parse error in a template even
   where PHP would accept it;
+- declared types (`{var}`, `{default}`, `{parameters}`, `{define}`,
+  `{varType}`) read as `TagParser::parseType()` reads them - a PHPDoc
+  type, generics and shapes included (`array<int, array<string, mixed>>`,
+  `array{id: int}`, `?Foo`, `list<Foo>`) - and parsed with the `phpdoc`
+  crate's type grammar, so they mean what an `@var` of the same text
+  means;
 - recovery on malformed input: a template mid-edit still yields a tree
   and one diagnostic, like the PHP parser.
 
@@ -4650,7 +4656,10 @@ classes (`{parameters}`, `{templateType}`, `{extends}`/`{layout}` and
 `{contentType}` outside the header, an unclosed or mismatched tag, an
 unknown tag (with Latte's own "did you mean" suggestion), `n:else` without its `n:if`/`n:foreach`, a block name used
 twice in one layer or a block or define name not starting with a letter,
-a `{/x}` closing another tag than the open one, `{tag/}` on a tag that
+a PHP reserved keyword called as a function (`exit()`, `die()`,
+`eval()`, `print()`, `unset()`, `include()`, ...: `NameNode::isKeyword()`,
+"Keyword 'x' cannot be used in Latte"), a `{/x}` closing another tag
+than the open one, `{tag/}` on a tag that
 takes content, `n:tag` on `<script>`/`<style>`, a `|noescape` where
 no filter is expected, `{iterateWhile}` outside a `{foreach}`, `n:class`
 beside a `class` attribute, `n:ifcontent` on an empty element,
