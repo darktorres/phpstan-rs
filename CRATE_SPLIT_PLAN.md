@@ -927,6 +927,8 @@ Follow-ups:
   assert fails unless its expectation is the explicit empty list (§3.11).
 - **`.corpus-runs/README.md`** loses the manual sorted-run section (the gate
   compares unsorted) and names `gate-runner` as what records the snapshots.
+- **The rest of A2's conversion.** `checker/tests/key_value_of.rs`'s three
+  `assertType` tests become fixtures.
 
 ### Stage B: workspace and leaf layers
 
@@ -1008,12 +1010,14 @@ Follow-ups, behaviour fixes:
 
 Follow-ups, the typed AST (§3.1):
 - **Resolved names are read.** No engine code reads
-  `QualifiedName::resolved`; about 155 sites in 40 files re-resolve through
-  a `NameContext`. C4 converts the builders and D4 the checker; the project
+  `QualifiedName::resolved`; 109 calls in 43 files re-resolve through a
+  `NameContext`. C4 converts the builders and D4 the checker; the project
   rules, the LSP, `pest_config` and `deps` convert with the phases that move
   them. `NameContext::build` (the last namespace wins, used at six sites,
   anonymous classes among them) is deleted first, and `NameContext` becomes
-  private to `syntax`.
+  private to `syntax`. Its per-branch copy of the context for an `if` goes
+  (PHP allows `namespace` and `use` only at the top level), and with it
+  `imbl` in `syntax`.
 - **Declarations carry their namespaced name** (class-likes, functions,
   global constants), before C4's builder commit reads the AST, so nothing
   tracks namespaces positionally.
@@ -1039,7 +1043,8 @@ Follow-ups, the typed AST (§3.1):
   is a `ParseError`, not a panic.
 - **Walkers.** `Visitor` gains `visit_name` and `visit_closure_use`. The
   self-recursive walkers built on `child_exprs`/`child_stmts`/`stmt_exprs`
-  (about 80, each deciding closure and anonymous-class descent on its own;
+  (in 29 files, about 80 calls, each deciding closure and anonymous-class
+  descent on its own;
   `architecture.rs`'s `new` scan skips parameter defaults, hooks and
   constants) become `Visitor` impls, and the three allocating helpers are
   deleted.
@@ -1110,6 +1115,10 @@ Follow-ups:
 - **Patch versions.** `PhpVersion` carries the patch: the false branch of
   `PHP_VERSION_ID >= 80105` keeps 8.1 (`narrow_at_least` drops it, which
   D2's scope narrowing would read as dead code).
+- **Tests move in.** `checker/tests/accessory_and_refinement_types.rs`
+  (12 tests of `types::union_types`) and
+  `checker/tests/array_literals_and_shapes.rs` (2 of
+  `generalize_by_key_set`) move to `crates/types`.
 
 **B5. phpdoc redesign.**
 - `DocBlock` stores `TypeNode`s.
