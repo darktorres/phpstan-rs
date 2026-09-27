@@ -697,7 +697,14 @@ impl<'a> Checker<'a> {
         if let Some(c) = class_name
             && !is_static
         {
-            locals.insert("this".to_string(), Type::Object(c.into(), Vec::new()));
+            // Its own templates stay templates inside the class.
+            let own = self
+                .registry
+                .classes
+                .get(c)
+                .map(|info| info.own_template_args(c))
+                .unwrap_or_default();
+            locals.insert("this".to_string(), Type::Object(c.into(), own));
         }
 
         // A signature's return type already defaults to Mixed when nothing

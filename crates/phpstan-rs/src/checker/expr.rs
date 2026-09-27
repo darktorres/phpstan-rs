@@ -5990,8 +5990,16 @@ impl<'a> Checker<'a> {
     )> {
         let (owner, sig) = self.registry.lookup_method_with_owner(class, method)?;
         let sig = match &self.current_class {
+            // Inside the calling class, its own templates stay templates:
+            // `parent::` binds the parent's through the class's `@extends`.
             Some(current) if forwards_static_binding(target) => {
-                self.substitute_class_templates(sig, current, &[], &owner)
+                let own = self
+                    .registry
+                    .classes
+                    .get(current.as_str())
+                    .map(|info| info.own_template_args(current))
+                    .unwrap_or_default();
+                self.substitute_class_templates(sig, current, &own, &owner)
             }
             _ => std::borrow::Cow::Borrowed(sig),
         };
