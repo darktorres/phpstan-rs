@@ -1219,8 +1219,11 @@ engine context, file state, function frame and traversal context
 ### Stage F: Session and LSP (in the package)
 
 **F1. Session** (§3.10), one commit each:
-- `AnalysisResult`;
-- the finalizer;
+- `AnalysisResult` (landed early as GATE_SPEED_PLAN S9a;
+  `project::session::AnalysisResult`);
+- the finalizer (landed early as S9a, `AnalysisResult::finalize`, with a
+  temporary level stage E5 removes; the LSP moves onto it in this
+  phase's parity commits);
 - entry points;
 - the VFS;
 - panic isolation;
@@ -1238,7 +1241,9 @@ replay gate goes on.
 
 **F3. ErrorFormatter** set (JSON schema versioned).
 
-**F4. Binary**: global flags, `--set`, `check`/`demo` deleted,
+**F4. Binary**: check-project's resolution already lives in the library
+(`app::check_project`, landed early as GATE_SPEED_PLAN S9b); global
+flags, `--set`, `check`/`demo` deleted,
 `incremental-bench` → project example plus bench, `format_signature` test
 moved.
 

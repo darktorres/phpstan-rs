@@ -61,6 +61,7 @@ extern composer composer
 extern stub_sources stub-sources
 
 module output app
+module app app
 module baseline project
 module ignore_errors project
 module ignore_comments project

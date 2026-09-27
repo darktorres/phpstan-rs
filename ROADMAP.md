@@ -4265,8 +4265,11 @@ the gate's first run decides which.
   finding's minimum level and hidden-by reason. HTML, JS and CSS are
   embedded in the binary and work offline, with no CDN.
 - It lives in its own app-layer crate above the session. The finalizer
-  it shares with `check-project` is the same one `GATE_SPEED_PLAN.md`
-  S7 uses for its baseline and emission-order views.
+  it shares with `check-project` (`AnalysisResult::finalize`) is the
+  same one `GATE_SPEED_PLAN.md` S9's gate runner uses for its baseline
+  and emission-order views. Once `report --export` ships, the corpus
+  gate reads its views from the export and `tools/gate-runner` is
+  deleted.
 
 **Filters:**
 - level (a slider, applied instantly);

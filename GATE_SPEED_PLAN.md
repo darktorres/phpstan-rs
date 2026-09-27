@@ -393,6 +393,15 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
 - Quick tier: 3 analyses instead of 6. `--full`: 2 fewer unscoped runs.
 - Per-level runs stay real runs. Under crate-split §3.9 the level decides
   which rules run, and only a level-specific run shows that.
+- S9a and S9b land as one commit, since the binary's rewrite uses both
+  the finalizer and the entry point. The `.err` notices come back as
+  lines from `CheckRun::notices`, `AnalysisResult::notices` and
+  `Report::notices`. The flag overlay stays in the binary, before
+  `app::check_project::prepare`; the runner's configurations need none.
+- The runner writes `report`, `emission` and `baseline` `.json`/`.err`
+  pairs, plus `types.txt`, per configuration. A smoke run on a small
+  project matched the binary's `--emission-order` stdout and stderr
+  byte for byte. The module graph assigns `app` to the `app` crate.
 - Verify: cli tests pass. The corpus pipeline it rewires runs for real
   in the final run (§6), where `compare` must find every snapshot
   identical.

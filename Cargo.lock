@@ -1625,6 +1625,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "phpstan-rs-gate-runner"
+version = "0.1.0"
+dependencies = [
+ "phpstan-rs",
+]
+
+[[package]]
 name = "phpstan-rs-phpdoc"
 version = "0.1.0"
 dependencies = [

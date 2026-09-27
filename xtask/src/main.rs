@@ -136,10 +136,16 @@ fn gate_dir() -> PathBuf {
         .join(".corpus-runs/gate")
 }
 
-/// The `gate` profile's binary: what the corpus, type and baseline
-/// snapshots run.
+/// The `gate` profile's `phpstan-rs`: what the determinism check runs
+/// against the runner, and what generates the reference baselines.
 fn binary() -> PathBuf {
     root().join("target/gate/phpstan-rs")
+}
+
+/// The `gate` profile's `gate-runner` (`tools/gate-runner`): what the
+/// corpus, type and baseline snapshots come from.
+fn runner() -> PathBuf {
+    root().join("target/gate/gate-runner")
 }
 
 /// The shipped `release` binary: what the performance gate measures.
@@ -204,7 +210,19 @@ fn require_clean_tree() -> Result<(), String> {
 }
 
 fn build_gate() -> Result<(), String> {
-    run(cargo().args(["build", "--profile", "gate", "--bin", "phpstan-rs"]))
+    run(cargo().args([
+        "build",
+        "--profile",
+        "gate",
+        "-p",
+        "phpstan-rs",
+        "--bin",
+        "phpstan-rs",
+        "-p",
+        "phpstan-rs-gate-runner",
+        "--bin",
+        "gate-runner",
+    ]))
 }
 
 fn build_release() -> Result<(), String> {
@@ -569,13 +587,19 @@ fn corpus(
     if with_fixture_types {
         record_fixture_types(hash, timings)?;
     }
-    baseline_check(hash, timings)?;
     determinism_check(full, timings)?;
     Ok(())
 }
 
-/// Runs `config` at `level` and writes its snapshots (and, for the
-/// dumped configurations, its type snapshot) for `hash`.
+/// Where the runner writes `artifact`'s views.
+fn runner_out(artifact: &str) -> PathBuf {
+    gate_dir().join(format!(".run-{artifact}"))
+}
+
+/// Runs `config` at `level` through the runner and writes its snapshots
+/// for `hash`: the report, and for the unset level of the scoped and
+/// all-on configurations, the type snapshot and the view with the
+/// reference baseline applied.
 fn record_artifact(
     config: &Config,
     level: &str,
@@ -583,31 +607,78 @@ fn record_artifact(
     timings: &mut Timings,
 ) -> Result<(), String> {
     let artifact = &artifact_name(config, level);
-    let mut extra = Vec::new();
-    let dump = level == "unset" && config.name != "unscoped";
-    let dump_file = gate_dir().join(format!(".{artifact}-types.tmp"));
-    if dump {
-        extra.push("--dump-types".to_string());
-        extra.push(dump_file.display().to_string());
+    let out = runner_out(artifact);
+    let _ = std::fs::remove_dir_all(&out);
+    let views = level == "unset" && config.name != "unscoped";
+    let baseline = baseline_file(config.name);
+    let mut cmd = Command::new(runner());
+    cmd.current_dir(corpus_dir())
+        .args((config.args)())
+        .arg("--out")
+        .arg(&out);
+    if level != "unset" {
+        cmd.args(["--level", level]);
     }
-    let (stdout, stderr) = timings.time(&format!("corpus {artifact}"), |_| {
-        run_corpus(config, level, &extra)
-    })?;
+    if views {
+        cmd.arg("--dump-types");
+        if baseline.exists() {
+            cmd.arg("--baseline").arg(&baseline);
+        } else {
+            eprintln!(
+                "no reference baseline for {} yet; run `cargo xtask baseline`",
+                config.name
+            );
+        }
+    }
+    timings.time(&format!("corpus {artifact}"), |_| run(&mut cmd))?;
+    let read = |name: &str| {
+        std::fs::read_to_string(out.join(name)).map_err(|e| format!("{artifact}: {name}: {e}"))
+    };
     write(
         &snapshot_path(artifact, hash, "txt"),
-        normalize(&stdout)?.as_bytes(),
+        normalize(&read("report.json")?)?.as_bytes(),
     )?;
-    write(&snapshot_path(artifact, hash, "err"), stderr.as_bytes())?;
-    if dump {
-        let target = snapshot_path(&format!("types-{artifact}"), hash, "txt.zst");
-        std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-        timings.time(&format!("compress types-{artifact}"), |_| {
-            run(Command::new("zstd")
-                .args(["-q", "-f", "-3", "--rm", "-T0"])
-                .arg(&dump_file)
-                .arg("-o")
-                .arg(&target))
-        })?;
+    write(
+        &snapshot_path(artifact, hash, "err"),
+        read("report.err")?.as_bytes(),
+    )?;
+    if !views {
+        return Ok(());
+    }
+    let target = snapshot_path(&format!("types-{artifact}"), hash, "txt.zst");
+    std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+    timings.time(&format!("compress types-{artifact}"), |_| {
+        run(Command::new("zstd")
+            .args(["-q", "-f", "-3", "-T0"])
+            .arg(out.join("types.txt"))
+            .arg("-o")
+            .arg(&target))
+    })?;
+    if baseline.exists() {
+        let normalized = normalize(&read("baseline.json")?)?;
+        let stderr = read("baseline.err")?;
+        let baseline_artifact = format!("baseline-{artifact}");
+        write(
+            &snapshot_path(&baseline_artifact, hash, "txt"),
+            normalized.as_bytes(),
+        )?;
+        write(
+            &snapshot_path(&baseline_artifact, hash, "err"),
+            stderr.as_bytes(),
+        )?;
+        let remaining = normalized.lines().filter(|l| !l.starts_with('#')).count();
+        let stale = stderr
+            .lines()
+            .filter(|l| l.contains("baseline entry"))
+            .count();
+        // The Stage A snapshot is empty; `compare` holds every later one
+        // to its parent's plus the commit's approved delta.
+        if remaining != 0 || stale != 0 {
+            eprintln!(
+                "baseline compatibility ({}): {remaining} diagnostic(s) and {stale} stale entr(ies) with the reference baseline",
+                config.name
+            );
+        }
     }
     Ok(())
 }
@@ -648,29 +719,36 @@ fn record_fixture_types(hash: &str, timings: &mut Timings) -> Result<(), String>
     Ok(())
 }
 
-/// Runs a configuration twice with `--emission-order` (each file's
-/// diagnostics in the order the checks produced them, no final sort) and
-/// requires identical output: the engine itself must be reproducible,
-/// not just the sorted report.
+/// Runs the shipped binary on a configuration with `--emission-order`
+/// (each file's diagnostics in the order the checks produced them, no
+/// final sort) and requires the runner's emission-order view of the same
+/// configuration, from a separate process, to be identical, stdout and
+/// stderr: the engine itself must be reproducible, not just the sorted
+/// report, and the runner must run what the binary runs.
 fn determinism_check(full: bool, timings: &mut Timings) -> Result<(), String> {
     let mut configs = vec![ALL_ON];
     if full {
         configs.push(UNSCOPED);
     }
     for config in configs {
-        let flag = ["--emission-order".to_string()];
-        let (first, first_err) = timings.time(&format!("determinism {} 1", config.name), |_| {
-            run_corpus(&config, "unset", &flag)
+        let out = runner_out(&artifact_name(&config, "unset"));
+        let (stdout, stderr) = timings.time(&format!("determinism {}", config.name), |_| {
+            run_corpus(&config, "unset", &["--emission-order".to_string()])
         })?;
-        let (second, second_err) = timings
-            .time(&format!("determinism {} 2", config.name), |_| {
-                run_corpus(&config, "unset", &flag)
-            })?;
-        if first != second || first_err != second_err {
-            let diff = unified_diff(first.as_bytes(), second.as_bytes())?;
+        let read = |name: &str| {
+            std::fs::read_to_string(out.join(name))
+                .map_err(|e| format!("{}: {name}: {e}", config.name))
+        };
+        let (runner_stdout, runner_stderr) = (read("emission.json")?, read("emission.err")?);
+        if stdout != runner_stdout || stderr != runner_stderr {
+            let diff = if stdout != runner_stdout {
+                unified_diff(runner_stdout.as_bytes(), stdout.as_bytes())?
+            } else {
+                unified_diff(runner_stderr.as_bytes(), stderr.as_bytes())?
+            };
             let shown: String = diff.lines().take(40).collect::<Vec<_>>().join("\n");
             return Err(format!(
-                "{}: two runs emitted different output\n{shown}",
+                "{}: the binary's --emission-order output differs from the runner's: either the engine isn't reproducible, or the runner doesn't run what the binary runs\n{shown}",
                 config.name
             ));
         }
@@ -707,47 +785,6 @@ fn baseline_generate() -> Result<(), String> {
             return Err(format!("{}: no baseline written ({status})", config.name));
         }
         eprintln!("generated {}", file.display());
-    }
-    Ok(())
-}
-
-fn baseline_check(hash: &str, timings: &mut Timings) -> Result<(), String> {
-    for config in [SCOPED, ALL_ON] {
-        let file = baseline_file(config.name);
-        if !file.exists() {
-            eprintln!(
-                "no reference baseline for {} yet; run `cargo xtask baseline`",
-                config.name
-            );
-            continue;
-        }
-        let (stdout, stderr) = timings.time(&format!("baseline {}", config.name), |_| {
-            run_corpus(
-                &config,
-                "unset",
-                &["--baseline".to_string(), file.display().to_string()],
-            )
-        })?;
-        let normalized = normalize(&stdout)?;
-        let artifact = format!("baseline-{}", config.name);
-        write(
-            &snapshot_path(&artifact, hash, "txt"),
-            normalized.as_bytes(),
-        )?;
-        write(&snapshot_path(&artifact, hash, "err"), stderr.as_bytes())?;
-        let remaining = normalized.lines().filter(|l| !l.starts_with('#')).count();
-        let stale = stderr
-            .lines()
-            .filter(|l| l.contains("baseline entry"))
-            .count();
-        // The Stage A snapshot is empty; `compare` holds every later one
-        // to its parent's plus the commit's approved delta.
-        if remaining != 0 || stale != 0 {
-            eprintln!(
-                "baseline compatibility ({}): {remaining} diagnostic(s) and {stale} stale entr(ies) with the reference baseline",
-                config.name
-            );
-        }
     }
     Ok(())
 }
