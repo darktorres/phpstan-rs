@@ -2148,7 +2148,26 @@ deleted; the file-size gate.
     `@var Coll<int>` property types the `new` as `Coll<int>`
     (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
   - **Increments** follow PHP: `$k = 'a'; $k++` leaves `'a'` today, and
-    `$n = null; $n++` leaves `int` where PHP gives `1`.
+    `$n = null; $n++` leaves `int` where PHP gives `1`. The value of a
+    pre-increment is the new value: `$one = 1; ++$one` is `1` today, and
+    `'foo'` pre-incremented stays `'foo'` where PHP gives `'fop'`
+    (`''` → `'1'`, `'123'` → `124`; nsrt `pre-inc.php`, `pre-dec.php`,
+    `binary.php`).
+  - **Wrong values** the nsrt suite isolates, each a soundness fixture:
+    - unary minus on a literal union is ignored: `-$c` for `1|2` is `1|2`;
+    - a float result is typed as an integer literal: `(float) 5` is `5`
+      and `abs(0.0)` is `0`;
+    - loose comparison is evaluated with the wrong table: `'0' == null` is
+      `true` and reported `equal.alwaysTrue`, where PHP 8 gives `false`
+      (nsrt `loose-comparisons.php:325`, `:460`);
+    - a string offset write doesn't change the string: `$s[6] = 'b'` on
+      `'foo   '` leaves `'foo'`;
+    - late static binding of a constant in an inherited method:
+      `$bar->test()` returning `static::FOO_BAR` gives the parent's
+      `'foo'` instead of the subclass's `'bar'` (nsrt `bug-13828.php`);
+    - narrowing to a value the type excludes gives the value instead of
+      `never`: after a `match ($i) { 0 => … }` caught in a `try` on
+      `1|2|3|4`, `$i` is `0|1|2|3|4` (nsrt `match-expr.php:19`).
   - **Narrowing gaps** in the handlers' `specifyTypes`:
     - `$e === E::A` doesn't subtract the case, so `$e` stays `E` after
       `if ($e === E::A) { return; }` and in a `match` `default` arm (with
