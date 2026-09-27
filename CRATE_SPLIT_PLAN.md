@@ -1723,7 +1723,10 @@ Follow-ups:
   `function_decl.rs`) and a losing duplicate function's rebuilt signature
   read the file's own declaration, comparing as today; the builder builds
   property-hook signatures with their property, the same signature
-  `check_hook_phpdoc_types` synthesizes a `FunctionDecl` for today. The
+  `check_hook_phpdoc_types` synthesizes a `FunctionDecl` for today; a set
+  hook's parameter takes the property's PHPDoc type where it narrows the
+  native one (`set (array $val)` on an `@var array<string>` property sees
+  `array<string>`; it is `array` today, nsrt `property-hooks.php`). The
   per-file sets also answer what `Project` indexes separately today:
   `DuplicateClassSites` and `DuplicateFunctionSites` (with their own
   declaration walks) are deleted for a query over them that groups by exact
@@ -1906,6 +1909,11 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
   checker (`resolve_written_type`);
 - native `TypeHint` nodes are resolved directly, not printed and re-parsed
   (about 85 sites);
+- a template name is a template wherever a type is expected, shape keys
+  included: `@return array{TKey: int}` under `@template TKey of string`
+  has the literal key `'TKey'` today, so `sealed('a')` is
+  `array{TKey: int}` where PHPStan has `array{a: int}`, a wrong value (nsrt
+  `array-shape-template-key.php`);
 - a constant name in a PHPDoc type resolves through the name scope's
   `use const` imports and its initializer: `@param PREG_SPLIT_NO_EMPTY_ALIAS`
   under `use const PREG_SPLIT_NO_EMPTY as PREG_SPLIT_NO_EMPTY_ALIAS` reads
@@ -2174,7 +2182,9 @@ deleted; the file-size gate.
   the target's sub-expressions in PHP's evaluation order, then the value,
   then the write.
 - isset/`empty`/`??` resolve through one issetability descriptor, which the
-  engine and the isset rules share.
+  engine and the isset rules share. On a constant array, `empty($a['nope'])`
+  and `empty($a[3])` for a falsy value are `true` (`bool` today; nsrt
+  `isset-coalesce-empty-type.php`).
 - AST names read their parse-time resolution; `name_ctx` is deleted.
 - **Disagreements.** `check_expr` and `infer_expr` compute the same
   expression twice. Before the merge, a commit instruments both paths to
@@ -2246,6 +2256,10 @@ deleted; the file-size gate.
       `int<-8, 8>`, and a range divisor gives `int` (nsrt `bug-15242.php`).
       A shift covers every operand: `int<1, 3> << 63` is
       `-9223372036854775808` today, missing the `0` that `2 << 63` gives.
+      `int ** int` is `int` today, where a negative exponent or an overflow
+      gives a float (nsrt `pow.php`). A bitwise operator on two strings
+      works bytewise and gives a string: `$s & $s` is `int` today (nsrt
+      `bitwise.php`); a string with an int is `*ERROR*` (B4).
     - **Increments** follow PHP: `$k = 'a'; $k++` leaves `'a'` today, and
       `$n = null; $n++` leaves `int` where PHP gives `1`. The value of a
       pre-increment is the new value: `$one = 1; ++$one` is `1` today, and
@@ -2306,6 +2320,10 @@ deleted; the file-size gate.
       `nyholm/psr7/src/Response.php:75`), and the `throw` after an exhausted
       `if` chain isn't `deadCode.unreachable` (57, e.g.
       `nikic/php-parser/BuilderFactory.php:373`).
+    - **Enums**: `Foo::cases()` is the shape of its cases in declaration
+      order, and `$e->name`/`$e->value` are the unions of the cases' names
+      and values; today they are `list<Foo>`, `string` and `mixed`, and a
+      pure enum's `->value` isn't `*ERROR*` (nsrt `enums.php`).
     - **First-class callables** carry the callee's signature: `strlen(...)`
       is a bare `Closure` today.
     - **Arguments** follow `processArgs`: each argument is processed on the
@@ -2336,6 +2354,10 @@ deleted; the file-size gate.
       `if ($e === E::A) { return; }` and in a `match` `default` arm (with
       `$this` as the subject inside the enum too: nsrt `bug-8486.php`);
     - `!empty($v)` on an `int` leaves `int`;
+    - a condition on an increment narrows the variable: `if (++$a < 0)`
+      leaves `$a` as `int` in both branches today where PHPStan has
+      `int<min, -1>`/`int<0, max>`, and `$a++ < 0` narrows by the old value
+      (nsrt `inc-dec-in-conditions.php`);
     - `$x instanceof $classString` narrows by the class-string's class:
       with `class-string<Foo> $cs`, `$subject` stays `mixed` today (nsrt
       `instanceof.php`);
@@ -2582,6 +2604,9 @@ building on the previous one:
     - `polluteScopeWithLoopInitialAssignments` decides whether the init
       assignments survive a loop that may not run.
   - **Foreach** follows `ForeachHandler`:
+    - an unsealed shape's tail is iterated too: over `array{a: int,
+      ...<string, float>}`, `$v` is `int` today where it is `float|int`, a
+      wrong value (nsrt `unsealed-array-shapes.php`);
     - the body sees the iteratee narrowed by `!== []`, and the post-loop
       scope merges `=== [] || is_object()`; today `$arr` in the body is
       `array<string, int>`, not non-empty;
@@ -2677,6 +2702,9 @@ building on the previous one:
       variable is `null` in the outer scope, and afterwards it is the
       closure's type unioned with the previous one and generalized;
     - a closure with by-reference uses converges like a loop;
+    - a static closure has no `$this`: `static fn () => $this->p` isn't
+      reported today (a static `function` already is `variable.undefined`),
+      and PHP throws on it;
     - holders rooted at a `use`d variable carry into the closure body
       (`enterAnonymousFunction`): after `if ($call->name instanceof Id)`,
       `function () use ($call) { … }` sees `$call->name` as `Id|string`
@@ -2750,6 +2778,11 @@ building on the previous one:
   - `array_combine([true, 'red', 'yellow'], …)` has the keys `0`, `1`, `2`,
     where PHP gives `1`, `'red'`, `'yellow'`;
   - `array_intersect_key($a, [])` is `$a` instead of `array{}`;
+  - `array_slice($nonEmptyList, 1)` is `non-empty-list` where a
+    one-element list slices to `[]` (nsrt `bug-10721.php`);
+  - `array_change_key_case` of a shape keeps its keys:
+    `array{Foo: int, ...<string, float>}` with `CASE_LOWER` stays `Foo`
+    where PHP gives `foo` (nsrt `unsealed-derivations.php`);
   - `array_flip` of an unsealed shape ignores the tail: on
     `array{0: 1, 1: 2, 2: 3, ...<int, bool>}`, `array_flip($u)[1]` is `0`
     where the tail's `true` values map to key `1` (nsrt `array-flip.php`);
