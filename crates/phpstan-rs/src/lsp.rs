@@ -1010,7 +1010,8 @@ impl Server {
     ) -> Option<Type> {
         let mut checker = Checker::new(self.project.registry())
             .with_sql(self.project.sql())
-            .with_settings(self.project.check_settings());
+            .with_settings(self.project.check_settings())
+            .with_bodies(self.project.bodies());
         checker.probe_span.set(Some(receiver_span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker.probe_hit.into_inner()
@@ -1036,7 +1037,8 @@ impl Server {
     ) -> Vec<Span> {
         let mut checker = Checker::new(self.project.registry())
             .with_sql(self.project.sql())
-            .with_settings(self.project.check_settings());
+            .with_settings(self.project.check_settings())
+            .with_bodies(self.project.bodies());
         checker.probe_span.set(Some(span));
         self.run_probe_scope(&mut checker, scope, is_static, class);
         checker

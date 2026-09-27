@@ -58,7 +58,10 @@ pub(super) fn all_diagnostics_for_with(
     registry.precompute_member_owners();
     let mut settings = CheckSettings::default();
     configure(&mut settings);
-    let mut checker = Checker::new(&registry).with_settings(&settings);
+    let bodies = crate::registry::FileBodies::of(&program);
+    let mut checker = Checker::new(&registry)
+        .with_settings(&settings)
+        .with_bodies(&bodies);
     checker.check_program(&program);
     checker.into_diagnostics()
 }

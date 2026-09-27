@@ -299,7 +299,10 @@ impl Project {
                 else {
                     continue;
                 };
-                let parent_does_something = parent_sig.body.as_ref().is_some_and(|b| !b.is_empty());
+                let parent_does_something = self
+                    .bodies()
+                    .body(&parent_sig.provenance)
+                    .is_some_and(|b| !b.is_empty());
                 let call = format!("parent::{}()", f.name);
                 let body = &f.body;
                 let found = contains_parent_call(body, &f.name);

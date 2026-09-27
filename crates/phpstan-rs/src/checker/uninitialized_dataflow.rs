@@ -54,7 +54,6 @@
 //! false-positive class for another isn't a real fix.
 
 use rustc_hash::FxHashSet;
-use std::sync::Arc;
 
 use crate::checker::Checker;
 use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
@@ -619,18 +618,14 @@ fn absorb_resolved(
     let Some((owner, sig)) = resolved else {
         return state;
     };
-    let Some(body) = sig.body.clone() else {
+    let Some(body) = ctx.checker.bodies.body(&sig.provenance) else {
         return state;
     };
     let key = (owner.to_ascii_lowercase(), method_name.to_ascii_lowercase());
     if !ctx.visiting.insert(key.clone()) {
         return state;
     }
-    let result = walk_stmts(body_as_ref(&body), state, ctx, &owner);
+    let result = walk_stmts(body, state, ctx, &owner);
     ctx.visiting.remove(&key);
     result
-}
-
-fn body_as_ref(body: &Arc<Vec<Stmt>>) -> &[Stmt] {
-    body.as_slice()
 }

@@ -12,7 +12,7 @@ use crate::deps;
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
-use crate::registry::{Origin, Registry};
+use crate::registry::{BodySource, FileBodies, Origin, Provenance, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use syntax::lexer::{LexWarning, Lexer};
@@ -69,6 +69,35 @@ struct FileState {
     analyzed: bool,
     // The composer package this file belongs to (`Project::packages`).
     owner: Option<composer::PackageOwner>,
+    // Its function and method bodies, which the declarations' provenance
+    // finds.
+    bodies: FileBodies,
+}
+
+/// The loaded files' function and method bodies, found by provenance.
+impl BodySource for FxHashMap<PathBuf, FileState> {
+    fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
+        self.get(provenance.file()?)?
+            .bodies
+            .get(provenance.declaration_span())
+    }
+}
+
+/// The loaded files' bodies, with one file's not in the file table yet.
+struct PendingFileBodies<'a> {
+    project: &'a FxHashMap<PathBuf, FileState>,
+    path: &'a Path,
+    bodies: &'a FileBodies,
+}
+
+impl BodySource for PendingFileBodies<'_> {
+    fn body(&self, provenance: &Provenance) -> Option<&Arc<Vec<Stmt>>> {
+        if provenance.file() == Some(self.path) {
+            self.bodies.get(provenance.declaration_span())
+        } else {
+            self.project.body(provenance)
+        }
+    }
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one
@@ -414,6 +443,11 @@ impl Project {
         &self.settings
     }
 
+    /// The loaded files' function and method bodies.
+    pub(crate) fn bodies(&self) -> &dyn BodySource {
+        &self.files
+    }
+
     /// Applies every analyzed file's inline ignore comments to `results`
     /// and, with `report_unmatched`, reports each ignore that suppressed
     /// nothing (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`),
@@ -607,6 +641,7 @@ impl Project {
             anonymous_class_names,
             duplicate_fn_sites,
             duplicate_class_sites,
+            bodies,
         } = parsed;
         for decl in built_decls.into_iter().chain(anonymous_class_decls) {
             self.registry.insert_built_decl(decl, analyzed);
@@ -657,6 +692,7 @@ impl Project {
                 source: self.retain_source.then_some(source),
                 analyzed,
                 owner,
+                bodies,
             },
         );
     }
@@ -692,7 +728,7 @@ impl Project {
         // member-owner maps built just above stay correct through this
         // point and for the checker's own later use - no third rebuild
         // needed.
-        self.registry.resolve_transitive_purity();
+        self.registry.resolve_transitive_purity(&self.files);
         self.registry.precompute_ancestor_names();
         self.registry.resolve_constant_named_types();
         self.registry.drop_doc_members_excluded_by_native();
@@ -971,7 +1007,12 @@ impl Project {
         // final, correct one for the checker's own later use.
         self.registry.resolve_deferred_mixins();
         self.registry.precompute_member_owners();
-        self.registry.resolve_transitive_purity();
+        let bodies = FileBodies::of(&ast);
+        self.registry.resolve_transitive_purity(&PendingFileBodies {
+            project: &self.files,
+            path,
+            bodies: &bodies,
+        });
         self.registry.precompute_ancestor_names();
         self.registry.resolve_constant_named_types();
         self.registry.drop_doc_members_excluded_by_native();
@@ -998,6 +1039,7 @@ impl Project {
                 source: self.retain_source.then(|| new_source.to_string()),
                 analyzed,
                 owner: self.packages.owner(&self.absolute_path(path)),
+                bodies,
             },
         );
         self.rebuild_pest_config();
@@ -1255,7 +1297,8 @@ impl Project {
         let file = self.files.get(path)?;
         let mut checker = Checker::new(&self.registry)
             .with_sql(&self.sql)
-            .with_settings(&self.settings);
+            .with_settings(&self.settings)
+            .with_bodies(&self.files);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
@@ -1299,7 +1342,8 @@ impl Project {
         };
         let mut checker = Checker::new(&self.registry)
             .with_sql(&self.sql)
-            .with_settings(&self.settings);
+            .with_settings(&self.settings)
+            .with_bodies(&self.files);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
@@ -1540,7 +1584,8 @@ impl Project {
         let _ = path;
         let mut checker = Checker::new(&self.registry)
             .with_sql(&self.sql)
-            .with_settings(&self.settings);
+            .with_settings(&self.settings)
+            .with_bodies(&self.files);
         checker.set_facts_only(true);
         checker.check_program(&file.ast);
         checker.take_property_assign_facts()
@@ -2023,6 +2068,7 @@ pub struct ParsedFile {
     // parameter is baked into every `ClassDeclSite` here (see that
     // field's own doc comment for why it's needed at all).
     duplicate_class_sites: DuplicateClassSites,
+    bodies: FileBodies,
 }
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
@@ -2055,6 +2101,7 @@ pub fn parse_file(
     duplicate_fn_sites.index(&ast, &mut NameContext::default(), path, false);
     let mut duplicate_class_sites = DuplicateClassSites::default();
     duplicate_class_sites.index(&ast, &mut NameContext::default(), path, false, is_stub);
+    let bodies = FileBodies::of(&ast);
     Ok(ParsedFile {
         ast,
         lex_warnings,
@@ -2067,6 +2114,7 @@ pub fn parse_file(
         duplicate_fn_sites,
         duplicate_class_sites,
         ignores,
+        bodies,
     })
 }
 

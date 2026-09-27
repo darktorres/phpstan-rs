@@ -120,7 +120,7 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
             break;
         };
         let found = info.methods.values().any(|sig| {
-            sig.body.as_ref().is_some_and(|body| {
+            checker.bodies.body(&sig.provenance).is_some_and(|body| {
                 let self_vars = collect_self_instance_vars(body, &ancestor);
                 body_ever_assigns_property(body, prop, &self_vars)
             })

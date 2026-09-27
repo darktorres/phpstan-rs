@@ -35,6 +35,7 @@
 //! `staticPropertyAccess`) mirrors real PHPStan's own impure-point
 //! taxonomy.
 
+use crate::registry::bodies::BodySource;
 use rayon::prelude::*;
 use std::sync::Arc;
 
@@ -65,10 +66,11 @@ impl Registry {
     /// single-file-reload path, the same precedent) - re-runs from
     /// scratch on every reload rather than incrementally recomputing,
     /// prioritizing correctness over performance, the same tradeoff
-    /// `resolve_deferred_value_of` already made.
+    /// `resolve_deferred_value_of` already made. Each body comes from
+    /// `bodies`, found by its declaration's provenance.
     #[hotpath::measure]
-    pub(crate) fn resolve_transitive_purity(&mut self) {
-        self.classify_purity();
+    pub(crate) fn resolve_transitive_purity(&mut self, bodies: &dyn BodySource) {
+        self.classify_purity(bodies);
         self.run_purity_fixed_point();
     }
 
@@ -97,7 +99,7 @@ impl Registry {
     /// its own fresh reborrow since the sequential apply loop in between
     /// needs `&mut self` again.
     #[allow(clippy::type_complexity)]
-    fn classify_purity(&mut self) {
+    fn classify_purity(&mut self, bodies: &dyn BodySource) {
         let function_names: Vec<Arc<str>> = self.functions.keys().cloned().collect();
         let registry: &Registry = self;
         let function_deps: Vec<(Arc<str>, Option<Vec<PurityDependency>>)> = function_names
@@ -107,8 +109,8 @@ impl Registry {
                 if !purity_gate_passes(sig, false) {
                     return None;
                 }
-                let body = sig.body.clone()?;
-                let deps = classify_body(&body, None, registry);
+                let body = bodies.body(&sig.provenance)?;
+                let deps = classify_body(body, None, registry);
                 Some((name.clone(), deps))
             })
             .collect();
@@ -132,10 +134,10 @@ impl Registry {
                     if !purity_gate_passes(sig, method_name.eq_ignore_ascii_case("__construct")) {
                         continue;
                     }
-                    let Some(body) = sig.body.clone() else {
+                    let Some(body) = bodies.body(&sig.provenance) else {
                         continue;
                     };
-                    let deps = classify_body(&body, Some(class_name), registry);
+                    let deps = classify_body(body, Some(class_name), registry);
                     per_class.push((class_name.clone(), method_name, deps));
                 }
                 per_class

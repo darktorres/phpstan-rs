@@ -75,7 +75,6 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         assert_if_true: Vec::new(),
         assert_if_false: Vec::new(),
         assert: Vec::new(),
-        body: None,
         purity_dependencies: None,
         is_transitively_pure: false,
         is_stub: false,

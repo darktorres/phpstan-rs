@@ -7,6 +7,7 @@ use types::Type;
 pub mod access_attributes;
 mod anonymous_class;
 mod assertion_table;
+pub mod bodies;
 mod class_info;
 mod function_sig;
 mod function_table;
@@ -23,6 +24,7 @@ pub mod settings;
 mod type_node;
 
 pub(crate) use anonymous_class::collect_anonymous_classes;
+pub use bodies::{BodySource, FileBodies, NoBodies};
 pub(crate) use class_info::object_class_names;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
 pub(crate) use class_info::{hook_body_calls_parent_hook, hook_body_references_property};
@@ -243,7 +245,7 @@ impl Registry {
 
     pub fn build(program: &[Stmt]) -> Registry {
         let mut registry = Registry::index_and_flatten(program, &Origin::Unknown);
-        registry.resolve_transitive_purity();
+        registry.resolve_transitive_purity(&FileBodies::of(program));
         registry
     }
 

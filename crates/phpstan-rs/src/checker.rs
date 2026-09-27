@@ -577,6 +577,9 @@ pub struct Checker<'a> {
     // What the checks are configured with - the defaults unless
     // `with_settings` supplies the project's.
     pub(crate) settings: &'a settings::CheckSettings,
+    // Function and method bodies, found by a declaration's provenance -
+    // none unless `with_bodies` supplies the project's.
+    pub(crate) bodies: &'a dyn crate::registry::BodySource,
     // The project's SQL reflection service - an unconfigured one unless
     // `with_sql` supplies the project's.
     pub(crate) sql: &'a sql::context::SqlContext,
@@ -1274,6 +1277,11 @@ impl<'a> Checker<'a> {
         self
     }
 
+    pub fn with_bodies(mut self, bodies: &'a dyn crate::registry::BodySource) -> Self {
+        self.bodies = bodies;
+        self
+    }
+
     /// The type relations over the registry's classes, as lenient as the
     /// configured rule levels say.
     pub(crate) fn relation(&self) -> types::Relation<'a> {
@@ -1310,6 +1318,7 @@ impl<'a> Checker<'a> {
         Checker {
             registry,
             settings: &DEFAULT_SETTINGS,
+            bodies: &crate::registry::NoBodies,
             sql: &NO_SQL,
             diagnostics: Vec::new(),
             name_ctx: NameContext::default(),

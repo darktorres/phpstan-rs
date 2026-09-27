@@ -6,7 +6,7 @@ use crate::registry::type_node::{mentions_mixed, parse_type_node};
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
-use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
+use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
 use types::has_explicit_mixed_nested_somewhere;
 use types::union_types;
@@ -140,15 +140,6 @@ pub struct FunctionSig {
     pub assert_if_true: Vec<AssertInfo>,
     pub assert_if_false: Vec<AssertInfo>,
     pub assert: Vec<AssertInfo>,
-    // This declaration's real AST body, when it has one - `None` for a
-    // synthesized signature. Lets a cross-file
-    // `parent::`/`self::`/`static::`/`$this->` call be recursively
-    // walked from wherever it's declared, since the per-file `Checker`
-    // only sees the file it's currently checking. `Arc`, not `Rc`:
-    // cloned routinely (template substitution, trait flattening,
-    // override merging), and `php_stubs.rs`'s generated-stub caches are
-    // `LazyLock` statics requiring `Send + Sync`.
-    pub body: Option<Arc<Vec<Stmt>>>,
     // `None` until `Registry::resolve_transitive_purity` classifies
     // this body; stays `None` for a bodyless signature or one the
     // classifier can never prove effect-free. `Some(vec![])` is the
@@ -629,7 +620,6 @@ impl FunctionSig {
             assert_if_true,
             assert_if_false,
             assert,
-            body: Some(f.body.clone()),
             purity_dependencies: None,
             is_transitively_pure: false,
             is_stub: false,
@@ -775,12 +765,6 @@ impl FunctionSig {
             assert_if_true: [self.assert_if_true, other.assert_if_true].concat(),
             assert_if_false: [self.assert_if_false, other.assert_if_false].concat(),
             assert: [self.assert, other.assert].concat(),
-            // Same permissive "either overload's own body wins" as
-            // `deprecated` above - both real overloads are stub-modeled
-            // splits of the same underlying declaration, so either one's
-            // own body is an equally valid absorption target; `self`'s
-            // own (if it has one) is preferred only for determinism.
-            body: self.body.or(other.body),
             // Merging happens during indexing/stub-merging, always
             // before `Registry::resolve_transitive_purity` ever runs -
             // both sides are always `None`/`false` at this point, same
