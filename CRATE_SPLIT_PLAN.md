@@ -2408,6 +2408,10 @@ assignments inside `assert()`.
       variable is `null` in the outer scope, and afterwards it is the
       closure's type unioned with the previous one and generalized;
     - a closure with by-reference uses converges like a loop;
+    - holders rooted at a `use`d variable carry into the closure body
+      (`enterAnonymousFunction`): after `if ($call->name instanceof Id)`,
+      `function () use ($call) { … }` sees `$call->name` as `Id|string`
+      today, while an arrow function already keeps `Id`;
     - `$f = function () use (&$f)` types `$f` as the closure inside its
       own body;
     - a closure's type carries its throw points, impure points and
