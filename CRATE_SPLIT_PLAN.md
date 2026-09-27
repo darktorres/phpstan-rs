@@ -1445,7 +1445,7 @@ Follow-ups:
   - **ancestors** (declarations only): the `extends`/`implements` closure
     in resolution order, the `use` closure in composition order, the
     `@mixin` targets - each edge naming its target by the declared
-    spelling, as `canonicalize_class_name_case` does today - the unresolved
+    spelling the folded lookup finds - the unresolved
     edges (a declared name no class answers to, as written, with the class
     declaring it), and the class's constant declarations composed with its
     traits';
