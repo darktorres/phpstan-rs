@@ -1,6 +1,6 @@
 # Making the gates faster
 
-`cargo xtask gates` takes about 25–30 minutes on the quick tier and about
+`cargo xtask gates` takes 37.5 minutes on the quick tier (§2) and about
 45 more on `--full`. This plan cuts that without weakening any gate. It
 sits beside `CRATE_SPLIT_PLAN.md` and runs before Stage C.
 
@@ -32,25 +32,31 @@ early; each edit goes in with the step that causes it.
 - Each commit message records the step's before and after wall times,
   measured on an idle machine from S0's timing file.
 
-## 2. Measured state (HEAD `acf0827c`)
+## 2. Measured state
+
+S0's first quick-tier run, at `8682ba07` (`gatetime/8682ba07….gates.tsv`),
+took 2,252 s (37.5 min) in total:
 
 | Step | Wall | Cause |
 |---|---|---|
-| fixture suite (gate profile) | 410–490 s | ~250 ms per fixture, see below |
-| lib tests (debug) | ~200 s | per test: stub clone and registry precompute |
-| cli tests (debug) | ~150 s for 44 tests | ~60 spawned debug binaries, each parsing every stub |
-| `cargo bench --no-run` | minutes (estimated) | a release build with thin LTO and one codegen unit; `test --all-targets` already compiles every bench |
-| doc, fuzz check, `--no-default-features` build | ~1–2 min each (estimated) | three more compiles of the package |
-| corpus step | ~7.5 min | six analysis runs (below) plus the gate build (~70 s); the two recorded runs also pay a second checker pass for `--dump-types` (S3) |
-| `zstd -19` of each type dump (~115 MB) | 11.6 s ×2 | `-3` takes 0.3 s and writes 1.5 MB instead of 1.0 MB |
+| `cargo bench --no-run` | 570 s | a release build with thin LTO and one codegen unit; `test --all-targets` already compiles every bench |
+| fixture suite (gate profile) | 483 s | ~250 ms per fixture, see below |
+| cli tests (debug) | 173 s for 44 tests | ~60 spawned debug binaries, each parsing every stub |
+| lib tests (debug) | 124 s | per test: stub clone and registry precompute |
+| `vendored_corpus` bench in test mode | 80 s | one debug pass over 2,351 vendored files |
+| corpus step | 667 s | the gate build (114 s) and six analysis runs (below) |
+| `zstd -19` of the two corpus type dumps (~115 MB each) | 24 s + 21 s | `-3` takes 0.3 s and writes 1.5 MB instead of 1.0 MB |
+| `--no-default-features` build | 75 s | a debug build of the package with different features |
+| fuzz check | 21 s | |
+| clippy, fmt, doc, arch, module graph, test manifest | 10, 2, 6, 6, 6, 4 s | |
 
-Rows marked "estimated" weren't timed in isolation. S0 measures them
-before any step relies on them.
-
-The quick tier's six corpus runs are:
-- the recorded scoped run (29 s) and all-on run (71 s);
-- the same two again with the reference baseline applied;
-- two more all-on runs with `--emission-order` for the determinism check.
+The quick tier's six corpus runs:
+- the recorded scoped run (57 s) and all-on run (121 s). Both include
+  `--dump-types`' second checker pass (S3). Measured on their own,
+  without it, they took 29 s and 71 s;
+- the same two with the reference baseline applied (40 s and 89 s);
+- two more all-on runs with `--emission-order` for the determinism check
+  (90 s and 91 s).
 
 `--full` adds the unscoped run, two more unscoped runs for determinism,
 and 22 per-level runs (~17 min).
@@ -367,9 +373,8 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   build. `--full` and CI keep it.
 - The `--no-default-features` step becomes `cargo check`; `--full` keeps
   the `--no-default-features` test run.
-- `cargo doc` and the fuzz check stay in the quick tier. S0 shows what
-  they cost. If the fuzz check is material, it shares the main target
-  directory so dependencies aren't rebuilt.
+- `cargo doc` (6 s) and the fuzz check (21 s) stay in the quick tier;
+  S0 showed neither is material.
 
 ### S11. Measure, then decide (build config)
 - **Dev-profile optimization:**
@@ -387,10 +392,11 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   profile that inherits `gate`, against debug's, for a one-file engine
   edit (the `buildtime` "engine" scenario). Switch `gates` to it only if
   the total is lower. Debug stays the default for `cargo test`.
-- **The criterion bench under `cargo test --all-targets`:** measure what
-  `vendored_corpus` costs in test mode (one debug pass over 2,351
-  files). If it's material, the bench target gets `test = false`, and
-  `--full`'s `cargo bench --no-run` keeps compiling it.
+- **The criterion bench under `cargo test --all-targets`:** S0 measured
+  `vendored_corpus` at 80 s in test mode, which is material. The bench
+  target gets `test = false`, and `--full`'s `cargo bench --no-run` keeps
+  compiling it. Before that lands, check what its test-mode run catches
+  that the fixtures and the corpus don't.
 - The commit records every measurement, whichever way each decision
   goes.
 
@@ -446,6 +452,5 @@ Each is a targeted edit in the step's own commit:
 - S0–S12 are committed. Each structural commit leaves the snapshots
   identical, and each behaviour commit carries its approved delta.
 - One `cargo xtask gates` run at the end passes, and its `gatetime` is
-  compared with the §2 table. The expected quick tier is about 10–12 min,
-  down from 25–30.
+  compared with the §2 table (37.5 min at `8682ba07`).
 - CHANGELOG notes the `check-project` speedup from S2–S8.
