@@ -2525,6 +2525,12 @@ deleted; the file-size gate.
       `$v` as `int` today where PHPStan has `0` (nsrt `bug-15039.php`);
     - `$b?->c->n === 1` doesn't narrow `$b` to non-null
       (`createNullsafeTypes`);
+    - a call's conditional return type narrows its arguments
+      (`specifyTypesFromConditionalReturnType`): after
+      `if (testIsInt($v))` with `@return ($value is int ? true : false)`,
+      `$v` is `int`, and `assertIsInt($w)` with `($value is int ? void :
+      never)` asserts `$w` is `int`; both stay `mixed` today (nsrt
+      `conditional-types-inference.php`);
     - a conditional `@phpstan-assert` type resolves against the call's
       arguments and parameter defaults (`ConditionalTypeResolver::resolveForCall`):
       `@phpstan-assert ($allow_null is true ? string|null : string) $input`
@@ -3049,7 +3055,14 @@ derived node, each listing its Appendix A rows:
   includes `void` accepts falling off the end (fixed first): `@return
   void|int` on a function that returns only on some paths is
   `return.missing` today, 10 of the corpus oracle's 38 phpstan-rs-only
-  `return.missing` (the `php_codesniffer` sniffs' `process()`);
+  `return.missing` (the `php_codesniffer` sniffs' `process()`); a
+  conditional return type is resolved at each `return` against the
+  scope's parameter types: after `if ($lazy) { return …; }`, nette's
+  `Strings::matchAll` returns a `list` against `($lazy is true ? Generator
+  : list)`, and `return is_int($value);` under `@return ($value is int ?
+  true : false)` returns `bool`; both are `return.type` today (12 in the
+  corpus, e.g. `nette/utils/src/Utils/Strings.php:538`,
+  `latte/Essential/Filters.php:728`);
 - (g) the restricted-usage framework: `@internal` core, deprecation
   (ext-deprecation-rules), disallowed-calls, and `phpstan_api`;
 - (h) `FileAssertRule`, the dump rules and the four asserts;
