@@ -2226,7 +2226,7 @@ its owner. Non-Registry keys follow the table.
 | diagnostics | deleted (returned errors) |
 | semantic_tokens, probe_span, probe_hit, probe_var_provenance, collect_inlay_hints, inlay_param_name_hints, inlay_local_type_hints | LSP observers |
 | collect_member_refs, member_ref_sites, escaped_enums, escaped_member_classes | reference-site collector |
-| name_ctx | deleted (parse-time resolved names, D4) |
+| name_ctx | deleted: AST names read their parse-time resolution (D4), PHPDoc names resolve through C7's name scope |
 | current_file, anonymous_class_names, current_anonymous_class | file state (anonymous names from reflection) |
 | current_class, current_method, current_method_templates, current_class_attrs, current_method_attrs, current_trait | Scope (class / function / trait context) |
 | current_scope_deprecated | Scope query (deprecation predicate) |
