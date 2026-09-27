@@ -993,8 +993,6 @@ Follow-ups:
     (Symfony's `AppReference`: `class.notFound` on its `@psalm-type`s);
   - `method_exists()` on a property narrows it (Symfony's `Router`); D's
     `HasMethod` narrowing, reported since Stage A.
-- **Performance and build time** record their first results; from then on
-  the performance gate compares every commit with its parent (§4.8).
 - **CI green.** The one recorded Rust CI run (`867d9cb3`) failed at the
   no-default-features tests, so the docs, machete and deny steps never ran,
   and 162 commits since are unpushed. Every step passes locally; a passing
