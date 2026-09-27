@@ -2527,7 +2527,12 @@ building on the previous one:
     - a Traversable iteratee adds `getIterator()`'s throw point;
     - by-reference foreach leaves `ForeachValueByRefExpr`;
     - the loop always terminates only when the iteratee is non-empty and
-      the body always terminates.
+      the body always terminates;
+    - with `polluteScopeWithAlwaysIterableForeach` off (strict-rules), the
+      body's assignments after a non-empty foreach are Maybe
+      (`processAlwaysIterableForeachScopeWithoutPollute`), and the body
+      doesn't see the iteratee narrowed to non-empty. Today the setting is
+      read nowhere.
   - **Goto**: forward gotos merge at their label; a backward goto runs a
     fixpoint like a loop (`resolveBackwardGotoScope`). In
     `retry: $i++; if ($i < 3) { goto retry; }`, `$i < 3` is reported
