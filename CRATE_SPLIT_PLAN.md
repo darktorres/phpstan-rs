@@ -24,11 +24,6 @@ composer, config, reflection) are extracted as soon as they're finished.
 The engine and everything above it is redesigned in the package and
 extracted in one final wave.
 
-This document was reviewed by a 21-agent workflow (10 review dimensions,
-each adversarially verified, plus a completeness critic): 249 findings, 248
-upheld. This revision incorporates every upheld finding. Contradictions
-between findings are resolved in Appendix F.
-
 ## 1. Measured state (HEAD `89d468c` + docs)
 
 | Area | Measured |
@@ -138,7 +133,7 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 | `ext-nette-tester` | Tester\Assert overlays |
 | `ext-pest` | pest's PHPStan plugin |
 | `ext-mockstan` | rector/mockstan mock hygiene |
-| `ext-disallowed-calls` | spaze/phpstan-disallowed-calls (today's `restricted_symbols`) |
+| `ext-disallowed-calls` | spaze/phpstan-disallowed-calls (`restricted_symbols`) |
 | `ext-shipmonk` | shipmonk/phpstan-rules |
 | `ext-type-perfect` | rector/type-perfect |
 | `ext-voku` | voku/phpstan-rules |
@@ -166,9 +161,8 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 - **Workspace manifest:**
   - `resolver = "3"`;
   - `[workspace.package]` with edition 2024, version, `publish = false`
-    and license, inherited by every member (so the LSP's
-    `serverInfo.version` matches the bin; the bin also passes its version
-    into the LSP entry point);
+    and license, inherited by every member; the bin passes its version
+    into the LSP entry point;
   - `default-members = ["crates/phpstan-rs"]`;
   - `exclude = ["fuzz", "third_party/hotpath"]`;
   - root `[profile.*]` and `[patch.crates-io] hotpath`.
@@ -199,9 +193,9 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 - **Release profile.** Decided in Stage A: `lto = "thin"`,
   `codegen-units = 1`, with `dhat` inheriting it. The timing baseline is
   recorded under that same profile.
-- **Name collision.** The embedded-stub crate is named `stub-sources`, so
-  it doesn't collide with the `reflection::stubs` module. It owns the
-  `include!` of its generated statics and exports them.
+- **Names.** The embedded-stub crate is `stub-sources` (`reflection::stubs`
+  is the module). It owns the `include!` of its generated statics and
+  exports them.
 
 ## 3. Designs
 
@@ -227,8 +221,8 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 - **Lexer:** returns `Vec<LexWarning>` instead of printing.
   Stub-attribute rewriting moves to `reflection::stubs` as an AST pass.
 - **Names:** an interned `Name` with a precomputed lowercase key, used
-  across syntax, types and reflection. The interner is sharded and
-  Session-scoped, so the LSP can reclaim memory.
+  across syntax, types and reflection. The interner is sharded,
+  Session-scoped and evicts unreferenced names.
 - **Helpers:** `is_primitive_type_name`, `unwrap_grouping`,
   `literal_string_value`, `is_superglobal` and `body_contains_yield` move
   here.
@@ -238,12 +232,9 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
   - variance-annotated generic arguments;
   - late-resolvable types (value-of, key-of, offset-access, class-constant
     access, conditional);
-  - `Static`/`This` with their bound class (B4 ships them unbound, with
-    `self<T>`/`static<T>` arguments on the variants and `self` bound to the
-    declaring class at a member read; the bound form, `static(Base)`/
-    `$this(Base)` and `@return $this` refusing `new static()`, lands in D4,
-    where member access goes through one object view instead of ~540
-    `Type::Object` matches);
+  - `Static`/`This` with `self<T>`/`static<T>` arguments, `self` bound to
+    the declaring class at a member read; the bound form (`static(Base)`/
+    `$this(Base)`, `@return $this` refusing `new static()`) in D4;
   - `ObjectWithoutClass`, `Resource`, `BenevolentUnion`.
 - **Shapes and names:**
   - shape keys use a typed key enum, with an explicit unsealed tail
@@ -272,8 +263,8 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
   `Arc<dyn ExtensionTypeData + Send + Sync>`, with hooks for eq, hash,
   display, and payload-vs-payload subtyping taking `&dyn ClassHierarchy`.
   There is no mandatory merge: a join unions distinct payload-carrying
-  types (PHPStan keeps each `QueryBuilderType` distinct), and an optional
-  extension widening applies only past the union cap.
+  types, and an optional extension widening applies only past the union
+  cap.
 
 ### 3.3 phpdoc
 One grammar produces a `TypeNode` AST, which `DocBlock` stores. The
@@ -300,9 +291,8 @@ Each index entry records:
 - PHP-version gates.
 
 The index covers `resources/functionMap.php` and its per-version deltas
-too, once C6 embeds them. Its generator and reflection's declaration walk
-are one Visitor-based walk, so the two can't disagree on what a file
-declares.
+(C6). Its generator and reflection's declaration walk are one
+Visitor-based walk.
 
 ### 3.5 reflection
 - **Data model.** Opaque `ClassReflection`, `MethodReflection`,
@@ -332,24 +322,25 @@ declares.
      in a version-aware skip-polyfill;
   4. the stub layer, filtered by a PHP-version blacklist.
 
-  The embedded phpstan-src layer stays unconditionally available, matching
-  PHPStan's in-process autoloader.
+  The embedded phpstan-src layer stays unconditionally available.
 - **Stub layer:**
   - process-wide and keyed by PHP version (`version -> Arc<StubLayer>`,
-    with "unset" meaning today's newest reading);
+    "unset" being the newest reading);
   - its unit of resolution is a class plus its transitive ancestors, traits
-    and mixins, resolved through a per-class `OnceLock` (no shared Mutex,
-    so it can't be poisoned; a panic leaves the unit retryable);
+    and mixins, resolved through a per-class `OnceLock` (no shared Mutex; a
+    panic leaves the unit retryable);
   - a project declaration that merges with a stub symbol becomes a
     per-project materialized entry (copy-on-merge);
   - the four seeded tracking sets become provenance queries against the
     index;
-  - polyfill arbitration first keeps today's quality tiebreak
+  - polyfill arbitration first keeps the current quality tiebreak
     (byte-identical); version-based skip-polyfill follows as its own
     commit.
 - **Signature and overlay pipeline:**
-  - the base is phpstorm-stubs, then the phpstan-src `functionMap.php` plus
-    per-version deltas;
+  - the native signature base (phpstorm-stubs or `phpstan/php-8-stubs`,
+    decided in C6), then the phpstan-src `functionMap.php` plus per-version
+    deltas, merged as `Php8SignatureMapProvider::mergeSignatures` does;
+  - `functionMetadata.php` for builtin purity;
   - a PHPDoc overlay layer on top holds phpstan-src `stubs/*.stub` (full
     PHPDoc), user `stub_paths` (PHPStan `stubFiles` semantics: a PHPDoc
     overlay, or a declaration when none exists, as its own behaviour-change
@@ -357,8 +348,7 @@ declares.
   - every hand-written Rust patch becomes a declarative overlay entry,
     ordered and with cross-symbol dependencies recorded;
   - `[[assertions]]`/`[[class_argument_returns]]` compile to overlay entries
-    at config load, so every assert flows through the one `@phpstan-assert`
-    path;
+    at config load, read through the one `@phpstan-assert` path;
   - the Nette Tester and Mockery defaults ship as overlays from their `ext-*`
     crates;
   - `apply_assertion_table` is deleted.
@@ -366,14 +356,13 @@ declares.
   - `names(kind, layer)` from the index, without parsing (completion);
   - `subclasses_of`/`implementors_of` from the index hierarchy plus the
     project;
-  - a case-folded function key map replacing the linear scan (landed
-    early as GATE_SPEED_PLAN S6: `registry::FunctionTable`; class keys
-    stay with C3);
+  - case-folded key maps (functions: `registry::FunctionTable`; classes
+    and methods: C4);
   - every existing iteration site states its layer scope, including the
     ported `ReflectionRule` API.
 - **Extension points owned here:**
   - Properties / Methods / AllowedSubTypes class-reflection extensions,
-    consulted by member lookup so every consumer sees them;
+    consulted by member lookup;
   - class-reflection *data* extensions (typed per-class data computed at
     build);
   - Deprecation extensions plus a `DeprecationProvider`;
@@ -389,12 +378,12 @@ declares.
   settings type named under `crates/reflection`.
 - **Keys.** Class and function names are the case-insensitive `Name`;
   method names fold case; property and constant names stay exact, and a
-  global constant folds only its namespace prefix - PHP's own rules. There
-  is one lookup per kind and no side map.
+  global constant folds only its namespace prefix. There is one lookup per
+  kind and no side map.
 - **`ConstantResolver`** (declared, predefined and version-aware over the
-  whole `PhpVersions` range, plus `dynamicConstantNames`) lives here, as
-  the reflection-side initializer and PHPDoc-type resolution needs it;
-  the analyser reads constants through it.
+  whole `PhpVersions` range, plus `dynamicConstantNames`) lives here;
+  reflection's initializer and PHPDoc-type resolution and the analyser read
+  constants through it.
 
 ### 3.6 config
 - Global keys plus per-owner tables (`[rules.*]`, `[ext.<name>]`, the
@@ -442,9 +431,8 @@ declares.
   same fields minus file and trait file, which a rule doesn't know. The
   dispatcher turns each into a `Diagnostic` (PHPStan's `RuleError` →
   `Error`).
-- `location` and `metadata` are removed. Dropping `location` changes text
-  output and the baseline key, so the baseline format is versioned, keyed
-  like PHPStan (path, identifier, message, count), with a converter.
+- `location` and `metadata` are removed. The baseline format is versioned,
+  keyed like PHPStan (path, identifier, message, count), with a converter.
 - No `clap` in any library crate.
 
 ### 3.8 analyser
@@ -488,8 +476,8 @@ declares.
   foreach binding) drops every holder and conditional that contains it.
   May-alias dim siblings are an explicit sub-rule. Other triggers: impure
   calls on the receiver, volatile/static expressions, existence checks, and
-  extract/include/eval via `afterExtractCall`. eval is treated like extract,
-  beyond PHPStan.
+  extract/include/eval via `afterExtractCall`; eval is treated like
+  extract.
 - **Natives.** Natives are full holders, narrowed in lockstep, with a
   complete `native_type_of` inference path.
 - **Results.**
@@ -531,8 +519,7 @@ declares.
   - `is_in_closure_bind`.
 
   The scope handed to a callback is the pre-node state; post-node data
-  comes from derived nodes. For ported external rules this is a behaviour
-  change, recorded as such.
+  comes from derived nodes (a behaviour change for ported external rules).
 - **TypeSpecifier** is public: `specify_types_in_condition(scope, expr,
   ctx) -> SpecifiedTypes` (sure / sure-not). It is passed to rules and to
   type-specifying extensions (TypeSpecifierAware). The impossible-check
@@ -590,7 +577,7 @@ declares.
   - `ResultCacheMetaExtension`;
   - `IgnoreErrorExtension`;
   - a project-level file-set hook (per-file extension context, refreshed
-    incrementally, which ext-pest needs);
+    incrementally; ext-pest);
   - `DiagnoseExtension`;
   - plus the reflection-owned kinds in §3.5.
 - **Built-in services:**
@@ -602,11 +589,9 @@ declares.
     `lsp`;
   - a public "is this usage internal / deprecated from this scope"
     predicate, used by rules and by the LSP semantic-token observer.
-- **Summaries API.** Whole-program summaries that feed inference, such as
-  purity and global-variable types (and later, from the ROADMAP: H2, H3,
-  U1-U4, U6 and P1; A5 and U5 are reflection enumeration queries instead;
-  H1, V1, V2 and Phase 90 are collector rules, not summaries), run
-  as a fixed point before analysis. They are stored per reflection snapshot
+- **Summaries API.** Whole-program summaries that feed inference (purity,
+  global-variable types, and the ROADMAP items C9 lists) run as a fixed
+  point before analysis. They are stored per reflection snapshot
   in `AnalysisContext` and declare invalidation keys. The invariant: per-file
   inference reads reflection plus summaries, and never collector output.
 - **No I/O.** The package context comes from `AnalysisContext`, and file
@@ -654,7 +639,7 @@ declares.
 
   The Session also provides:
   - panic isolation, and the 64 MiB worker pool, injected: one per
-    process (`project::worker_pool`, landed early as GATE_SPEED_PLAN S4);
+    process (`project::worker_pool`);
   - context-before-analysed ordering;
   - one Session per workspace root;
   - a single engine-construction path (gate: none outside `project`).
@@ -684,8 +669,7 @@ declares.
     provenance metadata.
 - **bin:**
   - global flags plus `--set`;
-  - exit code nonzero on remaining diagnostics, as PHPStan does, landed as
-    its own commit;
+  - exit code nonzero on remaining diagnostics, its own commit;
   - the parse-only `check` subcommand and `demo` are deleted: their roles
     move to the syntax bench, the fixtures and a project example;
   - `incremental-bench` becomes a `project` example (arbitrary directory)
@@ -727,8 +711,7 @@ Every gate below, once it exists, stays forever. Feature work (ROADMAP)
 keeps landing, but only on the APIs that have landed. While a stage is in
 progress, feature work touching that stage's modules waits for it.
 
-`cargo xtask gates` runs them in two tiers, because one scoped Piwigo run
-takes ~30 s and the full per-level matrix is 25 runs:
+`cargo xtask gates` runs them in two tiers:
 
 - **quick** (every commit):
   - gates 1–3 without `cargo hack`/`machete`/`deny` or `cargo bench
@@ -746,8 +729,8 @@ takes ~30 s and the full per-level matrix is 25 runs:
   - performance and build time.
 
 CI (`.github/workflows/rust-ci.yml`) runs the build and test half. The
-corpus, type, baseline, performance and build-time gates need the frozen
-Piwigo checkout and a stable machine, so they run locally.
+corpus, type, baseline, performance and build-time gates run locally
+(frozen Piwigo checkout, stable machine).
 
 1. **Build and lint:**
    - fmt;
@@ -812,8 +795,7 @@ Piwigo checkout and a stable machine, so they run locally.
       identifier literals and does no diagnostics-vector mutation;
     - reflection reads no settings type but `ReflectionSettings`;
     - no `Locals` map outside the holder model;
-    - no engine I/O (its path-resolution part enforced early by
-      GATE_SPEED_PLAN S7: no `current_dir`, `canonicalize` or
+    - no engine I/O (including no `current_dir`, `canonicalize` or
       `path::absolute` outside the session, binary, LSP and tests);
     - no engine construction outside `project`;
     - the built-in function names the analyser may mention form an
@@ -876,12 +858,11 @@ commit); the unsorted corpus comparison starts here.
   harness, and every old assertion must pass. Only then are the converted
   Rust tests deleted.
 - `examples/stress*.php` become fixtures or are deleted.
-- The harness backend at this point is today's Project API, in the bin
-  package's integration tests.
+- The harness backend is the Project API, in the bin package's
+  integration tests.
 
-**Bugs found during A2**, and the purity bug found during B3, were fixed
-after B7, one commit each with fixtures; the Piwigo delta is approved as
-`gates/approved/a2-known-bugs`. The fixes changed these behaviours:
+**A2 behaviour fixes**, one commit each with fixtures (approved delta
+`gates/approved/a2-known-bugs`):
 - class names resolve case-insensitively, in `catch`, static-call targets
   and types;
 - casts, `echo` and interpolation give precise types, a resource included;
@@ -911,9 +892,6 @@ after B7, one commit each with fixtures; the Piwigo delta is approved as
   `UnhandledMatchError`;
 - a dynamic method call is impure.
 
-Two reported bugs were not bugs: the sort family and `array_splice()`
-were already right, and an interpolated string statement has no effect.
-
 ### Stage B: workspace and leaf layers
 
 **B1. Workspace skeleton.**
@@ -929,10 +907,10 @@ were already right, and an interpolated string statement has no effect.
   `-p phpstan-rs` now.
 
 **B2. Module graph.**
-- A mechanical edge inventory against Appendix A (it includes the edges
-  missed so far: `text_split → deps`, `registry → {restricted_symbols,
-  doctrine_functions, assertion_tables, sql_*}`, `config → rule configs`,
-  `checker ↔ rule`, `checker → project`, engine → rule-module references).
+- A mechanical edge inventory against Appendix A, including
+  `text_split → deps`, `registry → {restricted_symbols, doctrine_functions,
+  assertion_tables, sql_*}`, `config → rule configs`, `checker ↔ rule`,
+  `checker → project` and engine → rule-module references.
 - Move the helpers down (§3.1, §3.2) and `Diagnostic*` into its module.
 - Move `whole_program/*` and `duplicate_{classes,functions}` under the
   `project` module (they use no `Checker`), which removes both
@@ -989,11 +967,10 @@ Then extract `types`, with the proptest seeds moved to
 - Extract `sql`.
 
 **B7. diagnostics.**
-- The diagnostic model (§3.7). `RuleError`, the file and trait file,
-  identifier families declared per rule, and AST-node fixes arrive with
-  the rule dispatcher (E), which has the rule declarations and the analysed
-  file to attach them from; B7 gives `Diagnostic` its validated
-  `Identifier`, a list of tips, and drops `location` and `metadata`.
+- The diagnostic model (§3.7): `Diagnostic` gets its validated
+  `Identifier` and a list of tips, and drops `location` and `metadata`.
+  `RuleError`, the file and trait file, identifier families and AST-node
+  fixes arrive with the rule dispatcher (E3).
 - The versioned baseline plus converter, as an approved-delta commit
   (location dropped, text format change).
 - Extract `diagnostics`. The ignore / baseline pipeline stays in the
@@ -1001,9 +978,8 @@ Then extract `types`, with the proptest seeds moved to
 
 **B8. composer.** The package context is computed once. Extract. The
 default `PhpVersions` range comes from it (§3.2): composer
-`config.platform.php`, else `require.php`; today an unconfigured
-`php_version` leaves every version-gated rule silent. An approved-delta
-commit of its own.
+`config.platform.php`, else `require.php`. An approved-delta commit of its
+own.
 
 **B9. stub-sources.**
 - The generated index plus the xtask plus the regeneration test.
@@ -1012,703 +988,336 @@ commit of its own.
 
 ### Stage C: config and reflection
 
+A bug below that sits in code a later Stage C phase rewrites gets a fixture
+first and is fixed in that phase, as its own behaviour commit after the
+structural one (Appendix F).
+
 **C1. config.**
 - Schema, owner sections, the shim, `--set`, deletion of per-rule flags
   and setters (approved delta for the CLI surface), extension activation.
-- The setting split per Appendix B; each owner module exists in the
-  package by now.
+- The setting split per Appendix B; each settings type lives in its owner
+  module (`project::session::SessionSettings`,
+  `registry::settings::ReflectionSettings`,
+  `checker::settings::EngineSettings`); the `config` crate holds the loader
+  and the schema.
 - Extract `config`.
 
-Landed with C2 in one commit (`4c18d661`), with a scoped-corpus delta of
-+405 (`gates/approved/c1-c2-config-and-settings`: 197 `test.risky`, 136
-`cast.useless`, the rest strict-rules families), because an installed
-package now activates its extension. The global settings live in their
-owner modules (`project::session::SessionSettings`,
-`registry::settings::ReflectionSettings`, `checker::settings::EngineSettings`),
-not in the `config` crate as §2's L2 line says; the crate holds only the
-loader and the schema. Open (review of 2026-09-27), one commit each:
-- **Nested keys are not validated.** The schema rejects unknown keys only at
-  a section's own level (`config/src/lib.rs` `check_table`); the structs
-  inside arrays of tables have no `deny_unknown_fields`:
-  `IgnoreErrorEntry`, `RestrictedSymbolEntry` and its `ParamCondition`/
-  `ParamRef`/`ParamFlagsCondition`, `DoctrineCustomFunctionEntry`,
-  `sql::config::SqlReflectionConfig`. Every `IgnoreErrorEntry` field is
-  optional and an entry with none set matches every diagnostic, so a
-  misspelled `messages =` ignores everything, and `identifer =` beside
-  `path =` ignores everything under the path. The fix: `deny_unknown_fields`
-  on every nested struct, an ignore entry needs `message` or `identifier`
-  (as PHPStan's schema requires), its regex is compiled and rejected at
-  load instead of never matching, compiled once rather than per
-  diagnostic, and `count` is enforced (unmatched counts reported as
-  PHPStan does).
-- **Type errors name the key.** A section's type error is reported as
-  `config at <section>: <serde error>`; each must carry the full dotted
-  key path (§3.6), with a test per section shape.
-- **Settings §3.6 assigns to the split don't exist**, and each lands with
-  the phase that implements its behaviour:
-  - universal object crates (hard-coded as `stdClass` at
-    `checker/expr.rs:200`) - a `ReflectionSettings` key read by C8's
-    built-in implementor;
-  - global type aliases (`typeAliases`) - `ReflectionSettings`, resolved by
-    C7's TypeNodeResolver;
-  - a PHP version range: `php_version` accepts only `"major.minor"`
-    (`types::php_version::parse_php_version`), not PHPStan's `{min, max}`
-    or a patch version - C5, with the stub-layer key;
-  - treatPhpDocTypesAsCertain (D2 natives), polluteScopeWith* (D2
-    transitions), rememberPossiblyImpureFunctionValues (D2 virtual keys),
-    early-terminating calls (D3), the exception model (E3f).
-- **The LSP resolves settings through a second copy.**
-  `lsp/workspace_config.rs` assembles `ProjectSettings` by hand beside
-  `Session::resolve`, and they differ: the LSP skips the overlay,
-  architecture, banned-construct and psr3-pattern validation, folds
-  `stub_paths` into plain context directories (losing their designated-
-  override meaning), resolves config paths against the workspace root
-  rather than the config file's directory, and falls back to an empty
-  config on any error. One settings-assembly function serves both now;
-  F1 still deletes `ResolvedWorkspaceConfig`.
-- **Activation doesn't reach library typing.** Only Doctrine result types,
-  Pest's `$this` and the language-extensions attributes follow activation.
-  PHPUnit assertion narrowing and mock types, the test base classes, the
-  parent-call defaults and the Mockery / Nette Tester assertion defaults
-  apply whether or not their package is installed; mockery,
-  nette-tester, codeception, type-perfect, disallowed-calls and sql have
-  no `Extension` impl. Each gets one, and its typing follows it.
-- **`test.risky` is activated by `phpstan/phpstan-phpunit`,** which has no
-  such rule; it is a phpstan-rs rule and its activation moves to its own
-  owner (ext-extras or an explicit key), with the corpus delta re-reviewed.
-- **`ignore_errors.path` depends on how the run was invoked.** The glob is
-  matched against the analysed path as spelled on the command line
-  (`ignore_errors::filter` uses `file.display()`): `path = "src/*"` ignores
-  the error for `check-project src` but not for `./src` or from the
-  parent directory (reproduced), while the baseline normalizes the same
-  paths. `path` resolves against the config file's directory, as PHPStan
-  resolves it, and is compared as a normalized path.
-- **`restricted_symbols` entries fail silently too.** A `method`,
-  `staticMethod`, `property`, `staticProperty` or `classConstant` entry
-  without `class` is dropped by `RestrictedSymbols::compile`; and
-  `compile` keys entries by symbol with last-insert-wins while
-  `DisallowedCallsSettings::entries` appends the presets after the user's
-  own entries, so a preset silently replaces a user's entry for the same
-  symbol (traced). A missing `class` is a load error, and a user entry wins
-  over a preset's for its symbol.
-- **The C1 tests don't cover what C1 promised.** `config/src/tests.rs` and
-  `app/tests.rs` test top-level unknown keys only - no nested key, no
-  `--set` of an unknown key, no type error's key path - and
-  `loads_every_ignore_error_field_combination` loads a `path`-only
-  `[[ignore_errors]]` entry, which the requirement above makes a load
-  error (no config in the fixtures or the corpus uses one). Each open item
-  above lands with its test. The activation package names were checked
-  against Packagist; all seventeen exist.
-- **`[[assertions]]`/`[[class_argument_returns]]` fail silently.** A type
-  string is not parsed at load (a typo becomes a class name), and an
-  entry naming a missing function, method or parameter is skipped
-  without a word at apply time. Both are load errors.
-- **`--set` paths** resolve against the config file's directory, unlike
-  every other command-line path; they resolve against the working
-  directory.
-- **Docs:** no config reference exists (the README documents no keys);
-  one is written from the section doc comments, and §2's L2 line is
-  corrected. The `check-project` help is stale: `--php-version` says an
-  unset version leaves the version rules nothing to check, though B8
-  defaults it from composer, and `--level` says unset reports everything,
-  though the session caps it at `DEFAULT_REPORT_LEVEL` (6); `--stub-path`
-  points at a `check_duplicate_class_declarations` flag "above" that no
-  longer exists, and `--format` at the deleted `config.rs`. The
-  CHANGELOG's "an unknown key is reported by its full dotted path" holds
-  only at a section's own level (the nested-keys item), and it doesn't
-  mention C3a's output change. `declared_php_versions` carries
-  `composer_roots`' doc comment (`project/session.rs`).
-- **One composer root decides activation.** `Session::resolve` discovers a
-  composer root per analysed directory and loads each one's vendor
-  context, and `phpstan_api_check_enabled` ORs over all of them, but the
-  PHP versions and extension activation come from the root that is the
-  working directory only. One rule for all three: every discovered root's
-  manifest counts.
-- **Pest's risky tests are switched by `ext.phpunit.check_risky_tests`.**
-  Appendix A splits risky tests between ext-phpunit (methods) and ext-pest
-  (`it`/`test` closures); `[ext.pest]` has only `enabled`. Each owner gets
-  its own key.
-- **Key names.** Several keys repeat their section
+Follow-ups, one commit each, each with its test:
+- **Nested validation.** `deny_unknown_fields` on every struct nested in a
+  section: `IgnoreErrorEntry`, `RestrictedSymbolEntry`, `ParamCondition`,
+  `ParamRef`, `ParamFlagsCondition`, `DoctrineCustomFunctionEntry`,
+  `sql::config::SqlReflectionConfig`. An `[[ignore_errors]]` entry needs
+  `message` or `identifier`; its regex is compiled once, at load, and an
+  invalid one is a load error; `count` is enforced.
+- **Error paths.** Every type error names its full dotted key path.
+- **Missing settings**, each with the phase that implements it:
+  universal object crates (`ReflectionSettings`, C8; replaces the
+  hard-coded `stdClass` in `checker/expr.rs`), global type aliases
+  (`ReflectionSettings`, C7), a `php_version` range and patch version
+  (C5), treatPhpDocTypesAsCertain (D2), polluteScopeWith* (D2),
+  rememberPossiblyImpureFunctionValues (D2), early-terminating calls (D3),
+  the exception model (E3f).
+- **One settings assembly.** `lsp/workspace_config.rs` stops assembling
+  `ProjectSettings` itself and uses `Session::resolve`'s function: the same
+  validation (overlays, architecture, banned constructs, psr3 pattern), the
+  same `stub_paths` meaning, config-relative paths, and an error surfaced
+  instead of an empty config. F1 still deletes `ResolvedWorkspaceConfig`.
+- **Activation reaches library typing.** PHPUnit assertion narrowing and
+  mock types, the test base classes, the parent-call defaults and the
+  Mockery / Nette Tester assertion defaults follow their extension's
+  activation. mockery, nette-tester, codeception, type-perfect,
+  disallowed-calls and sql get `Extension` impls.
+- **`test.risky`** gets its own activation (ext-extras or an explicit key)
+  instead of `phpstan/phpstan-phpunit`'s; the corpus delta is re-reviewed.
+- **`ignore_errors.path`** resolves against the config file's directory and
+  is compared as a normalized path.
+- **`restricted_symbols`.** A member entry without `class` is a load error;
+  a user entry wins over a preset's for the same symbol.
+- **`[[assertions]]`/`[[class_argument_returns]]`.** Type strings are parsed
+  at load; an entry naming a missing function, method or parameter is a
+  load error.
+- **`--set` paths** resolve against the working directory, like every other
+  command-line path.
+- **Composer roots.** PHP versions and extension activation read every
+  discovered root's manifest, as `phpstan_api_check_enabled` does.
+- **Pest risky tests** get their own `[ext.pest]` key.
+- **Key names.** One casing, no key repeating its section's name
   (`ext.psr3.check_psr3_logging`, `ext.psr3.psr3_context_key_pattern`,
-  `ext.sidz.magic_number_exemptions`), and section names are kebab-case
-  (`strict-rules`, `deprecation-rules`) while `rules.class_shape` and
-  every key are snake_case. The shim is the one chance to settle names
-  without a second migration: one casing, no repeated prefixes, and a
-  PHPStan parameter's own name wherever one exists.
+  `ext.sidz.magic_number_exemptions`), a PHPStan parameter's own name where
+  one exists; settled before the shim is removed.
+- **Tests.** `config/src/tests.rs` and `app/tests.rs` cover nested keys,
+  `--set` of an unknown key and error key paths;
+  `loads_every_ignore_error_field_combination` drops its `path`-only entry.
+- **Docs.** A config reference generated from the section doc comments.
+  `check-project` help corrected: `--php-version` (defaults from composer),
+  `--level` (unset caps at `DEFAULT_REPORT_LEVEL`, 6), `--stub-path` and
+  `--format` (references to deleted flags and `config.rs`). CHANGELOG: the
+  unknown-key claim and C3a's output change. `declared_php_versions` gets
+  its own doc comment (`project/session.rs`).
 
 **C2. Settings leave `Registry`**, following Appendix B:
-- `RuleLevelHelper` lands in the package's future `analyser` module and
-  `ConstantResolver` in the checker (landed); `ConstantResolver` moves on
-  to `reflection` (below);
+- `RuleLevelHelper` lands in the package's future `analyser` module;
+- `ConstantResolver` moves to `reflection` (below);
 - rule and extension settings go to their owner modules;
 - `phpstan_api` recording becomes unconditional.
 
-Gate: reflection reads no settings type but `ReflectionSettings`.
+Gate: reflection reads no settings type but `ReflectionSettings`
+(an `xtask arch` rule: no `*Settings`, `CheckSettings` or `ProjectSettings`
+named under `registry`/`stub_attributes`).
 
-Open (review of 2026-09-27):
-- **A version range types `PHP_VERSION_ID` as the stub's literal.**
-  `ConstantResolver::global_constant_type` asks
-  `Registry::php_version_consensus`, which answers only when the range's
-  two ends agree; for any range they differ, so the lookup falls through
-  to the phpstorm-stubs `define('PHP_VERSION_ID', 50306)`. With composer's
-  `"php": "^7.4 || ^8.0"` (B8's default range), `if (PHP_VERSION_ID >=
-  80000)` is reported `greaterOrEqual.alwaysFalse` (reproduced); the same
-  holds for `PHP_MAJOR_VERSION`/`PHP_MINOR_VERSION`. Fixed first, as its
-  own behaviour commit: a predefined constant is typed over the whole
-  range (`int<min.id, max.id + 99>`, the major and minor as ranges or
-  unions) and never falls back to the stub's value.
-- **`ConstantResolver` is in the wrong layer.** Reflection resolves
-  constants too, bypassing it: `resolve_constant_named_types` substitutes a
-  constant-named PHPDoc type straight from `Registry::global_constants`
-  (`registry/resolve.rs` `constant_named_type`), and class-constant
-  initializers are typed at registry build. PHPStan's `ConstantResolver`
-  is what its reflection-side `InitializerExprTypeResolver` calls. It
-  moves to `reflection` (L3), `dynamic_constant_names` becomes a
-  `ReflectionSettings` key, Appendix B's row follows, and reflection's
-  constant reads go through it.
-- **Constant lookups outside the resolver fold nothing.**
-  `checker/imports.rs` checks `use const` with an exact
-  `global_constants.contains_key`, but PHP folds a constant's namespace
-  prefix: `use const foo\BAR;` against `namespace Foo { const BAR = 1; }`
-  reports `constant.notFound` twice, at the import and at the use
-  (reproduced). Every constant lookup goes through one folded key.
-- **`dynamic_constant_names` details:** a global name is matched exactly,
-  where PHP folds a constant's namespace prefix (the stub index's own
-  rule); and `generalize` turns a shape into `array<array-key, …>`,
-  dropping list-ness and the key type, and builds an unflattened union of
-  its values.
-- **The gate doesn't exist.** `xtask arch` enforces the `Diagnostic`
-  literal, `$$`, print and path rules only; "no setting read under
-  reflection" is added (no `*Settings` type, `CheckSettings` or
-  `ProjectSettings` named under `registry`/`stub_attributes`).
-- **`RuleLevelHelper` holds the settings, not the rule.** It only builds a
-  `types::Relation` (`checker/rule_level_helper.rs`); the nullable
-  thresholds, benevolent unions and strict mixed arrays are still decided
-  inside `types::Relation::accepts` from its `configured_level`,
-  `strict_mixed_arrays` and `check_benevolent_union_types` fields. E5
-  moves that logic into `RuleLevelHelper::accepts`/`find_type_to_check`
-  and deletes the three fields from `types::Relation`.
-- **The registry still receives configuration.** `apply_settings` writes
-  `php_versions` and the assertion tables into `Registry`, and the tables
-  only take effect at the next `apply_assertion_table` pass, so a
-  reconfigure (the LSP) keeps the old ones until a rebuild. C6 compiles
-  them to overlays; until then a reconfigure reapplies them.
+Follow-ups:
+- **Predefined constants over a version range** (fixed first): `PHP_VERSION_ID`
+  is `int<min.id, max.id + 99>`, `PHP_MAJOR_VERSION`/`PHP_MINOR_VERSION` are
+  ranges or unions over the range, and a predefined constant never falls
+  back to the stub's `define()` value.
+- **`ConstantResolver` in `reflection`**, with `dynamic_constant_names` a
+  `ReflectionSettings` key; `resolve_constant_named_types` and
+  class-constant initializer typing read constants through it.
+- **One folded constant key.** A constant's namespace prefix folds case at
+  every lookup, `checker/imports.rs`'s `use const` check and
+  `dynamic_constant_names` included.
+- **`generalize`** keeps list-ness and the key type and flattens unions.
+- **`RuleLevelHelper` owns the rule** (E5): the level thresholds, benevolent
+  unions and strict mixed arrays move out of `types::Relation::accepts`,
+  and `types::Relation` loses `configured_level`, `strict_mixed_arrays` and
+  `check_benevolent_union_types`.
+- **Assertion tables** are reapplied on reconfigure until C6 compiles them
+  to overlays.
 
 **C3. Reflection data model** (§3.5): opaque reflections, attributes with
 arguments, provenance, no AST bodies.
 
-Landed as C3a-C3d (`dcc67ce5`, `bfce0e9f`, `49e6d9b1`, `41874e77`,
-`ca63ef85`). Open (review of 2026-09-27):
-- **C3a changed output as a refactor.** Its message claims no behaviour
-  change, but `gates/approved/c3-provenance-declarations` adds 985 all-on
-  diagnostics (978 `property.unused`, 7 `method.unused`): promoted
-  properties got a declaration location and the dead-members rule began
-  reporting them without the exemptions they need. Confirmed wrong at
-  runtime: the Projection view objects' properties (about 200, e.g.
-  `SlideshowView::navCurrent`, passed to `Renderer::render()` and read by
-  `slideshow.latte`) and 77 Doctrine-mapped columns (`ActivityEntity::
-  $objectId`), which phpstan-doctrine's read/write extension counts as
-  read and written. Fixed first, as its own behaviour commit: mapped
-  properties are used while ext-doctrine is active, and every line of the
-  delta is re-reviewed for runtime correctness.
-- **Class keys are not `Name`.** `Registry::classes` is keyed by `Arc<str>`
-  with a `classes_lowercase` side map and a `canonicalize_class_name_case`
-  pass; `class_declaration` looks up case-sensitively. §3.5 left class
-  keys to C3. Scheduled in C4.
-- **Member names are matched by declared spelling.** Methods are keyed by
-  declared spelling; `lookup_method` falls back to a linear scan on a
-  miss, but the flag sets and the 12 direct `methods().get()` sites in
-  the checker don't. Reproduced: `class D extends C { function BAR() }`
-  over `final public function bar()` in `C` reports only
-  `method.nameCase`, not the override of a final method (a PHP fatal
-  error). Method keys fold case (like `FunctionTable`); property and
-  constant keys stay exact. Scheduled in C4.
-- **Accessors return the storage.** C3d's accessors (47 of them) hand out
-  `&FxHashMap`/`&FxHashSet`/`&Vec`/`&IndexMap` (`methods()`,
-  `properties()`, `consts()`, `final_methods()`, `template_bounds()`,
-  ...), so the storage shape is still the API, and `Registry::classes`,
-  `functions` and `global_constants` are `pub` maps read directly (124
-  `registry.classes.get`/`contains_key` in the checker, case-sensitive).
-  Opaque means queries (`method(name)`, `is_final_method(name)`,
-  `template_params()`), which C4's snapshots need anyway. Scheduled in C4.
-- **Parallel collections remain.** Templates are five parallel structures
-  (`templates`, `template_bounds`, `template_defaults`,
-  `covariant_templates`, `contravariant_templates`), and member flags are
-  class-level sets (`abstract_methods`, `final_methods`, `static_methods`,
-  `final_properties`, `final_*_by_phpdoc`); `FunctionReflection` has no
-  `is_static`/`is_abstract`/`is_final`. §3.5 wants per-member flags and
-  `Vec<TemplateParam>`. Scheduled in C4.
-- **Build scratch is in the reflections:** `purity_dependencies` and
-  `is_transitively_pure` (C9), `method_tags`, `trait_aliases`,
-  `resolved_trait_conflicts`, `redeclared_methods`, `type_alias_case_refs`,
-  `return_case_refs` / `case_refs` and `type_imports`. They move to the
-  builder in C4.
-- **Provenance is not the only location record.** `Origin::Unknown` is
-  still produced (`Registry::build`, the `.stub` class pass); `is_stub`
-  duplicates the origin; `phpstan_class_files` and `function_decl_sites`
-  are parallel location stores; comments cite `project/decl_locations.rs`
-  and `Project::decl_locations`, which no longer exist. Scheduled in C4.
-- **Parse-time resolved names are never read.** B3's `QualifiedName`
-  keeps `written` and `resolved`, and the audit marks it OK, but nothing
-  outside `syntax` reads `.resolved` or `ResolvedName`: about 90 sites
-  re-resolve the written name through a `NameContext`, among them the
-  reflection builders (`class_info.rs` 9, `class_info/doctrine_entity.rs`
-  5, `reflection_attribute.rs` 3, `access_attributes.rs` 3,
-  `global_vars.rs` 3, `function_sig/generics.rs`). One visible effect:
-  `NameContext::resolve` has no `self`/`parent`/`static` case, so
-  `#[Attr(self::X)]` in namespace `App` records the class `App\self`
-  (traced through `reflection_attribute.rs`). The reflection sites read
-  `resolved` in C4; the checker's go with D4, and Appendix C's `name_ctx`
-  is deleted rather than moved to file state.
-- **No-native-type is encoded three ways:** `PropertyReflection::
-  has_native_type` beside `ty_native: Type`, the
-  `explicit_mixed_hint`/`return_explicit_mixed_hint` flags, and
-  `ConstantReflection::native_ty: Option<Type>`. Each native type is an
-  `Option<Type>`. Flags are split too: `PropertyReflection` carries
-  `is_static`/`is_abstract`, but its finality lives in the class's
-  `final_properties` set. Both go with C4's per-member flags.
-- **PHPStan's own embedded classes are never "PHPStan code".**
-  `checker::phpstan_api::is_phpstan_code` looks the class up in
-  `phpstan_class_files` (exact case) and requires a `vendor/` path
-  segment, so a class known only from the embedded phpstan-src sources
-  (provenance `Origin::Phpstan`) doesn't count (traced). It becomes a
-  provenance query with the map's deletion.
-- **Attribute arguments are partly evaluated:** constants and class
-  constants stay unresolved names, a bare constant name is not
-  namespace-resolved, and `new` (allowed in attribute arguments since PHP
-  8.1) or concatenation become `Unsupported`. Scheduled in C8, where the
-  ConstantResolver and the hierarchy are at hand.
-
-**Registry read-through (review of 2026-09-27).** Every file under
-`registry/`, `stub_attributes`, the stub-sources build script, the
-stub-index generator and the project load/update paths was read line by
-line. The bugs below were each reproduced with `check-project` (marked
-"traced" where only the code path was followed). Each reproduced one gets
-a fixture now, recording the correct behaviour; it is fixed in the phase
-named, as its own behaviour commit after that phase's structural commit
-(approved delta), since C4 rewrites most of this code.
-
-- Fixed in C4 (the builder, per-file declaration sets, lazy member
-  resolution):
-  - **Declarations below the top level are never indexed.**
-    `build_declarations` recurses only through namespaces, blocks and
-    `if`: a function or class declared inside a function body, a class in
-    a top-level `try`, a function in a `switch` case all give
-    `function.notFound`/`class.notFound`. The walk becomes a Visitor over
-    every statement, marking each such declaration conditional.
-    `project.rs`'s `declared_names` and the stub index generator walk the
-    same subset and move with it.
-  - **Member names by declared spelling** (beyond the final-method case
-    in C3's list): an interface, abstract-parent or enum method
-    implemented with other casing is `class.abstractMethodNotImplemented`
-    (three shapes reproduced); a constructor spelled `__Construct` loses
-    its promoted properties (`property.notFound`); a class declaring
-    `__tostring()` is not `Stringable` (`argument.type`); about 49 sites
-    compare magic-method names exactly. Case-folded method keys fix all.
-  - **Type names keep their written spelling, and exact lookups skip on
-    them.** A parameter typed `square` (class `Square`) carries
-    `Object("square")`; the member-existence checks look that up exactly
-    (`checker/expr.rs` `registry.classes.contains_key(class)` before
-    `method.notFound`/`property.notFound`) and skip on a miss, so
-    `$s->nope()` - a runtime `Error` - and `$t->missingProp` go unreported
-    (both reproduced; reported with `Square`). Messages print the written
-    spelling too ("Instanceof between App\square and App\Square"). Of the
-    126 direct `registry.classes.get`/`contains_key` sites outside the
-    registry, those keyed by a declaration or an owner lookup are canonical;
-    those keyed by a type's or a literal's name (`expr.rs` 1401/2747/2761/
-    4203/4266/6702, `operators.rs:68`, `throws.rs:196`, `visibility.rs:256`,
-    `var_tag_types.rs`, `phpdoc_unresolvable.rs`, `missing_typehint.rs`,
-    `strict_idioms.rs`) are not. `Name`-keyed lookups fix every one, and a
-    type's class name is canonicalized where the type is resolved, so
-    messages print the declared name.
-  - **Member resolution order.** `own_owner_names` walks `extends` and
-    `implements` breadth-first together, so for `C extends B implements I`
-    with `A::foo(): int` two levels up and `I::foo(): int|string`, `$c->foo()`
-    is `int|string`. PHP resolves the class chain first, then interfaces.
-  - **Trait composition.** `insteadof` is ignored (the first trait's method
-    wins: `TB::hello insteadof TA` still types `hello()` from `TA`, and a
-    wrong `function.alreadyNarrowedType` follows); an abstract method from
-    one trait implemented by another is `class.abstractMethodNotImplemented`;
-    `shown as protected` doesn't change visibility; a trait's `final`
-    methods don't reach the using class, so overriding one is missed (a PHP
-    fatal error); `@use Trait<int>` never binds the trait's templates
-    (`class_template_bindings` ignores `uses`).
-  - **PHPDoc inheritance carries only `@param`/`@return`.** An interface's
-    `@phpstan-assert-if-true` doesn't reach an undocumented implementation
-    (`argument.type` after the guard); `@param-out`, `@phpstan-self-out`,
-    `@throws` and method templates aren't inherited either (traced).
-  - **Mixins.** A `@mixin` brings in only the target's own members, not
-    those it inherits, so the call falls to `__call` (`return.type`); one
-    level only.
-  - **`@method` tags act as override prototypes**, their PHPDoc types
-    stored as native types: a real `items(): array` under `@method
-    list<int> items()` reports "return type list<int> is not compatible
-    with the inherited return type list<int>".
-  - **Type aliases.** `@property` and `@method` tags skip
-    `@phpstan-type` substitution (`class.notFound` twice); enums support no
-    aliases at all (`class.notFound`, `missingType.iterableValue`,
-    `return.phpDocType` on one method); an alias of an alias resolves one
-    level only (traced).
-  - **Enums** also ignore `@deprecated` on a case and `@var` on a
-    constant, and drop `@method`/`@mixin`/`@phpstan-require-*` (traced).
-  - **Promoted properties** ignore asymmetric visibility (`public
-    private(set)`: an outside write, a runtime `Error`, isn't reported) and
-    the promoted parameter's own `@deprecated`/`@internal`.
-  - **Anonymous classes** resolve names through one whole-file
-    `NameContext`, so in the first of two namespace blocks `extends Base`
-    finds the last block's `Base` (`method.notFound`); their diagnostics
-    print the internal `AnonymousClass<md5>` name where PHPStan prints
-    `class@anonymous`. `anonymous_class.rs` is one more hand-rolled walker
-    beside the Visitor (it walks `new class(...)` arguments twice).
-  - **`merge` has no single meaning.** `ClassReflection::merge` and
-    `FunctionReflection::merge` serve four cases - phpstorm-stubs overloads,
-    a `stubFiles`-style override, a polyfill onto a built-in, a duplicate
-    declaration - with per-field precedence that differs (methods unioned,
-    properties and constants later-wins, hierarchy first-wins-if-set, flag
-    sets unioned so `final`/`abstract` leak across). Each case gets its own
-    operation; `insert_built_decl`'s enum arm bypasses the collision policy
-    entirely (traced). The registry tests that pin today's union
-    (`two_unconditional_class_declarations_merge_instead_of_replacing`,
-    `two_unconditional_function_declarations_with_a_disjoint_type_at_one_position_union_it`
-    and their siblings in `stubs_and_conditional_declarations.rs`) are
-    rewritten per case, each keeping its name only where its case keeps
-    its meaning.
-  - **More incremental staleness:** the dead-code escape sets
-    (`Project::escaped_enum_cases`, `escaped_member_classes`) only grow;
-    an edit or a removal never takes a file's contributions out.
-  - **The registry's own tests are white-box on what C4 replaces:** the
-    188 tests under `registry/tests` and `registry/stubs/tests` build
-    through `Registry::build` (provenance `Origin::Unknown`) and index
-    `.classes[...]`/`.functions[...]` directly at 98 sites. They move onto
-    `ReflectionBuilder::apply` and the query accessors with their names
-    kept (gate 3).
-  - **The language server's navigation is exact-case too:**
-    `class_declaration`/`member_declaration` look up by exact name, so
-    go-to-definition on a differently cased reference finds nothing
-    (traced).
-  - **`TemplateParam`s are rebuilt from the parallel maps in four places**
-    (`own_template_args`, `class_template_params_for` in `checker/
-    resolve.rs`, the ReflectionClass patch, `build_template_params`);
-    `Vec<TemplateParam>` leaves one.
-  - Smaller: `method_access` is keyed lowercase (a third key convention);
-    doc comments are re-parsed per method; accessors return `&Option<T>`
-    and `&Vec<T>` rather than `Option<&T>` and `&[T]`; the stub pass runs
-    global-variable inference on each of 2,351 stub files and discards it.
-- Fixed with C2's `ConstantResolver` move: `infer_const_type` evaluates
-  only literals, negation, concatenation, arrays and class-constant
-  references - bitwise and arithmetic operators, ternaries, `??`, global
-  constants, enum cases and `new` give `mixed` (traced).
-- Fixed in C5: `stub_attributes` appends a property's or class constant's
-  `#[LanguageLevelTypeAware]` type as `@return`, which neither reads
-  (they read `@var`), so `mysqli::$affected_rows` is untyped where PHP 8.1
-  makes it `int|string` (reproduced); `newest_type` stops at the first
-  non-string entry; `FunctionReflection::merge` marks a function deprecated
-  when any version-split overload is.
-- Fixed in C7: an assert target `$param->prop`, `$param->method()` or
-  `$this->method()` is dropped as unknown; `@throws` and assert types
-  skip alias substitution; `resolve_names_in_type` never namespace-resolves
-  a written `Traversable` (traced).
-- Fixed in C8: `access_attributes` and `compute_attribute_targets` read
-  AST attributes themselves beside C3c's `ReflectionAttribute`, the first
-  matching any name containing `PhpLanguageExtensions`, the second any
-  attribute short-named `Attribute` (traced).
-- Fixed in C9:
-  - `global_vars` counts only assignment statements, so a global also
-    bound by `foreach`, destructuring or a by-reference argument keeps the
-    literal of its first assignment (`function.alreadyNarrowedType` three
-    times, reproduced), and a top-level append (`$items[] = 'x'`) adds
-    nothing, so `$items = ['a' => 1]` stays `array{a: 1}` and a correct
-    `is_string()` over its values is `function.impossibleType`
-    (reproduced) - the registry test
-    `a_bare_top_level_append_contributes_nothing` asserts that behaviour
-    and flips with the fix; its expression typing drops unkeyed array items
-    (`['en', 'fr']` is `array{}`), takes call returns raw (templates,
-    `static`, dynamic return types unresolved) and resolves `self::` as
-    `Ns\self` (traced);
-  - purity misses backtick execution and `throw` expressions, classifies
-    calls and `new` by written name, not the resolved one (a same-named
-    global function becomes the dependency), treats a class-constant read
-    as impure, and looks method dependencies up on the named class only
-    (traced).
-- Fixed in E4: `doctrine_entity` records every property as a DQL field,
-  mapped or not, misses fields from a `#[MappedSuperclass]` parent or a
-  trait, and reads no docblock `@ORM` annotations (traced).
-- Outside Stage C, for the checker: a by-reference argument PHP creates on
-  the call is type-checked against the parameter (`preg_match('/a/', 'a',
-  $z)` reports `argument.type` "mixed given"); PHPStan skips it.
+Follow-ups:
+- **C3a's `property.unused` delta** (fixed first): ORM-mapped properties
+  count as used while ext-doctrine is active, view objects passed to a
+  template renderer are not reported, and every line of
+  `gates/approved/c3-provenance-declarations` is re-reviewed.
+- **`is_phpstan_code`** becomes a provenance query (an `Origin::Phpstan`
+  class counts), with `phpstan_class_files` deleted.
+- **Attribute arguments** evaluate to types: constants and class constants
+  through the ConstantResolver, bare constant names namespace-resolved,
+  `self`/`parent`/`static` bound to the class, `new` and constant
+  expressions included (C8).
+- The rest of C3's data model lands in C4: class and method keys, per-member
+  flags and `Vec<TemplateParam>`, build scratch in the builder, provenance
+  as the only location record, query accessors, parse-time resolved names,
+  one no-native-type encoding (`Option<Type>`).
 
 **C4. Snapshots and lazy resolution**, one commit each:
-- per-class memoized resolution replacing the passes. Today's 15 passes
-  (16 calls) and where each goes:
-  - per-class memos here: `flatten_traits`, `resolve_method_tags`,
-    `precompute_member_owners` (twice), `resolve_deferred_type_imports`,
+- **Per-class memoized resolution** replacing the passes:
+  - per-class memos: `flatten_traits`, `resolve_method_tags`,
+    `precompute_member_owners`, `resolve_deferred_type_imports`,
     `resolve_deferred_value_of`, `flatten_phpdoc_inheritance`,
     `inherit_property_hooks`, `resolve_deferred_mixins`,
     `precompute_ancestor_names`, `drop_doc_members_excluded_by_native`,
-    `resolve_constant_named_types` (through the ConstantResolver, C2);
+    `resolve_constant_named_types`;
   - deleted by `Name` keys: `canonicalize_class_name_case`;
-  - C6: `apply_assertion_table`;
-  - C9: `resolve_transitive_purity`, `infer_global_variables`.
+  - C6: `apply_assertion_table`; C9: `resolve_transitive_purity`,
+    `infer_global_variables`.
 
-  The three lists are not the same list: `index_and_flatten` (each stub
-  file, `Registry::build`) runs the second `precompute_member_owners`
-  last, after `drop_doc_members_excluded_by_native`, while
-  `finish_loading` and `update_file` run it before, with purity between,
-  so their owner maps can name a member the drop removed. Stub classes
-  are flattened within their own file at stub load and again per
-  project. The memo has one order, and a fixture pins the dropped-member
-  case.
-  The memo has levels - ancestors, then members, then inherited PHPDoc -
-  and a hierarchy query made while resolving members reads only the
-  ancestor level, so resolution never re-enters a class's own cell
-  (`OnceLock` re-entrance deadlocks). A cyclic `extends`/`implements`/
-  `use` is detected and resolved as broken, with a test;
-- the C3 residue: class keys as case-insensitive `Name` (the lowercase side
-  map and `canonicalize_class_name_case` deleted) and case-folded method
-  keys, `Vec<TemplateParam>` and per-member flags, build scratch in the
-  builder, provenance as the only location record, and query accessors
-  in place of the storage-returning ones and the `pub` maps (every direct
-  `registry.classes`/`functions`/`global_constants` access converted);
-- `ReflectionBuilder::apply` snapshots, which own their names: the
-  registry's and checker's calls to the process-wide
-  `syntax::intern::intern` (about 100) go through the project's interner.
-  Names of the process-wide stub layer (C5) stay global; `Name` equality
-  falls back to text, so mixing is correct, and the hot comparisons are
-  measured. A session-scoped interner that holds strong references frees
-  nothing until the session drops, which in the LSP is only on
-  reconfigure, so it evicts names no longer referenced elsewhere;
-- the staleness fixes (approved deltas). Beyond the three in §1, the
-  incremental path (`Project::unindex_file`,
-  `Registry::remove_declarations`) has these:
-  - a file's global constants are never removed;
-  - removing a file whose declaration merged onto a built-in stub (the
-    `str_contains` polyfill, a user `Imagick` stub) deletes the built-in;
-  - removing one of two files declaring the same name removes it for both;
-  - `stub_provided_functions`, `names_with_assert_tags` and
-    `function_decl_sites` are never cleared, and
-    `doctrine_entity_table_index` is never reset.
+  The memo has one order (a fixture pins the dropped-member case) and
+  levels - ancestors, members, inherited PHPDoc - with hierarchy queries
+  during member resolution reading only the ancestor level. A cyclic `extends`/`implements`/`use` is detected and
+  treated as broken, with a test.
+- **Keys and data model:** class keys are the case-insensitive `Name` (side
+  map and `canonicalize_class_name_case` deleted); method keys fold case;
+  property and constant keys stay exact; a type's class name is resolved to
+  the declared spelling when the type is resolved; `Vec<TemplateParam>`
+  and per-member flags; build scratch (`method_tags`, `trait_aliases`,
+  `resolved_trait_conflicts`, `redeclared_methods`, `*case_refs`,
+  `type_imports`) stays in the builder; provenance is the only location
+  record (`Origin::Unknown`, `is_stub`, `phpstan_class_files`,
+  `function_decl_sites` gone); every native type is an `Option<Type>`;
+  query accessors replace the storage-returning ones and the `pub` maps,
+  and every direct `registry.classes`/`functions`/`global_constants` access
+  outside the registry is converted; the builders read parse-time
+  `resolved` names instead of re-resolving through a `NameContext`.
+- **`ReflectionBuilder::apply` snapshots** own their names: the registry's
+  and checker's `syntax::intern::intern` calls (about 100) go through the
+  project's interner; the stub layer's names stay global; the session
+  interner evicts names no longer referenced elsewhere.
+- **Staleness fixes** (approved deltas), each with a closure gate, through
+  per-file declaration sets (which also hold what
+  `unconditionally_declared_classes`/`_functions` record): the three in §1;
+  a file's global constants are removed with it; removing a declaration
+  merged onto a built-in stub keeps the built-in; removing one of two
+  same-named declarations keeps the other; `stub_provided_functions`,
+  `names_with_assert_tags`, `function_decl_sites`, `doctrine_entity_table_index`
+  and the dead-code escape sets (`escaped_enum_cases`,
+  `escaped_member_classes`) follow their files.
+- **Registry tests** (188, `registry/tests` and `registry/stubs/tests`) move
+  onto `ReflectionBuilder::apply` and the query accessors, names kept.
+- **Behaviour fixes**, one commit each after the structural ones:
+  - declarations below the top level are indexed (inside function bodies,
+    `try`, `switch`), conditional, through one Visitor walk shared with
+    `declared_names` and the stub-index generator;
+  - member names fold case everywhere: abstract-method implementation,
+    final-method overrides, constructors (`__Construct` promotes its
+    properties), `__toString` making a class `Stringable`, the magic-method
+    comparisons (about 49 sites);
+  - member resolution follows PHP: the class chain first, then interfaces;
+  - trait composition: `insteadof`, visibility-changing `as`, a trait's
+    `final` methods, an abstract method implemented by another trait,
+    `@use Trait<T>` template bindings;
+  - PHPDoc inheritance carries `@phpstan-assert*`, `@param-out`,
+    `@phpstan-self-out`, `@throws` and method templates;
+  - a mixin brings in the target's inherited members too, chained;
+  - a `@method` tag is not an override prototype and has no native types;
+  - `@phpstan-type` aliases apply in `@property`/`@method` tags and on
+    enums, chained to any depth;
+  - enums read `@deprecated` on cases, `@var` on constants, and `@method`/
+    `@mixin`/`@phpstan-require-*`;
+  - promoted properties carry asymmetric visibility and their own
+    `@deprecated`/`@internal`;
+  - anonymous classes resolve names per namespace block, and diagnostics
+    name them `class@anonymous`; `anonymous_class.rs` becomes a Visitor;
+  - `merge` splits into one operation per case (phpstorm-stubs overload,
+    stub override, polyfill onto a built-in, duplicate declaration), with
+    the enum arm under the same collision policy; the registry tests
+    pinning the union (`two_unconditional_*` in
+    `stubs_and_conditional_declarations.rs`) are rewritten per case;
+  - LSP navigation (`class_declaration`, `member_declaration`) uses the
+    case-insensitive keys;
+  - one `method_access` key convention; each doc comment parsed once;
+    accessors return `Option<&T>`/`&[T]`; the stub pass runs no
+    global-variable inference.
 
-  Per-file declaration sets fix each one structurally; each gets a
-  closure gate. `unconditionally_declared_classes`/`_functions` record
-  whether a project declaration is conditional and become part of those
-  per-file sets.
-
-Gate: the fixture suite's and the lib tests' wall times (`gatetime`) are
-recorded and lower than at the phase's start; per-class resolution no
-longer re-runs every pass over the stub classes for each project. Today
-`xtask` only writes `gatetime/<hash>.<command>.tsv`; nothing compares two
-of them, so this gate (and C5's) gets a command first: `xtask gatetime
---since <hash>`, the median of N runs per step against the phase-start
-commit's, failing on any step not lower.
+Gate: the fixture suite's and the lib tests' wall times are lower than at
+the phase's start, measured by `xtask gatetime --since <hash>` (median of N
+runs per step against the phase-start commit, failing on any step not
+lower; a command added first); per-class resolution no longer re-runs every
+pass over the stub classes for each project.
 
 **C5. Locator chain and stub layer**, one commit each:
-- the stub layer's version key, decided first and recorded in Appendix F.
-  Its reach: phpstorm-stubs carries 2,234 `LanguageLevelTypeAware` and 598
-  `PhpStormStubsElementAvailable` attributes in 88 files; today the newest
-  reading wins for every project, so 185 declarations take a type from PHP
-  8.4 or later (134 at 8.4, 48 at 8.5, 3 at an unreleased 8.6) even for a
-  project whose range ends at 8.3. The index sees only the 35 top-level
-  function gates; member and parameter gates live inside the files, so the
-  layer parses per version.
-  a project has a `PhpVersions` range (B8), not one version, and the key
-  decides signature selection, the functionMap deltas (C6) and the
-  version-specific `.stub` files (`socket_select.stub` vs
-  `socket_select_php8.stub`). `php_version` accepts PHPStan's range and
-  patch forms in the same commit;
+- the stub layer's version key over a `PhpVersions` range, decided first
+  and recorded in Appendix F. It governs 2,234 `LanguageLevelTypeAware` and
+  598 `PhpStormStubsElementAvailable` attributes in 88 phpstorm-stubs files
+  (185 declarations change type at 8.4 or later), the functionMap deltas
+  (C6) and the version-specific `.stub` files. Member and parameter gates
+  are inside the files, so the layer parses per version. `php_version`
+  accepts the range and patch forms in the same commit;
+- `stub_attributes` fixes: a property's or class constant's
+  `LanguageLevelTypeAware` type becomes `@var`, not `@return`;
+  `newest_type` reads every entry; a function deprecated in one
+  version-split overload isn't deprecated in the others;
 - locator order;
-- the lazy composer locator (approved delta): today
-  `discover_vendor_context` loads whole PSR-4 directories eagerly, and
-  lazy location changes what `subclasses_of`/`implementors_of`, the
-  dead-code and duplicate-class rules and the purity / global-variable
-  inputs see, and which of two vendor declarations wins. Functions,
-  constants and `files` autoload entries stay eager;
-- the version-keyed, per-class `OnceLock` stub layer with copy-on-merge,
-  plus a per-file parse memo (one phpstorm file declares many symbols);
-  whether the index build keeps `rayon` is decided here, and Appendix E
+- the lazy composer locator (approved delta): classes load on demand;
+  functions, constants and `files` autoload entries stay eager;
+- the version-keyed, per-class `OnceLock` stub layer with copy-on-merge and
+  a per-file parse memo; `rayon` in the index build decided, Appendix E
   follows;
-- provenance queries: `built_in_stub_classes` and `stub_provided_functions`
-  become queries against the index (the other two sets went to C4). Two
-  questions are answered by these today and each consumer names its own:
-  "a stub declares it and no analysed code redeclares it"
-  (`is_builtin_function`/`is_builtin_class`, read by the restricted-usage
-  `is_builtin` flags in `expr.rs` and `oop/attributes.rs`, and
-  `checker/resolve.rs:507`), and "an extension in the stub corpus declares
-  it" (`builtin_function_extension`/`builtin_class_extension`, read by
-  composer hygiene and the architecture rules' `is_standard_class`). A
-  polyfill clears the first but not the second;
-- the enumeration APIs. Each whole-registry iteration would force every
-  lazy stub class, so each moves onto a scoped query:
-  `native_type_hints.rs`'s two scans (every class, `is_subclass_of`, per
-  member) onto `subclasses_of`; `Project::run_reflection_rules` (every
-  class and function, stubs included) onto the project layer;
-  `repository_entity`'s scan onto ext-doctrine's data (E4 keeps it until
-  then); the LSP workspace-symbol function list onto the project layer;
-  LSP completion's class and function candidate lists (`lsp/completion.rs`,
-  every class and function, stubs included) onto `names(kind, layer)`.
-  The index records `parent`/`interfaces` for its first declaration only,
-  so for a class declared differently per version
-  (`couchbase`/`couchbase_v2`) `subclasses_of` must read each
-  declaration's ancestors: the index records them per declaration;
+- provenance queries replacing `built_in_stub_classes` and
+  `stub_provided_functions`, each consumer naming its question: "a stub
+  declares it and no analysed code redeclares it" (the restricted-usage
+  `is_builtin` flags in `expr.rs` and `oop/attributes.rs`,
+  `checker/resolve.rs`) or "an extension in the stub corpus declares it"
+  (composer hygiene, the architecture rules' `is_standard_class`);
+- the enumeration APIs, with every whole-registry iteration moved onto a
+  scoped query: `native_type_hints.rs`'s two scans onto `subclasses_of`;
+  `Project::run_reflection_rules`, the LSP workspace-symbol function list
+  and LSP completion's candidate lists onto the project layer or
+  `names(kind, layer)`; `repository_entity` onto ext-doctrine's data (E4).
+  The index records `parent`/`interfaces` per declaration;
 - version-based skip-polyfill (approved delta);
 - version-dependent signature selection (approved delta);
 - a panic-injection test.
 
-Gate: the fixture suite's, the lib tests' and the cli tests' wall times
-(`gatetime`) are recorded and lower than at the phase's start; the stub
-layer replaces the per-project stub clone and the per-process stub
-parse. And the union of all lazily resolved symbols equals today's
-`generated_stub_data()`, extension maps included, for the unset version
-key, checked before the two approved-delta commits, which change it by
-design.
+Gate: the fixture suite's, the lib tests' and the cli tests' wall times are
+lower than at the phase's start (`xtask gatetime --since`); the stub layer
+replaces the per-project stub clone and the per-process stub parse; the
+union of all lazily resolved symbols equals `generated_stub_data()`,
+extension maps included, for the unset version key, checked before the two
+approved-delta commits.
 
-**C6. Overlay layer**, one commit each. Every entry's types are parsed as
-PHPDoc through the phpdoc grammar (TypeNode), never `parse_type_string`,
-which C7 deletes:
+**C6. Overlay layer**, one commit each. Every entry's types are parsed with
+the phpdoc grammar (TypeNode), never `parse_type_string`:
 - phpstan-src `.stub` PHPDoc overlays (approved delta, split per stub
-  file). PHPStan loads 31 of the files unconditionally (`conf/config.neon`
-  `stubFiles`) and 9 through five version-gated `StubFilesExtension`s -
-  `BcMathNumber` (8.4), `JsonValidate` (8.3), `ReflectionClass` (the
-  `WithLazyObjects` pair from 8.4), `ReflectionEnum` (enums, then the 8.4
-  pair), `SocketSelect` (8.0) - which port as `StubFilesExtension`'s
-  built-in implementors; today all 40 load whatever the version, both
-  variants of each pair included. today `patch_phpstan_stub_classes` takes only class templates,
-  bounds, variance and property types; the 144 top-level functions in 13
-  stub files (`core.stub` 63, `file.stub` 31, `arrayFunctions.stub` 16,
-  `typeCheckingFunctions.stub` 16, `ctype.stub` 10, ...) and all method
-  PHPDoc are new, and overlap the built-in typing E2 moves;
-- declarative patch entries;
-- the `functionMap.php` + deltas layer: `stub-sources` embeds
-  `resources/functionMap.php` (12,214 entries) and its seven
+  file): the 31 files `conf/config.neon` lists, plus the 9 selected by the
+  five version-gated `StubFilesExtension`s (`BcMathNumber`,
+  `JsonValidate`, `ReflectionClass`, `ReflectionEnum`, `SocketSelect`),
+  which port as built-in implementors. All 146 functions and all method
+  PHPDoc apply, not only class templates and property types;
+- declarative patch entries replacing the Rust patch functions;
+- the `functionMap.php` layer: `stub-sources` embeds
+  `resources/functionMap.php` and the seven
   `functionMap_php{74,80,81,82,83,84,85}delta.php` files (the two
-  `bleedingEdge` files decided and recorded), the index and its
-  regeneration test cover them, and a `SignatureMapParser` port reads
-  them. It replaces `patch_functionmap_array_shapes`. PHPStan's merge rule
-  (`Php8SignatureMapProvider::mergeSignatures`) is the one to port: a
-  parameter's type is the native type decided against the stub's PHPDoc
-  decided against the functionMap type; the return type is the
-  functionMap's when the native return is an implicit `mixed`, else
-  decided the same way. The base those native signatures come from is
-  decided in the same commit and recorded in Appendix F: PHPStan's PHP 8
-  base is `phpstan/php-8-stubs` (php-src's own `*.stub.php`), not
-  phpstorm-stubs, which it uses for classes; `registry/stubs.rs`'s module
-  doc saying PHPStan doesn't use php-src's stubs is wrong;
-- `resources/functionMetadata.php` (1,756 entries, `hasSideEffects` and
-  `pureUnlessCallableIsImpureParameters`) is embedded as the builtin
-  purity source. Nothing reads it today, so a bare `strlen('x');` is not
-  `function.resultUnused` and a user function whose body only calls
-  `strlen()` is never pure (both reproduced); C9's summaries read it;
-- user `stub_paths` PHPStan semantics (approved delta). Today's behaviour,
-  reproduced, which the delta replaces:
-  - a `.stub` file given to `--stub-path`/`stub_paths` is not loaded at all
-    (only `.php` is collected), with no warning - PHPStan's own convention
-    is `.stub`;
-  - a stub's PHPDoc merges with the real declaration by `merge`'s union
-    instead of overriding it: a stub `@return list<string>` over a real
-    `@return array` leaves `array`;
-  - a stub redeclaring a built-in function (`php_uname(): non-empty-string`)
-    changes nothing - the built-in stub signature stays.
-
-  PHPStan's semantics: a stub's PHPDoc replaces the declaration's, the
-  native signature stays the real one, members the stub omits are kept,
-  and a stub declares a symbol only when nothing else does;
+  `bleedingEdge` files decided), the index covers them, and a
+  `SignatureMapParser` port reads them, replacing
+  `patch_functionmap_array_shapes`. The merge follows
+  `Php8SignatureMapProvider::mergeSignatures`. The native signature base
+  (`phpstan/php-8-stubs` or phpstorm-stubs) is decided in the same commit
+  and recorded in Appendix F; `registry/stubs.rs`'s module doc is
+  corrected;
+- `resources/functionMetadata.php` embedded as the builtin purity source
+  (C9 reads it);
+- user `stub_paths` with PHPStan `stubFiles` semantics (approved delta):
+  `.stub` files load; a stub's PHPDoc replaces the declaration's, the native
+  signature stays the real one, omitted members are kept, built-in
+  functions are overridable, and a stub declares a symbol only when nothing
+  else does;
 - `StubFilesExtension`;
-- assertion tables compiled to overlays (`apply_assertion_table` deleted).
-  The Mockery and Nette Tester defaults move to their ext modules, and
-  `gates/module-graph.txt` splits `assertion_tables` so the defaults can't
-  be extracted with `reflection`.
+- assertion tables compiled to overlays (`apply_assertion_table` deleted);
+  the Mockery and Nette Tester defaults move to their ext modules, and
+  `gates/module-graph.txt` splits `assertion_tables`.
 
-**C7. TypeNodeResolver** with `TypeNodeResolverExtension`;
-`parse_type_string` is deleted. It replaces the B5 adapter
-(`registry::type_node`: `parse_type_node` and `mentions_mixed`, both still
-going through the node's printed text) and the checker's
-`resolve_type_node`. The deletion reaches the extracted `types` crate:
-- `types::parse` (1,286 lines, with `parse_native_type_string` and the
-  string-based `has_explicit_mixed_nested_somewhere`) goes;
-- about 150 `types` tests build their types through it
-  (`tests/parsing.rs` 67, `tests/accessory_and_refinement_types.rs` 60,
-  `tests/display_and_misc.rs` 17, `tests/subtyping.rs` 7). The resolver
-  sits above `types`, so they can't use it without a dev-dependency
-  cycle: the relation and display tests build types with constructors,
-  and the parsing tests move to `reflection` as resolver tests;
-- the other package call sites (about 35, besides the adapter): the
-  `stubs.rs` patches (C6 has replaced them), `predefined_constants.rs`
-  (10), `class_info.rs` (4), `expr/mysqli.rs` (3), and one or two each in
-  `restricted_symbol_usage`, `phpdoc_unresolvable`, `missing_typehint`,
-  `native_type_hints`, `narrowing`, `preg_shapes`, `array_ops`,
-  `doctrine/result_shape`, `constant_resolver`, `name_context`,
-  `function_sig`, `assertion_table` and `deps`, each listed in the commit;
-- native type hints go the same way: about 85 sites print a `TypeHint`
-  node (`TypeHint::to_string`) and re-parse it with
-  `parse_native_type_string`. The resolver takes `syntax` `TypeHint`
-  nodes directly, and `parse_native_type_string` goes with
-  `parse_type_string`;
-- one resolver, one scope: today the registry (`from_decl`: templates
-  marked, names resolved, class aliases substituted, deferred value-of)
-  and the checker (`resolve_written_type`: templates and names, with
-  aliases applied separately at three call sites) each assemble their own
-  pipeline. The TypeNodeResolver takes one name scope - namespace and
-  `use` imports, active templates, class aliases, the current class for
-  `self` - and both use it.
+**C7. TypeNodeResolver** with `TypeNodeResolverExtension`, replacing the B5
+adapter (`registry::type_node`) and the checker's `resolve_type_node`:
+- one name scope - namespace and `use` imports, active templates, class
+  aliases, the current class for `self` - used by both the registry and the
+  checker (`resolve_written_type`);
+- native `TypeHint` nodes are resolved directly, not printed and re-parsed
+  (about 85 sites);
+- `types::parse` is deleted (`parse_type_string`,
+  `parse_native_type_string`, `has_explicit_mixed_nested_somewhere`); the
+  `types` tests that build types through it (about 150) use constructors,
+  and its parsing tests move to `reflection` as resolver tests;
+- the other package call sites (about 35) are converted, each listed in the
+  commit;
+- assert targets `$param->prop`, `$param->method()` and `$this->method()`
+  are kept; `@throws` and assert types get alias substitution; a written
+  `Traversable` resolves like any name.
 
 **C8. Reflection extension points** (§3.5), with the built-in implementors
-(universal object crates among them, from C1's `ReflectionSettings` key).
-Reflection implements ClassHierarchy: today's `impl ClassHierarchy for
-Registry` (`registry/relation.rs`) becomes reflection's; B4 already
-deleted the duplicate subtyping implementations. The callers still on
-`Relation::structural()` (a class a subtype only of itself) switch to the
-hierarchy-aware relation, which lazy reflection makes available there - an
-approved-delta commit. They are the 24 package sites (among them the
-narrowing exclusion in `narrowing/type_ops.rs` and the doc-vs-native
-reconciliation in `function_sig/type_resolution.rs`, which runs at
-registry build) and three inside `types`, whose API takes a
-`&dyn ClassHierarchy` for them: `conditional_branch`
-(`types/src/conditional.rs`; `($x is Foo ? A : B)` with `$x` bound to a
-subclass of `Foo` doesn't pick `A`), `intersection.rs`'s `narrower`
-(`Foo&SubFoo` isn't collapsed) and `coercion.rs`'s string check.
-The delta, predicted site by site (the scalar-only sites change nothing:
-`operators.rs`, `accessory_range.rs`, `assignment.rs`, `builtin_calls.rs`,
-`coercion.rs`, and `type_resolution.rs`, whose object members return
-before reaching the relation):
-- `narrow_instanceof_true` (`type_ops.rs`) narrows `Base` by `instanceof
-  Child` to `Base&Child` instead of `Child` (reproduced);
-- `narrow_type_excluding` keeps `Child` in `Child|Other` after `!$x
-  instanceof Base`, so `$x->only()` there reports `method.notFound` on
-  `Child|Other` (reproduced);
-- `conditional_branch` doesn't pick `int` from `($x is Base ? int :
-  string)` for a `Child` argument, a false `return.type` at the caller
-  (reproduced);
-- `intersection.rs`'s `narrower` leaves `Foo&SubFoo` uncollapsed;
-- the DQL entity-field refinement in `sql_reflection/resolve.rs` compares
-  object field types structurally.
+(universal object crates among them). Reflection implements ClassHierarchy
+(`registry/relation.rs`'s impl moves). The trait takes `Name`s, lends
+memoized views instead of allocating, exposes `TemplateParam`s, and gains
+the enum-cases query.
 
-`ClassHierarchy` gains the enum-cases query §3.2 lists, with the first
-relation that needs it. The trait itself is redone for the reflection
-it now fronts: it takes `&str` names where §3.2 has `Name`; it allocates
-on every call (`ancestor_names` returns a `Vec`,
-`ancestor_template_bindings` an `FxHashMap<String, Type>`) where the
-memoized views can lend; and `ClassFacts::templates` is `&[Arc<str>]`,
-not the `TemplateParam`s C4 introduces. The class-reflection data extensions take their
-first non-built-in implementors here: `registry::access_attributes`
+The `Relation::structural()` callers switch to the hierarchy-aware
+relation (approved delta): the 24 package sites and three in `types`
+(`conditional_branch`, `intersection.rs`'s `narrower`, `coercion.rs`),
+whose API takes a `&dyn ClassHierarchy`. Expected delta: `instanceof Child`
+narrows `Base` to `Child`; `!$x instanceof Base` removes `Child` from
+`Child|Other`; `($x is Base ? A : B)` picks `A` for a `Child`; `Foo&SubFoo`
+collapses; the DQL entity-field refinement compares object types with the
+hierarchy. The scalar-only sites don't change.
+
+The class-reflection data extensions take `registry::access_attributes`
 (ext-language-extensions) and `registry::class_info::doctrine_entity`
-(ext-doctrine) move onto them in the package's future ext modules, and
-their module-graph edges, dated E4 today, are re-dated to C8, so C10 can
-extract. Attribute arguments are evaluated to types (constants through
-the ConstantResolver, `new` and constant expressions included).
+(ext-doctrine), with their module-graph edges re-dated to C8.
+`access_attributes` and `compute_attribute_targets` read
+`ReflectionAttribute`s. Attribute arguments evaluate to types.
 
 **C9. Summaries.** Purity and global-variable inference leave reflection for
-the summaries API. The ROADMAP mapping, item by item (§3.8): summaries -
+the summaries API; C9 creates `AnalysisContext` in the package's future
+`analyser` module to hold them per snapshot, and D6 completes it.
+`purity_dependencies` and `is_transitively_pure` leave
+`FunctionReflection`. Stubs get no global-variable summaries. Builtin
+purity comes from `functionMetadata`. ROADMAP mapping (§3.8): summaries -
 H2, H3, U1-U4, U6, P1; reflection enumeration - A5, U5; collector rules
-(E1) - H1, V1, V2, Phase 90; neither - A2-A4 and A6 (per-file inference),
-C1 (`types`), P2 (the composer package context), D1 (a metrics rule).
-Builtin purity comes from C6's `functionMetadata`. C9 creates
-`AnalysisContext` in the package's future `analyser` module to hold them
-per reflection snapshot (§3.8); D6 extends it. `purity_dependencies` and
-`is_transitively_pure` leave `FunctionReflection`. Whether stubs have
-global-variable summaries is decided: today `index_and_flatten` runs
-`infer_global_variables` for each of the 2,351 stub files.
+(E1) - H1, V1, V2, Phase 90; neither - A2-A4, A6, C1, P2, D1.
 
-**C10. Extract `reflection`.** Its module-graph edges are all gone by now
-(C8 moved the two ext data modules, C9 the summaries); `cargo machete`
+Fixes, each its own behaviour commit:
+- global-variable sites include `foreach` bindings, destructuring,
+  by-reference out arguments and appends (the registry test
+  `a_bare_top_level_append_contributes_nothing` flips); expression typing
+  keeps unkeyed array items, resolves call returns (templates, `static`,
+  dynamic return types) and binds `self::`;
+- purity: shell-exec and `throw` expressions are impure, a class-constant
+  read is pure, calls and `new` resolve through parse-time names, and
+  method dependencies follow inheritance.
+
+**C10. Extract `reflection`.** No module-graph edge remains; `cargo machete`
 checks Appendix E's rows for it.
 
 ### Stage D: engine (in the package, module-gated)
@@ -1803,23 +1412,22 @@ derived node, each listing its Appendix A rows:
 - (a) file-level (`keywords`, `whitespace`, RequireFileExists over the VFS
   from `includes.rs`);
 - (b) expression-level;
-- (c) calls and member access;
+- (c) calls and member access (a by-reference argument PHP creates on
+  the call is not type-checked against the parameter);
 - (d) assignments and properties (`uninitialized` and
   `uninitialized_dataflow` rewritten over the ClassPropertiesNode
   initialization state, with the dataflow walker deleted);
 - (e) declarations, generics checks and PHPDoc;
 - (f) control flow, returns, throws and generators;
 - (g) the restricted-usage framework: `@internal` core, deprecation
-  (ext-deprecation-rules), disallowed-calls (its path zones already
-  decided at the report site since B7), and `phpstan_api`;
+  (ext-deprecation-rules), disallowed-calls, and `phpstan_api`;
 - (h) `FileAssertRule`, the dump rules and the four asserts;
 - (i) semantic-token predicates exposed.
 
 Mixed modules are split row by row (Appendix A). Gate: architecture rule 10
 for the analyser.
 
-The rest of the diagnostic model (§3.7) that B7 left for the dispatcher
-lands here, each its own commit:
+The rest of the diagnostic model (§3.7), each its own commit:
 - `RuleError` and `RuleErrorBuilder`: rules return them, and the dispatcher
   turns each into a `Diagnostic`;
 - file and trait file on every diagnostic, attached by the dispatcher (a
@@ -1827,13 +1435,12 @@ lands here, each its own commit:
   file);
 - identifier families: each rule declares its identifiers as prefix ×
   suffix sets, the dispatcher debug-asserts every error against its rule's
-  declaration, and the `format!`-built identifiers (about 40 sites today)
+  declaration, and the `format!`-built identifiers (about 40 sites)
   become family members;
 - AST-node fixes beside text fixes, rendered to diffs through
   `syntax::printer`;
-- `accepts` reasons: `Relation::accepts` fills `AcceptsResult.reasons`
-  (B4 ships the field empty), and the argument, return and property type
-  rules show them as tips;
+- `accepts` reasons: `Relation::accepts` fills `AcceptsResult.reasons`, and
+  the argument, return and property type rules show them as tips;
 - PHPStan's standard tip helpers (§3.7: discovering symbols,
   `treatPhpDocTypesAsCertain`, and the rest), used by the rules that show
   those tips.
@@ -1866,12 +1473,11 @@ lands here, each its own commit:
 
 **E5. Levels** (§3.9): the ladder, `RuleLevelHelper` parameters,
 computed-level sites, the default level, and the replacement consumers for
-JSON and the LSP. The level-dependent acceptance still inside
+JSON and the LSP. The level-dependent acceptance in
 `types::Relation::accepts` moves into `RuleLevelHelper::accepts`/
-`find_type_to_check`, and `types::Relation` loses its
-`configured_level`, `strict_mixed_arrays` and
-`check_benevolent_union_types` fields. The level tests become level-header fixtures.
-LevelsTestCase fixtures are added. Gate: for every level in 0..=10 plus
+`find_type_to_check`, and `types::Relation` loses its `configured_level`,
+`strict_mixed_arrays` and `check_benevolent_union_types` fields. The level
+tests become level-header fixtures. LevelsTestCase fixtures are added. Gate: for every level in 0..=10 plus
 unset, before == after, except approved deltas.
 
 **E6. Observers.** LSP-only presentation (semantic tokens, inlay hints,
@@ -1884,11 +1490,9 @@ engine context, file state, function frame and traversal context
 ### Stage F: Session and LSP (in the package)
 
 **F1. Session** (§3.10), one commit each:
-- `AnalysisResult` (landed early as GATE_SPEED_PLAN S9a;
-  `project::session::AnalysisResult`);
-- the finalizer (landed early as S9a, `AnalysisResult::finalize`, with a
-  temporary level stage E5 removes; the LSP moves onto it in this
-  phase's parity commits);
+- `AnalysisResult` (`project::session::AnalysisResult`);
+- the finalizer (`AnalysisResult::finalize`, with a temporary level stage
+  E5 removes; the LSP moves onto it in this phase's parity commits);
 - entry points;
 - the VFS;
 - panic isolation;
@@ -1906,11 +1510,9 @@ replay gate goes on.
 
 **F3. ErrorFormatter** set (JSON schema versioned).
 
-**F4. Binary**: check-project's resolution already lives in the library
-(`app::check_project`, landed early as GATE_SPEED_PLAN S9b); global
-flags, `--set`, `check`/`demo` deleted,
-`incremental-bench` → project example plus bench, `format_signature` test
-moved.
+**F4. Binary**: global flags over `app::check_project`, `--set`,
+`check`/`demo` deleted, `incremental-bench` → project example plus bench,
+`format_signature` test moved.
 
 ### Stage G: extraction wave and tidy
 
@@ -1949,15 +1551,11 @@ The `structured_php` fuzz target moves to `project`.
   gates relative to the previous commit.
 - **Cross-crate inlining.** Thin LTO plus `codegen-units = 1`, decided and
   baselined in A0. The timing gate applies from B1 on.
-- **Fixture conversion.** Weak assertions surface extra diagnostics, which
-  the fixtures now record; the dual-run gate ensures no old assertion is
-  lost.
 - **User-visible changes.** Config schema (with a shim), CLI flags,
   baseline format (with a converter), JSON schema (versioned), exit code,
   output order. Each is its own changelog-noted commit.
-- **Package build time during D–F.** The engine redesign happens in the
-  package before its extraction. That is deliberate (§ ordering principle),
-  and the per-commit build-time gate tracks it.
+- **Package build time during D–F.** The engine is redesigned in the
+  package before its extraction; the per-commit build-time gate tracks it.
 
 ## Appendix A: module assignments
 
@@ -1986,7 +1584,7 @@ moves in the phase named.
 | registry/* (declarations, hierarchy, index, resolve, name_context, class_info, function_sig, generics, super_type, anonymous_class) | reflection | C3–C10 |
 | registry/assignability | types (unified relation) + analyser RuleLevelHelper | B4/C2 |
 | registry/assertion_table, assertion_tables | reflection overlays; defaults → ext-nette-tester / ext-mockery | C6 |
-| checker/predefined_constants, checker/constant_resolver (registry/dynamic_constants was folded in at C2) | reflection ConstantResolver | C2 |
+| checker/predefined_constants, checker/constant_resolver | reflection ConstantResolver | C2 |
 | checker/rule_level_helper | analyser RuleLevelHelper | C2/E5 |
 | registry/purity, registry/global_vars | analyser summaries | C9 |
 | registry/access_attributes | ext-language-extensions (class-reflection data ext) | C8 |
@@ -2077,10 +1675,10 @@ moves in the phase named.
 
 ## Appendix B: settings
 
-Every `Registry` setting, with its current readers and its owner.
-Non-Registry keys follow the table.
+Every setting that was on `Registry` before C2, with its readers then and
+its owner. Non-Registry keys follow the table.
 
-| Setting | Read today in | Owner |
+| Setting | Read in | Owner |
 |---|---|---|
 | strict_mixed_arrays | registry/assignability | RuleLevelHelper param |
 | configured_level, check_benevolent_union_types | registry/assignability | RuleLevelHelper / level param set |
@@ -2158,7 +1756,7 @@ Non-Registry keys follow the table.
 
 ## Appendix D: `Locals` and its merge policies
 
-| Member | Merge today | Target |
+| Member | Current merge | Target |
 |---|---|---|
 | types | only if on both sides, unioned | holders with certainty (Maybe for one side) |
 | native | only if on both sides, unioned | native holders, narrowed |
@@ -2200,31 +1798,24 @@ Non-Registry keys follow the table.
 
 ## Appendix F: decisions
 
-- **Scope reporting.** Rules return `Vec<RuleError>`, as in PHPStan and
-  today's external `Rule`. `Scope::report` does not exist.
+- **Scope reporting.** Rules return `Vec<RuleError>`, as in PHPStan and the
+  external `Rule` API. `Scope::report` does not exist.
 - **Diagnostic naming.** The reported item is `Diagnostic` (the compiler
   and LSP term, and the crate's name), not `RuleError`: it also carries
   parse errors, unmatched ignores, project-level findings and stale
   baseline entries. `RuleError` names only what a rule returns, before the
   dispatcher locates it - PHPStan's `RuleError` → `Error` split.
-- **ConstantResolver's layer.** In `reflection`, with
-  `dynamic_constant_names` a `ReflectionSettings` key: reflection's own
-  constant-initializer and PHPDoc-type resolution needs it, as PHPStan's
-  `InitializerExprTypeResolver` calls it. Supersedes C2's analyser
-  placement.
-- **Stage C ordering.** C6 stays before C7: its overlay entries and the
-  functionMap layer parse types with the phpdoc grammar (TypeNode), never
-  `parse_type_string`, so C7 deletes nothing C6 depends on. C9 creates
-  `AnalysisContext` (for the summaries) and D6 completes it, so the
-  summaries have no interim home. The two ext data modules
-  (`access_attributes`, `doctrine_entity`) move onto class-reflection data
-  extensions in C8, so C10 extracts a `reflection` with no ext code in it.
-- **Review findings are fixed where the code is rewritten.** A bug found in
-  code a later Stage C phase rewrites gets a fixture now and is fixed as
-  that phase's own behaviour commit (approved delta) after its structural
-  commit, not patched into code about to be replaced. Exceptions, fixed
-  first because they are wrong output today in code that stays: the
-  `PHP_VERSION_ID` range typing (C2) and C3a's `property.unused` delta.
+- **ConstantResolver's layer.** `reflection`, with `dynamic_constant_names`
+  a `ReflectionSettings` key; reflection and the analyser both read
+  constants through it.
+- **Stage C ordering.** C6 before C7, with C6 parsing types through the
+  phpdoc grammar (TypeNode). C9 creates `AnalysisContext` and D6
+  completes it. The two ext data modules (`access_attributes`,
+  `doctrine_entity`) move onto class-reflection data extensions in C8.
+- **Bugs in code a later phase rewrites.** A fixture first; the fix is that
+  phase's own behaviour commit (approved delta) after its structural
+  commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2) and
+  C3a's `property.unused` delta.
 - **Subtyping home.** A ClassHierarchy oracle trait in `types` with one
   tri-state relation, implemented by reflection. ExtensionTypeData hooks
   take `&dyn ClassHierarchy`. Level-dependent acceptance lives in
@@ -2233,22 +1824,18 @@ Non-Registry keys follow the table.
   load. There is no engine extension.
 - **ext-sql and ext-doctrine.** No crate edge between them. ext-sql owns the
   DBAL Connection / QueryBuilder typing. ext-doctrine publishes entity
-  metadata through a reflection data extension, which lands in C8 so
-  `reflection` can be extracted in C10. DQL typing reads the schema from
-  `sql`.
+  metadata through a reflection data extension (C8). DQL typing reads the
+  schema from `sql`.
 - **Stub index.** Checked in, generated by an xtask, and verified by a
   regeneration test. `stub-sources` has no build-dependency on the parser.
 - **Fixture timing.** Recorded in A2 from the Stage-A binary, behind a
   harness whose backend moves Project API → Session (F1), and moved to
   owning crates in G2. Expectations change only through approved deltas.
-- **Refactor-then-extract.** Chosen over extract-first: it avoids interim
-  homes, double visibility changes and dev-dependency cycles. Its cost is a
-  larger package during Stages D–F, tracked by the build-time gate.
+- **Refactor-then-extract**, not extract-first. The larger package during
+  Stages D–F is tracked by the build-time gate.
 - **Publishing.** Crates stay `publish = false`. Third parties consume them
-  via git against `app`. Publishing to crates.io would require stable APIs
-  and a semver policy, and is out of this plan's structural scope.
+  via git against `app`. Publishing to crates.io is out of scope.
 - **Scope API exclusions.** Excluded PHPStan `Scope` methods are listed with
   reasons in the D6 commit.
-- **`Type` as a closed enum.** Kept: exhaustive matching is compiler-checked
-  coverage. The redesign gives every PHPStan type concept its own variant,
-  and `ExtensionTypeData` covers open extension data.
+- **`Type` as a closed enum.** Kept. Every PHPStan type concept has its own
+  variant, and `ExtensionTypeData` covers open extension data.
