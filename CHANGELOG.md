@@ -18,6 +18,18 @@ User-visible changes: output, formats, flags, configuration and exit codes.
 - `convert-baseline <path>` rewrites a baseline in the current format
   (`bad4a754`).
 
+### Performance
+- `check-project` spends far less time on one thread: named-argument
+  facts no longer need a second checker pass, property-assign facts are
+  collected in parallel, a function lookup that misses no longer scans
+  every function, and composer hygiene no longer calls `getcwd` or
+  canonicalizes each file. The all-on Piwigo run went from about 71 s to
+  about 30 s (`370f1d87`, `3c3c04e0`, `247d955d`, `9d3937f3`).
+- `--dump-types` records the types the check itself inferred, in the
+  same pass, instead of re-checking every file (`78047041`, `ee2eb7a4`).
+- The language server's workspace check runs its files in parallel
+  (`06a56b58`).
+
 ### Language server
 - `restricted_symbols` path zones (`allow_in`, `allow_except_in`) apply in
   the language server, with no ignore list or baseline configured, and its

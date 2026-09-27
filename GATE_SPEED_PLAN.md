@@ -501,5 +501,27 @@ Each is a targeted edit in the step's own commit:
 - S0–S12 are committed. Each structural commit leaves the snapshots
   identical, and each behaviour commit carries its approved delta.
 - One `cargo xtask gates` run at the end passes, and its `gatetime` is
-  compared with the §2 table (37.5 min at `8682ba07`).
-- CHANGELOG notes the `check-project` speedup from S2–S8.
+  compared with the §2 table.
+- CHANGELOG notes the `check-project` speedup from S2–S7.
+
+**Result** (6e186945): every S0–S12 commit is in, and one `cargo xtask
+gates` run passes. Every snapshot is byte-identical to the S3a
+recording (`78047041`), so no approved delta was needed: S3a, S5a, S6
+and S7's possible behaviour changes changed nothing on the corpus or
+the fixtures. The quick tier took 1,008 s (16.8 min), against 2,252 s
+(37.5 min) at `8682ba07`:
+
+| Step | Before | After |
+|---|---|---|
+| corpus step | 667 s | 172 s (gate build 84 s, scoped 27 s, all-on 32 s, determinism 28 s) |
+| `cargo bench --no-run` | 570 s | `--full` only |
+| benches in test mode | ~82 s (debug) | 14 s (gate profile) |
+| type-dump compression | 45 s | 0.6 s |
+| `--no-default-features` | 75 s (build) | 8 s (check) |
+| fixture suite | 483 s | 391 s |
+| lib + cli tests (debug) | 124 s + 173 s | 172 s + 200 s |
+
+What's left is the debug lib and cli tests (~6 min) and the fixture
+suite (~6.5 min), each dominated by stub setup that §4 leaves to C4/C5.
+S11's open question, running the debug tests in an optimized profile,
+is the user's call.
