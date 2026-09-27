@@ -88,6 +88,30 @@ fn check_project_reports_real_diagnostics_and_a_summary_line() {
 }
 
 #[test]
+fn check_project_writes_the_type_dump_it_is_asked_for() {
+    let dir = TempDir::new("dump_types");
+    dir.write("a.php", "<?php $x = 1;\n$y = 'two';\n");
+    let dump = dir.path().join("types.txt");
+
+    let output = bin()
+        .arg("check-project")
+        .arg("--dump-types")
+        .arg(&dump)
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = std::fs::read_to_string(&dump).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "got: {text}");
+    assert!(
+        lines[0].ends_with("a.php:1:7 [] x: 1 (native 1)"),
+        "got: {text}"
+    );
+    assert!(lines[1].contains("a.php:2:1 [] "), "got: {text}");
+}
+
+#[test]
 fn check_project_reports_diagnostics_in_source_order_across_files() {
     // Two files, each with one diagnostic, loaded in an order that
     // doesn't match their sorted-by-path report order - `--check-project`

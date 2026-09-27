@@ -58,10 +58,9 @@ fn run_fixture(name: &str, expect_file: &Path) -> Result<(), Failed> {
     let single_file = stem.with_extension("php").is_file();
     let dump = std::env::var_os("PHPSTAN_RS_DUMP_TYPES")
         .map(|dir| PathBuf::from(dir).join(name.replace('/', "__")));
-    let raw = dump.as_ref().map(|d| d.with_extension("raw"));
-    let analysis = session.run(raw.as_deref())?;
-    if let (Some(dump), Some(raw)) = (&dump, &raw) {
-        write_type_dump(name, &base, raw, &dump.with_extension("types"))?;
+    let analysis = session.run(dump.is_some())?;
+    if let (Some(dump), Some(text)) = (&dump, &analysis.type_dump) {
+        write_type_dump(name, &base, text, &dump.with_extension("types"))?;
     }
     if analysis.skipped_analyze > 0 {
         return Err(format!(
@@ -91,10 +90,9 @@ fn run_fixture(name: &str, expect_file: &Path) -> Result<(), Failed> {
     }
 }
 
-/// Rewrites `raw`, the session's type dump, into `out`: each line's path
+/// Writes `text`, the session's type dump, to `out`: each line's path
 /// relative to `base` and prefixed with the fixture's name.
-fn write_type_dump(name: &str, base: &Path, raw: &Path, out: &Path) -> Result<(), Failed> {
-    let text = std::fs::read_to_string(raw)?;
+fn write_type_dump(name: &str, base: &Path, text: &str, out: &Path) -> Result<(), Failed> {
     let prefix = format!("{}/", base.display());
     let mut rewritten = String::new();
     for line in text.lines() {
@@ -102,7 +100,6 @@ fn write_type_dump(name: &str, base: &Path, raw: &Path, out: &Path) -> Result<()
         writeln!(rewritten, "{name}: {line}").unwrap();
     }
     std::fs::write(out, rewritten)?;
-    std::fs::remove_file(raw)?;
     Ok(())
 }
 

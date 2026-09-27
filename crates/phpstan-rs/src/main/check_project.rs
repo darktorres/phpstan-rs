@@ -676,7 +676,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     // print each caught panic's default message.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let analysis = session.run(args.dump_types.as_deref());
+    let analysis = session.run(args.dump_types.is_some());
     std::panic::set_hook(default_hook);
     let analysis = match analysis {
         Ok(analysis) => analysis,
@@ -687,6 +687,11 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     };
     for warning in &analysis.lex_warnings {
         eprintln!("{warning}");
+    }
+    if let (Some(out), Some(dump)) = (&args.dump_types, &analysis.type_dump)
+        && let Err(e) = std::fs::write(out, dump)
+    {
+        eprintln!("failed to write type dump {}: {e}", out.display());
     }
     report(
         analysis,
@@ -716,6 +721,7 @@ fn report(
         context_loaded,
         check_panics,
         lex_warnings: _,
+        type_dump: _,
     } = analysis;
     if let Some(generate_baseline_path) = generate_baseline_path {
         let generated = if baseline_per_identifier {

@@ -106,6 +106,11 @@ pub struct Analysis {
     pub check_panics: Vec<(PathBuf, String)>,
     /// What the lexer skipped over in the loaded files, one line each.
     pub lex_warnings: Vec<String>,
+    /// The `--dump-types` output when requested: every tracked variable's
+    /// type after each statement of each analysed file, one
+    /// `path:line:col [host] vars` line per statement, files in path
+    /// order.
+    pub type_dump: Option<String>,
 }
 
 /// The directory a composer project containing `dirs` is rooted at: the
@@ -550,10 +555,10 @@ impl Session {
         Some((source, parsed))
     }
 
-    /// Loads, checks and post-processes every analysed file. `dump_types`
-    /// writes `--dump-types` output there. Fails when the analysed
-    /// paths hold no `.php` file.
-    pub fn run(&self, dump_types: Option<&Path>) -> Result<Analysis, String> {
+    /// Loads, checks and post-processes every analysed file, with the
+    /// `--dump-types` output when `dump_types` is set. Fails when the
+    /// analysed paths hold no `.php` file.
+    pub fn run(&self, dump_types: bool) -> Result<Analysis, String> {
         let loaded = self.load()?;
         Ok(self.analyse(loaded, dump_types))
     }
@@ -662,7 +667,7 @@ impl Session {
 
     /// Checks every analysed file of `loaded`, runs the project-wide
     /// passes, and post-processes the result.
-    pub fn analyse(&self, loaded: Loaded, dump_types: Option<&Path>) -> Analysis {
+    pub fn analyse(&self, loaded: Loaded, dump_types: bool) -> Analysis {
         let Loaded {
             mut project,
             pool,
@@ -690,7 +695,12 @@ impl Session {
                 .par_iter()
                 .map(|path| {
                     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        project.check_analysed_file(path, &property_assign_facts, needs_tier_2)
+                        project.check_analysed_file(
+                            path,
+                            &property_assign_facts,
+                            needs_tier_2,
+                            dump_types,
+                        )
                     }));
                     let outcome = outcome.map_err(|payload| {
                         payload
@@ -704,28 +714,10 @@ impl Session {
                 .collect()
         });
 
-        if let Some(out) = dump_types {
-            let mut dumps: Vec<(&PathBuf, Vec<String>)> = pool.install(|| {
-                analyze_files_by_size
-                    .par_iter()
-                    .map(|path| (path, project.dump_types(path, &property_assign_facts)))
-                    .collect()
-            });
-            dumps.sort_by(|a, b| a.0.cmp(b.0));
-            let mut text = String::new();
-            for (path, lines) in dumps {
-                for line in lines {
-                    text.push_str(&format!("{}:{line}\n", path.display()));
-                }
-            }
-            if let Err(e) = std::fs::write(out, text) {
-                eprintln!("failed to write type dump {}: {e}", out.display());
-            }
-        }
-
         let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
         let mut named_argument_calls = Vec::new();
+        let mut type_dumps = Vec::new();
         for (path, outcome) in checked_results {
             match outcome {
                 Ok(check) => {
@@ -738,6 +730,9 @@ impl Session {
                         );
                     }
                     named_argument_calls.push((path.clone(), check.named_argument_calls));
+                    if dump_types {
+                        type_dumps.push((path.clone(), check.type_dump));
+                    }
                     results.insert(path, check.diagnostics);
                 }
                 Err(msg) => check_panics.push((path, msg)),
@@ -745,6 +740,16 @@ impl Session {
         }
         check_panics.sort();
         named_argument_calls.sort_by(|a, b| a.0.cmp(&b.0));
+        let type_dump = dump_types.then(|| {
+            type_dumps.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut text = String::new();
+            for (path, lines) in type_dumps {
+                for line in lines {
+                    text.push_str(&format!("{}:{line}\n", path.display()));
+                }
+            }
+            text
+        });
         let named_argument_calls = merge_named_argument_calls(named_argument_calls);
         if needs_tier_2 {
             project.mark_member_index_built();
@@ -798,6 +803,7 @@ impl Session {
             context_loaded,
             check_panics,
             lex_warnings,
+            type_dump,
         }
     }
 }

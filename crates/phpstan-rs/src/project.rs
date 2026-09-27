@@ -201,6 +201,9 @@ pub(crate) struct FileCheck {
     pub(crate) escaped_member_classes: FxHashSet<String>,
     /// Named-argument call sites against overridable methods.
     pub(crate) named_argument_calls: checker::NamedArgumentCallFacts,
+    /// The `--dump-types` lines (`line:col [host] vars`, one per
+    /// statement); empty unless requested.
+    pub(crate) type_dump: Vec<String>,
 }
 
 impl Project {
@@ -1131,7 +1134,7 @@ impl Project {
         }
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         for path in paths {
-            let check = self.check_file_impl(&path, None, true);
+            let check = self.check_file_impl(&path, None, true, false);
             self.seed_member_refs(
                 &path,
                 check.member_refs,
@@ -1527,7 +1530,7 @@ impl Project {
     /// is the batch counterpart that does.
     #[hotpath::measure]
     pub fn check_file(&self, path: &Path) -> Vec<Diagnostic> {
-        self.check_file_impl(path, None, false).diagnostics
+        self.check_file_impl(path, None, false, false).diagnostics
     }
 
     /// The Tier-2 (member-reference) counterpart of `check_file` - the
@@ -1543,7 +1546,7 @@ impl Project {
         &self,
         path: &Path,
     ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
-        let check = self.check_file_impl(path, None, true);
+        let check = self.check_file_impl(path, None, true, false);
         (check.diagnostics, check.member_refs)
     }
 
@@ -1558,21 +1561,24 @@ impl Project {
         path: &Path,
         facts: &Arc<PropertyAssignFacts>,
     ) -> Vec<Diagnostic> {
-        self.check_file_impl(path, Some(facts), false).diagnostics
+        self.check_file_impl(path, Some(facts), false, false)
+            .diagnostics
     }
 
     /// The session's main-pass check of an analysed file, with the
     /// project-wide property-assign `facts`: its diagnostics and the data
     /// the whole-program checks read afterwards. With
     /// `collect_member_refs`, the Tier-2 member-reference data too (fed to
-    /// `seed_member_refs`), so no second pass is needed for it.
+    /// `seed_member_refs`), so no second pass is needed for it; with
+    /// `dump_types`, the file's `--dump-types` lines.
     pub(crate) fn check_analysed_file(
         &self,
         path: &Path,
         facts: &Arc<PropertyAssignFacts>,
         collect_member_refs: bool,
+        dump_types: bool,
     ) -> FileCheck {
-        self.check_file_impl(path, Some(facts), collect_member_refs)
+        self.check_file_impl(path, Some(facts), collect_member_refs, dump_types)
     }
 
     /// A bare, un-run `Checker` for `path` plus its AST, for an LSP
@@ -1609,24 +1615,12 @@ impl Project {
         checker.take_semantic_tokens()
     }
 
-    /// `--dump-types`: every tracked variable's type after each statement
-    /// of `path`, one `line:col [host] vars` line per statement, inferred
-    /// with the same project-wide property-assign `facts` as the check.
-    pub fn dump_types(&self, path: &Path, facts: &Arc<PropertyAssignFacts>) -> Vec<String> {
-        let Some((mut checker, ast)) = self.checker_for(path) else {
-            return Vec::new();
-        };
-        checker.set_cross_file_property_assign_facts(Arc::clone(facts));
-        checker.set_dump_types(true);
-        checker.check_program(ast);
-        checker.take_type_dump()
-    }
-
     fn check_file_impl(
         &self,
         path: &Path,
         cross_file_property_assign_facts: Option<&Arc<PropertyAssignFacts>>,
         collect_member_refs: bool,
+        dump_types: bool,
     ) -> FileCheck {
         let Some(file) = self.files.get(path) else {
             return FileCheck {
@@ -1635,6 +1629,7 @@ impl Project {
                 escaped_enums: FxHashSet::default(),
                 escaped_member_classes: FxHashSet::default(),
                 named_argument_calls: FxHashMap::default(),
+                type_dump: Vec::new(),
             };
         };
         let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
@@ -1647,6 +1642,7 @@ impl Project {
             checker.set_cross_file_property_assign_facts(Arc::clone(facts));
         }
         checker.set_collect_member_refs(collect_member_refs);
+        checker.set_dump_types(dump_types);
         checker.check_program(&file.ast);
         if collect_member_refs {
             checker.collect_default_and_const_value_member_refs(&file.ast);
@@ -1655,6 +1651,7 @@ impl Project {
         let escaped_enums = checker.take_escaped_enums();
         let escaped_member_classes = checker.take_escaped_member_classes();
         let named_argument_calls = checker.take_named_argument_call_facts();
+        let type_dump = checker.take_type_dump();
         let mut diagnostics = checker.into_diagnostics();
         if self.registry.check_duplicate_function_declarations {
             diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
@@ -1729,6 +1726,7 @@ impl Project {
             escaped_enums,
             escaped_member_classes,
             named_argument_calls,
+            type_dump,
         }
     }
 
