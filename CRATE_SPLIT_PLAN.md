@@ -1110,6 +1110,10 @@ Follow-ups:
   nsrt mismatches), and integer ranges merge when they overlap or touch
   (`int<10, 20>|int<5, 25>` stays unmerged today, and
   `@param int<0, 5>|int<6, 9>` widens to `int`).
+- **Intersections reduce** by the class hierarchy (`TypeCombinator::intersect`):
+  an intersection of a class and its subclass is the subclass. In
+  `while ($foo instanceof Dim) { …; $foo = $bar; }` with `Dim extends Expr`,
+  the second pass sees `$foo` as `Expr&Dim` today.
 - **Subtracted types.** `mixed~T` and `object~T`/`Foo~Bar` (PHPStan's
   `subtractedType`) are variants: narrowing `mixed` away from a type keeps
   what was removed. Today `$m !== null`, `isset($m)` and `!is_int($m)` on a
@@ -2250,7 +2254,9 @@ assignments inside `assert()`.
   - At a file's top level every unknown variable is Maybe
     (`canAnyVariableExist`), because the including scope may define it.
     `echo $x;` in a script file is `variable.undefined` at level 0 today;
-    snapshot 0a8fe69 has 75 of them in `<main>`. Fixed first: before D5,
+    snapshot 0a8fe69 has 75 of them in `<main>`. `$argc`/`$argv` there
+    are `int<1, max>`/`non-empty-list<string>` (they are `int` and
+    `array<(int|string), mixed>` today). Fixed first: before D5,
     an unknown variable read outside any function or closure is reported
     at level 1 as "Variable $x might not be defined."
   - A merge keeps a Maybe holder only for variables, function calls and
