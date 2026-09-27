@@ -1,0 +1,119 @@
+--- old
++++ new
+@@ -1543,7 +1543,7 @@
+ checker/constant_conditions/a_breakless_while_true_is_flagged: a_breakless_while_true_is_flagged.php:1:22 [] 
+ checker/constant_conditions/a_breakless_while_true_is_flagged: a_breakless_while_true_is_flagged.php:1:35 [] 
+ checker/constant_conditions/a_breakless_while_true_is_flagged: a_breakless_while_true_is_flagged.php:1:37 [] 
+-checker/constant_conditions/a_comparison_whose_ranges_genuinely_overlap_is_never_flagged: a_comparison_whose_ranges_genuinely_overlap_is_never_flagged.php:3:36 [] x: int<0, 9>|int<10, 30> (native int)
++checker/constant_conditions/a_comparison_whose_ranges_genuinely_overlap_is_never_flagged: a_comparison_whose_ranges_genuinely_overlap_is_never_flagged.php:3:36 [] x: int<0, 30> (native int)
+ checker/constant_conditions/a_comparison_whose_ranges_genuinely_overlap_is_never_flagged: a_comparison_whose_ranges_genuinely_overlap_is_never_flagged.php:3:49 [] x: int<0, 9> (native int)
+ checker/constant_conditions/a_comparison_whose_ranges_genuinely_overlap_is_never_flagged: a_comparison_whose_ranges_genuinely_overlap_is_never_flagged.php:3:51 [] x: int<0, 9> (native int)
+ checker/constant_conditions/a_counter_incremented_inside_a_loop_and_checked_after_is_never_flagged: a_counter_incremented_inside_a_loop_and_checked_after_is_never_flagged.php:3:13 [] items: array (native array); n: 0 (native 0)
+@@ -1706,7 +1706,7 @@
+ checker/constant_conditions/a_yielding_while_true_is_not_flagged: a_yielding_while_true_is_not_flagged.php:1:22 [] 
+ checker/constant_conditions/a_yielding_while_true_is_not_flagged: a_yielding_while_true_is_not_flagged.php:1:35 [] 
+ checker/constant_conditions/a_yielding_while_true_is_not_flagged: a_yielding_while_true_is_not_flagged.php:1:37 [] 
+-checker/constant_conditions/already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else: already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else.php:3:17 [] x: int<6, max>|int<min, 5> (native int)
++checker/constant_conditions/already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else: already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else.php:3:17 [] x: int (native int)
+ checker/constant_conditions/already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else: already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else.php:3:29 [] x: int<6, max> (native int)
+ checker/constant_conditions/already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else: already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else.php:4:21 [] x: int<6, max> (native int)
+ checker/constant_conditions/already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else: already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else.php:5:39 [] x: int<min, 5> (native int)
+@@ -1743,7 +1743,7 @@
+ checker/constant_conditions/an_if_with_a_real_variable_condition_is_not_flagged: an_if_with_a_real_variable_condition_is_not_flagged.php:1:29 [] x: bool (native bool)
+ checker/constant_conditions/an_if_with_a_real_variable_condition_is_not_flagged: an_if_with_a_real_variable_condition_is_not_flagged.php:1:37 [] x: bool (native bool)
+ checker/constant_conditions/an_if_with_a_real_variable_condition_is_not_flagged: an_if_with_a_real_variable_condition_is_not_flagged.php:1:39 [] x: bool (native bool)
+-checker/constant_conditions/an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged: an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged.php:2:36 [] x: int<min, 9>|int<10, max> (native int)
++checker/constant_conditions/an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged: an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged.php:2:36 [] x: int (native int)
+ checker/constant_conditions/an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged: an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged.php:2:49 [] x: int<min, 9> (native int)
+ checker/constant_conditions/an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged: an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged.php:2:51 [] x: int<min, 9> (native int)
+ checker/constant_conditions/haystack_values_the_needle_can_never_match_are_flagged: haystack_values_the_needle_can_never_match_are_flagged.php:5:17 [] n: int (native int); name: string (native string); s: Suit (native Suit)
+@@ -1751,7 +1751,7 @@
+ checker/constant_conditions/haystack_values_the_needle_can_never_match_are_flagged: haystack_values_the_needle_can_never_match_are_flagged.php:7:17 [] n: int (native int); name: string (native string); s: Suit (native Suit)
+ checker/constant_conditions/haystack_values_the_needle_can_never_match_are_flagged: haystack_values_the_needle_can_never_match_are_flagged.php:8:17 [] n: int (native int); name: string (native string); s: Suit (native Suit)
+ checker/constant_conditions/haystack_values_the_needle_can_never_match_are_flagged: haystack_values_the_needle_can_never_match_are_flagged.php:9:17 [] n: int (native int); name: string (native string); s: Suit (native Suit)
+-checker/constant_conditions/impossible_type_is_never_exempted_as_a_trailing_elseif: impossible_type_is_never_exempted_as_a_trailing_elseif.php:3:17 [] x: int<6, max>|string|int<min, 5> (native int)
++checker/constant_conditions/impossible_type_is_never_exempted_as_a_trailing_elseif: impossible_type_is_never_exempted_as_a_trailing_elseif.php:3:17 [] x: int|string (native int)
+ checker/constant_conditions/impossible_type_is_never_exempted_as_a_trailing_elseif: impossible_type_is_never_exempted_as_a_trailing_elseif.php:3:29 [] x: int<6, max> (native int)
+ checker/constant_conditions/impossible_type_is_never_exempted_as_a_trailing_elseif: impossible_type_is_never_exempted_as_a_trailing_elseif.php:4:21 [] x: int<6, max> (native int)
+ checker/constant_conditions/impossible_type_is_never_exempted_as_a_trailing_elseif: impossible_type_is_never_exempted_as_a_trailing_elseif.php:5:42 [] x: string (native int)
+@@ -2017,11 +2017,11 @@
+ checker/control_flow/a_later_catch_clause_for_the_exact_same_type_is_flagged: a_later_catch_clause_for_the_exact_same_type_is_flagged.php:7:21 [] e: RuntimeException
+ checker/control_flow/a_later_catch_clause_for_the_exact_same_type_is_flagged: a_later_catch_clause_for_the_exact_same_type_is_flagged.php:9:21 [] e: RuntimeException
+ checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:3:17 [] n: int (native int); total: 0 (native 0)
+-checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:4:17 [] n: int<min, 0>; total: int
+-checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:4:32 [] n: int<0, max>; total: int
+-checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:5:21 [] n: int<1, max>; total: int
+-checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:6:21 [] n: int<0, max>; total: int
+-checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:8:17 [] n: int<min, 0>; total: int
++checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:4:17 [] n: int<min, 0>; total: int<0, max>
++checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:4:32 [] n: int<0, max>; total: int<1, max>
++checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:5:21 [] n: int<1, max>; total: int<1, max>
++checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:6:21 [] n: int<0, max>; total: int<1, max>
++checker/control_flow/a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn: a_loop_body_with_no_internal_reassignment_produces_no_diagnostic_churn.php:8:17 [] n: int<min, 0>; total: int<0, max>
+ checker/control_flow/a_loop_counter_incremented_each_iteration_converges_to_a_plain_int: a_loop_counter_incremented_each_iteration_converges_to_a_plain_int.php:4:17 [] i: 0 (native 0)
+ checker/control_flow/a_loop_counter_incremented_each_iteration_converges_to_a_plain_int: a_loop_counter_incremented_each_iteration_converges_to_a_plain_int.php:5:17 [] i: int
+ checker/control_flow/a_loop_counter_incremented_each_iteration_converges_to_a_plain_int: a_loop_counter_incremented_each_iteration_converges_to_a_plain_int.php:5:36 [] i: int
+@@ -3518,6 +3518,12 @@
+ checker/instantiation/static_call_on_a_value_that_cannot_name_a_class_is_flagged: static_call_on_a_value_that_cannot_name_a_class_is_flagged.php:3:17 [] i: int (native int); m: int|string (native int|string); s: string (native string)
+ checker/instantiation/static_call_on_a_value_that_cannot_name_a_class_is_flagged: static_call_on_a_value_that_cannot_name_a_class_is_flagged.php:4:17 [] i: int (native int); m: int|string (native int|string); s: string (native string)
+ checker/instantiation/static_call_on_a_value_that_cannot_name_a_class_is_flagged: static_call_on_a_value_that_cannot_name_a_class_is_flagged.php:5:17 [] i: int (native int); m: int|string (native int|string); s: string (native string)
++checker/int_range_arithmetic/a_union_of_an_integer_and_an_adjacent_range_is_one_range: a_union_of_an_integer_and_an_adjacent_range_is_one_range.php:8:25 [] n: int<0, max> (native int)
++checker/int_range_arithmetic/a_union_of_an_integer_and_an_adjacent_range_is_one_range: a_union_of_an_integer_and_an_adjacent_range_is_one_range.php:17:5 [] a: int<0, max> (native int); b: int<1, 9>|12 (native int); c: 1|2|3 (native int); d: int (native int); e: int<3, 5>|1 (native int)
++checker/int_range_arithmetic/a_union_of_an_integer_and_an_adjacent_range_is_one_range: a_union_of_an_integer_and_an_adjacent_range_is_one_range.php:18:5 [] a: int<0, max> (native int); b: int<1, 9>|12 (native int); c: 1|2|3 (native int); d: int (native int); e: int<3, 5>|1 (native int)
++checker/int_range_arithmetic/a_union_of_an_integer_and_an_adjacent_range_is_one_range: a_union_of_an_integer_and_an_adjacent_range_is_one_range.php:19:5 [] a: int<0, max> (native int); b: int<1, 9>|12 (native int); c: 1|2|3 (native int); d: int (native int); e: int<3, 5>|1 (native int)
++checker/int_range_arithmetic/a_union_of_an_integer_and_an_adjacent_range_is_one_range: a_union_of_an_integer_and_an_adjacent_range_is_one_range.php:20:5 [] a: int<0, max> (native int); b: int<1, 9>|12 (native int); c: 1|2|3 (native int); d: int (native int); e: int<3, 5>|1 (native int)
++checker/int_range_arithmetic/a_union_of_an_integer_and_an_adjacent_range_is_one_range: a_union_of_an_integer_and_an_adjacent_range_is_one_range.php:21:5 [] a: int<0, max> (native int); b: int<1, 9>|12 (native int); c: 1|2|3 (native int); d: int (native int); e: int<3, 5>|1 (native int)
+ checker/int_range_arithmetic/adding_a_genuinely_unbounded_operand_stays_plain_int_not_float: adding_a_genuinely_unbounded_operand_stays_plain_int_not_float.php:7:17 [] x: int<1, max> (native int)
+ checker/int_range_arithmetic/adding_a_literal_to_a_bounded_int_range_shifts_both_ends: adding_a_literal_to_a_bounded_int_range_shifts_both_ends.php:5:17 [] x: int<0, 10> (native int)
+ checker/int_range_arithmetic/adding_a_literal_to_an_upper_unbounded_int_range_keeps_it_unbounded: adding_a_literal_to_an_upper_unbounded_int_range_keeps_it_unbounded.php:5:17 [] x: int<0, max> (native int)
+@@ -4107,7 +4113,7 @@
+ checker/narrowing/a_later_match_true_arm_sees_every_condition_of_a_multi_condition_arm_false: a_later_match_true_arm_sees_every_condition_of_a_multi_condition_arm_false.php:7:82 [] x: string
+ checker/narrowing/a_literal_arm_repeated_after_an_already_narrowed_single_value_subject_is_always_true: a_literal_arm_repeated_after_an_already_narrowed_single_value_subject_is_always_true.php:3:17 [] x: 1 (native 1)
+ checker/narrowing/a_literal_arm_repeated_after_an_already_narrowed_single_value_subject_is_always_true: a_literal_arm_repeated_after_an_already_narrowed_single_value_subject_is_always_true.php:4:17 [] x: 1|never (native 1)
+-checker/narrowing/a_literal_on_the_left_is_narrowed_via_the_mirrored_operator: a_literal_on_the_left_is_narrowed_via_the_mirrored_operator.php:5:17 [] x: int<0, max>|int<min, -1> (native int)
++checker/narrowing/a_literal_on_the_left_is_narrowed_via_the_mirrored_operator: a_literal_on_the_left_is_narrowed_via_the_mirrored_operator.php:5:17 [] x: int (native int)
+ checker/narrowing/a_literal_on_the_left_is_narrowed_via_the_mirrored_operator: a_literal_on_the_left_is_narrowed_via_the_mirrored_operator.php:5:30 [] x: int<0, max> (native int)
+ checker/narrowing/a_literal_on_the_left_is_narrowed_via_the_mirrored_operator: a_literal_on_the_left_is_narrowed_via_the_mirrored_operator.php:6:21 [] x: int<0, max> (native int)
+ checker/narrowing/a_method_call_on_a_union_of_two_classes_unions_their_return_types: a_method_call_on_a_union_of_two_classes_unions_their_return_types.php:3:61 [ReturnsInt] this: ReturnsInt
+@@ -4474,10 +4480,10 @@
+ checker/narrowing/fully_qualified_true_false_and_null_infer_as_their_own_literal_types: fully_qualified_true_false_and_null_infer_as_their_own_literal_types.php:6:17 [] 
+ checker/narrowing/fully_qualified_true_false_and_null_infer_as_their_own_literal_types: fully_qualified_true_false_and_null_infer_as_their_own_literal_types.php:7:17 [] 
+ checker/narrowing/fully_qualified_true_false_and_null_infer_as_their_own_literal_types: fully_qualified_true_false_and_null_infer_as_their_own_literal_types.php:8:17 [] 
+-checker/narrowing/greater_than_a_literal_narrows_the_lower_bound_exclusive: greater_than_a_literal_narrows_the_lower_bound_exclusive.php:5:17 [] x: int<1, max>|int<min, 0> (native int)
++checker/narrowing/greater_than_a_literal_narrows_the_lower_bound_exclusive: greater_than_a_literal_narrows_the_lower_bound_exclusive.php:5:17 [] x: int (native int)
+ checker/narrowing/greater_than_a_literal_narrows_the_lower_bound_exclusive: greater_than_a_literal_narrows_the_lower_bound_exclusive.php:5:29 [] x: int<1, max> (native int)
+ checker/narrowing/greater_than_a_literal_narrows_the_lower_bound_exclusive: greater_than_a_literal_narrows_the_lower_bound_exclusive.php:6:21 [] x: int<1, max> (native int)
+-checker/narrowing/greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive: greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive.php:5:17 [] x: int<0, max>|int<min, -1> (native int)
++checker/narrowing/greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive: greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive.php:5:17 [] x: int (native int)
+ checker/narrowing/greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive: greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive.php:5:30 [] x: int<0, max> (native int)
+ checker/narrowing/greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive: greater_than_or_equal_to_a_literal_narrows_the_lower_bound_inclusive.php:6:21 [] x: int<0, max> (native int)
+ checker/narrowing/guard_clause_narrows_in_else_branch_too: guard_clause_narrows_in_else_branch_too.php:3:17 [] name: string (native string|null)
+@@ -4757,7 +4763,7 @@
+ checker/narrowing/match_unhandled_is_never_flagged_when_a_nullable_enum_is_fully_covered: match_unhandled_is_never_flagged_when_a_nullable_enum_is_fully_covered.php:4:17 [] s: Status::Active|Status::Inactive|null (native Status|null)
+ checker/narrowing/match_unhandled_is_never_flagged_when_both_bool_arms_are_covered: match_unhandled_is_never_flagged_when_both_bool_arms_are_covered.php:3:17 [] b: true|false (native bool)
+ checker/narrowing/match_unhandled_is_never_flagged_when_every_enum_case_is_covered: match_unhandled_is_never_flagged_when_every_enum_case_is_covered.php:4:17 [] s: Suit::Hearts|Suit::Diamonds|Suit::Clubs|Suit::Spades (native Suit)
+-checker/narrowing/match_unhandled_proves_a_match_true_idiom_exhaustive_via_range_narrowing: match_unhandled_proves_a_match_true_idiom_exhaustive_via_range_narrowing.php:3:17 [] x: int<6, max>|int<min, 5> (native int)
++checker/narrowing/match_unhandled_proves_a_match_true_idiom_exhaustive_via_range_narrowing: match_unhandled_proves_a_match_true_idiom_exhaustive_via_range_narrowing.php:3:17 [] x: int (native int)
+ checker/narrowing/match_unhandled_still_flags_a_genuinely_non_exhaustive_match_true_idiom: match_unhandled_still_flags_a_genuinely_non_exhaustive_match_true_idiom.php:3:17 [] x: int<6, max>|never (native int)
+ checker/narrowing/method_exists_composes_with_the_right_side_of_an_and_expression: method_exists_composes_with_the_right_side_of_an_and_expression.php:4:17 [] image: ImageInterface4 (native ImageInterface4)
+ checker/narrowing/method_exists_composes_with_the_right_side_of_an_and_expression: method_exists_composes_with_the_right_side_of_an_and_expression.php:4:76 [] image: ImageInterface4 (native ImageInterface4)
+@@ -5869,6 +5875,10 @@
+ checker/printf_format_arguments/a_purely_positional_format_string_missing_an_argument_is_flagged: a_purely_positional_format_string_missing_an_argument_is_flagged.php:1:7 [] 
+ checker/printf_format_arguments/a_purely_positional_format_string_with_enough_arguments_is_never_flagged: a_purely_positional_format_string_with_enough_arguments_is_never_flagged.php:1:7 [] 
+ checker/printf_format_arguments/a_repeated_position_only_needs_one_argument: a_repeated_position_only_needs_one_argument.php:1:7 [] 
++checker/printf_format_arguments/a_value_every_printf_function_rejects_is_reported_once: a_value_every_printf_function_rejects_is_reported_once.php:7:5 [] m: mixed; row: array<string, mixed> (native array); stream: resource
++checker/printf_format_arguments/a_value_every_printf_function_rejects_is_reported_once: a_value_every_printf_function_rejects_is_reported_once.php:8:5 [] m: mixed; row: array<string, mixed> (native array); stream: resource
++checker/printf_format_arguments/a_value_every_printf_function_rejects_is_reported_once: a_value_every_printf_function_rejects_is_reported_once.php:9:5 [] m: mixed; row: array<string, mixed> (native array); stream: resource
++checker/printf_format_arguments/a_value_every_printf_function_rejects_is_reported_once: a_value_every_printf_function_rejects_is_reported_once.php:10:5 [] m: mixed; row: array<string, mixed> (native array); stream: resource
+ checker/printf_format_arguments/an_int_for_f_specifier_is_still_accepted_in_strict_mode: an_int_for_f_specifier_is_still_accepted_in_strict_mode.php:3:17 [] x: int (native int)
+ checker/printf_format_arguments/fprintf_checks_its_format_string_as_the_second_argument: fprintf_checks_its_format_string_as_the_second_argument.php:3:17 [] stream: mixed
+ checker/printf_format_arguments/fprintf_flags_extra_arguments: fprintf_flags_extra_arguments.php:3:17 [] stream: mixed
+@@ -5876,6 +5886,8 @@
+ checker/printf_format_arguments/fscanf_byref_count_mismatch_reports_argument_fscanf: fscanf_byref_count_mismatch_reports_argument_fscanf.php:4:25 [] a: 0 (native 0); b: '' (native ''); stream: resource
+ checker/printf_format_arguments/fscanf_byref_count_mismatch_reports_argument_fscanf: fscanf_byref_count_mismatch_reports_argument_fscanf.php:4:34 [] a: 0 (native 0); b: '' (native ''); c: 0 (native 0); stream: resource
+ checker/printf_format_arguments/fscanf_byref_count_mismatch_reports_argument_fscanf: fscanf_byref_count_mismatch_reports_argument_fscanf.php:5:17 [] a: mixed; b: mixed; c: mixed; stream: resource
++checker/printf_format_arguments/printf_accepts_bool_and_null_values: printf_accepts_bool_and_null_values.php:3:5 [] b: bool (native bool); n: int|null (native int|null)
++checker/printf_format_arguments/printf_accepts_bool_and_null_values: printf_accepts_bool_and_null_values.php:4:5 [] b: bool (native bool); n: int|null (native int|null)
+ checker/printf_format_arguments/printf_flags_too_many_arguments_for_its_own_placeholders: printf_flags_too_many_arguments_for_its_own_placeholders.php:1:7 [] 
+ checker/printf_format_arguments/sprintf_accepts_an_object_with_to_string_only_for_string_placeholders: sprintf_accepts_an_object_with_to_string_only_for_string_placeholders.php:2:54 [Label] this: Label
+ checker/printf_format_arguments/sprintf_accepts_an_object_with_to_string_only_for_string_placeholders: sprintf_accepts_an_object_with_to_string_only_for_string_placeholders.php:4:5 [] l: Label (native Label)
