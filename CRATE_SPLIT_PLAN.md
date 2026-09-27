@@ -2717,8 +2717,8 @@ building on the previous one:
     - `default` excludes the handled cases, and a switch without one
       whose cases leave the subject `never` has no fall-through exit: a
       variable every case assigns is defined after it (`$method` after a
-      `switch` over all four `MagicPropertyHandler` cases is
-      `variable.undefined` today,
+      `switch` over all four values of `@param MagicPropertyHandler::*`,
+      the constants of a final class, is `variable.undefined` today,
       `rector/rules/Transform/Rector/ArrayDimFetch/ArrayDimFetchToMethodCallRector.php:171`);
     - `continue` inside a switch acts like `break`;
     - a `break` nested in a case's `if` leaves the switch with that scope:
