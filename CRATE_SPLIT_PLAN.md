@@ -895,11 +895,15 @@ corpus, type, baseline, performance and build-time gates run locally
    `impl` must be in the module assignment of its type's crate, and a trait
    `impl` in that of its trait's crate or its type's (the orphan rule, a
    generic type's own parameters counting as neither). The inventory lands
-   before C4, each entry with the phase that moves its module; on today's
-   package, 84 inherent `impl` blocks of seven core types alone sit in
-   another crate's modules (52 of `Checker` in modules assigned to `rules`, 7
-   in `builtins`, 17 in the `ext-*` modules, one in `lsp`; 5 of `Project`; 2
-   of `Registry` in `analyser`'s `global_vars`).
+   before C4, each entry with the phase that moves its module. Over every `impl`
+   of today's package (tests aside), 84 inherent blocks sit in another crate's
+   modules, all of three types: 77 of `Checker` (52 in modules assigned to
+   `rules`, 7 in `builtins`, 17 in the `ext-*` modules, one in `lsp`), 5 of
+   `Project` (in `rules`' and `ext-mockstan`'s) and 2 of `Registry` (in
+   `analyser`'s `global_vars`). One trait `impl` breaks the orphan rule, and
+   before G: `project.rs`'s `impl BodySource for FxHashMap<PathBuf, FileState>`
+   implements `reflection`'s trait for a foreign type, which stops compiling at
+   C10 while `project` is still in the package.
 3. **Tests.** The set of test names (`cargo test --workspace --all-targets
    -- --list` plus the fixture lists) must be a superset of the previous
    commit's set mapped through a committed rename/removal manifest (old →
@@ -7452,10 +7456,15 @@ What an extraction checks:
 - **Tests.** Each `#[cfg(test)]` module moves with its module. A unit test may
   dev-depend only on crates that don't depend on its own: a dev-dependency on
   one that does links a second copy of the crate, whose types don't match the
-  test's. So `project`'s unit tests (70 today) may register `builtins`, `rules`
-  and any `ext-*`, and `lsp`'s (263) may use `app`, but an `analyser` test
-  needing a built-in's typing can't stay a unit test (169 `#[test]` sit under
-  `checker` today, its rule modules' included, each checked). Before the
+  test's. Counted by the crate each test's module is assigned: `project`'s 118 unit
+  tests may register `builtins`, `rules` and any `ext-*`; `builtins`' 95,
+  `rules`' 22 and the `ext-*` modules' 115 may use `project` and `testing`;
+  `app`'s 23 and `lsp`'s 263 may use each other's crate. Only `analyser`'s 68
+  have no crate above them to reach: 14 are `types` tests B4 already moves
+  (`accessory_and_refinement_types`, `array_literals_and_shapes`), 50 test
+  pure functions, the summaries or the `Rule` dispatch with rules they define,
+  and stay; the 4 in `checker/tests/codemods.rs` apply rules' fixes
+  (`function.nameCase`) and become Codemod fixtures. Before the
   extraction it becomes a fixture, or a test through the crate's own API, named
   in the rename manifest. An integration test has no such limit: it links the
   crate's ordinary library, so a fixtures target may dev-depend on crates above
