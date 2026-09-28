@@ -2874,6 +2874,7 @@ impl<'a> Checker<'a> {
                 {
                     self.record_member_class_escape(&class);
                 }
+                self.record_call_throw_point(None, None, e.span);
                 Type::Mixed(false)
             }
             ExprKind::ClassConstFetch(target, name) => {
@@ -3089,15 +3090,18 @@ impl<'a> Checker<'a> {
                 for a in args {
                     self.check_expr(&a.value, locals, label);
                 }
+                let mut callee = None;
                 if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind {
                     if let Some((owner, _)) = self.find_method_owner(&recv_ty, name) {
                         self.record_member_ref(e.span, &owner, name);
+                        callee = self.registry.lookup_method(&owner, name);
                     }
                 } else if self.collect_member_refs {
                     for class in self.escape_targets_for_receiver_type(&recv_ty) {
                         self.record_member_class_escape(&class);
                     }
                 }
+                self.record_call_throw_point(None, callee, e.span);
                 Type::Mixed(false)
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
@@ -3118,6 +3122,7 @@ impl<'a> Checker<'a> {
                 {
                     self.record_member_class_escape(&class);
                 }
+                self.record_call_throw_point(None, None, e.span);
                 Type::Mixed(false)
             }
             ExprKind::Interpolated(parts) => {

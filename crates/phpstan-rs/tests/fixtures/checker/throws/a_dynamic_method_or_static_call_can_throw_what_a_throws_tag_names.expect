@@ -1,0 +1,1 @@
+23:17-23:34 identical.alwaysTrue L4 | Strict comparison using === between 'call' and 'call' will always evaluate to true.
