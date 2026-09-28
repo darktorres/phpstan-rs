@@ -444,6 +444,14 @@ through `check-project`.
   those in top-level control flow (`if (...) { function f() {} }` works),
   so nested ones also miss every per-declaration rule that goes through
   it (banned types in their signatures, for one). (found fixing F24)
+- [ ] **F60. A float literal is typed `float`, not its value.** `1.7`
+  infers `float` in both `check_expr` and `infer_expr` (`checker/expr.rs`),
+  so nothing downstream can fold it: `~1.7` is `int` rather than `-2`,
+  `$f = 0.5; $f * 2` is `float` rather than `1.0`, and a float-keyed
+  array literal's key is unknown. The types crate already has
+  `FloatLiteral` and folds it where it appears (casts, `to_array_key`,
+  `~`); the literal needs to reach it, with float arithmetic folding
+  alongside. (found fixing F31)
 
 ### False positives (from reading)
 
