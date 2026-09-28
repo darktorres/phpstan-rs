@@ -2706,6 +2706,27 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
   its parsing tests move to `reflection` as resolver tests;
 - the other package call sites (about 35) are converted, each listed in the
   commit;
+- the resolver has, each with its `STAGE_B_REVIEW.md` probe as a resolver
+  test, what `parse_type_string` gets wrong today:
+  - a float literal needs PHPDoc's float grammar, so a class named `Nan`,
+    `Infinity` or `inf` is a class (F40);
+  - `value-of<X>`/`key-of<X>` read any array type (`list<int>`,
+    `non-empty-array<string, int>`), a bare name kept late as a possible
+    template or enum (F40);
+  - `numeric` is `int|float|numeric-string`, `non-decimal-int-string` a
+    string, not a class (F40);
+  - a conditional's branches may hold `callable(): int`, `Foo::BAR` and a
+    nullable `?T` (the grammar's tree, no text splitting; F40);
+  - quoted literals and shape keys unescape `\'` and `\\` (F40);
+  - `list{…}`, `non-empty-array{…}` and `non-empty-list{…}` keep their
+    list and non-empty refinements (F40);
+  - `iterable<K, V>` is `array<K, V>|Traversable<K, V>`, so a `foreach`
+    over one keeps both types (F45);
+  - an explicit `mixed` is the node's own (`Mixed(true)`), not a search of
+    the declaration's text, so `array{a: array, b: mixed}` still reports
+    `a` (F46);
+  - unions, `?T` and native `A|B` are built through the normalizing
+    constructors (F47).
 - assert targets `$param->prop`, `$param->method()` and `$this->method()` are
   kept; `@throws` and assert types get alias substitution; a written
   `Traversable` resolves like any name.
