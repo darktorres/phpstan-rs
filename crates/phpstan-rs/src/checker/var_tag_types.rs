@@ -72,18 +72,6 @@ fn native_iterable_key(ty: &Type) -> Type {
     }
 }
 
-/// `ty` with `static` bound to `class`.
-fn bind_static(ty: &Type, class: &str) -> Type {
-    match ty {
-        Type::StaticRef(args) => Type::object(
-            class.into(),
-            args.iter().map(|a| bind_static(a, class)).collect(),
-        ),
-        Type::This => Type::object(class.into(), Vec::new()),
-        other => other.map_children(&mut |c| bind_static(c, class)),
-    }
-}
-
 impl<'a> Checker<'a> {
     /// `e`'s value when it is a known string: literal syntax, or a
     /// constant (`self::PATTERN`) whose inferred type is one string.
@@ -291,7 +279,7 @@ impl<'a> Checker<'a> {
         if sig.is_magic() {
             return Type::mixed();
         }
-        self.resolve_pseudo(&bind_static(sig.return_type_native(), class), &owner)
+        self.resolve_pseudo(&sig.return_type_native().bind_static(class), &owner)
     }
 
     /// A property's native type, `mixed` when it has none (untyped, or a

@@ -1482,8 +1482,8 @@ impl<'a> Checker<'a> {
             ) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_incdec_validity(op, inner, &inner_ty, e.span);
-                // See `advance_incdec_type`'s doc comment for the real
-                // PHP null/bool/string semantics this computes.
+                // A literal or range steps by one, so a counter widened to
+                // `null|int` across a loop's passes still advances.
                 //
                 // Computed against `inner_ty` (whatever `inner` itself
                 // just inferred as, any shape) rather than only a bare
@@ -1501,7 +1501,11 @@ impl<'a> Checker<'a> {
                 // tracked literal default, so `$obj->prop++` has no
                 // equivalent gap to fix here).
                 let is_increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
-                let updated = advance_incdec_type(&inner_ty, is_increment);
+                let updated = if is_increment {
+                    inner_ty.increment_type()
+                } else {
+                    inner_ty.decrement_type()
+                };
                 // `$x++`/`$x--` is real, visible rebinding syntax, the
                 // same category as `$x += 1`.
                 self.bind_assignment_target(inner, updated, locals);
@@ -3397,11 +3401,7 @@ impl<'a> Checker<'a> {
                     // A by-reference capture can still gain keys from
                     // anything else holding the reference before the
                     // closure runs.
-                    let ty = if u.by_ref {
-                        unseal_array_shapes(&ty)
-                    } else {
-                        ty
-                    };
+                    let ty = if u.by_ref { ty.unsealed_shapes() } else { ty };
                     closure_locals.insert_with_provenance(u.name.to_string(), ty, provenance);
                 }
                 if !is_static && let Some(this_ty) = locals.get("this") {
@@ -5288,47 +5288,6 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
     }
 }
 
-/// Real PHP: incrementing `null` produces `int(1)`; decrementing `null`,
-/// and either direction on a `bool`, is a no-op (the value is unchanged) -
-/// only the null-to-int case actually changes the tracked type. A string
-/// operand's exact value isn't modeled precisely enough to distinguish
-/// numeric from alphanumeric-increment behavior, so it conservatively
-/// stays a string either way.
-///
-/// Recurses through a `Union` the same established way `write_index_into`/
-/// `index_result_type` do (advance each member independently,
-/// `reduce(union_types)` back into one type) - without this, a container
-/// widened to `Null|Int` across a loop's multi-pass fixed-point
-/// convergence (the counter's first touch contributing the `Null`
-/// branch, an already-incremented later pass contributing `Int`) would
-/// stay frozen at that same `Null|Int` forever, even though incrementing
-/// either member alone always produces a real number.
-fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
-    match ty {
-        Type::Null if is_increment => Type::int(),
-        // A literal/range-typed operand must not pass straight through
-        // unchanged: `++$x`/`--$x` on `IntLiteral(0)` needs to actually
-        // advance, the same "value never applied" bug class
-        // `negate_numeric_literal`'s doc comment covers for unary `-`. A
-        // counter incremented inside a loop then checked afterward
-        // (`$n = 0; foreach (...) { ...; $n++; } if ($n > 0)`) would
-        // otherwise look "always false" against a check that only fires
-        // once anything actually consumes the literal's exact value.
-        Type::IntLiteral(n) => Type::int_literal(if is_increment { n + 1 } else { n - 1 }),
-        Type::FloatLiteral(f) => Type::float_literal(if is_increment { f + 1.0 } else { f - 1.0 }),
-        Type::IntRange(min, max) => {
-            let shift = |b: Option<i64>| b.map(|v| if is_increment { v + 1 } else { v - 1 });
-            Type::int_range(shift(*min), shift(*max))
-        }
-        Type::Union(members) => members
-            .iter()
-            .map(|m| advance_incdec_type(m, is_increment))
-            .reduce(union_types)
-            .unwrap_or(Type::mixed()),
-        other => other.clone(),
-    }
-}
-
 /// Whether `ty` is provably a `non-falsy-string` (non-empty and never
 /// exactly `"0"`) - a one-line delegate to the generalized
 /// `string_type_has_accessory`.
@@ -5488,7 +5447,7 @@ impl<'a> Checker<'a> {
         let forwards = forwards_static_binding(target);
         match (&self.current_class, forwards) {
             (Some(current), true) => {
-                let bound = bind_static_ref(ty, current);
+                let bound = ty.bind_static(current);
                 self.resolve_pseudo(&bound, class)
             }
             _ => self.resolve_pseudo(ty, class),
@@ -6274,30 +6233,6 @@ fn closure_inferred_return_type(
         .into_iter()
         .reduce(union_types)
         .unwrap_or(Type::void())
-}
-
-/// `static` as `class`, everywhere in `ty`.
-fn bind_static_ref(ty: &Type, class: &str) -> Type {
-    match ty {
-        Type::StaticRef(args) => Type::object(
-            class.into(),
-            args.iter().map(|a| bind_static_ref(a, class)).collect(),
-        ),
-        Type::This => Type::object(class.into(), Vec::new()),
-        other => other.map_children(&mut |t| bind_static_ref(t, class)),
-    }
-}
-
-/// `ty` with every sealed array shape marked unsealed, so a key it
-/// doesn't list isn't proven absent.
-pub(crate) fn unseal_array_shapes(ty: &Type) -> Type {
-    match ty {
-        Type::ArrayShape(shape) if shape.is_sealed() => {
-            Type::array_shape(Shape::unsealed(shape.fields.clone()))
-        }
-        Type::Union(members) => Type::union_of(members.iter().map(unseal_array_shapes).collect()),
-        other => other.clone(),
-    }
 }
 
 /// Where a static call's class part (`Foo` in `Foo::bar()`, or `$obj` in

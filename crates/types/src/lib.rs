@@ -31,6 +31,7 @@ pub mod relation;
 mod shape;
 mod subtype;
 mod templates;
+mod transform;
 mod trinary;
 mod union;
 
