@@ -1152,6 +1152,11 @@ Follow-ups, behaviour fixes:
   oracle's `instantiation.php:172`, `:179`), `new $o->cls()` as `(new
   $o)->cls()` ("Cannot call method cls() on mixed") and `new $o::$s()`
   reports `$s` undefined.
+- **`(void)` casts a whole expression statement**: `(void) 5 |>
+  f(...);` is `(void) (5 |> f(...))`; today it parses as `((void) 5) |>
+  f(...)` and is `cast.void` "cannot be used within an expression" (12
+  rules-oracle findings in the `*-statement-result-discarded-php85.php`
+  files).
 - **`yield` takes an assignment**: `yield $x = 1;` is `yield ($x = 1)`;
   today it parses as `(yield $x) = 1`, `assign.invalidExpr` plus
   `$x` undefined there and on the next `yield $x + 1` (the rules oracle's
@@ -3223,7 +3228,11 @@ building on the previous one:
     - After a foreach that may not run, the value variable is dropped, and
       a read of it is `variable.undefined`.
     - At a file's top level every unknown variable is Maybe
-      (`canAnyVariableExist`), because the including scope may define it.
+      (`canAnyVariableExist`), because the including scope may define it,
+      and a `@var` there names it: `/** @var \PDOStatement $stmt */` above
+      `$stmt->fetch()` is `varTag.variableNotFound` today (8 rules-oracle
+      findings, `bug-6688.php`, `discussion-10252.php`,
+      `constant-parameter-check-methods.php`, `var-above-declare.php`).
       `echo $x;` in a script file is `variable.undefined` at level 0 today;
       snapshot 0a8fe69 has 75 of them in `<main>`. `$argc`/`$argv` there
       are `int<1, max>`/`non-empty-list<string>` (they are `int` and
@@ -3714,7 +3723,13 @@ rules-oracle findings).
   => …])` write are uses too, `property.unused`/`property.onlyWritten`
   today (the rules oracle's 30: `nullsafe-property-fetch.php`,
   `bug-3654.php`, `bug-9409.php`, `bug-12702.php`, `bug-7198.php`,
-  `clone-with.php`);
+  `clone-with.php`); and a private method called with another case
+  (`$this->sayhello()` for `sayHello()`), through `?->`, as a callable
+  (`[self::class, 'callBack']`), from a used trait (a trait's abstract
+  private method the host implements) or through a class-string is a
+  use, `method.unused` today (11: `bug-8346.php`, `bug-8071.php`,
+  `bug-6039.php`, `nullsafe-unused-private-method.php`,
+  `unused-private-method.php`);
 - duplicates;
 - circular namespaces;
 - architecture;
@@ -3778,6 +3793,18 @@ rules-oracle findings).
     (`JsonThrowOnErrorDynamicReturnTypeExtension`): `json_decode('{"class":
     "x"}')->class` is `property.nonObject` "on mixed" today (the rules
     oracle's `bug-12273.php`);
+  - the printf format parser follows PHP's: `%5%` and `%1$%` are a
+    literal `%`, `%ls` ignores the length modifier, `%'%5d` pads with
+    `%`, flags combine (`%-+5d`), and `*` takes a positional width or
+    precision (`%*2$d`, `%1$*2$d`, `%.*3$f`); each is `argument.sprintf`
+    "invalid placeholder" today (11 rules-oracle findings,
+    `printf-format-parser.php`, `printf-param-types-format-parser.php`);
+  - the scanf format parser follows PHP's: a NUL byte ends the format
+    (`"%d\0%d"` has one conversion), `%n` is a conversion and `l` a
+    modifier (`"%s%n"` takes two values, `"%ld %lf %s"` three); each is
+    `argument.sscanf` today, reported twice by two rules with different
+    messages ("contains 4 placeholders" and "contains 4 placeholder(s)"),
+    which become one (`bug-14567.php`, `printf.php`);
   - `XMLReader::open()` is `XMLReader|false` called statically and `bool`
     on an instance (`XMLReaderOpenReturnTypeExtension`); it is
     `XMLReader|bool` today, so `->read()` after `!== false` is
@@ -3870,8 +3897,11 @@ rules-oracle findings).
     'm')` does, and both guard a ternary's true branch and a first-class
     callable (`method_exists($this, 'm') ? $this->m(...) : null`); each is
     `method.notFound` today (the rules oracle's `bug-13596.php`);
-    `property_exists(static::class, 'd')` guards `static::$d` (it is
-    `staticProperty.notFound` today, `bug-2861.php`).
+    `property_exists(static::class, 'd')` guards `static::$d` and
+    `method_exists(static::class, 'm')` or `method_exists(X::class, 'm')`
+    a static call (each is `staticProperty.notFound`/
+    `staticMethod.notFound` today, `bug-2861.php`, `bug-1267.php`,
+    `static-has-method.php`).
     `is_callable()` keeps a non-final class as `Class&callable(): mixed`:
     on `Route|callable(): Route` it leaves `callable(): Route` today (the
     rules oracle's `bug-5333.php`); on an array it gives `callable-array`,
@@ -4126,6 +4156,21 @@ fixture:
     (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
     fail and stays unreported (341 PHPStan reports on `mixed`).
 - (e) declarations, generics checks and PHPDoc:
+  - `by-ref parameter's declared type is never narrower than 'foo'`
+    (`parameterByRef.tooWide`) becomes PHPStan's
+    `TooWideParameterOutTypeCheck`: a union member the function never
+    assigns is reported, not a missing narrowing to a literal (10
+    rules-oracle findings, `too-wide-*-parameter-out.php`);
+  - an empty array assigned under any array `@var` is widening, not
+    `varTag.type`: `/** @var array{string, int} $a */ $a = [];` is
+    reported today (`var-above-empty-array-widening.php`,
+    `bug-5356.php`);
+  - a generic argument built from a template is checked through its
+    bound: `EnumAsFilterInterface<(int|string)&TOperation>` for
+    `TOperation of scalar`, a conditional `(TKey is object ? TKey :
+    Box<TKey>)` and `FooBoxedArray<T>` inside the class's own `T` are
+    `generics.notSubtype` today (8 rules-oracle findings,
+    `bug-11776.php`, `bug-10622b.php`);
   - a template bound is supported when `TemplateTypeCheck` lists its type:
     `self` (an object type) and `key-of<…>` are, and are
     `generics.notSupportedBound` today (15 rules-oracle findings,
