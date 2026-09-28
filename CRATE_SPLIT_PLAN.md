@@ -2040,7 +2040,13 @@ Follow-ups:
   `constant-phpdoc-type.php`).
 - **`ConstantResolver` in `reflection`**, with `dynamic_constant_names` a
   `ReflectionSettings` key; `resolve_constant_named_types` and class-constant
-  initializer typing read constants through it.
+  initializer typing read constants through it. The module-graph spec assigns
+  `checker::constant_resolver` and `checker::predefined_constants` to
+  `analyser` today, against Appendix A's `reflection`, and
+  `checker::expr::probe_checks` to `analyser`, where Appendix A splits it
+  between the resolver (`global_constant_type`) and `rules` (the null probes);
+  this follow-up reassigns them, with the edges that remain listed, so C10
+  doesn't extract `reflection` without its constant resolver.
 - **Initializers evaluate as `InitializerExprTypeResolver`**, one evaluator
   for class and global constants, enum case values and parameter defaults
   (D3's arithmetic shares it): arithmetic, bitwise operators, ternaries, `??`,
