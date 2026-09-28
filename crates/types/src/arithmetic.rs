@@ -394,18 +394,11 @@ impl Type {
     }
 }
 
-/// Real PHPStan's own `InitializerExprTypeResolver::getModType`,
-/// transcribed - unlike `Mul`/`Sub`/`Pow`, whose own corner/point
-/// formulas already reduce to the exact answer for two literal operands
-/// as a natural degenerate case, `%`'s own real magnitude-based range
-/// fallback (below) reasons only about the *divisor*'s own bound (real
-/// PHPStan's own `IntegerRangeType`-branch: `[0, |r|-1]` when the
-/// dividend is provably non-negative, `[-(|r|-1), |r|-1]` otherwise) -
-/// `7 % 3` would fall to the far coarser `int<0, 2>` there instead of
-/// the exact literal `1` without a dedicated literal-pair fold first,
-/// exactly matching real PHPStan's own two-step structure (its own
-/// `getModType` does the identical cross-product fold before ever
-/// reaching this same fallback).
+/// `l % r` over int ranges. PHP's remainder takes the dividend's sign,
+/// is smaller in magnitude than the divisor, and is no larger in
+/// magnitude than the dividend: `int<0, max> % -3` is `int<0, 2>`, and
+/// `int<0, 2> % 5` stays `int<0, 2>`. A divisor that can only be `0`
+/// throws, so there is no result.
 pub(crate) fn mod_int_range(
     l_min: Option<i64>,
     l_max: Option<i64>,
@@ -420,19 +413,33 @@ pub(crate) fn mod_int_range(
         // `PHP_INT_MIN % -1` is 0.
         return Type::int_literal(l.checked_rem(r).unwrap_or(0));
     }
-    // Real PHPStan's own explicit special case: modulo by exactly 1 is
-    // always 0, regardless of the dividend.
-    if r_min == Some(1) && r_max == Some(1) {
-        return Type::int_literal(0);
-    }
-    let range_max = r_max.and_then(|m| m.checked_sub(1));
-    let left_is_non_negative = l_min.is_some_and(|v| v >= 0);
-    let range_min = if left_is_non_negative {
-        Some(0)
-    } else {
-        range_max.and_then(i64::checked_neg)
+    // The largest divisor magnitude, less one; unbounded when the
+    // divisor is.
+    let divisor_magnitude = match (r_min, r_max) {
+        (Some(lo), Some(hi)) => Some(i128::from(lo).abs().max(i128::from(hi).abs())),
+        _ => None,
     };
-    Type::int_interval(range_min, range_max)
+    if divisor_magnitude == Some(0) {
+        return Type::never();
+    }
+    let bound = divisor_magnitude.map(|m| m - 1);
+    let clamp = |dividend_end: i128| match bound {
+        Some(b) => dividend_end.clamp(-b, b),
+        None => dividend_end,
+    };
+    let min = match l_min {
+        Some(v) if v >= 0 => Some(0),
+        Some(v) => Some(clamp(i128::from(v))),
+        None => bound.map(|b| -b),
+    };
+    let max = match l_max {
+        Some(v) if v <= 0 => Some(0),
+        Some(v) => Some(clamp(i128::from(v))),
+        None => bound,
+    };
+    let narrow =
+        |v: Option<i128>| v.map(|v| i64::try_from(v).expect("within an i64 operand's range"));
+    Type::int_interval(narrow(min), narrow(max))
 }
 
 /// An unbounded end (or a `0` swapped to the nearest representable
