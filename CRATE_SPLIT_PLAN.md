@@ -1576,12 +1576,15 @@ Follow-ups:
   `is_string`/`is_string_type`/`is_exactly_string_operand`/
   `is_string_shaped`/`is_string_or_nullable_string` across `strict_rules`,
   `offset_assignment`, `operators` and `expr`. Measured: 373 functions in
-  `crates/phpstan-rs/src` take a `Type` (204 free, 169 methods; 50 of them
-  rules that report, the rest questions: 32 offset and key, 22 iteration,
-  41 template binding, 28 constant values, 32 `is_*`/`has_*`, 21
-  narrowing, 15 coercion, 14 union flattening, 7 comparison, 22 name
-  resolution, 85 unsorted), and 108 files hold about 1,055 inline
-  inspections (`matches!(.., Type::..)`, `if let Type::..`, match arms).
+  `crates/phpstan-rs/src` take a `Type` (204 free, 169 methods): 63 rules
+  that report, 8 scope storage, and 302 questions - 52 `is_*`/`has_*`
+  predicates, 41 template binding, 32 offset and key, 28 constant values,
+  22 iteration, 22 name resolution, 21 narrowing, 15 coercion, 14 union
+  flattening, 13 transformations (accessories stripped and rewrapped,
+  nullability added), 12 function return types, 10 member lookup, 9
+  relation wrappers, 7 comparison, 4 generalization. 108 files hold about
+  1,055 more inline inspections (`matches!(.., Type::..)`, `if let
+  Type::..`, match arms).
   - Each question becomes one `Type` method (a trinary one where PHPStan's
     is: `is_array()` of `array|int` is `Maybe`), or a `Relation` method
     where it needs the class hierarchy, in `crates/types`.
@@ -1590,9 +1593,12 @@ Follow-ups:
     checker is building types from syntax and deciding what to report.
   - Where two copies disagreed, the method follows PHPStan and the
     difference is fixtured.
-  - A gate holds it: xtask counts `Type::` patterns outside
-    `crates/types` and fails when the count grows, ratcheting down as
-    sites move.
+  - `Type` becomes opaque: its representation is private to
+    `crates/types`, and other crates build types through constructors
+    and read them only through methods, so matching on a type outside the
+    crate doesn't compile. While sites move, an xtask gate counts `Type::`
+    patterns outside `crates/types` and fails when the count grows; once
+    it reaches zero the variants go private and the gate is deleted.
   - Subtraction, `Relation::remove` and the coercions already moving in
     follow the same shape. Member lookup (`getMethod`/`getProperty`/
     `getConstant`) moves once C8's reflection exists.
