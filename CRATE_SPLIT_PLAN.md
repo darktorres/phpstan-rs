@@ -4771,7 +4771,15 @@ fixture:
   - a `void` call's result is reported where it is used (`method.void`,
     `staticMethod.void`, `function.void`): `$x = $o->v();` for `v(): void`
     isn't reported today (54 oracle findings, e.g. PSR-3
-    `LoggerInterface::debug()` results);
+    `LoggerInterface::debug()` results). Every use counts: an argument, a
+    `foreach` iteratee, an `if`, `switch`/`case`, `match` subject or arm
+    condition, a ternary or `&&`/`||` operand, `??=`/`.=`, a
+    destructuring source, a pipe's left side or result, and the result of
+    `call_user_func()`/`call_user_func_array()` (reported for the function
+    and the callable), `Closure::call()` and an invoked closure or string
+    callable (`callable.void`); the rules oracle's 26, 19 and 4
+    (`call-methods.php:66`-`:91`, `wrong-variable-name-var*.php`,
+    `*-call-pipe.php`, `match-expr-void-used.php`, `call-user-func*.php`);
   - a discarded pure call is reported for built-ins too
     (`function.resultUnused`, `staticMethod.resultUnused`): the rule
     exists (`noop.rs`) but reads purity, and a built-in has none until C5
