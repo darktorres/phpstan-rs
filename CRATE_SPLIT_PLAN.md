@@ -7451,39 +7451,45 @@ held to the previous commit's:
 
 ### Stage G: extraction wave and tidy
 
-Stage G starts when F is done. The lower layers are crates already: `syntax`,
-`types`, `phpdoc`, `stub-sources`, `sql`, `diagnostics`, `composer`, `config`,
-`reflection` and `php-regex` (B, C10, E2), with the sibling plans'
-`crash-context`, `pcre` and `crash-sys`, and `neon` once Phase 183 lands.
-Everything from `analyser` up is still modules of the one `phpstan-rs` package
-(`crates/phpstan-rs/src`), each assigned its crate by Appendix A and held to it
-by the module-graph gate, whose `allow` list is empty: every edge and misplaced
-`impl` it listed (235 edges today) named a phase up to F, and each phase removed
-its own. The package's library is used by its binary, its integration tests
-(`tests/cli.rs`, `version.rs`, `lsp_exit_code.rs`, the fixture harness
-`tests/fixtures.rs` over 8,347 fixture files in
-`tests/fixtures/{checker,project}`), its bench (`benches/vendored_corpus.rs`),
-`tools/gate-runner` and `tools/crash-repro` (`CRASH_REPORTING_PLAN.md` §5), and
-the fuzz package's `structured_php` target, all through `phpstan_rs::…` paths.
+Stage G starts when F is done. What it starts from:
 
-ROADMAP Phase 184 renames the project between two crate-split phases, and
-every `Cargo.toml` changes in it. When the name is chosen before G, the rename
-lands before G1, so G's new packages are created under the final prefix rather
-than renamed after (26 `phpstan-rs-<name>` packages); when it isn't, the
-rename follows G5, and the `phpstan_rs` library it lists (24 importing sites)
-no longer exists by then.
+- **Crates already:** `syntax`, `types`, `phpdoc`, `stub-sources`, `sql`,
+  `diagnostics`, `composer`, `config`, `reflection` and `php-regex` (B, C10,
+  E2), the sibling plans' `crash-context`, `pcre` and `crash-sys`, and `neon`
+  once Phase 183 lands.
+- **The package:** everything from `analyser` up is still modules of the one
+  `phpstan-rs` package (`crates/phpstan-rs/src`), each assigned its crate by
+  Appendix A and held to it by the module-graph gate. The gate's `allow` list
+  is empty: every edge and misplaced `impl` it listed (235 edges today) named a
+  phase up to F, and each phase removed its own.
+- **The package's library users**, all through `phpstan_rs::…` paths: its
+  binary; its integration tests (`tests/cli.rs`, `version.rs`,
+  `lsp_exit_code.rs`, and the fixture harness `tests/fixtures.rs` over 8,347
+  fixture files in `tests/fixtures/{checker,project}`); its bench
+  (`benches/vendored_corpus.rs`); `tools/gate-runner` and `tools/crash-repro`
+  (`CRASH_REPORTING_PLAN.md` §5); and the fuzz package's `structured_php`
+  target.
 
-G makes a crate of each remaining layer, moves the tests, benches and fuzz
-targets to the crates they test, retargets the gates from the package's paths
-to the crates', rewrites the docs, and asserts the build-time targets. It
-changes no behaviour:
+G makes a crate of each remaining layer (G1), moves the tests, benches and fuzz
+targets to the crates they test (G2), rewrites the docs (G3), asserts the
+build-time targets (G4), and closes the plan (G5).
+
+**The rename comes first when it can.** ROADMAP Phase 184 renames the project
+between two crate-split phases, changing every `Cargo.toml`. When the name is
+chosen before G, it lands before G1, so G's 26 new packages are created under
+the final prefix instead of renamed after; otherwise it follows G5, when the
+`phpstan_rs` library it lists (24 importing sites) no longer exists.
+
+**G changes no behaviour:**
 
 - the corpus, type-snapshot and baseline gates (4–6) and every fixture's
   expectations are identical through every G commit, the fixture type snapshot
   compared through the rename map (G2), and a fixture's or test's name changes
   only through gate 3's rename manifest;
-- nothing reads a path-dependent intrinsic (`type_name`, `module_path!`,
-  `TypeId`) into output;
+- no module's output depends on which crate compiles it: nothing reads a
+  path-dependent intrinsic (`type_name`, `module_path!`, `TypeId`), and
+  nothing but the binary's version reads a Cargo variable (`env!`,
+  `option_env!`);
 - the one output a move does change is an internal error's location in
   phpstan-rs's source (`file:line:col`, `CRASH_REPORTING_PLAN.md` §6.1.2),
   which no gate holds, since the corpus and fixtures have none: every moved
@@ -7496,36 +7502,16 @@ changes no behaviour:
   covers the rest).
 
 **G1. Extraction**, one crate at a time in dependency order: `analyser`,
-`builtins`, `rules`, the nineteen `ext-*` (one each, in E4's order), `project`,
-`testing`, `app`, `lsp`. What remains in `crates/phpstan-rs` is the binary.
+`builtins`, `rules`, the nineteen `ext-*` (one each, in any order, none
+depending on another), `project`, `testing`, `app`, `lsp`. What remains in
+`crates/phpstan-rs` is the binary.
 
-Each extraction is one commit that builds and passes every gate: the modules
-move with `git mv` to `crates/<name>/src/` and are rewritten in place, and
-`git diff -M --summary` shows every moved file as a rename, since rewriting
-paths leaves a file far above git's similarity threshold. A file that falls
-below it moves first in a pure rename commit, content unchanged (gate 11),
-which doesn't build and which a bisect skips.
-
-**Module paths.** A module's path in its crate is Appendix A's module path
-without the package prefix that named the layer (`checker::unused` is
-`rules::unused`), unless §3 names another, and a new `lib.rs` declares them.
-Where two modules land on one path they are one module, which the extraction's
-commit writes; seven pairs do on today's package:
-
-- an extension's `ext::<name>` (its settings and registration) is its crate's
-  `lib.rs`, so `ext::doctrine`, `ext::psr3` and `ext::strict_rules` don't meet
-  `checker::doctrine`, `checker::psr3` and `checker::strict_rules`;
-- a settings module joins the rule it configures, as C1 has each settings type
-  live with its owner: `architecture` and `banned` with `project::architecture`
-  and `project::banned` in `rules`;
-- `checker::access_attributes` and `registry::access_attributes` are one module
-  of `ext-language-extensions`;
-- `checker::semantic_tokens`, E6's observer, joins `lsp::semantic_tokens`.
-
-Gate 2 computes these paths from C4 on and fails on an unmarked collision, so a
-collision a later phase creates is decided when it appears.
-
-**The commit** holds:
+*The commit.* Each extraction is one commit that builds and passes every gate.
+The modules move with `git mv` to `crates/<name>/src/` and are rewritten in
+place; `git diff -M --summary` shows every moved file as a rename, since
+rewriting paths leaves a file far above git's similarity threshold. A file that
+falls below it moves first in a pure rename commit, content unchanged (gate
+11), which doesn't build and which a bisect skips. The commit holds:
 
 - the crate's manifest (package `phpstan-rs-<name>`, inheriting
   `[workspace.package]`, with `[lints] workspace = true`), its
@@ -7544,122 +7530,144 @@ collision a later phase creates is decided when it appears.
 - `Cargo.lock` with the new member (CI runs `--locked`), and the commit's hash
   in `.git-blame-ignore-revs`.
 
-What an extraction checks:
+*Module paths.* A module's path in its crate is Appendix A's module path without
+the package prefix that named the layer (`checker::unused` is
+`rules::unused`), unless §3 names another, and a new `lib.rs` declares them.
+Where two modules land on one path they are one module, which the extraction's
+commit writes. Seven pairs do on today's package:
+
+- an extension's `ext::<name>` (its settings and registration) is its crate's
+  `lib.rs`, so `ext::doctrine`, `ext::psr3` and `ext::strict_rules` don't meet
+  `checker::doctrine`, `checker::psr3` and `checker::strict_rules`;
+- a settings module joins the rule it configures, as C1 has each settings type
+  live with its owner: `architecture` and `banned` with `project::architecture`
+  and `project::banned` in `rules`;
+- `checker::access_attributes` and `registry::access_attributes` are one module
+  of `ext-language-extensions`;
+- `checker::semantic_tokens`, E6's observer, joins `lsp::semantic_tokens`.
+
+Gate 2 computes these paths from C4 on and fails on an unmarked collision, so a
+collision a later phase creates is decided when it appears.
+
+*What each extraction checks:*
 
 - **Visibility.** An item used across the new boundary becomes `pub` only when
   §3's design names it as the crate's API. Anything else the other side still
   uses is a design gap, closed before the extraction (the user moves, or §3
-  gains the API, in a commit of its own), never by widening. `unreachable_pub`
-  then denies any `pub` item the crate doesn't export. The scale is known: of
-  764 uniquely named `pub(crate)` items in today's package, 497 are used from
-  another crate's modules (186 of `rules`' items, 103 of `analyser`'s, 29 of
-  `builtins`', 21 of `project`'s, the rest the `ext-*` modules', `lsp`'s and the
-  bin's; 73 more are `reflection`'s, which C10's extraction settles), most of
-  them the upward uses gate 2 lists and D–F remove. Each extraction's commit
-  lists the crossings left for its crate, each with the §3 item it serves. No
-  test-only item crosses: the one `#[cfg(test)]` helper outside a test module
-  (`ignore_comments::scan`) serves its own module's tests.
-- **`impl` placement.** No entry of gate 2's list names the crate's modules,
-  so every `impl` it holds or that others hold of its types compiles where it
+  gains the API, in a commit of its own), never by widening; `unreachable_pub`
+  then denies any `pub` item the crate doesn't export. Each extraction's commit
+  lists the crossings left for its crate, each with the §3 item it serves.
+- **The public API** is snapshotted from the extraction commit on (gate 14),
+  and the commit lists its difference from §3's design: an item the design
+  names that the crate lacks, or one it exports that the design doesn't name.
+- **`impl` placement.** No entry of gate 2's list names the crate's modules, so
+  every `impl` it holds, or that others hold of its types, compiles where it
   is.
 - **Features.** A feature the crate's code tests is declared by the crate and
-  forwarded by the bin (§2: `hotpath` for `analyser`'s `measure_outermost!`,
+  forwarded by the bin (§2): `hotpath` for `analyser`'s `measure_outermost!`,
   `crash-injection` for `project`'s hook, `pcre-validate` through `builtins`
-  and `project` to `php-regex`); a
-  `cfg(feature)` naming a feature its crate lacks is an `unexpected_cfgs` error
-  under clippy's `-D warnings`.
-- **The public API** is snapshotted from the extraction commit on (gate 14), and
-  the commit lists its difference from §3's design: an item the design names
-  that the crate lacks, or one it exports that the design doesn't name.
-- **Compile-time values.** Nothing in the package but the binary's version
-  reads a Cargo variable (`env!`, `option_env!`), so no value changes meaning
-  when a module compiles in another crate.
+  and `project` to `php-regex`. A `cfg(feature)` naming a feature its crate
+  lacks is an `unexpected_cfgs` error under clippy's `-D warnings`.
 - **Standalone build.** The crate builds alone (gate 1's `cargo hack check
   --workspace --no-dev-deps`), so a dependency feature it needs is in its own
   manifest rather than unified in from another member.
-- **Tests.** Each `#[cfg(test)]` module moves with its module. A unit test may
-  dev-depend only on crates that don't depend on its own: a dev-dependency on
-  one that does links a second copy of the crate, whose types don't match the
-  test's. Counted by the crate each test's module is assigned: `project`'s 118
-  unit tests may register `builtins`, `rules` and any `ext-*`; `builtins`' 95,
-  `rules`' 22 and the `ext-*` modules' 115 may use `project` and `testing`;
-  `app`'s 23 and `lsp`'s 263 may use each other's crate. Only `analyser`'s 68
-  have no crate above them to reach: 14 are `types` tests B4 already moves
-  (`accessory_and_refinement_types`, `array_literals_and_shapes`), 50 test pure
-  functions, the summaries or the `Rule` dispatch with rules they define, and
-  stay; the 4 in `checker/tests/codemods.rs` apply rules' fixes
-  (`function.nameCase`) and become Codemod fixtures. A test that can't stay
-  becomes a fixture, or a test through its crate's own API, before the
-  extraction, named in the rename manifest. An integration test has no such
-  limit: it links the crate's ordinary library, so a fixtures target may
-  dev-depend on crates above its own (G2).
+- **Unit tests.** Each `#[cfg(test)]` module moves with its module. A unit test
+  may dev-depend only on crates that don't depend on its own: a dev-dependency
+  on one that does links a second copy of the crate, whose types don't match
+  the test's. An integration test has no such limit, since it links the crate's
+  ordinary library, so a fixtures target may dev-depend on crates above its own
+  (G2). A test that can't stay becomes a fixture, or a test through its crate's
+  own API, before the extraction, named in the rename manifest.
 - **Lints**, active from the extraction commit (§2): `missing_docs` on the API
-  crates (§2), those already extracted gaining it in G1's first commit;
+  crates (§2), those already extracted gaining it in G1's first commit, and
   `clippy::print_stdout`/`print_stderr` at `deny` in every library crate. The
-  arch gate checks the attribute in the crates of a hand-kept list
-  (`LIBRARY_CRATES`, the eight B and C extracted) that a new crate isn't on
+  arch gate checks that attribute in the crates of a hand-kept list
+  (`LIBRARY_CRATES`, the eight B and C extracted), which a new crate isn't on
   until someone adds it; the list becomes every workspace member with a `lib`
-  target, from `cargo metadata`, in G1's first commit. Today's print calls all
-  sit in code headed for such a crate or for none: `main/check_project.rs`'s 21
-  move into `app` with F4's reporting and become writes (below), `lsp`'s 18
-  become F1's `window/logMessage`, and `check`, `demo` and `incremental-bench`'s
-  27 leave with F4 for examples, which may print.
+  target, from `cargo metadata`, in G1's first commit.
 - **Comments** follow the comment rules, as Stage B's crates did: a comment
   citing a module the crate can't see, a phase, a fix number or an
   investigation's history is rewritten, the count per crate listed in the
   commit. The package's manifest comments go with the features they describe
   (`pcre-validate`'s cites a phase and a plan file today).
 
-Per crate:
+*The inventories the checks start from* (today's package, counted by the crate
+each module is assigned):
+
+- **Crossing items:** of 764 uniquely named `pub(crate)` items, 497 are used
+  from another crate's modules: 186 of `rules`' items, 103 of `analyser`'s, 29
+  of `builtins`', 21 of `project`'s, and the rest the `ext-*` modules', `lsp`'s
+  and the bin's; 73 more are `reflection`'s, which C10's extraction settles.
+  Most are the upward uses gate 2 lists and D–F remove. No test-only item
+  crosses: the one `#[cfg(test)]` helper outside a test module
+  (`ignore_comments::scan`) serves its own module's tests.
+- **Unit tests:** `project`'s 118 may register `builtins`, `rules` and any
+  `ext-*`; `builtins`' 95, `rules`' 22 and the `ext-*` modules' 115 may use
+  `project` and `testing`; `app`'s 23 and `lsp`'s 263 may use each other's
+  crate. Only `analyser`'s 68 have no crate above them to reach: 14 are `types`
+  tests B4 already moves (`accessory_and_refinement_types`,
+  `array_literals_and_shapes`); 50 test pure functions, the summaries or the
+  `Rule` dispatch with rules they define, and stay; the 4 in
+  `checker/tests/codemods.rs` apply rules' fixes (`function.nameCase`) and
+  become Codemod fixtures.
+- **Print calls:** all sit in code headed for a library crate or for none:
+  `main/check_project.rs`'s 21 move into `app` with F4's reporting and become
+  writes (below), `lsp`'s 18 become F1's `window/logMessage`, the 27 in the
+  `check`, `demo` and `incremental-bench` commands leave with F4 for examples,
+  which may print, and `main.rs`'s 2 stay in the binary.
+
+*Per crate:*
 
 - **`analyser`**: the engine, the Scope API, the `TypeSpecifier`, the
   Rule/Collector/Observer traits and the extension-trait registry,
-  `RuleLevelHelper`, `AnalysisContext` and the summaries API, the
-  reference-site collector (§3.8). No `composer` dependency and no I/O (its
-  module-graph row, and gate 10's rules, already hold it to both).
+  `RuleLevelHelper`, `AnalysisContext` with its services and the summaries API,
+  the reference-site collector (§3.8). No `composer` dependency and no I/O (its
+  module-graph row and gate 10's rules already hold it to both).
 - **`builtins`**: forwards `pcre-validate` to `php-regex` (E2), the bin's
   `default = ["pcre-validate"]` reaching it through `builtins` and `project`,
   and the tests gated on it move with their modules. `roxmltree` moves here.
-- **`rules`**, with the `[rules]` section's settings type (`rules_settings`).
+- **`rules`**, with the `[rules]` section's settings type (`rules_settings`),
+  depending on `composer` for the package-index service composer hygiene and
+  `phpstan_api` read (§3.8).
 - **Each `ext-*`**: its rules, collectors, extensions, config section and
   settings, and the composer packages whose installation activates it (C1),
   behind one registration function that `app` calls. No `ext-*` crate depends
   on another; the Cargo graph now enforces what the module graph did.
 - **`project`**: the Session, `SessionBuilder`, the VFS, the finalizer, the
-  result cache and dependency graph, the worker pool, `cache_dir()` (moved down
-  in F2); `blake3`, `dunce` and `rayon`.
+  result cache and dependency graph, the worker pool behind a type of its own,
+  and `cache_dir()` (moved down in F2); `blake3`, `dunce` and `rayon`.
 - **`testing`**: the harness leaves the package's `tests/fixtures.rs` for a
   library: RuleTestCase (with collectors), TypeInferenceTestCase,
-  LevelsTestCase, Integration and Codemod (§3.11), and the libtest-mimic runner,
-  `testing::run(registrations, fixtures_dir)`. It depends on nothing above
-  `project` (its row names `project` and the crates below it, which it names
-  directly: `analyser`'s node callbacks, `diagnostics`' expectations, `config`'s
-  schema for the fixture header) and takes its registrations from the caller, so
-  a fixtures target registers what its crate needs, builtins always (E2).
-  TypeInferenceTestCase evaluates the asserts through a node callback, as
-  PHPStan's `gatherAssertTypes` does, rather than through `rules`'
-  `FileAssertRule`, which is what keeps `rules` out of its dependencies.
+  LevelsTestCase, Integration and Codemod (§3.11), and the libtest-mimic
+  runner, `testing::run(registrations, fixtures_dir)`. It depends on nothing
+  above `project` (its row names `project` and the crates below it, which it
+  names directly: `analyser`'s node callbacks, `diagnostics`' expectations,
+  `config`'s schema for the fixture header), and takes its registrations from
+  the caller, so a fixtures target registers what its crate needs, builtins
+  always (E2). TypeInferenceTestCase evaluates the asserts through a node
+  callback, as PHPStan's `gatherAssertTypes` does, rather than through `rules`'
+  `FileAssertRule`, which keeps `rules` out of its dependencies.
 - **`app`**: the composition root (every registration, extension activation),
-  the ErrorFormatter set, `run(args, extra)` over already parsed arguments (no
-  `clap` in a library crate, §3.7) and the writers it prints to: the report,
-  F4's progress line, `-v`'s statistics and the warnings go through the
-  `io::Write`s the bin passes (its stdout and stderr), since the print lints
-  deny `print!`/`eprintln!` in a library crate, and a test passes buffers; and
-  the crash reporter's `crash_report` module linking `crash-sys` under
-  `crash-reporting` (`CRASH_REPORTING_PLAN.md` §5). An integration test,
+  the ErrorFormatter set, and `run(args, extra)` over already parsed arguments
+  (no `clap` in a library crate, §3.7). It prints through the `io::Write`s the
+  bin passes (its stdout and stderr): the report, F4's progress line, `-v`'s
+  statistics and the warnings, since the print lints deny `print!`/`eprintln!`
+  in a library crate, and a test passes buffers. The crash reporter's
+  `crash_report` module lives here, linking `crash-sys` under `crash-reporting`
+  (`CRASH_REPORTING_PLAN.md` §5). An integration test,
   `app/tests/third_party.rs`, is the third party §2's composition model
-  promises: being a crate of its own, it sees only public items, and it defines
-  a rule, a collector, a dynamic return-type extension and an ErrorFormatter,
-  registers them through `run(args, |b| …)`, runs a fixture through `testing`,
-  and checks the formatter's output, so an API the design names but the crates
-  don't export fails a test instead of a user.
+  promises: a crate of its own, it sees only public items, defines a rule, a
+  collector, a dynamic return-type extension and an ErrorFormatter, registers
+  them through `run(args, |b| …)`, runs a fixture through `testing`, and checks
+  the formatter's output, so an API the design names but the crates don't
+  export fails a test instead of a user.
 - **`lsp`**: the server and its features over the Session and observers
   (`lsp-server`, `lsp-types`, `crossbeam-channel`). Its entry point takes,
   beside the config schema the bin already passes from `app`
   (`app::config_schema()`), the function `app` exposes for building a root's
   Session from that root's config (the registrations and the extensions its
-  composer files activate, C1, so each root of F1's per-root Sessions gets its
-  own) and the server info the bin passes (§2): `serverInfo.version` stays the
+  composer files activate, C1, so each of F1's per-root Sessions gets its own),
+  and the server info the bin passes (§2). `serverInfo.version` stays the
   binary's, as today (`main.rs` passes its `env!("CARGO_PKG_VERSION")` to
   `lsp::run`, and the `lsp` tests pass theirs, which after the split is `lsp`'s
   own and the same workspace version), with F4's build identity added.
@@ -7668,28 +7676,28 @@ Per crate:
   package has no library target. Every `phpstan_rs::` user is repointed:
   `tools/gate-runner` to `app` and `project` (unless Phase 181's
   `report --export` has replaced it, `GATE_SPEED_PLAN.md` S9c),
-  `tools/crash-repro` to `app`, the bench and fuzz target (G2) to `project`.
+  `tools/crash-repro` to `app`, and the bench and fuzz target (G2) to
+  `project`.
 
-After the last extraction the gates that read the package's source move to the
-crates, in one commit:
+*After the last extraction*, the gates that read the package's source move to
+the crates, in one commit:
 
 - **Module graph (gate 2).** The spec keeps its `crate` rows and loses the
   `module`, `allow`, `extern` and `finished` rows, and `xtask modgraph` stops
   walking `crates/phpstan-rs/src`: the gate checks that each workspace crate's
   normal and build dependencies on other workspace crates are within its row.
   `testing` appears in no row, being a dev-dependency only, and the bin's row
-  shrinks to what `main` uses (`app`, `lsp`), where today's lists every
-  crate, `testing` included. The `phpstan-rs` package, which the check skips
-  today since it holds every module not yet extracted, is checked against the
-  `bin` row.
+  shrinks to what `main` uses (`app`, `lsp`), where today's lists every crate,
+  `testing` included. The `phpstan-rs` package, which the check skips today
+  since it holds every module not yet extracted, is checked against the `bin`
+  row.
 - **Architecture (gate 10).** The engine-I/O rule covers every crate but
   `composer`, `config` and `sql`, `project`'s session module, `app`, `lsp`, the
   bin and tests, where `is_engine_source` reads paths under
   `crates/phpstan-rs/src` today (each G1 extraction adding its crate as it
   goes); the rules scoped to the analyser read `crates/analyser`; and `xtask`'s
   own tests of the gates, which pin `crates/phpstan-rs/src/...` paths, follow.
-- **Build time (gate 9).** Each scenario's file moves to the crate it stands
-  for (G4).
+- **Build time (gate 9)** stands for crates (G4).
 
 **G2. Tests, benches and fuzz targets to their owners.**
 
@@ -7702,8 +7710,8 @@ crates, in one commit:
   that `ext-*`, whose target registers `builtins`, `rules` and itself;
   Integration fixtures (every rule at a level) and fixtures expecting several
   extensions' identifiers to `app`, the one crate that registers everything, so
-  no separate test crate is needed. The directory layout under each crate's
-  `tests/fixtures` keeps the file's path below its old family directory.
+  no separate test crate is needed. Under each crate's `tests/fixtures` a file
+  keeps its path below its old family directory.
 - **Hermetic fixtures.** A fixture reads nothing outside its own directory:
   `Session::for_fixture` roots the VFS at the fixture, and a path outside it is
   absent, so moving a fixture can't change its result. Today
@@ -7716,35 +7724,37 @@ crates, in one commit:
   `CARGO_MANIFEST_DIR`; tests are named `<crate>::<path>` and run with
   `cargo test -p <crate> --test fixtures -- <filter>` (§3.11). Gate 3's
   manifest maps every old fixture name to its new one, and the fixtures' own
-  expectations don't change. The fixture type snapshot (`types-fixtures`) is
-  keyed by fixture name, each line led by it
+  expectations don't change.
+- **The fixture type snapshot** (`types-fixtures`) is keyed by fixture name,
+  each line led by it
   (`checker/access_attributes/friends_are_the_only_other_callers: …`) and the
   dumps sorted by it, so the move rewrites every key and the order while no
-  type changes: its comparison maps the parent snapshot's names through the
-  same manifest and reorders before comparing.
-- **`xtask`'s fixture runs select every member.** Its three runs of the target,
-  the suite with type dumps that records `types-fixtures`, gate 3's test
-  listing and the no-default-features run, pass `--test fixtures` without
+  type changes: its comparison maps the parent snapshot's names through gate
+  3's manifest and reorders before comparing.
+- **`xtask`'s fixture runs select every member.** Its three runs of the target
+  (the suite with type dumps that records `types-fixtures`, gate 3's test
+  listing, and the no-default-features run) pass `--test fixtures` without
   `--workspace` today, so they select the default member's target alone; after
   the move they would find no fixture, and gate 3 would read every fixture as
   deleted. Each gains `--workspace` in the commit that moves the first
   fixtures.
 - **Fixtures in plain `cargo test`.** The package's fixtures target is
   `test = false` today and runs in the `gate` profile, because each fixture
-  builds a whole `Project`, stubs included (about 210 ms of its setup clones the
-  stubs and reruns the registry passes over them): a debug run takes about 26
-  minutes, the gate profile 483 s (`GATE_SPEED_PLAN.md` §2). With C5's
+  builds a whole `Project`, stubs included (about 210 ms of its setup clones
+  the stubs and reruns the registry passes over them): a debug run takes about
+  26 minutes, the gate profile 483 s (`GATE_SPEED_PLAN.md` §2). With C5's
   process-wide stub layer a fixture's setup no longer builds the stubs, so the
-  owning crates' targets drop `test = false` and `cargo test --workspace` runs
+  owning crates' targets drop `test = false`, and `cargo test --workspace` runs
   every fixture in the debug profile, once that run takes no longer than the
   gate profile's suite does at the time; the commit records each crate's debug
   wall time, and until the bar is met the targets stay in the gate profile.
-  `default-members` keeps the bin, so a bare `cargo test` runs only the binary's
-  tests, and the documented command is `cargo test --workspace`. When the targets
-  leave the gate profile, CI's two fixture steps (`cargo test --profile gate
-  --test fixtures`, with and without default features) fold into its workspace
-  test steps and `GATE_SPEED_PLAN.md`'s fixture command follows; until then
-  they become `cargo test --profile gate --workspace --test fixtures`.
+  When they leave it, CI's two fixture steps (`cargo test --profile gate
+  --test fixtures`, with and without default features) fold into its
+  workspace test steps and `GATE_SPEED_PLAN.md`'s fixture command follows;
+  until then they become
+  `cargo test --profile gate --workspace --test fixtures`. `default-members`
+  keeps the bin, so a bare `cargo test` runs only the binary's tests, and the
+  documented command is `cargo test --workspace`.
 - **The binary's own tests** stay in the bin package: `tests/cli.rs`,
   `version.rs`, `lsp_exit_code.rs` and their `common` helper, which run the
   built binary (`CARGO_BIN_EXE_phpstan-rs`).
@@ -7762,8 +7772,8 @@ crates, in one commit:
 - **Property-test regressions** live with their tests' crates (`types`' since
   B4; any the package still holds move with their modules).
 
-**G3. Docs.** Every document that describes the package's layout or cites its
-paths is rewritten against the crates:
+**G3. Docs.** Every living document that describes the package's layout or
+cites its paths is rewritten against the crates:
 
 - the README: the build, test and profiling commands (the fixture command per
   crate, `--lib` for white-box tests, the bin forwarding the profiling
@@ -7781,27 +7791,25 @@ paths is rewritten against the crates:
   command becomes `cargo test -p <crate> --test fixtures -- <filter>`, or
   `--lib` for white-box tests.
 
-Records of past work keep the paths they were written against: a report named by
-the commit it describes (`PIWIGO_CORPUS_TRIAGE_ab4c2b5.md`), and the five
+Records of past work keep the paths they were written against: a report named
+by the commit it describes (`PIWIGO_CORPUS_TRIAGE_ab4c2b5.md`), and the five
 `.claude/workflows/*.js` scripts, each committed once on 2026-09-03 with that
-day's ROADMAP text embedded, which rewriting would make misstate what ran. A
-check joins gate 1's quick tier: every repository path the living Markdown docs
-cite exists, so a later move can't leave them stale; those records are exempt.
+day's ROADMAP text embedded, which rewriting would make misstate what ran.
+
+A check joins gate 1's quick tier: every repository path the living Markdown
+docs cite exists, so a later move can't leave them stale; those records are
+exempt.
 
 **G4. Build time.** Gate 9's scenarios now stand for crates, and each records
 its `cargo build -p phpstan-rs` and `cargo test --workspace --no-run` times
-with the crates it rebuilt, as `.corpus-runs/gate/buildtime` does today. The
-rebuild sets are asserted, since the crate graph alone doesn't decide them: a
-build script's `rerun-if-changed` scope, `include_str!` inputs and feature
-unification between the build and the test build rebuild crates too. At
-`25d63876` a stub edit rebuilt `syntax`, `types`, `phpdoc`, `diagnostics` and
-`composer`, none of which depends on `stub-sources`; at `1b20b638` it rebuilds
-`stub_sources` and the package alone. The recorder counts a crate as rebuilt
-from cargo's `compiler-artifact` messages of `lib` targets only
-(`rebuilt_workspace_crates`), which today catches the package through its
-library; with the bin left alone in it, the recorder counts `bin` targets too,
-so the bin's rebuild is seen and the sets below can name it. The asserted
-sets:
+with the crates it rebuilt, as `.corpus-runs/gate/buildtime` does today.
+
+*The rebuild sets are asserted*, since the crate graph alone doesn't decide
+them: a build script's `rerun-if-changed` scope, `include_str!` inputs and
+feature unification between the build and the test build rebuild crates too.
+At `25d63876` a stub edit rebuilt `syntax`, `types`, `phpdoc`, `diagnostics`
+and `composer`, none of which depends on `stub-sources`; at `1b20b638` it
+rebuilds `stub_sources` and the package alone. The asserted sets:
 
 - an engine edit (a file in `analyser`) rebuilds nothing below `analyser`;
 - a rule edit (a file in `rules`) rebuilds neither `analyser`, `builtins` nor
@@ -7812,35 +7820,41 @@ sets:
   `types`, `phpdoc`, `sql`, `diagnostics`, `composer` or `config`;
 - a lexer edit rebuilds everything above `syntax`, and its time is recorded.
 
-The times are asserted too. A rule edit and an extension edit build faster than
-an engine edit, which is what the split is for: today all three rebuild the
-one package, and at `1b20b638` the rule edit's build (8.5 s) is slower than
+The recorder counts a crate as rebuilt from cargo's `compiler-artifact`
+messages of `lib` targets only (`rebuilt_workspace_crates`), which today
+catches the package through its library; with the bin left alone in it, the
+recorder counts `bin` targets too, so the bin's rebuild is seen and the sets
+above can name it.
+
+*The times are asserted too.* A rule edit and an extension edit build faster
+than an engine edit, which is what the split is for: today all three rebuild
+the one package, and at `1b20b638` the rule edit's build (8.5 s) is slower than
 the engine edit's (7.3 s). No scenario is slower than its last record before
 G.
 
-`-Z threads` and mold are measured again, clean and incremental, with and
-without, and `.cargo/config.toml` keeps what is faster, its comment stating the
-measurement.
+*The toolchain settings are measured again.* `-Z threads` and mold, clean and
+incremental, with and without; `.cargo/config.toml` keeps what is faster, its
+comment stating the measurement.
 
 **G5. Done.** The plan is finished when:
 
 - `crates/phpstan-rs` holds the binary alone, with no library target;
 - the module-graph spec holds `crate` rows only, and every crate's
   dependencies are within its row;
-- every Appendix A row's destination exists (or its module is deleted), and
-  no row's module remains in the package;
+- every Appendix A row's destination exists (or its module is deleted), and no
+  row's module remains in the package;
 - `cargo xtask gates --full` passes, with no approved delta pending, gate 14
-  holds a snapshot for every library crate, and CI's run on the final commit
-  is green;
+  holds a snapshot for every library crate, and CI's run on the final commit is
+  green;
 - G4's build-time targets hold.
 
 Then the plan closes, in one commit:
 
 - **What stays in force moves out first**, since a Done section is history and
-  these are rules every later commit runs under: §2's crate map, layer rules and
-  workspace conventions and Appendix F's decisions to `ARCHITECTURE.md`; each
-  crate's §3 design to its crate-level `//!` docs, which `missing_docs` asks of
-  the API crates anyway; §4's gates with the approved-delta rule to
+  these are rules every later commit runs under: §2's crate map, layer rules
+  and workspace conventions and Appendix F's decisions to `ARCHITECTURE.md`;
+  each crate's §3 design to its crate-level `//!` docs, which `missing_docs`
+  asks of the API crates anyway; §4's gates with the approved-delta rule to
   `gates/README.md`, beside the approved deltas and manifests they read.
 - **One gate document.** `gates/README.md` also takes the gate section of
   `.corpus-runs/README.md` (the `xtask` commands, the artifact formats, the
