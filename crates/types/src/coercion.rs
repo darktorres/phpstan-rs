@@ -6,7 +6,7 @@
 //! (PHPStan's `ObjectType::toInteger()`/`toFloat()`/`toString()`) and in
 //! `ArrayTypeTrait`'s always-`ErrorType` `toString()`.
 
-use crate::{AccessoryKind, ClassHierarchy, PhpString, Type, union_types};
+use crate::{AccessoryKind, ClassHierarchy, PhpString, Type, format_php_float, union_types};
 
 /// The built-in classes PHPStan's `ObjectType::toInteger()`/`toFloat()`
 /// special-case as numeric-castable; every other object is illegal for
@@ -78,18 +78,6 @@ impl Type {
                 Type::Accessory(AccessoryKind::DecimalIntegerString),
             ])
         };
-        let numeric_string = || {
-            Type::Intersection(vec![
-                Type::String,
-                Type::Accessory(AccessoryKind::NumericString),
-            ])
-        };
-        let non_empty_string = || {
-            Type::Intersection(vec![
-                Type::String,
-                Type::Accessory(AccessoryKind::NonEmptyString),
-            ])
-        };
         if !matches!(self, Type::Mixed(_) | Type::Never)
             && crate::Relation::structural()
                 .is_super_type_of(&Type::String, self)
@@ -100,8 +88,13 @@ impl Type {
         match self {
             Type::IntLiteral(n) => Some(Type::StringLiteral(n.to_string().into())),
             Type::Int | Type::IntRange(..) => Some(decimal_int_string()),
-            Type::FloatLiteral(f) if f.is_finite() => Some(numeric_string()),
-            Type::Float | Type::FloatLiteral(_) => Some(non_empty_string()),
+            Type::FloatLiteral(f) => Some(Type::StringLiteral(format_php_float(*f).into())),
+            // `INF`, `-INF` and `NAN` aren't numeric.
+            Type::Float => Some(Type::Intersection(vec![
+                Type::String,
+                Type::Accessory(AccessoryKind::UppercaseString),
+                Type::Accessory(AccessoryKind::NonEmptyString),
+            ])),
             Type::True => Some(Type::StringLiteral("1".into())),
             Type::False | Type::Null => Some(Type::StringLiteral(PhpString::default())),
             Type::Bool => Some(Type::Union(vec![
@@ -132,6 +125,8 @@ impl Type {
                     None => Some(Type::String),
                 }
             }
+            // An enum case can't declare `__toString()`.
+            Type::EnumCase(..) => None,
             Type::Union(members) | Type::Intersection(members) => {
                 union_coercion(members, |m| m.to_string_type(hierarchy))
             }

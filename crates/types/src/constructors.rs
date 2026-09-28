@@ -61,6 +61,18 @@ impl Type {
         Type::IntRange(min, max)
     }
 
+    /// The integers from `min` to `max` as the narrowest type: `int` when
+    /// unbounded both ways, a literal when they meet, `never` when they
+    /// cross (PHPStan's `IntegerRangeType::fromInterval`).
+    pub fn int_interval(min: Option<i64>, max: Option<i64>) -> Type {
+        match (min, max) {
+            (None, None) => Type::Int,
+            (Some(a), Some(b)) if a > b => Type::Never,
+            (Some(a), Some(b)) if a == b => Type::IntLiteral(a),
+            (min, max) => Type::IntRange(min, max),
+        }
+    }
+
     pub const fn float() -> Type {
         Type::Float
     }

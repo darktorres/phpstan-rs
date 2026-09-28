@@ -1,7 +1,5 @@
 use crate::checker::expr::type_definitely_excludes_null;
-use crate::checker::{
-    Checker, Locals, build_matched_shape, int_range_bounds, literal_string_key, normalize_int_range,
-};
+use crate::checker::{Checker, Locals, build_matched_shape, literal_string_key};
 use crate::regex_groups;
 use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
@@ -16,9 +14,7 @@ mod type_ops;
 use accessory_range::{
     comparison_narrowed_bounds, int_comparison_operands, narrow_array_to_non_list,
     numeric_bounds_for_narrowing, upgrade_array_to_list, upgrade_array_to_non_empty,
-    upgrade_string_to_numeric, upgrade_string_with_accessory,
 };
-pub(crate) use accessory_range::{resolve_concat_type, string_type_has_accessory};
 pub(crate) use array_shape::{
     array_value_type_for_key, narrow_array_shape_by_key_presence, narrow_isset_container,
     narrow_type_excluding_falsy,
@@ -889,7 +885,7 @@ impl<'a> Checker<'a> {
                     let current = self.current_narrowed_type(keyed_expr, &key, locals);
                     if let Some((cur_min, cur_max)) = numeric_bounds_for_narrowing(&current) {
                         let bound_ty = self.infer_expr(bound_expr, locals);
-                        if let Some((Some(bound), Some(bound_max))) = int_range_bounds(&bound_ty)
+                        if let Some((Some(bound), Some(bound_max))) = bound_ty.int_range_bounds()
                             && bound == bound_max
                             && let Some((new_min, new_max)) = comparison_narrowed_bounds(
                                 op,
@@ -900,7 +896,7 @@ impl<'a> Checker<'a> {
                                 bound,
                             )
                         {
-                            locals.insert(key, normalize_int_range(new_min, new_max));
+                            locals.insert(key, Type::int_interval(new_min, new_max));
                         }
                     }
                 }
@@ -1037,7 +1033,7 @@ impl<'a> Checker<'a> {
                             .fold(current.into_owned(), |acc, excluded| {
                                 narrow_type_excluding(&acc, &excluded)
                             });
-                            upgrade_string_to_numeric(&excluded)
+                            excluded.with_string_accessory(AccessoryKind::NumericString)
                         } else {
                             // Int/Float are unconditionally numeric, so
                             // failing is_numeric proves the value wasn't
@@ -1160,7 +1156,7 @@ impl<'a> Checker<'a> {
                             AccessoryKind::NonFalsyString
                         };
                         let current = self.current_narrowed_type(&haystack.value, &key, locals);
-                        locals.insert(key, upgrade_string_with_accessory(&current, kind));
+                        locals.insert(key, current.with_string_accessory(kind));
                     }
                 } else if let ExprKind::Name(name) = &callee.kind
                     && matches!(name.trim_start_matches('\\'), "is_a")

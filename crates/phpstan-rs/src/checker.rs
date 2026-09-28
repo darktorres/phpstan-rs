@@ -1244,7 +1244,7 @@ pub(crate) use control_flow::{
     merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
-pub(crate) use expr::{build_matched_shape, int_range_bounds, normalize_int_range};
+pub(crate) use expr::build_matched_shape;
 pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::{ITERABLE_GENERIC_CLASS_NAMES, class_kind_word};
 pub(crate) use named_argument_renames::NamedArgumentCallFacts;
@@ -1252,7 +1252,7 @@ pub(crate) use narrowing::{
     array_value_type_for_key, count_call_operand, is_known_single_value, is_real_variable_key,
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
     narrow_type_to, narrowing_key, narrowing_type_for_predicate, propagate_container_field_facts,
-    purge_stale_narrowing_for, resolve_concat_type, string_type_has_accessory,
+    purge_stale_narrowing_for,
 };
 pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
@@ -1744,19 +1744,9 @@ impl<'a> Checker<'a> {
     /// representative-class extraction `ExprKind::MethodCall`'s own
     /// `recv_class` uses for a Union/Intersection operand.
     pub(crate) fn check_implicit_tostring_usage(&mut self, ty: &Type, span: Span) {
-        let class = match ty {
-            Type::Object(class, _) => Some(class.clone()),
-            Type::EnumCase(fqn, _) => Some(fqn.clone()),
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().find_map(|m| match m {
-                    Type::Object(class, _) => Some(class.clone()),
-                    Type::EnumCase(fqn, _) => Some(fqn.clone()),
-                    _ => None,
-                })
-            }
-            _ => None,
+        let Some(class) = ty.object_class_names().first().map(|c| (*c).clone()) else {
+            return;
         };
-        let Some(class) = class else { return };
         let Some((owner, sig)) = self.registry.lookup_method_with_owner(&class, "__toString")
         else {
             return;

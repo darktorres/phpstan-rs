@@ -1,7 +1,6 @@
 use crate::checker::{
     Checker, Locals, is_real_variable_key, literal_string_key, narrow_type_excluding,
     narrow_type_excluding_falsy, narrow_type_to, narrowing_type_for_predicate, resolve_call_args,
-    string_type_has_accessory,
 };
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
@@ -10,9 +9,7 @@ use types::PhpString;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 use types::{has_offset_value_parts, union_types};
 
-use super::{
-    int_range_bounds, is_false_literal, is_non_falsy_string, is_true_literal, normalize_int_range,
-};
+use super::{is_false_literal, is_non_falsy_string, is_true_literal};
 
 impl<'a> Checker<'a> {
     /// Bespoke per-function return-type extensions, mirroring real
@@ -1934,20 +1931,29 @@ impl<'a> Checker<'a> {
 
         let mut accessories = Vec::new();
         if force_lower
-            || (keep_lower && string_type_has_accessory(&arg_ty, AccessoryKind::LowercaseString))
+            || (keep_lower
+                && arg_ty
+                    .is_refined_string(AccessoryKind::LowercaseString)
+                    .yes())
         {
             accessories.push(AccessoryKind::LowercaseString);
         }
         if force_upper
-            || (keep_upper && string_type_has_accessory(&arg_ty, AccessoryKind::UppercaseString))
+            || (keep_upper
+                && arg_ty
+                    .is_refined_string(AccessoryKind::UppercaseString)
+                    .yes())
         {
             accessories.push(AccessoryKind::UppercaseString);
         }
-        if string_type_has_accessory(&arg_ty, AccessoryKind::NumericString) {
+        if arg_ty.is_refined_string(AccessoryKind::NumericString).yes() {
             accessories.push(AccessoryKind::NumericString);
         } else if is_non_falsy_string(&arg_ty) {
             accessories.push(AccessoryKind::NonFalsyString);
-        } else if string_type_has_accessory(&arg_ty, AccessoryKind::NonEmptyString) {
+        } else if arg_ty
+            .is_refined_string(AccessoryKind::NonEmptyString)
+            .yes()
+        {
             accessories.push(AccessoryKind::NonEmptyString);
         }
 
@@ -2273,13 +2279,13 @@ fn filter_validate_result(
     // ("PHPStan does not yet support FloatRangeType").
     let element_ty = if filter_name == "FILTER_VALIDATE_INT" {
         let min = filter_var_option(fields, "min_range")
-            .and_then(|t| int_range_bounds(&t))
+            .and_then(|t| t.int_range_bounds())
             .and_then(|(min, _)| min);
         let max = filter_var_option(fields, "max_range")
-            .and_then(|t| int_range_bounds(&t))
+            .and_then(|t| t.int_range_bounds())
             .and_then(|(_, max)| max);
         if min.is_some() || max.is_some() {
-            normalize_int_range(min, max)
+            Type::int_interval(min, max)
         } else {
             base_ty
         }
@@ -2941,7 +2947,9 @@ pub(crate) fn date_interval_format_return_type(format: &str) -> Option<Type> {
 /// provably `non-empty-string` is enough on its own to prove `dirname`
 /// present.
 fn pathinfo_array_shape(path_ty: &Type) -> Type {
-    let dirname_optional = !string_type_has_accessory(path_ty, AccessoryKind::NonEmptyString);
+    let dirname_optional = !path_ty
+        .is_refined_string(AccessoryKind::NonEmptyString)
+        .yes();
     Type::array_shape(Shape::from_named(vec![
         ("dirname".to_string(), Type::string(), dirname_optional),
         ("basename".to_string(), Type::string(), false),

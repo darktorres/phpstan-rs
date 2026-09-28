@@ -11,6 +11,7 @@ pub use syntax::name::Name;
 pub use syntax::php_string::PhpString;
 
 mod coercion;
+mod concat;
 mod conditional;
 mod constructors;
 mod display;
@@ -29,6 +30,7 @@ mod templates;
 mod trinary;
 mod union;
 
+pub use concat::concat_types;
 pub use conditional::conditional_branch;
 pub use conditional::resolve_conditional;
 pub use extension::ExtensionTypeData;

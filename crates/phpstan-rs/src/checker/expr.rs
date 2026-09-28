@@ -7,8 +7,7 @@ use crate::checker::{
     UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
     is_known_single_value, is_real_variable_key, literal_string_key, merge_scopes,
     narrow_type_excluding, narrowing_key, propagate_container_field_facts,
-    purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
-    superglobal_default_type,
+    purge_stale_narrowing_for, resolve_call_args, superglobal_default_type,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -33,7 +32,6 @@ use crate::checker::expr::ranges::{
     mul_int_range, numeric_comparison_bounds, pow_int_range, shift_int_range, sub_int_range_full,
 };
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
-pub(crate) use ranges::{int_range_bounds, normalize_int_range};
 use types::union_types;
 
 // `checker::throws::dynamic` reuses this bitwise-or-flag-chain scan for
@@ -46,19 +44,6 @@ use preg_shapes::{
     PregFlags, parse_preg_flags, preg_leaf_type, preg_match_all_pattern_order_shape,
     preg_match_matches_shape,
 };
-
-/// Does unary `-`/`+`'s numeric-string-to-int coercion apply to this
-/// operand's type - true for a bare `Type::String`/`Type::StringLiteral`,
-/// or a `numeric-string`-shaped `Intersection` (`String` alongside an
-/// accessory kind). Deliberately does NOT widen into a `Union`'s members
-/// here, unlike `operators.rs`'s leniency-tuned `is_exactly_string_operand`
-/// (tuned for suppressing a false invalid-operand flag, not this coercion
-/// decision) - `int|string` should keep its own type, not collapse
-/// entirely to `Int` just because one member is string-shaped.
-fn is_string_shaped(ty: &Type) -> bool {
-    matches!(ty, Type::String | Type::StringLiteral(_))
-        || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)))
-}
 
 /// Unary `-` negates a literal/range operand's actual value - `+` is a
 /// true no-op on the value (only ever coercing a numeric string), but `-`
@@ -1703,7 +1688,7 @@ impl<'a> Checker<'a> {
             ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_unary_operand_validity(op, &inner_ty, inner.span);
-                if is_string_shaped(&inner_ty) {
+                if inner_ty.is_string().yes() {
                     Type::int()
                 } else if *op == UnaryOp::Neg {
                     negate_numeric_literal(inner_ty)
@@ -3153,7 +3138,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                concat_string_parts(part_types)
+                concat_string_parts(part_types, self.registry)
             }
             ExprKind::Match { subject, arms } => {
                 let default = match_default(arms);
@@ -4480,7 +4465,7 @@ impl<'a> Checker<'a> {
             // operators apply generally.
             ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
-                if is_string_shaped(&inner_ty) {
+                if inner_ty.is_string().yes() {
                     Type::int()
                 } else if *op == UnaryOp::Neg {
                     negate_numeric_literal(inner_ty)
@@ -4811,6 +4796,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or(Type::string())
                     })
                     .collect(),
+                self.registry,
             ),
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 if locals.may_have_member_narrowing()
@@ -5250,9 +5236,11 @@ impl<'a> Checker<'a> {
             // composition of every accessory kind (`NonFalsyString`/
             // `NonEmptyString`/`LiteralString`/`LowercaseString`/
             // `UppercaseString`/`NumericString`), not just non-falsiness.
-            BinOp::Concat => {
-                resolve_concat_type(&self.infer_expr(l, locals), &self.infer_expr(r, locals))
-            }
+            BinOp::Concat => types::concat_types(
+                &self.infer_expr(l, locals),
+                &self.infer_expr(r, locals),
+                self.registry,
+            ),
             // Real constant folding, mirroring real PHPStan's
             // `BooleanAndHandler`/`BooleanOrHandler::resolveType` -
             // without this, `check_boolean_and_or`'s "whole result"
@@ -5461,7 +5449,7 @@ impl<'a> Checker<'a> {
                 // replicated) - falls through to the plain `Int` answer
                 // whenever either side isn't range-representable.
                 if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    (lt.int_range_bounds(), rt.int_range_bounds())
                 {
                     // `checked_add` via `checked_bound_op`, not plain `+`:
                     // real PHP silently promotes an overflowing int
@@ -5470,7 +5458,7 @@ impl<'a> Checker<'a> {
                     // `int<1, PHP_INT_MAX> + int<1, 10>`.
                     let (min, min_overflow) = checked_bound_op(l_min, r_min, i64::checked_add);
                     let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
-                    let result = normalize_int_range(min, max);
+                    let result = Type::int_interval(min, max);
                     return if min_overflow || max_overflow {
                         union_types(result, Type::float())
                     } else {
@@ -5495,14 +5483,14 @@ impl<'a> Checker<'a> {
                 // below, which computes the identical answer for this
                 // case but far less directly.
                 if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
-                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    (lt.int_range_bounds(), rt.int_range_bounds())
                     && c == rc
                 {
                     // `checked_sub` via `checked_bound_op` - see the `Add`
                     // arm's own doc comment just above.
                     let (min, min_overflow) = checked_bound_op(l_min, Some(c), i64::checked_sub);
                     let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
-                    let result = normalize_int_range(min, max);
+                    let result = Type::int_interval(min, max);
                     return if min_overflow || max_overflow {
                         union_types(result, Type::float())
                     } else {
@@ -5514,7 +5502,7 @@ impl<'a> Checker<'a> {
                 // constant) - `sub_int_range_full`'s own doc comment has
                 // the transcription details.
                 if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    (lt.int_range_bounds(), rt.int_range_bounds())
                 {
                     return sub_int_range_full(l_min, l_max, r_min, r_max);
                 }
@@ -5534,7 +5522,7 @@ impl<'a> Checker<'a> {
                 // transcription details. Falls through to plain `Int`
                 // whenever either side isn't range-representable at all.
                 if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    (lt.int_range_bounds(), rt.int_range_bounds())
                 {
                     return mul_int_range(l_min, l_max, r_min, r_max);
                 }
@@ -5549,7 +5537,7 @@ impl<'a> Checker<'a> {
                 if lt == Type::Float || rt == Type::Float {
                     Type::float()
                 } else if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    (lt.int_range_bounds(), rt.int_range_bounds())
                 {
                     pow_int_range(l_min, l_max, r_min, r_max)
                 } else {
@@ -5585,7 +5573,7 @@ impl<'a> Checker<'a> {
                 // r_max`) is range-preserving at all, matching real
                 // PHPStan's identical restriction.
                 if let (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) =
-                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    (lt.int_range_bounds(), rt.int_range_bounds())
                     && amount == r_max
                 {
                     return shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl));
@@ -5603,7 +5591,7 @@ impl<'a> Checker<'a> {
                 // transcription details. Falls through to plain `Int`
                 // whenever either side isn't range-representable at all.
                 if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    (lt.int_range_bounds(), rt.int_range_bounds())
                 {
                     mod_int_range(l_min, l_max, r_min, r_max)
                 } else {
@@ -5626,7 +5614,7 @@ impl<'a> Checker<'a> {
                 if lt == Type::Float || rt == Type::Float {
                     Type::float()
                 } else if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (int_range_bounds(&lt), int_range_bounds(&rt))
+                    (lt.int_range_bounds(), rt.int_range_bounds())
                 {
                     div_int_range(l_min, l_max, r_min, r_max)
                 } else {
@@ -5805,7 +5793,7 @@ pub(crate) fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
 /// exactly `"0"`) - a one-line delegate to the generalized
 /// `string_type_has_accessory`.
 fn is_non_falsy_string(ty: &Type) -> bool {
-    string_type_has_accessory(ty, AccessoryKind::NonFalsyString)
+    ty.is_refined_string(AccessoryKind::NonFalsyString).yes()
 }
 
 /// Whether `ty` is confidently array-shaped for
@@ -6902,9 +6890,9 @@ fn static_target_end(target: &StaticTarget) -> syntax::token::Position {
 
 /// An interpolated string's type: its parts, each as a string,
 /// concatenated.
-fn concat_string_parts(parts: Vec<Type>) -> Type {
+fn concat_string_parts(parts: Vec<Type>, hierarchy: &dyn types::ClassHierarchy) -> Type {
     parts
         .into_iter()
-        .reduce(|acc, part| resolve_concat_type(&acc, &part))
+        .reduce(|acc, part| types::concat_types(&acc, &part, hierarchy))
         .unwrap_or(Type::string())
 }

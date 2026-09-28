@@ -10,7 +10,7 @@ function f(int $i, int $digit, bool $b, float $x, string $text): void
     \PHPStan\Testing\assertType('decimal-int-string', (string) $digit);
     \PHPStan\Testing\assertType("'1'|''", (string) $b);
     \PHPStan\Testing\assertType("''", (string) null);
-    \PHPStan\Testing\assertType('non-empty-string', (string) $x);
+    \PHPStan\Testing\assertType('non-empty-uppercase-string', (string) $x);
     \PHPStan\Testing\assertType('non-empty-string', (string) $text);
     \PHPStan\Testing\assertType('int<1, 9>', (int) $digit);
     \PHPStan\Testing\assertType('1', (int) true);

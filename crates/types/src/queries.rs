@@ -21,6 +21,18 @@ impl Type {
         }
     }
 
+    /// PHPStan's `getObjectClassNames()`: the classes of the objects and
+    /// enum cases among this type's union and intersection members.
+    pub fn object_class_names(&self) -> Vec<&crate::Name> {
+        match self {
+            Type::Object(class, _) | Type::EnumCase(class, _) => vec![class],
+            Type::Union(members) | Type::BenevolentUnion(members) | Type::Intersection(members) => {
+                members.iter().flat_map(Type::object_class_names).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Whether this is `never`.
     pub fn is_never(&self) -> bool {
         matches!(self, Type::Never)
@@ -87,10 +99,50 @@ impl Type {
 
     /// PHPStan's `isNumericString()`.
     pub fn is_numeric_string(&self) -> TrinaryLogic {
+        self.is_refined_string(AccessoryKind::NumericString)
+    }
+
+    /// Whether every value is a string `kind` refines: PHPStan's
+    /// `isNonEmptyString()`, `isNonFalsyString()`, `isLiteralString()`,
+    /// `isLowercaseString()`, `isUppercaseString()`, `isNumericString()`.
+    pub fn is_refined_string(&self, kind: AccessoryKind) -> TrinaryLogic {
         self.is_within(&Type::Intersection(vec![
             Type::String,
-            Type::Accessory(AccessoryKind::NumericString),
+            Type::Accessory(kind),
         ]))
+    }
+
+    /// This type with its strings refined by `kind`: a `string`, bare or
+    /// already refined, gains it, in a union too; other members are left
+    /// as they are.
+    pub fn with_string_accessory(&self, kind: AccessoryKind) -> Type {
+        match self {
+            Type::String => Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
+            Type::Intersection(members)
+                if members.contains(&Type::String) && !members.contains(&Type::Accessory(kind)) =>
+            {
+                let mut members = members.clone();
+                members.push(Type::Accessory(kind));
+                Type::Intersection(members)
+            }
+            Type::Union(members) => Type::Union(
+                members
+                    .iter()
+                    .map(|m| m.with_string_accessory(kind))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    /// The `(min, max)` of an integer literal or range, `None` bounds
+    /// unbounded; `None` for any other type.
+    pub fn int_range_bounds(&self) -> Option<(Option<i64>, Option<i64>)> {
+        match self {
+            Type::IntLiteral(n) => Some((Some(*n), Some(*n))),
+            Type::IntRange(min, max) => Some((*min, *max)),
+            _ => None,
+        }
     }
 
     /// PHPStan's `isArray()`.

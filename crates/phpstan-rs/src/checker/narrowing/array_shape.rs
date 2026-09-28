@@ -1,6 +1,4 @@
-use crate::checker::narrowing::accessory_range::{
-    upgrade_array_to_non_empty, upgrade_string_with_accessory,
-};
+use crate::checker::narrowing::accessory_range::upgrade_array_to_non_empty;
 use types::union_types;
 use types::{AccessoryKind, ShapeField, ShapeKey, Type};
 
@@ -239,6 +237,6 @@ pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {
         // (e.g. a known `non-empty-string`) now also gets upgraded to
         // the strictly narrower `non-falsy-string`, instead of falling
         // through unchanged.
-        other => upgrade_string_with_accessory(other, AccessoryKind::NonFalsyString),
+        other => other.with_string_accessory(AccessoryKind::NonFalsyString),
     }
 }

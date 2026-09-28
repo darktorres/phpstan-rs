@@ -3,43 +3,6 @@ use syntax::ast::*;
 use types::union_types;
 use types::{self, Type};
 
-/// `ty`'s own `(min, max)` bound pair when it's
-/// range-representable at all - an `IntLiteral` is a degenerate range
-/// with `min == max`, matching `IntRange`'s own doc comment ("the same
-/// relationship `IntLiteral` has to `Int`"). `infer_binary`'s own
-/// `Add`/`Sub` arms use this to compute a real, narrow arithmetic result
-/// range instead of collapsing straight to bare `Int`.
-pub(crate) fn int_range_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
-    match ty {
-        Type::IntLiteral(n) => Some((Some(*n), Some(*n))),
-        Type::IntRange(min, max) => Some((*min, *max)),
-        _ => None,
-    }
-}
-
-/// The inverse of `int_range_bounds`: collapses back to the most precise
-/// representable type - `Type::Int` when both ends are unbounded (an
-/// `IntRange(None, None)` is never constructed elsewhere in this
-/// project), `Type::IntLiteral` when both ends coincide, `Type::IntRange`
-/// otherwise. An inverted range (`min > max`) is genuinely empty - no
-/// real value satisfies it - matching real PHPStan's own `IntegerRangeType
-/// ::fromInterval`'s identical `if ($min > $max) { return new NeverType(); }`
-/// guard exactly; `div_int_range`'s own rounding step (`ceil`ing the min
-/// and `floor`ing the max independently, real PHPStan's own doc comment
-/// there) is the one caller that can genuinely produce this shape - a
-/// `Div` result with no possible integer value at all, only the `Float`
-/// alternative `union_types` there still unions in (`10 / 4` is always
-/// exactly `2.5`, never any int, so its own int "half" collapses to
-/// `Never`, absorbed away by the union, correctly leaving bare `float`).
-pub(crate) fn normalize_int_range(min: Option<i64>, max: Option<i64>) -> Type {
-    match (min, max) {
-        (None, None) => Type::int(),
-        (Some(a), Some(b)) if a > b => Type::never(),
-        (Some(a), Some(b)) if a == b => Type::int_literal(a),
-        (min, max) => Type::int_range(min, max),
-    }
-}
-
 /// Applies `op` to two bounds, distinguishing a genuine `i64` overflow
 /// (both operands were real values, but the exact result doesn't fit)
 /// from a merely-unbounded operand (`None` propagating as `None` is
@@ -114,7 +77,7 @@ pub(crate) fn mul_int_range(
     let min = min1.min(min2).min(max1).min(max2);
     let max = min1.max(min2).max(max1).max(max2);
     let (min_bound, max_bound) = (finite_bound(min), finite_bound(max));
-    let result = normalize_int_range(min_bound, max_bound);
+    let result = Type::int_interval(min_bound, max_bound);
     // With every input bound present (no `?? -INF`/`?? INF` substitution
     // ever used above), a non-finite corner can only be a genuine `i64`
     // overflow, not a propagated unbounded operand - the same real-PHP
@@ -190,7 +153,7 @@ pub(crate) fn sub_int_range_full(
             (min, max)
         }
     };
-    normalize_int_range(min, max)
+    Type::int_interval(min, max)
 }
 
 /// `base ** exp` for two plain `i64`s, `None` whenever real PHP itself
@@ -225,7 +188,7 @@ pub(crate) fn pow_int_range(
     let min = l_min.zip(r_min).and_then(|(b, e)| checked_i64_pow(b, e));
     let max = l_max.zip(r_max).and_then(|(b, e)| checked_i64_pow(b, e));
     if min.is_some() || max.is_some() {
-        normalize_int_range(min, max)
+        Type::int_interval(min, max)
     } else {
         Type::union_of(vec![Type::int(), Type::float()])
     }
@@ -270,7 +233,7 @@ pub(crate) fn shift_int_range(
             }
         })
     };
-    normalize_int_range(shift_bound(l_min), shift_bound(l_max))
+    Type::int_interval(shift_bound(l_min), shift_bound(l_max))
 }
 
 /// Whether `l OP r` (`op` one of `Lt`/`Gt`/`LtEq`/`GtEq`) is provably
@@ -412,7 +375,7 @@ pub(crate) type NullProbeVerdictFn = fn(&Type) -> Option<&'static str>;
 pub(crate) fn numeric_comparison_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
     match ty {
         Type::Int => Some((None, None)),
-        other => int_range_bounds(other),
+        other => other.int_range_bounds(),
     }
 }
 
@@ -512,7 +475,7 @@ pub(crate) fn mod_int_range(
     } else {
         range_max.map(|m| -m)
     };
-    normalize_int_range(range_min, range_max)
+    Type::int_interval(range_min, range_max)
 }
 
 /// An unbounded end (or a `0` swapped to the nearest representable
@@ -625,7 +588,7 @@ pub(crate) fn div_int_range(
     if min_i.is_none() && max_i.is_none() {
         return Type::union_of(vec![Type::int(), Type::float()]);
     }
-    match normalize_int_range(min_i, max_i) {
+    match Type::int_interval(min_i, max_i) {
         // The rounding step (`ceil`ing the min, `floor`ing the max
         // independently) can invert an otherwise-valid range into one
         // with no real int members at all - `normalize_int_range`'s own

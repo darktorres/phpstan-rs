@@ -443,17 +443,14 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether every value of `ty` has a string conversion.
+    /// An object of no known class or a callable may have no string
+    /// form, so neither surely converts.
     pub(crate) fn converts_to_string(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Union(members) => members.iter().all(|m| self.converts_to_string(m)),
-            Type::Intersection(members) => members.iter().any(|m| self.converts_to_string(m)),
-            Type::Array(..) | Type::ArrayShape(_) | Type::ObjectShape(_) | Type::Callable(_) => {
-                false
-            }
-            Type::Object(class, _) => self.registry.lookup_method(class, "__toString").is_some(),
-            Type::EnumCase(..) => false,
-            _ => true,
-        }
+        ty.union_members().iter().all(|m| {
+            m.to_string_type(self.registry).is_some()
+                && !(m.is_object().yes() && m.object_class_names().is_empty())
+                && !m.is_within(&Type::callable(None)).yes()
+        })
     }
 
     pub(crate) fn check_strict_array_filter(
