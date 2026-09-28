@@ -50,6 +50,18 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
     - `class_string_template_binds_through_a_nullable_union_parameter` and
       `declaration_sanity/nullsafe_returned_by_reference_is_flagged` gain
       level-8 nullable findings (R1-1's shift).
+    - `closures_and_callables/this_is_available_inside_*` and
+      `callable_non_callable/invoking_a_nullable_closure_is_not_flagged` gain
+      `callable.nonCallable` at level 8 on `Closure|null`;
+      `invoking_a_plain_class_with_no_invoke_method_is_flagged` loses its
+      finding (a non-final class may have an invokable subclass);
+    - `stdclass_*_method_calls_*`: `method.nonObject` became
+      `method.notFound` on `stdClass`;
+    - `method_and_property_non_object/a_union_mixing_a_real_class_with_a_closed_scalar_member_is_flagged`
+      moves from level 0 to level 7, and `a_union_with_a_null_member_*`
+      gains a level-8 finding;
+    - `enums/a_case_singleton_still_supports_its_enum_s_own_methods` gains
+      `method.resultUnused` on a pure method's result.
 - [ ] **V2. Corpus run and delta approval** after V1, saved to
   `.corpus-runs/<scope>/<hash>.txt`.
 
@@ -560,7 +572,7 @@ through `check-project`.
   walks every child. The unknown-class, trait, parent and internal-prefix
   checks use the partial one. Keep one walker over every child
   (`has_parent_ref` too). (`3ac29a9a`) Done in `d41a83bf`.
-- [ ] **F43. `accepts` lets unsound values through.**
+- [x] **F43. `accepts` lets unsound values through.**
   - Shape against shape (`ArrayShape` and `ObjectShape` arms) ignores the
     given field's `optional`: `array{a?: int}` passes for `array{a: int}`,
     and `object{a?: int}` for `object{a: int}`. An unsealed tail on either
@@ -580,7 +592,7 @@ through `check-project`.
     mixed)` is Yes. Parameter by-ref and a callable's own templates are
     never compared.
 
-  (`91bc9e49`; accepts.rs and subtype.rs final state, probed)
+  (`91bc9e49`; accepts.rs and subtype.rs final state, probed) Done in `15b5b494`.
 - [ ] **F44. Conditional return types over classes don't resolve.**
   `@return ($x is Foo ? int : string)` gives `int|string` for `new
   Child()` (`Child extends Foo`) and for an unrelated final class; so does
