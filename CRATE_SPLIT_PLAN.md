@@ -2714,7 +2714,11 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
 (universal object crates among them). Reflection implements ClassHierarchy
 (`registry/relation.rs`'s impl moves); the trait takes `Name`s, lends
 memoized views instead of allocating, exposes `TemplateParam`s, and gains
-the enum-cases query.
+the enum-cases query. The two extension data modules (`access_attributes`,
+`class_info::doctrine_entity`) become class-reflection data extensions here
+(Appendix F), so `registry` reaches them only through the trait: the
+module-graph spec lists those two edges with E4, and they are C8's, since
+C10 extracts `reflection` only with no edge left.
 
 The `Relation::structural()` callers switch to the hierarchy-aware relation
 (approved delta): the 24 package sites and three in `types`
@@ -7921,7 +7925,7 @@ moves in the phase named.
 | doctrine_functions | ext-doctrine | E4 |
 | pest_config | ext-pest | E4 |
 | rule, reflection_rule | analyser (Rule API; ported) | D6 |
-| project, project/* | project; architecture / banned / class_shape / composer_hygiene / mock_hygiene → rules / ext-mockstan | E1/F1 |
+| project, project/* | project; architecture / banned / class_shape / composer_hygiene / mock_hygiene → rules / ext-mockstan | E1/E4/F1 |
 | project/use_sites | built from the reference-site collector (`decl_locations` is gone; the doc comments in `registry.rs`, `dead_members.rs`, `dead_enum_cases.rs` and `use_site_index.rs` that name it are corrected) | E1 |
 | lsp (the `Server`, dispatch, `workspace_config`, `settings`, `debounce`) | lsp over the Session: settings assembly deleted, per-root Sessions, the debounce queue folded into the Session's update | F1 |
 | lsp/protocol | lsp (positions through the line index, conformance) | F1 |
@@ -7955,7 +7959,7 @@ moves in the phase named.
 | expr/mysqli | ext-sql | E4 |
 | expr/probe_checks | ConstantResolver (global_constant_type) + rules (null probes, via TypeSpecifier) | C2/E3b |
 | expr/ranges | analyser (int-range arithmetic) | D3 |
-| function_decl | analyser (function entry) + rules; empty bodies, never-return suggestions → ext-extras; checked exceptions → ext-extras (throws/missing) | E3e |
+| function_decl | analyser (function entry) + rules; empty bodies, never-return suggestions → ext-extras; checked exceptions → ext-extras (throws/missing) | E3e/E4 |
 | function_like_declarations | rules | E3e |
 | generics.rs, generics/substitution | analyser | D3 |
 | generics/ancestors, bounds, interfaces, variance | rules::generics | E3e |
@@ -7990,7 +7994,7 @@ moves in the phase named.
 | strict_rules | ext-strict-rules (strict-rules families); comparable types → ext-shipmonk; mixed type operands → ext-voku | E4 |
 | strict_idioms | isset / empty on objects → ext-type-perfect; null coercion and enum exhaustiveness → ext-shipmonk; identity vs equals → ext-extras | E4 |
 | suggest | rules utility | E3c |
-| throws | analyser (throw points) + rules (throws.notThrowable / void); throws/too_wide → rules; throws/missing → ext-extras; throws/dynamic → builtins | E2/E3f |
+| throws | analyser (throw points) + rules (throws.notThrowable / void); throws/too_wide → rules; throws/missing → ext-extras; throws/dynamic → builtins | E2/E3f/E4 |
 | type_union | types | B4 |
 | uninitialized, uninitialized_dataflow | rules over ClassPropertiesNode (walker deleted) | E3d |
 | unused, unused/* | rules | E3e |
