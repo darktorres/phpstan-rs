@@ -92,3 +92,30 @@ fn the_mutable_walk_reaches_the_same_nodes() {
     assert!(!v.0.is_empty());
     assert!(v.0.iter().all(|n| n.ends_with('_')), "{:?}", v.0);
 }
+
+#[test]
+fn every_name_and_closure_use_is_visited() {
+    struct Names(Vec<String>);
+    impl<'ast> Visitor<'ast> for Names {
+        fn visit_name(&mut self, name: &'ast QualifiedName) {
+            self.0.push(name.written.to_string());
+        }
+        fn visit_closure_use(&mut self, closure_use: &'ast ClosureUse) {
+            self.0.push(format!("${}", closure_use.name));
+        }
+    }
+    let program = parse(
+        "<?php #[Attr] class C extends P implements I { use T { T::m insteadof U; } }\n\
+         try { f(K, A::B, $x instanceof D); } catch (E $e) {}\n\
+         $g = function () use ($u) {};",
+    );
+    let mut names = Names(Vec::new());
+    walk_stmts(&mut names, &program);
+    names.0.sort();
+    assert_eq!(
+        names.0,
+        [
+            "$u", "A", "Attr", "D", "E", "I", "K", "P", "T", "T", "U", "f"
+        ]
+    );
+}

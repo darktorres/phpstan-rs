@@ -70,6 +70,13 @@ pub trait Visitor<'ast> {
 
     fn visit_type_hint(&mut self, _hint: &'ast TypeHint) {}
 
+    /// A class, function or constant name as written, with its
+    /// resolution.
+    fn visit_name(&mut self, _name: &'ast QualifiedName) {}
+
+    /// A variable a closure captures with `use`.
+    fn visit_closure_use(&mut self, _closure_use: &'ast ClosureUse) {}
+
     fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
         walk_catch_clause(self, clause);
     }
@@ -207,8 +214,9 @@ pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
 }
 
 fn walk_static_target<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, target: &'ast StaticTarget) {
-    if let StaticTarget::Expr(e) = target {
-        v.visit_expr(e);
+    match target {
+        StaticTarget::Name(name, _) => v.visit_name(name),
+        StaticTarget::Expr(e) => v.visit_expr(e),
     }
 }
 
@@ -220,7 +228,8 @@ fn walk_args<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, args: &'ast [Arg]) {
 
 pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
     match &expr.kind {
-        ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => {}
+        ExprKind::Literal(_) | ExprKind::Variable(_) => {}
+        ExprKind::Name(name) => v.visit_name(name),
         ExprKind::Isset(operands) => {
             for operand in operands {
                 v.visit_expr(operand);
@@ -306,8 +315,9 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
         }
         ExprKind::Instanceof(inner, target) => {
             v.visit_expr(inner);
-            if let InstanceofTarget::Expr(target) = target {
-                v.visit_expr(target);
+            match target {
+                InstanceofTarget::Name(name, _) => v.visit_name(name),
+                InstanceofTarget::Expr(target) => v.visit_expr(target),
             }
         }
         ExprKind::Clone(inner, overrides) => {
@@ -335,6 +345,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
         }
         ExprKind::Closure {
             params,
+            uses,
             body,
             return_type,
             attrs,
@@ -345,6 +356,9 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
             }
             for param in params {
                 v.visit_param(param);
+            }
+            for closure_use in uses {
+                v.visit_closure_use(closure_use);
             }
             if let Some(hint) = return_type {
                 v.visit_type_hint(hint);
@@ -397,6 +411,20 @@ pub fn walk_function_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, f: &'ast F
 pub fn walk_class_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast ClassDecl) {
     for attr in &c.attrs {
         v.visit_attribute(attr);
+    }
+    for name in c.extends.iter().chain(&c.implements).chain(&c.uses) {
+        v.visit_name(name);
+    }
+    for alias in &c.trait_aliases {
+        if let Some(name) = &alias.trait_name {
+            v.visit_name(name);
+        }
+    }
+    for precedence in &c.trait_precedences {
+        v.visit_name(&precedence.trait_name);
+        for name in &precedence.instead_of {
+            v.visit_name(name);
+        }
     }
     if let Some(hint) = &c.backing_type {
         v.visit_type_hint(hint);
@@ -495,6 +523,7 @@ pub fn walk_property_hooks<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, h: &'ast 
 }
 
 pub fn walk_attribute<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, a: &'ast Attribute) {
+    v.visit_name(&a.name);
     walk_args(v, &a.args);
 }
 
@@ -503,6 +532,9 @@ pub fn walk_arg<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, arg: &'ast Arg) {
 }
 
 pub fn walk_catch_clause<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast CatchClause) {
+    for name in &c.types {
+        v.visit_name(name);
+    }
     walk_stmts(v, &c.body);
 }
 
