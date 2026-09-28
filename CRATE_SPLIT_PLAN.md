@@ -1531,9 +1531,10 @@ without parentheses, `\\Foo` with a doubled backslash, `@phpstan-type
 InvalidFoo what{}`, and a hook's `@return Test(` (the rules oracle's 11
 PHPStan-only, `impossible-instanceof-in-trait.php`,
 `check-implicit-mixed.php:102`, `invalid-phpdoc*.php`,
-`invalid-type-type-alias.php`). A tag that doesn't parse is dropped, so an
-untyped property whose `@var` fails is `missingType.property` too
-(`invalid-phpdoc.php:59`, `incompatible-property-phpdoc.php:18`).
+`invalid-type-type-alias.php`). A tag that doesn't parse or resolve is
+dropped, so an untyped property under `@var callable(int)` or `@var
+class-string<int>` is `missingType.property` too (`invalid-phpdoc.php:59`,
+`incompatible-property-phpdoc.php:18`).
 
 Follow-up: **a tag's diagnostics sit on the tag's line**: an invalid
 `@param`, `@var` or `@return` is `phpDoc.parseError` on its own line, not
