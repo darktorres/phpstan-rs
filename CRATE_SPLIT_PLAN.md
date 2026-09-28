@@ -1170,6 +1170,10 @@ Follow-ups, behaviour fixes:
   (`phpunit/src/Framework/Constraint/Operator/LogicalXor.php:64`), and
   `include 'a.php' or die()` is read as including `a.php` where PHP
   includes `'1'`.
+- **`new $cls()` with a constant class name** is that class: after `$cls =
+  Foo::class`, and after a `@return class-string<KeywordList>` call, `!
+  $keywords instanceof KeywordList` is `instanceof.alwaysTrue`,
+  unreported today (`bug-4689.php`).
 - **`new` takes PHP's `new_variable`**: `new $b[0]()`, `new
   $c[$key]()`, `new $o->cls()` and `new $o::$cls()` instantiate the class
   the whole expression names. Today `new $b[0]()` parses as `(new
@@ -2183,8 +2187,10 @@ Follow-ups:
     today): the snapshot commit's duplicate query groups by folded key;
   - member names fold case everywhere: abstract-method implementation,
     final-method overrides, constructors (`__Construct` promotes its
-    properties), `__toString` making a class `Stringable`, the magic-method
-    comparisons; the exact method accessors are deleted;
+    properties), `__toString` making a class `Stringable` (a trait's
+    included: `new Foo() instanceof Stringable` for a `Foo` using one is
+    `instanceof.alwaysTrue`, unreported today, `bug-13469.php`), the
+    magic-method comparisons; the exact method accessors are deleted;
   - member resolution follows PHP: the class chain first, then interfaces;
   - trait composition: `insteadof`, visibility-changing `as`, a trait's
     `final` methods, an abstract method implemented by another trait,
@@ -3888,7 +3894,12 @@ building on the previous one:
       Today a closure whose body returns after `if (!$node instanceof
       Return_)` is re-entered six times with the narrowed `$node` unioned
       into the parameter, which reads
-      `Node|Node|Node|Node|Node|Node&Return_&…` at the body's start;
+      `Node|Node|Node|Node|Node|Node&Return_&…` at the body's start. In
+      `function (\stdClass $std) { if ($std instanceof \stdClass) {} if
+      ($std instanceof \Exception) {} }`, `$std` reads
+      `stdClass|stdClass&Exception`, so neither check is reported
+      (`unreachable-if-branches*.php`, 8, among the rules oracle's
+      PHPStan-only `instanceof.alwaysTrue`);
     - a static closure has no `$this`: `static fn () => $this->p` isn't
       reported today (a static `function` already is `variable.undefined`),
       and PHP throws on it;
