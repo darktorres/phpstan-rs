@@ -2866,7 +2866,11 @@ deleted; the file-size gate.
   nor uninitialized"), unless custom serialization (`__unserialize()`,
   `__wakeup()`) may skip the constructor (the rules oracle's 6,
   `property-initialization-custom-serialization.php`,
-  `isset-after-remembered-constructor.php`); both unreported today.
+  `isset-after-remembered-constructor.php`); `isset()` and `empty()`
+  alike (`isset.expr`, `empty.expr`, `isset.initializedProperty`,
+  `empty.initializedProperty`, and `empty.property` for a property that
+  can't be falsy, `int<1, max>`; `empty(X)` of a constant `null` is
+  "always falsy"; 11 in all); all unreported today.
   `nullCoalesce.offset` covers a literal or `null` container (`[0][0] ??
   'ok'` always exists, `(null)[0] ?? 'ok'` doesn't; `offset-access-legal.php`),
   unreported today. The
@@ -4874,7 +4878,9 @@ fixture:
   - `unset()` of a readonly property is `unset.readOnlyProperty` and of a
     hooked one `unset.hookedProperty` (PHP throws an `Error` for both), and
     of a non-final class's property `unset.possiblyHookedProperty` (a
-    subclass may hook it); all three are unreported today;
+    subclass may hook it); all three are unreported today, as is
+    `unset.readOnlyPropertyByPhpDoc` for a `@readonly` one (and every
+    property of a `@readonly` or `@immutable` class; `bug-12421.php`, 3);
   - a property that is only appended to is write-only:
     `$this->only[] = $v` with no read isn't `property.onlyWritten` today,
     where a plain assignment is; a read through an alias of `$this` counts
@@ -5208,8 +5214,21 @@ fixture:
   - the type-alias checks: a cycle (`@phpstan-type A = B`, `B = A`) is
     `typeAlias.circular`, and `class.notFound` today; an alias resolving
     to `never` (`int&string`) is `typeAlias.unresolvableType`; an invalid
-    alias name (`123bad`) and an `@phpstan-import-type` of an alias the
-    class doesn't define are reported; all unreported today;
+    alias name (`123bad`, or `int`: `typeAlias.invalidName`) and an
+    `@phpstan-import-type` of an alias the class doesn't define
+    (`typeAlias.notFound`) are reported, as is an alias whose definition
+    doesn't parse (`typeAlias.invalidType`); all unreported today (the
+    rules oracle's 10, 4, 2 and 2);
+  - `@method`, `@property` and `@mixin` tags and a constant's `@var` with
+    an unresolvable type are `methodTag.unresolvableType` (a parameter or
+    its default), `propertyTag.unresolvableType`, `mixin.unresolvableType`
+    and `classConstant.unresolvableType`, unreported today (`method-tag*.php`,
+    `property-tag.php`, `mixin*.php`, `incompatible-class-constant-phpdoc.php`;
+    8 in all);
+  - a class constant named `class` is `classConstant.class`, a compile
+    error (`class-as-class-constant.php`, 2), and `$string::class` on a
+    string `classConstant.dynamicString` ("not supported in PHP",
+    `class-constant-on-expr.php`), both unreported today;
   - `@mixin int` is `mixin.nonObject`, unreported today;
   - a PHPDoc tag a trait can't carry is reported: `@phpstan-self-out`,
     `@phpstan-sealed`, `@mixin`, `@method`, `@property` and
