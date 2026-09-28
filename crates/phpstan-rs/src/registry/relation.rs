@@ -6,7 +6,10 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 
 use crate::registry::Registry;
-use types::{AcceptsResult, ClassFacts, ClassHierarchy, Relation, TrinaryLogic, Type, Variance};
+use types::{
+    AcceptsResult, CallableParam, CallableSig, ClassFacts, ClassHierarchy, Relation, TrinaryLogic,
+    Type, Variance,
+};
 
 /// Every class name is looked up as PHP resolves it, case-insensitively:
 /// a name the relations carry keeps its spelling as written.
@@ -32,6 +35,42 @@ impl ClassHierarchy for Registry {
     fn has_method(&self, class: &str, method: &str) -> bool {
         self.lookup_method(self.canonical_class_name(class), method)
             .is_some()
+    }
+
+    fn is_static_method(&self, class: &str, method: &str) -> bool {
+        let class = self.canonical_class_name(class);
+        self.lookup_method_with_owner(class, method)
+            .and_then(|(owner, _)| self.classes.get(&*owner))
+            .is_some_and(|info| {
+                info.static_methods()
+                    .iter()
+                    .any(|m| m.eq_ignore_ascii_case(method))
+            })
+    }
+
+    fn method_signature(&self, class: &str, method: &str) -> Option<CallableSig> {
+        let sig = self.lookup_method(self.canonical_class_name(class), method)?;
+        Some(CallableSig {
+            params: sig
+                .params()
+                .iter()
+                .map(|p| CallableParam {
+                    ty: p.ty().clone(),
+                    variadic: p.variadic(),
+                    optional: p.has_default(),
+                    by_ref: p.by_ref(),
+                })
+                .collect(),
+            return_type: Box::new(sig.return_type().clone()),
+            templates: Vec::new(),
+        })
+    }
+
+    fn function_exists(&self, name: &str) -> TrinaryLogic {
+        TrinaryLogic::from_bool(
+            self.lookup_function(name.trim_start_matches('\\'))
+                .is_some(),
+        )
     }
 
     fn method_return_type(&self, class: &str, method: &str) -> Option<Type> {

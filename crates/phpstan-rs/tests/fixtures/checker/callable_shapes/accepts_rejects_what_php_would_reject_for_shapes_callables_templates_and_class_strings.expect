@@ -1,0 +1,12 @@
+22:22-22:24 class.notFound L0 | parameter $x of needUnknown() has invalid type NoSuchKlass
+34:15-34:19 argument.type L5 | Parameter #1 $x of function App\\needShape expects array{a: int}, array{a?: int} given.
+35:15-35:35 argument.type L5 | Parameter #1 $x of function App\\needShape expects array{a: int}, array{a: 1, b: 2} given.
+37:18-37:25 argument.type L5 | Parameter #1 $x of function App\\needObjShape expects object{a: int}, object{a?: int} given.
+39:18-39:34 argument.type L5 | Parameter #1 $c of function App\\needCallable expects callable, 'nosuchfunc_xyz' given.
+41:18-41:24 argument.type L5 | Parameter #1 $c of function App\\needCallable expects callable, array{0: 1, 1: 2} given.
+43:18-43:36 argument.type L5 | Parameter #1 $c of function App\\needCallable expects callable, array{0: App\\St, 1: 'nope'} given.
+45:18-45:34 argument.type L5 | Parameter #1 $c of function App\\needCallable expects callable, array{0: class-string<App\\St>, 1: 'i'} given.
+48:21-48:30 argument.type L5 | Parameter #1 $c of function App\\needIntCallable expects callable(int): int, App\\Inv given.
+50:15-50:18 argument.type L5 | Parameter #1 $s of function App\\needIface expects interface-string, class-string<App\\C> given.
+51:15-51:18 argument.type L5 | Parameter #1 $s of function App\\needIface expects interface-string, class-string<App\\I|App\\C> given.
+52:17-52:18 argument.type L5 | Parameter #1 $x of function App\\needUnknown expects NoSuchKlass, 5 given.

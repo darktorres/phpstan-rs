@@ -67,7 +67,7 @@ impl Relation<'_> {
                 (Type(Repr::Callable(Some(_))), Type(Repr::Callable(None))) => true,
                 // Parameters contravariant, the return covariant.
                 (Type(Repr::Callable(Some(a))), Type(Repr::Callable(Some(b)))) => {
-                    callable_sig_is_subtype(a, b, &|x, y| self.is_super_type_of(y, x).yes())
+                    self.callable_sig_fits(a, b, &|x, y| self.is_super_type_of(y, x).yes(), false)
                 }
 
                 (Type(Repr::IntLiteral(_)), Type(Repr::Int)) => true,
@@ -340,84 +340,79 @@ fn effective_callable_param_at(params: &[CallableParam], i: usize) -> Option<&Ca
         .or_else(|| params.last().filter(|p| p.variadic))
 }
 
-/// `Repr::Callable(Some(a))` vs `Repr::Callable(Some(b))`'s own
-/// `is_super_type_of` arm - is `a` safely substitutable wherever `b` is
-/// expected? Real contravariant-parameter/covariant-return function-type
-/// subtyping: `a`'s return type must satisfy wherever `b`'s return is
-/// relied on (covariant), and `a` must accept at least everything `b`
-/// itself promises to accept - the same "textbook motivating example"
-/// `registry/assignability.rs`'s own generic-template variance
-/// composition already models for `Covariant`/`Contravariant` positions,
-/// not a new concept. Mirrors real PHPStan's `CallableTypeHelper::
-/// isParametersAcceptorSuperTypeOf` on its `accepts` path
-/// (`treatMixedAsAny = true`), with `a` as "theirs" (the passed callable)
-/// and `b` as "ours" (the accepting one):
-///
-/// - Only `a`'s own positions are walked (a variadic last parameter of
-///   `a` first expanded to cover every extra position of `b`). `a` having
-///   *fewer* parameters than `b` is fine: PHP silently drops extra
-///   arguments passed to a user-defined callable, so `fn() => 1` stands
-///   in for `Closure(int): int`.
-/// - A position `b` doesn't have is fine only when `a`'s parameter there
-///   is optional or variadic - a required one would never be supplied.
-/// - `b` optional where `a` is required is a rejection: `b`'s callers may
-///   omit the argument `a` needs.
-/// - `mixed` on either side of a parameter or return comparison is
-///   treated as "any", the same leniency an ordinary argument check gets
-///   below level 9.
-///
-/// `is_sub` decides each individual parameter/return comparison, so the
-/// registry can supply its hierarchy-aware relation while this module
-/// passes its own structural one.
-pub(crate) fn callable_sig_is_subtype(
-    a: &CallableSig,
-    b: &CallableSig,
-    is_sub: &dyn Fn(&Type, &Type) -> bool,
-) -> bool {
-    let mixed_as_any = |sub: &Type, sup: &Type| {
-        matches!(sub, Type(Repr::Mixed(_)))
-            || matches!(sup, Type(Repr::Mixed(_)))
-            || is_sub(sub, sup)
-    };
-    // A `void` return accepts `null` (`VoidType::accepts`).
-    let returns_fit = mixed_as_any(&a.return_type, &b.return_type)
-        || (*b.return_type == Type::void() && *a.return_type == Type::null());
-    if !returns_fit {
-        return false;
-    }
-    let a_positions = match a.params.last() {
-        Some(last) if last.variadic => a.params.len().max(b.params.len()),
-        _ => a.params.len(),
-    };
-    for i in 0..a_positions {
-        let Some(ap) = effective_callable_param_at(&a.params, i) else {
-            continue;
+impl Relation<'_> {
+    /// Whether a callable of signature `a` can stand in wherever one of
+    /// `b` is expected: contravariant parameters, covariant return
+    /// (PHPStan's `CallableTypeHelper::isParametersAcceptorSuperTypeOf`,
+    /// `a` "theirs" and `b` "ours").
+    ///
+    /// - `b`'s own templates are their bounds (`a` must work for any of
+    ///   them); `a`'s own are bound from `b`'s types.
+    /// - Only `a`'s positions are walked (a variadic last parameter of `a`
+    ///   covers every extra position of `b`): PHP drops extra arguments,
+    ///   so `fn() => 1` stands in for `Closure(int): int`. A position `b`
+    ///   lacks is fine only when `a`'s parameter there is optional or
+    ///   variadic, and `b` optional where `a` requires is a rejection.
+    /// - A by-reference parameter of `a` needs `b` to pass one by
+    ///   reference.
+    /// - A template of the enclosing function in `b`'s parameter is
+    ///   inferred from `a`'s, so `a`'s type only has to fit its bound.
+    /// - With `mixed_as_any` (the `accepts` path), `mixed` on either side
+    ///   of a comparison is "any", as an argument check below level 9.
+    ///
+    /// `is_sub` decides each comparison, so `accepts` passes its own.
+    pub(crate) fn callable_sig_fits(
+        &self,
+        a: &CallableSig,
+        b: &CallableSig,
+        is_sub: &dyn Fn(&Type, &Type) -> bool,
+        mixed_as_any: bool,
+    ) -> bool {
+        let b = b.own_templates_as_bounds();
+        let a = a.instantiated_against(&b, self);
+        let fits = |sub: &Type, sup: &Type| {
+            (mixed_as_any
+                && (matches!(sub, Type(Repr::Mixed(_))) || matches!(sup, Type(Repr::Mixed(_)))))
+                || is_sub(sub, sup)
         };
-        let Some(bp) = b.params.get(i) else {
-            if !ap.optional && !ap.variadic {
-                return false;
-            }
-            continue;
-        };
-        if (bp.optional || bp.variadic) && !ap.optional && !ap.variadic {
+        // A `void` return accepts `null` (`VoidType::accepts`).
+        let returns_fit = fits(&a.return_type, &b.return_type)
+            || (*b.return_type == Type::void() && *a.return_type == Type::null());
+        if !returns_fit {
             return false;
         }
-        // A still-unresolved template in the accepting shape's parameter
-        // (`callable(T): ...` on a generic method) is inferred from the
-        // passed callable itself in real PHPStan - `T` becomes `ap`'s own
-        // parameter type - so the only real constraint is that type
-        // fitting within `T`'s bound.
-        if let Type(Repr::TemplateParam(tp)) = &bp.ty {
-            if !(matches!(*tp.bound, Type(Repr::Mixed(_))) || mixed_as_any(&ap.ty, &tp.bound)) {
+        let a_positions = match a.params.last() {
+            Some(last) if last.variadic => a.params.len().max(b.params.len()),
+            _ => a.params.len(),
+        };
+        for i in 0..a_positions {
+            let Some(ap) = effective_callable_param_at(&a.params, i) else {
+                continue;
+            };
+            let Some(bp) = b.params.get(i) else {
+                if !ap.optional && !ap.variadic {
+                    return false;
+                }
+                continue;
+            };
+            if (bp.optional || bp.variadic) && !ap.optional && !ap.variadic {
                 return false;
             }
-            continue;
+            if ap.by_ref && !bp.by_ref {
+                return false;
+            }
+            if let Type(Repr::TemplateParam(tp)) = &bp.ty {
+                if !(matches!(*tp.bound, Type(Repr::Mixed(_))) || fits(&ap.ty, &tp.bound)) {
+                    return false;
+                }
+                continue;
+            }
+            if !fits(&bp.ty, &ap.ty) {
+                return false;
+            }
         }
-        if !mixed_as_any(&bp.ty, &ap.ty) {
-            return false;
-        }
+        true
     }
-    true
 }
 
 /// A practical approximation of PHP's real numeric-string grammar, not

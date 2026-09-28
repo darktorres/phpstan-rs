@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use crate::{CallableSig, Relation, Repr, TemplateParam, Type};
+use crate::{CallableParam, CallableSig, Relation, Repr, TemplateParam, Type};
 
 impl Relation<'_> {
     /// PHPStan's `inferTemplateTypes`: the bindings a parameter of type
@@ -270,6 +270,74 @@ impl CallableSig {
             &outside_callable,
             &|_| true,
         )
+    }
+}
+
+impl CallableSig {
+    /// This signature with its own templates replaced by their bounds:
+    /// what it must work for whatever they are bound to.
+    pub(crate) fn own_templates_as_bounds(&self) -> CallableSig {
+        if self.templates.is_empty() {
+            return self.clone();
+        }
+        let own = |tp: &TemplateParam| tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE);
+        self.map_types(&mut |ty| substitute(ty, &FxHashMap::default(), &own, &|_| true))
+    }
+
+    /// This signature with its own templates bound as far as `other`'s
+    /// parameter and return types bind them, an unbound one falling back
+    /// to its bound: the instance of a generic callable that stands in
+    /// for `other`.
+    pub(crate) fn instantiated_against(
+        &self,
+        other: &CallableSig,
+        relation: &Relation,
+    ) -> CallableSig {
+        if self.templates.is_empty() {
+            return self.clone();
+        }
+        const OPEN: &str = "callable-open";
+        fn open(ty: &Type) -> Type {
+            match ty {
+                Type(Repr::TemplateParam(tp))
+                    if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) =>
+                {
+                    Type::template_param(TemplateParam {
+                        scope: Some(OPEN.into()),
+                        ..tp.clone()
+                    })
+                }
+                other => other.map_children(&mut open),
+            }
+        }
+        let opened = self.map_types(&mut open);
+        let mut bindings = FxHashMap::default();
+        for (mine, theirs) in opened.params.iter().zip(&other.params) {
+            relation.infer_template_bindings(&mine.ty, &theirs.ty, &mut bindings);
+        }
+        relation.infer_template_bindings(&opened.return_type, &other.return_type, &mut bindings);
+        let is_open = |tp: &TemplateParam| tp.scope.as_deref() == Some(OPEN);
+        let mut instance =
+            opened.map_types(&mut |ty| substitute(ty, &bindings, &is_open, &|_| true));
+        instance.templates.clear();
+        instance
+    }
+
+    /// This signature with `f` applied to each parameter type and the
+    /// return type.
+    fn map_types(&self, f: &mut dyn FnMut(&Type) -> Type) -> CallableSig {
+        CallableSig {
+            params: self
+                .params
+                .iter()
+                .map(|p| CallableParam {
+                    ty: f(&p.ty),
+                    ..p.clone()
+                })
+                .collect(),
+            return_type: Box::new(f(&self.return_type)),
+            templates: self.templates.clone(),
+        }
     }
 }
 

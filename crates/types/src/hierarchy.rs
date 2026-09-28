@@ -6,7 +6,7 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 use syntax::ast::ClassKind;
 
-use crate::{CallSiteVariance, Repr, Type, Variance};
+use crate::{CallSiteVariance, CallableSig, Repr, TrinaryLogic, Type, Variance};
 
 /// A class as a type relation sees it.
 pub struct ClassFacts<'a> {
@@ -27,6 +27,17 @@ pub trait ClassHierarchy {
     fn ancestor_names(&self, class: &str) -> Vec<Arc<str>>;
 
     fn has_method(&self, class: &str, method: &str) -> bool;
+
+    /// Whether `class`'s method `method` is static.
+    fn is_static_method(&self, class: &str, method: &str) -> bool;
+
+    /// `class`'s method `method` as a callable: its parameters and
+    /// return type.
+    fn method_signature(&self, class: &str, method: &str) -> Option<CallableSig>;
+
+    /// Whether a function named `name` exists (compared
+    /// case-insensitively); `Maybe` when functions aren't known.
+    fn function_exists(&self, name: &str) -> TrinaryLogic;
 
     /// The declared return type of `class`'s method `method`.
     fn method_return_type(&self, class: &str, method: &str) -> Option<Type>;
@@ -87,6 +98,18 @@ impl ClassHierarchy for NoClasses {
 
     fn has_method(&self, _: &str, _: &str) -> bool {
         false
+    }
+
+    fn is_static_method(&self, _: &str, _: &str) -> bool {
+        false
+    }
+
+    fn method_signature(&self, _: &str, _: &str) -> Option<CallableSig> {
+        None
+    }
+
+    fn function_exists(&self, _: &str) -> TrinaryLogic {
+        TrinaryLogic::Maybe
     }
 
     fn method_return_type(&self, _: &str, _: &str) -> Option<Type> {

@@ -57,7 +57,6 @@ pub use php_version::{
 };
 pub use relation::{AcceptsResult, Relation};
 pub use shape::{NextArrayIndex, Shape, ShapeField, ShapeKey};
-pub(crate) use subtype::callable_sig_is_subtype;
 pub use subtype::is_numeric_string_literal;
 pub use template_references::PositionVariance;
 pub use trinary::TrinaryLogic;

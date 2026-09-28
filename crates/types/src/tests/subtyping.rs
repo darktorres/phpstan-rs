@@ -69,14 +69,21 @@ fn everything_is_subtype_of_mixed() {
 }
 
 #[test]
-fn an_unbounded_template_param_is_still_unconditionally_compatible_either_way() {
-    // The extremely common bound-free `@template T` is accepted either
-    // way, though it's provably neither: its bound is `mixed`.
+fn an_unbounded_template_param_takes_anything_but_is_as_unknown_as_mixed_when_given() {
+    // An unbounded `@template T` slot takes any value. A `T` given is
+    // unknown: plain `accepts` refuses it where a specific type is
+    // declared, and the rule-level check lets it through below level 9,
+    // as it does an explicit `mixed`.
     let t = Type::template_param(TemplateParam::unbounded("T".to_string()));
-    assert!(accepts(&Type::string(), &t));
-    assert!(accepts(&Type::object("Foo".into(), Vec::new()), &t));
     assert!(accepts(&t, &Type::string()));
     assert!(accepts(&t, &Type::object("Foo".into(), Vec::new())));
+    assert!(!accepts(&Type::string(), &t));
+    assert!(!accepts(&Type::int(), &t));
+    assert!(
+        crate::Relation::structural()
+            .rule_level_accepts(&Type::string(), &t)
+            .yes()
+    );
     assert!(!is_subtype(&t, &Type::string()));
     assert!(!is_subtype(&Type::string(), &t));
 }

@@ -1,1 +1,2 @@
+6:38-6:55 argument.type L5 | Parameter #1 $callback of function call_user_func_array expects callable, array{0: 'C', 1: 'needsInt'} given.
 6:58-6:70 argument.type L5 | Parameter #1 $a of callable passed to call_user_func_array() expects int, 'not an int' given.

@@ -1,1 +1,2 @@
 2:13-4:14 class.notFound L0 | return type of f() has invalid type TotallyMadeUpReturn
+3:24-3:28 return.type L3 | return type mismatch: expected TotallyMadeUpReturn, got null

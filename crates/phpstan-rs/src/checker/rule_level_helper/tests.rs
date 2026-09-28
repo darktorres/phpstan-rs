@@ -149,7 +149,9 @@ fn a_definite_null_actual_value_is_still_rejected_by_a_non_nullable_declared_typ
 fn a_nullable_actual_type_is_not_accepted_by_a_definite_null_declared_type() {
     let mut levels = RuleLevelHelper::default();
     let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
-    levels.configured_level = Some(5);
+    // Level 7 checks union members but not nullables; below it any
+    // member of a union given is enough.
+    levels.configured_level = Some(7);
     // Stripping Null out of `sub` must never happen when `sup` is itself
     // bare `null` - a `?string` actual value still doesn't
     // definitely satisfy a target that only ever accepts `null`.

@@ -1,1 +1,2 @@
 2:22-2:38 class.notFound L0 | parameter $handle of takesHandle() has invalid type resource
+16:21-16:23 argument.type L5 | Parameter #1 $handle of function takesHandle expects resource, resource given.

@@ -1,5 +1,5 @@
 use crate::relation::{AcceptsResult, Relation};
-use crate::{Repr, ShapeKey, Type, Variance};
+use crate::{CallableSig, ClassKind, Repr, Shape, ShapeKey, Type, Variance};
 
 // The levels at which PHPStan's `RuleLevelHelper` checks turn on
 // (`rule_level_accepts`, `accepts_at_level`).
@@ -30,6 +30,8 @@ impl Relation<'_> {
         syntax::stack::guard(|| {
             match (sub, sup) {
                 (Type(Repr::Error), _) | (_, Type(Repr::Error)) => true,
+                // No value to reject.
+                (Type(Repr::Never), _) => true,
                 // A `key-of<T>`/`T[K]` still over a template is what `T`'s
                 // bound makes it.
                 (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
@@ -51,30 +53,28 @@ impl Relation<'_> {
                 // The native `object` type hint is satisfied by *any* class
                 // instance - an extremely common pattern, e.g. Doctrine's
                 // `EntityRepository<T of object>` - and satisfies no
-                // particular class.
+                // particular known class.
                 (Type(Repr::Object(_, _)), Type(Repr::ObjectWithoutClass)) => true,
-                (Type(Repr::ObjectWithoutClass), Type(Repr::Object(_, _))) => false,
-                // Real PHP recognizes (at least) four distinct shapes as a
-                // valid `callable`: an actual `Closure` (already handled by
-                // the ordinary class-hierarchy arm just below, since
-                // `Closure` is now its own real `Object` type rather than
-                // being conflated with `Repr::Callable` itself), an object
-                // whose class declares `__invoke()`, a plain string naming a
-                // real function, and a two-element array naming an instance-
-                // or static-method callable. The latter two can't be
-                // statically verified further without evaluating the string/
-                // array's own literal content - accepting them outright
-                // matches this project's existing "don't guess, don't
-                // false-positive" leniency elsewhere (e.g. the `Array(Mixed)`
-                // leniency just below).
-                (Type(Repr::Object(class, _)), Type(Repr::Callable(_))) => {
-                    self.hierarchy.has_method(class, "__invoke")
+                (Type(Repr::ObjectWithoutClass), Type(Repr::Object(b, _))) => {
+                    self.hierarchy.find_class(b).is_none()
                 }
-                (Type(Repr::String) | Type(Repr::StringLiteral(_)), Type(Repr::Callable(_))) => {
-                    true
+                // A value is callable as PHP's `is_callable()` says: an
+                // object with `__invoke` (whose signature must fit a shaped
+                // callable), a string naming a function or a static
+                // `Class::method`, or `[object|class-string, method]`. What
+                // the type doesn't settle is accepted.
+                (Type(Repr::Object(class, _)), Type(Repr::Callable(sig))) => {
+                    self.object_is_callable(class, sig.as_deref())
                 }
-                (Type(Repr::Array(_, _)) | Type(Repr::ArrayShape(_)), Type(Repr::Callable(_))) => {
-                    true
+                (
+                    Type(Repr::String)
+                    | Type(Repr::StringLiteral(_))
+                    | Type(Repr::ClassString(_))
+                    | Type(Repr::ClassKindString(_)),
+                    Type(Repr::Callable(_)),
+                ) => self.string_is_callable(sub),
+                (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)), Type(Repr::Callable(_))) => {
+                    self.array_is_callable(sub)
                 }
                 // Type arguments are compared with real variance
                 // (`Repr::TemplateParam::variance`, `@template-covariant`/
@@ -249,12 +249,7 @@ impl Relation<'_> {
                 // is allowed to check more strictly - `ClassReflection::kind`
                 // already tracks exactly this.
                 (Type(Repr::ClassString(a)), Type(Repr::ClassKindString(kind))) => {
-                    let Type(Repr::Object(name, _)) = &**a else {
-                        return false;
-                    };
-                    self.hierarchy
-                        .find_class(name)
-                        .is_some_and(|class| class.kind == *kind)
+                    self.class_string_may_be_kind(a, *kind)
                 }
                 (Type(Repr::ClassString(a)), Type(Repr::ClassString(b))) => self.accepts_type(a, b),
                 // Mirrors `Relation::is_super_type_of`'s own bound-aware `TemplateParam`
@@ -272,9 +267,7 @@ impl Relation<'_> {
                 // own `TNodeType of Node` bound - each of those four classes
                 // extends `Node` only via `Expr`, a multi-level ancestor
                 // chain plain name-equality can't see).
-                (Type(Repr::TemplateParam(tp)), _) => {
-                    matches!(*tp.bound, Type(Repr::Mixed(_))) || self.accepts_type(&tp.bound, sup)
-                }
+                (Type(Repr::TemplateParam(tp)), _) => self.accepts_type(&tp.bound, sup),
                 // Mirrors `Relation::is_super_type_of`'s own identically-placed
                 // `Repr::Conditional` arm exactly (see that arm's own doc
                 // comment) - a real, independent gap this project's own
@@ -341,7 +334,7 @@ impl Relation<'_> {
                 // hierarchy: `Closure(Animal): Dog` fits `callable(Dog):
                 // Animal`, and `Event` fits a `T of object` template's bound.
                 (Type(Repr::Callable(Some(a))), Type(Repr::Callable(Some(b)))) => {
-                    crate::callable_sig_is_subtype(a, b, &|x, y| self.accepts_type(x, y))
+                    self.callable_sig_fits(a, b, &|x, y| self.accepts_type(x, y), true)
                 }
                 // A closure literal (`Type::closure_literal`) checked against a
                 // shaped `callable(...)`/`Closure(...)`: only its own
@@ -441,10 +434,26 @@ impl Relation<'_> {
                 // leniency already uses elsewhere in this match. Either
                 // side's unsealed tail takes no part.
                 (Type(Repr::ArrayShape(sub)), Type(Repr::ArrayShape(sup))) => {
-                    sup.fields.iter().all(|f| match sub.field(&f.key) {
-                        Some(sub_field) => self.accepts_type(&sub_field.ty, &f.ty),
-                        None => f.optional,
-                    })
+                    self.shape_accepts_fields(sub, sup)
+                        // A key `sup` doesn't list must fit its unsealed
+                        // tail; a sealed `sup` has none.
+                        && sub
+                            .fields
+                            .iter()
+                            .filter(|f| sup.field(&f.key).is_none())
+                            .all(|f| {
+                                sup.unsealed.as_deref().is_some_and(|(key, value)| {
+                                    self.accepts_type(&f.key.to_type(), key)
+                                        && self.accepts_type(&f.ty, value)
+                                })
+                            })
+                        && match (sub.unsealed.as_deref(), sup.unsealed.as_deref()) {
+                            (None, _) => true,
+                            (Some(_), None) => false,
+                            (Some((sub_key, sub_value)), Some((key, value))) => {
+                                self.accepts_type(sub_key, key) && self.accepts_type(sub_value, value)
+                            }
+                        }
                 }
                 // The `object{...}`-flavored sibling of the two `ArrayShape`
                 // rules just above - a real class instance
@@ -480,22 +489,15 @@ impl Relation<'_> {
                             }
                         })
                 }
+                // An object may have more properties than a shape lists.
                 (Type(Repr::ObjectShape(sub)), Type(Repr::ObjectShape(sup))) => {
-                    sup.fields.iter().all(|f| match sub.field(&f.key) {
-                        Some(sub_field) => self.accepts_type(&sub_field.ty, &f.ty),
-                        None => f.optional,
-                    })
+                    self.shape_accepts_fields(sub, sup)
                 }
-                // Same unresolved-`@phpstan-type`-alias leniency as the
-                // Object-vs-Object arm above, generalized to every other
-                // `sub` shape: Doctrine DBAL's own `DriverManager::
-                // getConnection(Params $params)` is called with a real array
-                // *literal* (an `ArrayShape`) at nearly every real call site,
-                // never an actual `Params`-named object - only the
-                // Object-vs-Object arm's leniency would leave those failing
-                // just the same way.
+                // A class the registry doesn't know may be any class: a value
+                // that may be an object may be one; a scalar or an array
+                // never is.
                 (_, Type(Repr::Object(name, _))) if self.hierarchy.find_class(name).is_none() => {
-                    true
+                    !sub.is_object().no()
                 }
                 // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
                 (_, Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. })) => true,
@@ -693,6 +695,14 @@ impl Relation<'_> {
     }
 
     fn accepts_at_level(&self, sub: &Type, sup: &Type, level: u8) -> bool {
+        // A template bounded by nothing is as unknown as an explicit
+        // `mixed` (PHPStan's `TemplateMixedType`).
+        if let Type(Repr::TemplateParam(tp)) = sub
+            && matches!(*tp.bound, Type(Repr::Mixed(_)))
+            && level < EXPLICIT_MIXED_CHECK_LEVEL
+        {
+            return true;
+        }
         if let Type(Repr::Mixed(is_explicit)) = sub {
             let strict_level = if *is_explicit {
                 EXPLICIT_MIXED_CHECK_LEVEL
@@ -705,6 +715,135 @@ impl Relation<'_> {
             return matches!(sup, Type(Repr::Mixed(_)));
         }
         self.accepts_type(sub, sup)
+    }
+
+    /// Every field `sup` lists is in `sub` - present for sure where
+    /// `sup` requires it - with a type `sup` accepts.
+    fn shape_accepts_fields(&self, sub: &Shape, sup: &Shape) -> bool {
+        sup.fields.iter().all(|f| match sub.field(&f.key) {
+            Some(sub_field) => {
+                (f.optional || !sub_field.optional) && self.accepts_type(&sub_field.ty, &f.ty)
+            }
+            None => f.optional,
+        })
+    }
+
+    /// An instance of `class` is callable when it has `__invoke`, whose
+    /// signature must fit `sig`; an unknown class may be.
+    fn object_is_callable(&self, class: &str, sig: Option<&CallableSig>) -> bool {
+        if self.hierarchy.find_class(class).is_none() {
+            return true;
+        }
+        match (self.hierarchy.method_signature(class, "__invoke"), sig) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(invoke), Some(sig)) => {
+                self.callable_sig_fits(&invoke, sig, &|x, y| self.accepts_type(x, y), true)
+            }
+        }
+    }
+
+    /// A string is callable when it names a function or a static
+    /// `Class::method`; one not known literally may be.
+    fn string_is_callable(&self, sub: &Type) -> bool {
+        let Type(Repr::StringLiteral(text)) = sub else {
+            return true;
+        };
+        let text = text.to_str_lossy();
+        let text = text.trim_start_matches('\\');
+        match text.split_once("::") {
+            Some((class, method)) => self.static_method_may_be_callable(class, method),
+            None => !self.hierarchy.function_exists(text).no(),
+        }
+    }
+
+    /// `[object|class-string, method]` is callable when the method is
+    /// there (static for a class name); an array not known to be such a
+    /// pair may be one if its elements may be objects or strings.
+    fn array_is_callable(&self, sub: &Type) -> bool {
+        match sub {
+            Type(Repr::ArrayShape(shape)) => {
+                let (Some(target), Some(method)) = (
+                    shape.field(&ShapeKey::Int(0)),
+                    shape.field(&ShapeKey::Int(1)),
+                ) else {
+                    return false;
+                };
+                if shape.is_sealed() && shape.fields.len() != 2 {
+                    return false;
+                }
+                if method.ty.is_string().no()
+                    || (target.ty.is_object().no() && target.ty.is_string().no())
+                {
+                    return false;
+                }
+                let Type(Repr::StringLiteral(name)) = &method.ty else {
+                    return true;
+                };
+                let name = name.to_str_lossy();
+                match &target.ty {
+                    Type(Repr::Object(class, _)) => {
+                        self.hierarchy.find_class(class).is_none()
+                            || self.hierarchy.has_method(class, &name)
+                            || self.hierarchy.has_method(class, "__call")
+                    }
+                    Type(Repr::ClassString(inner)) => match &**inner {
+                        Type(Repr::Object(class, _)) => {
+                            self.static_method_may_be_callable(class, &name)
+                        }
+                        _ => true,
+                    },
+                    Type(Repr::StringLiteral(class)) => {
+                        self.static_method_may_be_callable(&class.to_str_lossy(), &name)
+                    }
+                    _ => true,
+                }
+            }
+            Type(Repr::Array(key, value)) => {
+                !key.is_int().no() && !(value.is_object().no() && value.is_string().no())
+            }
+            _ => true,
+        }
+    }
+
+    /// Whether `class::method` may be called statically: an unknown or
+    /// relative class may; a known one needs the method static, or
+    /// `__callStatic`.
+    fn static_method_may_be_callable(&self, class: &str, method: &str) -> bool {
+        let class = class.trim_start_matches('\\');
+        if ["self", "parent", "static"]
+            .iter()
+            .any(|r| class.eq_ignore_ascii_case(r))
+            || self.hierarchy.find_class(class).is_none()
+        {
+            return true;
+        }
+        (self.hierarchy.has_method(class, method) && self.hierarchy.is_static_method(class, method))
+            || self.hierarchy.has_method(class, "__callStatic")
+    }
+
+    /// Whether a `class-string<inner>` may name a class-like of `kind`:
+    /// bare `class-string` takes any; an interface or trait needs `inner`
+    /// to be one (a class's name, or a subclass's, never is), each
+    /// member of a union alike. What `inner` doesn't pin down may.
+    fn class_string_may_be_kind(&self, inner: &Type, kind: ClassKind) -> bool {
+        if kind == ClassKind::Class {
+            return true;
+        }
+        match inner {
+            Type(Repr::Object(name, _)) => self
+                .hierarchy
+                .find_class(name)
+                .is_none_or(|class| class.kind == kind),
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
+                .iter()
+                .all(|m| self.class_string_may_be_kind(m, kind)),
+            Type(Repr::Intersection(members)) => members
+                .iter()
+                .any(|m| self.class_string_may_be_kind(m, kind)),
+            Type(Repr::TemplateParam(tp)) => self.class_string_may_be_kind(&tp.bound, kind),
+            _ => true,
+        }
     }
 
     /// Real PHPStan's own `InitializerExprTypeResolver::
