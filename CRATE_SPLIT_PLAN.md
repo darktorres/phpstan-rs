@@ -2922,7 +2922,8 @@ deleted; the file-size gate.
       `3`, `null`, `false`, `' 3'` or `'13foo'`, a `non-falsy-string`
       against `''`, `[]` or `false|null`, `0|1|false` against `2`, an enum
       against another enum's case, and `array == int` are
-      `equal.alwaysFalse`, unreported today (the rules oracle's 25
+      `equal.alwaysFalse`, and `true == int<10, 20>` and a case against
+      itself `equal.alwaysTrue` (3), unreported today (the rules oracle's 25
       PHPStan-only: `bug-11694.php`, 14, `bug-14606.php`, `bug-8485.php`,
       `bug-8800.php`, `invalid-comparison.php`);
     - a string offset write doesn't change the string: `$s[6] = 'b'` on
@@ -3103,7 +3104,10 @@ deleted; the file-size gate.
       `1 |> doFoo(...)` for a two-parameter `doFoo()` and `5 |>
       $foo->canDiscard(...)` for one without parameters are
       `arguments.count` (15 findings, the same files and the
-      `*-statement-result-discarded-php85.php` ones).
+      `*-statement-result-discarded-php85.php` ones); a `#[\NoDiscard]`
+      result dropped through a pipe (`5 |> $o->instanceMethod(...);`) is
+      `method.resultDiscarded`/`staticMethod.resultDiscarded`/
+      `function.resultDiscarded`, unreported today (6).
     - **Magic constants** type as their values: `__DIR__`, `__FILE__`,
       `__LINE__`, `__CLASS__`, `__FUNCTION__`, `__METHOD__`,
       `__NAMESPACE__`, `__TRAIT__` and `__PROPERTY__` are all `mixed` today
@@ -4666,7 +4670,10 @@ fixture:
     `classConstant.private` as today, and a constant some member of a
     union or intersection receiver lacks is `classConstant.notFound`
     (`$fooOrString::DOLOR`; `class-constant-visibility.php`,
-    `class-constant.php:33`);
+    `class-constant.php:33`), a static property alike
+    (`$foo::$nonexistent` on `Foo&SomeInterface`, `$class::$unknown` on
+    `ClassOrString|string`, and `self::${$property}` over constant names;
+    `staticProperty.notFound`, 3);
   - named arguments that leave a required parameter unset are
     `argument.missing`: `$f(i: 1)` for a two-parameter closure or a
     `callable(int, int)`, `implode(array: [''])` and `join(array: …)`,
@@ -4988,6 +4995,12 @@ fixture:
     unknown `@phpstan-*` tag above a statement or on a hook
     (`phpDoc.phpstanTag`, `invalid-phpstan-doc*.php`, 3); all unreported
     today;
+  - a `@template` named like an existing class is
+    `generics.existingClass` wherever templates are declared: a class
+    template named after the class itself (`bug-10049.php`), an anonymous
+    class's (`new /** @template stdClass */ class`) and a callable
+    type's (`callable<\stdClass of mixed>(T): T`); reported today only on
+    functions and methods (3);
   - a template's variance is checked through composition, each parameter
     on its own (`VarianceCheck`, `TemplateTypeVariance::compose`): a
     covariant `X` in `Out<X>`, `In<Out<X>>`, `Inv<X>` (an invariant
@@ -5112,7 +5125,10 @@ fixture:
     marker (`$this->returningMethod();`), unreported today
     (`pure-method.php`, 8); and `array_map()` given an opaque, maybe-null
     or maybe-non-callable callback is `possiblyImpure.functionCall`, as is
-    the callable itself (`pure-unless-callable-is-impure*.php`, 7);
+    the callable itself (`pure-unless-callable-is-impure*.php`, 7); a
+    closure passed to a `@param-immediately-invoked-callable` parameter
+    (or a maybe-callable one) runs there, so its `exit` is `impure.exit`
+    in the pure caller (`pure-function.php`, `bug13288*`, 3);
   - an enum's duplicate case value is found through constant expressions:
     `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
     literal duplicate already is);
