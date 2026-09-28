@@ -1690,6 +1690,8 @@ Pick items the same way any other Pending/partial phase gets picked up.
 - **182** (Part 13) analyses Latte templates natively, parsing them into
   the AST instead of compiling them to PHP first; Piwigo's own
   compile-then-analyse pipeline is its reference (2026-09-27).
+- **187** (Part 5) removes the LSP threads' idle timed wakeups and the
+  debounce worker's shutdown lost-wakeup race (2026-09-28).
 
 A number between 85 and 179 with no entry here (86, 92, 93, 99, 102-104, 106,
 108, 135, 138, 158-172, 174, 175, 179) belongs to a phase that has fully
@@ -2920,8 +2922,8 @@ Most of what this part originally proposed has shipped (see Done's
 LSP server hardening and VSCode extension client in "Performance &
 tooling"). What's left is narrower residual work: finer-grained
 incremental re-check (G), two single-file/whole-project stragglers
-(`codeLens`, `willRenameFiles`), and derivation-trace explainability
-(T).
+(`codeLens`, `willRenameFiles`), derivation-trace explainability
+(T), and removing the server threads' timed idle wakeups (187).
 
 ### Phase 105 — Finer-grained incremental re-check (§G)
 
@@ -3112,6 +3114,52 @@ before/after diff there is retaining data that already exists for one more
 statement's worth of scope, not computing anything new.
 
 **Effort: medium.**
+
+---
+
+### Phase 187 — Event-driven LSP threads: no timed wakeups (§AY)
+
+**Status: PLANNED.** The LSP server's two long-lived threads both wake on
+a timer when idle, though neither has anything to do on that wakeup. The
+fix stays synchronous: blocking channel and condvar waits. Async would
+buy nothing here, since analysis is CPU-bound on the rayon pool and there
+is one client on one stdio pipe.
+
+- **The dispatch loop.** `run_dispatch_loop` (`crates/phpstan-rs/src/lsp.rs`)
+  calls `receiver.recv_timeout(RUN_LOOP_TICK)` (50 ms) and `continue`s on
+  `Timeout`, so an idle server wakes 20 times a second for nothing.
+  `RUN_LOOP_TICK`'s doc comment says the timeout keeps the loop out of a
+  blocking read, but the blocking `read_message` already runs on the
+  reader thread (`pump_messages`). A plain `receiver.recv()` blocks on the
+  channel, not on stdin, and returns `RecvError` exactly when the reader
+  drops its sender, which is today's `Disconnected => return 0`. Replace
+  it and delete `RUN_LOOP_TICK`.
+- **The debounce worker.** `spawn_debounce_worker` waits with
+  `cv.wait_timeout(guard, DEBOUNCE_IDLE_WAIT)` (200 ms) when no edit is
+  pending, only so a shutdown is noticed. The cap covers a lost wakeup:
+  `run_loop` stores `shutdown` and calls `notify_all` without holding
+  `debounce.queue`'s mutex. If that happens between the worker's
+  `shutdown.load` and its park, the notification is missed until the
+  timeout fires. Move the shutdown flag into `DebounceQueue` (set under the
+  mutex, then `notify_all`), so the check and the wait are atomic. Then
+  wait with `cv.wait(guard)` when nothing is pending and
+  `wait_timeout` only until the next real deadline, and delete
+  `DEBOUNCE_IDLE_WAIT` and the `shutdown: Arc<AtomicBool>`.
+  `queue_change` already records under the lock before `notify_one`, so
+  edits have no such race.
+- **Tests.** `run_loop_wakes_on_an_idle_timeout_instead_of_blocking_forever`
+  (`lsp/tests/protocol_and_session.rs`) pins the tick and sleeps on
+  `RUN_LOOP_TICK * 3`. It becomes a test that an idle `run_loop` still
+  answers a later request and exits, with a fixed sleep. Add a test that
+  shutdown with no pending edit joins the worker promptly: loop the
+  shutdown handshake many times and check that each join takes well under
+  the old 200 ms cap.
+
+If the dispatch loop later needs a second event source (a file watcher,
+worker results, a cancellation channel), use crossbeam's `select!` over
+the channels, not a timeout tick.
+
+**Effort: small.**
 
 ---
 
