@@ -14,10 +14,8 @@ use crate::token::{Keyword, Position, Span, Token};
 // checker's catch_unwind included) and takes the whole process down.
 const MAX_EXPR_DEPTH: usize = 1000;
 
-/// A recoverable parse failure - genuinely malformed syntax, as opposed to
-/// `enter_expr`'s own `MAX_EXPR_DEPTH` guard (a resource-exhaustion limit,
-/// not a syntax error, and kept as a panic - see its own doc comment).
-/// `message` mirrors this parser's own former panic message text.
+/// A parse failure: malformed syntax, or an expression nested past
+/// `MAX_EXPR_DEPTH`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
     pub message: String,
@@ -287,16 +285,21 @@ impl Parser {
         self.doc_comments.remove(&self.pos)
     }
 
-    /// Bumps the expression-recursion depth counter, panicking (a normal,
-    /// catchable error) once it passes MAX_EXPR_DEPTH instead of letting
-    /// the recursion keep going until it segfaults. Callers must pair this
-    /// with a matching decrement once their own recursive call returns -
-    /// see the three call sites for the exact pattern.
-    pub(crate) fn enter_expr(&mut self) {
+    /// Bumps the expression-recursion depth counter, failing once it
+    /// passes MAX_EXPR_DEPTH instead of letting the recursion keep going
+    /// until it overflows the stack. Callers pair this with `leave_expr`
+    /// once their own recursive call returns.
+    pub(crate) fn enter_expr(&mut self) -> Result<(), ParseError> {
         self.expr_depth += 1;
         if self.expr_depth > MAX_EXPR_DEPTH {
-            panic!("parse error: expression nested too deeply (over {MAX_EXPR_DEPTH} levels)");
+            return Err(ParseError {
+                message: format!(
+                    "parse error: expression nested too deeply (over {MAX_EXPR_DEPTH} levels)"
+                ),
+                span: self.spans.get(self.pos).copied().unwrap_or_default(),
+            });
         }
+        Ok(())
     }
 
     pub(crate) fn leave_expr(&mut self) {

@@ -55,7 +55,7 @@ impl Parser {
     }
 
     pub(crate) fn parse_assignment(&mut self) -> Result<Expr, ParseError> {
-        self.enter_expr();
+        self.enter_expr()?;
         let result = self.parse_assignment_inner();
         self.leave_expr();
         result
@@ -137,7 +137,7 @@ impl Parser {
     }
 
     pub(crate) fn parse_coalesce(&mut self) -> Result<Expr, ParseError> {
-        self.enter_expr();
+        self.enter_expr()?;
         let result = self.parse_coalesce_inner();
         self.leave_expr();
         result
@@ -378,7 +378,7 @@ impl Parser {
     }
 
     pub(crate) fn parse_unary(&mut self) -> Result<Expr, ParseError> {
-        self.enter_expr();
+        self.enter_expr()?;
         let result = self.parse_unary_inner();
         self.leave_expr();
         result

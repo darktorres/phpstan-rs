@@ -98,34 +98,30 @@ fn moderately_nested_unary_still_parses() {
 }
 
 #[test]
-#[should_panic(expected = "expression nested too deeply")]
 fn pathologically_nested_unary_fails_cleanly_instead_of_overflowing_the_stack() {
     // php-src's Zend/tests/stack_limit/stack_limit_013.phpt is exactly
-    // this shape (~7700 levels), designed to test the real engine's own
-    // stack-depth guard; parsing it must produce a normal parse error,
-    // not an uncatchable stack overflow.
-    //
-    // Runs on its own thread with an explicit, generous stack size,
-    // matching `main.rs::run_check`'s own `WORKER_STACK_SIZE`, rather
-    // than depending on whatever stack size the test harness's own
-    // thread happens to have - a debug build's much larger per-frame
-    // stack usage through `parse_unary`'s own recursive descent means
-    // even the parser's own `MAX_EXPR_DEPTH = 1000` guard can physically
-    // exhaust a small default thread stack before its own counter ever
-    // gets a chance to trip. Re-raises the inner thread's own panic
-    // payload so `#[should_panic]` still sees the real message.
+    // this shape (~7700 levels); parsing it must produce a parse error,
+    // not a stack overflow. Runs on a thread with a generous stack, as the
+    // checker's workers do: a debug build's frames are large enough to
+    // exhaust a default thread stack before the depth guard trips.
     let nested = "~".repeat(8000);
     let source = format!("<?php $x = {nested}1;");
     let result = std::thread::Builder::new()
         .stack_size(64 * 1024 * 1024)
         .spawn(move || {
-            parse(&source);
+            Parser::new(crate::lexer::Lexer::new(&source).tokenize_with_spans())
+                .parse_program()
+                .map(|_| ())
         })
         .expect("failed to spawn worker thread")
-        .join();
-    if let Err(payload) = result {
-        std::panic::resume_unwind(payload);
-    }
+        .join()
+        .expect("the parser must not panic");
+    let error = result.expect_err("expected a parse error");
+    assert!(
+        error.message.contains("expression nested too deeply"),
+        "got: {}",
+        error.message
+    );
 }
 
 #[test]
