@@ -2213,7 +2213,9 @@ Follow-ups:
     `instanceof.alwaysTrue`, unreported today, `bug-13469.php`), the
     magic-method comparisons; the exact method accessors are deleted;
   - member resolution follows PHP: the class chain first, then interfaces;
-  - trait composition: `insteadof`, visibility-changing `as`, a trait's
+  - trait composition: `insteadof`, visibility-changing `as` (`hello as
+    private somethingElse` makes `$bar->somethingElse()` from outside
+    `method.private`, unreported today; `bug-12544.php`), a trait's
     `final` methods, an abstract method implemented by another trait,
     `@use Trait<T>` template bindings, and a trait member's aliases
     resolved in the trait's scope (`self` still the host); a trait method
@@ -5168,7 +5170,15 @@ fixture:
     (`invalid-comparison.php`, `bug-3364.php`); an `include`/`require` of
     a stream-wrapper path PHP can't open (`vfs://…` unregistered,
     `not-a-registered-wrapper://…`) is `*.fileNotFound`
-    (`require-file-stream-wrapper.php`); `self::doBar(...)` of an
+    (`require-file-stream-wrapper.php`); a nullsafe returned from a `&get`
+    hook is `nullsafe.byRef` as from a by-reference function
+    (`return-null-safe-by-ref-property-hooks.php`); a constant overriding
+    a built-in's with a wider native type is `classConstant.nativeType`
+    (`const int|string NONE` in a `Phar` subclass,
+    `overriding-constant-native-types.php:48`); a
+    `@phpstan-require-extends` union naming an unknown class still checks
+    the known member (`class.missingExtends`,
+    `incompatible-require-extends.php:185`-`:198`); `self::doBar(...)` of an
     instance method from a static method (`method.staticCall`),
     `Ab::doBaz(...)` of an abstract
     static method (`staticMethod.callToAbstract`), a trait-typed promoted
