@@ -4746,8 +4746,9 @@ fixture:
     `bug-8101.php`, `bug-9863.php`, `bug-13856.php`);
   - `$this` is written by every write form, each `assign.this` (a compile
     error): a `foreach` key, value or by-reference target, `.=` and `??=`,
-    destructuring, a `catch` variable, and an offset write on a class
-    without `ArrayAccess`; only a plain `$this = …` is reported today (the
+    destructuring and a `catch` variable, and an offset write on a class
+    without `ArrayAccess` (an `Error` at runtime rather than at compile
+    time); only a plain `$this = …` is reported today (the
     rules oracle's 12 PHPStan-only, `bug-3585.php`, `bug-14349.php`,
     `bug-14351.php`, `bug-3782.php`, `bug-14352.php`);
   - a readonly property is modified by every write form, so outside the
