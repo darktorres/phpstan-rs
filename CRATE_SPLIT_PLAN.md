@@ -7790,7 +7790,12 @@ manifests they read, together with the gate section of `.corpus-runs/README.md`
 (the `xtask` commands, the artifact formats, the approved-delta files), which
 cites `CRATE_SPLIT_PLAN.md` §4 today; one document then says what each gate
 checks and how it records, and `.corpus-runs/README.md` keeps its older runs
-and known snapshots with a pointer to it. The plan
+and known snapshots with a pointer to it. The references to the plan outside it
+repoint in the same commit, to where their section went: the module-graph spec's
+header (Appendix A), `.corpus-runs/README.md` (§4), ROADMAP's two (A2's known
+bugs, the documents list) and the sibling plans' (`CRASH_REPORTING_PLAN.md`'s
+two, `GATE_SPEED_PLAN.md`'s two, `UNSAFE_PLAN.md`'s one) where they are still
+open. The plan
 then folds into ROADMAP's Done section, its open items moved into
 ROADMAP's phases first, and its working documents go with it once each open
 item in them has a ROADMAP phase: `CRATE_SPLIT_EVIDENCE.md` (the
