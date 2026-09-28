@@ -4957,16 +4957,16 @@ before defaulting to another full revert.
 
 ## Part 14: Onboarding
 
-### Phase 183 — `phpstan.neon` as a config source, and `phpstan-rs init` (§AU)
+### Phase 183 — `phpstan-rs init`, converting `phpstan.neon` (§AU)
 
-A project adopting phpstan-rs writes `phpstan-rs.toml` by hand, and one
-already on PHPStan re-types its `phpstan.neon`. Piwigo's hand-written
-toml shows the cost: 55 individual `paths` standing in for the NEON's
-glob `excludePaths`, 1 of its 36 `ignoreErrors` entries mirrored, none of
-its rationale comments kept. Piwigo also keeps running PHPStan, so the
-two files drift. This phase reads `phpstan.neon` directly, as a live
-config source, and adds `phpstan-rs init`, which scans a project, links
-or converts its NEON, and picks a level by running the analysis.
+A project adopting phpstan-rs writes `phpstan-rs.toml` by hand, and one already
+on PHPStan re-types its `phpstan.neon`. Piwigo's hand-written toml shows the
+cost: 55 individual `paths` standing in for the NEON's glob `excludePaths`, 1 of
+its 36 `ignoreErrors` entries mirrored, none of its rationale comments kept.
+This phase adds `phpstan-rs init`, which scans a project, converts its NEON once
+into a `phpstan-rs.toml`, and picks a level by running the analysis. phpstan-rs
+reads only its own config: `phpstan.neon` is never a live source, and a PHPStan
+baseline is never read (the project generates phpstan-rs's own).
 
 Targets PHPStan 2.2.16, the release `vendor/phpstan-src` is pinned at.
 Each later PHPStan release re-runs the level oracle below as part of
@@ -4987,10 +4987,10 @@ lines it changed. Buckets:
 - **S** maps once a crate-split phase lands;
 - **K** needs a key (crate-split C1 "Missing settings");
 - **N** no engine concept (a Known entry below);
-- **=** phpstan-rs matches PHPStan's default; a non-default value warns;
+- **=** phpstan-rs matches PHPStan's default; a non-default value is noted in
+  the converted file;
 - **X** no meaning here;
-- **>** phpstan-rs already reports what the toggle adds; imported
-  silently.
+- **>** phpstan-rs already reports what the toggle adds; converted silently.
 
 Core parameters:
 
@@ -5145,25 +5145,17 @@ fixture, minus the keys it strips (`analysedPaths`, `debugMode`,
 `dump-parameters` runs `bootstrapFiles`, so Piwigo's needs phpstan-dba's
 database.
 
-**183b. Live source.** `phpstan_config = "phpstan.neon"` in the TOML.
-Each run resolves it and maps it by the table; TOML keys win. A value is
-written wherever it differs from phpstan-rs's default, which is not
-PHPStan's: an unset NEON level is PHPStan's `0`, not phpstan-rs's 6, and
-`reportUnmatchedIgnoredErrors` defaults to true. One warning per N or =
-row set away from its default and per grouped key given mixed settings;
-none for `>` rows. `Baseline::load` reads a `.neon` baseline
-(`message` and `rawMessage`; a `#^...$#` pattern is un-escaped to its
-literal message, else matched as a pattern). The LSP watches the whole
-include set.
+**183b. `phpstan-rs init [dir]`.**
 
-**183c. `phpstan-rs init [dir]`.**
-
-- `--link` (the default when `phpstan/phpstan` is required) writes
-  `phpstan_config` plus phpstan-rs-only keys; `--convert` writes a
-  standalone TOML through `toml_edit`, keeping the NEON's comments and
-  entry order, and converts `baseline.neon` to the JSON baseline
-  (`convert-baseline` accepts `.neon` too). Several NEON files: `--from`
-  or a prompt.
+- The NEON is resolved (183a) and mapped by the table into a standalone TOML
+  written through `toml_edit`, keeping the NEON's comments and entry order. A
+  value is written wherever it differs from phpstan-rs's default, which is not
+  PHPStan's: an unset NEON level is PHPStan's `0`, not phpstan-rs's 6, and
+  `reportUnmatchedIgnoredErrors` defaults to true. Each N or = row set away from
+  its default, and each grouped key given mixed settings, is noted in a comment
+  where it would go; `>` rows convert silently. An included PHPStan baseline
+  isn't converted: it is noted, and 183c offers a phpstan-rs baseline instead.
+  Several NEON files: `--from` or a prompt.
 - The scan: Composer `autoload`/`autoload-dev` roots, else the top-level
   directories holding PHP; `exclude-from-classmap` → `exclude_paths`;
   symlinked directories resolving inside an analysed one (Piwigo's
@@ -5178,18 +5170,18 @@ include set.
 - Imported message-only `ignoreErrors` entries that matched nothing in
   the level run are listed.
 
-**183d. Level selection.** One "findings per level" function in `app`,
+**183c. Level selection.** One "findings per level" function in `app`,
 which Phase 181 also uses. The level only reaches checking through
 `CheckSettings.rule_levels`, so the project is parsed and indexed once
 and re-checked per level 0-10; after E5 and F1, one max scan tagged per
 level replaces the re-checks. `init` offers the highest level with no
 findings, a chosen level plus a generated baseline, or the NEON's level.
-Flags: `--from`, `--link`/`--convert`, `--level <n|max>`,
+Flags: `--from`, `--level <n|max>`,
 `--baseline[=path]`, `--no-analyse`, `--yes`, `--dry-run`, `--update`,
 `--force`; prompts only on a TTY. `app::init` holds the logic,
 `main/init.rs` the command.
 
-**183e. Editor.** The VS Code extension offers "Initialize config" for a
+**183d. Editor.** The VS Code extension offers "Initialize config" for a
 workspace without one, previewing `init --dry-run --yes`.
 
 **Gates.**
@@ -5197,21 +5189,21 @@ workspace without one, previewing `init --dry-run --yes`.
 - The level oracle: the probe corpus and PHPStan's rule fixtures, run
   through the pinned phar and phpstan-rs at every level and with
   bleedingEdge, plus the per-parameter flip runs, kept as
-  `gates/phpstan-oracle/`. 183d's per-level counts agree with it, and
+  `gates/phpstan-oracle/`. 183c's per-level counts agree with it, and
   each E5 approved delta moves a row of it.
 - Fixture projects (Composer, none, a path-repository monorepo, NEON with
-  includes, a baseline and the extension installer); every generated TOML
-  loads.
-- Piwigo, linked and converted: the same analysed and context files as
+  includes, an included baseline, which is noted and not converted, and the
+  extension installer); every generated TOML loads.
+- Piwigo, converted: the same analysed and context files as
   the hand-written toml, and an output that differs by exactly the
   findings the newly imported ignores suppress, each reviewed; runs
   `LC_ALL=C sort`ed under `.corpus-runs/`. The hand-written toml is then
   retired.
 
-**Depends on:** crate-split C1's config amendments (excludes, the
-matcher, the `ignore_errors` shape, discovery); C5, C6, C7, C8, D2, D3,
-D6, E3, E3f and E5 for their rows; F1 for the single-scan route. 183a and
-the scan half of 183c can start now.
+**Depends on:** crate-split C1's config amendments (excludes, the matcher, the
+`ignore_errors` shape, discovery); C5, C6, C7, C8, D2, D3, D6, E3, E3f and E5
+for their rows; F1 for the single-scan route. 183a and the scan half of 183b can
+start now.
 
 **Effort: very large** (the NEON resolver with its oracle gate, and the
 mapping).
@@ -5220,13 +5212,12 @@ mapping).
 
 ### Phase 184 — Rename the project (§AV)
 
-`phpstan-rs` reads as a port of PHPStan, or as PHPStan's own Rust
-edition. It is neither: it reads PHPStan's config, comments and
-identifiers, but its checks already go past PHPStan's (the Phase 183
-oracle measures where), and it is not PHPStan's project. The name is
-cheapest to change now: the repository is private, nothing is released
-(no `v*` tag, no GitHub release, nothing on crates.io or the VS Code
-Marketplace), and no Pages site exists.
+`phpstan-rs` reads as a port of PHPStan, or as PHPStan's own Rust edition. It is
+neither: it converts PHPStan's config and reads its comments and identifiers,
+but its checks already go past PHPStan's (the Phase 183 oracle measures where),
+and it is not PHPStan's project. The name is cheapest to change now: the
+repository is private, nothing is released (no `v*` tag, no GitHub release,
+nothing on crates.io or the VS Code Marketplace), and no Pages site exists.
 
 **Choosing the name.** A shortlist the maintainer decides on, each
 candidate checked for:
@@ -5270,11 +5261,11 @@ nothing else, followed by a review of each file. Measured today:
   `~/.claude/projects/-home-torres-projects-phpstan-rs/` moves with it.
 
 **What stays.** The PHPStan compatibility surface keeps PHPStan's name:
-`@phpstan-ignore*` comments, `@phpstan-*` PHPDoc tags, reading
-`phpstan.neon` (Phase 183), PHPStan's error identifiers, the
-`ignoreErrors` semantics, the PHPStan-API rules on code in the `PHPStan\`
-namespace, and every reference to PHPStan itself in the docs.
-`.corpus-runs/` is keyed by commit hash and needs nothing.
+`@phpstan-ignore*` comments, `@phpstan-*` PHPDoc tags, converting `phpstan.neon`
+(Phase 183), PHPStan's error identifiers, the `ignoreErrors` semantics, the
+PHPStan-API rules on code in the `PHPStan\` namespace, and every reference to
+PHPStan itself in the docs. `.corpus-runs/` is keyed by commit hash and needs
+nothing.
 
 **Gates.** `cargo xtask gates --full` with snapshots matching the
 parent: analysis output doesn't carry the project name, so nothing
@@ -5302,7 +5293,7 @@ from the tool.
 **Pages:**
 
 - **Landing:** what the tool is (an analyser and language server for PHP
-  that reads PHPStan's configuration), what it adds (the LSP, the checks
+  that converts a PHPStan project's configuration), what it adds (the LSP, the checks
   past PHPStan's, speed), and one quick start: install, then `init`
   (Phase 183).
 - **Install:** the release binaries with their `.sha256` checks (the
