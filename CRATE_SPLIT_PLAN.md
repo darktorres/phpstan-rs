@@ -4695,6 +4695,8 @@ the rest), which the gate excludes and lists.
   `regex`) is extracted as `php-regex`, as the finished lower layers are, since
   `project`'s ignore messages and ext-psr3's context-key pattern read it too;
   `builtins::regex` keeps group typing and the validation diagnostics over it.
+  The module-graph spec gains a `crate php-regex` row and an `extern` line, and
+  the `builtins` and `project` rows (and those above them) name it.
 - `builtins` is always registered, including by the testing harness.
 - Every return-type extension in Appendix G reaches the most precise type that
   holds at runtime in the nsrt suite (3,015 mismatches over 93 extensions
