@@ -1213,7 +1213,11 @@ Follow-ups:
 - **Intersections reduce** by the class hierarchy (`TypeCombinator::intersect`):
   an intersection of a class and its subclass is the subclass. In
   `while ($foo instanceof Dim) { …; $foo = $bar; }` with `Dim extends Expr`,
-  the second pass sees `$foo` as `Expr&Dim` today.
+  the second pass sees `$foo` as `Expr&Dim` today. An array with
+  `HasOffset`/`HasOffsetValue` is non-empty: after `isset($array['def'])`
+  on `array<mixed>`, `$array` is `array&hasOffsetValue('def', mixed)`
+  today, so passing it to a `non-empty-array` parameter is `argument.type`
+  (the rules oracle's `bug-12847.php`).
 - **Error type.** PHPStan's `ErrorType` is a variant: the result of an
   operation the rules report as invalid, a read of an undefined member, or
   destructuring a non-array. It accepts and is accepted by everything, so a
@@ -1310,6 +1314,12 @@ that parse (C4's store of parsed doc blocks holds it).
 Follow-up: **PHPDoc number literals** follow phpdoc-parser: hex, octal and
 binary, `_` separators and exponents (`int<0, 0xFF>`, `int<0, 1_000>` and
 `1e3` report `phpDoc.parseError` and read as `mixed` today).
+
+Follow-up: **shape keys follow phpdoc-parser's identifier token**, which
+takes `-` and `\` anywhere after the first character: `array{psr-4?:
+list<string>}` and `array{x-1: int}` report `phpDoc.parseError` today (a
+`-` before a digit ends the key), and `array{e\f: int}` parses as
+`array{0: e\f: int}` with a `class.notFound`.
 
 Follow-up: **type parsing is linear** in a type's length and depth-limited
 with a parse error: an `array<...>` nested 1,000 deep takes 3 s and 2,000
@@ -1766,7 +1776,12 @@ Follow-ups:
     `r(): Bar` returns `Bar` today, and a parent's `@param Baz $o` leaves
     `$o` as `Bar` in the child's body (an inherited `@return array<int>` on
     `: array` already applies; nsrt `method-phpDocs-inheritdoc.php`,
-    `methodPhpDocs-implicitInheritance.php`).
+    `methodPhpDocs-implicitInheritance.php`). On a variadic parameter with no
+    native type, an array PHPDoc type is the element type
+    (`decideTypeFromReflection`): `@param array ...$args` takes any
+    argument and `@param string[] ...$args` takes strings, where today
+    `variadicMethod(1, 2, 3)` is three `argument.type` "expects array"
+    (the rules oracle's `call-methods.php`).
 
   Class constants are typed through the `ConstantResolver` (C2's follow-up,
   which lands first), reading the ancestor level's constant declarations
@@ -2048,6 +2063,23 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   (`phpstan/php-8-stubs` or phpstorm-stubs) is decided in the same commit
   and recorded in Appendix F; `registry/stubs.rs`'s module doc is
   corrected;
+- the functionMap's signatures replace phpstorm-stubs' PHPDoc where they
+  differ; the rules oracle's `argument.type` findings this removes:
+  `curl_init()`'s `__benevolent<CurlHandle|false>` passed to `curl_setopt`,
+  `curl_exec` and the other `curl_*` handle parameters (39, "CurlHandle|false
+  given"), the `__stringAndStringable` values of `printf`/`sprintf`/
+  `vsprintf` (32, a `Stringable` object given), `round()`'s `RoundingMode`
+  from PHP 8.4 (9), `time_nanosleep()`'s `int` parameters where the stub
+  says `positive-int` (3, `0` given), `curl_share_setopt()`'s `mixed`
+  value (3) and `stream_get_contents()`'s `__benevolent<string|false>` (3);
+- a function or method with several signatures (a phpstorm-stubs overload,
+  a functionMap `'1` variant) keeps them all, and a call takes the variant
+  its arguments fit, named ones included
+  (`ParametersAcceptorSelector::selectFromArgs`): `strtr(string: $s,
+  from: 'a', to: 'b')`, `new DatePeriod(start: …, interval: …, end: …)`,
+  `setcookie(expires_or_options: …)`, `stream_context_set_option(context:
+  …)` and `session_set_save_handler(open: …)` are `argument.unknown` today
+  (24 rules-oracle findings);
 - `resources/functionMetadata.php` embedded as the builtin purity source
   (C9 reads it);
 - user `stub_paths` with PHPStan `stubFiles` semantics (approved delta):
@@ -2141,6 +2173,9 @@ structural one, each fixtured:
 - a trait's `@method`/`@property` tags reach its hosts (`method.notFound`
   and `property.notFound` today);
 - a `@method` tag is not an override prototype and has no native types;
+- `@property-read int $r` and `@property-write string $r` on one class are
+  one property readable as `int` and writable as `string`: `$m->r = 'x'`
+  is `assign.propertyReadOnly` and `assign.propertyType` today;
 - enums read `@method` and `@mixin`;
 - `@phpstan-require-extends Base` on an interface makes `Base`'s members
   visible through the interface: `$i->x` for an `I $i` is
@@ -2437,11 +2472,24 @@ deleted; the file-size gate.
     - narrowing to a value the type excludes gives the value instead of
       `never`: after a `match ($i) { 0 => … }` caught in a `try` on
       `1|2|3|4`, `$i` is `0|1|2|3|4` (nsrt `match-expr.php:19`), and
-      `$i === 2` on `int<3, 5>` gives `2`;
+      `$i === 2` on `int<3, 5>` gives `2`; a type guard does the same, so
+      the branch of an always-false guard types its subject as the guard's
+      type: inside `if (is_string($i))` on `int`, `if ($i instanceof
+      stdClass)` and `if (is_resource($c))` on `CurlHandle|false`, the
+      subject is `string`, `stdClass` and `resource` (then `curl_exec($c)`
+      is `argument.type`, the rules oracle's `bug-15139.php`);
     - a nested write through a non-constant key is dropped: after
       `$array = ['foo' => [], 'bar' => []]; $array[$name][] = $v;`, `$array`
       is unchanged, so a later `count($elements) > 0` over it is reported
       always false (`AssignHandler`; nsrt `bug-5316.php`);
+    - a property write narrows the property only where
+      `canChangeTypeAfterAssignment` holds (readable type equals writable
+      type, no hook, not virtual, not a `SimpleXMLElement` element): after
+      `$xml->foo = 'foo'` on a `SimpleXMLElement`, `$xml->foo` is `'foo'`
+      today, so passing it to a `SimpleXMLElement` parameter is
+      `argument.type` (the rules oracle's `properties-assigned-types.php`,
+      5), and a `@property-read int`/`@property-write string` pair reads
+      back the written `'x'`;
     - a by-reference argument to a closure or a variable-function call keeps
       its value: after `$cb = function (bool &$save) {…}; $save = true;
       $cb($save);`, and after `$f = 'h'; $f($s);` for `h(bool &$x)`, the
@@ -2451,6 +2499,10 @@ deleted; the file-size gate.
       `test($array['key'])` for `test(array &$a)`, `$array['key']` is still
       `array{}` (nsrt `bug-5077.php`; a plain variable argument gets the
       parameter's type);
+    - an argument to a by-reference variadic parameter is read with its
+      type: `$b = 2; $o->bar(1, $b)` for `bar(int $a, int &...$rest)` is
+      `argument.type` "mixed given" today (the rules oracle's
+      `bug-15251.php`);
     - `||` narrowing on a union that isn't normalized loses members: on
       `@param Node|Return_ $n` with `Return_ implements Node`, falling past
       `if (!$n instanceof Expression && !$n instanceof Return_) { return; }`
@@ -2503,10 +2555,12 @@ deleted; the file-size gate.
       `$n ??= 1` are all `mixed` today where PHPStan has `2`, `(float|int)`
       and `1|string` (nsrt `binary.php`, `coalesce-assign.php`).
     - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
-    - **Magic constants** type as their values: `__LINE__`, `__CLASS__`,
-      `__FUNCTION__`, `__METHOD__`, `__NAMESPACE__`, `__TRAIT__` and
-      `__PROPERTY__` are all `mixed` today (nsrt `node-callback-scope.php`,
-      `property-hooks.php`).
+    - **Magic constants** type as their values: `__DIR__`, `__FILE__`,
+      `__LINE__`, `__CLASS__`, `__FUNCTION__`, `__METHOD__`,
+      `__NAMESPACE__`, `__TRAIT__` and `__PROPERTY__` are all `mixed` today
+      (nsrt `node-callback-scope.php`, `property-hooks.php`), so
+      `dirname(__DIR__)` is `argument.type` "mixed given" at level 10 (the
+      rules oracle's `bug-13981.php`, `value-assigned-to-define.php`).
   - **Arrays and offsets:**
     - **Offset reads** follow `ArrayDimFetchHandler`: a constant array read
       with a non-literal key uses the key's type. Today `$t = [10, 20];
@@ -2532,7 +2586,18 @@ deleted; the file-size gate.
       fails), and appending to a shape keeps the shape. Today
       `[-5 => 'a', 'b']` is plain `array`, appending `'y'` to `array{3: 'x'}`
       gives `array<'y'|'x'>` instead of `array{3: 'x', 4: 'y'}`, and
-      `[PHP_INT_MAX => 1, 2]` gains a key `0` (nsrt `bug-15248.php`).
+      `[PHP_INT_MAX => 1, 2]` gains a key `0` (nsrt `bug-15248.php`). A
+      literal with a non-constant key is a general array of its key and
+      value types: `[$key => []]` for a `string $key` is `array` today
+      where PHPStan has `non-empty-array<string, array{}>`, so
+      `array_push($array[$key], $item)` reads `mixed` (the rules oracle's
+      `bug-3387.php`).
+    - **`$o::class`** is `class-string<C>&literal-string` for an object of
+      class `C`, `class-string<T>&literal-string` for a template `T`, and
+      `class-string&literal-string` for `object`: the template and `object`
+      cases are `string` today and the `literal-string` part is missing, so
+      passing `$t::class` to a `literal-string` parameter is `argument.type`
+      (the rules oracle's `bug-7823.php`).
     - **Key-producing assignments** follow `AssignHandler::specifyTypes`:
       after `$k = array_key_first($a)` (and `array_key_last`,
       `array_search`, `array_find_key`, `array_rand`), `$a[$k]` is known to
@@ -2899,7 +2964,11 @@ building on the previous one:
     - after the loop, the iteratee's value and key types are rewritten from
       the narrowed loop variables;
     - constant arrays of up to 16 keys are unrolled (8 when nested), and
-      constant-array iteratees add key → value conditional holders;
+      constant-array iteratees add key → value conditional holders: over
+      `array{psr4?: array<string, string>, classmap?: list<string>}`,
+      `$key === 'classmap'` leaves `$value` as the union and `$data[$key]`
+      as `mixed` today, so `implode(', ', $data[$key])` is `argument.type`
+      (the rules oracle's `bug-6000.php`, `bug-8467a.php`);
     - `foreach (array_keys($a) as $k)` knows `$a[$k]`;
     - destructuring a tagged union of shapes adds cross-variable
       conditional holders;
