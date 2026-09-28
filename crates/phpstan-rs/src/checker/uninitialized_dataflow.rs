@@ -61,7 +61,6 @@ use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::any_child_expr;
-use types::Type;
 
 /// Bare property names known-initialized on every path reaching a given
 /// point. Mirrors `checker.rs`'s `ProvenanceSet` type alias (same
@@ -178,12 +177,7 @@ fn resolves_to_this(e: &Expr, ctx: &PropertyInitCtx) -> bool {
             .checker
             .registry
             .lookup_method(&ctx.checked_class, name)
-            .is_some_and(|sig| {
-                matches!(
-                    sig.return_type_native(),
-                    Type::SelfRef(_) | Type::StaticRef(_) | Type::This
-                )
-            }),
+            .is_some_and(|sig| sig.return_type_native().is_self_reference()),
         _ => false,
     }
 }

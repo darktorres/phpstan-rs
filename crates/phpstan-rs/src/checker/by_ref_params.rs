@@ -182,9 +182,7 @@ impl<'a> Checker<'a> {
             .map(|(name, ty)| (name.clone(), ty.clone()))
             .collect();
         for (name, declared) in params {
-            let Type::Union(declared_members) = &declared else {
-                continue;
-            };
+            let declared_members = declared.union_members();
             if declared_members.len() < 2 {
                 continue;
             }

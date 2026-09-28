@@ -210,7 +210,7 @@ impl<'a> Checker<'a> {
                 // already answers both questions correctly (including
                 // through a `Union`, recursively), this just asks it
                 // twice rather than duplicating its own logic.
-                if narrow_array_shape_by_key_presence(&base_ty, &key, true) == Type::Never {
+                if narrow_array_shape_by_key_presence(&base_ty, &key, true).is_never() {
                     self.report(
                         format!(
                             "Offset '{key}' on {base_ty} {operator_description} does not exist."
@@ -221,7 +221,7 @@ impl<'a> Checker<'a> {
                     );
                     return None;
                 }
-                if narrow_array_shape_by_key_presence(&base_ty, &key, false) == Type::Never {
+                if narrow_array_shape_by_key_presence(&base_ty, &key, false).is_never() {
                     return base_ty.offset_value_type(Some(&types::ShapeKey::from_name(&key)));
                 }
                 None

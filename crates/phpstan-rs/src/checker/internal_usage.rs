@@ -603,24 +603,11 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Sibling of `checker::resolve::collect_unknown_class_names`, minus the
-/// existence check: native PHP type-hint syntax can only ever produce
-/// `Object`/`Union`/`Intersection` (no `Array`/`ClassString`/`ArrayShape`/
-/// `ObjectShape` - those are PHPDoc-only constructs `resolve_type_hint`
-/// never emits from a bare native hint string), so the walk only needs
-/// those two arms.
+/// Each class a native type hint names, once, into `out`.
 pub(crate) fn collect_referenced_class_names(ty: &Type, out: &mut Vec<String>) {
-    match ty {
-        Type::Object(name, _) => {
-            if !out.iter().any(|n| n == name) {
-                out.push(name.clone().to_string());
-            }
+    for name in ty.object_class_names() {
+        if !out.iter().any(|n| n == name) {
+            out.push(name.to_string());
         }
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                collect_referenced_class_names(m, out);
-            }
-        }
-        _ => {}
     }
 }

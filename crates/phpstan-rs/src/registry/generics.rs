@@ -167,17 +167,12 @@ impl Registry {
         ty: &Type,
         ancestor_bindings: &FxHashMap<Arc<str>, FxHashMap<String, Type>>,
     ) -> Type {
-        match ty {
-            Type::TemplateParam(tp) => tp
-                .scope
+        ty.replace_templates(&mut |tp| {
+            tp.scope
                 .as_deref()
                 .and_then(|s| ancestor_bindings.get(s))
                 .and_then(|b| b.get(&tp.name))
                 .cloned()
-                .unwrap_or_else(|| ty.clone()),
-            _ => types::settle(ty.map_children(&mut |t| {
-                Registry::substitute_class_scoped_ancestor_templates(t, ancestor_bindings)
-            })),
-        }
+        })
     }
 }

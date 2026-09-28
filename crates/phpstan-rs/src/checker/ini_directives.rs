@@ -140,11 +140,10 @@ const DEPRECATED: &[(&str, PhpVersion, Deprecation)] = &[
 ];
 
 fn directive_names(ty: &Type) -> Vec<&str> {
-    match ty {
-        Type::StringLiteral(s) => s.as_str().into_iter().collect(),
-        Type::Union(members) => members.iter().flat_map(directive_names).collect(),
-        _ => Vec::new(),
-    }
+    ty.union_members()
+        .iter()
+        .filter_map(|m| m.string_literal_value()?.as_str())
+        .collect()
 }
 
 impl<'a> Checker<'a> {

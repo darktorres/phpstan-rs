@@ -30,7 +30,6 @@
 use crate::checker::{Checker, Locals};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use types::Type;
 
 impl<'a> Checker<'a> {
     /// `pipe.byRef` - see this module's own doc comment for scope.
@@ -79,10 +78,11 @@ impl<'a> Checker<'a> {
                     };
                     let class = match &unwrap_grouping(&recv_item.value).kind {
                         ExprKind::Literal(Literal::String(name)) => name.to_string(),
-                        _ => match self.infer_expr(&recv_item.value, locals) {
-                            Type::Object(class, _) => class.to_string(),
-                            _ => return None,
-                        },
+                        _ => self
+                            .infer_expr(&recv_item.value, locals)
+                            .object_class_and_args()?
+                            .0
+                            .to_string(),
                     };
                     self.registry
                         .lookup_method(&class, &method.to_str_lossy())
@@ -119,11 +119,9 @@ impl<'a> Checker<'a> {
                 Some(sig.params().first().is_some_and(|p| p.by_ref()))
             }
             ExprKind::MethodCall(recv, method, _, _) => {
-                let class = match self.infer_expr(recv, locals) {
-                    Type::Object(class, _) => class,
-                    _ => return None,
-                };
-                let sig = self.registry.lookup_method(&class, method)?;
+                let recv_ty = self.infer_expr(recv, locals);
+                let (class, _) = recv_ty.object_class_and_args()?;
+                let sig = self.registry.lookup_method(class, method)?;
                 Some(sig.params().first().is_some_and(|p| p.by_ref()))
             }
             ExprKind::StaticCall(target, method, _) => {

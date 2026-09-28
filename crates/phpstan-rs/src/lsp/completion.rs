@@ -380,15 +380,7 @@ fn build_probe_scope(
 }
 
 fn type_to_class_names(ty: &Type, out: &mut Vec<String>) {
-    match ty {
-        Type::Object(class, _) => out.push(class.to_string()),
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                type_to_class_names(m, out);
-            }
-        }
-        _ => {}
-    }
+    out.extend(ty.object_class_names().into_iter().map(|c| c.to_string()));
 }
 
 fn is_visible(
@@ -453,7 +445,7 @@ pub(super) fn enumerate_members(
                 if !is_visible(registry, &owner, &sig.visibility(), current_class) {
                     continue;
                 }
-                let kind = if matches!(sig.ty(), Type::EnumCase(..)) {
+                let kind = if sig.ty().is_enum_case() {
                     CompletionItemKind::ENUM_MEMBER
                 } else {
                     CompletionItemKind::CONSTANT

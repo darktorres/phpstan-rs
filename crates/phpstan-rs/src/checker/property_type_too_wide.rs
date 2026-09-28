@@ -51,9 +51,7 @@ impl<'a> Checker<'a> {
             if prop_sig.write_visibility() != Visibility::Private {
                 continue;
             }
-            let Type::Union(declared_members) = prop_sig.ty() else {
-                continue;
-            };
+            let declared_members = prop_sig.ty().union_members();
             if declared_members.len() < 2 {
                 continue;
             }

@@ -588,10 +588,10 @@ impl<'a> Checker<'a> {
             return None;
         }
         let level = self.settings.rule_levels.configured_level;
-        let Type::Union(members) = ty else {
+        if ty.is_benevolent_union() || ty.union_members().len() < 2 {
             return Some(ty.clone());
-        };
-        let mut members: Vec<Type> = members.clone();
+        }
+        let mut members: Vec<Type> = ty.union_members().to_vec();
         if level.is_some_and(|l| l < 8) {
             members.retain(|m| !m.is_null().yes());
         }
@@ -665,17 +665,13 @@ impl<'a> Checker<'a> {
     /// must cast, one intersection member suffices, and of objects only
     /// `SimpleXMLElement` and `GMP` cast (plus the curl handles to int).
     fn casts_to_number(&self, ty: &Type, to_int: bool) -> bool {
-        match ty {
-            Type::Union(members) => members.iter().all(|m| self.casts_to_number(m, to_int)),
-            Type::Intersection(members) => members.iter().any(|m| self.casts_to_number(m, to_int)),
-            Type::Object(class, _) => {
-                self.registry.is_subclass_of(class, "SimpleXMLElement")
-                    || self.registry.is_subclass_of(class, "GMP")
-                    || (to_int && matches!(class.as_str(), "CurlHandle" | "CurlMultiHandle"))
+        ty.union_members().iter().all(|m| {
+            if to_int {
+                m.to_integer(self.registry).is_some()
+            } else {
+                m.to_float(self.registry).is_some()
             }
-            Type::EnumCase(..) => false,
-            _ => true,
-        }
+        })
     }
 }
 
@@ -695,24 +691,18 @@ fn format_value_type() -> Type {
 /// `ConstantArrayType::getArraySize` of each constant array `ty` can be,
 /// or `None` when it can be any other array.
 fn constant_array_sizes(ty: &Type) -> Option<Vec<Count>> {
-    match ty {
-        Type::ArrayShape(shape) => {
+    ty.union_members()
+        .iter()
+        .map(|member| {
+            let shape = member.shape()?;
             let tail = usize::from(!shape.is_sealed());
             let required = shape.fields.iter().filter(|f| !f.optional).count() + tail;
-            Some(vec![Count {
+            Some(Count {
                 min: required,
                 max: shape.fields.len() + tail,
-            }])
-        }
-        Type::Union(members) => {
-            let mut sizes = Vec::new();
-            for member in members {
-                sizes.extend(constant_array_sizes(member)?);
-            }
-            Some(sizes)
-        }
-        _ => None,
-    }
+            })
+        })
+        .collect()
 }
 
 /// `TypeCombinator::union` of array sizes, which PHPStan only checks

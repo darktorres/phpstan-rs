@@ -22,11 +22,11 @@ use types::{self, TemplateParam, Type};
 /// "don't guess" leniency this project already applies to every other
 /// type-bearing tag, not a new gap.
 pub(crate) fn object_class_names(ty: Type) -> Vec<String> {
-    match ty {
-        Type::Object(name, _) => vec![name.to_string()],
-        Type::Union(members) => members.into_iter().flat_map(object_class_names).collect(),
-        _ => Vec::new(),
-    }
+    ty.union_members()
+        .iter()
+        .filter_map(|m| m.object_class_and_args())
+        .map(|(name, _)| name.to_string())
+        .collect()
 }
 
 /// `@method`'s own tag-to-`FunctionReflection` synthesis - mirrors the plain

@@ -164,7 +164,7 @@ fn describe_key(key: &ParamKey) -> String {
 }
 
 fn value_is_definitely_array(ty: &Type) -> bool {
-    matches!(ty, Type::Array(..) | Type::ArrayShape(_))
+    ty.is_array().yes()
 }
 
 impl<'a> Checker<'a> {

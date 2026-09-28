@@ -82,15 +82,7 @@ use protocol::{
 /// for anything else (`Mixed`, a scalar, ...) - an un-inferrable
 /// receiver resolves to nothing, never a guess.
 fn type_to_classes(ty: &Type, out: &mut Vec<String>) {
-    match ty {
-        Type::Object(class, _) => out.push(class.clone().to_string()),
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                type_to_classes(m, out);
-            }
-        }
-        _ => {}
-    }
+    out.extend(ty.object_class_names().into_iter().map(|c| c.to_string()));
 }
 
 /// Resolves a receiver's own (possibly multi-class) type down to every

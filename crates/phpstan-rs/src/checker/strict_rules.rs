@@ -600,7 +600,7 @@ impl<'a> Checker<'a> {
                 position + 1
             ),
             Some(arg) if must_be_true => {
-                if self.infer_expr(&arg.value, locals) == Type::True {
+                if self.infer_expr(&arg.value, locals).is_true().yes() {
                     return;
                 }
                 format!(
@@ -687,15 +687,9 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Option<(String, String)> {
         let ty = self.infer_expr(receiver, locals);
-        let members: Vec<&Type> = match &ty {
-            Type::Union(members) => members.iter().filter(|m| !m.is_null().yes()).collect(),
-            other => vec![other],
-        };
         let mut found: Option<(String, String)> = None;
-        for member in members {
-            let Type::Object(class, _) = member else {
-                return None;
-            };
+        for member in ty.union_members().iter().filter(|m| !m.is_null().yes()) {
+            let (class, _) = member.object_class_and_args()?;
             let (owner, _) = self.registry.lookup_method_with_owner(class, method)?;
             let name = self
                 .registry

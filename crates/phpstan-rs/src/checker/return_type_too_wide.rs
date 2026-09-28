@@ -62,15 +62,9 @@ impl<'a> Checker<'a> {
         subject: &str,
         span: Span,
     ) {
-        // Only acts when the declared type is literally a `Union`; any
-        // other single declared type (a bare class, a `list<int>`-shaped
-        // `Intersection`, ...) is returned unchanged with no comparison -
-        // treating it as "one member to check" via `union_members` would
-        // produce a redundant second diagnostic for the same fact
-        // `return.type` already reports.
-        let Type::Union(declared_members) = declared else {
-            return;
-        };
+        // Only a union declares members that can go unused; a single
+        // declared type's mismatch is `return.type`'s to report.
+        let declared_members = declared.union_members();
         if declared_members.len() < 2 || self.current_function_is_generator {
             return;
         }
@@ -94,7 +88,7 @@ impl<'a> Checker<'a> {
         // union is exactly one of `null`/`true`/`false` is exempt.
         if !is_first_declaration
             && !is_private
-            && (actual.is_null().yes() || matches!(actual, Type::True | Type::False))
+            && (actual.is_null().yes() || actual.bool_literal_value().is_some())
         {
             return;
         }
@@ -106,10 +100,7 @@ impl<'a> Checker<'a> {
             .current_function_return_points
             .iter()
             .flat_map(Type::union_members)
-            .map(|t| match t {
-                Type::Void => Type::null(),
-                other => other.clone(),
-            })
+            .map(|t| if t.is_void() { Type::null() } else { t.clone() })
             .collect();
         for member in declared_members {
             // "Unused" is decided via trinary logic: only a definite No

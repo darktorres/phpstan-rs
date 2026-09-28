@@ -38,7 +38,6 @@ use rustc_hash::FxHashSet;
 use crate::project::use_sites::{RefTarget, UseSiteIndex};
 use crate::registry::Registry;
 use syntax::ast::ClassKind;
-use types::Type;
 
 /// Every `(enum FQN, case name)` pair with no recorded usage anywhere in
 /// the project - see this module's own doc comment for what counts as
@@ -57,7 +56,7 @@ pub(crate) fn find_dead_cases(
             continue;
         }
         for (case_name, sig) in info.consts() {
-            if !matches!(&sig.ty(), Type::EnumCase(..)) {
+            if !sig.ty().is_enum_case() {
                 continue;
             }
             let target = RefTarget::Member(fqn.to_string(), case_name.to_string());

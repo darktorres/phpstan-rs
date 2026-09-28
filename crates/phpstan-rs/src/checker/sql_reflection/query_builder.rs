@@ -620,10 +620,7 @@ impl<'a> Checker<'a> {
     }
 
     fn foldable_arg_int(&self, arg: &Arg, locals: &Locals) -> Option<i64> {
-        match self.infer_expr(&arg.value, locals) {
-            Type::IntLiteral(n) => Some(n),
-            _ => None,
-        }
+        self.infer_expr(&arg.value, locals).int_literal_value()
     }
 }
 
@@ -662,10 +659,10 @@ fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<S
         }
         _ => {}
     }
-    match checker.infer_expr(expr, locals) {
-        Type::StringLiteral(s) => Some(s.to_string()),
-        _ => None,
-    }
+    checker
+        .infer_expr(expr, locals)
+        .string_literal_value()
+        .map(|s| s.to_string())
 }
 
 /// A real `sprintf()` call whose format string and every value argument
@@ -719,17 +716,14 @@ fn fold_sprintf_string_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Opt
     if let Some(s) = fold_string_expr(checker, &arg.value, locals) {
         return Some(s);
     }
-    match checker.infer_expr(&arg.value, locals) {
-        Type::IntLiteral(n) => Some(n.to_string()),
-        _ => None,
-    }
+    checker
+        .infer_expr(&arg.value, locals)
+        .int_literal_value()
+        .map(|n| n.to_string())
 }
 
 fn fold_sprintf_int_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<i64> {
-    match checker.infer_expr(&arg.value, locals) {
-        Type::IntLiteral(n) => Some(n),
-        _ => None,
-    }
+    checker.infer_expr(&arg.value, locals).int_literal_value()
 }
 
 /// `ArrayParameterType::INTEGER`/`STRING`/`ASCII`/`BINARY` (real DBAL
@@ -782,10 +776,9 @@ pub(crate) fn is_integer_parameter_type(checker: &Checker, expr: &Expr) -> bool 
 /// normal, safe, everyday DBAL usage for an integer column, not a
 /// mismatch.
 pub(crate) fn value_is_confidently_not_an_integer(value_ty: &Type) -> bool {
-    match value_ty {
-        Type::StringLiteral(s) => !s.as_str().is_some_and(is_php_numeric_string),
-        _ => false,
-    }
+    value_ty
+        .string_literal_value()
+        .is_some_and(|s| !s.as_str().is_some_and(is_php_numeric_string))
 }
 
 fn is_php_numeric_string(s: &str) -> bool {
@@ -809,10 +802,10 @@ pub(crate) fn param_key_from_expr(
     if let Some(s) = fold_string_expr(checker, expr, locals) {
         return Some(ParamKey::Named(s));
     }
-    match checker.infer_expr(expr, locals) {
-        Type::IntLiteral(n) => Some(ParamKey::Positional(n)),
-        _ => None,
-    }
+    checker
+        .infer_expr(expr, locals)
+        .int_literal_value()
+        .map(ParamKey::Positional)
 }
 
 /// `where(...$predicates)`/`having(...$predicates)` take one-or-more

@@ -1471,18 +1471,17 @@ impl ClassReflection {
         let extends_args: Vec<Type> = class_doc
             .as_ref()
             .and_then(|d| d.extends.as_ref())
-            .map(|raw| match resolve_generic_tag(raw) {
-                Type::Object(_, args) => args,
-                _ => Vec::new(),
+            .map(|raw| {
+                resolve_generic_tag(raw)
+                    .object_class_and_args()
+                    .map(|(_, args)| args.to_vec())
+                    .unwrap_or_default()
             })
             .unwrap_or_default();
         let implements_args: FxHashMap<Arc<str>, Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
-            .filter_map(|raw| match resolve_generic_tag(raw) {
-                Type::Object(name, args) => Some((intern(&name), args)),
-                _ => None,
-            })
+            .filter_map(|raw| class_and_args(&resolve_generic_tag(raw)))
             .collect();
         // `@use Trait<Arg, ...>` - unlike `extends`/`implements`, lives
         // on the `use` statement's own doc comment, not `c.doc_comment`
@@ -1499,10 +1498,7 @@ impl ClassReflection {
             .into_iter()
             .map(docblock::parse)
             .flat_map(|d| d.uses)
-            .filter_map(|raw| match resolve_generic_tag(&raw) {
-                Type::Object(name, args) => Some((intern(&name), args)),
-                _ => None,
-            })
+            .filter_map(|raw| class_and_args(&resolve_generic_tag(&raw)))
             .collect();
         let template_bounds: FxHashMap<Arc<str>, Type> = class_doc
             .as_ref()
@@ -1726,12 +1722,7 @@ impl ClassReflection {
         let implements_args: FxHashMap<Arc<str>, Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
-            .filter_map(
-                |raw| match resolve_names_in_type(parse_type_node(raw), ctx) {
-                    Type::Object(name, args) => Some((intern(&name), args)),
-                    _ => None,
-                },
-            )
+            .filter_map(|raw| class_and_args(&resolve_names_in_type(parse_type_node(raw), ctx)))
             .collect();
         // See `ClassReflection::from_decl`'s identical `uses_args`
         // construction - the reasoning (`@use` lives on the `use`
@@ -1745,12 +1736,7 @@ impl ClassReflection {
             .into_iter()
             .map(docblock::parse)
             .flat_map(|d| d.uses)
-            .filter_map(
-                |raw| match resolve_names_in_type(parse_type_node(&raw), ctx) {
-                    Type::Object(name, args) => Some((intern(&name), args)),
-                    _ => None,
-                },
-            )
+            .filter_map(|raw| class_and_args(&resolve_names_in_type(parse_type_node(&raw), ctx)))
             .collect();
         let (mut methods, redeclared_methods) = collect_merged_methods(
             e.methods
@@ -2366,4 +2352,10 @@ fn native_const_type(cc: &syntax::ast::ClassConst, ctx: &NameContext) -> Option<
         types::parse_native_type_string(hint),
         ctx,
     ))
+}
+
+/// An ancestor tag's class and generic arguments.
+fn class_and_args(ty: &Type) -> Option<(Arc<str>, Vec<Type>)> {
+    ty.object_class_and_args()
+        .map(|(name, args)| (intern(name), args.to_vec()))
 }

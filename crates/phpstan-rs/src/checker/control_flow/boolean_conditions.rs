@@ -1,6 +1,5 @@
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
-use types::Type;
 
 impl<'a> Checker<'a> {
     /// The real, original PHPStan design -
@@ -16,11 +15,7 @@ impl<'a> Checker<'a> {
         if should_skip_constant_condition(e) {
             return None;
         }
-        match self.infer_expr(e, locals) {
-            Type::True => Some(true),
-            Type::False => Some(false),
-            _ => None,
-        }
+        self.infer_expr(e, locals).bool_literal_value()
     }
 
     /// `BooleanAndConstantConditionRule`/`BooleanOrConstantConditionRule` -
@@ -127,11 +122,7 @@ impl<'a> Checker<'a> {
         // function's own whole-result computation against itself. Calling
         // `inferred_constant_condition(whole, ..)` here would always
         // return `None`.
-        let whole_value = match self.infer_expr(whole, locals) {
-            Type::True => Some(true),
-            Type::False => Some(false),
-            _ => None,
-        };
+        let whole_value = self.infer_expr(whole, locals).bool_literal_value();
         if let Some(value) = whole_value {
             self.report(
                 format!(

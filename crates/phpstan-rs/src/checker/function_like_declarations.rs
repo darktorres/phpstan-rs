@@ -18,7 +18,6 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{Visitor, any_child_expr, any_stmt_in_body, walk_stmt};
-use types::Type;
 use types::php_version::PhpFeature;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -342,10 +341,7 @@ impl<'a> Checker<'a> {
             }
             let param_ty =
                 self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref());
-            let param_ty = match &param_ty {
-                Type::TemplateParam(tp) => tp.bound.as_ref().clone(),
-                other => other.clone(),
-            };
+            let param_ty = param_ty.template_bound().unwrap_or(&param_ty).clone();
             let param_ty = match &self.current_class {
                 Some(class) => self.resolve_pseudo(&param_ty, &class.clone()),
                 None => param_ty,

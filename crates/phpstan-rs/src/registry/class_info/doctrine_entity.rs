@@ -192,11 +192,10 @@ fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> FxHashMap<Strin
 /// the common case where the property's own native type already names
 /// the target class directly (every real corpus association does).
 fn association_target_from_native_type(ty: &Type) -> Option<String> {
-    match ty {
-        Type::Object(class, _) => Some(class.clone().to_string()),
-        Type::Union(members) => members.iter().find_map(association_target_from_native_type),
-        _ => None,
-    }
+    ty.union_members()
+        .iter()
+        .find_map(|m| m.object_class_and_args())
+        .map(|(class, _)| class.to_string())
 }
 
 /// Extracts this class's own Doctrine entity metadata, `None` when it

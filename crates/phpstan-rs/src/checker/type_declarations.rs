@@ -80,9 +80,9 @@ impl<'a> Checker<'a> {
     }
 
     fn resolve_class_name_for_hint(&self, name: &str) -> String {
-        match self.resolve_type_hint(Some(name)) {
-            types::Type::Object(resolved, _) => resolved.to_string(),
-            _ => name.trim_start_matches('\\').to_string(),
+        match self.resolve_type_hint(Some(name)).object_class_and_args() {
+            Some((resolved, _)) => resolved.to_string(),
+            None => name.trim_start_matches('\\').to_string(),
         }
     }
 

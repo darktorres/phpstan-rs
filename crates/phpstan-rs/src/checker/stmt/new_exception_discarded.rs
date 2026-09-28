@@ -1,6 +1,5 @@
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
-use types::Type;
 
 impl<'a> Checker<'a> {
     /// A `new SomeException(...)` expression sitting on its own line as a
@@ -19,7 +18,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let ty = self.infer_expr(inner, locals);
-        if let Type::Object(class, _) = &ty
+        if let Some((class, _)) = ty.object_class_and_args()
             && self.class_name_exists(class)
             && self.registry.is_subclass_of(class, "Throwable")
         {

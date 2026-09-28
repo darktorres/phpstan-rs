@@ -21,7 +21,6 @@ use crate::checker::{Checker, Locals};
 use crate::php_date_parser::depends_on_current_time;
 use syntax::ast::*;
 use syntax::token::Span;
-use types::Type;
 
 const CLOCK_TIP: &str = "rely on an injected clock (PSR-20 ClockInterface) instead";
 
@@ -32,15 +31,12 @@ impl<'a> Checker<'a> {
         let Some(arg) = arg else {
             return Some("no date".to_string());
         };
-        match self.infer_expr(&arg.value, locals) {
-            Type::Null => Some("null".to_string()),
-            Type::StringLiteral(s)
-                if s.as_str().and_then(depends_on_current_time) == Some(true) =>
-            {
-                Some(format!("\"{s}\""))
-            }
-            _ => None,
+        let ty = self.infer_expr(&arg.value, locals);
+        if ty.is_null().yes() {
+            return Some("null".to_string());
         }
+        let s = ty.string_literal_value()?;
+        (s.as_str().and_then(depends_on_current_time) == Some(true)).then(|| format!("\"{s}\""))
     }
 
     fn report_current_time(&mut self, message: String, span: Span, id: &'static str) {
@@ -109,7 +105,7 @@ impl<'a> Checker<'a> {
         };
         let omitted = match args.get(timestamp_at) {
             None => true,
-            Some(arg) => self.infer_expr(&arg.value, locals) == Type::Null,
+            Some(arg) => self.infer_expr(&arg.value, locals).is_null().yes(),
         };
         if omitted {
             self.report_current_time(
@@ -126,7 +122,8 @@ impl<'a> Checker<'a> {
         let Some(format) = format else {
             return;
         };
-        let Type::StringLiteral(text) = self.infer_expr(&format.value, locals) else {
+        let format_ty = self.infer_expr(&format.value, locals);
+        let Some(text) = format_ty.string_literal_value() else {
             return;
         };
         let Some(text) = text.as_str() else {

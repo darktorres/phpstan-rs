@@ -88,7 +88,7 @@ pub(crate) fn resolve_sql_row_type(
 /// schema fact. Scoped to the same single-table, no-`JOIN` shape every
 /// other step in this module already restricts itself to.
 fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type) -> Type {
-    let Type::ArrayShape(fields) = &row_type else {
+    let Some(fields) = row_type.shape() else {
         return row_type;
     };
     let Some(table) = single_table_name(sql) else {
@@ -328,7 +328,7 @@ fn literal_value_type(value: &Value, driver: Option<SqlDriver>) -> Option<Type> 
 /// own reported type here is already more accurate than force-matching
 /// 168d's simpler DQL heuristic would be.
 fn refine_count_columns(sql: &str, row_type: Type) -> Type {
-    let Type::ArrayShape(mut fields) = row_type else {
+    let Some(mut fields) = row_type.shape().cloned() else {
         return row_type;
     };
     if let Some(positions) = count_column_positions(sql) {

@@ -10,7 +10,6 @@ use lsp_types::SymbolKind;
 use crate::project::Project;
 use crate::registry::Provenance;
 use syntax::token::Span;
-use types::Type;
 
 use super::document_symbol::class_kind_symbol_kind;
 
@@ -93,7 +92,7 @@ pub(super) fn workspace_symbols<'a>(project: &'a Project, query: &str) -> Vec<Ma
         }
         for (name, cst) in info.consts() {
             if declared_here(cst.provenance()) {
-                let kind = if matches!(cst.ty(), Type::EnumCase(..)) {
+                let kind = if cst.ty().is_enum_case() {
                     SymbolKind::ENUM_MEMBER
                 } else {
                     SymbolKind::CONSTANT

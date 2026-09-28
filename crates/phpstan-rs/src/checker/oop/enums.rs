@@ -5,7 +5,6 @@ use crate::registry::{self};
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::*;
-use types::Type;
 
 /// The full set of PHP magic-method names (`nikic/php-parser`'s own
 /// `ClassMethod::isMagic()` list) - used only by `check_enum_sanity`
@@ -248,11 +247,12 @@ impl<'a> Checker<'a> {
                     // skipped rather than guessed, same "don't guess"
                     // leniency `check_enum_case_values` above already
                     // applies to duplicate-value detection.
-                    let matches_backing = match ty {
-                        Type::IntLiteral(_) => backing_type_word == Some("int"),
-                        Type::StringLiteral(_) => backing_type_word == Some("string"),
-                        Type::Mixed(_) => true,
-                        _ => false,
+                    let matches_backing = if ty.int_literal_value().is_some() {
+                        backing_type_word == Some("int")
+                    } else if ty.string_literal_value().is_some() {
+                        backing_type_word == Some("string")
+                    } else {
+                        ty.is_mixed()
                     };
                     if !matches_backing {
                         self.report_builder(

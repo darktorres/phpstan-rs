@@ -62,9 +62,11 @@ fn accessory_string(kind: AccessoryKind) -> Type {
 /// `PREG_OFFSET_CAPTURE`'s own `[string, int]` tuple, leaving the byte-
 /// offset slot untouched.
 fn refine_leaf(leaf: &Type, refined: Type) -> Type {
-    match leaf {
-        Type::String => refined,
-        Type::ArrayShape(shape) if shape.fields.len() == 2 => {
+    if *leaf == Type::string() {
+        return refined;
+    }
+    match leaf.shape() {
+        Some(shape) if shape.fields.len() == 2 => {
             let mut shape = shape.clone();
             shape.fields[0].ty = refined;
             Type::array_shape(shape)
@@ -145,7 +147,7 @@ pub(crate) fn preg_match_matches_shape(
         // case anyway (`union_types(String, StringLiteral(""))` already
         // collapses back to plain `String`) - only observable once
         // literal enumeration narrows `base` below plain `String`.
-        let ty = if g.optional && !is_last_group && !unmatched_as_null && leaf == &Type::String {
+        let ty = if g.optional && !is_last_group && !unmatched_as_null && *leaf == Type::string() {
             union_types(leaf_ty, Type::string_literal(PhpString::default()))
         } else {
             leaf_ty

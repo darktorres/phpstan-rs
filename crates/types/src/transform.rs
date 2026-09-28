@@ -40,6 +40,18 @@ impl Type {
         }
     }
 
+    /// This type with each object whose class `replace` answers for
+    /// replaced by that answer, generic arguments and all; every other
+    /// type's children are walked.
+    pub fn replace_objects(&self, replace: &mut dyn FnMut(&Name) -> Option<Type>) -> Type {
+        if let Type::Object(name, _) = self
+            && let Some(replacement) = replace(name)
+        {
+            return replacement;
+        }
+        self.map_children(&mut |t| t.replace_objects(replace))
+    }
+
     /// This type with each object's class renamed by `rename`, at any
     /// depth: generic arguments, and callable signatures with their
     /// templates' bounds and defaults. The `Closure` of a `Closure(...)`

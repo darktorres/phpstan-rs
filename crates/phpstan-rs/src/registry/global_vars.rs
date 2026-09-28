@@ -113,12 +113,14 @@ enum SiteContribution {
 impl SiteContribution {
     fn apply(self, acc: &mut GlobalAccumulator) {
         match self {
-            SiteContribution::WholeValue(Type::ArrayShape(shape)) => {
-                for f in shape.fields {
-                    acc.add_shape_field(f.key.to_string(), f.ty);
+            SiteContribution::WholeValue(ty) => match ty.shape() {
+                Some(shape) => {
+                    for f in &shape.fields {
+                        acc.add_shape_field(f.key.to_string(), f.ty.clone());
+                    }
                 }
-            }
-            SiteContribution::WholeValue(ty) => acc.add_other(ty),
+                None => acc.add_other(ty),
+            },
             SiteContribution::ShapeField(key, ty) => acc.add_shape_field(key, ty),
             SiteContribution::ShapeFields(fields) => {
                 for f in fields {
@@ -593,19 +595,19 @@ fn array_merge_self_fields(
     if first_name != name {
         return None;
     }
-    match resolve_static_expr_type(&args[1].value, registry, ctx) {
-        Type::ArrayShape(shape) => Some(
-            shape
-                .fields
-                .into_iter()
-                .map(|f| FieldContribution {
-                    key: f.key.to_string(),
-                    ty: f.ty,
-                })
-                .collect(),
-        ),
-        _ => None,
-    }
+    let shape = resolve_static_expr_type(&args[1].value, registry, ctx)
+        .shape()?
+        .clone();
+    Some(
+        shape
+            .fields
+            .into_iter()
+            .map(|f| FieldContribution {
+                key: f.key.to_string(),
+                ty: f.ty,
+            })
+            .collect(),
+    )
 }
 
 fn literal_string_key(expr: &Expr) -> Option<String> {
@@ -672,13 +674,12 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
                 .unwrap_or(Type::mixed())
         }
         ExprKind::MethodCall(recv, method, _args, _) => {
-            match resolve_static_expr_type(recv, registry, ctx) {
-                Type::Object(class, _) => registry
-                    .lookup_method(&class, method)
-                    .map(|sig| sig.return_type.clone())
-                    .unwrap_or(Type::mixed()),
-                _ => Type::mixed(),
-            }
+            let recv_ty = resolve_static_expr_type(recv, registry, ctx);
+            recv_ty
+                .object_class_and_args()
+                .and_then(|(class, _)| registry.lookup_method(class, method))
+                .map(|sig| sig.return_type.clone())
+                .unwrap_or(Type::mixed())
         }
         _ => infer_const_type(expr),
     }

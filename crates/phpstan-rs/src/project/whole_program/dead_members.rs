@@ -97,7 +97,6 @@
 use crate::project::use_sites::{RefTarget, UseSiteIndex};
 use crate::registry::Registry;
 use syntax::ast::{ClassKind, Visibility};
-use types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MemberKind {
@@ -239,10 +238,7 @@ pub(crate) fn find_dead_members(
             dead.push((fqn.to_string(), name.to_string(), MemberKind::Property));
         }
         for (name, sig) in info.consts() {
-            if matches!(sig.ty(), Type::EnumCase(..))
-                || !is_visible(&sig.visibility())
-                || is_used(name)
-            {
+            if sig.ty().is_enum_case() || !is_visible(&sig.visibility()) || is_used(name) {
                 continue;
             }
             dead.push((fqn.to_string(), name.to_string(), MemberKind::Const));

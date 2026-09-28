@@ -706,11 +706,7 @@ fn has_attr(attributes: &[crate::registry::ReflectionAttribute], name: &str) -> 
 /// two-member `Union` with `StaticRef`, never its own dedicated type, so
 /// a bare `StaticRef` check misses it entirely.
 fn ancestor_return_uses_static(ty: &Type) -> bool {
-    match ty {
-        Type::StaticRef(_) | Type::This => true,
-        Type::Union(members) => members
-            .iter()
-            .any(|m| matches!(m, Type::StaticRef(_) | Type::This)),
-        _ => false,
-    }
+    ty.union_members()
+        .iter()
+        .any(Type::is_late_static_reference)
 }

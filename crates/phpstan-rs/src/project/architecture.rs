@@ -87,10 +87,7 @@ fn new_class_spans(stmts: &[Stmt], out: &mut FxHashSet<Span>) {
 }
 
 fn type_class_names(ty: &Type, out: &mut Vec<String>) {
-    if let Type::Object(name, _) = ty {
-        out.push(name.clone().to_string());
-    }
-    ty.for_each_child(&mut |t| type_class_names(t, out));
+    out.extend(ty.nested_class_names().into_iter().map(|n| n.to_string()));
 }
 
 /// `(selectors, the class's related classes, whether one must match,

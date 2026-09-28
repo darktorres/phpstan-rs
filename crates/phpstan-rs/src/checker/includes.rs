@@ -17,7 +17,6 @@ use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{Visitor, any_child_expr, walk_stmt, walk_stmts};
-use types::Type;
 
 const GUARD_FUNCTIONS: [&str; 6] = [
     "file_exists",
@@ -248,17 +247,12 @@ impl<'a> Checker<'a> {
                         .collect(),
                 )
             }
-            _ => match self.infer_expr(e, locals) {
-                Type::StringLiteral(s) => Some(vec![s.to_string()]),
-                Type::Union(members) => members
-                    .iter()
-                    .map(|m| match m {
-                        Type::StringLiteral(s) => Some(s.to_string()),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => None,
-            },
+            _ => self
+                .infer_expr(e, locals)
+                .union_members()
+                .iter()
+                .map(|m| m.string_literal_value().map(|s| s.to_string()))
+                .collect(),
         }
     }
 

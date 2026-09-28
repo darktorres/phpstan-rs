@@ -24,16 +24,7 @@ use types::{self, TemplateParam, Type};
 /// already fully resolved, and never touched by `resolve_names_in_type`
 /// again after that.
 pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Arc<str>, Type>) -> Type {
-    match ty {
-        Type::Object(name, _) if aliases.contains_key(name.as_str()) => {
-            aliases[name.as_str()].clone()
-        }
-        // Every nested position - a `@phpstan-type` alias referenced
-        // inside a generic argument, a shape field, a `Closure(...)`
-        // shape or a conditional return type's branches needs the same
-        // substitution as anywhere else.
-        other => other.map_children(&mut |t| substitute_type_aliases(t.clone(), aliases)),
-    }
+    ty.replace_objects(&mut |name| aliases.get(name.as_str()).cloned())
 }
 
 /// Builds a class's own `@phpstan-type` alias table (`Registry::
@@ -120,16 +111,10 @@ fn expand_alias_uses(
     done: &mut FxHashMap<Arc<str>, Type>,
     visiting: &mut Vec<Arc<str>>,
 ) -> Type {
-    match ty {
-        Type::Object(name, _) if raw.contains_key(name.as_str()) => {
-            let key = raw
-                .get_key_value(name.as_str())
-                .map(|(k, _)| k.clone())
-                .expect("contained");
-            expand_type_alias(&key, raw, done, visiting)
-        }
-        other => other.map_children(&mut |t| expand_alias_uses(t.clone(), raw, done, visiting)),
-    }
+    ty.replace_objects(&mut |name| {
+        let (key, _) = raw.get_key_value(name.as_str())?;
+        Some(expand_type_alias(&key.clone(), raw, done, visiting))
+    })
 }
 
 /// Rewrites every `Object(name)` in a type tree whose name is one of this
@@ -147,18 +132,7 @@ fn expand_alias_uses(
 /// one declaration (`@template T of Shape`) applying everywhere `T` is
 /// written, not a fresh one per site.
 pub(crate) fn mark_template_params(ty: Type, params: &FxHashMap<String, TemplateParam>) -> Type {
-    match ty {
-        Type::Object(name, _) if params.contains_key(name.as_str()) => {
-            Type::template_param(params[name.as_str()].clone())
-        }
-        // Every nested position - without this, a template written
-        // inside a generic argument, `object{key: T}`, `Closure(self): T`
-        // or a conditional return type's branches would stay an
-        // unrecognized `Object("T", [])` instead of becoming a real
-        // `TemplateParam`, which `resolve_names_in_type` would then treat
-        // as a genuine, as-written class reference.
-        other => other.map_children(&mut |t| mark_template_params(t.clone(), params)),
-    }
+    ty.replace_objects(&mut |name| params.get(name.as_str()).cloned().map(Type::template_param))
 }
 
 /// Builds this docblock's own `@template` metadata - bound (`T of X`),

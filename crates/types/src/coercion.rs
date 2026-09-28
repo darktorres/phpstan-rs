@@ -31,7 +31,10 @@ impl Type {
             Type::Object(name, _) if castable(hierarchy, name, INT_CASTABLE_CLASSES) => {
                 Some(Type::Int)
             }
-            Type::Object(..) | Type::ObjectWithoutClass => None,
+            Type::Object(..)
+            | Type::ObjectWithoutClass
+            | Type::ObjectShape(_)
+            | Type::EnumCase(..) => None,
             // An intersection must not fall to the permissive catch-all:
             // `(int)` on `Countable&ArrayAccess` is illegal. If any
             // member offers a legal cast path, the value supports it.
@@ -55,7 +58,10 @@ impl Type {
             Type::Object(name, _) if castable(hierarchy, name, FLOAT_CASTABLE_CLASSES) => {
                 Some(Type::Float)
             }
-            Type::Object(..) | Type::ObjectWithoutClass => None,
+            Type::Object(..)
+            | Type::ObjectWithoutClass
+            | Type::ObjectShape(_)
+            | Type::EnumCase(..) => None,
             Type::Union(members) | Type::Intersection(members) => {
                 union_coercion(members, |m| m.to_float(hierarchy))
             }

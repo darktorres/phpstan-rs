@@ -1643,56 +1643,45 @@ impl<'a> Checker<'a> {
     /// false-positive risk `dead_members`'s own doc comment names, not
     /// silently assumed safe.
     pub(crate) fn escape_targets_for_receiver_type(&self, ty: &Type) -> Vec<String> {
-        match ty {
-            Type::Object(class, _) => {
-                let Some((canonical, info)) = self.registry.lookup_class(class) else {
-                    return Vec::new();
-                };
-                let canonical = canonical.to_string();
-                let mut targets: Vec<String> = vec![canonical.clone()];
-                targets.extend(
-                    self.registry
-                        .all_ancestor_names(&canonical)
-                        .iter()
-                        .map(|s| s.to_string()),
-                );
-                if info.is_abstract() || info.kind() != ClassKind::Class {
-                    for (other_fqn, other_info) in &self.registry.classes {
-                        if other_info.kind() == ClassKind::Class
-                            && !other_info.is_abstract()
-                            && self
-                                .registry
-                                .all_ancestor_names(other_fqn)
-                                .contains(canonical.as_str())
-                        {
-                            targets.push(other_fqn.to_string());
-                            targets.extend(
-                                self.registry
-                                    .all_ancestor_names(other_fqn)
-                                    .iter()
-                                    .map(|s| s.to_string()),
-                            );
-                        }
-                    }
-                }
-                targets
-            }
-            Type::EnumCase(fqn, _) => {
-                let mut targets = vec![fqn.to_string()];
-                targets.extend(
-                    self.registry
-                        .all_ancestor_names(fqn)
-                        .iter()
-                        .map(|s| s.to_string()),
-                );
-                targets
-            }
-            Type::Union(members) | Type::Intersection(members) => members
+        ty.object_class_names()
+            .into_iter()
+            .flat_map(|class| self.escape_targets_for_class(class))
+            .collect()
+    }
+
+    /// `escape_targets_for_receiver_type` for an instance of `class`.
+    fn escape_targets_for_class(&self, class: &str) -> Vec<String> {
+        let Some((canonical, info)) = self.registry.lookup_class(class) else {
+            return Vec::new();
+        };
+        let canonical = canonical.to_string();
+        let mut targets: Vec<String> = vec![canonical.clone()];
+        targets.extend(
+            self.registry
+                .all_ancestor_names(&canonical)
                 .iter()
-                .flat_map(|m| self.escape_targets_for_receiver_type(m))
-                .collect(),
-            _ => Vec::new(),
+                .map(|s| s.to_string()),
+        );
+        if info.is_abstract() || info.kind() != ClassKind::Class {
+            for (other_fqn, other_info) in &self.registry.classes {
+                if other_info.kind() == ClassKind::Class
+                    && !other_info.is_abstract()
+                    && self
+                        .registry
+                        .all_ancestor_names(other_fqn)
+                        .contains(canonical.as_str())
+                {
+                    targets.push(other_fqn.to_string());
+                    targets.extend(
+                        self.registry
+                            .all_ancestor_names(other_fqn)
+                            .iter()
+                            .map(|s| s.to_string()),
+                    );
+                }
+            }
         }
+        targets
     }
 
     /// The declaration-site counterpart of the read-site probe hook inline

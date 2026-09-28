@@ -897,13 +897,22 @@ fn patch_datetime_fluent_returns(classes: &mut [(Arc<str>, ClassReflection)]) {
             let Some(sig) = info.methods.get_mut(method) else {
                 continue;
             };
-            let to_static = |ty: &Type| match ty {
-                Type::Object(n, _) if *n == class => Type::static_ref(Vec::new()),
-                other => other.clone(),
+            let to_static = |ty: &Type| {
+                if ty.object_class_and_args().is_some_and(|(n, _)| *n == class) {
+                    Type::static_ref(Vec::new())
+                } else {
+                    ty.clone()
+                }
             };
-            sig.return_type = match &sig.return_type {
-                Type::Union(members) => Type::union_of(members.iter().map(to_static).collect()),
-                other => to_static(other),
+            let members: Vec<Type> = sig
+                .return_type
+                .union_members()
+                .iter()
+                .map(to_static)
+                .collect();
+            sig.return_type = match <[Type; 1]>::try_from(members) {
+                Ok([single]) => single,
+                Err(members) => sig.return_type.with_members(members),
             };
         }
     }

@@ -197,6 +197,20 @@ impl CallableSig {
     }
 }
 
+impl Type {
+    /// This type with each template `replace` answers for replaced by
+    /// that answer, and each late type over one settled.
+    pub fn replace_templates(
+        &self,
+        replace: &mut dyn FnMut(&TemplateParam) -> Option<Type>,
+    ) -> Type {
+        match self {
+            Type::TemplateParam(tp) => replace(tp).unwrap_or_else(|| self.clone()),
+            _ => super::late::settle(self.map_children(&mut |t| t.replace_templates(replace))),
+        }
+    }
+}
+
 pub fn substitute_template(ty: &Type, bindings: &FxHashMap<String, Type>) -> Type {
     substitute(ty, bindings, &outside_callable, &|_| false)
 }

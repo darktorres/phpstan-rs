@@ -18,13 +18,11 @@ impl<'a> Checker<'a> {
         if !self.relation().can_name_a_class(ty).no() {
             return;
         }
-        let every_member = match ty {
-            Type::Union(members) => members
-                .iter()
-                .filter(|m| !m.is_null().yes())
-                .all(|m| self.relation().can_name_a_class(m).no()),
-            _ => true,
-        };
+        let every_member = ty
+            .union_members()
+            .iter()
+            .filter(|m| !m.is_null().yes())
+            .all(|m| self.relation().can_name_a_class(m).no());
         self.report(
             format!("cannot instantiate class using {ty}"),
             span,

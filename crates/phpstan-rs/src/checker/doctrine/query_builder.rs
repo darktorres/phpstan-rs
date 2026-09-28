@@ -16,7 +16,6 @@
 use crate::checker::{Checker, Locals};
 use syntax::ast::literal_string_value;
 use syntax::ast::{Arg, Expr, ExprKind};
-use types::Type;
 
 /// A cheap syntactic pre-check mirroring `resolve_query_builder_chain`'s
 /// own `MethodCall`/`Grouping` walk - "does this expression's own chain
@@ -342,10 +341,9 @@ impl<'a> Checker<'a> {
         if let Some(s) = literal_string_value(&arg.value) {
             return Some(s.into_owned());
         }
-        match self.infer_expr(&arg.value, locals) {
-            Type::StringLiteral(s) => Some(s.to_string()),
-            _ => None,
-        }
+        self.infer_expr(&arg.value, locals)
+            .string_literal_value()
+            .map(|s| s.to_string())
     }
 
     fn foldable_arg_strings(

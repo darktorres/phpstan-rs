@@ -11,32 +11,8 @@ use crate::checker::Checker;
 use crate::registry::access_attributes::AccessAttributes;
 use syntax::ast::*;
 use syntax::token::Span;
-use types::Type;
 
 const TEST_BASE_CLASSES: [&str; 2] = ["PHPUnit\\Framework\\TestCase", "Codeception\\Test\\Unit"];
-
-fn object_names(ty: &Type, out: &mut Vec<String>) {
-    match ty {
-        Type::Object(name, args) => {
-            out.push(name.clone().to_string());
-            for a in args {
-                object_names(a, out);
-            }
-        }
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                object_names(m, out);
-            }
-        }
-        Type::Array(_, value) | Type::VarianceArg(_, value) => object_names(value, out),
-        Type::ArrayShape(fields) => {
-            for t in fields.types() {
-                object_names(t, out);
-            }
-        }
-        _ => {}
-    }
-}
 
 impl<'a> Checker<'a> {
     /// Whether the code being checked is test code: a PHPUnit/Codeception
@@ -236,10 +212,11 @@ impl<'a> Checker<'a> {
                 .iter()
                 .zip(&m.function.params)
                 .flat_map(|(param, decl)| {
-                    let mut names = Vec::new();
-                    object_names(param.ty(), &mut names);
-                    names
+                    param
+                        .ty()
+                        .nested_class_names()
                         .into_iter()
+                        .map(|name| name.to_string())
                         .filter_map(|name| {
                             let injectable = self.injectable_version_of(&name)?;
                             Some((decl.span, decl.name.to_string(), name, injectable))

@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
         }
         let min_ty = self.infer_expr(&args[0].value, locals);
         let max_ty = self.infer_expr(&args[1].value, locals);
-        if let (Type::IntLiteral(min), Type::IntLiteral(max)) = (min_ty, max_ty)
+        if let (Some(min), Some(max)) = (min_ty.int_literal_value(), max_ty.int_literal_value())
             && min > max
         {
             self.report(format!(

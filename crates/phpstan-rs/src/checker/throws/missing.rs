@@ -42,7 +42,7 @@ impl<'a> Checker<'a> {
             return;
         }
         for (thrown, span) in self.current_function_explicit_throw_points.clone() {
-            let Type::Object(class, _) = &thrown else {
+            let Some((class, _)) = thrown.object_class_and_args() else {
                 continue;
             };
             if !self.registry.classes.contains_key(class.as_str()) {

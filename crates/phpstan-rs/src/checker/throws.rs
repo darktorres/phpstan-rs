@@ -151,7 +151,7 @@ fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionReflection>) -> 
         return Some(anything);
     };
     match dynamic.or(sig.throws().as_ref()) {
-        Some(Type::Void) => None,
+        Some(t) if t.is_void() => None,
         Some(t) if !sig.is_stub() => Some(t.clone()),
         _ => Some(anything),
     }
@@ -168,12 +168,10 @@ fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionReflection>) -> 
 /// "unknown" the same as "confirmed not Throwable" would misreport a
 /// real typo'd/missing class.
 fn throws_is_valid(ty: &Type, registry: &Registry) -> bool {
-    match ty {
-        Type::Union(members) => members.iter().all(|m| throws_is_valid(m, registry)),
-        Type::Object(class, _) => {
+    ty.union_members().iter().all(|m| {
+        m.object_class_and_args().is_none_or(|(class, _)| {
             !registry.classes.contains_key(class.as_str())
                 || registry.is_subclass_of(class, "Throwable")
-        }
-        _ => true,
-    }
+        })
+    })
 }

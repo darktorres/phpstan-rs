@@ -508,7 +508,7 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(param.ty(), c),
                 None => param.ty().clone(),
             };
-            if param_ty != Type::Bool {
+            if param_ty != Type::bool() {
                 continue;
             }
             self.report(format!(
@@ -699,23 +699,19 @@ impl<'a> Checker<'a> {
             return self.registry.lookup_function(name.trim_start_matches('\\'));
         }
         let ty = self.infer_expr(callable_expr, locals);
-        let Type::ArrayShape(shape) = &ty else {
-            return None;
-        };
-        let method_ty = &shape.field(&types::ShapeKey::Int(1))?.ty;
-        let Type::StringLiteral(method) = method_ty else {
-            return None;
-        };
-        let method = method.as_str()?;
+        let shape = ty.shape()?;
+        let method = shape
+            .field(&types::ShapeKey::Int(1))?
+            .ty
+            .string_literal_value()?
+            .as_str()?;
         let class_ty = &shape.field(&types::ShapeKey::Int(0))?.ty;
-        let class = match class_ty {
-            Type::StringLiteral(c) => c.as_str()?,
-            Type::ClassString(inner) => match inner.as_ref() {
-                Type::Object(c, _) => c.as_str(),
-                _ => return None,
-            },
-            Type::Object(c, _) => c.as_str(),
-            _ => return None,
+        let class = if let Some(c) = class_ty.string_literal_value() {
+            c.as_str()?
+        } else if let Some(c) = class_ty.class_string_class() {
+            c.as_str()
+        } else {
+            class_ty.object_class_and_args()?.0.as_str()
         };
         self.registry.lookup_method(class, method)
     }

@@ -49,6 +49,22 @@ impl Type {
         out
     }
 
+    /// The class of every object at any depth: generic arguments,
+    /// array and shape values, callable signatures. In order, with
+    /// repeats.
+    pub fn nested_class_names(&self) -> Vec<&crate::Name> {
+        let mut out = Vec::new();
+        self.collect_nested_class_names(&mut out);
+        out
+    }
+
+    fn collect_nested_class_names<'t>(&'t self, out: &mut Vec<&'t crate::Name>) {
+        if let Type::Object(name, _) = self {
+            out.push(name);
+        }
+        self.for_each_child(&mut |t| t.collect_nested_class_names(out));
+    }
+
     /// Whether a `parent` stands in a class position (see
     /// `referenced_class_names`) unresolved.
     pub fn has_parent_ref(&self) -> bool {
@@ -165,6 +181,12 @@ impl Type {
             Type::Intersection(members) => members.iter().find_map(Type::shape),
             _ => None,
         }
+    }
+
+    /// Whether this is `static` or `$this`: the class a member is called
+    /// on.
+    pub fn is_late_static_reference(&self) -> bool {
+        matches!(self, Type::StaticRef(_) | Type::This)
     }
 
     /// Whether this names the class it is written in: `self`, `static`

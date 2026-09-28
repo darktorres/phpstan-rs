@@ -348,17 +348,11 @@ impl<'a> Checker<'a> {
         ty: &Type,
         has_named: &mut bool,
     ) -> Option<Vec<Argument<'e>>> {
-        let shapes: Vec<&Shape> = match ty {
-            Type::ArrayShape(shape) => vec![shape],
-            Type::Union(members) => members
-                .iter()
-                .map(|m| match m {
-                    Type::ArrayShape(shape) => Some(shape),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()?,
-            _ => return None,
-        };
+        let shapes: Vec<&Shape> = ty
+            .union_members()
+            .iter()
+            .map(Type::shape)
+            .collect::<Option<Vec<_>>>()?;
         let unsealed = shapes.iter().any(|shape| !shape.is_sealed());
         let size = if unsealed {
             0
