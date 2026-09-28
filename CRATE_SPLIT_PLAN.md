@@ -6707,6 +6707,23 @@ Behaviour commits, one each with its fixture:
   PHP; today `Resolved::Member` carries no kind and the caller tries a method,
   then a property, then a constant, so in a class declaring both `x()` and
   `const x`, definition and hover on `Foo::x` go to the method.
+- **Hover shows the declaration**, as Markdown when the client's
+  `hover.contentFormat` accepts it: the declaration written as PHP (modifiers,
+  templates, parameters with their native and PHPDoc types and defaults, the
+  return type), a constant's or enum case's value, the doc comment's description
+  with its `@deprecated` and `@throws` tags, and where the symbol comes from
+  (the project, a composer package, a built-in). Today it is a bare
+  `MarkedString::String` (`class App\Foo extends Base`, `Foo::X: int`) with
+  nothing from the doc comment.
+- **Definition reaches every declaration.** A name several files declare (a
+  polyfill beside the built-in, conditional declarations, the duplicates C4's
+  collision policy merges) answers each site, and a built-in's or embedded
+  stub's declaration opens as a read-only document under a `phpstan-rs-stub:`
+  URI (LSP 3.18's `workspace/textDocumentContent`, and the VS Code extension's
+  content provider for older clients). Today `class_declaration` and
+  `function_declaration` answer only an `Origin::File`, so definition on
+  `DateTime` or `array_map` answers nothing, and a name declared twice answers
+  one site.
 - **Navigation covers every name.** Definition, type definition, hover,
   document highlight, references and rename resolve a name in a PHPDoc type
   (C7's name scope: `@param`, `@var`, `@return`, `@throws`,
