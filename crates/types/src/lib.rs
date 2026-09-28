@@ -10,6 +10,7 @@ pub use syntax::ast::ClassKind;
 pub use syntax::name::Name;
 pub use syntax::php_string::PhpString;
 
+pub mod arithmetic;
 mod coercion;
 mod concat;
 mod conditional;

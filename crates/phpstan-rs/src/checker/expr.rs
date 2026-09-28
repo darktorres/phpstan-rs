@@ -27,11 +27,11 @@ mod preg_shapes;
 mod probe_checks;
 pub(crate) mod ranges;
 
-use crate::checker::expr::ranges::{
+pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
+use types::arithmetic::{
     checked_bound_op, compare_range_outcome, div_int_range, loose_compare_literals, mod_int_range,
     mul_int_range, numeric_comparison_bounds, pow_int_range, shift_int_range, sub_int_range_full,
 };
-pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
 use types::union_types;
 
 // `checker::throws::dynamic` reuses this bitwise-or-flag-chain scan for

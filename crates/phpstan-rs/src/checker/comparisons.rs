@@ -10,11 +10,11 @@
 //! needle/haystack value type pair can be `==` without being `===`
 //! (`function.looseComparison`).
 
-use crate::checker::expr::ranges::loose_compare_literals;
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
 use syntax::ast::Arg;
 use syntax::token::Span;
+use types::arithmetic::loose_compare_literals;
 
 use types::{AccessoryKind, Type, is_numeric_string_literal};
 
