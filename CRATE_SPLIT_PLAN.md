@@ -4129,6 +4129,28 @@ fixture:
     (356), `foreach.nonIterable` (284), `echo.nonString` (39),
     `cast.string`/`cast.int` (135), `++`/`--` on `mixed` (55) and
     `callable.nonCallable` (30);
+  - the same helper reports an operand with one invalid member ("Possibly
+    invalid", "might not be", at the level `checkUnionTypes` and
+    `checkNullables` set), where today only a wholly invalid operand is:
+    `echo $a?->foo` on `Foo|null`, `foreach` over `array<int>|null`,
+    `(string)` of `stdClass|null` or `object|string`, `[$a] = $arrayOrNull`,
+    `...$integersOrNull`, `new stdClass instanceof $class` with
+    `string|null`, `$ob < $n` for `stdClass` and `float|null`, `$string()`
+    and `$o(...)` for a `string` or `object` that may not be callable, an
+    array key of `int|null`, `string|null` or `int|object`, and `.` on
+    `array<string>|string` (with the `mixed` rows above, these are the rules
+    oracle's PHPStan-only `echo.nonString` 375, `binaryOp.invalid` 93,
+    `assignOp.invalid` 77, `offsetAccess.invalidOffset` 79,
+    `foreach.nonIterable` 27, `callable.nonCallable` 25, `cast.*` 42,
+    `unaryOp.invalid` 18, `offsetAccess.nonArray` 16 and smaller rows);
+    an `object` operand of `+`, `-` or `%` is invalid too (`+$o`, `$o % 3`);
+  - `++`/`--` on `bool`, `null`, a `resource` or a non-numeric string is
+    `postInc.type`/`preDec.type` and the rest (PHP leaves `true`, `false`
+    and `null` for `--` unchanged and throws for a resource), unreported
+    today (`invalid-inc-dec.php`, `inc-non-numeric-string.php`,
+    `dec-non-numeric-string.php`); `[]` for reading inside `isset()`,
+    `empty()` and `??` is `offsetAccess.noDim`, a compile error, unreported
+    today (`offset-access-without-dim-for-reading.php`);
   - an offset or array key of an invalid type is reported for every
     type: `$a[$o]` and `$a[$o] = 1` with an object offset and `[$o => 1]`
     throw a `TypeError` and aren't reported today (an `array` offset and,
