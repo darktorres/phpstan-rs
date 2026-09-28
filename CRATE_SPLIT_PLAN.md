@@ -4734,7 +4734,15 @@ fixture:
   - an offset write into an `ArrayAccess` object checks the key against
     `offsetSet`'s key type: `$w['str'] = 1` on `WeakMap<stdClass, int>`
     and `$s[5] = 1` on `SplObjectStorage` are unreported today
-    (`offsetAssign.dimType`);
+    (`offsetAssign.dimType`), as is `'a'` on an `ArrayAccess<int, int>`;
+    and the value against its value type (`offsetAssign.valueType`):
+    `$aa[] = 'foo'` and `$aa[1] += 2.5` on `ArrayAccess<int, int>`, `$c[]
+    = 1` on a class declaring `@implements \ArrayAccess<int, string>`,
+    `$a['foo'] ??= $a['foo'] ?? null` on `ArrayAccess<string, string>`,
+    and writes into an `ArrayObject<never, never>` are unreported today
+    (all 20 of the rules oracle's PHPStan-only
+    `offset-access-value-assignment*.php`,
+    `null-coalesce-assign-right-side-scope.php`, `readonly-assign.php`);
   - an offset write or append checks its container as a read does:
     `$i['x'] = 3` on an `int` throws at runtime and isn't reported today,
     and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
