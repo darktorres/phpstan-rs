@@ -134,6 +134,31 @@ impl Type {
         }
     }
 
+    /// PHPStan's `toArrayKey()`: the key a value of this type becomes in
+    /// an array - a float truncated to an int, `true`/`false` as `1`/`0`,
+    /// `null` as `''`, a canonical integer string as that int; any other
+    /// key type as it is.
+    pub fn to_array_key(&self) -> Type {
+        match self {
+            Type::FloatLiteral(f) => Type::IntLiteral(*f as i64),
+            Type::Float => Type::Int,
+            Type::True => Type::IntLiteral(1),
+            Type::False => Type::IntLiteral(0),
+            Type::Bool => Type::Union(vec![Type::IntLiteral(0), Type::IntLiteral(1)]),
+            Type::Null => Type::StringLiteral(PhpString::default()),
+            Type::StringLiteral(s) => match crate::canonical_int_key(&s.to_str_lossy()) {
+                Some(n) => Type::IntLiteral(n),
+                None => self.clone(),
+            },
+            Type::Union(members) => members
+                .iter()
+                .map(Type::to_array_key)
+                .reduce(union_types)
+                .unwrap_or(Type::Never),
+            other => other.clone(),
+        }
+    }
+
     /// `abs($x)`: PHPStan's `IntegerRangeType::toAbsoluteNumber()`,
     /// including its `PHP_INT_MIN` special case (negating it would
     /// overflow, so its absolute value is unbounded, as an unbounded

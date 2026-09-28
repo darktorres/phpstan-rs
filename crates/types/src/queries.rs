@@ -371,6 +371,14 @@ impl Type {
             .unwrap_or_default()
     }
 
+    /// The value of an integer literal; `None` for any other type.
+    pub fn int_literal_value(&self) -> Option<i64> {
+        match self {
+            Type::IntLiteral(n) => Some(*n),
+            _ => None,
+        }
+    }
+
     /// The value of `true` or `false`; `None` for any other type.
     pub fn bool_literal_value(&self) -> Option<bool> {
         match self {

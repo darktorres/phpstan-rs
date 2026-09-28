@@ -82,23 +82,17 @@ impl<'a> Checker<'a> {
                     // deliberately bailing (not guessing) on anything
                     // that doesn't resolve this way either, e.g. a plain
                     // variable or an unresolvable constant.
-                    _ => match self.infer_expr(k, locals) {
-                        Type::IntLiteral(n) => {
+                    _ => {
+                        let key = self.infer_expr(k, locals).to_array_key();
+                        if let Some(n) = key.int_literal_value() {
                             next_index = next_index.max(n + 1);
                             n.to_string()
+                        } else if let [s] = key.constant_strings()[..] {
+                            s.to_string()
+                        } else {
+                            return;
                         }
-                        Type::StringLiteral(s) => s.to_string(),
-                        Type::True => {
-                            next_index = next_index.max(2);
-                            "1".to_string()
-                        }
-                        Type::False => {
-                            next_index = next_index.max(1);
-                            "0".to_string()
-                        }
-                        Type::Null => String::new(),
-                        _ => return,
-                    },
+                    }
                 },
             };
             match seen.iter_mut().find(|(k, _)| *k == key) {
@@ -219,19 +213,18 @@ impl<'a> Checker<'a> {
             let value_ty = self.infer_expr(&item.value, locals);
             if item.spread {
                 if !degraded {
-                    match &value_ty {
-                        Type::ArrayShape(inner) => {
-                            for f in &inner.fields {
-                                Self::merge_shape_field(
-                                    &mut shape,
-                                    &mut next_index,
-                                    &f.key,
-                                    f.ty.clone(),
-                                    f.optional,
-                                );
-                            }
+                    if let [inner] = value_ty.constant_arrays()[..] {
+                        for f in &inner.fields {
+                            Self::merge_shape_field(
+                                &mut shape,
+                                &mut next_index,
+                                &f.key,
+                                f.ty.clone(),
+                                f.optional,
+                            );
                         }
-                        _ => degraded = true,
+                    } else {
+                        degraded = true;
                     }
                 }
                 if degraded {
@@ -379,7 +372,7 @@ impl<'a> Checker<'a> {
         let is_useless = match args.len() {
             0 => return,
             1 => true,
-            _ => self.infer_expr(&args[1].value, locals) == Type::False,
+            _ => self.infer_expr(&args[1].value, locals).bool_literal_value() == Some(false),
         };
         if !is_useless {
             return;
@@ -427,7 +420,11 @@ impl<'a> Checker<'a> {
         let Some(element_ty) = arr_ty.array_value_type() else {
             return;
         };
-        match array_filter_element_falsy_verdict(&element_ty) {
+        match element_ty
+            .to_boolean()
+            .bool_literal_value()
+            .map(|truthy| !truthy)
+        {
             Some(false) => {
                 self.report(format!(
                         "call to array_filter() with an array of only non-falsy values ({arr_ty}) has no effect"
@@ -691,54 +688,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Whether a key type could genuinely include a `String` member - the
-    /// only thing that actually breaks list-ness for a real PHP operation
-    /// that renumbers integer keys sequentially and discards their
-    /// original values (a spread array literal, and `array_merge()`,
-    /// which applies the identical renumbering rule to its own plain-
-    /// array arguments - shared by both `infer_spread_array_literal_
-    /// type`'s own degraded branch and `array_merge`'s below).
-    /// Conservative (`true`) for anything not provably int-only, matching
-    /// this project's "don't know, don't guess" leniency elsewhere.
-    pub(crate) fn key_type_could_be_string(ty: &Type) -> bool {
-        match ty {
-            Type::String | Type::StringLiteral(_) => true,
-            Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => false,
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().any(Self::key_type_could_be_string)
-            }
-            _ => true,
-        }
-    }
-
-    /// `key_type_could_be_string`'s own inverse-shaped sibling - whether a
-    /// key type could genuinely include an `Int` member. `array_merge`'s
-    /// own coarse-fallback key-type computation uses this (alongside
-    /// `key_type_could_be_string`) to decide whether an argument's real
-    /// keys could ever get real PHP's int-key-renumbering treatment,
-    /// rather than always widening the merged key type to `int|string`
-    /// regardless of what the arguments actually prove.
-    pub(crate) fn key_type_could_be_int(ty: &Type) -> bool {
-        match ty {
-            Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => true,
-            Type::String | Type::StringLiteral(_) => false,
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().any(Self::key_type_could_be_int)
-            }
-            _ => true,
-        }
-    }
-
     /// `array_merge`'s own per-argument list-safety check - the same
     /// "already proven list, or at least provably not string-keyed" OR
     /// `infer_spread_array_literal_type`'s degraded branch already uses,
     /// factored out since both apply the identical real-PHP renumbering
     /// rule to their own plain-array arguments/spread sources.
     pub(crate) fn is_list_safe_array_merge_argument(ty: &Type) -> bool {
-        ty.is_list().yes()
-            || ty
-                .array_key_type()
-                .is_some_and(|k| !Self::key_type_could_be_string(&k))
+        ty.is_list().yes() || ty.array_key_type().is_some_and(|k| k.is_string().no())
     }
 }
 
@@ -761,99 +717,9 @@ fn array_key_cast_description(expr: &Expr, ty: &Type) -> Option<(String, String)
     if let ExprKind::Literal(Literal::Float(f)) = &unwrap_grouping(expr).kind {
         return Some((f.to_string(), (*f as i64).to_string()));
     }
-    match ty {
-        Type::FloatLiteral(f) => Some((f.to_string(), (*f as i64).to_string())),
-        Type::True => Some(("true".to_string(), "1".to_string())),
-        Type::False => Some(("false".to_string(), "0".to_string())),
-        Type::Null => Some(("null".to_string(), "''".to_string())),
-        Type::StringLiteral(s) => {
-            types::canonical_int_key(&s.to_str_lossy()).map(|n| (format!("'{s}'"), n.to_string()))
-        }
-        _ => None,
+    if ty.finite_types().len() != 1 {
+        return None;
     }
-}
-
-/// Real PHP truthiness classification for `array_filter()`'s
-/// own `arrayFilter.same`/`arrayFilter.alwaysEmpty` checks - `Some(true)`
-/// when `ty` is confidently *always* falsy, `Some(false)` when it's
-/// confidently *never* falsy, `None` when it's ambiguous (real PHPStan's
-/// own tri-state "maybe" - neither `isSuperTypeOf(...)::yes()` nor
-/// `::no()`). Deliberately *not* built on `narrow_type_excluding_falsy`
-/// (`checker/narrowing/array_shape.rs`) - that function is designed for
-/// condition-narrowing, where a bare, unrefined `Type::Int`/`Float`/`Bool`
-/// staying unchanged after "narrowing" is a harmless missed-precision
-/// opportunity; reusing that same identity-preserving behavior *here*
-/// (comparing narrowed-vs-original to decide "never falsy") would be
-/// unsound - a bare `int`-typed element genuinely can be exactly `0`,
-/// so it must classify as ambiguous, not "never falsy." This project has
-/// no `FloatLiteral` variant at all, so a bare `Type::Float` is always
-/// ambiguous too (never provably `0.0` or provably nonzero).
-fn array_filter_element_falsy_verdict(ty: &Type) -> Option<bool> {
-    match ty {
-        Type::Null | Type::False => Some(true),
-        Type::True => Some(false),
-        Type::IntLiteral(n) => Some(*n == 0),
-        Type::StringLiteral(s) => Some(s.is_empty() || s == "0"),
-        Type::ArrayShape(shape) => {
-            if shape.is_empty_array() {
-                Some(true)
-            } else if !shape.fields.is_empty() {
-                Some(false)
-            } else {
-                // Only an unsealed tail - real size unknown.
-                None
-            }
-        }
-        // An object/enum-case instance, a resource, or a `class-string`,
-        // is always truthy in real PHP regardless of its own contents.
-        Type::Object(..)
-        | Type::ObjectWithoutClass
-        | Type::Resource { .. }
-        | Type::EnumCase(..)
-        | Type::ClassString(..)
-        | Type::ClassKindString(_) => Some(false),
-        // A `non-falsy-string` (never `""`/`"0"`) or `non-empty-array`
-        // (never the empty array) accessory intersection is confidently
-        // never falsy, whatever its own unrefined base type is. `list`
-        // (`AccessoryKind::ArrayList`) deliberately does not qualify on
-        // its own: `list<T>` only promises sequential int keys, never
-        // non-emptiness - `[]` is a perfectly real, empty `list<T>`
-        // (`types::parse::parse_type_string`'s own `"list"` arm adds
-        // `ArrayList` alone, `NonEmptyArray` only for `non-empty-list`)
-        // - so `list<T>`'s own truthiness stays genuinely ambiguous,
-        // matching real PHPStan exactly.
-        Type::Intersection(members) => members
-            .iter()
-            .any(|m| {
-                matches!(
-                    m,
-                    Type::Accessory(AccessoryKind::NonFalsyString | AccessoryKind::NonEmptyArray)
-                )
-            })
-            .then_some(false),
-        Type::IntRange(lo, hi) => {
-            if *lo == Some(0) && *hi == Some(0) {
-                Some(true)
-            } else if lo.is_some_and(|l| l > 0) || hi.is_some_and(|h| h < 0) {
-                Some(false)
-            } else {
-                None
-            }
-        }
-        Type::Union(members) => {
-            let verdicts: Option<Vec<bool>> = members
-                .iter()
-                .map(array_filter_element_falsy_verdict)
-                .collect();
-            let verdicts = verdicts?;
-            if verdicts.iter().all(|v| *v) {
-                Some(true)
-            } else if verdicts.iter().all(|v| !*v) {
-                Some(false)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
+    let key = ty.to_array_key();
+    (key != *ty).then(|| (ty.to_string(), key.to_string()))
 }

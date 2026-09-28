@@ -943,9 +943,7 @@ impl<'a> Checker<'a> {
                         // key type that provably excludes `Int` is just
                         // as safe here, not only the bare `Type::String`
                         // variant.
-                        _ => t
-                            .array_key_type()
-                            .is_some_and(|k| !Self::key_type_could_be_int(&k)),
+                        _ => t.array_key_type().is_some_and(|k| k.is_int().no()),
                     });
                 if all_string_keyed_or_shape {
                     let mut merged = Shape::sealed(Vec::new());
@@ -1057,8 +1055,8 @@ impl<'a> Checker<'a> {
                 // possible) rather than guessing narrower than known.
                 let mut note_key_type = |k: Option<Type>| match k {
                     Some(k) => {
-                        key_could_be_int |= Self::key_type_could_be_int(&k);
-                        key_could_be_string |= Self::key_type_could_be_string(&k);
+                        key_could_be_int |= !k.is_int().no();
+                        key_could_be_string |= !k.is_string().no();
                     }
                     None => {
                         key_could_be_int = true;
