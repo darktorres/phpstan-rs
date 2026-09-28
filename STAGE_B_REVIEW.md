@@ -309,7 +309,7 @@ through `check-project`.
   case relates to a class exactly as its enum's object type does; fold the
   subclass Yes into `object_super_type_of` so no caller can skip it.
   (`9355e811`)
-- [ ] **F35. A non-final class is treated as final.** For a non-final
+- [x] **F35. A non-final class is treated as final.** (`327da348`) For a non-final
   `class Foo` whose subclass `Bar` implements `IteratorAggregate`,
   `ArrayAccess` and `__invoke`, three things are reported on `$foo`, yet
   `f(new Bar())` runs:
