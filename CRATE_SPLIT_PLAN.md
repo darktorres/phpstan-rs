@@ -925,13 +925,16 @@ corpus, type, baseline, performance and build-time gates run locally
       `phpVersion` leaves `PHP_VERSION_ID` unbounded in PHPStan, so
       phpstan-rs's `PHP_VERSION_ID >= 80400` is `greaterOrEqual.alwaysTrue`
       where the phar is silent: 6 of the first run's phpstan-rs-only
-      findings), and matches
-      findings by file and identifier within three lines, or within one
-      declaration for the signature-level identifiers (`missingType.*`,
-      which PHPStan puts on the declaration's line and phpstan-rs on the
-      parameter's; about 40 unmatched pairs today). It
-      lists, per identifier, the PHPStan-only, matched and phpstan-rs-only
-      counts (phpstan-rs takes 2 s).
+      findings), and matches findings by file and identifier, on the same
+      line first so a near finding can't take another's exact match, then
+      within three lines, or within one declaration for the signature-level
+      identifiers (`missingType.*`, `return.missing`,
+      `constructor.unusedParameter`, `parameter.phpDocType`,
+      `phpDoc.parseError`, which the two tools place on different lines of
+      a declaration). PHPStan's "(in context of class …)" rows of a trait's
+      findings are stripped and collapsed first. It lists, per identifier,
+      the PHPStan-only, matched and phpstan-rs-only counts (phpstan-rs
+      takes 2 s).
 
     All three record under `.corpus-runs/gate/{nsrt,oracle,rules}/<hash>`. A count
     rises only through an approved delta that names the cause.
