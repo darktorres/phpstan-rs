@@ -199,6 +199,12 @@ Each fix needs a fixture.
   `registry/anonymous_class.rs` rebuilds it, and `checker/unused.rs`,
   `checker/resolve.rs` and `checker/expr.rs` string-match it. Key anonymous
   classes by what identifies them instead of a shared name.
+  `class_decl_name(c)` (the name or `class@anonymous`) is called at about
+  20 `StmtKind::ClassDecl` sites where the name can't be absent, and each
+  of about 12 walkers rebuilds the namespaced name with
+  `ctx.declared_name(class_decl_name(c))`. A statement declares a named
+  class (`name` and `namespaced_name` not optional); an anonymous class is
+  its own node with no name. (`9742818c`)
 - [ ] **S11. Stale syntax docs.**
   - `ClassDecl.name_span` still describes the `class@anonymous`
     placeholder;
@@ -207,10 +213,134 @@ Each fix needs a fixture.
 
 ## Full review: findings
 
-Each was found reading the commit named; "probed" means reproduced with
-an `assertType` or diagnostic probe through `check-project`.
+Grouped by severity, most severe first. Each names the commit that
+introduced it or, for a module read in its final state, the module;
+"probed" means reproduced with an `assertType` or diagnostic probe
+through `check-project`.
 
-### Correctness (probed)
+### Crashes and false positives (probed)
+
+- [ ] **F23. Deep nesting crashes the process.** 200,000 nested `{ }`
+  blocks overflow the parser's stack and abort the whole run ("has
+  overflowed its stack", exit 134). The depth guard (`MAX_EXPR_DEPTH`)
+  covers expressions only; statement nesting (blocks, control-structure
+  bodies, nested declarations) needs it too. No file may take the run
+  down. (`16dd573b`)
+- [ ] **F29. Integer overflow crashes the checker.** Each of these aborts
+  checking the file ("internal error while checking: attempt to … with
+  overflow"); a release build wraps silently to the wrong literal instead:
+  - `-$m` for `$m = PHP_INT_MIN` (`arithmetic.rs` `negate_numeric_literal`
+    and `-m` on range bounds; PHP gives a float);
+  - `$m % -1` (`mod_int_range` `l % r`; PHP gives `0`);
+  - `$i++` at `PHP_INT_MAX` (`transform.rs` `step`, `n + by`; PHP gives a
+    float).
+
+  From reading the final `arithmetic.rs`, two more:
+  - `$x % PHP_INT_MIN` overflows at `r_max - 1` and `-m` when a bound is
+    `i64::MIN`;
+  - `shift_int_range` uses `checked_shl`, which rejects only amounts of 64
+    or more and doesn't notice bits shifted out: `int<0, 2^62> << 2` gives
+    `0`. A range whose shifted bounds wrap is plain `int` (PHP's `<<`
+    wraps; it doesn't become a float).
+
+  Audit every i64 operation in `arithmetic.rs` and `transform.rs` (negation,
+  remainder, `MIN / -1`, `m - 1` at `MIN`); an overflowing result is a
+  float, as PHP makes it. (`d0d331dd`, `b62a1131`, `fd5c800e`)
+- [ ] **F22. `=== SomeEnum::Case` against an interface is "always
+  false".** With `Suit implements HasColor`, `$x === Suit::Hearts` for `$x:
+  HasColor`, `UnitEnum` or `HasColor|int` reports `identical.alwaysFalse`.
+  The `(Object, EnumCase)` arm in `relation/super_type.rs` calls
+  `object_super_type_of`, which only answers the not-a-subclass cases (it
+  relies on `proves_super_type` having returned Yes first) and returns No
+  for an interface against a final class (an enum) implementing it. The arm
+  also turns a Yes into Maybe, so `HasColor ⊇ Suit::Hearts` is never Yes. A
+  case relates to a class exactly as its enum's object type does; fold the
+  subclass Yes into `object_super_type_of` so no caller can skip it.
+  (`9355e811`)
+- [ ] **F35. A non-final class is treated as final.** For a non-final
+  `class Foo` whose subclass `Bar` implements `IteratorAggregate`,
+  `ArrayAccess` and `__invoke`, three things are reported on `$foo`, yet
+  `f(new Bar())` runs:
+  - `foreach ($foo …)`: `foreach.nonIterable`;
+  - `$foo()`: `callable.nonCallable`;
+  - `$foo['k']`: `offsetAccess.nonOffsetAccessible`.
+
+  `relation/kinds.rs` `class_is` answers No for any known non-interface
+  class that isn't a subclass, and `is_callable`'s missing `__invoke` does
+  the same. Likewise `function g(stdClass $s) { $s->foo(); }` reports
+  "call to method foo() on a non-object type stdClass": `can_call_methods`
+  says No for `stdClass`, which isn't final, and the message calls an
+  object a non-object. No only for a final class or an enum, Maybe
+  otherwise. (A `foreach` over any object also iterates its visible
+  properties, so even a final class's No for iterability is doubtful.)
+  (`9819e786`, `3bdb7505`)
+- [ ] **F37. A shape's string keys widen to `string`.** `f(['a' => 1])`
+  against `@param array<'a'|'b', int>` reports `argument.type`, and so does
+  `array<non-empty-string, int>`; `$y = ['a' => 1, 'b' => 2]; f($y)` too.
+  `Shape::key_type` (`subtype.rs`) contributes `string` for every string
+  key, while int keys keep their literal. The key type is the union of the
+  literal keys (`'a'|'b'`); `proves_super_type`'s `(ArrayShape, Array)` arm
+  and `accepts` read the same aggregate. (`91bc9e49`)
+- [ ] **F38. Template inference keeps the first binding.**
+  `infer_template_bindings` (`templates.rs`) is `or_insert`, so with
+  `@param T $a @param T $b @return T`, `pick(1, 'a')` is `1`, and
+  `pick(1, 'a') === 'a'` reports `identical.alwaysFalse`. The bindings of
+  one template from several positions union. Inference also stops at a bare
+  `T`, an array's value, `class-string<T>` and a union; each of these is
+  `mixed` where PHPStan infers the type:
+  - `@param list<T>` from `[1, 2]` (the param side is an intersection);
+  - an array's key (`array<K, V>` binds `V` only, so `K` is `int|string`);
+  - a generic object (`Box<T>` from `Box<5>`);
+  - a callable's return or parameters (`callable(): T`);
+  - a shape field (`array{v: T}`).
+
+  Walk every position structurally. A bound is enforced only as "object
+  bound against a definite scalar"; an argument outside `T of Foo` binds
+  anyway. (`31a2fd14`)
+- [ ] **F39. `value-of<T>` over a template is erased.** `@return
+  value-of<T>` (`T of array`) gives "Function v() has no return type
+  specified" and `v(['a' => 1, 'b' => 2])` is `mixed`, not `1|2`.
+  `resolve_class_references` (`late.rs`) maps a `ValueOf` over anything
+  but a class constant or an object to implicit `mixed`. It should recurse
+  and settle like `KeyOf` does. (`0e309c03`)
+- [ ] **F40. PHPDoc parsing misreads names and pseudo-types.**
+  - `parse_type_atom` tries `s.parse::<f64>()` before class names, and
+    Rust accepts `nan`, `inf` and `infinity` in any case: `@param Nan $n`,
+    with a class `Nan`, is typed `NaN`, and `@param Infinity $n` is `inf`.
+    Float literals need PHPDoc's float grammar.
+  - `value-of<list<int>>` and `key-of<non-empty-array<string, int>>` become
+    implicit `mixed` ("parameter with no type specified"). Parsing sees
+    only a bare array or shape, while `late::value_of`/`key_of` already
+    handle intersections.
+  - `non-decimal-int-string` falls to the class-name arm: `class.notFound`
+    and `parameter.unresolvableType`.
+  - `numeric` is `int|float|string` (the comment says numeric-string isn't
+    modeled; it is), so `num('abc')` is accepted.
+  - A conditional type splits its branches on top-level `?` and `:`, so a
+    branch holding `callable(): int`, `Foo::BAR` or `?T` breaks.
+  - Quoted literals and shape keys take no escapes (`'it\'s'`).
+  - `list{…}`, `non-empty-array{…}` and `non-empty-list{…}` parse as plain
+    sealed shapes, dropping non-emptiness for a shape with optional fields.
+
+  (`3af64337` area; parse.rs final state)
+- [ ] **F41. Union arguments are checked with level 7 rules at every
+  level.** `takesInt($b ? 1 : 'a')` is reported at levels 5 and 6 as at 7.
+  `UNION_TYPES_CHECK_LEVEL` gates nothing (it appears in a `debug_assert`);
+  `rule_level_accepts_rec` requires every member at every level. Below
+  `checkUnionTypes`' level a union given is accepted when some member is,
+  which needs a trinary `accepts` (Yes/Maybe/No) rather than the boolean
+  one the doc admits to. (`91bc9e49`; accepts.rs final state)
+
+### False positives (from reading)
+
+- [ ] **F42. Native-type suggestions PHP can't compile.** `render`
+  (`native.rs`) suggests `true|null`/`false|null` for PHP 8.0 and 8.1:
+  `true` doesn't exist before 8.2, and `false|null` is a compile error
+  before 8.2. Class atoms have no leading `\`, so in a namespace the
+  suggestion reads as a relative name. `check_native_type_hints` skips
+  every `__`-prefixed method, not only the magic ones. (`56c3beab`)
+
+### Wrong types and missed reports (probed)
 
 - [ ] **F1. `exit(...)` is typed `never`.** Since PHP 8.4 `exit`/`die`
   are functions and `exit(...)` is a first-class callable. The parser
@@ -233,8 +363,103 @@ an `assertType` or diagnostic probe through `check-project`.
   members.** `$this->HELPER()` calling `private function helper()` reports
   `helper()` unused (`checker/unused.rs`, `usage.methods`). PHP method names
   are case-insensitive. (`481b224b` area)
+- [ ] **F24. Property-hook bodies are skipped by "all code" walks.** A
+  banned `eval()` in a `get { }` hook isn't reported, while the same call
+  in a function is (`project/banned.rs`). `composer_hygiene.rs`'s `Facts`
+  skips hooks and parameter defaults on purpose, so `extension_loaded()`
+  and `function_exists()` probes in a hook are missed. Hook bodies are
+  code; audit every walker that claims to see all code (see F27).
+  (`0e294c5b`)
+- [ ] **F30. A modulo by a negative divisor is `never`.**
+  `int<0, max> % -3` infers `never`; PHP gives a value in `[0, 2]`.
+  `mod_int_range`'s range fallback uses the divisor's signed maximum
+  (`r_max - 1`) where it needs its magnitude over both bounds.
+  (`b62a1131`)
+- [ ] **F31. Bitwise operators on strings are typed `int`.** `$a ^ $b`,
+  `$a | $b` and `$a & $b` over strings give a string in PHP (bytewise;
+  `'a' ^ "\x02"` is `'c'`). `binary_operation_type`'s bitwise arm returns
+  `int`. (`615ad35d`)
+- [ ] **F32. `++` on a string keeps its value.** `$s = 'a'; $s++;` stays
+  `'a'` where PHP gives `'b'`: `step` leaves a string unchanged instead of
+  applying PHP's string increment (alphanumeric carry; a numeric string
+  steps as a number). `null++` gives `int`; PHP gives exactly `1`.
+  (`fd5c800e`)
+- [ ] **F33. A string written as an array key is taken as a string key.**
+  `$b = []; $b[$s] = 1;` with `$s: string` infers `array<string, 1>`, but
+  PHP turns a numeric string into an int key (`["5" => 1]` has key `5`).
+  The literal form `[$s => 1]` gets `int|string`, so the write path
+  (`write_key_type`) and `to_array_key` (a non-literal string passes
+  through) disagree with it. A string key is `int|string` unless provably
+  non-numeric; a decimal-int-string is `int`. The lost non-emptiness is C2.
+  (`323eeb36`, `e024c0bc`)
+- [ ] **F34. Unknown classes in generic arguments and callable signatures
+  go unreported.** `@param Box<NoSuchA>` and `@param callable(NoSuchB):
+  void` give no `class.notFound` (`array<NoSuchC>` and `NoSuchD` do).
+  `Type::referenced_class_names` walks only array, class-string,
+  union/intersection and shape positions, while `nested_class_names`
+  walks every child. The unknown-class, trait, parent and internal-prefix
+  checks use the partial one. Keep one walker over every child
+  (`has_parent_ref` too). (`3ac29a9a`)
+- [ ] **F43. `accepts` lets unsound values through.**
+  - Shape against shape (`ArrayShape` and `ObjectShape` arms) ignores the
+    given field's `optional`: `array{a?: int}` passes for `array{a: int}`,
+    and `object{a?: int}` for `object{a: int}`. An unsealed tail on either
+    side is ignored too.
+  - A template with a `mixed` bound is accepted anywhere (`(TemplateParam,
+    _)` returns true): `@template T @param T $t` passes `$t` to `int`.
+  - Any string or array is a `callable` (`'nosuchfunc_xyz'`, `[1, 2]`),
+    and an object with `__invoke` satisfies any `callable(sig)` without
+    comparing the signature.
+  - An unknown class accepts any value, even `5`, while `object` given to
+    the same unknown class is rejected (the `ObjectWithoutClass` arm
+    precedes the lenient one); a scalar is never an instance of any class.
+  - `class-string<T>` or `class-string<A|B>` passed as `interface-string`
+    is rejected: only a bare object inner type is looked up.
+  - `callable_sig_is_subtype`'s `mixed`-as-any leniency is shared by
+    `proves_super_type`, so `is_super_type_of(callable(): int, Closure():
+    mixed)` is Yes. Parameter by-ref and a callable's own templates are
+    never compared.
 
-### Correctness (from reading)
+  (`91bc9e49`; accepts.rs and subtype.rs final state, probed)
+- [ ] **F44. Conditional return types over classes don't resolve.**
+  `@return ($x is Foo ? int : string)` gives `int|string` for `new
+  Child()` (`Child extends Foo`) and for an unrelated final class; so does
+  `(T is Foo ? …)`. `conditional_branch` (`conditional.rs`) uses
+  `Relation::structural()`, which knows no classes; it needs the
+  hierarchy. (`0e309c03`)
+- [ ] **F45. `iterable<K, V>` loses both types.** It parses as
+  `array<int|string, V>|Traversable`, dropping `K` and leaving
+  `Traversable` bare, so a `foreach` over `iterable<string, int>` gives
+  `mixed` key and value. `Traversable<K, V>` carries them. (parse.rs final
+  state)
+- [ ] **F46. The missing-typehint walks skip callable signatures and object
+  shapes.** `callable(array): void` and `object{a: array}` get no
+  `missingType.iterableValue`, `callable(Coll): void` (generic `Coll`) no
+  `missingType.generics`, `object{c: callable}` no `missingType.callable`.
+  The three walks in `missing.rs` are hand-rolled; one over
+  `for_each_child`, with the template early return, covers every position.
+  Explicit `mixed` is a text search over the whole declaration
+  (`text_mentions_mixed`), not the `Mixed(true)` flag each node carries,
+  so `array{a: array, b: mixed}` hides `a`'s missing value type.
+  (`dbe500c5`)
+- [ ] **F47. Raw constructors break the canonical forms.** `Type::int_range`
+  is public and builds any pair beside the normalizing `int_interval`
+  (about 29 callers outside the crate, plus `transform::step`, `coercion`'s
+  abs and bitwise-not, `arithmetic`'s negation, `union.rs`). As a result,
+  `random_int($a, $b)` is `int<min, max>` and not `int`, `random_int(5,
+  5)` is `int<5, 5>` (so `=== 5` isn't always-true), and `random_int(10,
+  1)` is `int<10, 1>` and not `never`. The PHPDoc parser builds
+  `Repr::Union` directly (no deduplication or absorption, `?T` included),
+  as does `parse_native_type_string`. One normalizing constructor per
+  form, with raw construction kept private. (`5fc4e990`, `4dc6a4b7`)
+- [ ] **F48. Numeric strings are recognized too widely.**
+  `is_numeric_string_literal` trims with Rust's Unicode `trim()`, so
+  `"\u{a0}1"` is a `numeric-string` (PHP's `is_numeric` says false; its
+  whitespace is `" \t\n\r\v\f"`). `concat` keeps `numeric` for a left
+  operand with trailing whitespace: `'1 ' . '5'` is `'1 5'`, not numeric.
+  (`56e1f538`)
+
+### Wrong types (from reading)
 
 - [ ] **F5. Non-UTF-8 array keys collide.** `ShapeKey::Str` holds a
   `String`, and keys from string literals go through `to_str_lossy`
@@ -268,97 +493,55 @@ an `assertType` or diagnostic probe through `check-project`.
   digit is a PHP parse error ("Invalid numeric literal"); the lexer reads
   it as decimal. (`8f5b2af7`)
 
-- [ ] **F29. Integer overflow crashes the checker.** Each of these aborts
-  checking the file ("internal error while checking: attempt to … with
-  overflow"); a release build wraps silently to the wrong literal instead:
-  - `-$m` for `$m = PHP_INT_MIN` (`arithmetic.rs` `negate_numeric_literal`
-    and `-m` on range bounds; PHP gives a float);
-  - `$m % -1` (`mod_int_range` `l % r`; PHP gives `0`);
-  - `$i++` at `PHP_INT_MAX` (`transform.rs` `step`, `n + by`; PHP gives a
-    float).
-
-  Audit every i64 operation in `arithmetic.rs` and `transform.rs` (negation,
-  remainder, `MIN / -1`, `m - 1` at `MIN`); an overflowing result is a
-  float, as PHP makes it. (`d0d331dd`, `b62a1131`, `fd5c800e`)
-- [ ] **F30. A modulo by a negative divisor is `never`.**
-  `int<0, max> % -3` infers `never`; PHP gives a value in `[0, 2]`.
-  `mod_int_range`'s range fallback uses the divisor's signed maximum
-  (`r_max - 1`) where it needs its magnitude over both bounds.
-  (`b62a1131`)
-- [ ] **F31. Bitwise operators on strings are typed `int`.** `$a ^ $b`,
-  `$a | $b` and `$a & $b` over strings give a string in PHP (bytewise;
-  `'a' ^ "\x02"` is `'c'`). `binary_operation_type`'s bitwise arm returns
-  `int`. (`615ad35d`)
-- [ ] **F32. `++` on a string keeps its value.** `$s = 'a'; $s++;` stays
-  `'a'` where PHP gives `'b'`: `step` leaves a string unchanged instead of
-  applying PHP's string increment (alphanumeric carry; a numeric string
-  steps as a number). `null++` gives `int`; PHP gives exactly `1`.
-  (`fd5c800e`)
-- [ ] **F33. A string written as an array key is taken as a string key.**
-  `$b = []; $b[$s] = 1;` with `$s: string` infers `array<string, 1>`, but
-  PHP turns a numeric string into an int key (`["5" => 1]` has key `5`).
-  The literal form `[$s => 1]` gets `int|string`, so the write path
-  (`write_key_type`) and `to_array_key` (a non-literal string passes
-  through) disagree with it. A string key is `int|string` unless provably
-  non-numeric; a decimal-int-string is `int`. The lost non-emptiness is C2.
-  (`323eeb36`, `e024c0bc`)
-- [ ] **F34. Unknown classes in generic arguments and callable signatures
-  go unreported.** `@param Box<NoSuchA>` and `@param callable(NoSuchB):
-  void` give no `class.notFound` (`array<NoSuchC>` and `NoSuchD` do).
-  `Type::referenced_class_names` walks only array, class-string,
-  union/intersection and shape positions, while `nested_class_names`
-  walks every child. The unknown-class, trait, parent and internal-prefix
-  checks use the partial one. Keep one walker over every child
-  (`has_parent_ref` too). (`3ac29a9a`)
-- [ ] **F35. A non-final class is treated as final.** For a non-final
-  `class Foo` whose subclass `Bar` implements `IteratorAggregate`,
-  `ArrayAccess` and `__invoke`, three things are reported on `$foo`, yet
-  `f(new Bar())` runs:
-  - `foreach ($foo …)`: `foreach.nonIterable`;
-  - `$foo()`: `callable.nonCallable`;
-  - `$foo['k']`: `offsetAccess.nonOffsetAccessible`.
-
-  `relation/kinds.rs` `class_is` answers No for any known non-interface
-  class that isn't a subclass, and `is_callable`'s missing `__invoke` does
-  the same. Likewise `function g(stdClass $s) { $s->foo(); }` reports
-  "call to method foo() on a non-object type stdClass": `can_call_methods`
-  says No for `stdClass`, which isn't final, and the message calls an
-  object a non-object. No only for a final class or an enum, Maybe
-  otherwise. (A `foreach` over any object also iterates its visible
-  properties, so even a final class's No for iterability is doubtful.)
-  (`9819e786`, `3bdb7505`)
-
 ### Precision (probed)
 
 - [ ] **F11. `isset`/`empty` narrow one branch only.** `!isset($i)` on a
   defined `?int` leaves `int|null` (should be `null`); `empty($j)` true
   leaves `int|string|null` (should be `0|''|'0'|null`). For a single
   operand that is a defined variable, both branches narrow. (`6bdce4ce`)
+- [ ] **F49. Disjointness misses provable cases.** None of these are
+  reported: `int<0, 5> === int<10, 20>`, `non-empty-string === ''`,
+  `numeric-string === 'abc'`, `non-empty-array === []`, and `array<int>`
+  against a shape with a string value. `scalars_disjoint` never compares
+  two ranges, `accessory_refuses` compares families only, and a shape
+  supertype of an array is always Maybe. A float literal expression is
+  typed `float` (`$f = 1.5` is `float`), so `1.5 === 2.5` is never
+  constant. (`91bc9e49`)
+- [ ] **F50. Late types and traversal ignore parts of a type.**
+  - `key_of`, `value_of` and `offset_access` ignore an unsealed shape's
+    tail: `key-of<array{a: 1, ...<int, string>}>` is `'a'`, not `'a'|int`,
+    and an offset missing from an unsealed shape is `mixed`, not the tail's
+    value.
+  - `map_children`/`for_each_child` (`traverse.rs`) and `Shape::map_types`
+    never reach an unsealed tail's key type, a template's bound or default,
+    or a callable's own templates' bounds, so substitution, settling and
+    `references_template` don't see types there.
 
-- [ ] **F22. `=== SomeEnum::Case` against an interface is "always
-  false".** With `Suit implements HasColor`, `$x === Suit::Hearts` for `$x:
-  HasColor`, `UnitEnum` or `HasColor|int` reports `identical.alwaysFalse`.
-  The `(Object, EnumCase)` arm in `relation/super_type.rs` calls
-  `object_super_type_of`, which only answers the not-a-subclass cases (it
-  relies on `proves_super_type` having returned Yes first) and returns No
-  for an interface against a final class (an enum) implementing it. The arm
-  also turns a Yes into Maybe, so `HasColor ⊇ Suit::Hearts` is never Yes. A
-  case relates to a class exactly as its enum's object type does; fold the
-  subclass Yes into `object_super_type_of` so no caller can skip it.
-  (`9355e811`)
-- [ ] **F23. Deep nesting crashes the process.** 200,000 nested `{ }`
-  blocks overflow the parser's stack and abort the whole run ("has
-  overflowed its stack", exit 134). The depth guard (`MAX_EXPR_DEPTH`)
-  covers expressions only; statement nesting (blocks, control-structure
-  bodies, nested declarations) needs it too. No file may take the run
-  down. (`16dd573b`)
-- [ ] **F24. Property-hook bodies are skipped by "all code" walks.** A
-  banned `eval()` in a `get { }` hook isn't reported, while the same call
-  in a function is (`project/banned.rs`). `composer_hygiene.rs`'s `Facts`
-  skips hooks and parameter defaults on purpose, so `extension_loaded()`
-  and `function_exists()` probes in a hook are missed. Hook bodies are
-  code; audit every walker that claims to see all code (see F27).
-  (`0e294c5b`)
+  (`0e309c03`)
+- [ ] **F51. Displayed types lose information.**
+  - A float literal prints with Rust's `{n}`: `1.0|2.5` shows `1|2.5`, the
+    same as an int literal. PHPStan prints `1.0`.
+  - `describe_accessory_intersection`'s else-if chains drop parts:
+    `literal-string&numeric-string` shows `literal-string`, and
+    decimal-int hides literal. The `[shape, non-empty]` match is
+    positional, though its doc says presence-based.
+  - PHPDoc `1e20` doesn't parse (the parameter reads as untyped).
+
+  (`91bc9e49` area; display.rs final state)
+- [ ] **F52. Minor type-model gaps.**
+  - `constant_strings` (`queries.rs`) returns `Vec<&str>` and drops a
+    non-UTF-8 literal; `to_boolean` leaves `callable` at `bool`, though
+    every callable is truthy; `with_string_accessory` pushes an accessory
+    without reducing and builds a raw union.
+  - `union_types_impl` flattens `Union` operands only, so a benevolent
+    union stays nested (`(int|string)|null`); `is_keys_superset` is true
+    for any two unsealed shapes.
+  - `intersect` doesn't distribute over a union member (`(A|B)&C` holds a
+    union), and `intersect_but_not_never` gives the whole native
+    `float|string` for an int returned under `: float|string`.
+  - `object_super_type_of` and the accepts `Object` arm compare the class
+    name case-sensitively for "same class" beside case-insensitive
+    subclass checks.
 
 ### Structure
 
@@ -427,7 +610,6 @@ an `assertType` or diagnostic probe through `check-project`.
 - [ ] **F20. `exit` records its form by span width.** `banned.rs` tells a
   bare `exit` from `exit()` by measuring the span; the node doesn't record
   it. (`f9757b0a`)
-
 - [ ] **F25. The error type is produced by nothing.** `Type::error()`
   (`*ERROR*`, "for expressions a rule reports as invalid") has union,
   relation and accepts arms, but no rule or inference returns it. Either
@@ -469,7 +651,6 @@ an `assertType` or diagnostic probe through `check-project`.
     (`f4c6eb9f`).
   - `Relation::intersect` leaves `list & array{a: int}` as an intersection
     instead of `never`: `ArrayList` isn't applied to a shape (`102b907f`).
-
 - [ ] **F36. Structural leftovers from the "Type behaviour lives on the
   type" series.**
   - `Type::is_within` is public and general but uses
@@ -547,6 +728,46 @@ an `assertType` or diagnostic probe through `check-project`.
       `docblock/tests/param_and_return_tags.rs:283`).
 
     Re-read every comment that commit touched.
+- [ ] **F53. Stale or misplaced comments in the types crate's final
+  state.**
+  - Docs sitting on the wrong item:
+    - `union.rs`: an orphan doc on `impl Type`;
+    - `union.rs`: the 23-line empty-shape paragraph above
+      `merge_int_ranges`, describing `reduce_array_members` and citing the
+      deleted `index_result_type`;
+    - `super_type.rs`: `object_super_type_of`'s doc sits on
+      `absorb_union_subtypes`;
+    - `accepts.rs`: `accepts_at_level`'s doc sits on
+      `strict_mixed_receiver_level`, citing a nonexistent
+      `accepts_at_configured_level`;
+    - `templates.rs`: `substitute`'s doc sits on `impl CallableSig`;
+    - `parse.rs`: `split_top_level`'s doc sits on `matching_close`;
+    - `lib.rs`: `Repr::Conditional`'s doc sits above `Extension`.
+  - Statements that are false now:
+    - `MAX_UNION_MEMBERS`: `Mixed` is the "first special case";
+    - `literal_base_type`: cites "`types.rs` lines 498-500" and
+      int-to-float;
+    - `lib.rs`:
+      - "inheritance-chain substitution is not modeled";
+      - `Repr::Object`: "no variance checking";
+      - `Repr::EnumCase`: "not a subtype target", "`registry::accepts`
+        handles it";
+    - `parse_type_string`: DNF and parentheses unsupported;
+    - the conditional parser "takes the union of both branches";
+    - `numeric`: numeric-string isn't modeled;
+    - `accepts.rs`'s EnumCase arm: the relation is "bare name-equality";
+    - `key_type`: `registry::assignability` and a "`(Never, _) => true`
+      arm below".
+  - References to things that don't exist:
+    - `promote_class_string_literals`: `bind_template_param` and "the
+      module doc above";
+    - `resolve_conditional`: `TemplateBindings`;
+    - `parse_generic_arg`: `Registry::effective_slot_variance`;
+    - `accepts.rs`: "`282`/`283` arms".
+  - A rename casualty: the `accepts.rs` module header lists
+    "`rule_level_accepts`/`rule_level_accepts`".
+  - Task and phase references: `Phase 84` and `Phase 77` in `Repr` docs
+    and `parse.rs`, and `hierarchy.rs`' "Reflection implements it (C8)".
 
 ## Full review: coverage
 
@@ -647,6 +868,21 @@ above.
 - [x] `245f6b56` docs: comments follow the review's renames
 - [x] `247e5226` refactor: a list has one encoding, its array member keyed on int<0, max> wherever it's ...
 - [x] `34fd1014` fix: a union absorbs a refined array member into any present array that covers it, not ...
+
+### Final state, module by module
+
+Each touched module of `crates/types` and `crates/syntax`, read whole in
+its final state after the commit pass.
+
+- [x] types: `arithmetic`, `coercion`, `concat`, `conditional`,
+  `constructors`, `decide`, `display`, `extension`, `hierarchy`,
+  `intersection`, `late`, `lib`, `missing`, `narrowing`, `native`,
+  `offsets`, `parse`, `php_float_format`, `queries`, `relation` (`accepts`,
+  `kinds`, `super_type`), `shape`, `subtype`, `template_references`,
+  `templates`, `transform`, `traverse`, `trinary`, `union`
+- [x] syntax: `ast`, `parse`, `php_string`
+- [ ] syntax: `name_resolution`, `visit`, `lexer` (with `strings`),
+  `parser/*`, `printer`, `annotations`, `token`, `lib`
 
 ## Deferred to C8 (reflection)
 
