@@ -275,6 +275,31 @@ an `assertType` or diagnostic probe through `check-project`.
   leaves `int|string|null` (should be `0|''|'0'|null`). For a single
   operand that is a defined variable, both branches narrow. (`6bdce4ce`)
 
+- [ ] **F22. `=== SomeEnum::Case` against an interface is "always
+  false".** With `Suit implements HasColor`, `$x === Suit::Hearts` for `$x:
+  HasColor`, `UnitEnum` or `HasColor|int` reports `identical.alwaysFalse`.
+  The `(Object, EnumCase)` arm in `relation/super_type.rs` calls
+  `object_super_type_of`, which only answers the not-a-subclass cases (it
+  relies on `proves_super_type` having returned Yes first) and returns No
+  for an interface against a final class (an enum) implementing it. The arm
+  also turns a Yes into Maybe, so `HasColor ⊇ Suit::Hearts` is never Yes. A
+  case relates to a class exactly as its enum's object type does; fold the
+  subclass Yes into `object_super_type_of` so no caller can skip it.
+  (`9355e811`)
+- [ ] **F23. Deep nesting crashes the process.** 200,000 nested `{ }`
+  blocks overflow the parser's stack and abort the whole run ("has
+  overflowed its stack", exit 134). The depth guard (`MAX_EXPR_DEPTH`)
+  covers expressions only; statement nesting (blocks, control-structure
+  bodies, nested declarations) needs it too. No file may take the run
+  down. (`16dd573b`)
+- [ ] **F24. Property-hook bodies are skipped by "all code" walks.** A
+  banned `eval()` in a `get { }` hook isn't reported, while the same call
+  in a function is (`project/banned.rs`). `composer_hygiene.rs`'s `Facts`
+  skips hooks and parameter defaults on purpose, so `extension_loaded()`
+  and `function_exists()` probes in a hook are missed. Hook bodies are
+  code; audit every walker that claims to see all code (see F27).
+  (`0e294c5b`)
+
 ### Structure
 
 - [ ] **F12. Two name-resolution paths.** The resolve pass fills
@@ -343,6 +368,48 @@ an `assertType` or diagnostic probe through `check-project`.
   bare `exit` from `exit()` by measuring the span; the node doesn't record
   it. (`f9757b0a`)
 
+- [ ] **F25. The error type is produced by nothing.** `Type::error()`
+  (`*ERROR*`, "for expressions a rule reports as invalid") has union,
+  relation and accepts arms, but no rule or inference returns it. Either
+  the checker returns it for an expression it reports invalid (undefined
+  variable, method or property; invalid operands), so one error doesn't
+  cascade, or the variant goes. (`6fe620f7`)
+- [ ] **F26. `visit_name` misses type-hint names.** Its doc promises every
+  class, function and constant name, but `visit_type_hint` is a leaf with
+  no `walk_type_hint`. `TypeHintKind::Name` also holds keywords (`int`,
+  `static`, `self`) and class names alike; a keyword type should be its own
+  variant. (`0b579ab1`)
+- [ ] **F27. Hand-rolled traversals remain.** `any_child_expr` and
+  `any_child_stmt` serve as a for-each with an always-`false` closure at 21
+  sites (a `for_each_child_*` is missing). Twelve files still walk children
+  with their own per-node-kind handling:
+  - `lsp/navigation.rs`, `lsp/signature_help.rs`, `project/use_sites.rs`;
+  - `unused/member_usage.rs`, `unused/var_usage.rs`;
+  - `checker/phpstan_api.rs`, `registry/purity.rs`, `project/banned.rs`;
+  - `includes.rs`, `oop.rs`, `function_like_declarations.rs`,
+    `uninitialized_dataflow.rs`.
+
+  F24 is the kind of miss this produces. Each becomes a `Visitor` that
+  overrides only what it special-cases. Comments renamed mechanically still
+  describe the old API ("`any_child_expr` deliberately returns no
+  children", "the generic `Vec<&Expr>` shape"). (`167ff73d`)
+- [ ] **F28. Minor syntax and walker gaps.**
+  - A second `default` match arm is a PHP compile error; it's accepted,
+    and `match_default` takes the first (`bc28373d`).
+  - The new `NodeId`s on declarations and clauses are read by nothing, and
+    13 synthesized nodes share `NodeId::SYNTHETIC`, so a side table keyed
+    by id would conflate them (`158f843b`).
+  - `rebind.rs` compares `bind`/`bindTo` case-sensitively and misses
+    `$closure->call($obj)`, which also rebinds scope (`786f6639`).
+  - `annotations.rs` walks an arrow-form hook body outside
+    `function_scope`, so a class declared in a `try` gives its `get => …`
+    hook the enclosing catch types (`34571a3c`).
+  - `global_vars.rs`: `handle_top_expr_statement`'s doc was deleted, and
+    `walk_function_body` takes `&[&Stmt]`, so every caller allocates
+    (`f4c6eb9f`).
+  - `Relation::intersect` leaves `list & array{a: int}` as an intersection
+    instead of `never`: `ArrayList` isn't applied to a shape (`102b907f`).
+
 ### Comments
 
 - [ ] **F21. Stale or misplaced comments.**
@@ -357,6 +424,22 @@ an `assertType` or diagnostic probe through `check-project`.
     "`ClassDecl` and `ClassDecl` are different AST types" (`oop.rs:542`),
     "`ClassDecl`/`ClassDecl`" (`unused.rs:141`, `navigation.rs:25`,
     `phpstan_api.rs:1072`, `stmt.rs:860`, `stmt.rs:974`, `oop.rs:188`).
+  - After the relation merge (`91bc9e49`), comments renamed mechanically
+    from `subtype` state falsehoods:
+    - "`is_super_type_of`'s int-to-float widening" (`union.rs:386`,
+      `narrowing.rs:197`), while the relation answers Float ⊇ Int = No;
+    - `subtype.rs:92` still has the int-to-float paragraph above an arm it
+      no longer describes;
+    - "`is_super_type_of`'s Object handling is name-equality only" (or has
+      no class-hierarchy awareness), in `decide.rs:99`, `decide.rs:178`,
+      `type_resolution.rs:110`, `narrowing.rs:120`, `narrowing.rs:128`,
+      `accepts.rs:240`, `accepts.rs:262` and
+      `registry/tests/function_signatures.rs:512`; only
+      `Relation::structural()` lacks the hierarchy;
+    - comments with swapped argument order.
+  - `normalize_generic_args` (`a7f5bc27`) repairs raw unions inside a
+    top-level object's generic arguments on every union call; it goes with
+    T3.
 
 ## Full review: coverage
 
@@ -388,31 +471,31 @@ above.
 - [x] `f9651cf4` refactor: list() is its own destructuring node
 - [x] `5d93a01c` refactor: the @ operator is kept as ExprKind::ErrorSuppress instead of dropped
 - [x] `8e373302` refactor: an enum is a ClassDecl of kind Enum
-- [ ] `bc28373d` refactor: match arms are spanned MatchArm nodes in written order, the default arm among...
-- [ ] `158f843b` refactor: class-likes, methods, properties, constants, enum cases, parameters, argument...
-- [ ] `16dd573b` fix: an expression nested past the depth limit is a ParseError, not a panic
-- [ ] `b4939433` refactor: one parse entry point
-- [ ] `0b579ab1` feat: the visitor gains visit_name, called for every class, function and constant name ...
-- [ ] `2b00a8d4` refactor: the side-effect, hidden-effect, keyword, declare, magic-constant, member-defa...
-- [ ] `854fdd86` refactor: the explicit-throw, parent-call, anonymous-class and nested-define walkers ar...
-- [ ] `786f6639` refactor: the promotion, assigned-variable, property-assignment, self-instance and rebi...
-- [ ] `a2cb7a42` refactor: the purity walkers recurse through callback walks, and the include-constant, ...
-- [ ] `f4c6eb9f` refactor: the global-variable scope walk is a visitor, and the backing-storage and pare...
-- [ ] `0e294c5b` refactor: the composer-fact and banned-code walks are visitors, and the architecture ne...
-- [ ] `167ff73d` refactor: the allocating child_exprs, child_stmts and stmt_exprs helpers are gone
-- [ ] `34571a3c` fix: an arrow function's body is outside the enclosing try's catch types, as a closure'...
-- [ ] `91bc9e49` refactor: one subtyping relation
-- [ ] `ab8df0b0` fix: an intersection is within whatever one of its members is, ahead of the void and ne...
-- [ ] `9355e811` fix: an interpolated string is its parts' string forms concatenated, a bare return coun...
-- [ ] `54fea123` fix: an isset or empty condition stored in a variable narrows when the variable is test...
-- [ ] `0e309c03` refactor: a conditional's two branches and a late key-of or value-of join through union...
-- [ ] `a7f5bc27` fix: a union drops never, reads true|false as bool and lets bool absorb either, and ded...
-- [ ] `510a7ecb` fix: a union with an explicit mixed stays explicit, in PHPDoc too, so a property declar...
-- [ ] `56c6e420` fix: a union merges array shapes only when neither loses a key's meaning, so tagged uni...
-- [ ] `102b907f` fix: an intersection reduces by the class hierarchy and folds shapes, so a class and it...
-- [ ] `6fe620f7` feat: an error type, displayed *ERROR*, that accepts and is accepted by everything and ...
-- [ ] `6429c47e` chore: an arch ratchet on paths naming a types::Type variant outside crates/types, coun...
-- [ ] `4362acc7` chore: the type-access baseline splits its total into patterns, comparisons and constru...
+- [x] `bc28373d` refactor: match arms are spanned MatchArm nodes in written order, the default arm among...
+- [x] `158f843b` refactor: class-likes, methods, properties, constants, enum cases, parameters, argument...
+- [x] `16dd573b` fix: an expression nested past the depth limit is a ParseError, not a panic
+- [x] `b4939433` refactor: one parse entry point
+- [x] `0b579ab1` feat: the visitor gains visit_name, called for every class, function and constant name ...
+- [x] `2b00a8d4` refactor: the side-effect, hidden-effect, keyword, declare, magic-constant, member-defa...
+- [x] `854fdd86` refactor: the explicit-throw, parent-call, anonymous-class and nested-define walkers ar...
+- [x] `786f6639` refactor: the promotion, assigned-variable, property-assignment, self-instance and rebi...
+- [x] `a2cb7a42` refactor: the purity walkers recurse through callback walks, and the include-constant, ...
+- [x] `f4c6eb9f` refactor: the global-variable scope walk is a visitor, and the backing-storage and pare...
+- [x] `0e294c5b` refactor: the composer-fact and banned-code walks are visitors, and the architecture ne...
+- [x] `167ff73d` refactor: the allocating child_exprs, child_stmts and stmt_exprs helpers are gone
+- [x] `34571a3c` fix: an arrow function's body is outside the enclosing try's catch types, as a closure'...
+- [x] `91bc9e49` refactor: one subtyping relation
+- [x] `ab8df0b0` fix: an intersection is within whatever one of its members is, ahead of the void and ne...
+- [x] `9355e811` fix: an interpolated string is its parts' string forms concatenated, a bare return coun...
+- [x] `54fea123` fix: an isset or empty condition stored in a variable narrows when the variable is test...
+- [x] `0e309c03` refactor: a conditional's two branches and a late key-of or value-of join through union...
+- [x] `a7f5bc27` fix: a union drops never, reads true|false as bool and lets bool absorb either, and ded...
+- [x] `510a7ecb` fix: a union with an explicit mixed stays explicit, in PHPDoc too, so a property declar...
+- [x] `56c6e420` fix: a union merges array shapes only when neither loses a key's meaning, so tagged uni...
+- [x] `102b907f` fix: an intersection reduces by the class hierarchy and folds shapes, so a class and it...
+- [x] `6fe620f7` feat: an error type, displayed *ERROR*, that accepts and is accepted by everything and ...
+- [x] `6429c47e` chore: an arch ratchet on paths naming a types::Type variant outside crates/types, coun...
+- [x] `4362acc7` chore: the type-access baseline splits its total into patterns, comparisons and constru...
 - [ ] `5798014b` refactor: every type built outside crates/types goes through a Type constructor (Type::...
 - [ ] `089dae96` refactor: whether a type is mixed, explicit or not, is asked through Type::is_mixed/is_...
 - [ ] `a6dd2cc7` refactor: a union's members are Type::union_members, replacing four checker copies of f...
