@@ -4737,6 +4737,19 @@ fixture:
     `appended-array-item.php`, `appended-array-key.php`, `bug-9213.php`,
     `bug-7119.php`, `uksort.php`, `property-type-after-unset.php`,
     `properties-assigned-types.php`);
+  - a readonly property assigned twice is `assign.readOnlyProperty`
+    "already assigned" ("Cannot modify readonly property" at runtime): two
+    assignments in the constructor, a child's promoted redeclaration
+    followed by `parent::__construct($myProp)`, and an append after the
+    assignment; unreported today (the rules oracle's 12 PHPStan-only,
+    `missing-readonly-property-assign*.php`, `redeclare-readonly-property.php`,
+    `bug-8101.php`, `bug-9863.php`, `bug-13856.php`);
+  - `$this` is written by every write form, each `assign.this` (a compile
+    error): a `foreach` key, value or by-reference target, `.=` and `??=`,
+    destructuring, a `catch` variable, and an offset write on a class
+    without `ArrayAccess`; only a plain `$this = …` is reported today (the
+    rules oracle's 12 PHPStan-only, `bug-3585.php`, `bug-14349.php`,
+    `bug-14351.php`, `bug-3782.php`, `bug-14352.php`);
   - a readonly property is modified by every write form, so outside the
     constructor each is `property.readOnlyAssignNotInConstructor` ("Cannot
     indirectly modify readonly property" at runtime): an offset write or
@@ -4925,7 +4938,13 @@ fixture:
   - the purity checks cover property hooks (`impure.propertyHookCall`,
     `purePropertyHook.void`, `impurePropertyHook.pure`) and a pure
     function's callable-only redundancy
-    (`pureFunction.redundantUnlessCallable`), unreported today;
+    (`pureFunction.redundantUnlessCallable`), unreported today; a method
+    is pure through an ancestor's `@phpstan-pure`, a hook through its own,
+    and a callback a built-in invokes at once (`array_map()`, `array_any()`,
+    `array_find()`) is part of the pure caller's body, so an `echo` in any
+    of them is `impure.echo`, unreported today (the rules oracle's 12
+    PHPStan-only, `pure-method.php`, `pure-property-hook.php`,
+    `pure-unless-callable-is-impure*.php`);
   - an enum's duplicate case value is found through constant expressions:
     `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
     literal duplicate already is);
