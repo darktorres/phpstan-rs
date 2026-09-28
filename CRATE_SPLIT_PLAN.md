@@ -3433,7 +3433,14 @@ deleted; the file-size gate.
       `bug-6901.php`);
     - loose `==` with a constant narrows (`specifyTypesForEqual`):
       `$x == false` on `0|1|''|'x'|null|bool` leaves the whole union today
-      instead of `0|''|false|null`;
+      instead of `0|''|false|null`, and `($foo[$k] ?? null) == true` (or
+      `!= false`) proves `$foo[$k]` exists while `== false` doesn't (the
+      rules oracle's `bug-13488-loose.php`, 4);
+    - a `list` offset implies the lower ones: after `isset($list[3])`,
+      `isset($list[2])` is always true (`isset-constant-array.php`), and a
+      decimal-integer string can't be a key of `array<string, …>` (it is
+      cast to `int`), so `isset($strings[(string) $int])` is "does not
+      exist" (`bug-4671.php`);
     - a cast narrows its operand (`CastHandler::specifyTypes`):
       `(string) $s !== ''` leaves `$s` as `string` today;
     - `!is_scalar($s)` on a `string` leaves `string` (`!is_string` already
@@ -3458,7 +3465,11 @@ deleted; the file-size gate.
       today (nsrt `bug-9435.php`);
     - none of `EqualityTypeSpecifyingHelper`'s call comparisons narrow
       today (each reproduced):
-      - `count($a) === 3` → a 3-element shape;
+      - `count($a) === 3` → a 3-element shape, and on a union of shapes
+        the members of that size (`count($a) === 2` on `array{short:
+        string}|array{long: string, details: string}` makes
+        `isset($a['short'])` `isset.offset` "does not exist", the rules
+        oracle's `bug-11494.php`);
       - `count($a) === count($b)` → shared non-emptiness;
       - `count($l) > 2` on a list → the offsets it proves
         (`specifyTypesForCountFuncCall`): today `$l` stays `list<int>`
@@ -3679,7 +3690,7 @@ building on the previous one:
       $this->arr['foo'] = true; }` on `array{foo?: bool}`, `$this->arr` is
       still `array{foo?: bool}` inside and after the `if` today, where a
       variable gives `array{foo: true}` and `array{foo: bool}`
-      (`bug-11679.php`). A write on a template-typed array intersects:
+      (`bug-11679.php`, `pr-4374.php`). A write on a template-typed array intersects:
       after `$arr['mykey'] = $v` on `T of array`, `$arr` is still `T`
       today where it is `T&hasOffsetValue('mykey', int)&non-empty-array`
       (`bug-3931.php`).
@@ -3786,7 +3797,9 @@ building on the previous one:
       `OriginalForeachKey`/`OriginalForeachValue` virtual keys;
     - after the loop, the iteratee's value and key types are rewritten from
       the narrowed loop variables;
-    - constant arrays of up to 16 keys are unrolled (8 when nested), and
+    - constant arrays of up to 16 keys are unrolled (8 when nested), so
+      `foreach (['123', 'abc'] as $id) { $p[$id] = true; }` builds `array{123:
+      true, abc: true}` (the rules oracle's `bug-6163.php`), and
       constant-array iteratees add key → value conditional holders: over
       `array{psr4?: array<string, string>, classmap?: list<string>}`,
       `$key === 'classmap'` leaves `$value` as the union and `$data[$key]`
