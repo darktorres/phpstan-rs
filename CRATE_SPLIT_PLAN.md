@@ -4422,8 +4422,18 @@ fixture:
   - an offset write or append checks its container as a read does:
     `$i['x'] = 3` on an `int` throws at runtime and isn't reported today,
     and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
-    (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
-    fail and stays unreported (341 PHPStan reports on `mixed`).
+    (383 oracle findings). A read inside `isset()`/`??`/`empty()` and an
+    `unset()` are checked too: they are quiet on a scalar or `null`, but
+    an object without `ArrayAccess` throws "Cannot use object of type
+    stdClass as array" there (`isset($o['a'])`, `$closure['a'] ?? 1`,
+    `unset($iterable['s'])` on an iterable that may be a `Traversable`),
+    so those, and a `mixed` container at level 10, are reported (341
+    PHPStan reports on `mixed`; about 60 of the rules oracle's
+    PHPStan-only `offsetAccess.nonOffsetAccessible`). Also unreported
+    today: `$this[$k]` in a class without `ArrayAccess` (`bug-3782.php`,
+    `bug-14352.php`), `(new parent())[0]`, an offset read on a `resource`,
+    and a container typed by a template bounded by `mixed`
+    (`offset-access-mixed.php`).
 - (e) declarations, generics checks and PHPDoc:
   - class existence is checked everywhere PHPStan checks it (the rules
     oracle's 173 PHPStan-only `class.notFound`): at use sites through
