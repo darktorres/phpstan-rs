@@ -966,30 +966,16 @@ Follow-ups:
   do; levels 9–10 and `unscoped` add the call-parameters wording
   (`976956bc`), sub-name spans, extension activation by installed package
   (`unscoped` runs without composer, so Doctrine result typing is off), the
-  A2 fixes and better inference. The review's false positives are the
-  behaviour fixes below; `printf`'s doubled value report is fixed
-  (`ac70c6eb`), so is an integer range's union with the constants and
-  ranges touching it (`bda6df20`), and so are a class's own templates
-  inside its body (`40e45bdc`: `$this` and `parent::` calls kept them
-  as their defaults). Each is one commit with its fixture:
-  - an `@extends` type argument is resolved before the bound check: an
-    enum case (`BuiltinType<TypeIdentifier::ARRAY>`) and a constant
-    wildcard (`AbstractLexer<DocLexer::T_*>`) fit their bounds;
-  - a `foreach` over a value that isn't provably an array is a throw point
-    (iterating calls user code), so a catch after it sees the state before
-    and between iterations (PSL's `$iterating` checks:
-    `match.alwaysFalse`, `if.alwaysFalse`);
-  - an object whose class declares `__invoke()` is a subtype of `callable`
-    (Monolog's `ProcessorInterface|callable` PHPDoc on a `callable`
-    parameter);
-  - `null === $x || $x === (string) (int) $x` keeps `$x`'s string in the
-    true branch (Symfony's `DeepClone`: `notIdentical.alwaysFalse`);
-  - a static call with a dynamic name (`Assert::$name()`) is a throw point
-    for `@throws` (PHPUnit's `Phpt\TestCase`: `throws.unusedType`);
-  - a type alias used through another alias resolves at any depth
-    (Symfony's `AppReference`: `class.notFound` on its `@psalm-type`s);
-  - `method_exists()` on a property narrows it (Symfony's `Router`); D's
-    `HasMethod` narrowing, reported since Stage A.
+  A2 fixes and better inference. Its false positives are fixed, each with
+  its fixture: `printf`'s doubled value report (`ac70c6eb`), integer range
+  unions (`bda6df20`), a class's own templates inside its body
+  (`40e45bdc`), class constants in ancestor tags (`520cd439`), `foreach` as
+  a throw point (`9193f6a9`), `__invoke` and `callable` (`48dc04b3`),
+  narrowing a union to a target (`06ca4c48`), dynamic-name calls as throw
+  points (`2348279e`) and type aliases at any depth (`672e927a`); the type
+  deltas are approved in `aa08c24f`, `40e45bdc` and `0d105e30`.
+  `method_exists()` on a property not narrowing it (Symfony's `Router`) is
+  D's `HasMethod` narrowing.
 - **CI green.** The one recorded Rust CI run (`867d9cb3`) failed at the
   no-default-features tests, so the docs, machete and deny steps never ran,
   and 162 commits since are unpushed. Every step passes locally; a passing
@@ -1987,6 +1973,9 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
   has the literal key `'TKey'` today, so `sealed('a')` is
   `array{TKey: int}` where PHPStan has `array{a: int}`, a wrong value (nsrt
   `array-shape-template-key.php`);
+- a type alias defined through itself (`@phpstan-type A = array{next: B}`
+  beside `B = array{next: A}`) is reported (`typeAlias.circular`); it reads
+  as `mixed` inside the cycle today;
 - a constant name in a PHPDoc type resolves through the name scope's
   `use const` imports and its initializer: `@param PREG_SPLIT_NO_EMPTY_ALIAS`
   under `use const PREG_SPLIT_NO_EMPTY as PREG_SPLIT_NO_EMPTY_ALIAS` reads
