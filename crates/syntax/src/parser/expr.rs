@@ -320,11 +320,28 @@ impl Parser {
     /// than shift/concat/additive.
     pub(crate) fn parse_pipe(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
-        let mut lhs = self.parse_shift()?;
+        let mut lhs = self.parse_concat()?;
         while self.eat(&Token::PipeGt) {
-            let rhs = self.parse_shift()?;
+            let rhs = self.parse_concat()?;
             lhs = self.expr(
                 ExprKind::Binary(BinOp::Pipe, Box::new(lhs), Box::new(rhs)),
+                start,
+            );
+        }
+        Ok(lhs)
+    }
+
+    /// `.`, looser than `<<`/`>>` and `+`/`-` since PHP 8: `"a" . $x + 1` is
+    /// `"a" . ($x + 1)`.
+    pub(crate) fn parse_concat(&mut self) -> Result<Expr, ParseError> {
+        let start = self.current_pos();
+        let mut lhs = self.parse_shift()?;
+        while self.eat(&Token::Dot) {
+            let rhs_start = self.current_pos();
+            let rhs = self.parse_shift()?;
+            let rhs = self.parse_assignment_tail(rhs, rhs_start)?;
+            lhs = self.expr(
+                ExprKind::Binary(BinOp::Concat, Box::new(lhs), Box::new(rhs)),
                 start,
             );
         }
@@ -354,7 +371,6 @@ impl Parser {
             let op = match self.peek() {
                 Token::Plus => BinOp::Add,
                 Token::Minus => BinOp::Sub,
-                Token::Dot => BinOp::Concat,
                 _ => break,
             };
             self.skip();
