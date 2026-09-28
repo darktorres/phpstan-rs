@@ -2825,8 +2825,9 @@ deleted; the file-size gate.
   that is never defined are `isset.variable`/`empty.variable`/
   `nullCoalesce.variable` "is never defined", unreported today.
   `nullCoalesce.property` covers static properties and always-`null`
-  ones (`FooCoalesce::$staticString ?? ''`, `self::$date ?? …`, `$foo->
-  alwaysNull ?? ''` for `@var null`; `null-coalesce*.php`, `bug-3636.php`,
+  ones (`FooCoalesce::$staticString ?? ''`, `self::$date ?? …`,
+  `$foo->alwaysNull ?? ''` for `@var null`; `null-coalesce*.php`,
+  `bug-3636.php`,
   `bug-14393.php`), unreported today; an untyped property without a
   default starts as `null` whatever its `@var`, so `??` on it stays
   unreported where PHPStan reports "not nullable" (approved;
