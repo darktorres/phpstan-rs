@@ -3116,6 +3116,14 @@ deleted; the file-size gate.
     - **`new $c()`** for a `class-string<T> $c` is `T` (`NewHandler`); it is
       `mixed` today, so `function make(string $c) { return new $c(); }`
       with `@return T` is `return.type` "expected T, got mixed".
+    - **`new C()` is exactly `C`** (`ClassReflection::asFinal()`, dropped
+      again where a template is inferred from it): after `$foo = new
+      Foo()`, `$foo instanceof Sub` is `instanceof.alwaysFalse` and a
+      discarded `$foo->load(1)` of a method without impure points is
+      `method.resultUnused`, as for a final class; both are silent today
+      for a non-final `Foo` (most of the rules oracle's 109 PHPStan-only
+      `method.resultUnused`, e.g. `accept-throwable.php`, `bug-3589.php`,
+      `bug-8048.php`).
     - **`new` into a generic property**: `$this->c = new Coll();` for a
       `@var Coll<int>` property types the `new` as `Coll<int>`
       (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
@@ -4190,7 +4198,14 @@ fixture:
     `@phpstan-pure` (`N\g();` for `function g(): int { return 1; }` is
     silent where the global-namespace `g();` in the same file is
     reported); a first-class callable made as a statement (`foo(...);`,
-    `strlen(...);`) is reported too. The rules oracle's 518 PHPStan-only
+    `strlen(...);`, `$this->doFoo(...);`, `Foo::doFoo(...);`) is reported
+    too, as are a nullsafe call (`$e?->getMessage();`), a pipe into a pure
+    callable (`5 |> $foo->doPure(...);`) and the built-in methods
+    `functionMetadata` lists (`Closure::bind()` 20, `Closure::bindTo()`,
+    `finfo::file()`, `ImagickPixel::getColor()`, `Throwable::getCode()`:
+    with the `new` exactness in D3 these are the rules oracle's 109
+    `method.resultUnused` and 61 `staticMethod.resultUnused` PHPStan-only
+    findings). The rules oracle's 518 PHPStan-only
     `function.resultUnused` are these three shapes: 409 built-ins, 109
     namespaced or cross-file user functions (`missing-return.php`,
     `function-with-variadic-parameters.php`, `bug-15168.php`,
