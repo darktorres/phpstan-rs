@@ -4408,10 +4408,11 @@ those tools and ship opt-in in ext-extras, the rules oracle's other 4 of
 real dead-code check, not PHPStan-specific: it ships opt-in in ext-extras,
 the rules oracle's 81 being mostly test scaffolding
 (`filter-var-throw-on-failure.php`, `goto-undefined-label.php`,
-`inc-dec-gmp.php`). A certain impure
-point PHPStan names `impure.*` is `possiblyImpure.*` in phpstan-rs until
-C5's `functionMetadata.php` says which built-ins have side effects (42
-rules-oracle findings).
+`inc-dec-gmp.php`). A call phpstan-rs reports as `possiblyImpure.*`
+"unknown" where PHPStan knows it is impure (`impure.*`, 23 rules-oracle
+findings) is a wrong verdict, not a rename: C5's `functionMetadata.php` and
+C9's purity summaries decide built-in, user and static calls, and E3(e)'s
+purity items first-class callables and closures.
 
 The oracle's other side is the false-positive measure: phpstan-rs reports
 2,588 findings PHPStan doesn't, and every one was traced to its cause.
@@ -4513,9 +4514,13 @@ the rest), which the gate excludes and lists.
   narrowing predicates, the date / xml / DateInterval validators (as
   throw-type extensions), regex / PCRE, and the date parser.
 - `builtins` is always registered, including by the testing harness.
-- Every return-type extension in Appendix G reaches PHPStan's value in the
-  nsrt suite (3,025 mismatches over 93 extensions today); the items below
-  are the wrong values among them, fixed first.
+- Every return-type extension in Appendix G reaches PHPStan's value in the nsrt
+  suite (3,022 mismatches over 93 extensions today), unless phpstan-rs is right
+  at runtime. Each was read against its fixture and php 8.5: 2,525 are wider
+  than PHPStan's type and hold every value it holds; the other 497 are wrong at
+  runtime, 220 missing a value the call can return, 170 typing a call PHP
+  rejects as returning and 107 giving another PHP version's return, and the
+  items below name every one of them, fixed first.
 - The throw-type extensions `throws/dynamic.rs` lacks are added, each
   throwing only for the arguments that can fail: `array_chunk()`/
   `str_split()` with a length that may be below 1 (`ValueError`),
@@ -4545,20 +4550,39 @@ the rest), which the gate excludes and lists.
     (get_parent_class($object))` is `if.alwaysFalse` (the rules oracle's
     `bug-4302.php`);
   - `filter_var()` with a flags argument that isn't constant but may hold
-    `FILTER_NULL_ON_FAILURE` (`$strict ? FILTER_NULL_ON_FAILURE : 0`)
-    returns `bool|null`; it is `bool` today, so the `=== null` check is
-    `identical.alwaysFalse` (the rules oracle's `bug-11485.php`);
+    `FILTER_NULL_ON_FAILURE` (`$strict ? FILTER_NULL_ON_FAILURE : 0`) returns
+    `bool|null`; it is `bool` today, so the `=== null` check is
+    `identical.alwaysFalse` (the rules oracle's `bug-11485.php`). An options
+    argument that isn't constant, and flags inside it that aren't, are read the
+    same way: `filter_var($m, FILTER_VALIDATE_INT, $options)` is `mixed` (a
+    `default` option can return anything), `['flags' => $nullFilter]` gives
+    `int|null` and a `FILTER_FORCE_ARRAY` flag an array, where each is the plain
+    filter's `int|false` today (35 nsrt mismatches, `filterVar.php` 32,
+    `filter-var.php` 3);
   - `array_filter` keeps a shape's keys required: with a callback,
-    `array_filter([1, 2, 3], fn ($x) => $x > rand(0, 3))` is
-    `array{0: 1, 1: 2, 2: 3}`, and without one `array{a: int}|array{b:
-    string|null}` comes back unchanged, where each key becomes optional and
-    falsy values go (nsrt `array-filter-constant.php`, `array-functions.php`);
-  - `array_combine([true, 'red', 'yellow'], …)` has the keys `0`, `1`, `2`,
-    where PHP gives `1`, `'red'`, `'yellow'`;
+    `array_filter([1, 2, 3], fn ($x) => $x > rand(0, 3))` is `array{0: 1, 1: 2,
+    2: 3}`, and without one `array{a: int}|array{b: string|null}` comes back
+    unchanged, where each key becomes optional and falsy values go; a narrowing
+    callback keeps what it rules out (`array_filter($data, isFoo(...))` over
+    `array{Foo|int, Foo|int}` keeps the `int`s), and an unsealed shape's key
+    stays required with its falsy values (16 nsrt mismatches: `bug-11730.php` 9,
+    `bug-6715.php` 2, `array-filter-constant.php`, `array-functions.php`,
+    `array-filter-string-callables.php`, `minmax.php`,
+    `unsealed-derivations.php`);
+  - `array_combine($keys, $values)` is keyed by the positions `0`, `1`, `2`
+    instead of the key array's values as PHP casts them: `array_combine(['a',
+    'b', 'c'], ['d', 'e', 'f'])` is `array{0: 'd', 1: 'e', 2: 'f'}` where PHP
+    gives `array{a: 'd', b: 'e', c: 'f'}`, and `[true, 'red', 1.5]` keys `1`,
+    `'red'` and `'1.5'` (29 nsrt mismatches: `array-combine-php8.php` 15,
+    `array-combine-php7.php` 8, `array-functions.php` 3, `bug-3351.php`,
+    `bug-14980.php`, `non-empty-array.php`);
   - `array_intersect_key($a, [])` is `$a` instead of `array{}`, and so are
     `array_intersect`, `array_intersect_assoc`, `array_intersect_uassoc`,
     `array_intersect_ukey` and the `array_uintersect*` functions (nsrt
-    `array-functions.php`);
+    `array-functions.php`, `array-intersect-key-constant.php`); a key the other
+    array may lack stays required: `array_intersect_key(['a' => 1, 'b' => 2],
+    $a)` with `$a['b']` set on one path keeps `b: 2` where it is `b?: 2`
+    (`array-intersect-key-constant.php`, `unsealed-derivations.php`, 3);
   - `array_map()` over several arrays is a `list`: `array_map(fn ($s,
     $i) => …, $a, array_keys($a))` is `array` today (the rules oracle's
     `bug-12223.php`); a spread argument passes its elements:
@@ -4638,10 +4662,12 @@ the rest), which the gate excludes and lists.
     `lowercase-string&non-falsy-string` and `md5_file()` that or `false`,
     `string` today (`hashing.php`); `(int)` of a decimal string past
     `PHP_INT_MAX` folds to `PHP_INT_MAX` (`bug-4848.php`);
-  - `array_rand($a, $n)` is `int` instead of `int<0, max>|list<int<0,
-    max>>` (a list's keys; a list of them for a count other than 1), so
-    `array_keys()` of the result is `argument.type` (the rules oracle's
-    `bug-9803.php`);
+  - `array_rand($a, $n)` is `int` instead of `int<0, max>|list<int<0, max>>` (a
+    list's keys; a list of them for a count other than 1), so `array_keys()` of
+    the result is `argument.type` (the rules oracle's `bug-9803.php`); with a
+    count that isn't known it leaves out the list: `array_rand([1 => 1, 2 =>
+    'b'], $mixed)` is `1|2` where it is `1|2|non-empty-list<1|2>` (nsrt
+    `array-functions.php`, 4);
   - `array_map($cb, $l)` with a `callable(V): M` callback over `list<V>` is
     `array` instead of `list<M>`, so `new self(array_map($callback,
     $this->items))` into a `list<TValue>` parameter is `argument.type`
@@ -4649,17 +4675,84 @@ the rest), which the gate excludes and lists.
     === '23423')` keeps `string` where the callback's narrowing gives
     `'23423'` (`bug-8174.php`), and `array_map($cb, [])` is
     `array` instead of `array{}` (`bug-14582.php`);
-  - `array_slice($nonEmptyList, 1)` is `non-empty-list` where a
-    one-element list slices to `[]` (nsrt `bug-10721.php`);
-  - `array_change_key_case` of a shape keeps its keys:
-    `array{Foo: int, ...<string, float>}` with `CASE_LOWER` stays `Foo`
-    where PHP gives `foo` (nsrt `unsealed-derivations.php`);
-  - `array_flip` of an unsealed shape ignores the tail: on
-    `array{0: 1, 1: 2, 2: 3, ...<int, bool>}`, `array_flip($u)[1]` is `0`
-    where the tail's `true` values map to key `1` (nsrt `array-flip.php`);
-  - `array_key_last`, `array_pop` and `array_shift` on a possibly empty
-    array omit `null`: on `$c ? ['one', 'two'] : []` they give `0|1` and
-    `'one'|'two'` (nsrt `bug-14081.php`, `array-pop.php`, `array-shift.php`);
+  - `array_slice($nonEmptyList, 1)` is `non-empty-list` where a one-element list
+    slices to `[]`, and `array_slice($arr, 0, 0)` is `non-empty-array<string>`
+    where it is always `[]` (22 nsrt mismatches: `bug-10721.php` 17,
+    `array-slice.php` 5);
+  - `array_change_key_case()` ignores its mode: `CASE_UPPER` gives lowercase
+    keys (`array<lowercase-string, string>`, and `array{foo: 1, bar?: 2}` where
+    PHP gives `array{FOO: 1, BAR?: 2}`), a mode that isn't known assumes
+    `CASE_LOWER` where either case can come back, and a shape's keys and an
+    unsealed tail's key type keep their case: `array{Foo: int, ...<string,
+    float>}` with `CASE_LOWER` stays `Foo` where PHP gives `foo` (15 nsrt
+    mismatches: `array-change-key-case.php` 8, `unsealed-derivations.php` 7);
+  - `array_flip` of an unsealed shape ignores the tail: on `array{0: 1, 1: 2, 2:
+    3, ...<int, bool>}`, `array_flip($u)[1]` is `0` where the tail's `true`
+    values map to key `1`, and on `array{0: 'a'|'b', 1: 'c', ...<int, string>}`
+    the key `c` is `1` where a later `'c'` in the tail replaces it (nsrt
+    `array-flip.php`, `bug-14656.php`, `unsealed-derivations.php`);
+  - `array_key_last`, `array_pop` and `array_shift` on a possibly empty array
+    omit `null`: on `$c ? ['one', 'two'] : []` they give `0|1` and
+    `'one'|'two'`, and on an all-optional shape `array{a?: 0, b?: 1, c?: 2}`
+    `0|1|2` (nsrt `bug-14081.php`, `array-pop.php`, `array-shift.php`);
+  - `array_column($rows, null, 'key')` keys the whole rows by the column, where
+    it is typed as the column: `array<string>` for `array<int, array<string,
+    string>>`, where it is `array<int|string, array<string, string>>` (nsrt
+    `array-column.php`, `array-column-php82.php`);
+  - array keys built from values are cast as PHP casts them:
+    `array_fill_keys([true, false, 1.5, '999'], 'b')` has the keys `1`, `''`,
+    `'1.5'` and `999`, and `array_flip(['1', '2'])` the keys `1` and `2`, where
+    today the key type is the value type (`array<true, 'b'>`, `array<'1'|'2',
+    int>`); an object key is its `__toString()` (an `Error` without one), and an
+    unsealed shape's tail keeps its keys (`array_fill_keys()` of `array{0:
+    'a'|'b', 1: 'c', ...<int, string>}` drops them today; 18 nsrt mismatches:
+    `array-fill-keys.php` 13, `array-flip.php` 2, `bug-14980.php`,
+    `bug-14656.php`, `unsealed-derivations.php`);
+  - `array_merge()` is non-empty only when an argument is: of a possibly empty
+    `$arr2` and an `array`, or of an all-optional shape, it is `non-empty-array`
+    today (nsrt `array-merge-const-non-const.php` 4, `array-merge2.php`);
+  - `explode()` with a negative limit may return `[]` (`explode(',', 'a,b', -5)`
+    is `array{}`); it is `non-empty-list<string>` today (11 nsrt mismatches:
+    `bug-14651.php` 7, `explode.php` 3, `bug-3961-php8.php`);
+  - `get_defined_vars()` lists what can be defined: at file level any variable
+    can be (`array<string, mixed>`; `array{global: 'foo'}` today), a variable
+    assigned on one branch is an optional key (dropped today), and `$this` isn't
+    a key (it is today; nsrt `get-defined-vars.php`, 3);
+  - `preg_split()`'s flags decide its elements: `PREG_SPLIT_OFFSET_CAPTURE`,
+    constant or possibly set in a flags argument that isn't constant, makes each
+    an `array{string, int<0, max>}`; today every call is `list<string>|false`
+    (22 nsrt mismatches, `preg_split.php`);
+  - `rand()` takes its bounds in either order: `rand(5, 1)` is `int<1, 5>` and
+    `rand($i, 0)` `int<0, max>`, where today they are the empty `int<5, 1>` and
+    `int<0, 0>` (nsrt `rand-swapped-arguments.php`, 4);
+  - `array_search()` with `$strict` over an unsealed shape takes the key from
+    the entries whose value can be the needle: `array_search(true, $arr, true)`
+    on `array{a: int, b: string, ...<int, bool>}` is `string|false` today where
+    only a tail key, an `int`, can match (nsrt `unsealed-array-shapes.php`);
+  - `count()` of a `Countable` object is its `count()` method's return type:
+    `count(new Bar())` for a `count()` declared `@return -1` is `int<0, max>`
+    today (nsrt `countable.php`);
+  - `compact()` includes a variable that may be defined as an optional key, and
+    reads the names in an array's values (`compact(['foo' => 'bar'])` names
+    `$bar`); today both are dropped (nsrt `compact.php`, 2);
+  - `array_keys()` of an array that isn't otherwise known is `list<int|string>`
+    (non-empty once a key is known to exist); it is `array<(int|string),
+    int>|array<(int|string), string>` today (nsrt `bug-6859.php`);
+  - an unsealed shape's tail passes through `array_reverse`, `array_values`,
+    `array_keys`, `array_slice`, `array_chunk` and `array_replace`:
+    `array_values()` of `array{1, 2, ...<string>}` is `list<1|2>` today,
+    dropping the tail's values (nsrt `unsealed-derivations.php`, 6);
+  - a file analysed for a PHP version before 8 gets that version's returns: the
+    BcMath functions return `null` or `false` for a zero divisor or a bad
+    operand, `round()`, `ceil()` and `floor()` `false` for an array, the hash
+    functions `false` for an unknown algorithm, `substr()` `false` past the end,
+    the array functions `null` for a non-array, `explode('')` `false`, and
+    `count_chars()`, `get_class()`, `version_compare()` and `trigger_error()`
+    their PHP 7 results, inside a `PHP_VERSION_ID < 80000` branch too; before
+    8.4 `highlight_string()` returns `bool`. Today every file gets PHP 8.5's
+    returns (107 nsrt mismatches: `bcmath-dynamic-return-php7.php` 32,
+    `hash-functions-74.php` 15, `round.php` 12, `count-chars-7.4.php` 8 and the
+    rest);
   - `gettype()` of a resource omits `'resource (closed)'`, as `is_resource`
     does (D3);
   - `Throwable::getCode()` is `int`, but a `PDOException`'s code is a
@@ -4682,17 +4775,39 @@ the rest), which the gate excludes and lists.
     `strtolower($key)` to an `'enabled'|'disabled'` parameter is
     `argument.type` (the rules oracle's `bug-6987.php`, with the foreach
     key above);
-  - `mb_strtolower`, `mb_strtoupper` and `mb_convert_case` fold only ASCII in
-    a literal: `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` and
-    `mb_convert_case('Česká republika', MB_CASE_UPPER)` is
-    `'ČESKá REPUBLIKA'` (nsrt `str-casing.php`);
-  - a call PHP 8 rejects with a `TypeError` or `ValueError` returns
-    `*NEVER*`, so the code after it is unreachable: `array_combine([1, 2],
-    [3])`, `array_chunk($a, 0)`, `array_flip`/`array_keys` of a non-array,
-    `round('x')` under `strict_types`; today each returns its ordinary
-    type (304 nsrt `*NEVER*` expectations, most of them in these
-    functions' `-php8` files, `round-php8*.php`, `math.php` and the BcMath
-    files);
+  - `mb_strtolower`, `mb_strtoupper` and `mb_convert_case` fold only ASCII in a
+    literal: `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` and `mb_convert_case('Česká
+    republika', MB_CASE_UPPER)` is `'ČESKá REPUBLIKA'`; with a mode that isn't
+    known (`mb_convert_case($s, $mixed)`) the literal comes back unchanged where
+    any case can, and with another encoding (`mb_strtolower($s, 'CP1252')`) the
+    bytes are folded as UTF-8 (nsrt `str-casing.php`, 7);
+  - a call PHP 8 rejects returns `*NEVER*`, so the code after it is unreachable;
+    today each returns its ordinary type. Checked one by one against php 8.5,
+    the 170 in Appendix G throw a `TypeError`, `ValueError`,
+    `DivisionByZeroError` or `Error`: an array function given a non-array
+    (`array_flip`, `array_keys`, `array_values`, `array_reverse`,
+    `array_search`, `array_intersect_key`, `array_fill_keys`) or an invalid
+    callback (`array_filter($a, '')`); `array_combine()` of unequal sizes and
+    `array_chunk()` with a length below 1; the BcMath functions with a zero
+    divisor or modulus, a non-numeric operand or a negative root (`bcdiv('10',
+    '0')`, `bcpowmod('10', '-2', '1')`, `bcsqrt('-10')`); `explode('')`;
+    `filter_input()` of an invalid input type; `get_class()` without an argument
+    outside a class; the hash functions with an unknown or non-cryptographic
+    algorithm (`hash_hmac('crc32', …)`); `iterator_to_array()` of a generator
+    yielding array keys; `mb_strlen()` and `mb_substitute_character()` with an
+    invalid encoding or character; `mt_rand()` and `random_int()` with `$min >
+    $max` (`random_int(10, 1)` is the empty `int<10, 1>` today); `round()`,
+    `ceil()` and `floor()` of a non-number under `strict_types`;
+    `str_increment()` and `str_decrement()` of an empty or non-alphanumeric
+    string; `str_repeat()` with a negative count (`''` today); `trigger_error()`
+    with a level other than `E_USER_*`; `version_compare()` with an unknown
+    operator; `count()` of an object that isn't `Countable`; `pow()` of an
+    object or array operand; `preg_split()` with a non-integer limit or flags;
+    and `strval()`, `intval()`, `floatval()` and `boolval()` without an argument
+    or of an object without `__toString()` (`round-php8-strict-types.php` 30,
+    `bcmath-dynamic-return-php8.php` 27, `round-php8.php` 15,
+    `hash-functions-80.php` 11, `mb_substitute_character-php8.php` 9,
+    `str_decrement.php` 8 and the rest);
   - the built-in narrowing predicates follow the 2.2.16
     `*TypeSpecifyingExtension`s; compared one by one, these leave the type
     wider today: `array_key_exists($k, $a)` doesn't narrow `$k` to the key
@@ -4766,17 +4881,17 @@ the rest), which the gate excludes and lists.
     (`specifiedTypesUsingIsFunctions.php`, 24). `defined`/`define` and
     the rest of the `is_*` family already match.
 
-  Then the functions `gates/nsrt/owners.toml` assigns to E2 (3,399 nsrt
-  mismatches on calls to functions PHPStan types through an extension),
-  by count: `filter_var`/`filter_var_array` (353, 191 of them `mixed`),
-  `array_column` (215), `min`/`max` (217, 198 `mixed`), `count` (115),
-  `array_slice` (102), `sprintf`/`vsprintf` (136), `settype`'s narrowing
+  Then the rest, by each function's count in Appendix G (the wrong ones among
+  them are the items above): `filter_var`, `filter_var_array` and `filter_input`
+  (291, 194 of them `mixed`), `min`/`max` (217, 198 `mixed`), `array_column`
+  (211), `sprintf`/`vsprintf` (135), the BcMath functions (134), `count` (114)
+  and `array_slice` (101); beside Appendix G, `settype`'s narrowing
   (`set-type-type-specifying.php`, 156), the preg `$matches` shapes
-  (`preg_match_shapes.php`, 218, and the 155 variable mismatches of
-  Appendix H's `preg-shapes` in 24 more files: `preg_match_all`, the `/n`
-  flag, group 0 non-falsy when the pattern has literals, `> 0` and `=== 1`
-  making groups required) and the BcMath functions and `BcMath\Number`
-  operators (`bcmath-*.php`, 304). Appendix H's `ext:` entries are the
+  (`preg_match_shapes.php`, 204, and the 155 variable mismatches of Appendix H's
+  `preg-shapes` in 24 more files: `preg_match_all`, the `/n` flag, group 0
+  non-falsy when the pattern has literals, `> 0` and `=== 1` making groups
+  required) and the `BcMath\Number` operators (170 more in the `bcmath-*.php`
+  files, Appendix J's `bcmath-*` causes). Appendix H's `ext:` entries are the
   variables these extensions' values flow into, 621 mismatches beyond the
   calls themselves. Three have no counterpart in phpstan-rs today
   (`ext:PgDml`, `ext:Randomizer`, `ext:FilterInputArray`), and
@@ -6597,26 +6712,34 @@ its owner. Non-Registry keys follow the table.
 The nsrt suite at `76e738b4` has 3,108 mismatches on a call to a function one of
 PHPStan's `Type/Php/*ReturnTypeExtension`s types, spread over 94 extensions.
 Every line was read against its fixture. 46 differ only in a display form the
-gate's normalization covers, and 36 are another cause's, the extension being
+gate's normalization covers, and 37 are another cause's, the extension being
 right about what reaches it: Appendix H's `float-literal` (7, `abs.php`),
 `range-union` (4, `abs.php`), `operator-ranges` (4, `bug-14654.php`),
 `property-assign-narrow` (4, `bug-5129.php`), `closure-param-infer` (3,
 `array-find-key.php`, `array-find.php`, `pipe-operator.php`),
 `callable-value-call` (`bug-13296.php`), `coalesce-fold`
 (`isset-coalesce-empty-type.php`), `count-narrow` (`bug-4499.php`),
-`increment-types` (`bug-10187.php`), `short-ternary`
-(`do-not-remember-impure-functions.php`) and `union-normalize`
+`increment-types` (`bug-10187.php`), `is-fns-narrow` (`array_values.php`),
+`short-ternary` (`do-not-remember-impure-functions.php`) and `union-normalize`
 (`filter-var.php`); D3's nested-write (2, `bug-5316.php`), first-class callable
 (`first-class-callables.php`) and `gettype()` comparison (`bug-9404.php`) items;
 E2's spread-argument item (2, `array-intersect-key.php`); Appendix I's
 `constant-condition-certainty` (`get-defined-vars.php`); and one no item
 describes, a D3 item: `global $global;` in a function binds `mixed`, since the
 file-scope assignment says nothing of the global when the function runs (`'foo'`
-today, `get-defined-vars.php`). One is phpstan-rs right: `vsprintf('foo', [])`
-is always `'foo'`, so its `non-falsy-string` is an approved deviation where
-PHPStan has `string` (`non-falsy-string.php`). The other 3,025, over 93
-extensions, are the extensions' own: E2 brings each to PHPStan's value, and one
-that stays is phpstan-rs being right at runtime and is listed as an approved
+today, `get-defined-vars.php`). Three are phpstan-rs right, approved deviations:
+`vsprintf('foo', [])` is always `'foo'`, so its `non-falsy-string` stands where
+PHPStan has `string` (`non-falsy-string.php`); `array_flip()` of an array
+holding `'foo' => 17` and `'bar' => 17` is `array<int, string>` where PHPStan
+has `*NEVER*`, PHP returning `[17 => 'bar']` (`array-flip.php:93`); and
+`get_class($mixed)` is `string` where PHPStan adds `false`, which PHP 8 never
+returns (`generics.php:1344`). The other 3,022, over 93 extensions, are the
+extensions' own, each read against its fixture and, where the two tools
+disagree, php 8.5: 2,525 are wider than PHPStan's type and hold every value it
+holds; 170 are calls PHP rejects (a `TypeError`, `ValueError` or `Error`) typed
+as returning; 107 are in files that run before PHP 8 or 8.4 and get PHP 8.5's
+return; and 220 miss a value the call can return. E2 names each group; one that
+stays is phpstan-rs being right at runtime and is listed as an approved
 deviation. Each entry gives the extension, the functions the suite asserts, the
 mismatch count and files, and one mismatch from the run (phpstan-rs's type
 first). The extensions not listed have no mismatches of their own;
@@ -6686,7 +6809,7 @@ first). The extensions not listed have no mismatches of their own;
 - `ArrayChunkFunctionReturnTypeExtension` (`array_chunk()`; 35, 5 files):
   `array_chunk($arr, 2)` is `array<array>` where PHPStan has
   `list<non-empty-list<mixed>>`;
-- `GetClassDynamicReturnTypeExtension` (`get_class()`; 32, 10 files):
+- `GetClassDynamicReturnTypeExtension` (`get_class()`; 31, 10 files):
   `get_class($entity)` is `string` where PHPStan has `class-string`;
 - `ArrayPadDynamicReturnTypeExtension` (`array_pad()`; 31, `array_pad.php`):
   `array_pad($listString, $int, 'foo')` is `array<string>` where PHPStan has
@@ -6726,17 +6849,17 @@ first). The extensions not listed have no mismatches of their own;
   $ls, $ls)` is `string|null` where PHPStan has `lowercase-string|null`;
 - `StrlenFunctionReturnTypeExtension` (`strlen()`; 24, 5 files): `strlen('')` is
   `int<0, max>` where PHPStan has `0`;
-- `ArrayFlipFunctionReturnTypeExtension` (`array_flip()`; 22, 7 files):
-  `array_flip($unsealed)[1]` is `0` where PHPStan has `int`;
 - `DateFunctionReturnTypeExtension` (`date()`; 22, 5 files): `date('')` is
   `string` where PHPStan has `''`;
 - `StrRepeatFunctionReturnTypeExtension` (`str_repeat()`; 22, 4 files):
   `str_repeat($nonEmpty, 1)` is `string` where PHPStan has `non-empty-string`;
 - `TrimFunctionDynamicReturnTypeExtension` (`chop()`, `rtrim()`, `trim()`; 22, 4
   files): `trim($foo, $fooOrBar)` is `string` where PHPStan has `''|'foo'`;
+- `ArrayFlipFunctionReturnTypeExtension` (`array_flip()`; 21, 7 files):
+  `array_flip($unsealed)[1]` is `0` where PHPStan has `int`;
 - `StrPadFunctionReturnTypeExtension` (`str_pad()`; 21, 5 files): `str_pad($s,
   1)` is `string` where PHPStan has `non-empty-string`;
-- `ArrayValuesFunctionDynamicReturnTypeExtension` (`array_values()`; 20, 7
+- `ArrayValuesFunctionDynamicReturnTypeExtension` (`array_values()`; 19, 7
   files): `array_values($arr)` is `list` where PHPStan has `array{}`;
 - `ArrayFirstLastDynamicReturnTypeExtension` (`array_first()`,
   `array_key_first()`, `array_key_last()`, `array_last()`; 18, 2 files):
@@ -7942,12 +8065,12 @@ ways: 1,125 are explained by the plan item that cites their file, 1,019 are in
 citing item doesn't explain them (each cited file's findings were checked
 against its item's text). The last two sets are listed here. Each finding was
 read against its fixture, the phar's findings on the same line and, where the
-two tools disagree on runtime behaviour, php 8.5; they trace to 256 causes. By
-verdict: 857 are wrong today (a false positive, or a wrong type that leads to
+two tools disagree on runtime behaviour, php 8.5; they trace to 255 causes. By
+verdict: 860 are wrong today (a false positive, or a wrong type that leads to
 one), 188 are a finding PHPStan reports under another identifier or phpstan-rs
 reports twice, 70 are `phpstanRs.assertType` mismatches, 124 are right at
 runtime and approved, 43 come from bleeding-edge toggles C1 turns into settings,
-and 181 are the oracle's setup (php-parser classes, an unused trait, the
+and 178 are the oracle's setup (php-parser classes, an unused trait, the
 measured run's single-int `phpVersion`) or an approved rename. Each entry gives
 the cause's key, its findings and files, its verdict, what holds, and the files,
 most findings first; the phase is done with it when its files have no
@@ -8204,19 +8327,22 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `value-of-template` (1 finding, 1 file; wrong today): `?value-of<T>` for `T of
   BackedEnum` is `int|string|null`, not `mixed`; `bug-13638.php`.
 
-**C9** (46 findings, 18 files, 5 causes):
+**C9** (46 findings, 18 files, 4 causes):
 
+- `user-function-purity` (15 findings, 5 files; wrong today): a call to a user
+  function or method is judged by its body, its purity tags (a class's
+  `@phpstan-all-methods-impure` included) and its callback arguments (named or
+  shuffled included), and a call to a closure with a by-reference parameter is
+  impure: a pure one is silent, or `*.resultUnused` when discarded, and an
+  impure one `impure.functionCall`/`impure.methodCall`, where today each is
+  `possiblyImpure.*` "unknown"; `pure-unless-callable-is-impure-named-arg.php`,
+  `pure-unless-callable-is-impure.php`, `pure-function.php`,
+  `all-methods-are-pure.php`, `bug-11361-pure.php`.
 - `builtin-purity` (14 findings, 7 files; wrong today): built-ins and enum
   methods are pure: `is_int`, `is_string`, `is_numeric`, `is_array`, `empty`,
   `array_key_exists`, `tryFrom()` (functionMetadata); `bug-11207.php`,
   `bug-12224.php`, `pure-method.php`, `bug-12224.php`, `bug-13201.php`,
   `bug-14511-method.php`, `bug-14511.php`.
-- `user-function-purity` (12 findings, 3 files; wrong today): a call to a user
-  function or method is judged by its body and its callback arguments (named or
-  shuffled included): a pure one is silent and an impure one
-  `impure.functionCall`/`impure.methodCall`, where today each is
-  `possiblyImpure.*` "unknown"; `pure-unless-callable-is-impure-named-arg.php`,
-  `pure-unless-callable-is-impure.php`, `pure-function.php`.
 - `ctor-purity` (10 findings, 4 files; wrong today): a user class's constructor
   purity is known (promoted-only constructors are pure); `possiblyImpure.new`
   "unknown class" today; `pure-method.php`,
@@ -8226,9 +8352,6 @@ phpstan-rs-only findings left, or each remaining one is approved.
   function or method is impure (`method.resultUnused` today);
   `call-to-static-method-without-impure-points.php`,
   `call-to-method-without-impure-points.php`.
-- `impure-rename` (3 findings, 2 files; the oracle setup or an approved rename):
-  `possiblyImpure.*` for `impure.*` until C5's `functionMetadata.php`
-  (approved); `all-methods-are-pure.php`, `bug-11361-pure.php`.
 
 **D2** (11 findings, 5 files, 1 cause):
 
