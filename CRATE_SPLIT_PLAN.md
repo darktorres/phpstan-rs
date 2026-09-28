@@ -4405,10 +4405,11 @@ fixture:
     traits, functions, methods, `@method` tags and callable types);
     `@param-out`, `@phpstan-self-out`, a conditional return type's
     branches, generic arguments of a property type (`Foo<Barrrr>` and
-    `WeakMap<stdClass, …>` in a namespace), property hooks' types, every
-    `@var` of a doc block above a statement and above `$this`, and both
-    the parameter and the property of a promoted parameter; each is
-    unreported today;
+    `WeakMap<stdClass, …>` in a namespace; each class named, not only the
+    first), a `@var` naming `$this`, and both the parameter and the
+    property of a promoted parameter; each is unreported today (a
+    property hook's types and a doc block's several `@var` tags already
+    are);
   - `by-ref parameter's declared type is never narrower than 'foo'`
     (`parameterByRef.tooWide`) becomes PHPStan's
     `TooWideParameterOutTypeCheck`: a union member the function never
