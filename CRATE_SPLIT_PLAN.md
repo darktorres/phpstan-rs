@@ -4879,6 +4879,23 @@ fixture:
     unreported today;
   - `@phpstan-consistent-constructor` on a class with a private
     constructor is `consistentConstructor.private`, unreported today;
+  - an override's return type is checked in every form (PHPStan's
+    `MethodSignatureRule`), where today only a native type against a
+    native type is: a child without a return type under a parent's native
+    one is a compile error ("must be compatible with A::foo(): array";
+    `bug-8081.php`, `bug-8500.php`, `bug-9014.php`,
+    `overriding-indirect-prototype.php`, `return-type-covariance.php`,
+    `enum-sanity.php`, 8), a PHPDoc return incompatible with the parent's
+    is `method.childReturnType` (`@return string` under `@return int`,
+    `@return Cat` under `@return Dog`; `method-signature*.php`,
+    `merge-inherited-return.php`, `bug-3922-ancestors*.php`,
+    `bug-4003.php`, 12), and an untyped override of a built-in method
+    with a tentative return type is `method.tentativeReturnType` even when
+    that type is `mixed` (PHP 8.1 deprecates it without
+    `#[\ReturnTypeWillChange]`: `current()`, `key()`, `offsetGet()`;
+    `bug-4852.php`, `bug-5288.php`, `bug-7519.php`,
+    `tentative-return-types.php`, and the anonymous classes of
+    `offset-access-legal.php`); the rules oracle's 24 and 22 PHPStan-only;
   - `parameter.requiredAfterOptional` covers closures and arrow functions
     as it does functions and methods, with the same per-version wording
     (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`);
