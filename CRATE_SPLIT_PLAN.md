@@ -5333,7 +5333,16 @@ fixture:
     same exemption skips the `@param-out` end-of-execution check: `/**
     @param-out positive-int $i */ function a(int &$i): void {}` isn't
     reported, while a non-empty body that never assigns `$i` is
-    (`parameterByRef.executionEnd`, PHPStan's `paramOut.type`);
+    (`parameterByRef.executionEnd`, PHPStan's `paramOut.type`). The check
+    sits on each end statement (PHPStan's `ExecutionEndNode`), so an
+    `if`/`else` whose branches both fall off is reported twice, not once
+    on the declaration (the rules oracle's `parameter-out-execution-end.php`,
+    7), and it misses two shapes today: `unset($p[1])` on a `list<int>`
+    out-parameter leaves `array<0|int<2, max>, int>`, not a list
+    (`parameter-out-assigned-type.php`), and a template `@param-out S`
+    isn't satisfied by a concrete value (`param-out.php`, `method-assert.php`,
+    `generic-callables-incompatible.php`; 45 `paramOut.type` in all, most
+    of them empty bodies);
   - a finally block that changes a value returned by reference is
     `return.byRefFinally` (13 rules-oracle findings), and every exit point
     a finally block overrides is `finally.exitPoint` (25 of 42 missed);
