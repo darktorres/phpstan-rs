@@ -4359,7 +4359,15 @@ fixture:
     `?:` fire on each side and on the result: the rules oracle has 164
     `boolean{And,Or}.*`/`logical{And,Or,Xor}.*` findings and 17
     `ternary.always{True,False}`, of which phpstan-rs matches 2 and 0 (D3's
-    type-check folding feeds them);
+    type-check folding feeds them); and a condition is decided by its
+    truthiness, not only by a `true` type: `if ($std)` on an object, `if
+    (retObj())`, `if ($arr)` after `$arr = [1]`, `if ($one or $i)` on `1`,
+    `if (1 xor 0)` and `if (function_exists('strlen'))` are
+    `if.alwaysTrue`, and `!$b` after `if ($b) { return; }` is
+    `booleanNot.alwaysTrue`, all unreported today (the rules oracle's 37
+    PHPStan-only `if.alwaysTrue`: `if-condition.php`,
+    `if-condition-not-phpdoc.php`, `boolean-logical-*.php`,
+    `logical-xor.php`, `foreach.php`, `bug-6211.php`, `bug-8980.php`);
   - `--`/`++` on a non-numeric string (`$s = 'a'; $s--;`, which PHP
     leaves unchanged), `unset()` of an undefined variable
     (`unset.variable`), `unset()` of an offset on a non-array
