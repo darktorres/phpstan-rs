@@ -349,7 +349,7 @@ through `check-project`.
   Walk every position structurally. A bound is enforced only as "object
   bound against a definite scalar"; an argument outside `T of Foo` binds
   anyway. (`31a2fd14`)
-- [ ] **F39. `value-of<T>` over a template is erased.** `@return
+- [x] **F39. `value-of<T>` over a template is erased.** (`97472c63`) `@return
   value-of<T>` (`T of array`) gives "Function v() has no return type
   specified" and `v(['a' => 1, 'b' => 2])` is `mixed`, not `1|2`.
   `resolve_class_references` (`late.rs`) maps a `ValueOf` over anything
