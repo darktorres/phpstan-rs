@@ -1127,6 +1127,10 @@ Follow-ups, behaviour fixes:
   oracle's `instantiation.php:172`, `:179`), `new $o->cls()` as `(new
   $o)->cls()` ("Cannot call method cls() on mixed") and `new $o::$s()`
   reports `$s` undefined.
+- **`yield` takes an assignment**: `yield $x = 1;` is `yield ($x = 1)`;
+  today it parses as `(yield $x) = 1`, `assign.invalidExpr` plus
+  `$x` undefined there and on the next `yield $x + 1` (the rules oracle's
+  `defined-variables.php:391`).
 - **Assignment as an operand** at every binary operator, by one grammar rule
   instead of the per-level patches: `$a ?? $b = 1`, `1 | $g = 2` and
   `2 * $i = 3` report `assign.invalidExpr` and `variable.undefined` today.
@@ -2579,7 +2583,12 @@ deleted; the file-size gate.
   ??"). The isset rules read the same
   certainty: `isset($bar)`, `empty($foo)` and `$baz ?? 1` on a variable
   that is never defined are `isset.variable`/`empty.variable`/
-  `nullCoalesce.variable` "is never defined", unreported today. A falsey
+  `nullCoalesce.variable` "is never defined", unreported today. The
+  descriptor covers a nullsafe chain: `$f?->bar() ?? 0` and
+  `empty($i?->bar())` on an undefined `$f`/`$i` are `variable.undefined`
+  and `method.nonObject` today (the rules oracle's `bug-7291.php`), and
+  `isset($u::$p['x'])` on an undefined `$u` is
+  (`variable-certainty-isset.php`). A falsey
   `isset($v)` on a defined variable narrows it to `null`: after `if
   (isset($v)) { return; }` or inside `if (!isset($v))` on
   `int|string|float|null` (or `?int`), `$v` keeps its type today, so
@@ -3080,7 +3089,10 @@ building on the previous one:
       `echo $x;` in a script file is `variable.undefined` at level 0 today;
       snapshot 0a8fe69 has 75 of them in `<main>`. `$argc`/`$argv` there
       are `int<1, max>`/`non-empty-list<string>` (they are `int` and
-      `array<(int|string), mixed>` today). Fixed first: before D5,
+      `array<(int|string), mixed>` today). A call to `file_get_contents()`
+      or `fopen()` defines `$http_response_header` as `list<string>`
+      (`FuncCallScopeEffectsHelper`); it is `variable.undefined` today (the
+      rules oracle's `defined-variables.php:187`). Fixed first: before D5,
       an unknown variable read outside any function or closure is reported
       at level 1 as "Variable $x might not be defined."
     - A merge keeps a Maybe holder only for variables, function calls and
@@ -3375,7 +3387,13 @@ building on the previous one:
     with every arm excluded: in `match ($this) { self::TWO => …, default =>
     $this->requireOne($this) }` on a two-case enum, `$this` is the whole
     enum today where it is `E::ONE` (the rules oracle's
-    `call-method-in-enum.php`).
+    `call-method-in-enum.php`). An arm's body is entered from its
+    condition's truthy scope, assignments included: in `match (true) {
+    is_dir($dir = dirname(__DIR__)) => $dir, … }` and `match (1) {
+    preg_match($p, $s, $m) => $m[1], … }`, `$dir` and `$m` are
+    `variable.undefined` today (the rules oracle's `bug-13981.php`,
+    `bug-10418.php`), as are the same shapes in a `switch (true)` case
+    (`bug-5326.php`).
   - **Try/catch/finally** follows `TryCatchHandler`:
     - a catch is entered from the merge of the throw points it catches;
     - its variable is the catch type minus the earlier catches, and an
@@ -3858,6 +3876,20 @@ fixture:
     as a read: `$that = $this; function () use ($that) { return
     $that->p; }` leaves `$p` `property.onlyWritten` today, a false
     positive;
+  - every write form counts as a write for `property.onlyRead`/
+    `property.neverWritten` (`PropertyWrite` through `PropertyAssignNode`
+    and the by-reference and foreach paths): an offset write, append or
+    `unset()` of an offset (`$this->p[] = 4`, `$this->p['k'] = 5`,
+    `unset($this->p[$k])`), an increment (`$this->bar++`), a by-reference
+    argument (`foo($this->p)`, `exec($c, $this->out)`, `proc_open(…,
+    $this->pipes)`, `uksort($this->keys, …)`), a reference (`$x =
+    &$this->p`), a `foreach` target (`foreach ($c as $this->k =>
+    $this->v)`), destructuring (`[$this->foo] = [1]`) and a chained static
+    write (`self::$p::$p = …`) all leave the property "never written, only
+    read" today (the rules oracle's 64 `property.onlyRead`, among them
+    `appended-array-item.php`, `appended-array-key.php`, `bug-9213.php`,
+    `bug-7119.php`, `uksort.php`, `property-type-after-unset.php`,
+    `properties-assigned-types.php`);
   - property hooks: the checks that a property overriding a writable or
     readable one stays so (`property.notWritable`/`notReadable`) and that
     a get hook of a non-virtual property reads its value and a set hook
