@@ -4032,7 +4032,11 @@ approved deviation (an identifier named differently, such as
 `class.abstractMethodNotImplemented` for `method.abstract`, or a
 PHPStan-specific check: `void.pure`, `phpstan.*`, `phpParser.*`,
 `phpstanApi.*` outside a PHPStan extension's package, `function.inner`,
-PHPStan's "inner named functions are not supported"). A certain impure
+PHPStan's "inner named functions are not supported", and `class.prefixed`
+for a `_PHPStan_` prefix; the Rector, PHP-Scoper, PHPUnit PHAR and Box
+prefixes it also reports name classes that change with each release of
+those tools and ship opt-in in ext-extras, the rules oracle's other 4 of
+9). A certain impure
 point PHPStan names `impure.*` is `possiblyImpure.*` in phpstan-rs until
 C5's `functionMetadata.php` says which built-ins have side effects (42
 rules-oracle findings).
@@ -4462,8 +4466,9 @@ fixture:
     `elseif-condition.php`), and `!$b` after `if ($b) { return; }` is
     `booleanNot.alwaysTrue`, and on the falsy side `if ($zero)`, `if ($i
     and $zero)`, `if ($a xor $b)` on two objects and `if
-    ($this->returnsVoid())` are `if.alwaysFalse` (13), all unreported
-    today (the rules oracle's 37
+    ($this->returnsVoid())` are `if.alwaysFalse` (13), `elseif ($zero)`
+    `elseif.alwaysFalse` (9) and `!$zero` `booleanNot.alwaysTrue` (8), all
+    unreported today (the rules oracle's 37
     PHPStan-only `if.alwaysTrue`: `if-condition.php`,
     `if-condition-not-phpdoc.php`, `boolean-logical-*.php`,
     `logical-xor.php`, `foreach.php`, `bug-6211.php`, `bug-8980.php`);
@@ -5005,7 +5010,12 @@ fixture:
     `array_find()`) is part of the pure caller's body, so an `echo` in any
     of them is `impure.echo`, unreported today (the rules oracle's 12
     PHPStan-only, `pure-method.php`, `pure-property-hook.php`,
-    `pure-unless-callable-is-impure*.php`);
+    `pure-unless-callable-is-impure*.php`); an object's implicit
+    `__toString()` (in `echo`, `print`, `.`, `.=`, interpolation and a
+    `(string)` cast) is a call there, `possiblyImpure.methodCall` when
+    that method isn't known pure, as is a call to a method with no purity
+    marker (`$this->returningMethod();`), unreported today
+    (`pure-method.php`, 8);
   - an enum's duplicate case value is found through constant expressions:
     `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
     literal duplicate already is);
