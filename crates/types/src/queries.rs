@@ -33,6 +33,51 @@ impl Type {
         }
     }
 
+    /// The class names this type refers to where a class stands for
+    /// itself: an object, and the objects in array keys and values, a
+    /// class-string's class, union and intersection members and shape
+    /// fields - not in generic arguments. Each once, in order.
+    pub fn referenced_class_names(&self) -> Vec<&crate::Name> {
+        let mut out: Vec<&crate::Name> = Vec::new();
+        self.walk_class_positions(&mut |t| {
+            if let Type::Object(name, _) = t
+                && !out.contains(&name)
+            {
+                out.push(name);
+            }
+        });
+        out
+    }
+
+    /// Whether a `parent` stands in a class position (see
+    /// `referenced_class_names`) unresolved.
+    pub fn has_parent_ref(&self) -> bool {
+        let mut found = false;
+        self.walk_class_positions(&mut |t| found |= matches!(t, Type::ParentRef));
+        found
+    }
+
+    fn walk_class_positions<'a>(&'a self, f: &mut impl FnMut(&'a Type)) {
+        match self {
+            Type::Array(key, value) => {
+                key.walk_class_positions(f);
+                value.walk_class_positions(f);
+            }
+            Type::ClassString(inner) => inner.walk_class_positions(f),
+            Type::Union(members) | Type::BenevolentUnion(members) | Type::Intersection(members) => {
+                for m in members {
+                    m.walk_class_positions(f);
+                }
+            }
+            Type::ArrayShape(shape) | Type::ObjectShape(shape) => {
+                for t in shape.types() {
+                    t.walk_class_positions(f);
+                }
+            }
+            other => f(other),
+        }
+    }
+
     /// Whether this is `void`.
     pub fn is_void(&self) -> bool {
         matches!(self, Type::Void)

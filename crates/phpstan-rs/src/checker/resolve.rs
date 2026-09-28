@@ -607,35 +607,10 @@ impl<'a> Checker<'a> {
     /// too would trade a missed rare typo for a false positive on the
     /// ordinary case.
     pub(crate) fn collect_unknown_class_names(&self, ty: &Type, out: &mut Vec<String>) {
-        match ty {
-            Type::Object(name, _args) => {
-                if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
-                    out.push(name.clone().to_string());
-                }
+        for name in ty.referenced_class_names() {
+            if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
+                out.push(name.to_string());
             }
-            Type::Array(key, inner) => {
-                self.collect_unknown_class_names(key, out);
-                self.collect_unknown_class_names(inner, out);
-            }
-            Type::ClassString(inner) => self.collect_unknown_class_names(inner, out),
-            Type::Union(members) | Type::Intersection(members) => {
-                for m in members {
-                    self.collect_unknown_class_names(m, out);
-                }
-            }
-            Type::ArrayShape(fields) => {
-                for t in fields.types() {
-                    self.collect_unknown_class_names(t, out);
-                }
-            }
-            // `object{...}`'s own field types need checking for
-            // existence too.
-            Type::ObjectShape(fields) => {
-                for t in fields.types() {
-                    self.collect_unknown_class_names(t, out);
-                }
-            }
-            _ => {}
         }
     }
 
@@ -649,38 +624,15 @@ impl<'a> Checker<'a> {
     /// `@template` argument list) - the two are mutually exclusive per
     /// name, so no name is ever double-reported under both identifiers.
     pub(crate) fn collect_trait_class_names(&self, ty: &Type, out: &mut Vec<String>) {
-        match ty {
-            Type::Object(name, _args) => {
-                if self
-                    .registry
-                    .lookup_class(name)
-                    .is_some_and(|(_, info)| info.kind() == syntax::ast::ClassKind::Trait)
-                    && !out.iter().any(|n| n == name)
-                {
-                    out.push(name.clone().to_string());
-                }
+        for name in ty.referenced_class_names() {
+            if self
+                .registry
+                .lookup_class(name)
+                .is_some_and(|(_, info)| info.kind() == syntax::ast::ClassKind::Trait)
+                && !out.iter().any(|n| n == name)
+            {
+                out.push(name.to_string());
             }
-            Type::Array(key, inner) => {
-                self.collect_trait_class_names(key, out);
-                self.collect_trait_class_names(inner, out);
-            }
-            Type::ClassString(inner) => self.collect_trait_class_names(inner, out),
-            Type::Union(members) | Type::Intersection(members) => {
-                for m in members {
-                    self.collect_trait_class_names(m, out);
-                }
-            }
-            Type::ArrayShape(fields) => {
-                for t in fields.types() {
-                    self.collect_trait_class_names(t, out);
-                }
-            }
-            Type::ObjectShape(fields) => {
-                for t in fields.types() {
-                    self.collect_trait_class_names(t, out);
-                }
-            }
-            _ => {}
         }
     }
 
@@ -708,42 +660,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `parameter.noParent`/`return.noParent` - real PHPStan's
-    /// `NonexistentParentClassType` (`describe()` returns the literal
-    /// string `"parent"`), produced when a native `parent` type-hint is
-    /// used on a class with no `extends` ancestor. This project's
-    /// equivalent is `resolve_pseudo` deliberately leaving a bare
-    /// `Type::ParentRef` unresolved in exactly that situation - `ty`
-    /// here must already be the `resolve_pseudo`'d result, not the raw
-    /// pre-resolution type, or this can never find anything. Walks
-    /// the full type tree (unlike real PHPStan's own top-level-only
-    /// `instanceof` check) since this project's own `Type` can nest a
-    /// `ParentRef` inside a `Union` for the common `?parent` shape real
-    /// PHP itself allows - a real, more-thorough case real PHPStan's own
-    /// narrower check structurally can't hit the same way.
-    pub(crate) fn collect_bare_parent_refs(&self, ty: &Type, found: &mut bool) {
-        match ty {
-            Type::ParentRef => *found = true,
-            Type::Array(key, inner) => {
-                self.collect_bare_parent_refs(key, found);
-                self.collect_bare_parent_refs(inner, found);
-            }
-            Type::ClassString(inner) => self.collect_bare_parent_refs(inner, found),
-            Type::Union(members) | Type::Intersection(members) => {
-                for m in members {
-                    self.collect_bare_parent_refs(m, found);
-                }
-            }
-            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-                for t in fields.types() {
-                    self.collect_bare_parent_refs(t, found);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// The reporting half for `collect_bare_parent_refs` above -
+    /// The reporting half for `Type::has_parent_ref` -
     /// `identifier` is `parameter.noParent` or `return.noParent`
     /// depending on the call site, `subject` the same phrase the sibling
     /// `class.notFound`/`.trait` checks at that exact site already use.
@@ -754,9 +671,7 @@ impl<'a> Checker<'a> {
         span: Span,
         identifier: &'static str,
     ) {
-        let mut found = false;
-        self.collect_bare_parent_refs(ty, &mut found);
-        if found {
+        if ty.has_parent_ref() {
             self.report(
                 format!("{subject} has invalid type parent"),
                 span,
@@ -820,32 +735,13 @@ impl<'a> Checker<'a> {
 /// (a prefixed vendor class is almost always a real, indexed one) -
 /// otherwise the identical recursive shape.
 fn collect_prefixed_class_names<'b>(ty: &'b Type, out: &mut Vec<(&'b str, &'static str)>) {
-    match ty {
-        Type::Object(name, _args) => {
-            for entry in crate::checker::INTERNAL_CLASS_PREFIXES {
-                let (project, prefix): (&str, &str) = *entry;
-                if name.starts_with(prefix) {
-                    out.push((name.as_str(), project));
-                    break;
-                }
-            }
+    for name in ty.referenced_class_names() {
+        if let Some((project, _)) = crate::checker::INTERNAL_CLASS_PREFIXES
+            .iter()
+            .find(|(_, prefix)| name.starts_with(prefix))
+        {
+            out.push((name.as_str(), project));
         }
-        Type::Array(key, inner) => {
-            collect_prefixed_class_names(key, out);
-            collect_prefixed_class_names(inner, out);
-        }
-        Type::ClassString(inner) => collect_prefixed_class_names(inner, out),
-        Type::Union(members) | Type::Intersection(members) => {
-            for m in members {
-                collect_prefixed_class_names(m, out);
-            }
-        }
-        Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-            for t in fields.types() {
-                collect_prefixed_class_names(t, out);
-            }
-        }
-        _ => {}
     }
 }
 
