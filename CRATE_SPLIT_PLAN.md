@@ -4536,9 +4536,33 @@ the rest), which the gate excludes and lists.
   are matched by the resolved function name (a raw-name match today, so a
   namespace's own `compact()` is banned too), and `banned.type` reads the rules'
   resolved types;
-- class_shape with the parent-call registration API and the Doctrine
-  exemption hook;
-- composer hygiene (package context, no I/O);
+- class shapes as a collector rule over the project's class declarations, run in
+  the LSP too (CLI-only today, §1): `check_closed_classes` (`class.notFinal`,
+  `method.protectedInFinalClass`, `property.protectedInFinalClass`,
+  `classConstant.protectedInFinalClass`, `method.notFinalInAbstractClass`) and
+  `[[parent_calls]]` (`parentCall.*`). A class stays open where something
+  subclasses it at runtime, and extensions say what through a registration hook:
+  a project class extending it (the one exemption `class_shape.rs` derives
+  itself), a Doctrine proxy of an entity or mapped superclass (ext-doctrine's
+  metadata, E4, instead of today's match on `@Entity` or `@ORM\Entity` in the
+  doc text or any attribute whose short name is `Entity`), and a test double
+  (`createMock(Foo::class)`, Mockery and Prophecy through ext-phpunit and
+  ext-mockery: PHPUnit can't double a final class, and today such a class is
+  `class.notFinal`). The required parent calls (`parent::setUp()` and the like)
+  register the same way, from ext-phpunit, ext-codeception and the rest, instead
+  of core defaults (§1's `TEST_BASE_CLASSES`);
+- composer hygiene as a collector rule over the reference-site collector and the
+  package context (the manifests B8 loads; the rule does no I/O), run in the LSP
+  too (CLI-only today, §1): `undeclared.`, `misplaced.`, `devOnly.` and
+  `unused.composerDependency`, `misplaced.autoloadDevSymbol`,
+  `psr4.pathMismatch`/`psr4.caseMismatch`, `provide.unimplemented`,
+  `ext.notRequired`, `composerScript.notFound`/`composerScript.notPublicStatic`
+  and `composer.platformPhpInconsistentWithRequire`. A package's symbols include
+  its global constants (`define()` in its autoloaded files, `const`
+  declarations), which the reference sites don't record today, so a package used
+  only through its constants is `unused.composerDependency`, and one whose
+  constants are used undeclared isn't `undeclared.composerDependency`; today the
+  check walks every file again with its own reference walker;
 - `property.unusedType` as a ClassPropertiesNode rule over host-class
   assigns, including trait bodies per host (`facts_only`, the pre-pass
   and every `*_facts` field deleted). An untyped property without a
@@ -4592,8 +4616,7 @@ the rest), which the gate excludes and lists.
   `check_trait_methods`' sort and `dedup_by` on (span, message), which merges
   any two findings sharing text and span whatever reported them, and no other
   deduplication exists (the finalizer has none, and gate 13 fails a repeated
-  finding);
-- `constant_facts` as per-file rule state.
+  finding).
 
 **E2. builtins.**
 
@@ -5062,8 +5085,16 @@ Then the sub-phases, grouped by derived node, each listing its Appendix A
 rows, and each rule's behaviour commits after its move, each with its
 fixture:
 
-- (a) file-level (`keywords`, `whitespace`, RequireFileExists over the VFS
-  from `includes.rs`).
+- (a) per-file and per-body rules: `keywords` (`break`/`continue` levels, `goto`
+  and labels, `declare` directives: `goto.*`, `label.*`, `declare.*`,
+  `declareStrictTypes.*`), checking every body, property hooks included, where
+  today a hook's `break`/`continue` outside a loop (`break.outOfLoop`,
+  `continue.outOfLoop`, `continue-break-property-hook.php`, 3) and its `goto` to
+  an undefined label (`goto.labelUndefined`) go unreported; `whitespace`
+  (`whitespace.bom`, `whitespace.fileStart`, `whitespace.fileEnd`); and
+  `RequireFileExistsRule` (`includes.rs`), whose lookups go through the
+  session's VFS instead of `Path::is_file`, so a file the editor holds unsaved,
+  or has deleted, counts as the editor has it.
 - (b) expression-level:
   - every operand check goes through `find_type_to_check`, so at level 10
     an implicit `mixed` is reported everywhere PHPStan reports it. The
@@ -5353,7 +5384,10 @@ fixture:
     `magicConstant.outOfClass`, `__METHOD__`/`__FUNCTION__` in a property
     default `magicConstant.outOfFunction`, and `__NAMESPACE__` in the
     global namespace `magicConstant.outOfNamespace`, unreported today
-    (`magic-constant*.php`, 6, 3, 2 and 1);
+    (`magic-constant*.php`, 6, 3, 2 and 1); the rule reads where it is from
+    the scope (a closure, a function, a class, a trait), so
+    `Checker::constant_facts`, a pre-walk of each file marking
+    `__FUNCTION__`/`__METHOD__` inside closures, is deleted;
   - `null <= $object` is always true (`smallerOrEqual.alwaysTrue`,
     `bug-13001.php`), and enum cases compared with `<`, `>`, `<=` or `>=`
     are always false
@@ -5730,10 +5764,7 @@ fixture:
     class without a parent (`class.noParent`; `class-constant-visibility.php`,
     `bug-12272.php`, `access-static-properties.php`, 3), `implements
     \iterable` (not an interface; `interface.notFound`, `bug-8889.php`, 2),
-    `break`/`continue` in a property hook outside a loop
-    (`break.outOfLoop`, `continue.outOfLoop`,
-    `continue-break-property-hook.php`, 3), and an
-    unknown `@phpstan-*` tag above a statement or on a hook
+    and an unknown `@phpstan-*` tag above a statement or on a hook
     (`phpDoc.phpstanTag`, `invalid-phpstan-doc*.php`, 3); all unreported
     today;
   - a `@template` named like an existing class is
@@ -5784,8 +5815,7 @@ fixture:
     `bug-13001.php`), a constant overriding
     a built-in typed one without the native type (`const BZ2` in a `Phar`
     subclass, `classConstant.missingNativeType`), `do {} while ($arr =
-    [1])` (`doWhile.alwaysTrue`), a `goto` to an undefined label in a
-    property hook (`goto.labelUndefined`), `@phpstan-assert … $this`
+    [1])` (`doWhile.alwaysTrue`), `@phpstan-assert … $this`
     on a static method (`parameter.notFound`), an interface binding one
     ancestor's template two ways through two parents (`TValue` as `Item`
     via `Traversable` and as `string` via `IteratorAggregate`;
@@ -6238,8 +6268,19 @@ fixture:
     and a caught
     class that isn't an exception, or is guarded by `class_exists()`, is
     judged as well (`catch.php`, `class-exists.php`);
-- (g) the restricted-usage framework: `@internal` core, deprecation
-  (ext-deprecation-rules), disallowed-calls, and `phpstan_api`.
+- (g) the restricted-usage framework: one set of usage sites (function, method
+  and static calls, property and constant reads, `new`, `instanceof`, `catch`,
+  `extends`/`implements`/trait `use`, attributes, native type hints, PHPDoc
+  types, first-class callables and the implicit `__toString()` call), each
+  asking every registered restricted-usage extension (PHPStan's
+  `Restricted*UsageExtension`s), which `@internal` (core), `@deprecated`
+  (ext-deprecation-rules), `restricted_symbols` (ext-disallowed-calls) and
+  PHPStan's `@api` promise (`phpstan_api`) implement. Today each has its own
+  subset: `internal_usage` covers all but attributes, `deprecated_usage` only
+  calls, property and constant reads and `new` (a deprecated class in a type
+  hint, an `extends`, an `instanceof` or a `catch` is unreported),
+  `restricted_symbol_usage` reuses `internal_usage`'s call sites, and
+  `phpstan_api` walks its own.
 - (h) `FileAssertRule` (with the `assertNativeType` and
   `assertVariableCertainty` support Stage D's oracle added), the dump rules
   and the four asserts. `\PHPStan\dumpType()`, `dumpNativeType()`,
@@ -6248,7 +6289,10 @@ fixture:
   27 and 1, none reported today); the asserts' mismatches keep
   `phpstanRs.*` (approved: PHPStan's `phpstan.type`, `phpstan.nativeType`,
   `phpstan.superType`, `phpstan.variable`).
-- (i) semantic-token predicates exposed.
+- (i) the "is this usage internal / deprecated from this scope" predicate (§3)
+  exposed from (g)'s framework, so E6's semantic tokens mark every usage site
+  the rules check; today `semantic_tokens.rs` re-derives the gating at function,
+  member and `new` sites only.
 
 Mixed modules are split row by row (Appendix A). Gate: architecture rule 10
 for the analyser.
