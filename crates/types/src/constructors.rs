@@ -290,13 +290,10 @@ impl Type {
 
     /// `list<element>`: an array whose keys are `0..n` in order.
     pub fn list_of(element: Type) -> Type {
-        Type(Repr::Intersection(vec![
-            Type(Repr::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(element),
-            )),
-            Type(Repr::Accessory(AccessoryKind::ArrayList)),
-        ]))
+        crate::intersect_types(vec![
+            Type::array(Type::unknown_array_key(), element),
+            Type::accessory(AccessoryKind::ArrayList),
+        ])
     }
 
     /// PHP's full legal-array-key domain (`int|string`) - the default for

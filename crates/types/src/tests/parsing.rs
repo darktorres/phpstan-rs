@@ -633,48 +633,27 @@ fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() 
     assert!(template_subject);
 }
 
-// A docblock-parsed `list<int>` builds its key as a literal `Repr::Int`
-// (needed so a later marker-stripping op, e.g. `array_diff()`'s result,
-// still shows a known `array<int, T>` rather than collapsing to a
-// keyless `array<T>`), while every runtime-inferred list this project
-// builds (`array_values()`, `sort()`, ...) uses the generic
-// `unknown_array_key()` sentinel for that same position instead
-// (deliberately - a list's key is always int by definition, so encoding
-// it twice would be redundant). Both print identically as `list<int>`
-// but aren't structurally `==`-equal, and `is_super_type_of`'s generic `Array`
-// key check is directionally asymmetric between the two representations
-// (`subtype(unknown_array_key(), Int)` is false, the reverse true),
-// so a genuine runtime `list<int>` would otherwise fail to satisfy an
-// identical docblock-declared `list<int>` parameter/return type -
-// `Type::union`'s dedup (via `Type::equals_for_union`) must collapse them
-// into one.
+// A docblock-parsed `list<int>` and one built at runtime are the same
+// type, keyed on `int<0, max>` either way.
 #[test]
 fn a_docblock_parsed_list_is_a_mutual_subtype_of_the_runtime_inferred_shape() {
     let docblock_list = parse_type_string("list<int>");
-    let runtime_list = Type(Repr::Intersection(vec![
-        Type::array(Type::unknown_array_key(), Type(Repr::Int)),
-        Type::accessory(AccessoryKind::ArrayList),
-    ]));
-    assert_ne!(
-        docblock_list, runtime_list,
-        "still two distinct representations"
-    );
+    let runtime_list = Type::list_of(Type::int());
+    assert_eq!(docblock_list, runtime_list);
     assert!(is_subtype(&runtime_list, &docblock_list));
     assert!(is_subtype(&docblock_list, &runtime_list));
-    assert!(docblock_list.equals_for_union(&runtime_list));
 }
 
 #[test]
 fn a_docblock_parsed_non_empty_list_is_a_mutual_subtype_of_the_runtime_inferred_shape() {
     let docblock_list = parse_type_string("non-empty-list<int>");
-    let runtime_list = Type(Repr::Intersection(vec![
-        Type::array(Type::unknown_array_key(), Type(Repr::Int)),
-        Type::accessory(AccessoryKind::ArrayList),
+    let runtime_list = Type::intersection_of(vec![
+        Type::list_of(Type::int()),
         Type::accessory(AccessoryKind::NonEmptyArray),
-    ]));
+    ]);
+    assert_eq!(docblock_list, runtime_list);
     assert!(is_subtype(&runtime_list, &docblock_list));
     assert!(is_subtype(&docblock_list, &runtime_list));
-    assert!(docblock_list.equals_for_union(&runtime_list));
 }
 
 // The `NonEmptyArray` half of the same rule: a plain (possibly-empty)
@@ -684,10 +663,7 @@ fn a_docblock_parsed_non_empty_list_is_a_mutual_subtype_of_the_runtime_inferred_
 #[test]
 fn a_plain_list_is_not_a_subtype_of_a_non_empty_list_of_the_same_element_type() {
     let docblock_non_empty = parse_type_string("non-empty-list<int>");
-    let runtime_plain_list = Type(Repr::Intersection(vec![
-        Type::array(Type::unknown_array_key(), Type(Repr::Int)),
-        Type::accessory(AccessoryKind::ArrayList),
-    ]));
+    let runtime_plain_list = Type::list_of(Type::int());
     assert!(!is_subtype(&runtime_plain_list, &docblock_non_empty));
 }
 

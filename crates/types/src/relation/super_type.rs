@@ -99,9 +99,8 @@ impl Relation<'_> {
                     Some(_) => TrinaryLogic::Maybe,
                 }
             }
-            // Two `list<T>`s compare by element type and non-emptiness: a
-            // PHPDoc `list<T>` keys on `int`, one built at runtime on the
-            // unknown array key, and both are int-keyed.
+            // Two lists compare by element type and non-emptiness, their
+            // keys being `int<0, max>` alike.
             (Type(Repr::Intersection(sup_members)), Type(Repr::Intersection(sub_members)))
                 if sup_members.contains(&Type::accessory(AccessoryKind::ArrayList))
                     && sub_members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>

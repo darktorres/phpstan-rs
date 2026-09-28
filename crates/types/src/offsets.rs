@@ -117,11 +117,11 @@ impl Type {
                     // surely non-empty. A dynamic key need not be
                     // sequential.
                     if offset.is_none() && self.is_list().yes() {
-                        Some(Type(Repr::Intersection(vec![
+                        Some(crate::intersect_types(vec![
                             Type::array(Type::unknown_array_key(), widened),
                             Type::accessory(AccessoryKind::ArrayList),
                             Type::accessory(AccessoryKind::NonEmptyArray),
-                        ])))
+                        ]))
                     } else {
                         let key = offset
                             .map(Type::write_key_type)
@@ -201,7 +201,7 @@ impl Type {
                     {
                         new_members.push(Type::accessory(AccessoryKind::NonEmptyArray));
                     }
-                    Some(Type(Repr::Intersection(new_members)))
+                    Some(crate::intersect_types(new_members))
                 } else {
                     Some(Type::array(key, widened))
                 }

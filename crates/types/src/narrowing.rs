@@ -398,33 +398,20 @@ pub fn comparison_narrowed_bounds(
 }
 
 impl Type {
-    /// `array_is_list($x)`'s own true-branch narrowing - mirrors `upgrade_
-    /// array_to_non_empty` exactly, just adding `ArrayList` instead of
-    /// `NonEmptyArray`. Doesn't force the key type itself to `Repr::Int` -
-    /// every other list-producing call site in this project (`preg_split`,
-    /// `array_values`, ...) leaves the stored key as `unknown_array_key()`
-    /// too, relying on `describe_accessory_intersection`'s own display-layer
-    /// guard (a list's key is always `int` by definition, so showing it
-    /// would be redundant) rather than encoding it twice. A docblock-parsed
-    /// `list<T>` still uses a literal `Repr::Int` key instead (needed
-    /// elsewhere - see `parse_type_string`'s own `"list"` arm), so `crate::
-    /// subtype`'s dedicated list-vs-list `Intersection` arm and `crate::
-    /// Type::equals_for_union` both compare the two representations ignoring
-    /// key entirely, rather than this project settling on one encoding
-    /// everywhere.
+    /// This array as a list: `array_is_list($x)`'s true branch.
     pub fn to_list(&self) -> Type {
         match self {
-            Type(Repr::Array(key, inner)) => Type(Repr::Intersection(vec![
+            Type(Repr::Array(key, inner)) => crate::intersect_types(vec![
                 Type::array((**key).clone(), (**inner).clone()),
                 Type::accessory(AccessoryKind::ArrayList),
-            ])),
+            ]),
             Type(Repr::Intersection(members))
                 if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
                     && !members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
             {
                 let mut members = members.clone();
                 members.push(Type::accessory(AccessoryKind::ArrayList));
-                Type(Repr::Intersection(members))
+                crate::intersect_types(members)
             }
             Type(Repr::Union(members)) => {
                 Type(Repr::Union(members.iter().map(Type::to_list).collect()))

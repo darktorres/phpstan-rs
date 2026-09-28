@@ -67,7 +67,16 @@ impl Relation<'_> {
                 };
                 out.push(Type::array_shape(s));
             }
-            (None, Some((key, value))) => out.push(Type::array(key, value)),
+            // A list keys on `int<0, max>`, whatever key its array member
+            // was given.
+            (None, Some((key, value))) => {
+                let key = if rest.contains(&Type::accessory(AccessoryKind::ArrayList)) {
+                    self.narrower(key, Type::int_range(Some(0), None))
+                } else {
+                    key
+                };
+                out.push(Type::array(key, value));
+            }
             (None, None) => {}
         }
         out.extend(rest);

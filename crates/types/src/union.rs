@@ -32,7 +32,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         return normalize_generic_args(a);
     }
     let (a, b) = (normalize_generic_args(a), normalize_generic_args(b));
-    if a.equals_for_union(&b) {
+    if a == b {
         return a;
     }
     // An error absorbs everything, as a `mixed` does.
@@ -55,13 +55,13 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     match b {
         Type(Repr::Union(m)) => {
             for x in m {
-                if !members.iter().any(|m| m.equals_for_union(&x)) {
+                if !members.contains(&x) {
                     members.push(x);
                 }
             }
         }
         other => {
-            if !members.iter().any(|m| m.equals_for_union(&other)) {
+            if !members.contains(&other) {
                 members.push(other);
             }
         }

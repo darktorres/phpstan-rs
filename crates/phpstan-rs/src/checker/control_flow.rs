@@ -419,7 +419,7 @@ impl<'a> Checker<'a> {
 /// either.
 pub(crate) fn add_implied_fact(facts: &mut Vec<(String, Type)>, name: &str, ty: &Type) {
     match facts.iter_mut().find(|(k, _)| k == name) {
-        Some((_, existing)) if existing.equals_for_union(ty) => {}
+        Some((_, existing)) if existing == ty => {}
         Some((_, existing)) => *existing = Type::union(existing.clone(), ty.clone()),
         None => facts.push((name.to_string(), ty.clone())),
     }
@@ -630,7 +630,7 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     merged.discriminant_array_facts = then_locals.discriminant_array_facts.clone();
     for (key, else_ty) in else_locals.discriminant_array_facts.iter() {
         match merged.discriminant_array_facts.get(key) {
-            Some(then_ty) if then_ty.equals_for_union(else_ty) => {}
+            Some(then_ty) if then_ty == else_ty => {}
             Some(then_ty) => {
                 merged
                     .discriminant_array_facts
@@ -695,7 +695,7 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
             // equality here first avoids ever cloning `else_ty` at all,
             // rather than cloning it just to have `Type::union` discard
             // it a moment later.
-            let merged_ty = if then_ty.equals_for_union(else_ty) {
+            let merged_ty = if then_ty == else_ty {
                 then_ty.clone()
             } else {
                 Type::union(then_ty.clone(), else_ty.clone())

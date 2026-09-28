@@ -247,10 +247,6 @@ impl Type {
             }
             _ => {}
         }
-        if members.len() == 1 {
-            members.pop().expect("one member")
-        } else {
-            Type(Repr::Intersection(members))
-        }
+        crate::intersect_types(members)
     }
 }

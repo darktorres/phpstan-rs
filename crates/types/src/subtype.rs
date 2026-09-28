@@ -63,48 +63,6 @@ impl Shape {
     }
 }
 
-impl Type {
-    /// Is every value described by `sub` also described by `sup`? The same
-    /// relation PHPStan calls `isSuperTypeOf` (inverted). Class hierarchy
-    /// isn't modeled yet, so `Object` subtyping is name-equality only;
-    /// self/parent/static are accepted against any `Object` as a placeholder
-    /// until a class-context resolver exists.
-    /// Whether `a`/`b` should be treated as the identical type for union
-    /// deduplication - ordinary `==` for everything except a `list<T>`/
-    /// `non-empty-list<T>` pair, which can be structurally unequal (a
-    /// literal `Repr::Int` key vs. the generic `unknown_array_key()`
-    /// sentinel - see `is_super_type_of`'s `Intersection`-vs-`Intersection` list
-    /// arm) while still the same type PHPStan-visibly. Without this,
-    /// `Type::union` would print a duplicate `list<int>|list<int>` whenever
-    /// a docblock-declared `list<T>` and a runtime-inferred one of the same
-    /// element type meet in one union.
-    pub fn equals_for_union(&self, b: &Type) -> bool {
-        if self == b {
-            return true;
-        }
-        match (self, b) {
-            (Type(Repr::Intersection(ma)), Type(Repr::Intersection(mb)))
-                if ma.contains(&Type::accessory(AccessoryKind::ArrayList))
-                    && mb.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
-            {
-                let keyless = |members: &[Type]| -> Vec<Type> {
-                    members
-                        .iter()
-                        .map(|m| match m {
-                            Type(Repr::Array(_, v)) => {
-                                Type(Repr::Array(Box::new(Type::unknown_array_key()), v.clone()))
-                            }
-                            other => other.clone(),
-                        })
-                        .collect()
-                };
-                keyless(ma) == keyless(mb)
-            }
-            _ => false,
-        }
-    }
-}
-
 impl Relation<'_> {
     /// The structural half of `is_super_type_of`'s `Yes`: every value of
     /// `sub` provably is a `sup`, for the pairs `is_super_type_of` doesn't

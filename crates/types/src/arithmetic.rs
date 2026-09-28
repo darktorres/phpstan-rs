@@ -701,11 +701,7 @@ fn array_union_type(lt: &Type, rt: &Type) -> Type {
     if lt.is_non_empty_array().yes() || rt.is_non_empty_array().yes() {
         members.push(Type::accessory(crate::AccessoryKind::NonEmptyArray));
     }
-    if members.len() == 1 {
-        members.pop().expect("one member")
-    } else {
-        Type(Repr::Intersection(members))
-    }
+    crate::intersect_types(members)
 }
 
 /// A bitwise `&`/`|`/`^` over int literals, folded to its exact values

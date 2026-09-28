@@ -7,23 +7,17 @@ use crate::Repr;
 fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
     // Without this, "list" falls through to the generic-user-class
     // branch and gets treated as a literal class named "list".
-    // `list<T>` is a real `Intersection([Array(_), Accessory(ArrayList)])`,
-    // not a plain Array alias - a list's key can only ever be a
-    // sequential int.
+    // A list is an array refined by the list accessory, keyed on
+    // `int<0, max>` - the one encoding every list has, parsed or built.
     assert_eq!(
         parse_type_string("list<int>"),
         Type(Repr::Intersection(vec![
-            Type::array(Type(Repr::Int), Type(Repr::Int)),
+            Type::array(Type::int_range(Some(0), None), Type::int()),
             Type::accessory(AccessoryKind::ArrayList),
         ]))
     );
-    assert_eq!(
-        parse_type_string("list"),
-        Type(Repr::Intersection(vec![
-            Type::array(Type(Repr::Int), Type(Repr::Mixed(false))),
-            Type::accessory(AccessoryKind::ArrayList),
-        ]))
-    );
+    assert_eq!(parse_type_string("list<int>"), Type::list_of(Type::int()));
+    assert_eq!(parse_type_string("list"), Type::list_of(Type::mixed()));
 }
 
 #[test]
@@ -313,11 +307,11 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
         ]))
     );
     assert_eq!(
-        // A list's key can only ever be a sequential int, unlike the
-        // unknown int|string default plain non-empty-array keeps above.
+        // A list keys on `int<0, max>`, unlike the unknown `int|string`
+        // default plain non-empty-array keeps above.
         parse_type_string("non-empty-list<string>"),
         Type(Repr::Intersection(vec![
-            Type::array(Type(Repr::Int), Type(Repr::String)),
+            Type::array(Type::int_range(Some(0), None), Type(Repr::String)),
             Type::accessory(AccessoryKind::ArrayList),
             Type::accessory(AccessoryKind::NonEmptyArray),
         ]))

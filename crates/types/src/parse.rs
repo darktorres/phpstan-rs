@@ -1152,7 +1152,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             if bare != "list" {
                 members.push(Type::accessory(AccessoryKind::NonEmptyArray));
             }
-            Type(Repr::Intersection(members))
+            crate::intersect_types(members)
         }
         // Unlike its neighbors above, `iterable` is real PHP's own
         // native type hint, defined as exactly `array|Traversable` - a
