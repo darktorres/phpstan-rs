@@ -283,13 +283,15 @@ impl Type {
     }
 
     /// The key a write at an offset of this type lands on: `int` or
-    /// `string` when the offset surely is one, otherwise the benevolent
-    /// `int|string` (PHPStan's `MixedType::toArrayKey()`), which a later
-    /// read accepts wherever either member would do.
+    /// `string` when the offset surely becomes one (`'5'` becomes `5`, an
+    /// arbitrary string may too), otherwise the benevolent `int|string`
+    /// (PHPStan's `MixedType::toArrayKey()`), which a later read accepts
+    /// wherever either member would do.
     pub fn write_key_type(&self) -> Type {
-        if self.is_int().yes() {
+        let key = self.to_array_key();
+        if key.is_int().yes() {
             Type::int()
-        } else if self.is_string().yes() {
+        } else if key.is_string().yes() {
             Type::string()
         } else {
             Type::benevolent_array_key()
@@ -331,13 +333,9 @@ fn write_literal_key_aware(
     }
 }
 
-/// A string or integer literal offset's text.
+/// A literal offset's array key as text (`true` is `1`, `null` is `''`).
 fn literal_key_name(offset: &Type) -> Option<String> {
-    match offset {
-        Type(Repr::StringLiteral(s)) => Some(s.to_string()),
-        Type(Repr::IntLiteral(n)) => Some(n.to_string()),
-        _ => None,
-    }
+    literal_key(offset).map(|(key, _)| key)
 }
 
 /// An offset's array key as text and whether it's an integer key, for a

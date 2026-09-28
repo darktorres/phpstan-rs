@@ -5713,17 +5713,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Whether an array shape key string is one PHP itself would have
-/// already cast to a real integer at the point the array was built -
-/// PHP's rule: a decimal string with no leading zero (unless it's
-/// exactly `"0"`) and no leading `+`. Deliberately doesn't handle a
-/// leading `-` (a negative-integer key string) - misclassifying one as a
-/// string key here is the same safe-by-omission default this project
-/// uses throughout rather than a wrong answer.
-pub(crate) fn is_canonical_int_key(key: &str) -> bool {
-    types::canonical_int_key(key).is_some()
-}
-
 /// Whether `e` is the literal `false` - used to scope
 /// `array_slice`/`array_reverse`'s `$preserve_keys` argument to exactly
 /// the default-matching case (omitted, or explicitly `false`).

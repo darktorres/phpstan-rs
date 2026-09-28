@@ -1,26 +1,17 @@
-use crate::checker::expr::{invalid_array_key_description, is_canonical_int_key};
+use crate::checker::expr::invalid_array_key_description;
 use crate::checker::{Checker, Locals, TemplateBindings};
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
 
-use types::{self, AccessoryKind, NextArrayIndex, Shape, ShapeField, ShapeKey, Type};
+use types::{self, AccessoryKind, NextArrayIndex, Shape, ShapeField, ShapeKey, TrinaryLogic, Type};
 
 impl<'a> Checker<'a> {
-    /// `DuplicateKeysInLiteralArraysRule` - a later literal key
-    /// silently overwrites an earlier one at runtime (real PHP raises no
-    /// warning either), almost always a real bug (a copy-pasted entry
-    /// whose key was never updated) rather than an intentional
-    /// "overwrite semantics" idiom. `infer_array_literal_type` just
-    /// below already computes the exact same key-derivation/auto-index
-    /// logic for its own overwrite-on-duplicate handling - this walks
-    /// the same shape independently so it can report every duplicate
-    /// found, rather than reusing that function's own discard-on-
-    /// overwrite `Vec`. Bails on the *first* key it can't confidently
-    /// resolve at all (via a bare AST literal, or `infer_expr` below),
-    /// the same "don't guess" leniency `infer_array_literal_type` already
-    /// has, since a computed key could coincide with any later key, so
-    /// nothing past it can be soundly checked either.
+    /// `DuplicateKeysInLiteralArraysRule`: a later key in an array literal
+    /// silently overwrites an earlier one, almost always a copy-paste bug.
+    /// Keys resolve as `infer_array_literal_type` resolves them
+    /// (`array_literal_key`), so `1`, `'1'` and `true` are the same key;
+    /// the check stops at the first key that could be any of several.
     pub(crate) fn check_array_literal_duplicate_keys(
         &mut self,
         items: &[ArrayItem],
@@ -29,15 +20,9 @@ impl<'a> Checker<'a> {
         if items.iter().any(|item| item.spread) {
             return;
         }
-        // Key text -> (first occurrence's span, how many times it's been
-        // seen so far). Real PHP coerces a numeric-string key ("5") to
-        // the same int key (5) it names - both an int key's own
-        // `.to_string()` and its numeric-string twin are spelled
-        // identically here, so comparing the plain text alone (no
-        // separate int/string discriminator) already gets this right,
-        // the same simplification `infer_array_literal_type` below
-        // relies on for its own overwrite-on-duplicate handling.
-        let mut seen: Vec<(String, (Span, u32))> = Vec::new();
+        // Key -> (first occurrence's span, how many times it's been seen
+        // so far).
+        let mut seen: Vec<(ShapeKey, (Span, u32))> = Vec::new();
         let mut next_index = NextArrayIndex::default();
         for item in items {
             let item_span = item.key.as_ref().map_or(item.value.span, |k| k.span);
@@ -45,65 +30,32 @@ impl<'a> Checker<'a> {
                 // Appending past `PHP_INT_MAX` throws; nothing after it is
                 // an element.
                 None => match next_index.take() {
-                    Some(n) => n.to_string(),
+                    Some(n) => ShapeKey::Int(n),
                     None => return,
                 },
-                Some(k) => match &k.kind {
-                    ExprKind::Literal(Literal::String(s)) => s.to_string(),
-                    ExprKind::Literal(Literal::Int(n)) => {
-                        next_index.observe(*n);
-                        n.to_string()
-                    }
-                    // A negative int key literal parses as unary
-                    // negation of a positive int literal, not a single
-                    // negative `Literal::Int` token - without this arm,
-                    // a literal negative key (`-5 => ...`) would fall
-                    // into the catch-all below and silently abandon
-                    // duplicate-key checking for the whole array
-                    // literal, not just that one item.
-                    ExprKind::Unary(UnaryOp::Neg, inner) => match &inner.kind {
-                        ExprKind::Literal(Literal::Int(n)) => {
-                            let n = -n;
+                // A key that could be any of several coincides with a
+                // later one or not; nothing past it can be checked.
+                Some(k) => match self.array_literal_key(k, locals) {
+                    Ok(key) => {
+                        if let ShapeKey::Int(n) = key {
                             next_index.observe(n);
-                            n.to_string()
                         }
-                        _ => return,
-                    },
-                    // Real PHPStan's own key resolution goes
-                    // well beyond a bare AST literal (a class constant, a
-                    // `defined()` constant, any statically-known-scalar
-                    // expression) - routing through the same `infer_expr`
-                    // every other key-typed consumer already uses gets
-                    // all of that for free, canonicalizing PHP's own
-                    // bool/null key coercion the same way a real key
-                    // would (`true`/`false` become the int key `1`/`0`;
-                    // `null` becomes the empty-string key `""`) - still
-                    // deliberately bailing (not guessing) on anything
-                    // that doesn't resolve this way either, e.g. a plain
-                    // variable or an unresolvable constant.
-                    _ => {
-                        let key = self.infer_expr(k, locals).to_array_key();
-                        if let Some(n) = key.int_literal_value() {
-                            next_index.observe(n);
-                            n.to_string()
-                        } else if let [s] = key.constant_strings()[..] {
-                            s.to_string()
-                        } else {
-                            return;
-                        }
+                        key
                     }
+                    Err(_) => return,
                 },
             };
             match seen.iter_mut().find(|(k, _)| *k == key) {
                 Some((_, (first_span, count))) => {
                     *count += 1;
                     if *count == 2 {
-                        // `var_export`-style display: bare for a
-                        // canonical int key, single-quoted otherwise.
-                        let display = if is_canonical_int_key(&key) {
-                            key.clone()
-                        } else {
-                            format!("'{}'", key.replace('\\', "\\\\").replace('\'', "\\'"))
+                        // `var_export`-style display: bare for an int key,
+                        // single-quoted otherwise.
+                        let display = match &key {
+                            ShapeKey::Int(n) => n.to_string(),
+                            ShapeKey::Str(text) => {
+                                format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
+                            }
                         };
                         self.report(
                             format!("Array has duplicate key {display}."),
@@ -118,93 +70,77 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// An array literal's own element types must be inferred precisely:
-    /// reading every literal as `Array(Mixed)` regardless of its
-    /// actual contents would silently defeat `strict_mixed_arrays` for
-    /// its own headline use case (checking a hand-written literal
-    /// against a declared shape) and make any destructuring from an
-    /// inline literal lose all per-position precision. Builds a real
-    /// array shape, keyed by each literal
-    /// key (or, for a positional element, PHP's own real auto-index
-    /// rule: one past the highest explicit integer key seen so far, not
-    /// just a running count - `[5 => 'a', 'b']`'s `'b'` really is key
-    /// `6` in real PHP). A spread element (`...$other`) or a computed,
-    /// non-literal key both defeat precise inference for the *whole*
-    /// literal - real PHP inserts a variable number of the spread
-    /// value's own elements at that point, shifting every subsequent
-    /// positional key by an amount this checker has no way to know
-    /// statically, and a non-literal key has no fixed name to key a
-    /// field by at all - degrading to the honest `Array(Mixed)` for
-    /// those specific cases, matching the status quo everywhere else.
+    /// An array literal's type: a shape keyed by each item's key (a
+    /// positional item's is the next index, one past the highest int key
+    /// so far) while every key is known, and a non-empty general array of
+    /// every key and value once one isn't. A spread item goes through
+    /// `infer_spread_array_literal_type`.
     pub(crate) fn infer_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
         if items.iter().any(|item| item.spread) {
             return self.infer_spread_array_literal_type(items, locals);
         }
         let mut shape = Shape::sealed(Vec::new());
         let mut next_index = NextArrayIndex::default();
+        // Once a key isn't known, every key and value so far and after.
+        let mut general: Option<(Vec<Type>, Vec<Type>)> = None;
         for item in items {
             let key = match &item.key {
                 // Appending past `PHP_INT_MAX` throws: the literal has no
                 // value.
                 None => match next_index.take() {
-                    Some(n) => ShapeKey::Int(n),
+                    Some(n) => Ok(ShapeKey::Int(n)),
                     None => return Type::never(),
                 },
-                Some(k) => match &k.kind {
-                    ExprKind::Literal(Literal::String(s)) => {
-                        let key = ShapeKey::from_name(&s.to_str_lossy());
-                        if let ShapeKey::Int(n) = key {
-                            next_index.observe(n);
-                        }
-                        key
-                    }
-                    ExprKind::Literal(Literal::Int(n)) => {
-                        next_index.observe(*n);
-                        ShapeKey::Int(*n)
-                    }
-                    _ => {
-                        return Type::array(Type::unknown_array_key(), Type::mixed());
-                    }
-                },
+                Some(k) => self.array_literal_key(k, locals),
             };
             let value_ty = self.infer_expr(&item.value, locals);
-            // A later duplicate key overwrites an earlier one, matching
-            // real PHP's own array-literal semantics.
-            shape.set(ShapeField::new(key, value_ty, false));
+            match (key, &mut general) {
+                (Ok(key), None) => {
+                    if let ShapeKey::Int(n) = key {
+                        next_index.observe(n);
+                    }
+                    // A later duplicate key overwrites an earlier one.
+                    shape.set(ShapeField::new(key, value_ty, false));
+                }
+                (key, general) => {
+                    let (keys, values) = general.get_or_insert_with(|| {
+                        shape
+                            .fields
+                            .iter()
+                            .map(|f| (f.key.to_type(), f.ty.clone()))
+                            .unzip()
+                    });
+                    keys.push(key.map_or_else(|ty| ty, |key| key.to_type()));
+                    values.push(value_ty);
+                }
+            }
         }
-        Type::array_shape(shape)
+        match general {
+            None => Type::array_shape(shape),
+            Some((keys, values)) => general_array_literal_type(keys, values),
+        }
     }
 
-    /// A spread item (`[...$a, ...$b]`) can be tracked precisely as long
-    /// as every spread source's own exact fields are known (an
-    /// `ArrayShape`) - real PHP's own array-unpacking semantics
-    /// (verified via `dumpType()`): a spread `ArrayShape`'s canonical int
-    /// keys get renumbered sequentially into the result, exactly the same
-    /// as a plain positional item; its non-canonical (string, or a
-    /// non-sequential int) keys are kept and overwrite verbatim, the same
-    /// `is_canonical_int_key` rule `infer_array_literal_type`'s own
-    /// int-key handling already applies. `UserInfoWithThemeName::toArray()`
-    /// (`[...$this->userInfo->toArray(), 'theme_name' => $this->themeName]`)
-    /// is exactly this shape - merging two known shapes into one, not
-    /// combining unknown-length arrays.
-    ///
-    /// The moment any spread source's fields *aren't* known this way (a
-    /// plain `array<T>`/`list<T>`), the whole literal degrades to the
-    /// coarser "element type plus list/non-empty markers" level instead -
-    /// and every field already collected before that point degrades with
-    /// it, keeping only its value type, not its specific key. Verified via
-    /// `dumpType()`: `['x' => 1, ...$plainArray]` on a plain `array<int>`
-    /// dumps as `non-empty-array<int>`, not a shape retaining `'x'`.
-    /// Spreading two `list<T>`s stays a `list<T>`; a plain `array<T>`
-    /// source (list-ness unproven) degrades list-ness for the whole
-    /// result, matching `[...$list, ...$plainArray] -> array<T>` (not
-    /// `list<T>`) exactly. A plain, unkeyed element always guarantees the
-    /// result is non-empty; a spread source only does if it's itself
-    /// provably non-empty.
+    /// An array literal item's key: the one PHP stores it under when the
+    /// key expression's type pins it down (`-1`, `'5'` as `5`, `true` as
+    /// `1`, a constant), otherwise the key type it may be.
+    pub(crate) fn array_literal_key(&self, key: &Expr, locals: &Locals) -> Result<ShapeKey, Type> {
+        let key_ty = self.infer_expr(key, locals).to_array_key();
+        ShapeKey::from_type(&key_ty).ok_or(key_ty)
+    }
+
+    /// An array literal with spread items (`[...$a, 'k' => $v]`). While
+    /// every spread source is a known shape and every key is known, the
+    /// result is a shape: a spread renumbers integer keys to the next
+    /// index and keeps string keys, overwriting, as `array_merge` does.
+    /// After that it is a general array of every key and value: a list
+    /// while every source is list-safe and no item has a key, non-empty
+    /// once a plain item or a non-empty source appears.
     fn infer_spread_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
         let mut shape = Shape::sealed(Vec::new());
         let mut next_index = NextArrayIndex::default();
         let mut degraded = false;
+        let mut key_types: Vec<Type> = Vec::new();
         let mut elem_types: Vec<Type> = Vec::new();
         let mut list_safe = true;
         let mut known_non_empty = false;
@@ -231,6 +167,16 @@ impl<'a> Checker<'a> {
                 }
                 if degraded {
                     elem_types.push(value_ty.array_value_type().unwrap_or(Type::mixed()));
+                    // Spreading renumbers integer keys and keeps string
+                    // ones.
+                    let source_key = value_ty
+                        .array_key_type()
+                        .unwrap_or_else(Type::unknown_array_key);
+                    key_types.push(match source_key.is_int() {
+                        TrinaryLogic::Yes => Type::int(),
+                        TrinaryLogic::No => source_key,
+                        TrinaryLogic::Maybe => Type::union(Type::int(), source_key),
+                    });
                     // `is_list_like` alone (the original check) wrongly
                     // treats an *unmarked* int-keyed source
                     // (`array<int, int>`, list-ness never proven, only
@@ -257,35 +203,31 @@ impl<'a> Checker<'a> {
                     }
                 }
             } else {
-                if !degraded {
-                    match &item.key {
-                        None => {
-                            let Some(n) = next_index.take() else {
-                                return Type::never();
-                            };
-                            shape.set(ShapeField::new(ShapeKey::Int(n), value_ty.clone(), false));
+                let key = match &item.key {
+                    None => match next_index.take() {
+                        Some(n) => Ok(ShapeKey::Int(n)),
+                        None if degraded => Err(Type::int()),
+                        None => return Type::never(),
+                    },
+                    Some(k) => self.array_literal_key(k, locals),
+                };
+                match key {
+                    Ok(key) if !degraded => {
+                        if let ShapeKey::Int(n) = key {
+                            next_index.observe(n);
                         }
-                        Some(k) => match &k.kind {
-                            ExprKind::Literal(Literal::String(s)) => {
-                                let key = ShapeKey::from_name(&s.to_str_lossy());
-                                if let ShapeKey::Int(n) = key {
-                                    next_index.observe(n);
-                                }
-                                shape.set(ShapeField::new(key, value_ty.clone(), false));
-                            }
-                            ExprKind::Literal(Literal::Int(n)) => {
-                                next_index.observe(*n);
-                                shape.set(ShapeField::new(
-                                    ShapeKey::Int(*n),
-                                    value_ty.clone(),
-                                    false,
-                                ));
-                            }
-                            _ => degraded = true,
-                        },
+                        shape.set(ShapeField::new(key, value_ty.clone(), false));
+                    }
+                    key => {
+                        degraded = true;
+                        key_types.push(match key {
+                            Ok(ShapeKey::Int(_)) if item.key.is_none() => Type::int(),
+                            Ok(key) => key.to_type(),
+                            Err(ty) => ty,
+                        });
+                        elem_types.push(value_ty.clone());
                     }
                 }
-                elem_types.push(value_ty);
                 known_non_empty = true;
                 if item.key.is_some() {
                     list_safe = false;
@@ -296,12 +238,23 @@ impl<'a> Checker<'a> {
         if !degraded {
             return Type::array_shape(shape);
         }
-        elem_types.extend(shape.fields.into_iter().map(|f| f.ty));
+        for field in shape.fields {
+            key_types.push(field.key.to_type());
+            elem_types.push(field.ty);
+        }
+        let key_ty = if list_safe {
+            Type::unknown_array_key()
+        } else {
+            key_types
+                .into_iter()
+                .reduce(Type::union)
+                .unwrap_or_else(Type::unknown_array_key)
+        };
         let elem_ty = elem_types
             .into_iter()
             .reduce(Type::union)
             .unwrap_or(Type::mixed());
-        let mut members = vec![Type::array(Type::unknown_array_key(), elem_ty)];
+        let mut members = vec![Type::array(key_ty, elem_ty)];
         if list_safe {
             members.push(Type::accessory(AccessoryKind::ArrayList));
         }
@@ -730,4 +683,21 @@ fn array_key_cast_description(expr: &Expr, ty: &Type) -> Option<(String, String)
     }
     let key = ty.to_array_key();
     (key != *ty).then(|| (ty.to_string(), key.to_string()))
+}
+
+/// An array literal with a key that isn't known: every key and value it
+/// has, non-empty.
+fn general_array_literal_type(keys: Vec<Type>, values: Vec<Type>) -> Type {
+    let key = keys
+        .into_iter()
+        .reduce(Type::union)
+        .unwrap_or_else(Type::unknown_array_key);
+    let value = values
+        .into_iter()
+        .reduce(Type::union)
+        .unwrap_or_else(Type::mixed);
+    Type::intersection_of(vec![
+        Type::array(key, value),
+        Type::accessory(AccessoryKind::NonEmptyArray),
+    ])
 }

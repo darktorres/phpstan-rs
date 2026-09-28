@@ -5,7 +5,7 @@
                 $arr = [];
                 if (is_string($row['id'])) {
                     $arr[$row['id']] = $val;
-                    assertType('array<string, string>', $arr);
+                    assertType('array<(int|string), string>', $arr);
                 }
             }
         

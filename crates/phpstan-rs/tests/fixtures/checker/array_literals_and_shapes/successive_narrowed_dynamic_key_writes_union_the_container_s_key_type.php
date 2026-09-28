@@ -11,6 +11,6 @@
                 if (is_string($b['id'])) {
                     $arr[$b['id']] = $val;
                 }
-                assertType('array<string>', $arr);
+                assertType('array<(int|string), string>', $arr);
             }
         

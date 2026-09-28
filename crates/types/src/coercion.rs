@@ -180,10 +180,11 @@ impl Type {
 
     /// PHPStan's `toArrayKey()`: the key a value of this type becomes in
     /// an array - a float truncated to an int, `true`/`false` as `1`/`0`,
-    /// `null` as `''`, a canonical integer string as that int; any other
-    /// key type as it is.
+    /// `null` as `''`, a canonical integer string as that int. A string
+    /// not known to be one may still be, so it is an int or that string
+    /// (benevolently); a class name never is. Any other key type is kept.
     pub fn to_array_key(&self) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::FloatLiteral(f)) => Type::int_literal(php_float_to_int(*f)),
             Type(Repr::Float) => Type::int(),
             Type(Repr::True) => Type::int_literal(1),
@@ -202,8 +203,22 @@ impl Type {
                 .map(Type::to_array_key)
                 .reduce(Type::union)
                 .unwrap_or(Type::never()),
+            Type(Repr::BenevolentUnion(members)) => {
+                Type::benevolent_union_of(members.iter().map(Type::to_array_key).collect())
+            }
+            Type(Repr::ClassString(_)) => self.clone(),
+            _ if self.is_string().yes() => {
+                if self
+                    .is_refined_string(AccessoryKind::DecimalIntegerString)
+                    .yes()
+                {
+                    Type::int()
+                } else {
+                    Type::benevolent_union_of(vec![Type::int(), self.clone()])
+                }
+            }
             other => other.clone(),
-        }
+        })
     }
 
     /// `abs($x)`: PHPStan's `IntegerRangeType::toAbsoluteNumber()`,

@@ -125,6 +125,25 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         if members.contains(&Type::null()) {
             members.retain(|m| *m != Type::void());
         }
+        // A member a benevolent union co-member already holds, as it is or
+        // as a literal of it, adds nothing: `int|(int|string)` is
+        // `(int|string)`.
+        let benevolent: Vec<Vec<Type>> = members
+            .iter()
+            .filter_map(|m| match m {
+                Type(Repr::BenevolentUnion(inner)) => Some(inner.clone()),
+                _ => None,
+            })
+            .collect();
+        if !benevolent.is_empty() {
+            members.retain(|m| {
+                matches!(m, Type(Repr::BenevolentUnion(_)))
+                    || !benevolent
+                        .iter()
+                        .flatten()
+                        .any(|b| b == m || literal_base_type(m).is_some_and(|base| base == *b))
+            });
+        }
         // Drop a literal member whenever its exact base type is also present
         // in the same union - a ternary's two branches
         // (`is_string($x) ? $x : ''`) build exactly this shape,
