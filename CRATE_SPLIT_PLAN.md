@@ -1413,7 +1413,7 @@ Follow-ups:
   `V` is `mixed` today, so returning it under `@return V` is
   `return.type` "expected V, got mixed" (the rules oracle's
   `bug-10698.php`, `bug-14638.php` among the 24). Appendix H's template
-  causes are the nsrt side (294 mismatches): `new` infers the class's
+  causes are the nsrt side (272 mismatches): `new` infers the class's
   templates from its arguments (`generic-new-infer`, 59: `new WeakMap()`,
   `new ArrayObject([...])`, `new ReflectionClass($this)`), a callable
   argument infers from its parameters and return
