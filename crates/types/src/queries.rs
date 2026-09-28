@@ -33,6 +33,109 @@ impl Type {
         }
     }
 
+    /// Whether this is `void`.
+    pub fn is_void(&self) -> bool {
+        matches!(self, Type::Void)
+    }
+
+    /// Whether this is one case of an enum.
+    pub fn is_enum_case(&self) -> bool {
+        matches!(self, Type::EnumCase(..))
+    }
+
+    /// PHPStan's `getFiniteTypes()`: the values this type can only be, one
+    /// type each, when there are few enough to list; none otherwise.
+    pub fn finite_types(&self) -> Vec<Type> {
+        const LIMIT: i64 = 256;
+        match self {
+            Type::IntLiteral(_)
+            | Type::StringLiteral(_)
+            | Type::FloatLiteral(_)
+            | Type::True
+            | Type::False
+            | Type::Null
+            | Type::EnumCase(..) => vec![self.clone()],
+            Type::Bool => vec![Type::True, Type::False],
+            Type::IntRange(Some(min), Some(max)) if max - min < LIMIT => {
+                (*min..=*max).map(Type::IntLiteral).collect()
+            }
+            Type::Union(members) | Type::BenevolentUnion(members) => {
+                let mut all = Vec::new();
+                for member in members {
+                    let finite = member.finite_types();
+                    if finite.is_empty() {
+                        return Vec::new();
+                    }
+                    all.extend(finite);
+                }
+                all
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// PHPStan's `generalize(lessSpecific)`: literals and ranges widen to
+    /// their base type, an enum case to its class, a shape to the array
+    /// of its generalized keys and values (still a list, still non-empty,
+    /// when it was), and a union's members each.
+    pub fn generalize(&self) -> Type {
+        match self {
+            Type::IntLiteral(_) | Type::IntRange(..) => Type::Int,
+            Type::StringLiteral(_) => Type::String,
+            Type::FloatLiteral(_) => Type::Float,
+            Type::True | Type::False => Type::Bool,
+            Type::EnumCase(class, _) => Type::Object(class.clone(), Vec::new()),
+            Type::ArrayShape(shape) => {
+                let key = self
+                    .array_key_type()
+                    .map_or(Type::unknown_array_key(), |k| k.generalize());
+                let value = self
+                    .array_value_type()
+                    .map_or(Type::Mixed(false), |v| v.generalize());
+                let (key, value) = if value.is_never() {
+                    (Type::unknown_array_key(), Type::Mixed(false))
+                } else {
+                    (key, value)
+                };
+                let mut members = vec![Type::Array(Box::new(key), Box::new(value))];
+                if shape.is_list() && !shape.fields.is_empty() {
+                    members.push(Type::Accessory(AccessoryKind::ArrayList));
+                }
+                if shape.fields.iter().any(|f| !f.optional) {
+                    members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                }
+                crate::intersect_types(members)
+            }
+            Type::Union(members) | Type::BenevolentUnion(members) => members
+                .iter()
+                .map(Type::generalize)
+                .reduce(union_types)
+                .unwrap_or(Type::Never),
+            Type::Intersection(members) => crate::intersect_types(
+                members
+                    .iter()
+                    .filter(|m| {
+                        !matches!(
+                            m,
+                            Type::Accessory(
+                                AccessoryKind::NonEmptyString
+                                    | AccessoryKind::NonFalsyString
+                                    | AccessoryKind::LiteralString
+                                    | AccessoryKind::NumericString
+                                    | AccessoryKind::LowercaseString
+                                    | AccessoryKind::UppercaseString
+                                    | AccessoryKind::DecimalIntegerString
+                            ) | Type::HasOffsetValue(..)
+                                | Type::HasOffset(_)
+                        )
+                    })
+                    .map(Type::generalize)
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
     /// Whether this is `never`.
     pub fn is_never(&self) -> bool {
         matches!(self, Type::Never)

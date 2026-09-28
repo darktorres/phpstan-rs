@@ -11,45 +11,6 @@ use types::{self, Type};
 use crate::checker::predefined_constants::predefined_constant_type;
 use crate::registry::{Registry, resolve_names_in_type};
 
-/// A value's general type: every literal widened to its base type.
-fn generalize(ty: &Type) -> Type {
-    match ty {
-        Type::IntLiteral(_) | Type::IntRange(..) => Type::int(),
-        Type::StringLiteral(_) => Type::string(),
-        Type::FloatLiteral(_) => Type::float(),
-        Type::True | Type::False => Type::bool(),
-        Type::ArrayShape(shape) => {
-            let value = shape
-                .fields
-                .iter()
-                .map(|f| generalize(&f.ty))
-                .reduce(|a, b| {
-                    if a == b {
-                        a
-                    } else {
-                        Type::union_of(vec![a, b])
-                    }
-                })
-                .unwrap_or(Type::mixed());
-            Type::array(Type::unknown_array_key(), value)
-        }
-        Type::Union(members) => {
-            let mut out: Vec<Type> = Vec::new();
-            for m in members.iter().map(generalize) {
-                if !out.contains(&m) {
-                    out.push(m);
-                }
-            }
-            if out.len() == 1 {
-                out.remove(0)
-            } else {
-                Type::union_of(out)
-            }
-        }
-        other => other.clone(),
-    }
-}
-
 fn class_constant_key(class: &str, name: &str) -> String {
     format!(
         "{}::{name}",
@@ -126,14 +87,16 @@ impl ConstantResolver {
     /// configured as dynamic, given its declared type (if any).
     fn dynamic_global_constant_type(&self, name: &str, declared: Option<&Type>) -> Option<Type> {
         let configured = self.dynamic.get(name.trim_start_matches('\\'))?;
-        configured.clone().or_else(|| declared.map(generalize))
+        configured
+            .clone()
+            .or_else(|| declared.map(Type::generalize))
     }
 
     /// The type a read of class constant `owner::name`, declared as
     /// `declared`, sees.
     pub(crate) fn class_constant_type(&self, owner: &str, name: &str, declared: &Type) -> Type {
         match self.dynamic.get(&class_constant_key(owner, name)) {
-            Some(configured) => configured.clone().unwrap_or_else(|| generalize(declared)),
+            Some(configured) => configured.clone().unwrap_or_else(|| declared.generalize()),
             None => declared.clone(),
         }
     }

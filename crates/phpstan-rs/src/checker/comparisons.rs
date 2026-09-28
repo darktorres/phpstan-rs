@@ -16,35 +16,7 @@ use syntax::ast::Arg;
 use syntax::token::Span;
 use types::arithmetic::loose_compare_literals;
 
-use types::{AccessoryKind, Type, is_numeric_string_literal};
-
-/// A value with a finite set of possible values - a literal, `bool`,
-/// `null`, or an enum case.
-fn is_finite(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::IntLiteral(_)
-            | Type::StringLiteral(_)
-            | Type::FloatLiteral(_)
-            | Type::True
-            | Type::False
-            | Type::Bool
-            | Type::Null
-            | Type::EnumCase(..)
-    )
-}
-
-/// `Type::generalize(lessSpecific)` for a finite value.
-fn generalize(ty: &Type) -> Type {
-    match ty {
-        Type::IntLiteral(_) => Type::int(),
-        Type::StringLiteral(_) => Type::string(),
-        Type::FloatLiteral(_) => Type::float(),
-        Type::True | Type::False => Type::bool(),
-        Type::EnumCase(class, _) => Type::object(class.clone(), Vec::new()),
-        other => other.clone(),
-    }
-}
+use types::{Type, is_numeric_string_literal};
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_impossible_haystack_values(
@@ -68,27 +40,13 @@ impl<'a> Checker<'a> {
         }
         let needle = self.infer_expr(&args[needle_index].value, locals);
         let haystack = self.infer_expr(&args[haystack_index].value, locals);
-        let shapes: Vec<&types::Shape> = match &haystack {
-            Type::ArrayShape(shape) => vec![shape],
-            Type::Union(members) => {
-                let shapes: Vec<_> = members
-                    .iter()
-                    .filter_map(|m| match m {
-                        Type::ArrayShape(shape) => Some(shape),
-                        _ => None,
-                    })
-                    .collect();
-                if shapes.len() != members.len() {
-                    return;
-                }
-                shapes
-            }
-            _ => return,
-        };
+        let shapes = haystack.constant_arrays();
+        if shapes.is_empty() {
+            return;
+        }
         let strict = match args.get(2).map(|a| self.infer_expr(&a.value, locals)) {
-            None | Some(Type::False) => Some(false),
-            Some(Type::True) => Some(true),
-            Some(_) => None,
+            None => Some(false),
+            Some(ty) => ty.bool_literal_value(),
         };
         let can_never_match = |this: &Self, value: &Type| -> bool {
             let never_identical = || this.registry.identical_result(&needle, value) == Some(false);
@@ -112,10 +70,10 @@ impl<'a> Checker<'a> {
                     any_possible_match = true;
                     continue;
                 }
-                if !is_finite(value) || dead.iter().any(|(t, _)| t == value) {
+                if value.finite_types().is_empty() || dead.iter().any(|(t, _)| t == value) {
                     continue;
                 }
-                let another_value_of_needle = self.accepts(&generalize(value), &needle).yes();
+                let another_value_of_needle = self.accepts(&value.generalize(), &needle).yes();
                 dead.push((value.clone(), another_value_of_needle));
             }
         }
@@ -152,10 +110,11 @@ impl<'a> Checker<'a> {
     ) {
         let mut saw_void = false;
         for result in arms.iter().map(|arm| &arm.body) {
-            match self.infer_expr(result, locals) {
-                Type::Void => saw_void = true,
-                Type::Never => {}
-                _ => return,
+            let ty = self.infer_expr(result, locals);
+            if ty.is_void() {
+                saw_void = true;
+            } else if !ty.is_never() {
+                return;
             }
         }
         if saw_void {
@@ -187,37 +146,42 @@ enum LooseKind {
     Object(String),
 }
 
+/// The kinds of `ty`'s members into `out`; `false` when some member is
+/// of no kind loose comparison is decided for.
 fn loose_kinds(ty: &Type, out: &mut Vec<LooseKind>) -> bool {
-    let kind = match ty {
-        Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => LooseKind::Int,
-        Type::Float | Type::FloatLiteral(_) => LooseKind::Float,
-        Type::StringLiteral(s) if s.as_str().is_some_and(is_numeric_string_literal) => {
-            LooseKind::NumericString
-        }
-        Type::StringLiteral(_) => LooseKind::NonNumericString,
-        Type::String => LooseKind::String,
-        Type::Bool | Type::True | Type::False => LooseKind::Bool,
-        Type::Null => LooseKind::Null,
-        Type::Array(..) | Type::ArrayShape(_) => LooseKind::Array,
-        Type::EnumCase(..) => LooseKind::Enum,
-        Type::Object(class, _) => LooseKind::Object(class.clone().to_string()),
-        Type::Union(members) => return members.iter().all(|m| loose_kinds(m, out)),
-        Type::Intersection(members) => {
-            if members
-                .iter()
-                .any(|m| matches!(m, Type::Accessory(AccessoryKind::NumericString)))
-            {
+    for member in ty.union_members() {
+        let kind = if member.is_int().yes() {
+            LooseKind::Int
+        } else if member.is_float().yes() {
+            LooseKind::Float
+        } else if let [literal] = member.constant_strings()[..] {
+            if is_numeric_string_literal(literal) {
                 LooseKind::NumericString
-            } else if let Some(base) = members.iter().find(|m| !m.is_accessory()) {
-                return loose_kinds(base, out);
             } else {
-                return false;
+                LooseKind::NonNumericString
             }
+        } else if member.is_numeric_string().yes() {
+            LooseKind::NumericString
+        } else if member.is_string().yes() {
+            LooseKind::String
+        } else if member.is_bool().yes() {
+            LooseKind::Bool
+        } else if member.is_null().yes() {
+            LooseKind::Null
+        } else if member.is_array().yes() {
+            LooseKind::Array
+        } else if member.is_enum_case() {
+            LooseKind::Enum
+        } else if member.is_object().yes()
+            && let Some(class) = member.object_class_names().first()
+        {
+            LooseKind::Object(class.to_string())
+        } else {
+            return false;
+        };
+        if !out.contains(&kind) {
+            out.push(kind);
         }
-        _ => return false,
-    };
-    if !out.contains(&kind) {
-        out.push(kind);
     }
     true
 }
@@ -289,61 +253,36 @@ impl<'a> Checker<'a> {
             return;
         };
         if let Some(strict) = bound(2)
-            && self.infer_expr(&strict.value, locals) != Type::False
+            && self.infer_expr(&strict.value, locals).bool_literal_value() != Some(false)
         {
             return;
         }
         let needle_ty = self.infer_expr(&needle.value, locals);
         let haystack_ty = self.infer_expr(&haystack.value, locals);
-        let mut values: Vec<Type> = Vec::new();
-        if !haystack_value_types(&haystack_ty, &mut values) {
+        let Some(values) = haystack_ty.array_value_type() else {
             return;
-        }
+        };
         let mut needle_kinds = Vec::new();
         if !loose_kinds(&needle_ty, &mut needle_kinds) {
             return;
         }
-        for value in &values {
-            let mut value_kinds = Vec::new();
-            if !loose_kinds(value, &mut value_kinds) {
-                continue;
-            }
-            let hazard = needle_kinds.iter().any(|n| {
-                value_kinds
-                    .iter()
-                    .any(|v| self.loose_comparison_differs(n, v))
-            });
-            if hazard {
-                self.report(format!(
-                        "Loose comparison in {function}() between needle {needle_ty} and haystack value {value} can match values that are not identical; pass true as the strict argument."
-                    ),
-                    span,
-                    0,
-                    "function.looseComparison",
-                );
-                return;
-            }
+        let mut value_kinds = Vec::new();
+        if !loose_kinds(&values, &mut value_kinds) {
+            return;
         }
-    }
-}
-
-/// The value types an array type holds; `false` when `ty` isn't a known
-/// array.
-fn haystack_value_types(ty: &Type, out: &mut Vec<Type>) -> bool {
-    match ty {
-        Type::Array(_, value) => {
-            out.push((**value).clone());
-            true
+        let hazard = needle_kinds.iter().any(|n| {
+            value_kinds
+                .iter()
+                .any(|v| self.loose_comparison_differs(n, v))
+        });
+        if hazard {
+            self.report(format!(
+                    "Loose comparison in {function}() between needle {needle_ty} and haystack value {values} can match values that are not identical; pass true as the strict argument."
+                ),
+                span,
+                0,
+                "function.looseComparison",
+            );
         }
-        Type::ArrayShape(shape) => {
-            out.extend(shape.fields.iter().map(|f| f.ty.clone()));
-            true
-        }
-        Type::Union(members) => members.iter().all(|m| haystack_value_types(m, out)),
-        Type::Intersection(members) => members
-            .iter()
-            .find(|m| matches!(m, Type::Array(..) | Type::ArrayShape(_)))
-            .is_some_and(|base| haystack_value_types(base, out)),
-        _ => false,
     }
 }

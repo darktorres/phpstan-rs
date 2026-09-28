@@ -116,3 +116,28 @@ fn an_all_optional_shape_isnt_surely_non_empty() {
         TrinaryLogic::Yes
     );
 }
+
+#[test]
+fn generalize_widens_literals_cases_and_shapes() {
+    use crate::{Shape, ShapeField, ShapeKey};
+    assert_eq!(Type::int_range(Some(1), Some(3)).generalize(), Type::int());
+    assert_eq!(
+        Type::enum_case("E".into(), "A".into()).generalize(),
+        Type::object("E".into(), Vec::new())
+    );
+    let tuple = Type::array_shape(Shape::sealed(vec![
+        ShapeField::new(ShapeKey::Int(0), Type::string_literal("a".into()), false),
+        ShapeField::new(ShapeKey::Int(1), Type::int_literal(1), false),
+    ]));
+    assert_eq!(tuple.generalize().to_string(), "non-empty-list<string|int>");
+}
+
+#[test]
+fn finite_types_lists_a_bool_and_a_small_range() {
+    assert_eq!(
+        Type::bool().finite_types(),
+        vec![Type::bool_literal(true), Type::bool_literal(false)]
+    );
+    assert_eq!(Type::int_range(Some(1), Some(2)).finite_types().len(), 2);
+    assert!(Type::int().finite_types().is_empty());
+}
