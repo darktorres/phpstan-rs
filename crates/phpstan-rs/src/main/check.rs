@@ -1,20 +1,16 @@
 use std::fs;
 use std::path::PathBuf;
 
-use lexer::Lexer;
-use parser::Parser;
 use phpstan_rs::project;
 use rayon::prelude::*;
-use syntax::{lexer, parser};
+use syntax::name::Interner;
 
-/// `phpstan-rs check <file-or-dir>...` - lex+parse every .php file under
-/// the given paths in a single process (no per-file fork/exec), split
-/// across the worker pool, report a pass/fail summary. Panics are the
-/// parser's only error-reporting mechanism today, so each file's lex+parse
-/// runs under catch_unwind with the default panic hook silenced for the
-/// batch, to avoid both a crashed whole run and thousands of lines of
-/// unwind noise (the hook is process-global, so this also covers panics
-/// from the worker threads, not just the main one).
+/// `phpstan-rs check <file-or-dir>...` - parse every .php file under the
+/// given paths in a single process (no per-file fork/exec), split across
+/// the worker pool, report a pass/fail summary. Each file's parse runs
+/// under catch_unwind with the default panic hook silenced for the batch,
+/// so a bug that panics fails that file rather than the run (the hook is
+/// process-global, so this also covers the worker threads).
 pub(crate) fn run_check(paths: &[PathBuf]) {
     let mut files = Vec::new();
     for p in paths {
@@ -45,13 +41,9 @@ pub(crate) fn run_check(paths: &[PathBuf]) {
 pub(crate) fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
     let mut failures = Vec::new();
     for path in chunk {
-        // PHP source isn't required to be UTF-8 - identifiers and string
-        // literals are just opaque byte sequences to the real engine, so
-        // e.g. a class literally named a single Latin-1 byte (real,
-        // observed in the wild: symfony/cache's ValueWrapper.php) is valid
-        // PHP. read_to_string's strict UTF-8 requirement would reject such
-        // a file outright; a lossy conversion parses it instead, at the
-        // cost of that one identifier's exact byte content.
+        // PHP source isn't required to be UTF-8 (symfony/cache's
+        // ValueWrapper.php names a class with a single Latin-1 byte), so
+        // the file is parsed as bytes.
         let bytes = match fs::read(path) {
             Ok(b) => b,
             Err(e) => {
@@ -59,14 +51,9 @@ pub(crate) fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
                 continue;
             }
         };
-        let source = String::from_utf8_lossy(&bytes).into_owned();
-        // The parser itself no longer panics on ordinary malformed syntax
-        // (it returns a ParseError) - the catch_unwind here now only
-        // guards against the lexer's own, separate, still-panic-based
-        // error handling (out of scope for this parser-only conversion).
         let result = std::panic::catch_unwind(|| {
-            let (tokens, _, warnings) = Lexer::new(&source).tokenize_with_comments();
-            for w in &warnings {
+            let parsed = syntax::parse(&bytes, Interner::global())?;
+            for w in &parsed.warnings {
                 eprintln!(
                     "warning: {}:{}:{}: {}",
                     path.display(),
@@ -75,7 +62,7 @@ pub(crate) fn check_chunk(chunk: &[PathBuf]) -> Vec<(PathBuf, String)> {
                     w.message
                 );
             }
-            Parser::new(tokens).parse_program()
+            Ok::<_, syntax::parser::ParseError>(())
         });
         match result {
             Ok(Ok(_)) => {}

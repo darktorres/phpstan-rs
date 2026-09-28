@@ -47,8 +47,7 @@ use rayon::prelude::*;
 use crate::registry::{
     ClassReflection, FunctionReflection, Origin, Registry, register_global_constant,
 };
-use syntax::lexer::Lexer;
-use syntax::parser::Parser;
+use syntax::name::Interner;
 use types::{self, AccessoryKind, Shape, TemplateParam, Type};
 
 use stub_sources::{
@@ -744,10 +743,10 @@ fn patch_spl_iterator_templates(classes: &mut [(Arc<str>, ClassReflection)]) {
 /// names, since the type may refer to them.
 fn patch_phpstan_stub_classes(classes: &mut [(Arc<str>, ClassReflection)]) {
     for source in PHPSTAN_STUB_SOURCES {
-        let tokens = Lexer::new(source).tokenize_with_spans();
-        let Ok(mut program) = Parser::new(tokens).parse_program() else {
+        let Ok(parsed) = syntax::parse(source.as_bytes(), Interner::global()) else {
             continue;
         };
+        let mut program = parsed.stmts;
         crate::stub_attributes::apply_stub_attributes(&mut program);
         let registry = Registry::index_and_flatten(&program, &Origin::Unknown);
         for (name, stub) in registry.classes {
@@ -923,12 +922,11 @@ struct StubFileDeclarations {
     constants: Vec<(Arc<str>, Type)>,
 }
 
-/// Lexes, parses and indexes one embedded stub file, from `origin`.
+/// Parses and indexes one embedded stub file, from `origin`.
 fn index_stub_file(source: &str, origin: &Origin) -> StubFileDeclarations {
-    let tokens = Lexer::new(source).tokenize_with_spans();
-    let mut program = Parser::new(tokens)
-        .parse_program()
-        .expect("vendored phpstorm-stubs source failed to parse");
+    let mut program = syntax::parse(source.as_bytes(), Interner::global())
+        .expect("vendored phpstorm-stubs source failed to parse")
+        .stmts;
     crate::stub_attributes::apply_stub_attributes(&mut program);
     let registry = Registry::index_and_flatten(&program, origin);
     StubFileDeclarations {

@@ -273,6 +273,21 @@ impl<'a> Walker<'a> {
                 self.arguments(args, e.span);
             }
             ExprKind::Eval(_) => self.ban(BannedConstruct::Eval, e.span, "eval()".to_string()),
+            // Reported at the `@` itself.
+            ExprKind::ErrorSuppress(_) => {
+                let at = Span {
+                    start: e.span.start,
+                    end: syntax::token::Position {
+                        line: e.span.start.line,
+                        col: e.span.start.col + 1,
+                    },
+                };
+                self.ban(
+                    BannedConstruct::ErrorSuppression,
+                    at,
+                    "The @ error-suppression operator".to_string(),
+                );
+            }
             ExprKind::Isset(_) => self.ban(BannedConstruct::Isset, e.span, "isset()".to_string()),
             ExprKind::Empty(_) => self.ban(BannedConstruct::Empty, e.span, "empty()".to_string()),
             ExprKind::Exit(kind, arg) => {
@@ -446,13 +461,6 @@ impl Project {
                 out: Vec::new(),
             };
             walker.stmts(&file.ast);
-            for span in &file.ignores.error_suppressions {
-                walker.ban(
-                    BannedConstruct::ErrorSuppression,
-                    *span,
-                    "The @ error-suppression operator".to_string(),
-                );
-            }
             let mut ignore_lines: Vec<u32> = file
                 .ignores
                 .lines

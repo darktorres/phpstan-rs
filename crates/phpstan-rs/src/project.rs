@@ -16,10 +16,10 @@ use crate::registry::stubs;
 use crate::registry::{BodySource, FileBodies, Origin, Provenance, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
 use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
-use syntax::lexer::{LexWarning, Lexer};
+use syntax::lexer::LexWarning;
 use syntax::name::Interner;
 use syntax::name_resolution::NameContext;
-use syntax::parser::{ParseError, Parser};
+use syntax::parser::ParseError;
 use syntax::token::Span;
 use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 
@@ -1999,20 +1999,15 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
     ranges
 }
 
-/// Parses `source`, reading its inline ignore comments from the same
-/// lexing.
+/// Parses `source`, with its inline ignore comments.
 type Parsed = (Vec<Stmt>, ignore_comments::IgnoreComments, Vec<LexWarning>);
 
 fn parse_with_ignores(source: &[u8], interner: &Arc<Interner>) -> Result<Parsed, ParseError> {
-    let (tokens, comments, warnings) = Lexer::from_bytes(source)
-        .with_interner(interner)
-        .tokenize_with_comments();
-    let ignores = ignore_comments::scan_tokens(&tokens, &comments);
-    let mut ast = Parser::new(tokens)
-        .with_interner(interner)
-        .parse_program()?;
+    let parsed = syntax::parse(source, interner)?;
+    let ignores = ignore_comments::scan_parsed(&parsed);
+    let mut ast = parsed.stmts;
     crate::stub_attributes::apply_stub_attributes(&mut ast);
-    Ok((ast, ignores, warnings))
+    Ok((ast, ignores, parsed.warnings))
 }
 
 /// Everything about loading one file that's pure - parsing, plus every
@@ -2074,12 +2069,7 @@ pub struct ParsedFile {
 
 /// Computes a `ParsedFile` from `source` - see that type's own doc
 /// comment. Safe to call concurrently for many files at once (no shared
-/// state touched at all); still runs under the lexer's own, separate,
-/// still-panic-based error handling (unlike the parser, which no longer
-/// panics on ordinary malformed syntax - see `main/check.rs`'s identical
-/// note), so a caller parsing many files in parallel should still wrap
-/// each call in `catch_unwind`, the same precaution `check.rs`'s own
-/// lex+parse worker threads already take. `path` is used only to tag
+/// state touched at all). `path` is used only to tag
 /// `duplicate_fn_sites`'s own records (see `ParsedFile`'s doc comment on
 /// that field) - never read to make any decision, so it's fine that a
 /// caller building many `ParsedFile`s concurrently passes a different

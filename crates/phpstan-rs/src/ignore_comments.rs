@@ -9,7 +9,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use syntax::token::{Position, Span, Token};
+use syntax::token::Position;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct IgnoreComments {
@@ -19,16 +19,14 @@ pub(crate) struct IgnoreComments {
     pub(crate) identifiers: FxHashMap<u32, Vec<String>>,
     /// `(line, message)` for each malformed identifier list.
     pub(crate) parse_errors: Vec<(u32, String)>,
-    /// Where each `@` error-suppression operator is (the parser drops
-    /// the operator itself).
-    pub(crate) error_suppressions: Vec<Span>,
 }
 
-/// Lexes `source` and scans its comments.
+/// Parses `source` and scans its comments.
 #[cfg(test)]
 pub(crate) fn scan(source: &str) -> IgnoreComments {
-    let (tokens, comments, _) = syntax::lexer::Lexer::new(source).tokenize_with_comments();
-    scan_tokens(&tokens, &comments)
+    let parsed = syntax::parse(source.as_bytes(), syntax::name::Interner::global())
+        .expect("the source parses");
+    scan_parsed(&parsed)
 }
 
 enum Event<'t> {
@@ -44,48 +42,28 @@ fn position_key(p: Position) -> (u32, u32) {
     (p.line, p.col)
 }
 
-/// The scan over an already-lexed file: its tokens and its non-doc
-/// comments (doc comments are among the tokens).
-pub(crate) fn scan_tokens(
-    tokens: &[(Token, Span, Option<String>)],
-    comments: &[(Position, String)],
-) -> IgnoreComments {
-    let mut events: Vec<((u32, u32), Event)> = Vec::with_capacity(tokens.len() + comments.len());
-    let mut error_suppressions = Vec::new();
-    for (token, span, _) in tokens {
-        match token {
-            Token::Eof => {}
-            Token::At => {
-                error_suppressions.push(*span);
-                events.push((position_key(span.start), Event::Code(span.start.line)));
-            }
-            Token::DocComment(text) => events.push((
-                position_key(span.start),
-                Event::Comment {
-                    text,
-                    line: span.start.line,
-                    is_doc: true,
-                },
-            )),
-            _ => events.push((position_key(span.start), Event::Code(span.start.line))),
-        }
+/// The scan over a parsed file's comments. A pending comment waits for
+/// the next code, and a comment after code on its line belongs to that
+/// line, so each line's first code token is all of the code it needs.
+pub(crate) fn scan_parsed(parsed: &syntax::ParsedFile) -> IgnoreComments {
+    let mut events: Vec<((u32, u32), Event)> =
+        Vec::with_capacity(parsed.code_line_starts.len() + parsed.comments.len());
+    for start in &parsed.code_line_starts {
+        events.push((position_key(*start), Event::Code(start.line)));
     }
-    for (start, text) in comments {
+    for comment in &parsed.comments {
         events.push((
-            position_key(*start),
+            position_key(comment.start),
             Event::Comment {
-                text,
-                line: start.line,
-                is_doc: false,
+                text: &comment.text,
+                line: comment.start.line,
+                is_doc: comment.is_doc,
             },
         ));
     }
     events.sort_by_key(|(key, _)| *key);
 
-    let mut out = IgnoreComments {
-        error_suppressions,
-        ..IgnoreComments::default()
-    };
+    let mut out = IgnoreComments::default();
     let mut previous_code_line: Option<u32> = None;
     // (comment text, marker offset, error base line, comment's last line)
     let mut pending: Option<(&str, usize, i64, u32)> = None;

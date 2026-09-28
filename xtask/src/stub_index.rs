@@ -9,8 +9,7 @@ use std::fmt::Write as _;
 use syntax::ast::{
     Arg, Attribute, ClassKind, Expr, ExprKind, Literal, ResolvedName, Stmt, StmtKind,
 };
-use syntax::lexer::Lexer;
-use syntax::parser::Parser;
+use syntax::name::Interner;
 
 /// One embedded corpus: its tag in the index, and each file's path, source
 /// and (for phpstorm-stubs) extension.
@@ -35,11 +34,10 @@ pub(crate) fn generate(corpora: &[Corpus]) -> String {
     let mut entries: BTreeMap<(&'static str, String), Entry> = BTreeMap::new();
     for corpus in corpora {
         for (path, source, extension) in &corpus.files {
-            let tokens = Lexer::new(source).tokenize_with_spans();
-            let Ok(mut stmts) = Parser::new(tokens).parse_program() else {
+            let Ok(parsed) = syntax::parse(source.as_bytes(), Interner::global()) else {
                 continue;
             };
-            syntax::name_resolution::resolve_names(&mut stmts);
+            let stmts = parsed.stmts;
             let file = format!("{}:{path}", corpus.tag);
             let mut walk = Walk {
                 file: &file,

@@ -2,12 +2,10 @@ use std::fs;
 use std::path::Path;
 
 use checker::Checker;
-use lexer::Lexer;
-use parser::Parser;
 use phpstan_rs::registry::stubs;
 use phpstan_rs::{checker, output, registry};
 use registry::{Registry, format_signature};
-use syntax::{lexer, parser};
+use syntax::name::Interner;
 
 const SAMPLE: &str = r#"<?php
 
@@ -54,21 +52,15 @@ echo sum([1, 2, 3]) ?? 0;
 
 pub(crate) fn run_demo(file: Option<&Path>) {
     let source = if let Some(path) = file {
-        // See check_chunk's comment on why this is a lossy conversion, not
-        // a strict one.
-        let bytes =
-            fs::read(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-        String::from_utf8_lossy(&bytes).into_owned()
+        fs::read(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
     } else {
         println!("(no file given, parsing built-in sample)\n");
-        SAMPLE.to_string()
+        SAMPLE.as_bytes().to_vec()
     };
 
-    let tokens = Lexer::new(&source).tokenize_with_spans();
-    println!("-- {} tokens --", tokens.len());
-
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse_program().unwrap();
+    let parsed = syntax::parse(&source, Interner::global()).unwrap();
+    println!("-- {} comments --", parsed.comments.len());
+    let program = parsed.stmts;
 
     println!("-- {} top-level statements --", program.len());
     for stmt in &program {

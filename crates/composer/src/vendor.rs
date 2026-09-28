@@ -25,8 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
-use syntax::lexer::Lexer;
-use syntax::parser::Parser;
+use syntax::name::Interner;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct VendorContext {
@@ -159,9 +158,9 @@ fn find_class_decl(stmts: &[Stmt]) -> Option<&ClassDecl> {
 /// gives that for free, no `catch_unwind` needed.
 fn parse_generated_file(path: &Path) -> Option<Vec<Stmt>> {
     let bytes = std::fs::read(path).ok()?;
-    let source = String::from_utf8_lossy(&bytes).into_owned();
-    let tokens = Lexer::new(&source).tokenize_with_spans();
-    Parser::new(tokens).parse_program().ok()
+    syntax::parse(&bytes, Interner::global())
+        .ok()
+        .map(|parsed| parsed.stmts)
 }
 
 fn collect_files(

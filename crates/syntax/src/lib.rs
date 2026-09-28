@@ -9,8 +9,11 @@ pub mod intern;
 pub mod lexer;
 pub mod name;
 pub mod name_resolution;
+mod parse;
 pub mod parser;
 pub mod php_string;
 pub mod printer;
 pub mod token;
 pub mod visit;
+
+pub use parse::{Comment, ParsedFile, parse};
