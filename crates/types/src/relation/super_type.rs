@@ -20,7 +20,7 @@ impl Relation<'_> {
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         match (sup, sub) {
             (Type(Repr::Error), _) => TrinaryLogic::Yes,
-            (_, Type(Repr::Error)) => self.is_super_type_of(sup, &Type(Repr::Mixed(false))),
+            (_, Type(Repr::Error)) => self.is_super_type_of(sup, &Type::mixed()),
             (Type(Repr::Mixed(_)), _) | (_, Type(Repr::Never)) => TrinaryLogic::Yes,
             // `NAN` is itself, as `ConstantFloatType::equals()` has it.
             (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b)))
@@ -103,8 +103,8 @@ impl Relation<'_> {
             // PHPDoc `list<T>` keys on `int`, one built at runtime on the
             // unknown array key, and both are int-keyed.
             (Type(Repr::Intersection(sup_members)), Type(Repr::Intersection(sub_members)))
-                if sup_members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList)))
-                    && sub_members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
+                if sup_members.contains(&Type::accessory(AccessoryKind::ArrayList))
+                    && sub_members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
             {
                 let elem_of = |members: &[Type]| {
                     members.iter().find_map(|m| match m {
@@ -113,7 +113,7 @@ impl Relation<'_> {
                     })
                 };
                 let non_empty = |members: &[Type]| {
-                    members.contains(&Type(Repr::Accessory(AccessoryKind::NonEmptyArray)))
+                    members.contains(&Type::accessory(AccessoryKind::NonEmptyArray))
                 };
                 match (elem_of(sup_members), elem_of(sub_members)) {
                     (Some(sup_elem), Some(sub_elem)) => {
@@ -357,10 +357,7 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         AccessoryKind::NonEmptyArray | AccessoryKind::ArrayList => {
             !is_array
                 && scalars_disjoint(
-                    &Type(Repr::Array(
-                        Box::new(Type(Repr::Mixed(false))),
-                        Box::new(Type(Repr::Mixed(false))),
-                    )),
+                    &Type::array(Type(Repr::Mixed(false)), Type(Repr::Mixed(false))),
                     sub,
                 )
         }
@@ -371,7 +368,7 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         | AccessoryKind::LowercaseString
         | AccessoryKind::UppercaseString
         | AccessoryKind::DecimalIntegerString => {
-            !is_string && scalars_disjoint(&Type(Repr::String), sub)
+            !is_string && scalars_disjoint(&Type::string(), sub)
         }
     }
 }

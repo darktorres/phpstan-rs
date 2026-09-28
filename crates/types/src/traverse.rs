@@ -11,19 +11,16 @@ impl Type {
     /// a leaf is returned unchanged. `f` decides whether to recurse.
     pub fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
         match self {
-            Type(Repr::Array(k, v)) => Type(Repr::Array(Box::new(f(k)), Box::new(f(v)))),
-            Type(Repr::ClassString(inner)) => Type(Repr::ClassString(Box::new(f(inner)))),
-            Type(Repr::ArrayShape(shape)) => Type(Repr::ArrayShape(shape.map_types(f))),
-            Type(Repr::ObjectShape(shape)) => Type(Repr::ObjectShape(shape.map_types(f))),
-            Type(Repr::Object(name, args)) => Type(Repr::Object(
-                name.clone(),
-                args.iter().map(&mut *f).collect(),
-            )),
-            Type(Repr::SelfRef(args)) => Type(Repr::SelfRef(args.iter().map(&mut *f).collect())),
-            Type(Repr::StaticRef(args)) => {
-                Type(Repr::StaticRef(args.iter().map(&mut *f).collect()))
+            Type(Repr::Array(k, v)) => Type::array(f(k), f(v)),
+            Type(Repr::ClassString(inner)) => Type::class_string(f(inner)),
+            Type(Repr::ArrayShape(shape)) => Type::array_shape(shape.map_types(f)),
+            Type(Repr::ObjectShape(shape)) => Type::object_shape(shape.map_types(f)),
+            Type(Repr::Object(name, args)) => {
+                Type::object(name.clone(), args.iter().map(&mut *f).collect())
             }
-            Type(Repr::Callable(Some(sig))) => Type(Repr::Callable(Some(Arc::new(CallableSig {
+            Type(Repr::SelfRef(args)) => Type::self_ref(args.iter().map(&mut *f).collect()),
+            Type(Repr::StaticRef(args)) => Type::static_ref(args.iter().map(&mut *f).collect()),
+            Type(Repr::Callable(Some(sig))) => Type::callable(Some(Arc::new(CallableSig {
                 params: sig
                     .params
                     .iter()
@@ -34,10 +31,8 @@ impl Type {
                     .collect(),
                 return_type: Box::new(f(&sig.return_type)),
                 templates: sig.templates.clone(),
-            })))),
-            Type(Repr::VarianceArg(variance, inner)) => {
-                Type(Repr::VarianceArg(*variance, Box::new(f(inner))))
-            }
+            }))),
+            Type(Repr::VarianceArg(variance, inner)) => Type::variance_arg(*variance, f(inner)),
             Type(Repr::Union(ms)) => Type(Repr::Union(ms.iter().map(&mut *f).collect())),
             Type(Repr::BenevolentUnion(ms)) => {
                 Type(Repr::BenevolentUnion(ms.iter().map(&mut *f).collect()))
@@ -45,17 +40,13 @@ impl Type {
             Type(Repr::Intersection(ms)) => {
                 Type(Repr::Intersection(ms.iter().map(&mut *f).collect()))
             }
-            Type(Repr::HasOffsetValue(key, inner)) => {
-                Type(Repr::HasOffsetValue(key.clone(), Box::new(f(inner))))
-            }
+            Type(Repr::HasOffsetValue(key, inner)) => Type::has_offset_value(key.clone(), f(inner)),
             Type(Repr::ReflectedMember(owner, member)) => {
-                Type(Repr::ReflectedMember(Box::new(f(owner)), member.clone()))
+                Type::reflected_member(f(owner), member.clone())
             }
-            Type(Repr::ValueOf(inner)) => Type(Repr::ValueOf(Box::new(f(inner)))),
-            Type(Repr::KeyOf(inner)) => Type(Repr::KeyOf(Box::new(f(inner)))),
-            Type(Repr::OffsetAccess(base, key)) => {
-                Type(Repr::OffsetAccess(Box::new(f(base)), Box::new(f(key))))
-            }
+            Type(Repr::ValueOf(inner)) => Type::value_of(f(inner)),
+            Type(Repr::KeyOf(inner)) => Type::key_of(f(inner)),
+            Type(Repr::OffsetAccess(base, key)) => Type::offset_access(f(base), f(key)),
             Type(Repr::ClassConstant { class, pattern }) => Type(Repr::ClassConstant {
                 class: Box::new(f(class)),
                 pattern: pattern.clone(),

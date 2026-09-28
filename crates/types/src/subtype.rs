@@ -48,15 +48,15 @@ impl Shape {
         let mut key_types: Vec<Type> = Vec::new();
         for field in &self.fields {
             let kt = match field.key {
-                ShapeKey::Int(n) => Type(Repr::IntLiteral(n)),
-                ShapeKey::Str(_) => Type(Repr::String),
+                ShapeKey::Int(n) => Type::int_literal(n),
+                ShapeKey::Str(_) => Type::string(),
             };
             if !key_types.contains(&kt) {
                 key_types.push(kt);
             }
         }
         match key_types.len() {
-            0 => Type(Repr::Never),
+            0 => Type::never(),
             1 => key_types.into_iter().next().expect("len checked above"),
             _ => Type(Repr::Union(key_types)),
         }
@@ -84,8 +84,8 @@ impl Type {
         }
         match (self, b) {
             (Type(Repr::Intersection(ma)), Type(Repr::Intersection(mb)))
-                if ma.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList)))
-                    && mb.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
+                if ma.contains(&Type::accessory(AccessoryKind::ArrayList))
+                    && mb.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
             {
                 let keyless = |members: &[Type]| -> Vec<Type> {
                     members
@@ -332,12 +332,12 @@ impl Relation<'_> {
                     bindings
                         .get(name.as_ref())
                         .cloned()
-                        .unwrap_or(Type(Repr::Mixed(false)))
+                        .unwrap_or(Type::mixed())
                 })
                 .collect()
         };
         (0..class_b.templates.len()).all(|i| {
-            let b_i = args_b.get(i).cloned().unwrap_or(Type(Repr::Mixed(false)));
+            let b_i = args_b.get(i).cloned().unwrap_or(Type::mixed());
             let Some(variance) = crate::effective_slot_variance(self.hierarchy, b, i, &b_i) else {
                 return true;
             };
@@ -347,14 +347,11 @@ impl Relation<'_> {
             if matches!(b_i, Type(Repr::Mixed(_))) {
                 return true;
             }
-            let a_i = effective_args_a
-                .get(i)
-                .cloned()
-                .unwrap_or(Type(Repr::Mixed(false)));
+            let a_i = effective_args_a.get(i).cloned().unwrap_or(Type::mixed());
             let a_i = a_i
                 .without_call_site_variance()
                 .cloned()
-                .unwrap_or(Type(Repr::Mixed(false)));
+                .unwrap_or(Type::mixed());
             match variance {
                 Variance::Covariant => self.is_super_type_of(b_i, &a_i).yes(),
                 Variance::Contravariant => self.is_super_type_of(&a_i, b_i).yes(),
@@ -419,7 +416,7 @@ pub(crate) fn callable_sig_is_subtype(
     };
     // A `void` return accepts `null` (`VoidType::accepts`).
     let returns_fit = mixed_as_any(&a.return_type, &b.return_type)
-        || (*b.return_type == Type(Repr::Void) && *a.return_type == Type(Repr::Null));
+        || (*b.return_type == Type::void() && *a.return_type == Type::null());
     if !returns_fit {
         return false;
     }

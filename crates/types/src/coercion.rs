@@ -23,15 +23,15 @@ impl Type {
             Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => {
                 Some(self.clone())
             }
-            Type(Repr::True) => Some(Type(Repr::IntLiteral(1))),
-            Type(Repr::False) | Type(Repr::Null) => Some(Type(Repr::IntLiteral(0))),
-            Type(Repr::Bool) => Some(Type(Repr::IntRange(Some(0), Some(1)))),
+            Type(Repr::True) => Some(Type::int_literal(1)),
+            Type(Repr::False) | Type(Repr::Null) => Some(Type::int_literal(0)),
+            Type(Repr::Bool) => Some(Type::int_range(Some(0), Some(1))),
             Type(Repr::FloatLiteral(f)) if f.is_finite() && f.trunc().abs() < i64::MAX as f64 => {
-                Some(Type(Repr::IntLiteral(f.trunc() as i64)))
+                Some(Type::int_literal(f.trunc() as i64))
             }
-            Type(Repr::Resource { .. }) => Some(Type(Repr::Int)),
+            Type(Repr::Resource { .. }) => Some(Type::int()),
             Type(Repr::Object(name, _)) if castable(hierarchy, name, INT_CASTABLE_CLASSES) => {
-                Some(Type(Repr::Int))
+                Some(Type::int())
             }
             Type(Repr::Object(..))
             | Type(Repr::ObjectWithoutClass)
@@ -43,7 +43,7 @@ impl Type {
             Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
                 union_coercion(members, |m| m.to_integer(hierarchy))
             }
-            _ => Some(Type(Repr::Int)),
+            _ => Some(Type::int()),
         }
     }
 
@@ -53,12 +53,12 @@ impl Type {
     pub fn to_float(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
         match self {
             Type(Repr::Float) | Type(Repr::FloatLiteral(_)) => Some(self.clone()),
-            Type(Repr::IntLiteral(n)) => Some(Type(Repr::FloatLiteral(*n as f64))),
-            Type(Repr::True) => Some(Type(Repr::FloatLiteral(1.0))),
-            Type(Repr::False) | Type(Repr::Null) => Some(Type(Repr::FloatLiteral(0.0))),
-            Type(Repr::Resource { .. }) => Some(Type(Repr::Float)),
+            Type(Repr::IntLiteral(n)) => Some(Type::float_literal(*n as f64)),
+            Type(Repr::True) => Some(Type::float_literal(1.0)),
+            Type(Repr::False) | Type(Repr::Null) => Some(Type::float_literal(0.0)),
+            Type(Repr::Resource { .. }) => Some(Type::float()),
             Type(Repr::Object(name, _)) if castable(hierarchy, name, FLOAT_CASTABLE_CLASSES) => {
-                Some(Type(Repr::Float))
+                Some(Type::float())
             }
             Type(Repr::Object(..))
             | Type(Repr::ObjectWithoutClass)
@@ -67,7 +67,7 @@ impl Type {
             Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
                 union_coercion(members, |m| m.to_float(hierarchy))
             }
-            _ => Some(Type(Repr::Float)),
+            _ => Some(Type::float()),
         }
     }
 
@@ -93,7 +93,7 @@ impl Type {
             }
             _ => self
                 .to_float(hierarchy)
-                .map(|_| Type::union(Type(Repr::Int), Type(Repr::Float))),
+                .map(|_| Type::union(Type::int(), Type::float())),
         }
     }
 
@@ -108,36 +108,34 @@ impl Type {
     pub fn to_string_type(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
         let decimal_int_string = || {
             Type(Repr::Intersection(vec![
-                Type(Repr::String),
-                Type(Repr::Accessory(AccessoryKind::DecimalIntegerString)),
+                Type::string(),
+                Type::accessory(AccessoryKind::DecimalIntegerString),
             ]))
         };
         if !matches!(self, Type(Repr::Mixed(_)) | Type(Repr::Never))
             && crate::Relation::structural()
-                .is_super_type_of(&Type(Repr::String), self)
+                .is_super_type_of(&Type::string(), self)
                 .yes()
         {
             return Some(self.clone());
         }
         match self {
-            Type(Repr::IntLiteral(n)) => Some(Type(Repr::StringLiteral(n.to_string().into()))),
+            Type(Repr::IntLiteral(n)) => Some(Type::string_literal(n.to_string().into())),
             Type(Repr::Int) | Type(Repr::IntRange(..)) => Some(decimal_int_string()),
-            Type(Repr::FloatLiteral(f)) => {
-                Some(Type(Repr::StringLiteral(format_php_float(*f).into())))
-            }
+            Type(Repr::FloatLiteral(f)) => Some(Type::string_literal(format_php_float(*f).into())),
             // `INF`, `-INF` and `NAN` aren't numeric.
             Type(Repr::Float) => Some(Type(Repr::Intersection(vec![
-                Type(Repr::String),
-                Type(Repr::Accessory(AccessoryKind::UppercaseString)),
-                Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
+                Type::string(),
+                Type::accessory(AccessoryKind::UppercaseString),
+                Type::accessory(AccessoryKind::NonEmptyString),
             ]))),
-            Type(Repr::True) => Some(Type(Repr::StringLiteral("1".into()))),
+            Type(Repr::True) => Some(Type::string_literal("1".into())),
             Type(Repr::False) | Type(Repr::Null) => {
-                Some(Type(Repr::StringLiteral(PhpString::default())))
+                Some(Type::string_literal(PhpString::default()))
             }
             Type(Repr::Bool) => Some(Type(Repr::Union(vec![
-                Type(Repr::StringLiteral("1".into())),
-                Type(Repr::StringLiteral(PhpString::default())),
+                Type::string_literal("1".into()),
+                Type::string_literal(PhpString::default()),
             ]))),
             Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => None,
             Type(Repr::Intersection(members))
@@ -146,23 +144,23 @@ impl Type {
                 None
             }
             Type(Repr::Resource { .. }) => Some(Type(Repr::Intersection(vec![
-                Type(Repr::String),
-                Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
+                Type::string(),
+                Type::accessory(AccessoryKind::NonEmptyString),
             ]))),
             Type(Repr::Object(name, _)) => {
                 if hierarchy.is_subclass_of(name, "GMP")
                     || hierarchy.is_subclass_of(name, "BcMath\\Number")
                 {
                     return Some(Type(Repr::Intersection(vec![
-                        Type(Repr::String),
-                        Type(Repr::Accessory(AccessoryKind::NumericString)),
-                        Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
+                        Type::string(),
+                        Type::accessory(AccessoryKind::NumericString),
+                        Type::accessory(AccessoryKind::NonEmptyString),
                     ])));
                 }
                 match hierarchy.method_return_type(name, "__toString") {
                     Some(ty) => Some(ty),
                     None if hierarchy.find_class(name).is_some() => None,
-                    None => Some(Type(Repr::String)),
+                    None => Some(Type::string()),
                 }
             }
             // An enum case can't declare `__toString()`.
@@ -170,7 +168,7 @@ impl Type {
             Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
                 union_coercion(members, |m| m.to_string_type(hierarchy))
             }
-            _ => Some(Type(Repr::String)),
+            _ => Some(Type::string()),
         }
     }
 
@@ -180,24 +178,24 @@ impl Type {
     /// key type as it is.
     pub fn to_array_key(&self) -> Type {
         match self {
-            Type(Repr::FloatLiteral(f)) => Type(Repr::IntLiteral(*f as i64)),
-            Type(Repr::Float) => Type(Repr::Int),
-            Type(Repr::True) => Type(Repr::IntLiteral(1)),
-            Type(Repr::False) => Type(Repr::IntLiteral(0)),
+            Type(Repr::FloatLiteral(f)) => Type::int_literal(*f as i64),
+            Type(Repr::Float) => Type::int(),
+            Type(Repr::True) => Type::int_literal(1),
+            Type(Repr::False) => Type::int_literal(0),
             Type(Repr::Bool) => Type(Repr::Union(vec![
-                Type(Repr::IntLiteral(0)),
-                Type(Repr::IntLiteral(1)),
+                Type::int_literal(0),
+                Type::int_literal(1),
             ])),
-            Type(Repr::Null) => Type(Repr::StringLiteral(PhpString::default())),
+            Type(Repr::Null) => Type::string_literal(PhpString::default()),
             Type(Repr::StringLiteral(s)) => match crate::canonical_int_key(&s.to_str_lossy()) {
-                Some(n) => Type(Repr::IntLiteral(n)),
+                Some(n) => Type::int_literal(n),
                 None => self.clone(),
             },
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(Type::to_array_key)
                 .reduce(Type::union)
-                .unwrap_or(Type(Repr::Never)),
+                .unwrap_or(Type::never()),
             other => other.clone(),
         }
     }
@@ -218,23 +216,20 @@ impl Type {
                         (Some(im), Some(mx)) => Some(im.max(mx)),
                         _ => None,
                     };
-                    Type(Repr::IntRange(Some(0), upper))
+                    Type::int_range(Some(0), upper)
                 } else {
-                    Type(Repr::IntRange(
-                        Some(-max.expect("max < 0 is always Some")),
-                        inversed_min,
-                    ))
+                    Type::int_range(Some(-max.expect("max < 0 is always Some")), inversed_min)
                 }
             }
-            Type(Repr::IntLiteral(n)) => Type(Repr::IntLiteral(n.saturating_abs())),
-            Type(Repr::FloatLiteral(f)) => Type(Repr::FloatLiteral(f.abs())),
+            Type(Repr::IntLiteral(n)) => Type::int_literal(n.saturating_abs()),
+            Type(Repr::FloatLiteral(f)) => Type::float_literal(f.abs()),
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(Type::to_absolute_number)
                 .reduce(Type::union)
                 .unwrap_or_else(|| self.clone()),
             Type(Repr::Int) | Type(Repr::Float) => self.clone(),
-            _ => Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::Float)])),
+            _ => Type(Repr::Union(vec![Type::int(), Type::float()])),
         }
     }
 
@@ -243,9 +238,9 @@ impl Type {
     pub fn to_bitwise_not(&self) -> Option<Type> {
         match self {
             Type(Repr::IntRange(min, max)) => {
-                Some(Type(Repr::IntRange(max.map(|m| !m), min.map(|m| !m))))
+                Some(Type::int_range(max.map(|m| !m), min.map(|m| !m)))
             }
-            Type(Repr::IntLiteral(n)) => Some(Type(Repr::IntLiteral(!n))),
+            Type(Repr::IntLiteral(n)) => Some(Type::int_literal(!n)),
             _ => None,
         }
     }

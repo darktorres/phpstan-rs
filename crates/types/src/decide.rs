@@ -156,13 +156,13 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
         Type(Repr::Union(members)) => {
             match members
                 .iter()
-                .filter(|t| **t != Type(Repr::Null))
+                .filter(|t| **t != Type::null())
                 .collect::<Vec<_>>()
                 .as_slice()
             {
                 [Type(Repr::Object(_, _)) | Type(Repr::ObjectWithoutClass)] => members
                     .iter()
-                    .find(|t| **t != Type(Repr::Null))
+                    .find(|t| **t != Type::null())
                     .cloned()
                     .unwrap_or(m),
                 _ => m,
@@ -221,7 +221,7 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 // and no further `return` as "should never return, but a return
 // statement was reached."
 fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
-    if *native_ty == Type(Repr::Void) && *m != Type(Repr::Void) && *m != Type(Repr::Never) {
+    if *native_ty == Type::void() && *m != Type::void() && *m != Type::never() {
         return false;
     }
     match m {

@@ -41,7 +41,7 @@ pub fn parse_type_string(raw: &str) -> Type {
             })
             .reduce(|a, b| a || b)
         {
-            return Type(Repr::Mixed(explicit));
+            return Type::mixed_with(explicit);
         }
         crate::union::merge_int_ranges(&mut members);
         if members.len() == 1 {
@@ -55,8 +55,8 @@ pub fn parse_type_string(raw: &str) -> Type {
         parse_type_atom(s)
     };
 
-    if nullable && ty != Type(Repr::Mixed(false)) {
-        Type(Repr::Union(vec![ty, Type(Repr::Null)]))
+    if nullable && ty != Type::mixed() {
+        Type(Repr::Union(vec![ty, Type::null()]))
     } else {
         ty
     }
@@ -147,7 +147,7 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
     if matches!(keyword.as_str(), "closure" | "pure-closure") {
         Some(Type::closure_literal(sig))
     } else {
-        Some(Type(Repr::Callable(Some(Arc::new(sig)))))
+        Some(Type::callable(Some(Arc::new(sig))))
     }
 }
 
@@ -215,7 +215,7 @@ fn parse_callable_template(raw: &str) -> Option<crate::TemplateParam> {
         .or_else(|| rest.strip_prefix("as "))
     {
         Some(b) => parse_type_string(b.trim()),
-        None if rest.is_empty() => Type(Repr::Mixed(false)),
+        None if rest.is_empty() => Type::mixed(),
         None => return None,
     };
     Some(crate::TemplateParam {
@@ -256,7 +256,7 @@ fn mark_callable_templates(sig: CallableSig) -> CallableSig {
         match ty {
             Type(Repr::Object(name, args)) if args.is_empty() => {
                 match templates.iter().find(|t| t.name == *name) {
-                    Some(t) => Type(Repr::TemplateParam(t.clone())),
+                    Some(t) => Type::template_param(t.clone()),
                     None => ty.clone(),
                 }
             }
@@ -451,7 +451,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
             }
         }
     }
-    Some(Type(Repr::ArrayShape(shape)))
+    Some(Type::array_shape(shape))
 }
 
 /// `object{name: string, age?: int}` - PHPDoc's structural object shape.
@@ -495,7 +495,7 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
             optional,
         ));
     }
-    Some(Type(Repr::ObjectShape(Shape::sealed(fields))))
+    Some(Type::object_shape(Shape::sealed(fields)))
 }
 
 /// The inverse of `strip_shape_key_quotes`, for display: a shape key
@@ -650,7 +650,7 @@ fn parse_type_atom(s: &str) -> Type {
         .map(str::trim_start);
     if let Some(rest) = callable_head {
         if rest.starts_with('(') {
-            return try_parse_callable_shape(stripped).unwrap_or(Type(Repr::Callable(None)));
+            return try_parse_callable_shape(stripped).unwrap_or(Type::callable(None));
         }
         // `callable<T>(T): T`; `Closure<...>` not followed by a
         // parameter list stays a generic reference.
@@ -669,10 +669,10 @@ fn parse_type_atom(s: &str) -> Type {
     // themselves treated as part of a literal class name, then
     // nonsensically namespace-qualified into e.g. `Piwigo\Db\'ASC'`.
     if let Some(inner) = s.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
-        return Type(Repr::StringLiteral(inner.into()));
+        return Type::string_literal(inner.into());
     }
     if let Some(inner) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-        return Type(Repr::StringLiteral(inner.into()));
+        return Type::string_literal(inner.into());
     }
 
     // Same idea as the quoted-string case just above: a bare integer
@@ -680,13 +680,13 @@ fn parse_type_atom(s: &str) -> Type {
     // a fixed set - log levels, status codes, mode flags, ...) means
     // "exactly this integer value," not a class reference.
     if let Ok(n) = s.parse::<i64>() {
-        return Type(Repr::IntLiteral(n));
+        return Type::int_literal(n);
     }
     // Mirrors the int-literal case just above, for a real float
     // literal (`1.5|2.5`) - checked after the int case so an
     // integer-looking string is still caught as `IntLiteral` first.
     if let Ok(f) = s.parse::<f64>() {
-        return Type(Repr::FloatLiteral(f));
+        return Type::float_literal(f);
     }
 
     // PHPDoc's `Type[]` array shorthand (`int[]`, even `string[][]`) has no
@@ -712,10 +712,7 @@ fn parse_type_atom(s: &str) -> Type {
     {
         let mut ty = shape;
         for _ in 0..array_depth {
-            ty = Type(Repr::Array(
-                Box::new(Type::benevolent_array_key()),
-                Box::new(ty),
-            ));
+            ty = Type::array(Type::benevolent_array_key(), ty);
         }
         return ty;
     }
@@ -743,15 +740,12 @@ fn parse_type_atom(s: &str) -> Type {
                 // Possibly a template, known once `mark_template_params`
                 // runs; resolved when a call binds it.
                 None if matches!(&base_ty, Type(Repr::Object(_, args)) if args.is_empty()) => {
-                    Type(Repr::OffsetAccess(Box::new(base_ty), Box::new(key_ty)))
+                    Type::offset_access(base_ty, key_ty)
                 }
-                None => Type(Repr::Mixed(false)),
+                None => Type::mixed(),
             };
             for _ in 0..array_depth {
-                ty = Type(Repr::Array(
-                    Box::new(Type::benevolent_array_key()),
-                    Box::new(ty),
-                ));
+                ty = Type::array(Type::benevolent_array_key(), ty);
             }
             return ty;
         }
@@ -770,10 +764,7 @@ fn parse_type_atom(s: &str) -> Type {
     {
         let mut ty = parse_type_string(inner);
         for _ in 0..array_depth {
-            ty = Type(Repr::Array(
-                Box::new(Type::benevolent_array_key()),
-                Box::new(ty),
-            ));
+            ty = Type::array(Type::benevolent_array_key(), ty);
         }
         return ty;
     }
@@ -791,7 +782,7 @@ fn parse_type_atom(s: &str) -> Type {
         // class-string.
         let class_ty = parse_type_string(class_part);
         if const_part.eq_ignore_ascii_case("class") {
-            Type(Repr::ClassString(Box::new(class_ty)))
+            Type::class_string(class_ty)
         } else {
             Type(Repr::ClassConstant {
                 class: Box::new(class_ty),
@@ -802,10 +793,7 @@ fn parse_type_atom(s: &str) -> Type {
         parse_type_keyword_or_class(bare, original, &generic_args)
     };
     for _ in 0..array_depth {
-        ty = Type(Repr::Array(
-            Box::new(Type::benevolent_array_key()),
-            Box::new(ty),
-        ));
+        ty = Type::array(Type::benevolent_array_key(), ty);
     }
     ty
 }
@@ -826,7 +814,7 @@ pub fn parse_native_type_string(s: &str) -> Type {
     if let Some(inner) = s.strip_prefix('?') {
         return Type(Repr::Union(vec![
             parse_native_type_string(inner),
-            Type(Repr::Null),
+            Type::null(),
         ]));
     }
     let alternatives = split_top_level(s, '|');
@@ -856,7 +844,7 @@ pub fn parse_native_type_string(s: &str) -> Type {
     if NATIVE_TYPE_KEYWORDS.contains(&bare.to_ascii_lowercase().as_str()) {
         parse_type_string(bare)
     } else {
-        Type(Repr::Object(name.into(), Vec::new()))
+        Type::object(name.into(), Vec::new())
     }
 }
 
@@ -892,20 +880,20 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // bound falls back to plain `Type::Int` rather than guessing.
         "int" | "integer" => match generic_args {
             [min, max] => match (parse_int_bound(min), parse_int_bound(max)) {
-                (Some(min), Some(max)) => Type(Repr::IntRange(min, max)),
-                _ => Type(Repr::Int),
+                (Some(min), Some(max)) => Type::int_range(min, max),
+                _ => Type::int(),
             },
-            _ => Type(Repr::Int),
+            _ => Type::int(),
         },
-        "positive-int" => Type(Repr::IntRange(Some(1), None)),
-        "negative-int" => Type(Repr::IntRange(None, Some(-1))),
-        "non-negative-int" => Type(Repr::IntRange(Some(0), None)),
-        "non-positive-int" => Type(Repr::IntRange(None, Some(0))),
+        "positive-int" => Type::int_range(Some(1), None),
+        "negative-int" => Type::int_range(None, Some(-1)),
+        "non-negative-int" => Type::int_range(Some(0), None),
+        "non-positive-int" => Type::int_range(None, Some(0)),
         // Real PHPStan represents this as a union of two ranges, not its
         // own type (confirmed via dumpType()) - composed the same way.
         "non-zero-int" => Type(Repr::Union(vec![
-            Type(Repr::IntRange(None, Some(-1))),
-            Type(Repr::IntRange(Some(1), None)),
+            Type::int_range(None, Some(-1)),
+            Type::int_range(Some(1), None),
         ])),
         // `int-mask<Flag::*>`/`int-mask-of<Flag::*>` - real PHPStan
         // expands these into a union of every combinable bitmask value,
@@ -916,8 +904,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // generic class-name branch, which would produce a bogus
         // namespace-qualified "class" that fails every ordinary
         // `int`-typed assignability check.
-        "int-mask" | "int-mask-of" => Type(Repr::Int),
-        "float" | "double" => Type(Repr::Float),
+        "int-mask" | "int-mask-of" => Type::int(),
+        "float" | "double" => Type::float(),
         // The accessory-refined string pseudo-types are real
         // `Intersection([String, Accessory(_)])` types, mirroring real
         // PHPStan's own `IntersectionType([StringType, AccessoryXType])`.
@@ -933,22 +921,22 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // literal-fact arms and the `strtolower`/`strtoupper`/etc.
         // case-tracking producers (`checker/expr/builtin_calls.rs`).
         "lowercase-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::LowercaseString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::LowercaseString),
         ])),
         "uppercase-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::UppercaseString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::UppercaseString),
         ])),
         "non-empty-lowercase-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
-            Type(Repr::Accessory(AccessoryKind::LowercaseString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::NonEmptyString),
+            Type::accessory(AccessoryKind::LowercaseString),
         ])),
         "non-empty-uppercase-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
-            Type(Repr::Accessory(AccessoryKind::UppercaseString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::NonEmptyString),
+            Type::accessory(AccessoryKind::UppercaseString),
         ])),
         // `decimal-int-string` mirrors real PHPStan's own
         // `IntersectionType([StringType, AccessoryDecimalIntegerStringType])`.
@@ -959,33 +947,33 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // with no real consumer would be a silent, false claim of
         // support.
         "decimal-int-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::DecimalIntegerString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::DecimalIntegerString),
         ])),
         "non-empty-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::NonEmptyString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::NonEmptyString),
         ])),
         "non-falsy-string" | "truthy-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::NonFalsyString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::NonFalsyString),
         ])),
         "literal-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::LiteralString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::LiteralString),
         ])),
         "numeric-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Accessory(AccessoryKind::NumericString)),
+            Type::string(),
+            Type::accessory(AccessoryKind::NumericString),
         ])),
-        "string" => Type(Repr::String),
+        "string" => Type::string(),
         // `callable-string` mirrors real PHPStan's own resolution
         // (`IntersectionType([StringType, CallableType])`) -
         // architecturally unrelated to the `class-string` family below
         // despite the shared "-string" name.
         "callable-string" => Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Callable(None)),
+            Type::string(),
+            Type::callable(None),
         ])),
         // `enum-string`/`enum-string<T>` mirror real PHPStan's own
         // `GenericClassStringType(UnitEnum)`/`GenericClassStringType(T &
@@ -999,13 +987,13 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // class-hierarchy walk in `registry::accepts` - no new
         // type-system machinery needed.
         "enum-string" => {
-            let unit_enum = Type(Repr::Object("UnitEnum".into(), Vec::new()));
+            let unit_enum = Type::object("UnitEnum".into(), Vec::new());
             match generic_args {
-                [single] => Type(Repr::ClassString(Box::new(Type(Repr::Intersection(vec![
+                [single] => Type::class_string(Type(Repr::Intersection(vec![
                     parse_type_string(single),
                     unit_enum,
-                ]))))),
-                _ => Type(Repr::ClassString(Box::new(unit_enum))),
+                ]))),
+                _ => Type::class_string(unit_enum),
             }
         }
         // `interface-string`/`trait-string` (bare form): real PHPStan
@@ -1024,29 +1012,29 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `class-string` has nothing to preserve and stays plain
         // `String`.
         "class-string" => match generic_args {
-            [] => Type(Repr::String),
-            [single] => Type(Repr::ClassString(Box::new(parse_type_string(single)))),
-            _ => Type(Repr::String),
+            [] => Type::string(),
+            [single] => Type::class_string(parse_type_string(single)),
+            _ => Type::string(),
         },
-        "bool" | "boolean" => Type(Repr::Bool),
-        "true" => Type(Repr::True),
-        "false" => Type(Repr::False),
+        "bool" | "boolean" => Type::bool(),
+        "true" => Type::bool_literal(true),
+        "false" => Type::bool_literal(false),
         // Real, documented PHPStan/Psalm pseudo-types. `numeric` is an
         // honest approximation of real PHPStan's own
         // `int|float|numeric-string`: this project doesn't model
         // numeric-string as a distinct literal-set from plain `string`,
         // so `string` is the closest fit.
-        "array-key" => Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)])),
+        "array-key" => Type(Repr::Union(vec![Type::int(), Type::string()])),
         "scalar" => Type(Repr::Union(vec![
-            Type(Repr::Int),
-            Type(Repr::Float),
-            Type(Repr::String),
-            Type(Repr::Bool),
+            Type::int(),
+            Type::float(),
+            Type::string(),
+            Type::bool(),
         ])),
         "numeric" => Type(Repr::Union(vec![
-            Type(Repr::Int),
-            Type(Repr::Float),
-            Type(Repr::String),
+            Type::int(),
+            Type::float(),
+            Type::string(),
         ])),
         // A real, if untyped-at-the-language-level, PHP value kind
         // (file/curl/... handles). `open-resource` is an ordinary (open)
@@ -1068,39 +1056,39 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "value-of" => match generic_args {
             [single] => match parse_type_string(single) {
                 ty @ (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => {
-                    late::value_of(&ty).unwrap_or(Type(Repr::Mixed(false)))
+                    late::value_of(&ty).unwrap_or(Type::mixed())
                 }
                 Type(Repr::Object(name, args)) if args.is_empty() => {
-                    Type(Repr::ValueOf(Box::new(Type(Repr::Object(name, args)))))
+                    Type::value_of(Type(Repr::Object(name, args)))
                 }
-                target @ Type(Repr::ClassConstant { .. }) => Type(Repr::ValueOf(Box::new(target))),
-                _ => Type(Repr::Mixed(false)),
+                target @ Type(Repr::ClassConstant { .. }) => Type::value_of(target),
+                _ => Type::mixed(),
             },
-            _ => Type(Repr::Mixed(false)),
+            _ => Type::mixed(),
         },
         "key-of" => match generic_args {
             [single] => match parse_type_string(single) {
                 ty @ (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => {
-                    late::key_of(&ty).unwrap_or(Type(Repr::Mixed(false)))
+                    late::key_of(&ty).unwrap_or(Type::mixed())
                 }
                 // Possibly a template: kept until a call binds it.
                 Type(Repr::Object(name, args)) if args.is_empty() => {
-                    Type(Repr::KeyOf(Box::new(Type(Repr::Object(name, args)))))
+                    Type::key_of(Type(Repr::Object(name, args)))
                 }
-                _ => Type(Repr::Mixed(false)),
+                _ => Type::mixed(),
             },
-            _ => Type(Repr::Mixed(false)),
+            _ => Type::mixed(),
         },
-        "null" => Type(Repr::Null),
-        "void" => Type(Repr::Void),
+        "null" => Type::null(),
+        "void" => Type::void(),
         // The one genuine source of explicit `mixed` (Phase 84's own
         // `Type::Mixed`'s doc comment, `types.rs`) - the literal keyword
         // was written somewhere in this type expression, real PHPStan's
         // own `ParserNodeTypeToPHPStanType`/`TypeNodeResolver` both
         // resolving it to `MixedType(true)` too (confirmed directly
         // against `vendor/phpstan-src`).
-        "mixed" => Type(Repr::Mixed(true)),
-        "never" | "noreturn" | "never-return" | "never-returns" | "no-return" => Type(Repr::Never),
+        "mixed" => Type::explicit_mixed(),
+        "never" | "noreturn" | "never-return" | "never-returns" | "no-return" => Type::never(),
         // `array<K, V>`'s key argument is real
         // (`Type::Array`'s own key slot), not discarded. Bare `array`
         // still means "key unknown" - `Type::unknown_array_key()`.
@@ -1116,23 +1104,20 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // PHPStan precedent to check a 1-arg form against) keeps the
         // plain, non-benevolent default it always had.
         "array" | "class-string-map" => match generic_args.len() {
-            0 => Type::array_of(Type(Repr::Mixed(false))),
-            1 if bare == "array" => Type(Repr::Array(
-                Box::new(Type::benevolent_array_key()),
-                Box::new(parse_type_string(generic_args[0])),
-            )),
+            0 => Type::array_of(Type::mixed()),
+            1 if bare == "array" => Type::array(
+                Type::benevolent_array_key(),
+                parse_type_string(generic_args[0]),
+            ),
             1 => Type::array_of(parse_type_string(generic_args[0])),
             _ => {
                 let key_ty = parse_type_string(generic_args[0]);
                 let key_ty = if bare == "class-string-map" {
-                    Type(Repr::ClassString(Box::new(key_ty)))
+                    Type::class_string(key_ty)
                 } else {
                     key_ty
                 };
-                Type(Repr::Array(
-                    Box::new(key_ty),
-                    Box::new(parse_type_string(generic_args[1])),
-                ))
+                Type::array(key_ty, parse_type_string(generic_args[1]))
             }
         },
         // `list`/`non-empty-array`/`non-empty-list` are real
@@ -1141,7 +1126,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // AccessoryArrayListType/NonEmptyArrayType])`.
         "list" | "non-empty-array" | "non-empty-list" => {
             let elem_ty = match generic_args.len() {
-                0 => Type(Repr::Mixed(false)),
+                0 => Type::mixed(),
                 1 => parse_type_string(generic_args[0]),
                 _ => parse_type_string(generic_args[1]),
             };
@@ -1158,14 +1143,14 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                     _ => Type::unknown_array_key(),
                 }
             } else {
-                Type(Repr::Int)
+                Type::int()
             };
-            let mut members = vec![Type(Repr::Array(Box::new(key_ty), Box::new(elem_ty)))];
+            let mut members = vec![Type::array(key_ty, elem_ty)];
             if bare != "non-empty-array" {
-                members.push(Type(Repr::Accessory(AccessoryKind::ArrayList)));
+                members.push(Type::accessory(AccessoryKind::ArrayList));
             }
             if bare != "list" {
-                members.push(Type(Repr::Accessory(AccessoryKind::NonEmptyArray)));
+                members.push(Type::accessory(AccessoryKind::NonEmptyArray));
             }
             Type(Repr::Intersection(members))
         }
@@ -1177,16 +1162,13 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `iterable`-hinted parameter.
         "iterable" => {
             let element_ty = match generic_args.len() {
-                0 => Type(Repr::Mixed(false)),
+                0 => Type::mixed(),
                 1 => parse_type_string(generic_args[0]),
                 _ => parse_type_string(generic_args[1]),
             };
             Type(Repr::Union(vec![
-                Type(Repr::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(element_ty),
-                )),
-                Type(Repr::Object("Traversable".into(), Vec::new())),
+                Type::array(Type::unknown_array_key(), element_ty),
+                Type::object("Traversable".into(), Vec::new()),
             ]))
         }
         // `Closure` is a concrete class only a real closure object
@@ -1210,23 +1192,21 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // class-reference resolution below instead, deferring to a real
         // `use` import when one exists.
         "closure" if original.starts_with('\\') => {
-            Type(Repr::Object(("\\Closure".to_string()).into(), Vec::new()))
+            Type::object(("\\Closure".to_string()).into(), Vec::new())
         }
-        "callable" => Type(Repr::Callable(None)),
+        "callable" => Type::callable(None),
         // `self<T>`/`static<T>`: the current class with those arguments.
-        "self" => Type(Repr::SelfRef(
-            generic_args.iter().map(|a| parse_type_string(a)).collect(),
-        )),
-        "parent" => Type(Repr::ParentRef),
+        "self" => Type::self_ref(generic_args.iter().map(|a| parse_type_string(a)).collect()),
+        "parent" => Type::parent_ref(),
         // `@return $this` is a real, PHPStan-documented PHPDoc
         // convention - not a variable reference despite the `$` sigil
         // (real shape: amphp/amp's `@return $this` on several fluent
         // methods).
-        "$this" if generic_args.is_empty() => Type(Repr::This),
-        "static" | "$this" => Type(Repr::StaticRef(
-            generic_args.iter().map(|a| parse_type_string(a)).collect(),
-        )),
-        "object" => Type(Repr::ObjectWithoutClass),
+        "$this" if generic_args.is_empty() => Type::this(),
+        "static" | "$this" => {
+            Type::static_ref(generic_args.iter().map(|a| parse_type_string(a)).collect())
+        }
+        "object" => Type::object_without_class(),
         // A user-defined generic class (`Collection<User>`): each type
         // argument is a full type string, re-run through
         // `parse_generic_arg` (call-site-variance-aware; falls straight
@@ -1235,10 +1215,10 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // indistinguishable from "erased" generics - `TemplateParam`
         // substitution treats an unbound parameter as `Mixed` either
         // way.
-        _ => Type(Repr::Object(
+        _ => Type::object(
             original.into(),
             generic_args.iter().map(|a| parse_generic_arg(a)).collect(),
-        )),
+        ),
     }
 }
 
@@ -1254,22 +1234,13 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
 fn parse_generic_arg(a: &str) -> Type {
     let trimmed = a.trim();
     if trimmed == "*" {
-        return Type(Repr::VarianceArg(
-            CallSiteVariance::Bivariant,
-            Box::new(Type(Repr::Mixed(false))),
-        ));
+        return Type::variance_arg(CallSiteVariance::Bivariant, Type(Repr::Mixed(false)));
     }
     if let Some(rest) = trimmed.strip_prefix("covariant ") {
-        return Type(Repr::VarianceArg(
-            CallSiteVariance::Covariant,
-            Box::new(parse_type_string(rest)),
-        ));
+        return Type::variance_arg(CallSiteVariance::Covariant, parse_type_string(rest));
     }
     if let Some(rest) = trimmed.strip_prefix("contravariant ") {
-        return Type(Repr::VarianceArg(
-            CallSiteVariance::Contravariant,
-            Box::new(parse_type_string(rest)),
-        ));
+        return Type::variance_arg(CallSiteVariance::Contravariant, parse_type_string(rest));
     }
     parse_type_string(trimmed)
 }

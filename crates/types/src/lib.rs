@@ -582,7 +582,7 @@ impl TemplateParam {
             // both resolve this exact shape to `MixedType(true)`
             // (explicit), not `false` (confirmed directly against
             // `vendor/phpstan-src`).
-            bound: Box::new(Type(Repr::Mixed(true))),
+            bound: Box::new(Type::explicit_mixed()),
             variance: Variance::Invariant,
             scope: None,
             default: None,
@@ -629,7 +629,7 @@ impl CallableSig {
                     if tp.scope.as_deref() == Some(CALLABLE_TEMPLATE_SCOPE) =>
                 {
                     match templates.iter().find(|t| t.name == tp.name) {
-                        Some(t) => Type(Repr::TemplateParam(t.clone())),
+                        Some(t) => Type::template_param(t.clone()),
                         None => ty.clone(),
                     }
                 }

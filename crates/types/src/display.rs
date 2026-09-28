@@ -204,7 +204,7 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
 /// a real class intersection), leaving the generic `&`-joined fallback
 /// in place.
 fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
-    let has = |k: AccessoryKind| members.contains(&Type(Repr::Accessory(k)));
+    let has = |k: AccessoryKind| members.contains(&Type::accessory(k));
     if let [
         shape @ Type(Repr::ArrayShape(_)),
         Type(Repr::Accessory(AccessoryKind::NonEmptyArray)),
@@ -237,7 +237,7 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         let known_key = !is_list && *key != Type::unknown_array_key();
         let elem_str = if known_key {
             format!("<{key}, {elem}>")
-        } else if *elem == Type(Repr::Mixed(false)) {
+        } else if *elem == Type::mixed() {
             String::new()
         } else {
             format!("<{elem}>")
@@ -249,7 +249,7 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
             (false, false) => None,
         };
     }
-    if members.contains(&Type(Repr::String)) {
+    if members.contains(&Type::string()) {
         // A generic ordered-parts join correctly composes any
         // combination of accessory kinds (e.g. `date('Y')`'s own real
         // `non-empty-numeric-string`) rather than only a fixed set of

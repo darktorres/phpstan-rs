@@ -25,8 +25,8 @@ impl ShapeKey {
     /// The key as its literal type (`'name'`, `0`).
     pub fn to_type(&self) -> Type {
         match self {
-            ShapeKey::Int(n) => Type(Repr::IntLiteral(*n)),
-            ShapeKey::Str(s) => Type(Repr::StringLiteral(s.as_str().into())),
+            ShapeKey::Int(n) => Type::int_literal(*n),
+            ShapeKey::Str(s) => Type::string_literal(s.as_str().into()),
         }
     }
 
@@ -103,10 +103,7 @@ impl Shape {
     pub fn unsealed(fields: Vec<ShapeField>) -> Shape {
         Shape {
             fields,
-            unsealed: Some(Box::new((
-                Type::unknown_array_key(),
-                Type(Repr::Mixed(false)),
-            ))),
+            unsealed: Some(Box::new((Type::unknown_array_key(), Type::mixed()))),
         }
     }
 

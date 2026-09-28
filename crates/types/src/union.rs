@@ -25,10 +25,10 @@ impl Type {
 
 fn union_types_impl(a: Type, b: Type) -> Type {
     // `never` has no values to add.
-    if a == Type(Repr::Never) {
+    if a == Type::never() {
         return normalize_generic_args(b);
     }
-    if b == Type(Repr::Never) {
+    if b == Type::never() {
         return normalize_generic_args(a);
     }
     let (a, b) = (normalize_generic_args(a), normalize_generic_args(b));
@@ -37,12 +37,12 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     }
     // An error absorbs everything, as a `mixed` does.
     if matches!(a, Type(Repr::Error)) || matches!(b, Type(Repr::Error)) {
-        return Type(Repr::Error);
+        return Type::error();
     }
     // A `mixed` absorbs everything, and stays explicit when either side
     // wrote it.
     if let Some(explicit) = mixed_explicitness(&[&a, &b]) {
-        return Type(Repr::Mixed(explicit));
+        return Type::mixed_with(explicit);
     }
     if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
         return merged;
@@ -81,22 +81,22 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // (`nullsafe.neverNull` false-firing on a `T|mixed` receiver, since
     // `mixed` already includes `null` but a raw member scan for `Null`
     // specifically wouldn't find it).
-    if members.contains(&Type(Repr::Error)) {
-        return Type(Repr::Error);
+    if members.contains(&Type::error()) {
+        return Type::error();
     }
     if let Some(explicit) = mixed_explicitness(&members.iter().collect::<Vec<_>>()) {
-        return Type(Repr::Mixed(explicit));
+        return Type::mixed_with(explicit);
     }
-    members.retain(|m| *m != Type(Repr::Never));
+    members.retain(|m| *m != Type::never());
     // `true|false` is `bool`, and `bool` holds both.
-    if members.contains(&Type(Repr::True)) && members.contains(&Type(Repr::False)) {
+    if members.contains(&Type::bool_literal(true)) && members.contains(&Type::bool_literal(false)) {
         let at = members
             .iter()
             .position(|m| matches!(m, Type(Repr::True) | Type(Repr::False)))
             .expect("checked above");
-        members[at] = Type(Repr::Bool);
+        members[at] = Type::bool();
     }
-    if members.contains(&Type(Repr::Bool)) {
+    if members.contains(&Type::bool()) {
         members.retain(|m| !matches!(m, Type(Repr::True) | Type(Repr::False)));
     }
     // An extension payload whose widened form is already a member adds
@@ -118,8 +118,8 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // `void` joined with `null` is just `null`, as in real PHPStan's
     // `TypeCombinator::union` (a nullsafe call to a `void` method reads
     // as `null`).
-    if members.contains(&Type(Repr::Null)) {
-        members.retain(|m| *m != Type(Repr::Void));
+    if members.contains(&Type::null()) {
+        members.retain(|m| *m != Type::void());
     }
     // Drop a literal member whenever its exact base type is also present
     // in the same union - a ternary's two branches
@@ -205,10 +205,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
             });
             false
         });
-        members.push(Type(Repr::Array(
-            Box::new(merged_key.unwrap()),
-            Box::new(merged_val.unwrap()),
-        )));
+        members.push(Type::array(merged_key.unwrap(), merged_val.unwrap()));
     }
     if members.len() > MAX_UNION_MEMBERS {
         members = generalize_by_key_set(members);
@@ -217,7 +214,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         members = widen_extension_types(members);
     }
     if members.len() > MAX_UNION_MEMBERS {
-        return Type(Repr::Mixed(false));
+        return Type::mixed();
     }
     if members.len() == 1 {
         members.into_iter().next().unwrap()
@@ -266,8 +263,8 @@ pub(crate) fn merge_int_ranges(members: &mut Vec<Type>) {
                 .flatten();
             let first = cluster.iter().map(|&(i, ..)| i).min().expect("non-empty");
             let merged = match (min, max) {
-                (None, None) => Type(Repr::Int),
-                (min, max) => Type(Repr::IntRange(min, max)),
+                (None, None) => Type::int(),
+                (min, max) => Type::int_range(min, max),
             };
             replaced.push((first, merged));
             removed.extend(cluster.iter().map(|&(i, ..)| i).filter(|&i| i != first));
@@ -345,7 +342,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     }
     for (_, variants) in groups {
         if variants.len() == 1 {
-            passthrough.push(Type(Repr::ArrayShape(variants.into_iter().next().unwrap())));
+            passthrough.push(Type::array_shape(variants.into_iter().next().unwrap()));
             continue;
         }
         let fields = variants[0]
@@ -370,7 +367,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
             .filter_map(|shape| shape.unsealed.as_deref().cloned())
             .reduce(|(ka, va), (kb, vb)| (Type::union(ka, kb), Type::union(va, vb)))
             .map(Box::new);
-        passthrough.push(Type(Repr::ArrayShape(Shape { fields, unsealed })));
+        passthrough.push(Type::array_shape(Shape { fields, unsealed }));
     }
     passthrough
 }
@@ -390,11 +387,11 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
 /// relation that only holds for compatibility, not equivalence.
 fn literal_base_type(t: &Type) -> Option<Type> {
     match t {
-        Type(Repr::IntLiteral(_)) => Some(Type(Repr::Int)),
-        Type(Repr::StringLiteral(_)) => Some(Type(Repr::String)),
-        Type(Repr::True) | Type(Repr::False) => Some(Type(Repr::Bool)),
-        Type(Repr::FloatLiteral(_)) => Some(Type(Repr::Float)),
-        Type(Repr::IntRange(_, _)) => Some(Type(Repr::Int)),
+        Type(Repr::IntLiteral(_)) => Some(Type::int()),
+        Type(Repr::StringLiteral(_)) => Some(Type::string()),
+        Type(Repr::True) | Type(Repr::False) => Some(Type::bool()),
+        Type(Repr::FloatLiteral(_)) => Some(Type::float()),
+        Type(Repr::IntRange(_, _)) => Some(Type::int()),
         // Scoped to intersections that carry an `Accessory` member, so a
         // genuine, unrelated multi-class intersection
         // (`Countable&Iterator`) is never affected - only an
@@ -486,10 +483,9 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
         return None;
     }
     let merged_base = match (base_a, base_b) {
-        (Type(Repr::Array(ka, va)), Type(Repr::Array(kb, vb))) => Type(Repr::Array(
-            Box::new(Type::union(*ka, *kb)),
-            Box::new(Type::union(*va, *vb)),
-        )),
+        (Type(Repr::Array(ka, va)), Type(Repr::Array(kb, vb))) => {
+            Type::array(Type::union(*ka, *kb), Type::union(*va, *vb))
+        }
         // Unreachable given `has_offset_value_parts`'s own contract
         // (its `base` is always a `Type::Array`), kept as a safe
         // fallback rather than an `unreachable!()`.
@@ -508,7 +504,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
     members.extend(
         merged_pairs
             .into_iter()
-            .map(|(k, v)| Type(Repr::HasOffsetValue(k, Box::new(v)))),
+            .map(|(k, v)| Type::has_offset_value(k, v)),
     );
     Some(Type(Repr::Intersection(members)))
 }
@@ -535,7 +531,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
                 *m = shape_as_general_array(shape);
             }
         }
-        members.retain(|m| m != &Type(Repr::Never));
+        members.retain(|m| m != &Type::never());
         return;
     }
     if shape_count == 1 {
@@ -623,8 +619,8 @@ fn shape_as_general_array(shape: &Shape) -> Type {
         keys.into_iter().reduce(Type::union),
         values.into_iter().reduce(Type::union),
     ) {
-        (Some(key), Some(value)) => Type(Repr::Array(Box::new(key), Box::new(value))),
-        _ => Type(Repr::Never),
+        (Some(key), Some(value)) => Type::array(key, value),
+        _ => Type::never(),
     }
 }
 
@@ -759,11 +755,11 @@ fn normalize_generic_args(ty: Type) -> Type {
                     Type(Repr::Union(members)) => members
                         .into_iter()
                         .reduce(Type::union)
-                        .unwrap_or(Type(Repr::Never)),
+                        .unwrap_or(Type::never()),
                     other => other,
                 })
                 .collect();
-            Type(Repr::Object(name, args))
+            Type::object(name, args)
         }
         other => other,
     }

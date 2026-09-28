@@ -25,8 +25,8 @@ impl Relation<'_> {
                 other => flat.push(other),
             }
         }
-        if flat.contains(&Type(Repr::Never)) {
-            return Type(Repr::Never);
+        if flat.contains(&Type::never()) {
+            return Type::never();
         }
         let mut array: Option<(Type, Type)> = None;
         let mut shape: Option<Shape> = None;
@@ -44,7 +44,7 @@ impl Relation<'_> {
                         None => Some(s),
                         Some(acc) => match self.intersect_shapes(&acc, &s) {
                             Some(merged) => Some(merged),
-                            None => return Type(Repr::Never),
+                            None => return Type::never(),
                         },
                     };
                 }
@@ -58,18 +58,16 @@ impl Relation<'_> {
                 let s = match array {
                     Some((key, value)) => match self.shape_within_array(&s, &key, &value) {
                         Some(s) => s,
-                        None => return Type(Repr::Never),
+                        None => return Type::never(),
                     },
                     None => s,
                 };
                 let Some(s) = self.apply_offsets(s, &mut rest) else {
-                    return Type(Repr::Never);
+                    return Type::never();
                 };
-                out.push(Type(Repr::ArrayShape(s)));
+                out.push(Type::array_shape(s));
             }
-            (None, Some((key, value))) => {
-                out.push(Type(Repr::Array(Box::new(key), Box::new(value))))
-            }
+            (None, Some((key, value))) => out.push(Type::array(key, value)),
             (None, None) => {}
         }
         out.extend(rest);
@@ -87,11 +85,11 @@ impl Relation<'_> {
         }
         for (i, a) in kept.iter().enumerate() {
             if kept[i + 1..].iter().any(|b| self.disjoint(a, b)) {
-                return Type(Repr::Never);
+                return Type::never();
             }
         }
         match kept.len() {
-            0 => Type(Repr::Mixed(false)),
+            0 => Type::mixed(),
             1 => kept.pop().expect("one member"),
             _ => Type(Repr::Intersection(kept)),
         }
@@ -140,9 +138,9 @@ impl Relation<'_> {
             return native.clone();
         }
         if native_members.iter().any(|n| matches!(n, Type(Repr::Null))) {
-            kept.push(Type(Repr::Null));
+            kept.push(Type::null());
         }
-        kept.sort_by_key(|m| *m == Type(Repr::Null));
+        kept.sort_by_key(|m| *m == Type::null());
         kept.into_iter()
             .reduce(Type::union)
             .unwrap_or_else(|| native.clone())
@@ -156,7 +154,7 @@ impl Relation<'_> {
         } else if matches!(a, Type(Repr::Mixed(_))) || self.is_super_type_of(&a, &b).yes() {
             b
         } else if self.disjoint(&a, &b) {
-            Type(Repr::Never)
+            Type::never()
         } else {
             self.intersect(vec![a, b])
         }
@@ -186,7 +184,7 @@ impl Relation<'_> {
                 (None, None) => unreachable!("key came from one of the two shapes"),
             };
             if let Some(field) = field {
-                if field.ty == Type(Repr::Never) {
+                if field.ty == Type::never() {
                     if !field.optional {
                         return None;
                     }
@@ -248,7 +246,7 @@ impl Relation<'_> {
                 Type(Repr::HasOffsetValue(ref key, ref value)) => match shape.field(key).cloned() {
                     Some(f) => {
                         let ty = self.narrower(f.ty, (**value).clone());
-                        if ty == Type(Repr::Never) {
+                        if ty == Type::never() {
                             return None;
                         }
                         shape.set(ShapeField::new(f.key, ty, false));

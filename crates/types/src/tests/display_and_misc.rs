@@ -69,29 +69,20 @@ fn equal_types_hash_alike() {
     use std::hash::{BuildHasher, BuildHasherDefault};
     let hash = |ty: &Type| BuildHasherDefault::<rustc_hash::FxHasher>::default().hash_one(ty);
     let pairs = [
-        (Type(Repr::Mixed(true)), Type(Repr::Mixed(false))),
+        (Type::explicit_mixed(), Type::mixed()),
+        (Type::float_literal(0.0), Type::float_literal(-0.0)),
         (
-            Type(Repr::FloatLiteral(0.0)),
-            Type(Repr::FloatLiteral(-0.0)),
+            Type::float_literal(f64::NAN),
+            Type::float_literal(-f64::NAN),
         ),
         (
-            Type(Repr::FloatLiteral(f64::NAN)),
-            Type(Repr::FloatLiteral(-f64::NAN)),
-        ),
-        (
-            Type(Repr::Array(
-                Box::new(Type(Repr::Int)),
-                Box::new(Type(Repr::Mixed(true))),
-            )),
-            Type(Repr::Array(
-                Box::new(Type(Repr::Int)),
-                Box::new(Type(Repr::Mixed(false))),
-            )),
+            Type::array(Type(Repr::Int), Type(Repr::Mixed(true))),
+            Type::array(Type(Repr::Int), Type(Repr::Mixed(false))),
         ),
     ];
     for (a, b) in pairs {
         assert_eq!(a, b);
         assert_eq!(hash(&a), hash(&b), "{a:?} and {b:?}");
     }
-    assert_ne!(Type(Repr::IntLiteral(1)), Type(Repr::IntLiteral(2)));
+    assert_ne!(Type::int_literal(1), Type::int_literal(2));
 }

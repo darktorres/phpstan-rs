@@ -3,24 +3,21 @@
 use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
 
 fn shape(fields: &[(&str, Type, bool)]) -> Type {
-    Type(Repr::ArrayShape(Shape::sealed(
+    Type::array_shape(Shape::sealed(
         fields
             .iter()
             .map(|(k, t, o)| ShapeField::new(ShapeKey::from_name(k), t.clone(), *o))
             .collect(),
-    )))
+    ))
 }
 
 fn lit(s: &str) -> Type {
-    Type(Repr::StringLiteral(s.into()))
+    Type::string_literal(s.into())
 }
 
 #[test]
 fn a_tagged_union_of_shapes_stays_two_members() {
-    let a = shape(&[
-        ("t", lit("a"), false),
-        ("v", Type(Repr::IntLiteral(1)), false),
-    ]);
+    let a = shape(&[("t", lit("a"), false), ("v", Type::int_literal(1), false)]);
     let b = shape(&[("t", lit("b"), false), ("v", lit("s"), false)]);
     assert_eq!(
         Type::union(a.clone(), b.clone()),
@@ -30,13 +27,13 @@ fn a_tagged_union_of_shapes_stays_two_members() {
 
 #[test]
 fn shapes_differing_only_in_their_tag_merge() {
-    let a = shape(&[("t", lit("a"), false), ("v", Type(Repr::Int), false)]);
-    let b = shape(&[("t", lit("b"), false), ("v", Type(Repr::Int), false)]);
+    let a = shape(&[("t", lit("a"), false), ("v", Type::int(), false)]);
+    let b = shape(&[("t", lit("b"), false), ("v", Type::int(), false)]);
     assert_eq!(
         Type::union(a, b),
         shape(&[
             ("t", Type(Repr::Union(vec![lit("a"), lit("b")])), false),
-            ("v", Type(Repr::Int), false)
+            ("v", Type::int(), false)
         ])
     );
 }
@@ -44,11 +41,11 @@ fn shapes_differing_only_in_their_tag_merge() {
 #[test]
 fn an_empty_array_stays_apart_from_a_shape_with_a_required_key() {
     let empty = shape(&[]);
-    let one = Type(Repr::ArrayShape(Shape::sealed(vec![ShapeField::new(
+    let one = Type::array_shape(Shape::sealed(vec![ShapeField::new(
         ShapeKey::Int(0),
         lit("x"),
         false,
-    )])));
+    )]));
     assert_eq!(
         Type::union(empty.clone(), one.clone()),
         Type(Repr::Union(vec![empty, one]))
@@ -58,53 +55,47 @@ fn an_empty_array_stays_apart_from_a_shape_with_a_required_key() {
 #[test]
 fn an_all_optional_shape_absorbs_the_empty_array() {
     let empty = shape(&[]);
-    let optional = shape(&[("a", Type(Repr::Int), true)]);
+    let optional = shape(&[("a", Type::int(), true)]);
     assert_eq!(Type::union(empty, optional.clone()), optional);
 }
 
 #[test]
 fn a_general_array_absorbs_every_shape() {
-    let general = Type(Repr::Array(
-        Box::new(Type(Repr::String)),
-        Box::new(Type(Repr::Int)),
-    ));
-    let s = shape(&[("a", Type(Repr::IntLiteral(1)), false)]);
+    let general = Type::array(Type(Repr::String), Type(Repr::Int));
+    let s = shape(&[("a", Type::int_literal(1), false)]);
     assert_eq!(
         Type::union(general, s),
-        Type(Repr::Array(
-            Box::new(Type(Repr::String)),
-            Box::new(Type(Repr::Int))
-        ))
+        Type::array(Type(Repr::String), Type(Repr::Int))
     );
 }
 
 #[test]
 fn never_true_and_false_fold_away() {
     assert_eq!(
-        Type::union(Type(Repr::IntLiteral(1)), Type(Repr::Never)),
-        Type(Repr::IntLiteral(1))
+        Type::union(Type::int_literal(1), Type::never()),
+        Type::int_literal(1)
     );
     assert_eq!(
-        Type::union(Type(Repr::True), Type(Repr::False)),
-        Type(Repr::Bool)
+        Type::union(Type::bool_literal(true), Type::bool_literal(false)),
+        Type::bool()
     );
     assert_eq!(
         Type::union(
-            Type(Repr::Union(vec![Type(Repr::Bool), Type(Repr::Int)])),
-            Type(Repr::False)
+            Type(Repr::Union(vec![Type::bool(), Type::int()])),
+            Type::bool_literal(false)
         ),
-        Type(Repr::Union(vec![Type(Repr::Bool), Type(Repr::Int)]))
+        Type(Repr::Union(vec![Type::bool(), Type::int()]))
     );
 }
 
 #[test]
 fn a_union_keeps_an_explicit_mixed_explicit() {
     assert!(matches!(
-        Type::union(Type(Repr::Mixed(true)), Type(Repr::Null)),
+        Type::union(Type::explicit_mixed(), Type::null()),
         Type(Repr::Mixed(true))
     ));
     assert!(matches!(
-        Type::union(Type(Repr::Mixed(false)), Type(Repr::Null)),
+        Type::union(Type::mixed(), Type::null()),
         Type(Repr::Mixed(false))
     ));
 }
@@ -112,15 +103,12 @@ fn a_union_keeps_an_explicit_mixed_explicit() {
 #[test]
 fn a_shape_with_two_more_required_keys_stays_apart() {
     let key = |i: i64, t: Type| ShapeField::new(ShapeKey::Int(i), t, false);
-    let bare = Type(Repr::ArrayShape(Shape::sealed(vec![key(
-        0,
-        Type(Repr::String),
-    )])));
-    let with = Type(Repr::ArrayShape(Shape::sealed(vec![
+    let bare = Type::array_shape(Shape::sealed(vec![key(0, Type(Repr::String))]));
+    let with = Type::array_shape(Shape::sealed(vec![
         key(0, Type(Repr::String)),
         key(1, lit("ab")),
         key(2, lit("b")),
-    ])));
+    ]));
     assert_eq!(
         Type::union(with.clone(), bare.clone()),
         Type(Repr::Union(vec![with, bare]))
@@ -129,15 +117,12 @@ fn a_shape_with_two_more_required_keys_stays_apart() {
 
 #[test]
 fn an_error_absorbs_a_union() {
-    assert_eq!(
-        Type::union(Type(Repr::Error), Type(Repr::Int)),
-        Type(Repr::Error)
-    );
+    assert_eq!(Type::union(Type::error(), Type::int()), Type::error());
     assert_eq!(
         Type::union(
-            Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::Error)])),
-            Type(Repr::String)
+            Type(Repr::Union(vec![Type::int(), Type::error()])),
+            Type::string()
         ),
-        Type(Repr::Error)
+        Type::error()
     );
 }

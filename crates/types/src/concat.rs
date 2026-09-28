@@ -18,7 +18,7 @@ impl Type {
     /// (the numeric-string propagation's own `$left->isInteger()`/
     /// `$right`-range checks, which run against the un-stringified operand).
     pub fn concat(&self, r: &Type, hierarchy: &dyn ClassHierarchy) -> Type {
-        let as_string = |ty: &Type| ty.to_string_type(hierarchy).unwrap_or(Type(Repr::String));
+        let as_string = |ty: &Type| ty.to_string_type(hierarchy).unwrap_or(Type::string());
         let l_str = as_string(self);
         let r_str = as_string(r);
 
@@ -35,7 +35,7 @@ impl Type {
         }
         // Full constant fold when both sides are single literals.
         if let (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) = (&l_str, &r_str) {
-            return Type(Repr::StringLiteral(a.concat(b)));
+            return Type::string_literal(a.concat(b));
         }
 
         // Bounded constant-string cross product - covers a `Union` of
@@ -63,7 +63,7 @@ impl Type {
             combos.dedup();
             if !combos.is_empty() {
                 return if combos.len() == 1 {
-                    Type(Repr::StringLiteral(combos.into_iter().next().unwrap()))
+                    Type::string_literal(combos.into_iter().next().unwrap())
                 } else {
                     Type(Repr::Union(
                         combos.into_iter().map(Type::string_literal).collect(),
@@ -138,9 +138,9 @@ impl Type {
         }
 
         if accessories.is_empty() {
-            Type(Repr::String)
+            Type::string()
         } else {
-            let mut members = vec![Type(Repr::String)];
+            let mut members = vec![Type::string()];
             members.extend(accessories.into_iter().map(Type::accessory));
             Type(Repr::Intersection(members))
         }
@@ -159,7 +159,7 @@ fn strip_empty_string_member(ty: &Type) -> Type {
         Type(Repr::Union(members)) => {
             let filtered: Vec<Type> = members
                 .iter()
-                .filter(|m| **m != Type(Repr::StringLiteral(PhpString::default())))
+                .filter(|m| **m != Type::string_literal(PhpString::default()))
                 .cloned()
                 .collect();
             match filtered.len() {

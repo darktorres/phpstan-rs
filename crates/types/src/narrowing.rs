@@ -232,7 +232,7 @@ impl Type {
             // `non-empty-string` to `non-falsy-string` inside a nested
             // `!empty($x)` check) - a real gap, but a rare, redundant
             // double-guard pattern this project doesn't attempt yet.
-            Type(Repr::String) if *excluded == Type(Repr::StringLiteral(PhpString::default())) => {
+            Type(Repr::String) if *excluded == Type::string_literal(PhpString::default()) => {
                 Type(Repr::Intersection(vec![
                     Type::string(),
                     Type::accessory(AccessoryKind::NonEmptyString),
@@ -285,8 +285,8 @@ impl Type {
             // { true => ..., false => ... }` (or a bare `if ($b !== true)`)
             // never narrows `$b` down to `false` at all, since `Type::Bool`
             // isn't itself represented as `Union([True, False])`.
-            Type(Repr::Bool) if *excluded == Type(Repr::True) => Type::bool_literal(false),
-            Type(Repr::Bool) if *excluded == Type(Repr::False) => Type::bool_literal(true),
+            Type(Repr::Bool) if *excluded == Type::bool_literal(true) => Type::bool_literal(false),
+            Type(Repr::Bool) if *excluded == Type::bool_literal(false) => Type::bool_literal(true),
             other if other == excluded => Type::never(),
             other => other.clone(),
         }
@@ -302,7 +302,7 @@ impl Type {
             ])),
             Type(Repr::Intersection(members))
                 if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
-                    && !members.contains(&Type(Repr::Accessory(AccessoryKind::NonEmptyArray))) =>
+                    && !members.contains(&Type::accessory(AccessoryKind::NonEmptyArray)) =>
             {
                 let mut members = members.clone();
                 members.push(Type::accessory(AccessoryKind::NonEmptyArray));
@@ -332,7 +332,7 @@ impl Type {
                 let kept: Vec<Type> = members
                     .iter()
                     .map(Type::to_non_empty_array)
-                    .filter(|m| *m != Type(Repr::Never))
+                    .filter(|m| *m != Type::never())
                     .collect();
                 match kept.len() {
                     0 => Type::never(),
@@ -420,7 +420,7 @@ impl Type {
             ])),
             Type(Repr::Intersection(members))
                 if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
-                    && !members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
+                    && !members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
             {
                 let mut members = members.clone();
                 members.push(Type::accessory(AccessoryKind::ArrayList));
@@ -440,7 +440,7 @@ impl Type {
     pub fn to_non_list(&self) -> Type {
         match self {
             Type(Repr::Intersection(members))
-                if members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
+                if members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
             {
                 Type::never()
             }
@@ -448,7 +448,7 @@ impl Type {
                 let kept: Vec<Type> = members
                     .iter()
                     .map(Type::to_non_list)
-                    .filter(|m| *m != Type(Repr::Never))
+                    .filter(|m| *m != Type::never())
                     .collect();
                 match kept.len() {
                     0 => Type::never(),
@@ -524,7 +524,7 @@ impl Type {
                 let kept: Vec<Type> = members
                     .iter()
                     .map(|m| m.with_key_presence(key, present))
-                    .filter(|m| *m != Type(Repr::Never))
+                    .filter(|m| *m != Type::never())
                     .collect();
                 match kept.len() {
                     0 => Type::never(),
@@ -609,7 +609,7 @@ impl Type {
                 let kept: Vec<Type> = members
                     .iter()
                     .map(|m| m.to_isset_container(key))
-                    .filter(|m| *m != Type(Repr::Never))
+                    .filter(|m| *m != Type::never())
                     .collect();
                 match kept.len() {
                     0 => Type::never(),
@@ -639,7 +639,7 @@ impl Type {
                 let kept: Vec<Type> = members
                     .iter()
                     .map(Type::without_falsy)
-                    .filter(|t| *t != Type(Repr::Never))
+                    .filter(|t| *t != Type::never())
                     .collect();
                 match kept.len() {
                     0 => Type::never(),

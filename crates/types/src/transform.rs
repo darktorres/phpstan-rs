@@ -11,11 +11,11 @@ impl Type {
     /// This type with `static` and `$this` as `class`, at any depth.
     pub fn bind_static(&self, class: &str) -> Type {
         match self {
-            Type(Repr::StaticRef(args)) => Type(Repr::Object(
+            Type(Repr::StaticRef(args)) => Type::object(
                 class.into(),
                 args.iter().map(|a| a.bind_static(class)).collect(),
-            )),
-            Type(Repr::This) => Type(Repr::Object(class.into(), Vec::new())),
+            ),
+            Type(Repr::This) => Type::object(class.into(), Vec::new()),
             other => other.map_children(&mut |t| t.bind_static(class)),
         }
     }
@@ -23,10 +23,10 @@ impl Type {
     /// This type with `self` as `class`, at any depth.
     pub fn bind_self(&self, class: &str) -> Type {
         match self {
-            Type(Repr::SelfRef(args)) => Type(Repr::Object(
+            Type(Repr::SelfRef(args)) => Type::object(
                 class.into(),
                 args.iter().map(|a| a.bind_self(class)).collect(),
-            )),
+            ),
             other => other.map_children(&mut |t| t.bind_self(class)),
         }
     }
@@ -34,7 +34,7 @@ impl Type {
     /// This type with `parent` as `class`, at any depth.
     pub fn bind_parent(&self, class: &str) -> Type {
         match self {
-            Type(Repr::ParentRef) => Type(Repr::Object(class.into(), Vec::new())),
+            Type(Repr::ParentRef) => Type::object(class.into(), Vec::new()),
             other => other.map_children(&mut |t| t.bind_parent(class)),
         }
     }
@@ -57,10 +57,10 @@ impl Type {
     /// shape is PHP's own and keeps its name.
     pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
         match self {
-            Type(Repr::Object(name, args)) => Type(Repr::Object(
+            Type(Repr::Object(name, args)) => Type::object(
                 rename(name),
                 args.iter().map(|a| a.map_class_names(rename)).collect(),
-            )),
+            ),
             Type(Repr::Intersection(members))
                 if matches!(
                     members.as_slice(),
@@ -75,7 +75,7 @@ impl Type {
             }
             Type(Repr::Callable(Some(sig))) => {
                 let mut map = |t: &Type| t.map_class_names(rename);
-                Type(Repr::Callable(Some(Arc::new(
+                Type::callable(Some(Arc::new(
                     CallableSig {
                         params: sig
                             .params
@@ -97,7 +97,7 @@ impl Type {
                             .collect(),
                     }
                     .rebind_templates(),
-                ))))
+                )))
             }
             _ => self.map_children(&mut |t| t.map_class_names(rename)),
         }
@@ -108,7 +108,7 @@ impl Type {
     pub fn unsealed_shapes(&self) -> Type {
         match self {
             Type(Repr::ArrayShape(shape)) if shape.is_sealed() => {
-                Type(Repr::ArrayShape(Shape::unsealed(shape.fields.clone())))
+                Type::array_shape(Shape::unsealed(shape.fields.clone()))
             }
             Type(Repr::Union(members)) => Type(Repr::Union(
                 members.iter().map(Type::unsealed_shapes).collect(),
@@ -131,17 +131,17 @@ impl Type {
 
     fn step(&self, by: i64) -> Type {
         match self {
-            Type(Repr::Null) if by > 0 => Type(Repr::Int),
-            Type(Repr::IntLiteral(n)) => Type(Repr::IntLiteral(n + by)),
-            Type(Repr::FloatLiteral(f)) => Type(Repr::FloatLiteral(f + by as f64)),
+            Type(Repr::Null) if by > 0 => Type::int(),
+            Type(Repr::IntLiteral(n)) => Type::int_literal(n + by),
+            Type(Repr::FloatLiteral(f)) => Type::float_literal(f + by as f64),
             Type(Repr::IntRange(min, max)) => {
-                Type(Repr::IntRange(min.map(|v| v + by), max.map(|v| v + by)))
+                Type::int_range(min.map(|v| v + by), max.map(|v| v + by))
             }
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(|m| m.step(by))
                 .reduce(Type::union)
-                .unwrap_or(Type(Repr::Mixed(false))),
+                .unwrap_or(Type::mixed()),
             other => other.clone(),
         }
     }
@@ -152,7 +152,7 @@ impl Type {
     pub fn map_array_values(&self, f: &mut dyn FnMut(&Type) -> Type) -> Type {
         match self {
             Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Box::new(f(value)))),
-            Type(Repr::ArrayShape(shape)) => Type(Repr::ArrayShape(shape.map_types(&mut |t| f(t)))),
+            Type(Repr::ArrayShape(shape)) => Type::array_shape(shape.map_types(&mut |t| f(t))),
             Type(Repr::Union(_)) | Type(Repr::BenevolentUnion(_)) | Type(Repr::Intersection(_)) => {
                 self.map_children(&mut |m| m.map_array_values(&mut *f))
             }
@@ -179,7 +179,7 @@ impl Type {
     pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
         match self {
             Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Box::new(keep(value)))),
-            Type(Repr::ArrayShape(shape)) => Type(Repr::ArrayShape(Shape {
+            Type(Repr::ArrayShape(shape)) => Type::array_shape(Shape {
                 fields: shape
                     .fields
                     .iter()
@@ -197,7 +197,7 @@ impl Type {
                     })
                     .collect(),
                 unsealed: shape.unsealed.clone(),
-            })),
+            }),
             Type(Repr::Union(members)) => Type(Repr::Union(
                 members
                     .iter()
@@ -216,12 +216,12 @@ impl Type {
                 .iter()
                 .find(|m| !matches!(m, Type(Repr::Accessory(_))))
                 .cloned()
-                .unwrap_or(Type(Repr::Mixed(false))),
+                .unwrap_or(Type::mixed()),
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(Type::without_accessories)
                 .reduce(Type::union)
-                .unwrap_or(Type(Repr::Mixed(false))),
+                .unwrap_or(Type::mixed()),
             other => other.clone(),
         }
     }
@@ -229,10 +229,7 @@ impl Type {
     /// An array of `value`s keeping what this array is known to be: a
     /// list, non-empty.
     pub fn with_array_value(&self, value: Type) -> Type {
-        let mut members = vec![Type(Repr::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(value),
-        ))];
+        let mut members = vec![Type::array(Type::unknown_array_key(), value)];
         match self {
             Type(Repr::Intersection(existing)) => members.extend(
                 existing
@@ -242,10 +239,10 @@ impl Type {
             ),
             Type(Repr::Union(_)) => {
                 if self.is_list().yes() {
-                    members.push(Type(Repr::Accessory(AccessoryKind::ArrayList)));
+                    members.push(Type::accessory(AccessoryKind::ArrayList));
                 }
                 if self.is_non_empty_array().yes() {
-                    members.push(Type(Repr::Accessory(AccessoryKind::NonEmptyArray)));
+                    members.push(Type::accessory(AccessoryKind::NonEmptyArray));
                 }
             }
             _ => {}

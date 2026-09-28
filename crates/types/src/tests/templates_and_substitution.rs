@@ -9,33 +9,28 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
     // exercised by substituting a bare TemplateParam or one nested in a
     // Union, only `T[]`/`array<T>` or an intersection type mentioning T.
     let mut bindings = FxHashMap::default();
-    bindings.insert("T".to_string(), Type(Repr::String));
+    bindings.insert("T".to_string(), Type::string());
 
-    let array_of_t = Type(Repr::Array(
-        Box::new(Type::unknown_array_key()),
-        Box::new(Type(Repr::TemplateParam(TemplateParam::unbounded(
-            "T".to_string(),
-        )))),
-    ));
-    assert_eq!(
-        array_of_t.substitute_templates(&bindings),
-        Type(Repr::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type(Repr::String))
-        ))
-    );
-
-    let intersection_with_t = Type(Repr::Intersection(vec![
+    let array_of_t = Type::array(
+        Type::unknown_array_key(),
         Type(Repr::TemplateParam(TemplateParam::unbounded(
             "T".to_string(),
         ))),
-        Type(Repr::Object("Countable".into(), Vec::new())),
+    );
+    assert_eq!(
+        array_of_t.substitute_templates(&bindings),
+        Type::array(Type::unknown_array_key(), Type(Repr::String))
+    );
+
+    let intersection_with_t = Type(Repr::Intersection(vec![
+        Type::template_param(TemplateParam::unbounded("T".to_string())),
+        Type::object("Countable".into(), Vec::new()),
     ]));
     assert_eq!(
         intersection_with_t.substitute_templates(&bindings),
         Type(Repr::Intersection(vec![
-            Type(Repr::String),
-            Type(Repr::Object("Countable".into(), Vec::new()))
+            Type::string(),
+            Type::object("Countable".into(), Vec::new())
         ]))
     );
 }
@@ -46,17 +41,17 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
     // args)`: `T -> int` through `Box<T>` should produce `Box<int>`,
     // not leave it unchanged.
     let mut bindings = FxHashMap::default();
-    bindings.insert("T".to_string(), Type(Repr::Int));
+    bindings.insert("T".to_string(), Type::int());
 
-    let box_of_t = Type(Repr::Object(
+    let box_of_t = Type::object(
         "Box".into(),
         vec![Type(Repr::TemplateParam(TemplateParam::unbounded(
             "T".to_string(),
         )))],
-    ));
+    );
     assert_eq!(
         box_of_t.substitute_templates(&bindings),
-        Type(Repr::Object("Box".into(), vec![Type(Repr::Int)]))
+        Type::object("Box".into(), vec![Type(Repr::Int)])
     );
 }
 
@@ -67,18 +62,14 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
 #[test]
 fn substitute_template_recurses_into_a_conditional_types_branches() {
     let mut bindings = FxHashMap::default();
-    bindings.insert("T".to_string(), Type(Repr::Int));
+    bindings.insert("T".to_string(), Type::int());
 
-    let t = || {
-        Type(Repr::TemplateParam(TemplateParam::unbounded(
-            "T".to_string(),
-        )))
-    };
+    let t = || Type::template_param(TemplateParam::unbounded("T".to_string()));
     let conditional = Type(Repr::Conditional {
         subject: "x".to_string(),
         target: Box::new(t()),
         if_true: Box::new(t()),
-        if_false: Box::new(Type(Repr::Null)),
+        if_false: Box::new(Type::null()),
         negated: false,
         template_subject: false,
     });
@@ -86,9 +77,9 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
         conditional.substitute_templates(&bindings),
         Type(Repr::Conditional {
             subject: "x".to_string(),
-            target: Box::new(Type(Repr::Int)),
-            if_true: Box::new(Type(Repr::Int)),
-            if_false: Box::new(Type(Repr::Null)),
+            target: Box::new(Type::int()),
+            if_true: Box::new(Type::int()),
+            if_false: Box::new(Type::null()),
             negated: false,
             template_subject: false,
         })

@@ -50,7 +50,7 @@ impl Type {
                 negated,
                 template_subject,
             }) => match param_bindings.get(subject).filter(|_| !*template_subject) {
-                Some(bound) if *bound != Type(Repr::Mixed(false)) => {
+                Some(bound) if *bound != Type::mixed() => {
                     match conditional_branch(bound, target, *negated) {
                         Some(true) => if_true.resolve_conditional(param_bindings),
                         Some(false) => if_false.resolve_conditional(param_bindings),

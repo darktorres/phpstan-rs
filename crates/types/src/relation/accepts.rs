@@ -140,16 +140,13 @@ impl Relation<'_> {
                             bindings
                                 .get(name.as_ref())
                                 .cloned()
-                                .unwrap_or(Type(Repr::Mixed(false)))
+                                .unwrap_or(Type::mixed())
                         })
                         .collect()
                 };
                 for (i, _name) in info_b.templates.iter().enumerate() {
-                    let a_i = effective_args_a
-                        .get(i)
-                        .cloned()
-                        .unwrap_or(Type(Repr::Mixed(false)));
-                    let b_i = args_b.get(i).cloned().unwrap_or(Type(Repr::Mixed(false)));
+                    let a_i = effective_args_a.get(i).cloned().unwrap_or(Type::mixed());
+                    let b_i = args_b.get(i).cloned().unwrap_or(Type::mixed());
                     // A call-site variance marker on `sup`'s own argument
                     // (`Collection<covariant Foo>`) overrides `b`'s own
                     // declared slot variance for this one comparison,
@@ -165,11 +162,11 @@ impl Relation<'_> {
                     let a_i = a_i
                         .without_call_site_variance()
                         .cloned()
-                        .unwrap_or(Type(Repr::Mixed(false)));
+                        .unwrap_or(Type::mixed());
                     let b_i = b_i
                         .without_call_site_variance()
                         .cloned()
-                        .unwrap_or(Type(Repr::Mixed(false)));
+                        .unwrap_or(Type::mixed());
                     // Either side unresolved/erased - don't know, don't
                     // guess, matches this project's leniency everywhere
                     // else a generic argument can't be verified. A raw,
@@ -194,8 +191,8 @@ impl Relation<'_> {
                     // is bound," which this project's own call-argument
                     // binding is simply never invoked for at this nested
                     // position.
-                    if a_i == Type(Repr::Mixed(false))
-                        || b_i == Type(Repr::Mixed(false))
+                    if a_i == Type::mixed()
+                        || b_i == Type::mixed()
                         || matches!(a_i, Type(Repr::TemplateParam(_)))
                         || matches!(b_i, Type(Repr::TemplateParam(_)))
                     {
@@ -607,14 +604,14 @@ impl Relation<'_> {
         // every level, `sub` must be a multi-member Union that *includes*
         // Null, not Null alone).
         let stripped_sub = if level < NULLABLES_CHECK_LEVEL
-            && *sup != Type(Repr::Null)
-            && *sub != Type(Repr::Null)
+            && *sup != Type::null()
+            && *sub != Type::null()
             && let Type(Repr::Union(members)) = sub
-            && members.contains(&Type(Repr::Null))
+            && members.contains(&Type::null())
         {
             let non_null: Vec<Type> = members
                 .iter()
-                .filter(|m| **m != Type(Repr::Null))
+                .filter(|m| **m != Type::null())
                 .cloned()
                 .collect();
             Some(match non_null.len() {
@@ -622,7 +619,7 @@ impl Relation<'_> {
                 // whenever it's bare `Type::Null`, so a real Union always
                 // has at least one non-Null member) - kept as a safe,
                 // total fallback rather than an `unwrap`/panic.
-                0 => Type(Repr::Never),
+                0 => Type::never(),
                 1 => non_null.into_iter().next().unwrap(),
                 _ => Type(Repr::Union(non_null)),
             })

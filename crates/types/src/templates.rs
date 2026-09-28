@@ -47,9 +47,7 @@ impl Type {
                         | Type(Repr::False)
                         | Type(Repr::Null)
                 );
-                if *arg_ty != Type(Repr::Mixed(false))
-                    && !(bound_requires_object && arg_is_definite_scalar)
-                {
+                if *arg_ty != Type::mixed() && !(bound_requires_object && arg_is_definite_scalar) {
                     bindings
                         .entry(tp.name.clone())
                         .or_insert_with(|| arg_ty.clone());
@@ -131,10 +129,9 @@ impl Type {
         match (self, arg_ty) {
             (Type(Repr::ClassString(_)), Type(Repr::StringLiteral(s))) => {
                 match s.as_str().and_then(&resolve_class) {
-                    Some(canonical) => Type(Repr::ClassString(Box::new(Type(Repr::Object(
-                        canonical.into(),
-                        Vec::new(),
-                    ))))),
+                    Some(canonical) => {
+                        Type::class_string(Type(Repr::Object(canonical.into(), Vec::new())))
+                    }
                     None => arg_ty.clone(),
                 }
             }
@@ -177,10 +174,10 @@ impl CallableSig {
                 Type(Repr::TemplateParam(tp))
                     if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) =>
                 {
-                    Type(Repr::TemplateParam(TemplateParam {
+                    Type::template_param(TemplateParam {
                         scope: None,
                         ..tp.clone()
-                    }))
+                    })
                 }
                 other => other.map_children(&mut open),
             }
@@ -276,14 +273,14 @@ fn substitute(
             let fallback = match tp.default.as_deref() {
                 Some(default) => default,
                 None if to_bound(tp) && !matches!(*tp.bound, Type(Repr::Mixed(_))) => &tp.bound,
-                None => return Type(Repr::Mixed(false)),
+                None => return Type::mixed(),
             };
             // The template's own name is bound to `Mixed` while its
             // fallback is substituted, so a self-referential bound
             // (`@template T of Foo<T>`), or two templates bounded by each
             // other, can't recurse forever.
             let mut guarded = bindings.clone();
-            guarded.insert(tp.name.clone(), Type(Repr::Mixed(false)));
+            guarded.insert(tp.name.clone(), Type::mixed());
             substitute(fallback, &guarded, substituted, to_bound)
         }),
         // A template-subject conditional (`(T is int ? A : B)`) resolves

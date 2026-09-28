@@ -564,11 +564,9 @@ impl Type {
     /// ...) has no specific value to flip, so it's returned unchanged.
     pub fn negate(self) -> Type {
         match self {
-            Type(Repr::IntLiteral(n)) => Type(Repr::IntLiteral(-n)),
-            Type(Repr::FloatLiteral(f)) => Type(Repr::FloatLiteral(-f)),
-            Type(Repr::IntRange(min, max)) => {
-                Type(Repr::IntRange(max.map(|m| -m), min.map(|m| -m)))
-            }
+            Type(Repr::IntLiteral(n)) => Type::int_literal(-n),
+            Type(Repr::FloatLiteral(f)) => Type::float_literal(-f),
+            Type(Repr::IntRange(min, max)) => Type::int_range(max.map(|m| -m), min.map(|m| -m)),
             other => other,
         }
     }
@@ -581,13 +579,13 @@ impl Type {
     pub fn binary_operation(op: &BinOp, lt: &Type, rt: &Type) -> Type {
         let either_float = lt.is_float().yes() || rt.is_float().yes();
         match op {
-            BinOp::Spaceship => Type(Repr::IntRange(Some(-1), Some(1))),
+            BinOp::Spaceship => Type::int_range(Some(-1), Some(1)),
             BinOp::Add => {
                 if lt.is_array().yes() || rt.is_array().yes() {
                     return array_union_type(lt, rt);
                 }
                 if either_float {
-                    return Type(Repr::Float);
+                    return Type::float();
                 }
                 if let (Some((l_min, l_max)), Some((r_min, r_max))) =
                     (lt.int_bounds(), rt.int_bounds())
@@ -596,16 +594,16 @@ impl Type {
                     let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
                     let result = Type::int_interval(min, max);
                     return if min_overflow || max_overflow {
-                        Type::union(result, Type(Repr::Float))
+                        Type::union(result, Type::float())
                     } else {
                         result
                     };
                 }
-                Type(Repr::Int)
+                Type::int()
             }
             BinOp::Sub => {
                 if either_float {
-                    return Type(Repr::Float);
+                    return Type::float();
                 }
                 if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
                     (lt.int_bounds(), rt.int_bounds())
@@ -615,7 +613,7 @@ impl Type {
                     let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
                     let result = Type::int_interval(min, max);
                     return if min_overflow || max_overflow {
-                        Type::union(result, Type(Repr::Float))
+                        Type::union(result, Type::float())
                     } else {
                         result
                     };
@@ -624,58 +622,58 @@ impl Type {
                     (Some((l_min, l_max)), Some((r_min, r_max))) => {
                         sub_int_range_full(l_min, l_max, r_min, r_max)
                     }
-                    _ => Type(Repr::Int),
+                    _ => Type::int(),
                 }
             }
             BinOp::Mul => {
                 if either_float {
-                    return Type(Repr::Float);
+                    return Type::float();
                 }
                 match (lt.int_bounds(), rt.int_bounds()) {
                     (Some((l_min, l_max)), Some((r_min, r_max))) => {
                         mul_int_range(l_min, l_max, r_min, r_max)
                     }
-                    _ => Type(Repr::Int),
+                    _ => Type::int(),
                 }
             }
             BinOp::Pow => {
                 if either_float {
-                    return Type(Repr::Float);
+                    return Type::float();
                 }
                 match (lt.int_bounds(), rt.int_bounds()) {
                     (Some((l_min, l_max)), Some((r_min, r_max))) => {
                         pow_int_range(l_min, l_max, r_min, r_max)
                     }
-                    _ => Type(Repr::Int),
+                    _ => Type::int(),
                 }
             }
             BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-                fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type(Repr::Int))
+                fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type::int())
             }
             BinOp::Shl | BinOp::Shr => match (lt.int_bounds(), rt.int_bounds()) {
                 (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) if amount == r_max => {
                     shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl))
                 }
-                _ => Type(Repr::Int),
+                _ => Type::int(),
             },
             BinOp::Mod => match (lt.int_bounds(), rt.int_bounds()) {
                 (Some((l_min, l_max)), Some((r_min, r_max))) => {
                     mod_int_range(l_min, l_max, r_min, r_max)
                 }
-                _ => Type(Repr::Int),
+                _ => Type::int(),
             },
             BinOp::Div => {
                 if either_float {
-                    return Type(Repr::Float);
+                    return Type::float();
                 }
                 match (lt.int_bounds(), rt.int_bounds()) {
                     (Some((l_min, l_max)), Some((r_min, r_max))) => {
                         div_int_range(l_min, l_max, r_min, r_max)
                     }
-                    _ => Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::Float)])),
+                    _ => Type(Repr::Union(vec![Type::int(), Type::float()])),
                 }
             }
-            _ => Type(Repr::Mixed(false)),
+            _ => Type::mixed(),
         }
     }
 }
@@ -693,15 +691,15 @@ fn array_union_type(lt: &Type, rt: &Type) -> Type {
         (None, None) => Type::benevolent_array_key(),
     };
     let val_ty = Type::union(
-        lt.array_value_type().unwrap_or(Type(Repr::Mixed(false))),
-        rt.array_value_type().unwrap_or(Type(Repr::Mixed(false))),
+        lt.array_value_type().unwrap_or(Type::mixed()),
+        rt.array_value_type().unwrap_or(Type::mixed()),
     );
-    let mut members = vec![Type(Repr::Array(Box::new(key_ty), Box::new(val_ty)))];
+    let mut members = vec![Type::array(key_ty, val_ty)];
     if lt.is_list().yes() && rt.is_list().yes() {
-        members.push(Type(Repr::Accessory(crate::AccessoryKind::ArrayList)));
+        members.push(Type::accessory(crate::AccessoryKind::ArrayList));
     }
     if lt.is_non_empty_array().yes() || rt.is_non_empty_array().yes() {
-        members.push(Type(Repr::Accessory(crate::AccessoryKind::NonEmptyArray)));
+        members.push(Type::accessory(crate::AccessoryKind::NonEmptyArray));
     }
     if members.len() == 1 {
         members.pop().expect("one member")
