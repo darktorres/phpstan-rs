@@ -736,12 +736,21 @@ impl<'a> Checker<'a> {
         // `merge_scopes` join, so it's correctly absent from `pass_locals`
         // by the time this reads it.
         let mut last_field_facts: FxHashMap<String, Type> = FxHashMap::default();
+        // Iterating anything but an array runs user code (a generator, an
+        // `Iterator`'s methods) before each iteration and after the last.
+        let iteration_throws = Self::array_element_type(&subject_ty).is_none();
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
             declared_return,
             label,
             zero_iterations,
             |this, pass_locals, declared_return, label, _pass| {
+                if iteration_throws {
+                    this.record_throw_state(
+                        Type::Object("Throwable".into(), Vec::new()),
+                        pass_locals,
+                    );
+                }
                 if let Some(k) = key {
                     this.bind_simple_target(k, key_ty.clone(), pass_locals);
                     this.check_expr(k, pass_locals, label);
