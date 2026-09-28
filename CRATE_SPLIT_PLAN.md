@@ -2902,7 +2902,10 @@ building on the previous one:
     `$b instanceof Pay`, `is_string($b)`, `$b === null` over
     `Pay|string|null` report `match.unhandled` "remaining value: true"
     today; the oracle finds nine in snapshot 0a8fe69, e.g.
-    `amphp/http-client/src/Response.php:218`.
+    `amphp/http-client/src/Response.php:218`. Each arm's condition is
+    evaluated on the scope the earlier arms' falsey narrowing leaves, so a
+    repeated condition is `match.alwaysFalse`: `match ($i) { 1 => 'a', 1 =>
+    'b', default => 'c' }` isn't reported today.
   - **Try/catch/finally** follows `TryCatchHandler`:
     - a catch is entered from the merge of the throw points it catches;
     - its variable is the catch type minus the earlier catches;
@@ -3183,6 +3186,9 @@ fixture:
   - a non-numeric string offset on a string throws a `TypeError`:
     `$s['x']` on a `string` isn't reported today, nor `$d['priority']` on
     `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
+  - `self`/`static`/`parent` outside a class throw an `Error`:
+    `self::class` in a function isn't `outOfClass.self` today
+    (`outOfClass.static` is already reported);
   - a constant operand of `&&`/`||` is reported on either side: `$b &&
     true` isn't `booleanAnd.rightAlwaysTrue` today (the left side already
     is), and the oracle finds 21 `booleanAnd.leftAlwaysTrue` and 23
