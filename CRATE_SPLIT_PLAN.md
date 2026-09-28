@@ -894,7 +894,9 @@ corpus, type, baseline, performance and build-time gates run locally
    `impl Checker { … }` can't compile once the two are crates): an inherent
    `impl` must be in the module assignment of its type's crate, and a trait
    `impl` in that of its trait's crate or its type's (the orphan rule, a
-   generic type's own parameters counting as neither). The inventory lands
+   generic type's own parameters counting as neither). It also computes each
+   module's path in its crate (G1's rule) and fails when two land on one path
+   unless the spec marks them as merging. The inventory lands
    before C4, each entry with the phase that moves its module. Over every `impl`
    of today's package (tests aside), 84 inherent blocks sit in another crate's
    modules, all of three types: 77 of `Checker` (52 in modules assigned to
@@ -2072,6 +2074,12 @@ Follow-ups:
 
 **C4. Snapshots and lazy resolution**, one commit each, in this order:
 
+- **The gates G's extraction relies on** (§4), each with its first inventory:
+  gate 2's `impl` placement (inherent `impl`s with their type, trait `impl`s by
+  the orphan rule) and each module's path in its crate with the merges G1
+  names; gate 3's names qualified by package and target. Every entry carries
+  the phase that removes it, so the lists shrink through D–F instead of
+  surfacing at G.
 - **`xtask gatetime`**: `--record` runs HEAD's gated steps (the fixture suite
   and the lib tests; C5 adds the cli tests) N = 3 times each, binaries
   prebuilt, with the profile and environment `gates` uses (the fixture suite
@@ -7420,24 +7428,29 @@ Each extraction is one commit that builds and passes every gate: the modules
 move with `git mv` to `crates/<name>/src/` and are rewritten in place, and
 `git diff -M --summary` shows every moved file as a rename, since rewriting
 paths leaves a file far above git's similarity threshold. A file that falls
-below it moves first in a pure rename commit, content unchanged (gate 11), which
-doesn't build and which a bisect skips. Each module's path in the crate is
-Appendix A's module path without the package prefix that named the layer
-(`checker::unused` is `rules::unused`), unless §3 names another, and a new
-`lib.rs` declares them. Where two modules land on one path they are one module
-in the crate, which the extraction's commit writes: seven do on today's package.
-An extension's `ext::<name>` (its settings and registration) is its crate's
-`lib.rs`, so `ext::doctrine`, `ext::psr3` and `ext::strict_rules` don't meet
-`checker::doctrine`, `checker::psr3` and `checker::strict_rules`; a settings
-module joins the rule it configures, as C1 has each settings type live with its
-owner (`architecture` and `banned` with `project::architecture` and
-`project::banned` in `rules`); `checker::access_attributes` and
-`registry::access_attributes` are one module of `ext-language-extensions`; and
-`checker::semantic_tokens`, E6's observer, joins `lsp::semantic_tokens`. Gate 2
-computes each module's path in its crate from the inventory on (before C4) and
-fails on two landing on one unless the spec marks them as merging, so a
-collision a later phase creates is decided when it appears, not at G. The commit
-holds:
+below it moves first in a pure rename commit, content unchanged (gate 11),
+which doesn't build and which a bisect skips.
+
+**Module paths.** A module's path in its crate is Appendix A's module path
+without the package prefix that named the layer (`checker::unused` is
+`rules::unused`), unless §3 names another, and a new `lib.rs` declares them.
+Where two modules land on one path they are one module, which the extraction's
+commit writes; seven pairs do on today's package:
+
+- an extension's `ext::<name>` (its settings and registration) is its crate's
+  `lib.rs`, so `ext::doctrine`, `ext::psr3` and `ext::strict_rules` don't meet
+  `checker::doctrine`, `checker::psr3` and `checker::strict_rules`;
+- a settings module joins the rule it configures, as C1 has each settings type
+  live with its owner: `architecture` and `banned` with `project::architecture`
+  and `project::banned` in `rules`;
+- `checker::access_attributes` and `registry::access_attributes` are one module
+  of `ext-language-extensions`;
+- `checker::semantic_tokens`, E6's observer, joins `lsp::semantic_tokens`.
+
+Gate 2 computes these paths from C4 on and fails on an unmarked collision, so a
+collision a later phase creates is decided when it appears.
+
+**The commit** holds:
 
 - the crate's manifest (package `phpstan-rs-<name>`, inheriting
   `[workspace.package]`, with `[lints] workspace = true`), its
@@ -7464,13 +7477,13 @@ What an extraction checks:
   gains the API, in a commit of its own), never by widening. `unreachable_pub`
   then denies any `pub` item the crate doesn't export. The scale is known: of
   764 uniquely named `pub(crate)` items in today's package, 497 are used from
-  another crate's modules (186 of `rules`' items, 103 of `analyser`'s, 73 of
-  `reflection`'s, 29 of `builtins`', 21 of `project`'s, the rest the `ext-*`
-  modules', `lsp`'s and the bin's), most of them the upward uses gate 2 lists
-  and D–F remove. Each extraction's commit lists the crossings left for its
-  crate, each with the §3 item it serves. No test-only item crosses: the one
-  `#[cfg(test)]` helper outside a test module (`ignore_comments::scan`) serves
-  its own module's tests.
+  another crate's modules (186 of `rules`' items, 103 of `analyser`'s, 29 of
+  `builtins`', 21 of `project`'s, the rest the `ext-*` modules', `lsp`'s and the
+  bin's; 73 more are `reflection`'s, which C10's extraction settles), most of
+  them the upward uses gate 2 lists and D–F remove. Each extraction's commit
+  lists the crossings left for its crate, each with the §3 item it serves. No
+  test-only item crosses: the one `#[cfg(test)]` helper outside a test module
+  (`ignore_comments::scan`) serves its own module's tests.
 - **`impl` placement.** No entry of gate 2's list names the crate's modules,
   so every `impl` it holds or that others hold of its types compiles where it
   is.
@@ -7488,19 +7501,19 @@ What an extraction checks:
 - **Tests.** Each `#[cfg(test)]` module moves with its module. A unit test may
   dev-depend only on crates that don't depend on its own: a dev-dependency on
   one that does links a second copy of the crate, whose types don't match the
-  test's. Counted by the crate each test's module is assigned: `project`'s 118 unit
-  tests may register `builtins`, `rules` and any `ext-*`; `builtins`' 95,
+  test's. Counted by the crate each test's module is assigned: `project`'s 118
+  unit tests may register `builtins`, `rules` and any `ext-*`; `builtins`' 95,
   `rules`' 22 and the `ext-*` modules' 115 may use `project` and `testing`;
   `app`'s 23 and `lsp`'s 263 may use each other's crate. Only `analyser`'s 68
   have no crate above them to reach: 14 are `types` tests B4 already moves
-  (`accessory_and_refinement_types`, `array_literals_and_shapes`), 50 test
-  pure functions, the summaries or the `Rule` dispatch with rules they define,
-  and stay; the 4 in `checker/tests/codemods.rs` apply rules' fixes
-  (`function.nameCase`) and become Codemod fixtures. Before the
-  extraction it becomes a fixture, or a test through the crate's own API, named
-  in the rename manifest. An integration test has no such limit: it links the
-  crate's ordinary library, so a fixtures target may dev-depend on crates above
-  its own (G2).
+  (`accessory_and_refinement_types`, `array_literals_and_shapes`), 50 test pure
+  functions, the summaries or the `Rule` dispatch with rules they define, and
+  stay; the 4 in `checker/tests/codemods.rs` apply rules' fixes
+  (`function.nameCase`) and become Codemod fixtures. A test that can't stay
+  becomes a fixture, or a test through its crate's own API, before the
+  extraction, named in the rename manifest. An integration test has no such
+  limit: it links the crate's ordinary library, so a fixtures target may
+  dev-depend on crates above its own (G2).
 - **Lints**, active from the extraction commit (§2): `missing_docs` on the API
   crates (§2), those already extracted gaining it in G1's first commit;
   `clippy::print_stdout`/`print_stderr` at `deny` in every library crate, the
