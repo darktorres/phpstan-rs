@@ -902,7 +902,10 @@ corpus, type, baseline, performance and build-time gates run locally
    No module imports a module assigned to a higher crate or a sibling it may
    not depend on, except edges listed in `gates/module-graph.txt`, each with
    the phase that removes it. The list only shrinks: an entry that no
-   longer matches an edge fails the gate, and none outlives its phase.
+   longer matches an edge fails the gate, and none outlives its phase. A change
+   to a `module` or `crate` row lands with the list changes it causes, in the
+   same commit: lines for edges it makes permitted go, and edges it makes
+   cross are listed with the phase that removes them.
    The same list covers where an `impl` sits, which an edge doesn't show (a
    `rules` module reaching `analyser` is an allowed edge, yet its
    `impl Checker { … }` can't compile once the two are crates): an inherent
