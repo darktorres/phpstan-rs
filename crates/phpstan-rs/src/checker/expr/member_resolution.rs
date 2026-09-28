@@ -1,4 +1,3 @@
-use crate::checker::assignment::dynamic_write_key_type;
 use crate::checker::expr::builtin_calls::{
     date_format_return_type, date_interval_format_return_type,
 };
@@ -965,20 +964,20 @@ fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<T
             Some(traversable_of(Type::int(), fields[0].ty.clone()))
         }
         "fetchAllKeyValue" if fields.len() >= 2 => {
-            let key_ty = dynamic_write_key_type(&fields[0].ty);
+            let key_ty = fields[0].ty.write_key_type();
             Some(Type::array(key_ty, fields[1].ty.clone()))
         }
         "iterateKeyValue" if fields.len() >= 2 => {
-            let key_ty = dynamic_write_key_type(&fields[0].ty);
+            let key_ty = fields[0].ty.write_key_type();
             Some(traversable_of(key_ty, fields[1].ty.clone()))
         }
         "fetchAllAssociativeIndexed" if !fields.is_empty() => {
-            let key_ty = dynamic_write_key_type(&fields[0].ty);
+            let key_ty = fields[0].ty.write_key_type();
             let rest = Type::array_shape(Shape::sealed(fields[1..].to_vec()));
             Some(Type::array(key_ty, rest))
         }
         "iterateAssociativeIndexed" if !fields.is_empty() => {
-            let key_ty = dynamic_write_key_type(&fields[0].ty);
+            let key_ty = fields[0].ty.write_key_type();
             let rest = Type::array_shape(Shape::sealed(fields[1..].to_vec()));
             Some(traversable_of(key_ty, rest))
         }

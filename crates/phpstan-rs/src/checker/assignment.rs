@@ -1,7 +1,7 @@
 use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
-use types::{AccessoryKind, Shape, ShapeField, ShapeKey, Type};
+use types::{Shape, ShapeKey, Type};
 
 /// Real PHPStan's `NullsafeCheck::containsNullSafe` - whether an
 /// assignment target's own access chain contains a nullsafe `?->`
@@ -504,13 +504,11 @@ impl<'a> Checker<'a> {
                                 .get(&key)
                                 .cloned()
                                 .unwrap_or_else(|| Type::array_shape(Shape::sealed(Vec::new())));
-                            if let Some(new_slot_ty) = write_index_into(
-                                &prior,
-                                None,
+                            if let Some(new_slot_ty) = prior.set_offset_value_type(
                                 None,
                                 ty.clone(),
                                 false,
-                                self.loop_depth > 0,
+                                self.loop_depth == 0,
                             ) {
                                 locals.discriminant_array_facts.insert(key, new_slot_ty);
                             }
@@ -550,13 +548,11 @@ impl<'a> Checker<'a> {
                                 locals.insert(synthetic_key, merged);
                             }
                         }
-                        if let Some(new_ty) = write_index_into(
-                            &current,
-                            idx.as_deref(),
+                        if let Some(new_ty) = current.set_offset_value_type(
                             idx_ty.as_ref(),
                             ty,
                             in_range,
-                            self.loop_depth > 0,
+                            self.loop_depth == 0,
                         ) {
                             if was_defined || is_superglobal(name) {
                                 locals.insert(name.to_string(), new_ty);
@@ -571,13 +567,11 @@ impl<'a> Checker<'a> {
                         // variable name `in_range_index_writes` could
                         // ever match against - out of scope for this
                         // narrow mechanism.
-                        if let Some(new_base_ty) = write_index_into(
-                            &current_base_ty,
-                            idx.as_deref(),
+                        if let Some(new_base_ty) = current_base_ty.set_offset_value_type(
                             idx_ty.as_ref(),
                             ty,
                             false,
-                            self.loop_depth > 0,
+                            self.loop_depth == 0,
                         ) {
                             self.bind_assignment_target(base, new_base_ty, locals);
                         }
@@ -588,13 +582,11 @@ impl<'a> Checker<'a> {
                     _ => {
                         if let Some(key) = narrowing_key(base)
                             && let Some(current) = locals.get(&key).cloned()
-                            && let Some(new_ty) = write_index_into(
-                                &current,
-                                idx.as_deref(),
+                            && let Some(new_ty) = current.set_offset_value_type(
                                 idx_ty.as_ref(),
                                 ty,
                                 false,
-                                self.loop_depth > 0,
+                                self.loop_depth == 0,
                             )
                         {
                             locals.insert(key, new_ty);
@@ -709,7 +701,14 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if let ExprKind::ArrayLiteral(inner) | ExprKind::List(inner) = &item.value.kind {
-                let key = normalized_literal_key(&dim).map(|(k, _)| k);
+                let array_key = dim.to_array_key();
+                let key = array_key
+                    .int_literal_value()
+                    .map(|n| n.to_string())
+                    .or_else(|| match array_key.constant_strings()[..] {
+                        [s] => Some(s.to_string()),
+                        _ => None,
+                    });
                 let inner_container =
                     crate::checker::expr::index_result_type(container.clone(), key.as_deref());
                 self.check_destructuring_offsets(inner, &inner_container, locals);
@@ -725,7 +724,7 @@ impl<'a> Checker<'a> {
         dim: &Type,
         span: syntax::token::Span,
     ) -> bool {
-        if offset_verdict(container, dim) != Some(false) {
+        if !container.has_offset_value_type(dim).no() {
             return false;
         }
         self.report(
@@ -843,34 +842,6 @@ pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
     }
 }
 
-/// Computes a container's new type after `container[idx] = value_ty` -
-/// shared by `bind_assignment_target`'s `Index` arm for both a flat write
-/// (`$x[...] = v`, `container_ty` is `$x`'s own current type) and a
-/// nested one (`$a[$k1][$k2] = v`, called once per nesting level with
-/// each level's own `idx`/`value_ty`, `container_ty` being that level's
-/// own current type as computed by `infer_expr`). Returns `None` when
-/// `container_ty` doesn't carry enough shape information to update
-/// precisely - left alone, matching this project's usual "don't guess"
-/// scope.
-/// `literal_string_key`'s own type-based sibling - a non-literal index
-/// *expression* (`$row[$key] = ...`) whose *inferred* type is already a
-/// precise `Type::StringLiteral`/`Type::IntLiteral` (from `$key = 'id';`
-/// alone, or any other narrowing that pins it down, no loop needed) is
-/// just as resolvable against a shape's own field names as a literal AST
-/// token is - `literal_string_key` only ever checks the syntax, never the
-/// type its caller already computed and passed in as `idx_ty`. Kept as a
-/// separate helper (checked only where `write_index_into`'s `ArrayShape`
-/// arm needs it) rather than folded into `literal_string_key` itself, to
-/// avoid changing that function's signature at its other, unrelated call
-/// sites.
-fn literal_key_from_type(idx_ty: Option<&Type>) -> Option<String> {
-    match idx_ty {
-        Some(Type::StringLiteral(s)) => Some(s.to_string()),
-        Some(Type::IntLiteral(n)) => Some(n.to_string()),
-        _ => None,
-    }
-}
-
 /// `literal_key_from_type`'s own plural form - every `StringLiteral`/
 /// `IntLiteral` member reachable from `ty`, recursing through a `Union` (a
 /// `foreach` over a small literal array of key names binds its own loop
@@ -883,375 +854,4 @@ fn literal_keys_from_type(ty: &Type) -> Vec<String> {
         Type::Union(members) => members.iter().flat_map(literal_keys_from_type).collect(),
         _ => Vec::new(),
     }
-}
-
-/// Maps `idx_ty` to a definite array key type for a write - `Type::Int`/
-/// `Type::String` when `idx_ty` is confidently one or the other, otherwise
-/// `unknown_array_key()` rather than a wrong guess. Also reused by
-/// `checker::sql_reflection`'s own `fetchAllKeyValue`/
-/// `fetchAllAssociativeIndexed` dispatch (sub-phase D) - the identical
-/// "what does this uncertain-typed value become as a real PHP array
-/// key" question, just asked about a fetched column's own value instead
-/// of a write's own index expression.
-pub(crate) fn dynamic_write_key_type(idx_ty: &Type) -> Type {
-    if types::Relation::structural()
-        .is_super_type_of(&Type::int(), idx_ty)
-        .yes()
-    {
-        Type::int()
-    } else if types::Relation::structural()
-        .is_super_type_of(&Type::string(), idx_ty)
-        .yes()
-    {
-        Type::string()
-    } else {
-        // Mirrors real PHPStan's own `MixedType::toArrayKey()`/
-        // `UnionType::toArrayKey()` (confirmed reading `vendor/
-        // phpstan-src` directly): the fallback for a dynamic write whose
-        // own key expression can't be confidently proven `int` or
-        // `string` is a *benevolent* union, not a plain one - accepted
-        // later wherever *either* member would independently satisfy the
-        // target (`Registry::accepts`'s existing Benevolent
-        // handling, from Fix 1, already does the right thing once a
-        // value's type actually carries the marker). Real corpus false
-        // positive this fixes: a dynamic-key write keyed by a `Type::
-        // Mixed` foreach variable, later read back and passed to a
-        // `string`-typed parameter - real PHPStan doesn't flag it either.
-        Type::benevolent_array_key()
-    }
-}
-
-fn write_index_into(
-    container_ty: &Type,
-    idx: Option<&Expr>,
-    idx_ty: Option<&Type>,
-    value_ty: Type,
-    in_range: bool,
-    in_loop: bool,
-) -> Option<Type> {
-    match container_ty {
-        // `Null` is the same "not really an array yet" case a top-level
-        // undefined-variable write already auto-vivifies from a fresh
-        // empty `ArrayShape` (real PHP auto-vivifies a null-valued offset
-        // too) - delegate rather than bail, so a `Union` member that's
-        // provably `Null` doesn't sink the whole write via `Union`'s
-        // "all or nothing" `?`.
-        Type::Null => write_index_into(
-            &Type::array_shape(Shape::sealed(Vec::new())),
-            idx,
-            idx_ty,
-            value_ty,
-            in_range,
-            in_loop,
-        ),
-        Type::ArrayShape(shape) => match idx
-            .and_then(literal_string_key)
-            .or_else(|| literal_key_from_type(idx_ty))
-        {
-            Some(key) => {
-                let mut shape = shape.clone();
-                // A written key is present afterwards, even one the shape
-                // only had as optional.
-                shape.set(ShapeField::new(ShapeKey::from_name(&key), value_ty, false));
-                Some(Type::array_shape(shape))
-            }
-            None => {
-                let widened = shape
-                    .types()
-                    .fold(value_ty, |acc, field_ty| union_types(acc, field_ty.clone()));
-                // A real append (`idx` absent) onto an already list-like
-                // container always assigns the next sequential int key,
-                // so the result stays a list, now provably non-empty. A
-                // dynamic key write falls through this same branch but
-                // must not get the marker - an arbitrary key need not be
-                // sequential.
-                if idx.is_none() && container_ty.is_list().yes() {
-                    Some(Type::intersection_of(vec![
-                        Type::array(Type::unknown_array_key(), widened),
-                        Type::accessory(AccessoryKind::ArrayList),
-                        Type::accessory(AccessoryKind::NonEmptyArray),
-                    ]))
-                } else {
-                    let key_ty = idx
-                        .and(idx_ty)
-                        .map(dynamic_write_key_type)
-                        .unwrap_or_else(Type::unknown_array_key);
-                    Some(Type::array(key_ty, widened))
-                }
-            }
-        },
-        // Already widened past a literal shape - no single key to grow
-        // precisely anymore. A genuinely literal key still gets a real
-        // `hasOffsetValue(...)` intersection member layered on top (see
-        // `write_literal_key_aware`'s own doc comment) - the container's
-        // shared element type still widens via `union_types` exactly as
-        // before regardless, so a later dynamic-key read stays sound.
-        Type::Array(key, inner) => Some(write_literal_key_aware(
-            key,
-            inner,
-            idx,
-            idx_ty,
-            value_ty,
-            in_loop,
-            &[],
-        )),
-        // A container typed as a `Union` (e.g. differently-shaped
-        // `ArrayShape`s merged across an `if`/`else`) must update every
-        // member the same way, bailing via `?` if any one can't be -
-        // otherwise a later read through the same `Union` sees a key
-        // written one line earlier as still missing.
-        Type::Union(members) => {
-            let mut updated = Vec::with_capacity(members.len());
-            for m in members {
-                updated.push(write_index_into(
-                    m,
-                    idx,
-                    idx_ty,
-                    value_ty.clone(),
-                    in_range,
-                    in_loop,
-                )?);
-            }
-            Some(
-                updated
-                    .into_iter()
-                    .reduce(union_types)
-                    .unwrap_or(Type::mixed()),
-            )
-        }
-        // A `list<T>`/`non-empty-array<T>` container is an
-        // `Intersection([Array(T), Accessory(_)])`. A dynamic-key write
-        // drops any `Accessory` marker - an arbitrary key can't preserve
-        // a list's sequential-key guarantee - but a real append (`idx`
-        // absent) onto an already-list-marked container keeps it a list,
-        // now provably non-empty. `in_range` is the one further
-        // exception: `Checker::in_range_index_writes`'s own doc comment -
-        // a write whose index is syntactically the exact loop variable
-        // bounded by `count()` of this exact container (`for ($i = 0; $i
-        // < count($x); $i++) { $x[$i] = ...; }`) rewrites an existing
-        // element in place, never growing past the end or skipping an
-        // index, so real PHP list-ness genuinely survives it too -
-        // confirmed via `dumpType()` against real PHPStan. Non-emptiness
-        // is handled differently for the two cases: a real append always
-        // proves it (the container just grew), but an in-range rewrite
-        // doesn't change whether the container was already empty, so it
-        // only carries `NonEmptyArray` forward when the container already
-        // had it, never adds it fresh.
-        //
-        // A container that instead already carries one or more
-        // `hasOffsetValue(...)` members (from an earlier literal-key
-        // write this same function produced) is a completely separate
-        // case from the list-marker one above - dispatched first, before
-        // any list-specific handling, since the two never co-occur (a
-        // list's keys are always sequential ints, so a literal-key write
-        // onto one is a dynamic-key write in this function's own terms,
-        // which the list arm below already drops the marker for).
-        Type::Intersection(members)
-            if members
-                .iter()
-                .any(|m| matches!(m, Type::HasOffsetValue(..))) =>
-        {
-            let (key, inner) = members.iter().find_map(|m| match m {
-                Type::Array(k, v) => Some((k.as_ref(), v.as_ref())),
-                _ => None,
-            })?;
-            let existing: Vec<Type> = members
-                .iter()
-                .filter(|m| matches!(m, Type::HasOffsetValue(..)))
-                .cloned()
-                .collect();
-            Some(write_literal_key_aware(
-                key, inner, idx, idx_ty, value_ty, in_loop, &existing,
-            ))
-        }
-        Type::Intersection(members) => {
-            let inner = members.iter().find_map(Type::array_value_type)?;
-            let widened = union_types(value_ty, inner);
-            let key_ty = idx
-                .and(idx_ty)
-                .map(dynamic_write_key_type)
-                .unwrap_or_else(Type::unknown_array_key);
-            let is_append = idx.is_none();
-            if (is_append || in_range)
-                && members.contains(&Type::Accessory(AccessoryKind::ArrayList))
-            {
-                let mut new_members = vec![
-                    Type::array(key_ty, widened),
-                    Type::accessory(AccessoryKind::ArrayList),
-                ];
-                if is_append || members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray)) {
-                    new_members.push(Type::accessory(AccessoryKind::NonEmptyArray));
-                }
-                Some(Type::intersection_of(new_members))
-            } else {
-                Some(Type::array(key_ty, widened))
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Builds `Array(key, inner)[literal-or-dynamic key] = value_ty`'s result,
-/// layering a `hasOffsetValue(...)` intersection member on top whenever
-/// the write's own key resolves to a genuine compile-time literal and
-/// this write isn't inside a loop body currently under analysis - shared
-/// by `write_index_into`'s own `Type::Array` arm (`existing_has_offset_
-/// values` empty, no prior tracked keys) and its `Type::Intersection`
-/// arm for a container that already carries one or more from an earlier
-/// literal-key write (accumulated here, replacing any entry for the same
-/// key rather than duplicating it - real PHPStan does the same, confirmed
-/// via `assertType()`: two straight-line literal-key writes to different
-/// keys keep both as separate `hasOffsetValue(...)` members).
-///
-/// The `in_loop` guard mirrors real PHPStan's own observed behavior
-/// exactly (confirmed via `assertType()`, not guessed): a loop variable
-/// narrowed to a literal during one simulated iteration still generalizes
-/// away before the merge that produces the loop's own exit type, so a
-/// `for ($i = 0; ...) { $x[$i] = ...; }`-shaped write never produces
-/// `hasOffsetValue` there either. This project's own multi-pass
-/// fixed-point loop convergence (`converge_loop_body`) has no such
-/// generalization step, so without this guard it would instead compose a
-/// fresh, differently-keyed `hasOffsetValue` on almost every pass - which
-/// doesn't collapse safely across passes the way plain union-widening
-/// always has. Confirmed as a real, broad corpus regression (6 new false
-/// positives, 0 fixes) before this guard was added; `self.loop_depth ==
-/// 0` is this project's own established idiom for exactly this class of
-/// "only sound on a single, non-looping pass" soundness issue (see
-/// `ExprKind::MethodCall`'s nullsafe-on-non-nullable check in
-/// `checker::expr` for the identical reasoning).
-fn write_literal_key_aware(
-    key: &Type,
-    inner: &Type,
-    idx: Option<&Expr>,
-    idx_ty: Option<&Type>,
-    value_ty: Type,
-    in_loop: bool,
-    existing_has_offset_values: &[Type],
-) -> Type {
-    let key_ty = match idx.and(idx_ty).map(dynamic_write_key_type) {
-        Some(new_key_ty) => union_types(key.clone(), new_key_ty),
-        None => key.clone(),
-    };
-    let base = Type::array(key_ty, union_types(value_ty.clone(), inner.clone()));
-    let literal_key = idx
-        .and_then(literal_string_key)
-        .or_else(|| literal_key_from_type(idx_ty));
-    match literal_key {
-        Some(key) if !in_loop => {
-            let key = ShapeKey::from_name(&key);
-            let mut members: Vec<Type> = existing_has_offset_values
-                .iter()
-                .filter(|m| !matches!(m, Type::HasOffsetValue(k, _) if *k == key))
-                .cloned()
-                .collect();
-            members.push(Type::has_offset_value(key, value_ty));
-            members.insert(0, base);
-            Type::intersection_of(members)
-        }
-        // A dynamic key, or a write now happening inside a loop, can't
-        // extend the tracked-keys set precisely - same "give up
-        // precision" fallback the plain `Type::Array` arm always took,
-        // dropping every existing `hasOffsetValue` member too since none
-        // of them can be trusted to still hold once an arbitrary key may
-        // have overwritten them.
-        _ => base,
-    }
-}
-
-/// A literal array key's normalized form: an int key as its decimal
-/// text, a numeric-integer string likewise, any other string as-is.
-fn normalized_literal_key(dim: &Type) -> Option<(String, bool)> {
-    match dim {
-        Type::IntLiteral(n) => Some((n.to_string(), true)),
-        Type::StringLiteral(s)
-            if s.as_str()
-                .is_some_and(|t| t.parse::<i64>().is_ok_and(|n| n.to_string() == t)) =>
-        {
-            Some((s.to_string(), true))
-        }
-        Type::StringLiteral(s) => Some((s.to_string(), false)),
-        Type::True => Some(("1".to_string(), true)),
-        Type::False => Some(("0".to_string(), true)),
-        Type::Null => Some((String::new(), false)),
-        _ => None,
-    }
-}
-
-/// Whether `container` definitely has (`Some(true)`), definitely lacks
-/// (`Some(false)`), or might have (`None`) the offset `dim`.
-pub(crate) fn offset_verdict(container: &Type, dim: &Type) -> Option<bool> {
-    match container {
-        Type::ArrayShape(shape) => {
-            if !shape.is_sealed() {
-                return None;
-            }
-            if shape.fields.is_empty() && !(dim.is_mixed() || matches!(dim, Type::Never)) {
-                return Some(false);
-            }
-            let (key, _) = normalized_literal_key(dim)?;
-            match shape.field(&ShapeKey::from_name(&key)) {
-                Some(field) if !field.optional => Some(true),
-                Some(_) => None,
-                None => Some(false),
-            }
-        }
-        Type::Array(key_ty, _) => general_array_offset_verdict(key_ty, false, dim),
-        Type::Intersection(members) => {
-            let is_list = members
-                .iter()
-                .any(|m| matches!(m, Type::Accessory(types::AccessoryKind::ArrayList)));
-            let key_ty = members.iter().find_map(|m| match m {
-                Type::Array(k, _) => Some(k.as_ref()),
-                _ => None,
-            })?;
-            general_array_offset_verdict(key_ty, is_list, dim)
-        }
-        Type::Union(members) => {
-            let verdicts: Vec<Option<bool>> =
-                members.iter().map(|m| offset_verdict(m, dim)).collect();
-            if verdicts.iter().all(|v| *v == Some(false)) {
-                Some(false)
-            } else if verdicts.iter().all(|v| *v == Some(true)) {
-                Some(true)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-fn general_array_offset_verdict(key_ty: &Type, is_list: bool, dim: &Type) -> Option<bool> {
-    let (key, is_int_key) = normalized_literal_key(dim)?;
-    let key_kinds = |t: &Type| -> (bool, bool) {
-        match t {
-            Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => (true, false),
-            Type::String
-            | Type::StringLiteral(_)
-            | Type::ClassString(_)
-            | Type::ClassKindString(_) => (false, true),
-            _ => (true, true),
-        }
-    };
-    let (may_be_int, may_be_string) = match key_ty {
-        Type::Union(members) => members
-            .iter()
-            .map(key_kinds)
-            .fold((false, false), |a, b| (a.0 || b.0, a.1 || b.1)),
-        Type::Intersection(members) => members
-            .iter()
-            .map(key_kinds)
-            .fold((true, true), |a, b| (a.0 && b.0, a.1 && b.1)),
-        other => key_kinds(other),
-    };
-    if is_list {
-        return (!is_int_key || key.starts_with('-')).then_some(false);
-    }
-    if is_int_key && !may_be_int {
-        return Some(false);
-    }
-    if !is_int_key && !may_be_string {
-        return Some(false);
-    }
-    None
 }

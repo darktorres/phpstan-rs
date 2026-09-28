@@ -6,7 +6,6 @@
 //! or value its `offsetSet()` doesn't accept. An array's invalid key type
 //! is `offsetAccess.invalidOffset`'s concern, on writes as on reads.
 
-use crate::checker::assignment::offset_verdict;
 use crate::checker::{Checker, Locals};
 use syntax::ast::{Expr, ExprKind};
 use types::Type;
@@ -61,7 +60,7 @@ impl<'a> Checker<'a> {
         }
         if is_assign_op
             && let Some(dim) = &dim
-            && offset_verdict(&container, dim) == Some(false)
+            && container.has_offset_value_type(dim).no()
         {
             return;
         }
