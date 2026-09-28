@@ -3024,7 +3024,10 @@ deleted; the file-size gate.
       oracle's 80 PHPStan-only `identical.alwaysFalse`, `strict-comparison.php`,
       `lowercase-string.php`, `uppercase-string.php`, `hashing.php`). The
       truthy branch intersects: after `if ($x === 3) {}` on `1|2`, `$x` is
-      `3|1|2` today. An enum's `$this` narrows like any enum value: after
+      `3|1|2` today. The `!==` mirror of each is `notIdentical.alwaysTrue`
+      (the rules oracle's 26 PHPStan-only, the same files plus
+      `bug-7844b.php`'s `assert($objs !== [])` and `bug-5474.php`'s
+      differing shapes). An enum's `$this` narrows like any enum value: after
       `if ($this === self::A) { return; }` it is still the whole enum today
       (`bug-9142.php`).
     - **Comparisons between constants fold**, including `null` and `bool`
