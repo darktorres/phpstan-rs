@@ -2277,7 +2277,11 @@ the LSP's per-edit invalidation.
   accepts the range and patch forms in the same commit. A function removed
   before the analysed range is unknown: `mysql_connect()` under PHP 8.5
   resolves today where PHPStan reports `function.notFound` (the corpus
-  oracle finds 42 such calls, all `mysql_*` or `ldap_control_paged_*`);
+  oracle finds 42 such calls, all `mysql_*` or `ldap_control_paged_*`;
+  the rules oracle's 9 PHPStan-only are `create_function()`,
+  `convert_cyr_string()`, `fgetss()`, `get_magic_quotes_gpc()`,
+  `hebrevc()`, `restore_include_path()` and the rest of
+  `removed-functions-from-php8.php`);
 - phpstorm-stubs' `PS_UNRESERVE_PREFIX_` names are the reserved words
   they spell: `Generator::throw()` and `IntlCalendar::isSet()` are
   `method.notFound` today (the rules oracle's `bug-3683.php`), and the
@@ -5035,8 +5039,10 @@ fixture:
     of the rules oracle's 16 PHPStan-only, `typehints-nodiscard.php`,
     `closure-typehints-nodiscard.php`,
     `arrow-function-typehints-nodiscard.php`);
-  - `parameter.requiredAfterOptional` covers closures and arrow functions
-    as it does functions and methods, with the same per-version wording
+  - `parameter.requiredAfterOptional` and `parameter.implicitlyNullable`
+    ("Deprecated in PHP 8.4: … implicitly nullable via default value
+    null", 9) cover closures and arrow functions as they do functions and
+    methods, `requiredAfterOptional` with the same per-version wording
     (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`);
     unreported today (all 25 of the rules oracle's PHPStan-only,
     `required-parameter-after-optional-closures.php`,
@@ -5047,6 +5053,15 @@ fixture:
     `conflicting-trait-constants.php`, 10, `bug-12011.php`), and a dynamic
     fetch `static::{$name}` counts only for the names `$name` can be
     (`unused-private-constant-dynamic-fetch.php`); both unreported today;
+  - a `@throws` of any type that isn't `Throwable` is
+    `throws.notThrowable`: a scalar (`bool`), an unknown class, an
+    interface not extending `Throwable`, an intersection with a
+    non-throwable member, a union with `void`, a conditional with a
+    non-throwable branch, and a statement's `@throws` (`/** @throws
+    \stdClass */ $i = 1;`); only a union with a non-throwable class member
+    is reported today (the rules oracle's 10 PHPStan-only,
+    `incompatible-throws.php`, `throws-with-require.php`,
+    `missing-exception-method-throws.php`);
   - a template no parameter references is
     `method.templateTypeNotInParameter` wherever else it appears: today it
     is reported only when the return type uses it, so a template used
