@@ -5276,7 +5276,10 @@ of the four tokens outside CHANGELOG history.
 
 **When.** Between two crate-split phases, as one commit series: every
 `Cargo.toml` changes, so it shouldn't interleave with a phase that is
-moving crates. Before Phase 185, which is published under the new name.
+moving crates. Before crate-split Stage G when the name is chosen by then, so
+G's 26 new packages are created under the final prefix instead of renamed after;
+otherwise after G5, when the `phpstan_rs` library no longer exists. Before
+Phase 185, which is published under the new name.
 
 **Depends on:** the maintainer's choice of name.
 
