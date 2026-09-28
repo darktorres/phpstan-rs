@@ -166,20 +166,28 @@ impl Type {
         Type(Repr::VarianceArg(variance, Box::new(arg)))
     }
 
-    /// `members` as one union, taken as they are; `union_types` normalizes.
+    /// The union of `members`: nested unions flattened, members another
+    /// covers absorbed; `never` for none.
     pub fn union_of(members: Vec<Type>) -> Type {
-        Type(Repr::Union(members))
+        members
+            .into_iter()
+            .reduce(Type::union)
+            .unwrap_or(Type(Repr::Never))
     }
 
-    /// `members` as one benevolent union, taken as they are.
+    /// The union of `members`, benevolent: a value checked against it
+    /// passes when it passes against any member.
     pub fn benevolent_union_of(members: Vec<Type>) -> Type {
-        Type(Repr::BenevolentUnion(members))
+        match Type::union_of(members) {
+            Type(Repr::Union(members)) => Type(Repr::BenevolentUnion(members)),
+            other => other,
+        }
     }
 
-    /// `members` as one intersection, taken as they are;
-    /// `Relation::intersect` reduces.
+    /// The intersection of `members`, with no class knowledge (see
+    /// `Relation::intersect`).
     pub fn intersection_of(members: Vec<Type>) -> Type {
-        Type(Repr::Intersection(members))
+        crate::intersect_types(members)
     }
 
     pub const fn accessory(kind: AccessoryKind) -> Type {

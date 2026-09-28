@@ -1,5 +1,6 @@
 //! The kind predicates: every value (`Yes`), none (`No`), some (`Maybe`).
 
+use crate::Repr;
 use crate::{AccessoryKind, TrinaryLogic, Type};
 
 fn foo() -> Type {
@@ -13,10 +14,10 @@ fn a_kind_holds_for_its_refinements() {
         TrinaryLogic::Yes
     );
     assert_eq!(
-        Type::intersection_of(vec![
+        Type(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonEmptyString)
-        ])
+        ]))
         .is_string(),
         TrinaryLogic::Yes
     );
@@ -27,10 +28,13 @@ fn a_kind_holds_for_its_refinements() {
 
 #[test]
 fn a_union_is_a_kind_only_when_every_member_is() {
-    let nullable = Type::union_of(vec![foo(), Type::null()]);
+    let nullable = Type(Repr::Union(vec![foo(), Type::null()]));
     assert_eq!(nullable.is_object(), TrinaryLogic::Maybe);
     assert_eq!(nullable.is_null(), TrinaryLogic::Maybe);
-    let object_or_null = Type::union_of(vec![Type::object_without_class(), Type::null()]);
+    let object_or_null = Type(Repr::Union(vec![
+        Type::object_without_class(),
+        Type::null(),
+    ]));
     assert_eq!(nullable.is_within(&object_or_null), TrinaryLogic::Yes);
 }
 
@@ -56,16 +60,16 @@ fn an_array_answers_its_value_and_key_types() {
     ]));
     assert_eq!(
         shape.array_value_type(),
-        Some(Type::union_of(vec![Type::int(), Type::string()]))
+        Some(Type(Repr::Union(vec![Type::int(), Type::string()])))
     );
     let empty = Type::array_shape(Shape::sealed(Vec::new()));
     assert_eq!(empty.array_value_type(), Some(Type::never()));
     assert_eq!(
-        Type::union_of(vec![empty, Type::list_of(Type::int())]).array_value_type(),
+        Type(Repr::Union(vec![empty, Type::list_of(Type::int())])).array_value_type(),
         Some(Type::int())
     );
     assert_eq!(
-        Type::union_of(vec![Type::list_of(Type::int()), Type::null()]).array_value_type(),
+        Type(Repr::Union(vec![Type::list_of(Type::int()), Type::null()])).array_value_type(),
         None
     );
     assert_eq!(
@@ -89,15 +93,15 @@ fn to_boolean_follows_each_kind() {
         Type::bool_literal(true)
     );
     assert_eq!(
-        Type::intersection_of(vec![
+        Type(Repr::Intersection(vec![
             Type::string(),
             Type::accessory(AccessoryKind::NonFalsyString)
-        ])
+        ]))
         .to_boolean(),
         Type::bool_literal(true)
     );
     assert_eq!(
-        Type::union_of(vec![Type::null(), Type::int_literal(1)]).to_boolean(),
+        Type(Repr::Union(vec![Type::null(), Type::int_literal(1)])).to_boolean(),
         Type::bool()
     );
 }

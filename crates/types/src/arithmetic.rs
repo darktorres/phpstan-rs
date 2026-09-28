@@ -192,7 +192,7 @@ pub(crate) fn pow_int_range(
     if min.is_some() || max.is_some() {
         Type::int_interval(min, max)
     } else {
-        Type::union_of(vec![Type::int(), Type::float()])
+        Type(Repr::Union(vec![Type::int(), Type::float()]))
     }
 }
 
@@ -528,7 +528,7 @@ pub(crate) fn div_int_range(
     }
 
     if min_i.is_none() && max_i.is_none() {
-        return Type::union_of(vec![Type::int(), Type::float()]);
+        return Type(Repr::Union(vec![Type::int(), Type::float()]));
     }
     match Type::int_interval(min_i, max_i) {
         // The rounding step (`ceil`ing the min, `floor`ing the max

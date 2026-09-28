@@ -233,10 +233,10 @@ impl Type {
             // `!empty($x)` check) - a real gap, but a rare, redundant
             // double-guard pattern this project doesn't attempt yet.
             Type(Repr::String) if *excluded == Type(Repr::StringLiteral(PhpString::default())) => {
-                Type::intersection_of(vec![
+                Type(Repr::Intersection(vec![
                     Type::string(),
                     Type::accessory(AccessoryKind::NonEmptyString),
-                ])
+                ]))
             }
             // `$x !== []` on a plain `array`/`list` - the same idiom as the
             // `String` arm above: both a plain `array<T>` and an already-
@@ -296,17 +296,17 @@ impl Type {
 impl Type {
     pub fn to_non_empty_array(&self) -> Type {
         match self {
-            Type(Repr::Array(key, inner)) => Type::intersection_of(vec![
+            Type(Repr::Array(key, inner)) => Type(Repr::Intersection(vec![
                 Type::array((**key).clone(), (**inner).clone()),
                 Type::accessory(AccessoryKind::NonEmptyArray),
-            ]),
+            ])),
             Type(Repr::Intersection(members))
                 if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
                     && !members.contains(&Type(Repr::Accessory(AccessoryKind::NonEmptyArray))) =>
             {
                 let mut members = members.clone();
                 members.push(Type::accessory(AccessoryKind::NonEmptyArray));
-                Type::intersection_of(members)
+                Type(Repr::Intersection(members))
             }
             // A genuinely empty `ArrayShape` is a real contradiction once
             // `count() > 0`/truthy is known - collapses to `Never` (the same
@@ -337,7 +337,7 @@ impl Type {
                 match kept.len() {
                     0 => Type::never(),
                     1 => kept.into_iter().next().unwrap(),
-                    _ => Type::union_of(kept),
+                    _ => Type(Repr::Union(kept)),
                 }
             }
             _ => self.clone(),
@@ -414,20 +414,20 @@ impl Type {
     /// everywhere.
     pub fn to_list(&self) -> Type {
         match self {
-            Type(Repr::Array(key, inner)) => Type::intersection_of(vec![
+            Type(Repr::Array(key, inner)) => Type(Repr::Intersection(vec![
                 Type::array((**key).clone(), (**inner).clone()),
                 Type::accessory(AccessoryKind::ArrayList),
-            ]),
+            ])),
             Type(Repr::Intersection(members))
                 if members.iter().any(|m| matches!(m, Type(Repr::Array(_, _))))
                     && !members.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
             {
                 let mut members = members.clone();
                 members.push(Type::accessory(AccessoryKind::ArrayList));
-                Type::intersection_of(members)
+                Type(Repr::Intersection(members))
             }
             Type(Repr::Union(members)) => {
-                Type::union_of(members.iter().map(Type::to_list).collect())
+                Type(Repr::Union(members.iter().map(Type::to_list).collect()))
             }
             _ => self.clone(),
         }
@@ -453,7 +453,7 @@ impl Type {
                 match kept.len() {
                     0 => Type::never(),
                     1 => kept.into_iter().next().unwrap(),
-                    _ => Type::union_of(kept),
+                    _ => Type(Repr::Union(kept)),
                 }
             }
             _ => self.to_non_empty_array(),
@@ -529,7 +529,7 @@ impl Type {
                 match kept.len() {
                     0 => Type::never(),
                     1 => kept.into_iter().next().unwrap(),
-                    _ => Type::union_of(kept),
+                    _ => Type(Repr::Union(kept)),
                 }
             }
             _ => self.clone(),
@@ -581,10 +581,10 @@ impl Type {
             }
             // A general array now has that key, with a non-null value.
             Type(Repr::Array(_, value)) => match key {
-                Some(key) => Type::intersection_of(vec![
+                Some(key) => Type(Repr::Intersection(vec![
                     self.clone(),
                     Type::has_offset_value(ShapeKey::from_name(key), value.without(&Type::null())),
-                ]),
+                ])),
                 None => self.clone(),
             },
             // `list<T>`/`non-empty-array<T>` - an accessory-marked array.
@@ -600,7 +600,7 @@ impl Type {
                             ShapeKey::from_name(key),
                             value.without(&Type::null()),
                         ));
-                        Type::intersection_of(members)
+                        Type(Repr::Intersection(members))
                     }
                     _ => self.clone(),
                 }
@@ -614,7 +614,7 @@ impl Type {
                 match kept.len() {
                     0 => Type::never(),
                     1 => kept.into_iter().next().unwrap(),
-                    _ => Type::union_of(kept),
+                    _ => Type(Repr::Union(kept)),
                 }
             }
             _ => self.clone(),
@@ -644,7 +644,7 @@ impl Type {
                 match kept.len() {
                     0 => Type::never(),
                     1 => kept.into_iter().next().unwrap(),
-                    _ => Type::union_of(kept),
+                    _ => Type(Repr::Union(kept)),
                 }
             }
             Type(Repr::Null) | Type(Repr::False) | Type(Repr::IntLiteral(0)) => Type::never(),
