@@ -1958,8 +1958,7 @@ the LSP's per-edit invalidation.
   accepts the range and patch forms in the same commit. A function removed
   before the analysed range is unknown: `mysql_connect()` under PHP 8.5
   resolves today where PHPStan reports `function.notFound` (the corpus
-  oracle finds 42 such calls, all `mysql_*` or `ldap_control_paged_*`
-  among them);
+  oracle finds 42 such calls, all `mysql_*` or `ldap_control_paged_*`);
 - `stub_attributes` fixes: a property's or class constant's
   `LanguageLevelTypeAware` type becomes `@var`, not `@return`;
   `newest_type` reads every entry; a function deprecated in one
