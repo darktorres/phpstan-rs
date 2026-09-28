@@ -2606,7 +2606,12 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
   - `StatementContext` holds top level and the foreach unroll factor.
 - A statement's `/** @throws */` overrides its throw points.
 - The statement after a terminating one gets the unreachable-statement
-  node. Functions, classes and labels after it are still processed.
+  node. Functions, classes and labels after it are still processed, and
+  an empty statement (`;`) or a closing inline-HTML tag isn't reported
+  (`deadCode.unreachable` today, the rules oracle's `unreachable.php:50`,
+  `bug-7531.php`); a loop condition after an always-terminating body
+  isn't evaluated (`do { exit; } while (true);` is `doWhile.alwaysTrue`
+  today, `do-while-loop.php:145`).
 - Each end statement gets its own `ExecutionEndNode`.
 - Per-function mutable fields are deleted.
 - Behaviour commits, each with its fixture:
@@ -2883,6 +2888,10 @@ deleted; the file-size gate.
       `'foo'` pre-incremented stays `'foo'` where PHP gives `'fop'`
       (`''` → `'1'`, `'123'` → `124`; nsrt `pre-inc.php`, `pre-dec.php`,
       `binary.php`).
+    - **`NAN`** is never identical or equal to itself: `NAN === NAN` is
+      reported `identical.alwaysTrue` today, a wrong value (and `NAN !==
+      NAN` `notIdentical.alwaysFalse`; the rules oracle's
+      `strict-comparison.php:980`, `:983`).
     - **Identical** follows `resolveIdenticalType`: operand types that don't
       intersect make `===` constant false. `identical_result` tests type
       families only, so `1|2 === 7` isn't reported today.
@@ -3079,7 +3088,10 @@ deleted; the file-size gate.
       is `argument.type` "mixed given" (the rules oracle's
       `bug-8430b.php`), and `array_push($a, ...$b)` pushes `$b`'s elements
       where today it pushes `$b` itself: `non-empty-list<int|list<int>>`
-      on `list<int>` (`array-push-preserves-list.php`, 6).
+      on `list<int>` (`array-push-preserves-list.php`, 6), and a spread
+      that may be empty leaves the array possibly empty (`empty($a)` after
+      `array_push($a, ...$b)` on `$a = []` is `empty.variable` "not
+      falsy" today, `bug-6974.php`).
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
       is `Closure(): mixed` today instead of returning a `Generator`. A
       closure or arrow function whose body never returns returns `never`
@@ -3496,9 +3508,12 @@ building on the previous one:
     `smaller.alwaysTrue` today and `$i` is `1|never`.
   - **Short-circuit scopes** follow `BooleanAndHandler`/`BooleanOrHandler`/
     `TernaryHandler`/`NullsafeShortCircuitingHelper`:
-    - an assignment on the right of `&&`/`||` is Maybe afterwards:
-      `$c || ($y = 1); echo $y ?? 2;` is `nullCoalesce.variable` today, and
-      `if ($c && ($z = 2) > 1) {}` leaves `$z` as `2`;
+    - an assignment on the right of `&&`/`||`/`??=` is Maybe afterwards:
+      `$c || ($y = 1); echo $y ?? 2;` is `nullCoalesce.variable` today,
+      `if ($c && ($z = 2) > 1) {}` leaves `$z` as `2`, and after `$r =
+      $c[$k] ??= ($new = count($c) + 1);`, `isset($new)` is
+      `isset.variable` "always exists" (the rules oracle's
+      `bug-10151.php`);
     - an increment on the right of `&&` counts: `$j = 0; $foo && $j++;`
       leaves `$j` as `0` today, a wrong value, and in a loop `$i` stays `0`
       on every pass (nsrt `foreach-loop-variables.php`);
@@ -3819,6 +3834,16 @@ rules-oracle findings).
     `XMLReader|bool` today, so `->read()` after `!== false` is
     `method.nonObject` "XMLReader|true" (the rules oracle's
     `call-methods.php:1676`);
+  - `class_implements()`, `class_parents()` and `class_uses()` of an
+    object are `array`, without `false`, so a `foreach` over them isn't
+    `foreach.nonIterable` (`bug-4335.php`); `DateInterval::format('%a')`
+    is a numeric string, so `* 60` on it isn't `binaryOp.invalid`
+    (`bug-1452.php`); `BcMath\Number` supports `++`/`--`
+    (`inc-dec-bcmath-number.php`, four findings); `PDOStatement` is generic
+    through PHPStan's stub (`PDOStatement<int>` is `generics.notGeneric`
+    today, `missing-function-parameter-typehint.php`); a `SimpleXMLElement`
+    compares to scalars and takes `$xml->a[] = …` appends
+    (`invalid-comparison.php`, `bug-14054.php`);
   - `Closure::bind()`/`bindTo()` of a closure literal is `Closure`, not
     `Closure|null` (`ClosureBindDynamicReturnTypeExtension`; the rules
     oracle's `bug-7675.php`);
@@ -4016,7 +4041,8 @@ fixture:
     (`unset.offset`), and a statement with no effect for `new class {};`
     (`expr.resultUnused`) are unreported today;
   - a call to a method declared `@phpstan-impure`, abstract or on an
-    interface has effects: `X::impureFunc();`, `self::fooStaticMethod();`
+    interface has effects: `$x->impureFunc();`, `X::impureFunc();`,
+    `self::fooStaticMethod();`
     of an interface and `$foo::doFoo();` are `staticMethod.resultUnused`
     today (8 rules-oracle findings,
     `call-to-static-method-without-impure-points.php`,
@@ -4057,6 +4083,19 @@ fixture:
     `method.notFound`/`property.notFound` (it declares no members):
     `$o->getItem()` and `$o->x` on `object $o` are unreported today (the
     oracle finds 59 "undefined method/property object::");
+  - a protected method declared in a common ancestor is accessible from a
+    sibling class (PHP checks the prototype's declaring class): `$other->foo()`
+    from a class sharing `Base` with `Other` is `method.protected` today
+    (`sibling-method-prototype.php`); a `private(set)`/`protected(set)`
+    property is writable anywhere in its class, through another instance
+    too (`$self->asymmetricProperty = 1` is `assign.propertyReadOnly`
+    today, `writing-to-read-only-properties.php`); a dynamic class
+    constant name that is a union of string literals is a string
+    (`self::{$name}` on `'FOO'|'BAR'` is `classConstant.nameType` today,
+    `dynamic-constant-access.php`); a class constant read through
+    `static::` can be overridden, so `if (static::FOO)` isn't
+    `if.alwaysTrue` unless the constant or class is final
+    (`if-condition.php:130`);
   - a call to a method a class doesn't have is `method.notFound`, never
     `method.nonObject`: `(new stdClass())->foo()` is "call to method foo()
     on a non-object type stdClass" today (the rules oracle's
@@ -4154,7 +4193,9 @@ fixture:
     exist and miss the rules oracle's cases (an interface property
     prototype, a hook inherited through a parent:
     `property-prototype-from-interface.php`, `bug-14457.php`,
-    `set-non-virtual-property-hook-assign.php`);
+    `set-non-virtual-property-hook-assign.php`), and report a short set
+    hook (`set => $value + 1`, which assigns its expression) as
+    `propertySetHook.noAssign` (`get-non-virtual-property-hook-read.php`);
     a `private(set)`/`protected(set)` static property assigned from outside
     (`assign.staticPropertyPrivateSet`/`ProtectedSet`) and a `@readonly`
     property assigned twice (`assign.readOnlyPropertyByPhpDoc`) are
@@ -4207,6 +4248,26 @@ fixture:
     (a PHP warning, "no effect"), are `use.nameInUse` today (7 findings,
     `repeated-namespaces.php`, `repeated-braced-namespaces.php`,
     `bug-15215.php`);
+  - an override may put optional parameters before the variadic one:
+    `translate($message, $lang = 'cs', string ...$parameters)` over
+    `translate($message, ...$parameters)` is `parameter.notVariadic`
+    today (`overriding-variadics.php`);
+  - `new static(…)` is safe under a final constructor (`final private
+    function __construct`) as under a final class or
+    `@phpstan-consistent-constructor`; `new.static` today (`bug-4396.php`,
+    `bug-2861.php`);
+  - a conditional return whose subject is a template isn't
+    `conditionalType.alwaysTrue` from the bound alone: `(T is object ? … :
+    …)` under `T of object` (`bug-10622b.php`), nor `(int is int ? …)`
+    shadowing a parameter (`callable-type-predicate-rule.php`);
+  - `@var` above `global $x;` and `static $x = 1;` sets the variable's
+    type; it is `varTag.nativeType` against the default today
+    (`bug-4500.php`, `invalid-var-tag-type.php`);
+  - `#[\Override]` on a trait member is checked in each host: a trait
+    property overriding the host's parent's is `property.override` "no
+    matching parent property" today (`property-override-attr.php`);
+  - `static` in `@phpstan-assert static $object` resolves to the called
+    class; `assert.unresolvableType` today (`bug-12548.php`);
   - a template bound is supported when `TemplateTypeCheck` lists its type:
     `self` (an object type) and `key-of<…>` are, and are
     `generics.notSupportedBound` today (15 rules-oracle findings,
