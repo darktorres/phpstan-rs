@@ -30,35 +30,28 @@ impl Shape {
 }
 
 impl Shape {
-    /// The aggregate key type real PHPStan's `ConstantArrayType::
-    /// getIterableKeyType()` reports for a shape - the union of each
-    /// field's key kind (an unsealed tail contributes nothing). Lets `registry::assignability`/`is_super_type_of` compare an
-    /// `ArrayShape`'s real key type against a `Repr::Array`'s declared one,
-    /// so `array{name: string}` isn't wrongly assignable to
-    /// `array<int, string>`. `Repr::Never` for a shape with no real fields
-    /// (vacuously a subtype of any key type via the `(Never, _) => true` arm
-    /// below).
-    ///
-    /// An int-canonical key contributes its own `Repr::IntLiteral`, not the
-    /// bare `Repr::Int` widening - needed so `array{0: ...}` doesn't wrongly
-    /// fail against an `array<int<0, max>, ...>`-typed parameter (`Repr::Int`
-    /// isn't a confirmed subtype of `int<0, max>`, even though the one
-    /// concrete key written always is non-negative).
+    /// Every key the shape can have (`ConstantArrayType::getIterableKeyType()`):
+    /// each field's literal key, and an unsealed tail's key type; `never`
+    /// for `array{}`. Literal, not widened, so `array{0: int}` fits
+    /// `array<int<0, max>, int>` and `array{a: int}` fits
+    /// `array<'a'|'b', int>`.
     pub fn key_type(&self) -> Type {
         let mut key_types: Vec<Type> = Vec::new();
         for field in &self.fields {
-            let kt = match field.key {
-                ShapeKey::Int(n) => Type::int_literal(n),
-                ShapeKey::Str(_) => Type::string(),
-            };
+            let kt = field.key.to_type();
             if !key_types.contains(&kt) {
                 key_types.push(kt);
             }
         }
-        match key_types.len() {
+        // Distinct literals: a union past the member cap must not collapse.
+        let literals = match key_types.len() {
             0 => Type::never(),
             1 => key_types.into_iter().next().expect("len checked above"),
             _ => Type(Repr::Union(key_types)),
+        };
+        match self.unsealed.as_deref() {
+            Some(tail) => Type::union(literals, tail.0.clone()),
+            None => literals,
         }
     }
 }

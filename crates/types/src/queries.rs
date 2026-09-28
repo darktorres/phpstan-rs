@@ -640,13 +640,7 @@ impl Type {
         syntax::stack::guard(|| {
             match self {
                 Type(Repr::Array(key, _)) => Some((**key).clone()),
-                Type(Repr::ArrayShape(shape)) => {
-                    let keys = shape.key_type();
-                    Some(match shape.unsealed.as_deref() {
-                        Some(tail) => Type::union(keys, tail.0.clone()),
-                        None => keys,
-                    })
-                }
+                Type(Repr::ArrayShape(shape)) => Some(shape.key_type()),
                 // A list keys on `int<0, max>` whatever its array member says.
                 Type(Repr::Intersection(members)) => {
                     let key = members.iter().find_map(Type::array_key_type)?;
