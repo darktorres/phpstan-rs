@@ -33,8 +33,15 @@ pub fn parse_type_string(raw: &str) -> Type {
         // doc text with no such normalization; a stray non-`Mixed`
         // member would otherwise fail an ordinary compatibility check
         // even though the whole union is vacuously satisfiable.
-        if members.contains(&Type::Mixed(false)) {
-            return Type::Mixed(false);
+        if let Some(explicit) = members
+            .iter()
+            .filter_map(|m| match m {
+                Type::Mixed(explicit) => Some(*explicit),
+                _ => None,
+            })
+            .reduce(|a, b| a || b)
+        {
+            return Type::Mixed(explicit);
         }
         crate::union::merge_int_ranges(&mut members);
         if members.len() == 1 {

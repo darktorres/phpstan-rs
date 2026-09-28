@@ -153,7 +153,7 @@ fn mentions_mixed(native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> boo
 /// both "no hint at all" and "explicit `mixed`" alike) where the source
 /// itself didn't actually spell out `mixed`.
 fn is_implicit_mixed(ty: &Type, native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> bool {
-    *ty == Type::Mixed(false) && !is_explicit_mixed_text(native_hint, doc_type)
+    matches!(ty, Type::Mixed(false)) && !is_explicit_mixed_text(native_hint, doc_type)
 }
 
 /// A bare `iterable`'s own two-member shape (`types::parse_type_string`

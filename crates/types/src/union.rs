@@ -48,8 +48,10 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     if crate::types_equal_for_union(&a, &b) {
         return a;
     }
-    if a == Type::Mixed(false) || b == Type::Mixed(false) {
-        return Type::Mixed(false);
+    // A `mixed` absorbs everything, and stays explicit when either side
+    // wrote it.
+    if let Some(explicit) = mixed_explicitness(&[&a, &b]) {
+        return Type::Mixed(explicit);
     }
     if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
         return merged;
@@ -94,8 +96,8 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     // (`nullsafe.neverNull` false-firing on a `T|mixed` receiver, since
     // `mixed` already includes `null` but a raw member scan for `Null`
     // specifically wouldn't find it).
-    if members.contains(&Type::Mixed(false)) {
-        return Type::Mixed(false);
+    if let Some(explicit) = mixed_explicitness(&members.iter().collect::<Vec<_>>()) {
+        return Type::Mixed(explicit);
     }
     members.retain(|m| *m != Type::Never);
     // `true|false` is `bool`, and `bool` holds both.
@@ -623,4 +625,16 @@ fn normalize_generic_args(ty: Type) -> Type {
         }
         other => other,
     }
+}
+
+/// Whether any of `types` is `mixed`, and if so whether one is written
+/// out explicitly.
+fn mixed_explicitness(types: &[&Type]) -> Option<bool> {
+    let mut found = None;
+    for ty in types {
+        if let Type::Mixed(explicit) = ty {
+            found = Some(found.unwrap_or(false) || *explicit);
+        }
+    }
+    found
 }
