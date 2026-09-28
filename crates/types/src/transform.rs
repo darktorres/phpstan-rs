@@ -134,10 +134,23 @@ impl Type {
     fn step(&self, by: i64) -> Type {
         syntax::stack::guard(|| match self {
             Type(Repr::Null) if by > 0 => Type::int(),
-            Type(Repr::IntLiteral(n)) => Type::int_literal(n + by),
+            // Stepping past `PHP_INT_MAX` or `PHP_INT_MIN` gives a float.
+            Type(Repr::IntLiteral(n)) => match n.checked_add(by) {
+                Some(v) => Type::int_literal(v),
+                None => Type::float_literal(*n as f64 + by as f64),
+            },
             Type(Repr::FloatLiteral(f)) => Type::float_literal(f + by as f64),
             Type(Repr::IntRange(min, max)) => {
-                Type::int_range(min.map(|v| v + by), max.map(|v| v + by))
+                let edge = if by > 0 { i64::MAX } else { i64::MIN };
+                let stepped = Type::int_interval(
+                    min.map(|v| v.checked_add(by).unwrap_or(edge)),
+                    max.map(|v| v.checked_add(by).unwrap_or(edge)),
+                );
+                if [*min, *max].contains(&Some(edge)) {
+                    Type::union(stepped, Type::float_literal(edge as f64 + by as f64))
+                } else {
+                    stepped
+                }
             }
             Type(Repr::Union(members)) => members
                 .iter()

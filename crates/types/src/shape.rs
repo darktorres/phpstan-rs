@@ -55,6 +55,38 @@ impl fmt::Display for ShapeKey {
     }
 }
 
+/// The key PHP gives the next element appended to an array being built:
+/// one past the highest integer key so far, never below 0. Once
+/// `PHP_INT_MAX` is a key there is none, and appending throws ("Cannot add
+/// element to the array as the next element is already occupied").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NextArrayIndex(Option<i64>);
+
+impl Default for NextArrayIndex {
+    fn default() -> Self {
+        NextArrayIndex(Some(0))
+    }
+}
+
+impl NextArrayIndex {
+    /// The key an appended element gets, moving past it; `None` when
+    /// appending throws.
+    pub fn take(&mut self) -> Option<i64> {
+        let key = self.0?;
+        self.0 = key.checked_add(1);
+        Some(key)
+    }
+
+    /// Records an element written at the explicit integer key `key`.
+    pub fn observe(&mut self, key: i64) {
+        if let Some(next) = self.0
+            && key >= next
+        {
+            self.0 = key.checked_add(1);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ShapeField {
     pub key: ShapeKey,

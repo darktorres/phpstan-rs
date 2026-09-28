@@ -27,11 +27,7 @@ impl Type {
                 Type(Repr::True) => Some(Type::int_literal(1)),
                 Type(Repr::False) | Type(Repr::Null) => Some(Type::int_literal(0)),
                 Type(Repr::Bool) => Some(Type::int_range(Some(0), Some(1))),
-                Type(Repr::FloatLiteral(f))
-                    if f.is_finite() && f.trunc().abs() < i64::MAX as f64 =>
-                {
-                    Some(Type::int_literal(f.trunc() as i64))
-                }
+                Type(Repr::FloatLiteral(f)) => Some(Type::int_literal(php_float_to_int(*f))),
                 Type(Repr::Resource { .. }) => Some(Type::int()),
                 Type(Repr::Object(name, _)) if castable(hierarchy, name, INT_CASTABLE_CLASSES) => {
                     Some(Type::int())
@@ -216,6 +212,10 @@ impl Type {
     /// lower bound's is). Anything it can't narrow is `int|float`.
     pub fn to_absolute_number(&self) -> Type {
         match self {
+            Type(Repr::IntRange(min, max)) if *min == Some(i64::MIN) => Type::union(
+                Type::int_interval(Some(i64::MIN + 1), *max).to_absolute_number(),
+                Type::float_literal(-(i64::MIN as f64)),
+            ),
             Type(Repr::IntRange(min, max)) => {
                 if min.is_some_and(|m| m >= 0) {
                     return self.clone();
@@ -228,10 +228,15 @@ impl Type {
                     };
                     Type::int_range(Some(0), upper)
                 } else {
-                    Type::int_range(Some(-max.expect("max < 0 is always Some")), inversed_min)
+                    let max = max.expect("max < 0 is always Some");
+                    Type::int_interval(Some(max.checked_neg().unwrap_or(i64::MAX)), inversed_min)
                 }
             }
-            Type(Repr::IntLiteral(n)) => Type::int_literal(n.saturating_abs()),
+            // `abs(PHP_INT_MIN)` is past `PHP_INT_MAX`: a float.
+            Type(Repr::IntLiteral(n)) => match n.checked_abs() {
+                Some(v) => Type::int_literal(v),
+                None => Type::float_literal(-(*n as f64)),
+            },
             Type(Repr::FloatLiteral(f)) => Type::float_literal(f.abs()),
             Type(Repr::Union(members)) => members
                 .iter()
@@ -253,6 +258,21 @@ impl Type {
             Type(Repr::IntLiteral(n)) => Some(Type::int_literal(!n)),
             _ => None,
         }
+    }
+}
+
+/// `(int) $f` as PHP computes it: truncated toward zero, wrapped modulo
+/// 2^64 when out of range, and 0 for NaN and the infinities.
+pub(crate) fn php_float_to_int(f: f64) -> i64 {
+    const TWO_POW_64: f64 = 18_446_744_073_709_551_616.0;
+    if !f.is_finite() {
+        return 0;
+    }
+    let t = f.trunc();
+    if t >= i64::MIN as f64 && t < -(i64::MIN as f64) {
+        t as i64
+    } else {
+        t.rem_euclid(TWO_POW_64) as u64 as i64
     }
 }
 

@@ -4,7 +4,7 @@ use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
 
-use types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
+use types::{self, AccessoryKind, NextArrayIndex, Shape, ShapeField, ShapeKey, Type};
 
 impl<'a> Checker<'a> {
     /// `DuplicateKeysInLiteralArraysRule` - a later literal key
@@ -38,19 +38,20 @@ impl<'a> Checker<'a> {
         // the same simplification `infer_array_literal_type` below
         // relies on for its own overwrite-on-duplicate handling.
         let mut seen: Vec<(String, (Span, u32))> = Vec::new();
-        let mut next_index: i64 = 0;
+        let mut next_index = NextArrayIndex::default();
         for item in items {
             let item_span = item.key.as_ref().map_or(item.value.span, |k| k.span);
             let key = match &item.key {
-                None => {
-                    let k = next_index.to_string();
-                    next_index += 1;
-                    k
-                }
+                // Appending past `PHP_INT_MAX` throws; nothing after it is
+                // an element.
+                None => match next_index.take() {
+                    Some(n) => n.to_string(),
+                    None => return,
+                },
                 Some(k) => match &k.kind {
                     ExprKind::Literal(Literal::String(s)) => s.to_string(),
                     ExprKind::Literal(Literal::Int(n)) => {
-                        next_index = next_index.max(n + 1);
+                        next_index.observe(*n);
                         n.to_string()
                     }
                     // A negative int key literal parses as unary
@@ -63,7 +64,7 @@ impl<'a> Checker<'a> {
                     ExprKind::Unary(UnaryOp::Neg, inner) => match &inner.kind {
                         ExprKind::Literal(Literal::Int(n)) => {
                             let n = -n;
-                            next_index = next_index.max(n + 1);
+                            next_index.observe(n);
                             n.to_string()
                         }
                         _ => return,
@@ -83,7 +84,7 @@ impl<'a> Checker<'a> {
                     _ => {
                         let key = self.infer_expr(k, locals).to_array_key();
                         if let Some(n) = key.int_literal_value() {
-                            next_index = next_index.max(n + 1);
+                            next_index.observe(n);
                             n.to_string()
                         } else if let [s] = key.constant_strings()[..] {
                             s.to_string()
@@ -140,24 +141,25 @@ impl<'a> Checker<'a> {
             return self.infer_spread_array_literal_type(items, locals);
         }
         let mut shape = Shape::sealed(Vec::new());
-        let mut next_index: i64 = 0;
+        let mut next_index = NextArrayIndex::default();
         for item in items {
             let key = match &item.key {
-                None => {
-                    let k = ShapeKey::Int(next_index);
-                    next_index += 1;
-                    k
-                }
+                // Appending past `PHP_INT_MAX` throws: the literal has no
+                // value.
+                None => match next_index.take() {
+                    Some(n) => ShapeKey::Int(n),
+                    None => return Type::never(),
+                },
                 Some(k) => match &k.kind {
                     ExprKind::Literal(Literal::String(s)) => {
                         let key = ShapeKey::from_name(&s.to_str_lossy());
                         if let ShapeKey::Int(n) = key {
-                            next_index = next_index.max(n + 1);
+                            next_index.observe(n);
                         }
                         key
                     }
                     ExprKind::Literal(Literal::Int(n)) => {
-                        next_index = next_index.max(n + 1);
+                        next_index.observe(*n);
                         ShapeKey::Int(*n)
                     }
                     _ => {
@@ -201,7 +203,7 @@ impl<'a> Checker<'a> {
     /// provably non-empty.
     fn infer_spread_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
         let mut shape = Shape::sealed(Vec::new());
-        let mut next_index: i64 = 0;
+        let mut next_index = NextArrayIndex::default();
         let mut degraded = false;
         let mut elem_types: Vec<Type> = Vec::new();
         let mut list_safe = true;
@@ -213,13 +215,15 @@ impl<'a> Checker<'a> {
                 if !degraded {
                     if let [inner] = value_ty.constant_arrays()[..] {
                         for f in &inner.fields {
-                            Self::merge_shape_field(
+                            if !Self::merge_shape_field(
                                 &mut shape,
                                 &mut next_index,
                                 &f.key,
                                 f.ty.clone(),
                                 f.optional,
-                            );
+                            ) {
+                                return Type::never();
+                            }
                         }
                     } else {
                         degraded = true;
@@ -256,20 +260,21 @@ impl<'a> Checker<'a> {
                 if !degraded {
                     match &item.key {
                         None => {
-                            let key = ShapeKey::Int(next_index);
-                            next_index += 1;
-                            shape.set(ShapeField::new(key, value_ty.clone(), false));
+                            let Some(n) = next_index.take() else {
+                                return Type::never();
+                            };
+                            shape.set(ShapeField::new(ShapeKey::Int(n), value_ty.clone(), false));
                         }
                         Some(k) => match &k.kind {
                             ExprKind::Literal(Literal::String(s)) => {
                                 let key = ShapeKey::from_name(&s.to_str_lossy());
                                 if let ShapeKey::Int(n) = key {
-                                    next_index = next_index.max(n + 1);
+                                    next_index.observe(n);
                                 }
                                 shape.set(ShapeField::new(key, value_ty.clone(), false));
                             }
                             ExprKind::Literal(Literal::Int(n)) => {
-                                next_index = next_index.max(n + 1);
+                                next_index.observe(*n);
                                 shape.set(ShapeField::new(
                                     ShapeKey::Int(*n),
                                     value_ty.clone(),
@@ -316,22 +321,25 @@ impl<'a> Checker<'a> {
     /// renumbered sequentially into the target (`next_index`); any other
     /// key is kept and fully overwrites a same-named target field
     /// verbatim, its own optional flag included.
+    /// Merges one field into `shape` as spreading or `array_merge` does:
+    /// an integer key is renumbered to the next index, a string key kept.
+    /// `false` when renumbering runs past `PHP_INT_MAX`, which throws.
     pub(crate) fn merge_shape_field(
         shape: &mut Shape,
-        next_index: &mut i64,
+        next_index: &mut NextArrayIndex,
         key: &ShapeKey,
         ty: Type,
         optional: bool,
-    ) {
+    ) -> bool {
         let resolved_key = match key {
-            ShapeKey::Int(_) => {
-                let assigned = ShapeKey::Int(*next_index);
-                *next_index += 1;
-                assigned
-            }
+            ShapeKey::Int(_) => match next_index.take() {
+                Some(n) => ShapeKey::Int(n),
+                None => return false,
+            },
             ShapeKey::Str(_) => key.clone(),
         };
         shape.set(ShapeField::new(resolved_key, ty, optional));
+        true
     }
 
     /// `UselessFunctionReturnValueRule` -

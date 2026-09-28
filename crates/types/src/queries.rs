@@ -332,7 +332,9 @@ impl Type {
                 | Type(Repr::Null)
                 | Type(Repr::EnumCase(..)) => vec![self.clone()],
                 Type(Repr::Bool) => vec![Type::bool_literal(true), Type::bool_literal(false)],
-                Type(Repr::IntRange(Some(min), Some(max))) if max - min < LIMIT => {
+                Type(Repr::IntRange(Some(min), Some(max)))
+                    if i128::from(*max) - i128::from(*min) < i128::from(LIMIT) =>
+                {
                     (*min..=*max).map(Type::int_literal).collect()
                 }
                 Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {

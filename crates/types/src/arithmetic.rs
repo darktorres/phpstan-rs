@@ -107,16 +107,19 @@ pub(crate) fn sub_int_range_full(
     r_min: Option<i64>,
     r_max: Option<i64>,
 ) -> Type {
+    // A bound that overflows is a float in PHP, as for `+`.
+    let mut overflow = false;
+    let mut sub = |a: i64, b: i64| {
+        let result = a.checked_sub(b);
+        overflow |= result.is_none();
+        result
+    };
     let (min, max) = if l_min == l_max && l_min.is_some() && (r_min.is_none() || r_max.is_none()) {
         (None, l_min)
     } else {
-        // `checked_sub` throughout, not plain `-`: see `infer_binary`'s
-        // own `Add` arm doc comment for why (real PHP silently promotes
-        // an overflowing subtraction to `float` instead of panicking/
-        // wrapping the way plain `i64::-` would on adversarial input).
         let mut min = match (l_min, r_min) {
             (_, None) => None,
-            (Some(lm), Some(_)) => lm.checked_sub(r_max.or(r_min).unwrap()),
+            (Some(lm), Some(_)) => sub(lm, r_max.or(r_min).unwrap()),
             (None, Some(_)) => None,
         };
         let max;
@@ -132,10 +135,10 @@ pub(crate) fn sub_int_range_full(
                 if let Some(lm) = l_min
                     && r_min.is_none()
                 {
-                    min = lm.checked_sub(rmax);
+                    min = sub(lm, rmax);
                     max = None;
                 } else if let Some(rmin) = r_min {
-                    max = lmax.checked_sub(rmin);
+                    max = sub(lmax, rmin);
                 } else {
                     max = None;
                 }
@@ -155,7 +158,12 @@ pub(crate) fn sub_int_range_full(
             (min, max)
         }
     };
-    Type::int_interval(min, max)
+    let result = Type::int_interval(min, max);
+    if overflow {
+        Type::union(result, Type::float())
+    } else {
+        result
+    }
 }
 
 /// `base ** exp` for two plain `i64`s, `None` whenever real PHP itself
@@ -196,24 +204,12 @@ pub(crate) fn pow_int_range(
     }
 }
 
-/// Real PHPStan's own `InitializerExprTypeResolver::integerRangeMath`'s
-/// `ShiftLeft`/`ShiftRight` arms, transcribed - unlike `Mul`/`Pow`, real
-/// PHPStan only ever reaches this formula for a *single constant* right
-/// operand (`getShiftLeftType`/`getShiftRightType` themselves bail to
-/// plain `int` the moment the right side isn't a `ConstantIntegerType` -
-/// no range-shifted-by-range case exists at all), so
-/// `infer_binary`'s own call site only invokes this once `int_bounds`
-/// on the right side has already collapsed to a single value. `amount`
-/// outside `0..64` (negative - PHP throws `ArithmeticError` at runtime,
-/// not modeled as `ErrorType` here, matching this project's existing
-/// choice not to surface that family - or too wide to be a real shift
-/// amount) falls back to plain `Repr::Int` directly, the same "give up
-/// gracefully" shape every other range-arithmetic arm here already has.
-/// Each bound shifts independently and collapses to `None` (unbounded)
-/// on overflow rather than aborting the whole computation - matching
-/// real PHPStan's own `is_float($min) ? null : $min` guard (PHP silently
-/// promotes an overflowing int to `float`, which these two functions
-/// then treat as "no longer a precise int bound").
+/// `l << amount` or `l >> amount` for a single constant `amount`, as PHP
+/// computes it: a negative amount throws `ArithmeticError` (`never`); a
+/// left shift wraps within 64 bits and one of 64 or more is 0; a right
+/// shift of 64 or more leaves only the sign (`0` or `-1`). A range whose
+/// bounds shift without losing bits keeps its order; one that wraps is
+/// plain `int`.
 pub(crate) fn shift_int_range(
     l_min: Option<i64>,
     l_max: Option<i64>,
@@ -221,21 +217,39 @@ pub(crate) fn shift_int_range(
     left: bool,
 ) -> Type {
     let Ok(amount) = u32::try_from(amount) else {
-        return Type::int();
+        return Type::never();
     };
-    if amount >= 64 {
-        return Type::int();
-    }
-    let shift_bound = |v: Option<i64>| -> Option<i64> {
-        v.and_then(|v| {
-            if left {
-                v.checked_shl(amount)
-            } else {
-                Some(v >> amount)
+    if left {
+        if amount >= 64 {
+            return Type::int_literal(0);
+        }
+        // One value wraps to one value.
+        if let (Some(min), Some(max)) = (l_min, l_max)
+            && min == max
+        {
+            return Type::int_literal(min.wrapping_shl(amount));
+        }
+        let shift = |v: Option<i64>| -> Result<Option<i64>, ()> {
+            match v {
+                None => Ok(None),
+                Some(v) => {
+                    let shifted = v.wrapping_shl(amount);
+                    if shifted >> amount == v {
+                        Ok(Some(shifted))
+                    } else {
+                        Err(())
+                    }
+                }
             }
-        })
-    };
-    Type::int_interval(shift_bound(l_min), shift_bound(l_max))
+        };
+        match (shift(l_min), shift(l_max)) {
+            (Ok(min), Ok(max)) => Type::int_interval(min, max),
+            _ => Type::int(),
+        }
+    } else {
+        let amount = amount.min(63);
+        Type::int_interval(l_min.map(|v| v >> amount), l_max.map(|v| v >> amount))
+    }
 }
 
 /// Whether `l OP r` (`op` one of `Lt`/`Gt`/`LtEq`/`GtEq`) is provably
@@ -403,19 +417,20 @@ pub(crate) fn mod_int_range(
         && let (Some(l), Some(r)) = (l_min, r_min)
         && r != 0
     {
-        return Type::int_literal(l % r);
+        // `PHP_INT_MIN % -1` is 0.
+        return Type::int_literal(l.checked_rem(r).unwrap_or(0));
     }
     // Real PHPStan's own explicit special case: modulo by exactly 1 is
     // always 0, regardless of the dividend.
     if r_min == Some(1) && r_max == Some(1) {
         return Type::int_literal(0);
     }
-    let range_max = r_max.map(|m| m - 1);
+    let range_max = r_max.and_then(|m| m.checked_sub(1));
     let left_is_non_negative = l_min.is_some_and(|v| v >= 0);
     let range_min = if left_is_non_negative {
         Some(0)
     } else {
-        range_max.map(|m| -m)
+        range_max.and_then(i64::checked_neg)
     };
     Type::int_interval(range_min, range_max)
 }
@@ -566,9 +581,23 @@ impl Type {
     /// ...) has no specific value to flip, so it's returned unchanged.
     pub fn negate(self) -> Type {
         match self {
-            Type(Repr::IntLiteral(n)) => Type::int_literal(-n),
+            Type(Repr::IntLiteral(n)) => match n.checked_neg() {
+                Some(v) => Type::int_literal(v),
+                // `-PHP_INT_MIN` is past `PHP_INT_MAX`: a float.
+                None => Type::float_literal(-(n as f64)),
+            },
             Type(Repr::FloatLiteral(f)) => Type::float_literal(-f),
-            Type(Repr::IntRange(min, max)) => Type::int_range(max.map(|m| -m), min.map(|m| -m)),
+            Type(Repr::IntRange(min, max)) => {
+                let negated = Type::int_interval(
+                    max.map(|m| m.checked_neg().unwrap_or(i64::MAX)),
+                    min.map(|m| m.checked_neg().unwrap_or(i64::MAX)),
+                );
+                if min == Some(i64::MIN) {
+                    Type::union(negated, Type::float_literal(-(i64::MIN as f64)))
+                } else {
+                    negated
+                }
+            }
             other => other,
         }
     }

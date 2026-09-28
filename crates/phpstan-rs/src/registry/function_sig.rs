@@ -457,7 +457,7 @@ fn infer_const_type_with(
             // `array` of the values' union.
             ExprKind::ArrayLiteral(items) => {
                 let mut fields: Vec<(String, Type, bool)> = Vec::new();
-                let mut next_index: i64 = 0;
+                let mut next_index = types::NextArrayIndex::default();
                 let mut exact = true;
                 for item in items {
                     let value_ty = infer_const_type_with(&item.value, class_const_ref);
@@ -465,7 +465,12 @@ fn infer_const_type_with(
                         None
                     } else {
                         match item.key.as_ref().map(|k| &k.kind) {
-                            None => Some(next_index.to_string()),
+                            // Appending past `PHP_INT_MAX` throws: the
+                            // constant has no value.
+                            None => match next_index.take() {
+                                Some(n) => Some(n.to_string()),
+                                None => return Type::never(),
+                            },
                             Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
                             Some(ExprKind::Literal(Literal::String(s))) => Some(
                                 types::canonical_int_key(&s.to_str_lossy())
@@ -480,7 +485,7 @@ fn infer_const_type_with(
                         continue;
                     };
                     if let Some(n) = types::canonical_int_key(&key) {
-                        next_index = next_index.max(n.saturating_add(1));
+                        next_index.observe(n);
                     }
                     match fields.iter_mut().find(|(k, _, _)| *k == key) {
                         Some(existing) => existing.1 = value_ty,

@@ -387,7 +387,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
     let inner = &rest[1..rest.len() - 1];
 
     let mut shape = Shape::sealed(Vec::new());
-    let mut next_index: i64 = 0;
+    let mut next_index = crate::NextArrayIndex::default();
     for field_str in split_top_level(inner, ',') {
         let field_str = field_str.trim();
         if field_str.is_empty() {
@@ -438,7 +438,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
                 // PHP would use as the array key.
                 let key = ShapeKey::from_name(strip_shape_key_quotes(key));
                 if let ShapeKey::Int(n) = key {
-                    next_index = next_index.max(n + 1);
+                    next_index.observe(n);
                 }
                 shape.set(ShapeField::new(
                     key,
@@ -447,8 +447,12 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
                 ));
             }
             None => {
-                let key = ShapeKey::Int(next_index);
-                next_index += 1;
+                // No key is left after `PHP_INT_MAX`: no array has this
+                // shape.
+                let Some(n) = next_index.take() else {
+                    return Some(Type::never());
+                };
+                let key = ShapeKey::Int(n);
                 shape.set(ShapeField::new(key, parse_type_string(field_str), false));
             }
         }

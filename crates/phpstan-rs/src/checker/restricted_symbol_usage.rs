@@ -145,7 +145,9 @@ impl<'a> Checker<'a> {
     fn fold_int_flags(&self, e: &Expr) -> Option<i64> {
         syntax::stack::guard(|| match &e.kind {
             ExprKind::Literal(Literal::Int(n)) => Some(*n),
-            ExprKind::Unary(UnaryOp::Neg, inner) => self.fold_int_flags(inner).map(|n| -n),
+            ExprKind::Unary(UnaryOp::Neg, inner) => {
+                self.fold_int_flags(inner).and_then(i64::checked_neg)
+            }
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
                 self.fold_int_flags(inner)
             }

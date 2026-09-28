@@ -951,18 +951,20 @@ impl<'a> Checker<'a> {
                     });
                 if all_string_keyed_or_shape {
                     let mut merged = Shape::sealed(Vec::new());
-                    let mut next_index: i64 = 0; // unused - no int keys reach this path
+                    let mut next_index = types::NextArrayIndex::default();
                     for arg_ty in &arg_types {
                         match arg_ty.as_array_shape() {
                             Some(inner) => {
                                 for f in &inner.fields {
-                                    Self::merge_shape_field(
+                                    if !Self::merge_shape_field(
                                         &mut merged,
                                         &mut next_index,
                                         &f.key,
                                         f.ty.clone(),
                                         f.optional,
-                                    );
+                                    ) {
+                                        return Type::never();
+                                    }
                                 }
                                 // An unsealed argument's own untracked
                                 // keys could still be present in the
@@ -1003,13 +1005,15 @@ impl<'a> Checker<'a> {
                                 // case.
                                 if let Some((_, pairs)) = arg_ty.has_offset_value_parts() {
                                     for (k, v) in pairs {
-                                        Self::merge_shape_field(
+                                        if !Self::merge_shape_field(
                                             &mut merged,
                                             &mut next_index,
                                             &k,
                                             v,
                                             false,
-                                        );
+                                        ) {
+                                            return Type::never();
+                                        }
                                     }
                                 }
                             }
@@ -1019,17 +1023,19 @@ impl<'a> Checker<'a> {
                 }
                 if !has_spread && arg_types.iter().all(|t| t.as_array_shape().is_some()) {
                     let mut merged = Shape::sealed(Vec::new());
-                    let mut next_index: i64 = 0;
+                    let mut next_index = types::NextArrayIndex::default();
                     for arg_ty in &arg_types {
                         if let Some(inner) = arg_ty.as_array_shape() {
                             for f in &inner.fields {
-                                Self::merge_shape_field(
+                                if !Self::merge_shape_field(
                                     &mut merged,
                                     &mut next_index,
                                     &f.key,
                                     f.ty.clone(),
                                     f.optional,
-                                );
+                                ) {
+                                    return Type::never();
+                                }
                             }
                             if !inner.is_sealed() {
                                 unseal(&mut merged);
