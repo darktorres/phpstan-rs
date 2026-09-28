@@ -383,13 +383,23 @@ stderr. A finisher gets null stdin and stdout, and its stderr goes to
 an invalid DSN, or an unreadable `PHPSTAN_RS_SENTRY_CA_FILE` (then only the
 system roots are trusted).
 
+**Children run the binary that is running.** On Linux the supervisor starts
+its worker and finishers by executing `/proc/self/exe`, not the path
+`std::env::current_exe` returns: an upgrade that replaces the installed file
+(a package manager, the VS Code extension's download) deletes the running
+binary's path, after which `current_exe` names `"<path> (deleted)"` and
+spawning it fails with `NotFound`, while `/proc/self/exe` still executes the
+same program (checked with a scratch binary deleted while running). A
+language server running for days therefore keeps starting finishers of its
+own version. macOS and Windows have no equivalent, so there `current_exe` is
+used and a failed spawn degrades as below.
+
 **A process that can't be started degrades** instead of failing the run. The
-supervisor failing to start its worker (`current_exe` unavailable, as when the
-binary was replaced during an upgrade and `/proc/self/exe` names a deleted
-file), or to create its socket, runs the command itself as a worker with no
-crash handler, with one line on stderr. A worker that can't connect to the
-socket or attach runs without native-crash reports, likewise. A finisher that
-can't be started leaves its pending entry for the next supervisor.
+supervisor failing to start its worker, or to create its socket, runs the
+command itself as a worker with no crash handler, with one line on stderr. A
+worker that can't connect to the socket or attach runs without native-crash
+reports, likewise. A finisher that can't be started leaves its pending entry
+for the next supervisor, whose finisher may be a newer version (§4.10).
 
 ### 4.2 Where Sentry runs
 
@@ -667,7 +677,8 @@ has the finisher load the project (§4.10).
   within 30 days still sends the event, so Sentry's counts stay true, but
   tagged `bundle = already_sent` and without the bundle. The file is updated
   under `File::lock` (std) and replaced by rename, so concurrent runs don't
-  lose entries.
+  lose entries. It carries a format version like the outbox's entries, and a
+  binary that finds a newer one leaves it alone.
 
 ### 4.7 Tags, context, breadcrumbs and focus
 
@@ -678,6 +689,14 @@ has the finisher load the project (§4.10).
   `pending`).
 - **Context `run`:** analysed and context file counts, the enabled optional
   rules, the PHP version range, whether ext-sql reflects a live database.
+- **Installation:** the event's `user.id` is a random installation id, made
+  once and kept in `<cache>/installation-id`, so Sentry's "users affected"
+  counts machines rather than events without identifying anyone. Deleting the
+  file makes a new one. A CI job's fresh machine gets a fresh id each run, so
+  CI runs are tagged apart instead: `ci` = `true` when the conventional `CI`
+  variable is set, and `ci.provider` from the variables each provider sets
+  (`GITHUB_ACTIONS`, `GITLAB_CI`, `BUILDKITE`, `CIRCLECI`, `JENKINS_URL`,
+  `TF_BUILD`); only the variables' presence is read, never their values.
 - **Breadcrumbs:** each run phase (config, discovery, load, property-assign
   facts, check, each whole-program pass, report); in the LSP each request and
   notification's method, file and position, never its text. The SDK keeps the
@@ -777,20 +796,20 @@ external/<n>/<name>      files outside the root, mapped in the manifest
   the manifest.
 - **Archive:** `tar` + `flate2` (`flate2` is already in the lock).
 - **Checked before it's sent.** A bundle is replayed before it goes out: its
-  files loaded into a fresh project with its config, its crashing unit run
-  under `isolated`, and the result compared with the crash (the same panic
-  location; for a native crash, the child running it dying of the same
-  signal). The finisher replays in a child
-  (`phpstan-rs __crash-replay <bundle>`, hidden like `__crash-finish`), so a
-  replay that aborts can't take the report with it. A bundle that doesn't
-  reproduce is rebuilt with its walk widened (the next reference distance;
-  for a pass or load unit, every analysed file) and replayed again, at most
-  three times within the cap. The event is tagged `reproduces` = `yes`, `no`
-  or `unchecked` (a live SQL connection the bundle can't carry, a replay
-  that timed out after 60 s), so a maintainer knows before downloading
-  whether the bundle alone is enough. Replay runs only phpstan-rs's analysis
-  over the files, never the project's code, and costs one check of the
-  crashing unit per unique crash (`sent.json` skips repeats).
+  files loaded into a fresh project with its config, its crashing unit run under
+  `isolated`, and the result compared with the crash (the same panic location;
+  for a native crash, the child running it dying of the same signal). The
+  finisher replays in a child (`phpstan-rs __crash-replay <bundle>`, hidden like
+  `__crash-finish`), so a replay that aborts can't take the report with it. A
+  bundle that doesn't reproduce is rebuilt with its walk widened (the next
+  reference distance; for a pass or load unit, every analysed file) and replayed
+  again, at most three times within the cap. The event is tagged `reproduces` =
+  `yes`, `no`, `not_in_replayed_with` (a newer finisher, §4.10) or `unchecked`
+  (a live SQL connection the bundle can't carry, a replay that timed out after
+  60 s), so a maintainer knows before downloading whether the bundle alone is
+  enough. Replay runs only phpstan-rs's analysis over the files, never the
+  project's code, and costs one check of the crashing unit per unique crash
+  (`sent.json` skips repeats).
 
 ### 4.9 Crash state and minidumps
 
@@ -864,6 +883,16 @@ external/<n>/<name>      files outside the root, mapped in the manifest
    the pending entry, and sends it with its own client and the outbox
    transport.
 
+**A finisher of another version.** An entry left behind can be finished by a
+later supervisor running a newer binary. Everything describing the crash comes
+from the entry, not the finisher: the release, the binary's identity, the
+stack frames and module list, so the event names the version that crashed.
+The replay runs with the finisher's own version; the event carries
+`replayed_with` = its release, and when that differs from the crash's and the
+replay doesn't reproduce, `reproduces = not_in_replayed_with`, which tells the
+maintainer the newer version may already have fixed it rather than that the
+bundle is incomplete.
+
 A finisher that crashes while loading leaves the entry for the next attempt,
 so a project that crashes the loader can't loop forever. It runs without a
 crash handler of its own: a finisher's crash is what the attempt count is
@@ -874,10 +903,10 @@ for.
 The process the user, CI or the editor started, whenever a DSN is set:
 
 1. creates the crash-state directory and the minidump server (§4.1, §4.9);
-2. starts the worker (`std::env::current_exe`, the same arguments through
-   `std::env::args_os` so non-UTF-8 ones pass exactly, inherited stdio, and
-   the role, socket, run id, crash-state path and its own pid in the
-   environment);
+2. starts the worker (the running binary, §4.1, with the same arguments
+   through `std::env::args_os` so non-UTF-8 ones pass exactly, inherited
+   stdio, and the role, socket, run id, crash-state path and its own pid in
+   the environment);
 3. releases its own standard input and output (`nix::unistd::dup2_stdin`
    and `dup2_stdout` onto `/dev/null` on Unix, `crash_sys::release_std_handles`
    on Windows), so the worker holds the only copies: when the worker ends, a
@@ -1123,7 +1152,13 @@ instance:
   fingerprint for panics; native crashes group by their symbolicated stacks;
 - **alerts:** a new issue and a regressed issue each notify by email;
 - **retention:** the instance's `SENTRY_EVENT_RETENTION_DAYS` (90 by
-  default) also bounds how long bundles are kept;
+  default) also bounds how long bundles are kept. Each machine sends one
+  bundle per crash location a month (§4.6), so an issue hit on many machines
+  stores many bundles; the size to plan for is machines × distinct crashes ×
+  up to 10 MiB within the retention window;
+- **what "users" means:** an issue's user count is the number of
+  installations that hit it (§4.7), and CI runs are told apart by the `ci`
+  tags;
 - **an organization auth token** for the release workflow, stored as
   `SENTRY_AUTH_TOKEN`: its `org:ci` scope is accepted by the debug-file
   upload and release endpoints (`ProjectReleasePermission`, §3);
@@ -1171,6 +1206,12 @@ so the user's binary doesn't carry it:
   sent across hosts), and the request sends `Accept-Encoding: identity`, since
   the server otherwise may answer with the stored blob's own content
   encoding.
+- **A triage runbook**, `docs/crash-triage.md`: from an issue, `fetch` its
+  bundle, `replay` it on the current commit, `reduce` it, commit the reduced
+  bundle's fixture with the fix, and resolve the issue in the release that
+  carries the fix (so a recurrence reopens it as a regression); what the tags
+  mean (`reproduces`, `bundle`, `unit`, `ci`), and when a bundle alone isn't
+  enough (`sql: live`, `changed_since_crash`).
 - **Bundles are untrusted input**, since anyone with the DSN can send one.
   Extraction rejects absolute paths, `..` components, links and device
   entries, and stops past 256 MiB extracted; a bundle is only ever extracted
@@ -1250,6 +1291,12 @@ so the user's binary doesn't carry it:
   where none is available), `crash-injection`'s unbounded allocation ends in
   an `oom` report with the in-progress file; a plain `kill -9` of the worker
   produces none.
+- **Upgrades:** with the worker's binary deleted mid-run (a copy of the
+  test binary, removed after start), the supervisor still starts a finisher on
+  Linux; an entry left by one release and finished by another carries the
+  first's release and `replayed_with` the second's.
+- **Installation id:** stable across runs, new after the file is deleted,
+  and the `ci` tags present only with `CI` set.
 - **PID 1:** the supervisor run as a PID namespace's init (`unshare --user
   --map-root-user --pid --fork --mount-proc` in the test, no root and no
   container runtime needed; skipped with a printed reason where user
@@ -1335,7 +1382,9 @@ A "Crash reporting" section, in these words:
 > reproduce the crash: the file being analysed and the files it depends
 > on, up to 10 MiB compressed, including unsaved editor buffers, and the
 > schema ext-sql reflected. It contains your file paths, OS and CPU
-> architecture; it leaves out your hostname, your environment variables and
+> architecture, a random id for your installation (kept in the cache
+> directory; delete it to get a new one), and whether it ran in CI; it
+> leaves out your hostname, your environment variables and
 > the database connection settings (host, user, password, database name). A
 > report of a hard crash (a stack overflow, an abort) also carries a memory
 > snapshot of the program's thread stacks, which can hold fragments of
