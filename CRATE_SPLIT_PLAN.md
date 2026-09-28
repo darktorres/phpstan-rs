@@ -6694,6 +6694,33 @@ Behaviour commits, one each with its fixture:
   - The edit is a versioned `documentChanges` edit, so a client rejects it
     against a document that changed since, where today it is an unversioned
     `changes` map.
+- **Completion reads the scope at the cursor.** It asks the Session for the D6
+  scope at the position in the recovered tree, where today `lsp/completion.rs`
+  re-lexes the live buffer, finds the enclosing function by name, clones its
+  last good body, truncates it at the edit line and splices in a probe
+  statement. In `function use_it(Shape $s, Circle $c)`, `$c->` offers nothing,
+  as does `$c->a` (unedited, just edited and half typed alike), and `Circle::`
+  offers `__construct` and the instance method `area`, both of which throw an
+  `Error` when called statically, but not `class`. The target:
+  - `->` offers the instance members visible from the calling scope (a private
+    one only inside its class, a protected one inside the hierarchy),
+    `@method`/`@property` tags and mixins included;
+  - `::` offers static methods, static properties, constants, enum cases and
+    `class`, with `parent::`/`self::` also reaching the parent's instance
+    methods, as PHP allows;
+  - the names after `new`, `instanceof`, `extends`, `implements`, `catch` and
+    type positions are class-likes of the fitting kind, with the auto-import
+    edit the bare completion already makes;
+  - a call's argument list offers its parameters' names for named arguments,
+    and `$` offers the variables defined at that point.
+- **Signature help shows the whole signature**: default values, by-reference
+  and variadic markers and the PHPDoc types (`make(float $radius, bool $cached)`
+  for `bool $cached = false` today), the active parameter following named
+  arguments as well as positions, and every variant of a function C6 keeps
+  several of.
+- **Hover at a write shows the written value's type**: on `$x` in
+  `$x = make(2.0, true);` it answers `mixed` today, while the inlay hint on the
+  same `$x` says `App\Circle`.
 - **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
   the document at once, which editors can run on save; today each quick fix is
   offered alone.
