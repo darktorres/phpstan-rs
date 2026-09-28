@@ -78,6 +78,16 @@ impl Type {
         }
     }
 
+    /// Whether a `value-of`, `key-of`, offset access or class-constant
+    /// reference, left for the registry to resolve, stands anywhere in
+    /// this type.
+    pub fn contains_deferred(&self) -> bool {
+        matches!(
+            self,
+            Type::ValueOf(_) | Type::KeyOf(_) | Type::OffsetAccess(..) | Type::ClassConstant { .. }
+        ) || self.any_child(Type::contains_deferred)
+    }
+
     /// Whether this is `void`.
     pub fn is_void(&self) -> bool {
         matches!(self, Type::Void)

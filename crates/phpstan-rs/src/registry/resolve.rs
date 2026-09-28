@@ -470,7 +470,7 @@ impl Registry {
                 continue;
             };
             let resolve = |ty: &mut Type, native: &Type, classes: &_| {
-                if type_contains_deferred_value_of(ty) {
+                if ty.contains_deferred() {
                     let bound = bind_class_const_self(
                         std::mem::replace(ty, Type::mixed()),
                         &class_name,
@@ -503,7 +503,7 @@ impl Registry {
                 }
             }
             for prop in info.properties.values_mut() {
-                if type_contains_deferred_value_of(&prop.ty) {
+                if prop.ty.contains_deferred() {
                     let ty = bind_class_const_self(
                         std::mem::replace(&mut prop.ty, Type::mixed()),
                         &class_name,
@@ -512,7 +512,7 @@ impl Registry {
                     prop.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
                 if let Some(doc) = &mut prop.doc_ty
-                    && type_contains_deferred_value_of(doc)
+                    && doc.contains_deferred()
                 {
                     let ty = bind_class_const_self(
                         std::mem::replace(doc, Type::mixed()),
@@ -522,7 +522,7 @@ impl Registry {
                     *doc = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
                 if let Some(set_ty) = &prop.set_ty
-                    && type_contains_deferred_value_of(set_ty)
+                    && set_ty.contains_deferred()
                 {
                     let ty = bind_class_const_self(
                         prop.set_ty.take().unwrap(),
@@ -533,7 +533,7 @@ impl Registry {
                 }
             }
             for c in info.consts.values_mut() {
-                if type_contains_deferred_value_of(&c.ty) {
+                if c.ty.contains_deferred() {
                     let ty = bind_class_const_self(
                         std::mem::replace(&mut c.ty, Type::mixed()),
                         &class_name,
@@ -543,7 +543,7 @@ impl Registry {
                 }
             }
             for bound in info.template_bounds.values_mut() {
-                if type_contains_deferred_value_of(bound) {
+                if bound.contains_deferred() {
                     let ty = bind_class_const_self(
                         std::mem::replace(bound, Type::mixed()),
                         &class_name,
@@ -558,7 +558,7 @@ impl Registry {
                 .iter_mut()
                 .chain(info.implements_args.values_mut().flatten());
             for arg in ancestor_args {
-                if type_contains_deferred_value_of(arg) {
+                if arg.contains_deferred() {
                     let ty = bind_class_const_self(
                         std::mem::replace(arg, Type::mixed()),
                         &class_name,
@@ -570,7 +570,7 @@ impl Registry {
             self.classes.insert(class_name, info);
         }
         let resolve = |ty: &mut Type, native: &Type, classes: &_| {
-            if type_contains_deferred_value_of(ty) {
+            if ty.contains_deferred() {
                 let taken = std::mem::replace(ty, Type::mixed());
                 *ty = resolve_deferred_value_of_with_native_fallback(taken, native, classes);
             }
@@ -611,16 +611,12 @@ impl Registry {
         for _ in 0..MAX_ROUNDS {
             let mut updates: Vec<(Arc<str>, Arc<str>, Type)> = Vec::new();
             for (class_name, info) in &self.classes {
-                if !info
-                    .consts
-                    .values()
-                    .any(|sig| type_contains_deferred_value_of(&sig.ty))
-                {
+                if !info.consts.values().any(|sig| sig.ty.contains_deferred()) {
                     continue;
                 }
                 let own_consts = visible_class_consts(class_name, &self.classes);
                 for (const_name, sig) in &info.consts {
-                    if !type_contains_deferred_value_of(&sig.ty) {
+                    if !sig.ty.contains_deferred() {
                         continue;
                     }
                     let step = resolve_deferred_value_of_in_type(
@@ -647,7 +643,7 @@ impl Registry {
         }
         for info in self.classes.values_mut() {
             for sig in info.consts.values_mut() {
-                if type_contains_deferred_value_of(&sig.ty) {
+                if sig.ty.contains_deferred() {
                     sig.ty = unresolved_class_const_to_mixed(std::mem::replace(
                         &mut sig.ty,
                         Type::mixed(),
@@ -828,7 +824,7 @@ impl Registry {
     /// annotation, would otherwise leak the raw, unresolved sentinel
     /// straight into a diagnostic message.
     pub(crate) fn resolve_deferred_value_of_now(&self, ty: Type) -> Type {
-        if !type_contains_deferred_value_of(&ty) {
+        if !ty.contains_deferred() {
             return ty;
         }
         resolve_deferred_value_of_in_type(ty, &self.classes)
@@ -848,7 +844,7 @@ impl Registry {
         ty: Type,
         native: &Type,
     ) -> Type {
-        if !type_contains_deferred_value_of(&ty) {
+        if !ty.contains_deferred() {
             return ty;
         }
         resolve_deferred_value_of_with_native_fallback(ty, native, &self.classes)
@@ -1279,20 +1275,6 @@ fn declared_name_in_namespace(namespace: &str, bare: &str) -> String {
     }
 }
 
-/// Cheap, read-only pre-check for `Registry::resolve_deferred_value_of`:
-/// does `ty` contain a `ValueOf`/`ClassConstant` anywhere in its tree - lets
-/// every call site skip the much more expensive rebuild-with-clone
-/// `resolve_deferred_value_of_in_type` does for the overwhelming majority
-/// of types, which never contain it.
-pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
-    match ty {
-        Type::ValueOf(_) | Type::KeyOf(_) | Type::OffsetAccess(..) | Type::ClassConstant { .. } => {
-            true
-        }
-        _ => ty.any_child(type_contains_deferred_value_of),
-    }
-}
-
 /// The actual substitution: every `ValueOf`/`ClassConstant` in `ty`, at
 /// any depth. See `Registry::resolve_deferred_value_of`'s doc comment
 /// for why this exists, and `types::parse_type_keyword_or_class`'s
@@ -1349,40 +1331,30 @@ fn resolve_class_const_type(
 /// contains a deferred sentinel - lets that pass skip a class outright.
 fn class_has_deferred_type(info: &ClassReflection) -> bool {
     info.methods.values().any(|sig| {
-        type_contains_deferred_value_of(&sig.return_type)
+        sig.return_type.contains_deferred()
             || [&sig.return_doc_ty, &sig.self_out]
                 .into_iter()
                 .flatten()
-                .any(type_contains_deferred_value_of)
+                .any(Type::contains_deferred)
             || sig.params.iter().any(|p| {
-                type_contains_deferred_value_of(&p.ty)
+                p.ty.contains_deferred()
                     || [&p.doc_ty, &p.out_ty, &p.closure_this_type]
                         .into_iter()
                         .flatten()
-                        .any(type_contains_deferred_value_of)
+                        .any(Type::contains_deferred)
             })
     }) || info
         .extends_args
         .iter()
         .chain(info.implements_args.values().flatten())
-        .any(type_contains_deferred_value_of)
+        .any(Type::contains_deferred)
         || info.properties.values().any(|p| {
-            type_contains_deferred_value_of(&p.ty)
-                || p.doc_ty
-                    .as_ref()
-                    .is_some_and(type_contains_deferred_value_of)
-                || p.set_ty
-                    .as_ref()
-                    .is_some_and(type_contains_deferred_value_of)
+            p.ty.contains_deferred()
+                || p.doc_ty.as_ref().is_some_and(Type::contains_deferred)
+                || p.set_ty.as_ref().is_some_and(Type::contains_deferred)
         })
-        || info
-            .consts
-            .values()
-            .any(|c| type_contains_deferred_value_of(&c.ty))
-        || info
-            .template_bounds
-            .values()
-            .any(type_contains_deferred_value_of)
+        || info.consts.values().any(|c| c.ty.contains_deferred())
+        || info.template_bounds.values().any(Type::contains_deferred)
 }
 
 /// Every constant visible on `fqn` - its own, then each parent's and
@@ -1974,7 +1946,7 @@ impl Registry {
         mut sig: FunctionReflection,
     ) -> FunctionReflection {
         let resolve = |ty: &mut Type, native: &Type| {
-            if type_contains_deferred_value_of(ty) {
+            if ty.contains_deferred() {
                 let taken = std::mem::replace(ty, Type::mixed());
                 *ty = resolve_deferred_value_of_with_native_fallback(taken, native, &self.classes);
             }

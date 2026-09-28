@@ -23,9 +23,9 @@ pub(crate) use generics::{
     build_template_params, build_type_aliases, mark_template_params, substitute_type_aliases,
 };
 pub(crate) use type_resolution::{
-    apply_implicit_nullable_default, reconcile_with_native, resolve_type,
-    resolve_type_with_parsed_native,
+    apply_implicit_nullable_default, resolve_type, resolve_type_with_parsed_native,
 };
+pub(crate) use types::reconcile_with_native;
 
 #[derive(Debug, Clone)]
 pub struct ParameterReflection {
