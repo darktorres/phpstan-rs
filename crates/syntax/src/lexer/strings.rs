@@ -171,7 +171,12 @@ impl<'a> Lexer<'a> {
         while self.pos < self.src.len() && self.peek() != delim {
             if self.peek() == b'\\' {
                 self.pos = (self.pos + 2).min(self.src.len());
-            } else if self.peek() == b'{' && self.peek_at(1) == b'$' {
+            } else if (self.peek() == b'{' && self.peek_at(1) == b'$')
+                || (self.peek() == b'$' && self.peek_at(1) == b'{')
+            {
+                if self.peek() == b'$' {
+                    self.pos += 1;
+                }
                 // A `{$...}` complex-interpolation block can contain its
                 // own delimiter characters (`{$data["key"]}`), which must
                 // not be mistaken for this string's own closing delimiter -
@@ -528,6 +533,45 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
+            // `${name}` is `$name`, `${name[expr]}` is `$name[expr]`, and
+            // any other `${expr}` the variable `expr` names.
+            if b == b'$' && bytes.get(i + 1) == Some(&b'{') {
+                flush!();
+                let base = self.line_col_at(abs_base + i);
+                i += 2;
+                let start = i;
+                let mut depth = 1;
+                while i < bytes.len() && depth > 0 {
+                    if matches!(bytes[i], b'\'' | b'"') {
+                        i = skip_string_literal_bytes(bytes, i);
+                        continue;
+                    }
+                    match bytes[i] {
+                        b'{' => depth += 1,
+                        b'}' => depth -= 1,
+                        _ => {}
+                    }
+                    if depth > 0 {
+                        i += 1;
+                    }
+                }
+                let inner = String::from_utf8_lossy(&bytes[start..i]).into_owned();
+                i = (i + 1).min(bytes.len());
+                let name_len = inner.bytes().take_while(|&c| is_ident_continue(c)).count();
+                let starts_with_name = inner.bytes().next().is_some_and(is_ident_start);
+                if starts_with_name && name_len == inner.len() {
+                    parts.push(StringPart::SimpleVar(self.interner.str(&inner)));
+                } else if starts_with_name
+                    && inner[name_len..].starts_with('[')
+                    && inner.ends_with(']')
+                {
+                    parts.push(StringPart::ComplexExpr(format!("${inner}"), base));
+                } else {
+                    parts.push(StringPart::ComplexExpr(format!("${{{inner}}}"), base));
+                }
+                continue;
+            }
+
             if b == b'$' && bytes.get(i + 1).is_some_and(|&c| is_ident_start(c)) {
                 flush!();
                 i += 1;
@@ -620,7 +664,10 @@ impl<'a> Lexer<'a> {
             while i < bytes.len()
                 && !(bytes[i] == b'\\' && i + 1 < bytes.len())
                 && !(bytes[i] == b'{' && bytes.get(i + 1) == Some(&b'$'))
-                && !(bytes[i] == b'$' && bytes.get(i + 1).is_some_and(|&c| is_ident_start(c)))
+                && !(bytes[i] == b'$'
+                    && bytes
+                        .get(i + 1)
+                        .is_some_and(|&c| c == b'{' || is_ident_start(c)))
             {
                 i += 1;
             }
