@@ -4265,7 +4265,8 @@ rules-oracle findings).
 The oracle's other side is the false-positive measure: phpstan-rs reports
 2,588 findings PHPStan doesn't, and every one was traced to its cause.
 Each cause is a plan item where it lives (the items cite the rules
-oracle's file), and the phase that fixes it re-runs the oracle and removes
+oracle's file; Appendix I lists the 1,019 in 410 files no item names, by
+cause and phase), and the phase that fixes it re-runs the oracle and removes
 its findings; what stays is approved: stricter checks that are right at
 runtime (`array_sum()` of arrays, printf placeholders that cast objects,
 `new self()` statements with no effects, `static::$p;` statements, a
@@ -7569,3 +7570,761 @@ values that flow on from them.
   to `class-string&hasMethod(…)`; `bug-8752.php`.
 - `property-exists-narrow` (1, 1 file): `property_exists()` narrows to
   `object&hasProperty(…)`; `bug-13304.php`.
+
+## Appendix I: the rules oracle's uncited phpstan-rs-only findings by cause
+
+At `76e738b4`, 1,019 of the rules oracle's 2,588 phpstan-rs-only findings are in
+410 files the plan cites nowhere else. Each was read against its fixture, the
+phar's findings on the same line and, where the two tools disagree on runtime
+behaviour, php 8.5; they trace to 218 causes. By verdict: 669 are wrong today (a
+false positive, or a wrong type that leads to one), 145 are a finding PHPStan
+reports under another identifier or phpstan-rs reports twice, 66 are
+`phpstanRs.assertType` mismatches, 44 are right at runtime and approved, 35 come
+from bleeding-edge toggles C1 turns into settings, and 60 are the oracle's setup
+(php-parser classes, an unused trait, the measured run's single-int
+`phpVersion`) or an approved rename. Each entry gives the cause's key, its
+findings and files, its verdict, what holds, and the files, most findings first;
+the phase is done with it when its files have no phpstan-rs-only findings left,
+or each remaining one is approved.
+
+**Oracle setup** (49 findings, 15 files, 3 causes):
+
+- `phpparser-classes` (36 findings, 10 files; the oracle setup or an approved
+  rename): php-parser and PHPStan classes the phar loads and phpstan-rs doesn't
+  (the gate's excluded files); `return-list-rule.php`, `return-rule-error.php`,
+  `TestTypeOverwriteSpecifyingExtensions.php`,
+  `class-implements-out-of-phpstan.php`, `node-connecting-visitor.php`,
+  `class-implements-in-phpstan.php`, `instanceof-type.php`,
+  `old-php-parser-4-class.php`, `runtime-reflection-function.php`,
+  `runtime-reflection-instantiation.php`.
+- `oracle-phpversion` (11 findings, 3 files; the oracle setup or an approved
+  rename): the measured run gave the phar `phpVersion: 80500` as one int (gate
+  12's spec gives the range), which leaves `PHP_VERSION_ID` unbounded;
+  `final-private-method-phpversions.php`, `named-arguments-phpversion.php`,
+  `disallow-named-arguments-php-version-scope.php`.
+- `unused-trait-body` (2 findings, 2 files; the oracle setup or an approved
+  rename): PHPStan doesn't analyse a trait no class uses; phpstan-rs does
+  (approved); `ignore-parse-error-trait.php`, `bug-5143.php`.
+
+**B3** (11 findings, 5 files, 2 causes):
+
+- `assign-in-coalesce` (7 findings, 1 file; wrong today): `$a ?? $x = null`
+  parses as `$a ?? ($x = null)`; `assign.invalidExpr`, `variable.undefined` and
+  `return.type` today (B3's assignment-as-operand item);
+  `unnecessary-null-coalesce-side-effects.php`.
+- `shebang-declare` (4 findings, 4 files; wrong today): a shebang line before
+  `<?php` doesn't make `declare(strict_types=1)` not first;
+  `declare-shebang.php`, `declare-shebang2.php`, `declare-shebang3.php`,
+  `bug-6252.php`.
+
+**B4** (92 findings, 34 files, 19 causes):
+
+- `template-iterable` (23 findings, 3 files; wrong today): `foreach` over
+  `iterable<T>` gives `T` (`mixed` today, B4's `iterable<K, V>` item);
+  `bug-7511.php`, `bug-7460.php`, `bug-8936.php`.
+- `assert:print-keys` (13 findings, 4 files; an assertType mismatch): `array<V>`
+  prints without its `(int|string)` key, the nsrt normalization's form;
+  `bug-13921.php`, `file-asserts.php`, `bug-5372_2.php`,
+  `inherit-phpdoc-return-type-with-narrower-native-return-type.php`.
+- `template-property` (9 findings, 4 files; wrong today): a property holding a
+  `T` (assigned, promoted, or `@var E|null` with `?? throw`) returns `T`;
+  `generic-subtype.php`, `bug-4590.php`, `template-string-bound.php`,
+  `bug-13190.php`.
+- `template-infer-keys` (7 findings, 2 files; wrong today; an assertType
+  mismatch): `array<K, V>` arguments infer `K`, and `new Collection([0 => …])`
+  infers `Collection<int, …>`; `bug-3769.php`, `bug-11041.php`.
+- `template-generalize` (6 findings, 1 file; an assertType mismatch): `new
+  Collection(['foo', 'bar'])` generalizes to `Collection<int, string>`;
+  `bug-5372.php`.
+- `assert:print-template-bound` (5 findings, 2 files; an assertType mismatch):
+  templates print with their bound (`T of X (…)`), nested generics included;
+  `bug-9708.php`, `bug-5562.php`.
+- `callable-template-infer` (5 findings, 5 files; wrong today; an assertType
+  mismatch): a callable argument infers a template from its parameters and
+  return: `Closure(): T`, `__invoke` with a callable template,
+  `callable(callable(): T): T`, a templated callable property called through
+  `($this->cb)($x)`; `bug-14844-class-const.php`, `bug-7984.php`,
+  `bug-9167.php`, `varying-acceptor.php`, `bug-13876.php`.
+- `template-bound-template` (5 findings, 1 file; wrong today): a method template
+  bounded by a class template (`F of E`) accepts the bound; `bug-4643.php`.
+- `template-offset` (4 findings, 2 files; wrong today): an offset read on
+  `array<TKey, T>` or `non-empty-list<T>` is `T`; `bug-6158.php`,
+  `bug-7600.php`.
+- `assert:iterable-template` (2 findings, 1 file; an assertType mismatch):
+  `iterable<array<T>>` from a generic helper prints as `iterable`, `never` for
+  an empty array; `bug-5757.php`.
+- `conditional-return` (2 findings, 1 file; an assertType mismatch): conditional
+  returns over callable templates resolve; `conditional-complex-templates.php`.
+- `conditional-return-callable` (2 findings, 1 file; wrong today): a first-class
+  callable of a method with a conditional return resolves it per element in
+  `array_map()`; `bug-10715.php`.
+- `mixed-accepts` (2 findings, 1 file; wrong today): `mixed|null` accepts
+  `mixed` (`return.type` today); `?mixed` is reported once;
+  `invalid-union-with-mixed.php`.
+- `sealed-generic` (2 findings, 1 file; wrong today): `match` on `$x::class`
+  over a `@phpstan-sealed` generic class's subclasses is exhaustive;
+  `bug-14412.php`.
+- `allowed-subtypes` (1 finding, 1 file; wrong today): `DateTimeInterface` after
+  `!instanceof DateTimeImmutable` is `DateTime`; `bug-5259.php`.
+- `shape-dynamic-key` (1 finding, 1 file; wrong today): `[$name => $value]` is
+  `non-empty-array<string, mixed>`; `bug-4844.php`.
+- `shape-optional-accepts` (1 finding, 1 file; wrong today): a constant array
+  missing an optional key is accepted by `array{url?: …, title: …}`
+  (`classConstant.phpDocType` today); `bug-7273b.php`.
+- `stringable-to-string` (1 finding, 1 file; wrong today): without
+  `strict_types`, a `Stringable` object is accepted by a `string` parameter;
+  `stringable.php`.
+- `template-narrow` (1 finding, 1 file; wrong today): `!instanceof C` on `T of
+  A|B|C` leaves `A|B`, which has `$name`; `bug-6566.php`.
+
+**C4** (54 findings, 25 files, 18 causes):
+
+- `method-tag-static-trait` (8 findings, 1 file; wrong today): static `@method`
+  tags declared on a trait or parent resolve on the class;
+  `bug-11591-method-tag.php`.
+- `trait-duplicate-method` (8 findings, 2 files; another identifier or a second
+  report): methods differing only in case are
+  `class.duplicateMethod`/`trait.duplicateMethod`, not `method.nameCase`;
+  `bug-14250.php`, `duplicate-declarations.php`.
+- `enum-interface-methods` (6 findings, 1 file; wrong today): an enum implements
+  `cases`/`from`/`tryFrom` natively, so an interface declaring them is satisfied
+  (`class.abstractMethodNotImplemented` today); `bug-11592.php`.
+- `require-extends-members` (5 findings, 1 file; wrong today):
+  `@phpstan-require-extends` on an interface makes the required class's members
+  accessible through it; `require-extends.php`.
+- `mixin-trait` (4 findings, 2 files; wrong today): `@mixin` on a trait applies
+  to the classes using it (as well as being `mixin.trait`); `trait-mixin.php`,
+  `trait-mixin.php`.
+- `inherited-property-phpdoc` (3 findings, 2 files; wrong today): a property
+  redeclared without PHPDoc keeps the parent's type; `bug-7240.php`,
+  `bug-1216.php`.
+- `mixin-callstatic` (3 findings, 2 files; wrong today): with `@mixin` and
+  `__callStatic`, `Class::method()` of an instance method goes through
+  `__callStatic`; `bug-3641.php`, `bug-5536.php`.
+- `trait-alias` (3 findings, 3 files; wrong today): trait adaptations: `foo as
+  public` changes visibility and `foo as bar` adds `bar`; `bug-3465.php`,
+  `bug-3514.php`, `bug-4516.php`.
+- `define-constants` (2 findings, 1 file; wrong today): a constant `define()`d
+  in the file is known everywhere in it; `constants.php`.
+- `trait-abstract-impl` (2 findings, 1 file; wrong today): an abstract method
+  from one trait implemented by another trait in the same class is implemented;
+  `bug-3406_2.php`.
+- `trait-method-shadowed` (2 findings, 1 file; wrong today): a trait constructor
+  the class overrides isn't checked in that class;
+  `incompatible-default-parameter-type-trait-crash.php`.
+- `trait-templates` (2 findings, 2 files; wrong today): `@use
+  Trait<X>`/`@phpstan-use` resolves a trait's method `@return` and property
+  `@var` templates; `bug-9657.php`, `php-82-dynamic-properties.php`.
+- `abstract-trait-method-overridden` (1 finding, 1 file; wrong today): an
+  abstract trait method the class implements isn't `missingType.return`;
+  `bug-4214.php`.
+- `const-expr-enum-value` (1 finding, 1 file; an assertType mismatch):
+  `A::X->value` in a constant expression is the case's value (`mixed` today);
+  `bug-8957.php`.
+- `generic-parent-params` (1 finding, 1 file; wrong today): an implementing
+  method's untyped parameter takes `@implements IProcessor<string>`'s type;
+  `bug-8880.php`.
+- `inherited-stub-param` (1 finding, 1 file; another identifier or a second
+  report): an overriding method's untyped parameter inherits the stub's `array`;
+  PHPStan reports `missingType.parameter`; `memcache-pool-get.php`.
+- `property-tag-inside-class` (1 finding, 1 file; wrong today): inside the
+  class, a native property wins over a child's `@property` tag; `bug-13537.php`.
+- `property-tag-private` (1 finding, 1 file; wrong today): a `@property` tag
+  over a private property makes it readable outside (through `__get`);
+  `private-property-with-allowed-property-tag-is-public.php`.
+
+**C6** (144 findings, 23 files, 12 causes):
+
+- `printf-values-dup` (47 findings, 2 files; wrong today; another identifier or
+  a second report): `printf`'s `...$values` is `bool|float|int|string|null` with
+  `__stringAndStringable` (functionMap), so the stub's `string|int|float` adds a
+  second `argument.type` per value; `printf-param-types.php`,
+  `unpack-operator.php`.
+- `curl-init-benevolent` (41 findings, 7 files; wrong today): `curl_init()`'s
+  `CurlHandle|false` is benevolent in PHPStan; `curl_setopt.php`,
+  `curl_setopt_callback.php`, `bug-13862.php`, `curl-setopt-array.php`,
+  `curl_setopt_prereq.php`, `bug-13862b.php`, `bug-15185.php`.
+- `functionmap-variants` (26 findings, 3 files; wrong today): named arguments
+  select a functionMap variant (`setcookie`'s `$expires_or_options`,
+  `session_set_save_handler`'s handler, `stream_context_set_option`'s options),
+  and an override of `PDO::query()` is checked against the native signature, not
+  a variant's `$ctorargs`; `call-to-function-named-params-multivariant.php`,
+  `bug-10171.php`, `bug-5436.php`.
+- `iterator-key-type` (5 findings, 1 file; an assertType mismatch):
+  `ArrayIterator::key()` and friends over a typed array are its key type;
+  `infer-array-key.php`.
+- `datePeriod-ctor-variants` (4 findings, 1 file; wrong today): `DatePeriod`'s
+  constructor has two signatures; named `start`/`interval`/`end` pick the first
+  (`argument.missing` `$isostr` today); `bug-5553.php`.
+- `file-return` (4 findings, 1 file; wrong today): `file()` is
+  `list<string>|false`; after the `false` check, `foreach` gives `string`;
+  `bug-9328.php`.
+- `pdo-benevolent` (4 findings, 1 file; wrong today): `PDO::prepare()`/`query()`
+  are benevolent `PDOStatement|false` in PHPStan; `bug-14719.php`.
+- `stub-signature` (4 findings, 2 files; wrong today): stub parameters narrower
+  than PHP's: `strpos`'s `$offset` is `int` (negative counts from the end),
+  `time_nanosleep`'s are `int`; `bug-8097.php`,
+  `function-call-statement-no-side-effects-error-throws.php`.
+- `dom-benevolent` (3 findings, 2 files; wrong today):
+  `DOMDocument::createElement()` and `DOMElement::getAttributeNode()` are
+  benevolent `…|false` in PHPStan; `dom-legacy-ext-template-nodes.php`,
+  `bug-6213.php`.
+- `stream-get-contents-benevolent` (3 findings, 1 file; wrong today):
+  `stream_get_contents()` is benevolent `string|false` in PHPStan;
+  `bug-3396.php`.
+- `reflection-enum-cases` (2 findings, 1 file; wrong today):
+  `ReflectionEnum<BackedEnum>::getCases()` gives `ReflectionEnumBackedCase` with
+  `getBackingValue()`; `unused-method-false-positive-with-trait.php`.
+- `static-return-stub` (1 finding, 1 file; wrong today):
+  `CustomDateTimeImmutable::createFromFormat()` is `static|false`;
+  `bug-7225.php`.
+
+**C7** (74 findings, 15 files, 11 causes):
+
+- `benevolent-keyword` (22 findings, 3 files; wrong today): `__benevolent<…>` in
+  a PHPDoc is a type, not a class name; `binary-op-benevolent-union.php`,
+  `invalid-inc-dec-union.php`, `unary-union.php`.
+- `type-alias-circular` (13 findings, 2 files; another identifier or a second
+  report): a circular or invalid type alias is
+  `typeAlias.circular`/`typeAlias.invalidType`, not `class.notFound` on its
+  name; `local-type-aliases.php`, `local-type-trait-aliases.php`.
+- `class-string-param-type` (11 findings, 1 file; wrong today):
+  `class-string<UnitEnum>` in a namespace resolves `UnitEnum` globally, so
+  `$enum::from()` is the enum; `bug-14557-function.php`.
+- `pure-callable` (11 findings, 2 files; wrong today): `pure-callable` and
+  `pure-Closure` are PHPDoc types, not class names; `pure-callable-accepts.php`,
+  `missing-method-parameter-typehint.php`.
+- `template-type-keyword` (5 findings, 1 file; wrong today): `template-type<T,
+  Interface, 'TValue'>` is a PHPDoc type, not a class name; `bug-13474.php`.
+- `class-named-like-keyword` (3 findings, 1 file; wrong today): a class named
+  `The` or `Scalar` resolves as the class; `scalar-class-name.php`.
+- `iterable-phpdoc` (3 findings, 1 file; wrong today): `iterable<Foo>` on a
+  native `iterable` is its value type, and `array<Bar>|Collection` is a subtype
+  of `iterable`; `call-methods-iterable.php`.
+- `phpdoc-keywords` (2 findings, 1 file; wrong today): `non-decimal-int-string`
+  is a PHPDoc type, not a class name; `unsealed-array-shapes-has-offset.php`.
+- `phpdoc-precedence` (2 findings, 1 file; wrong today): a PHPDoc union
+  containing an intersection parses with `&` binding tighter; `bug-6243.php`.
+- `const-type-in-shape` (1 finding, 1 file; wrong today): `Foo::TEST` inside a
+  `@psalm-param` shape resolves; `bug-3723.php`.
+- `value-of-template` (1 finding, 1 file; wrong today): `?value-of<T>` for `T of
+  BackedEnum` is `int|string|null`, not `mixed`; `bug-13638.php`.
+
+**C9** (13 findings, 8 files, 4 causes):
+
+- `builtin-purity` (7 findings, 4 files; wrong today): built-ins and enum
+  methods are pure: `is_int`, `is_string`, `is_numeric`, `is_array`, `empty`,
+  `array_key_exists`, `tryFrom()` (functionMetadata); `bug-11207.php`,
+  `bug-13201.php`, `bug-14511-method.php`, `bug-14511.php`.
+- `method-purity` (3 findings, 1 file; wrong today): a method calling an impure
+  function or method is impure (`method.resultUnused` today);
+  `call-to-method-without-impure-points.php`.
+- `ctor-purity` (2 findings, 2 files; wrong today): a user class's constructor
+  purity is known (promoted-only constructors are pure); `possiblyImpure.new`
+  "unknown class" today; `possibly-impure-instanceof-tip.php`,
+  `bug-14138-pure.php`.
+- `impure-rename` (1 finding, 1 file; the oracle setup or an approved rename):
+  `possiblyImpure.*` for `impure.*` until C5's `functionMetadata.php`
+  (approved); `bug-11361-pure.php`.
+
+**D2** (2 findings, 2 files, 1 cause):
+
+- `var-tags` (2 findings, 2 files; wrong today): an `@var` naming a variable the
+  next statement uses types or defines it (`$x = $v`, `$a->{$foo} = …`);
+  `bug-10861.php`, `discussion-13274.php`.
+
+**D3** (245 findings, 115 files, 43 causes):
+
+- `byref-out-undefined` (60 findings, 19 files; wrong today): an undefined
+  variable passed to an out parameter is defined by the call and not checked
+  against the parameter first: `preg_match`'s `$matches` (13 files),
+  `preg_match_all`, `preg_replace_callback`'s `$count`, `parse_str`'s `$result`,
+  user `&$out = null` parameters and static methods; `defined-variables.php`,
+  `bug-6551.php`, `constant-parameter-check.php`, `bug-9503.php`,
+  `bug-7806.php`, `bug-8356.php`, `bug-8142.php`, `bug-14097.php`,
+  `bug-5365.php`, `bug-11602.php`, `bug-12406b.php`, `bug-14270.php`,
+  `always-true-preg-match.php`, `bug-11908.php`, `bug-7491.php`,
+  `bug-12397.php`, `bug-12015.php`, `bug-11617.php`,
+  `preg-match-offset-capture-isset.php`.
+- `const-offset-nonliteral` (18 findings, 9 files; wrong today; an assertType
+  mismatch): a constant or literal array read with a non-literal key is the
+  union of its values: class constants, `array_rand()` keys, `'a_' . $d`, `??
+  null` on a literal-typed static array (`mixed` today); `bug-10577.php`,
+  `bug-12981.php`, `bug-4747.php`, `bug-7898.php`, `slevomat-cs-in-array.php`,
+  `bug-10610.php`, `bug-3920.php`, `bug-3530.php`, `bug-7933.php`.
+- `new-class-string` (13 findings, 9 files; wrong today): `new $c()` for
+  `class-string<T>` is `T`, `static` for `static::class`, and after
+  `is_subclass_of($c, A::class)` it is `A` (`mixed` today); `bug-6370.php`,
+  `bug-4552.php`, `bug-7574.php`, `bug-5369.php`,
+  `bug-13190-template-generic.php`, `bug-12940.php`, `bug-3120.php`,
+  `bug-4795.php`, `bug-5591.php`.
+- `conditional-holders` (12 findings, 5 files; wrong today): a variable defined
+  under a condition is certain when a correlated condition holds (`!$b` then
+  `!$a && !$b`, `in_array($t, [A, B])` then `$t === A`, `count($row) === N`, the
+  same superglobal offset); `bug-8430.php`, `bug-12992.php`, `bug-12597.php`,
+  `bug-4173.php`, `bug-5805.php`.
+- `match-exhaustive` (12 findings, 7 files; wrong today): `match (true)` is
+  exhaustive when its arms' narrowings cover the subject: `instanceof` over a
+  union, `===` over literals or enum cases, `is_string`/`is_array`, every
+  combination of two bools; `bug-8042.php`, `bug-13303.php`,
+  `strict-comparison-last-match-arm.php`, `bug-7721.php`, `bug-8937.php`,
+  `bug-unhandled-true-with-complex-condition.php`, `bug-13210.php`.
+- `magic-constants` (11 findings, 4 files; wrong today; an assertType mismatch):
+  `__FILE__` is `mixed` today; `__FUNCTION__`/`__METHOD__` in a closure are
+  `'{closure}'`; `file.php`, `bug-anonymous-function-method-constant.php`,
+  `compiler-halt-offset-const-defined.php`, `bug-12850.php`.
+- `infer-expr-gaps` (10 findings, 7 files; wrong today): `infer_expr` has no
+  `instanceof` arm and gives `mixed` for a short ternary (`$s ?: ''`), so
+  `return $o instanceof X`, `match ($x instanceof Y)` and `$a ?: [...]` are
+  `mixed`; `bug-9991.php`, `bug-12827-instanceof.php`, `bug-10214.php`,
+  `bug-6910.php`, `bug-4188.php`, `bug-5164.php`, `bug-5382.php`.
+- `assert:offset-writes` (9 findings, 1 file; an assertType mismatch): nested
+  offset writes and `isset` narrowing on `array<array<mixed>>`; `bug-8113.php`.
+- `append-byref-arg` (8 findings, 3 files; wrong today): an offset or append
+  passed by reference creates it (`hi($array['hi'])`, `set($array[])`), where
+  today it is `offsetAccess.notFound` or `mixed`; `bug-5290.php`,
+  `bug-2313.php`, `bug-2634.php`.
+- `loop-offset-narrow` (8 findings, 1 file; wrong today): narrowing
+  `$record[$col]` over a constant-key loop proves each key `int`;
+  `bug-13643.php`.
+- `offset-write-scalar-union` (8 findings, 2 files; wrong today): an offset
+  write on a union with an array keeps only the array (and `false`, which
+  autovivifies), not `offsetAssign.dimType`; `bug-3391.php`, `bug-7417.php`.
+- `assert:mixed-offset` (6 findings, 1 file; wrong today): offsets of a
+  PHPDoc-typed `array<int, SassValue>` argument are `mixed` today;
+  `bug-10822.php`.
+- `class-const-narrow` (6 findings, 1 file; wrong today): `$x::class ===
+  Final::class` narrows `$x` to the final class (`method.notFound` today), and
+  `!instanceof` leaves `Interface~Class`; `bug-9542.php`.
+- `list-write` (6 findings, 3 files; wrong today): offset writes over foreach
+  keys keep nested lists, and conditional appends then `!$a` returning make
+  `$a[0]` exist; `bug-13797.php`, `bug-14124.php`, `bug-14124b.php`.
+- `iife-byref-use` (5 findings, 2 files; wrong today): an immediately invoked
+  closure's by-reference and `$this` writes reach the caller (`if.alwaysFalse`
+  today); `bug-8926.php`, `bug-4864.php`.
+- `closure-generator` (4 findings, 3 files; wrong today): a closure or arrow
+  function with `yield` is a `Generator`, called or invoked at once (`mixed`
+  today); `bug-1517.php`, `arrow-functions-return-type.php`, `bug-6464.php`.
+- `coalesce-assign-static` (4 findings, 2 files; wrong today): `self::$p ??= …`
+  is the property's type (`mixed` today); `bug-10924.php`, `bug-11949.php`.
+- `count-array-shift` (4 findings, 1 file; wrong today): after `2 !==
+  count(explode(…))` throws, `array_shift()` twice gives `string` (`string|null`
+  today); `bug-12675.php`.
+- `coalesce-assign` (3 findings, 3 files; wrong today): `$x ??= new X()` is `X`,
+  as an argument, on a property and in a get hook (`mixed` today);
+  `bug-12735.php`, `bug-4525.php`, `bug-12553.php`.
+- `offset-narrow-dynamic-key` (3 findings, 3 files; wrong today): a narrowed or
+  assigned offset with variable keys stays narrowed (`is_null($a[$n - 1])` then
+  an assignment, `!isset(self::$s[$id][$k])` throwing); `bug-9494.php`,
+  `deep-dim-fetch.php`, `bug-6398.php`.
+- `static-call-on-expr` (3 findings, 1 file; wrong today):
+  `(static::class)::m()` resolves the static method (`mixed` today);
+  `bug-12558.php`.
+- `string-offset-read` (3 findings, 2 files; wrong today): `$s[$i]` on a string
+  is a string (`mixed` today); `non-empty-string-impossible-type.php`,
+  `bug-11506.php`.
+- `anon-class-parent` (2 findings, 1 file; wrong today): `parent::m()` in an
+  anonymous class resolves (`mixed` today); `bug-7640.php`.
+- `assert-tags` (2 findings, 2 files; wrong today; an assertType mismatch):
+  `@phpstan-assert` through a parent call (`parent::equals($other)`) and an
+  impossible assertion making the argument `never`; `bug-8169.php`,
+  `bug-11289.php`.
+- `byref-arg-type` (2 findings, 2 files; wrong today): a defined variable passed
+  by reference is checked with its value, not `mixed` (`$a = 'hello'; foo($a)`
+  for `string &$i`; `$matches = []`); `bug-1953.php`, `bug-11708.php`.
+- `closure-param-infer` (2 findings, 2 files; wrong today): a callback's native
+  `array` parameter is refined by the callable's parameter type
+  (`preg_replace_callback`, `mb_ereg_replace_callback`);
+  `mb_ereg_replace_callback.php`, `preg_replace_callback.php`.
+- `coalesce-maybe-defined` (2 findings, 2 files; wrong today): `$x ?? null` on a
+  maybe-defined `$x` is its type or `null` (`mixed` today); `bug-12179.php`,
+  `bug-4337.php`.
+- `isset-mixed-offset` (2 findings, 1 file; wrong today): `isset($config[$key])`
+  on `mixed` narrows `$config` to an offset-accessible type; `bug-7229.php`.
+- `key-exists-offset` (2 findings, 2 files; wrong today): after
+  `array_key_exists($k, $a)` with a non-literal key, `$a[$k]` is the union of
+  the values (`mixed` today); `bug-13526.php`, `bug-7763.php`.
+- `string-offset-write` (2 findings, 1 file; wrong today): `$string[$k] = $v` on
+  `''` in a loop; the string isn't `''` after it; `bug-3803.php`.
+- `arrayaccess-offset-set` (1 finding, 1 file; approved, right at runtime):
+  `$data['k'] = 1` against `offsetSet()`'s `@param string`, PHPDoc-only, which
+  PHPStan doesn't check; `bug-2268.php`.
+- `byref-out-input` (1 finding, 1 file; wrong today): `openssl_sign()`'s
+  `$signature` is an out parameter; its input isn't checked;
+  `incorrect-call-to-function.php`.
+- `byref-static-call-classstring` (1 finding, 1 file; wrong today): a
+  by-reference argument to `$classString::m()` is written (`if.alwaysFalse`
+  today); `bug-5020.php`.
+- `callable-offset-call` (1 finding, 1 file; wrong today): calling a closure
+  read from an array offset after `isset` returns its return type;
+  `bug-9614.php`.
+- `casts` (1 finding, 1 file; wrong today): `(object)` of an array is `stdClass`
+  (`mixed` today); `array_walk.php`.
+- `enum-case-subtract` (1 finding, 1 file; wrong today): `$foo === Foo::ONE`
+  throwing leaves `Foo::TWO|Foo::THREE`; `bug-8846.php`.
+- `function-exists-var` (1 finding, 1 file; wrong today): a variable holding
+  `function_exists('f')` guards `f()` when it is checked; `bug-14384.php`.
+- `instanceof-class-string` (1 finding, 1 file; wrong today): `assert($x
+  instanceof $className)` with `class-string<T>` makes `$x` `T`;
+  `template-type-native-type-object.php`.
+- `is-resource-closed` (1 finding, 1 file; wrong today): `is_resource()` on a
+  `resource` is never always true (D3's soundness item);
+  `check-type-function-call.php`.
+- `isset-superglobal` (1 finding, 1 file; an assertType mismatch):
+  `isset($_SERVER['X'])` narrows `$_SERVER` to `non-empty-array&hasOffset`;
+  `narrow-superglobal.php`.
+- `isset-union-key` (1 finding, 1 file; wrong today): `isset($a[$k])` with a
+  literal-union key narrows `$a[$k]` for the same key; `bug-6508.php`.
+- `match-result-correlation` (1 finding, 1 file; wrong today): `(match
+  (get_class($x)) {…})->add($x)`: each arm's receiver pairs with the narrowed
+  `$x`; `bug-7593.php`.
+- `trait-property-exists` (1 finding, 1 file; wrong today):
+  `property_exists($this, 'p')` in a trait makes `$this->p` `mixed`, not the
+  property's type in one host; `bug-9095.php`.
+
+**D5** (41 findings, 27 files, 17 causes):
+
+- `switch-exhaustive` (13 findings, 7 files; wrong today): a `switch` over every
+  value of a constant union, a PHPDoc union or an enum (fallthrough included)
+  covers every path: variables are defined after it and `return.missing` isn't
+  reported; `bug-8719.php`, `bug-12722.php`, `bug-1016b.php`, `bug-3488-2.php`,
+  `bug-3488.php`, `bug-1016.php`, `defined-variables-enum.php`.
+- `catch-scope` (3 findings, 1 file; wrong today): an assignment inside a
+  constructor argument happens before the constructor can throw, so the `catch`
+  sees it; `bug-14323.php`.
+- `class-exists-remember` (3 findings, 2 files; wrong today):
+  `class_exists()`/`function_exists()` checked in the constructor guard uses in
+  other methods; `remember-class-exists-from-constructor.php`,
+  `remember-function-exists-from-constructor.php`.
+- `constant-condition-certainty` (3 findings, 1 file; wrong today): a variable
+  defined under `if (true)` is certain after it; `dead-branches.php`.
+- `loop-generalize` (3 findings, 3 files; wrong today; an assertType mismatch):
+  loop generalization: optional-key lists, literal-keyed writes, and
+  `array_shift` in a `foreach` widening a constant array; `bug-14308.php`,
+  `bug-2851b.php`, `bug-12653.php`.
+- `closure-invalidate` (2 findings, 1 file; wrong today): a closure passed to a
+  call that may invoke it invalidates `$this->conn`'s narrowing;
+  `bug-11417.php`.
+- `exhaustive-if-chain` (2 findings, 2 files; wrong today): an `if`/`elseif`
+  chain over every member of a union (null, `instanceof A`, `instanceof B`;
+  every `self::SORT_*`) covers every path; `bug-2875.php`, `bug-5266.php`.
+- `infinite-loop-exit` (2 findings, 1 file; wrong today): `while (true)`/`for
+  (;;)` left only by `break`: the break scopes define the variable;
+  `bug-11545.php`.
+- `loop-first-iteration` (2 findings, 1 file; wrong today): a variable defined
+  on the loop's first iteration is defined on later ones; `bug-11218.php`.
+- `catch-byref` (1 finding, 1 file; wrong today): a catch variable passed to a
+  by-reference parameter with `@param-out int`;
+  `parameter-out-catch-variable.php`.
+- `dead-loop-body` (1 finding, 1 file; approved, right at runtime): a call in a
+  loop body that never runs (`for ($i = 5; $i < 4; …)`) names an undefined
+  function; PHPStan skips unreachable code; `bug-3277.php`.
+- `for-runs-once` (1 finding, 1 file; wrong today): a `for` loop whose first
+  condition holds runs once, defining its variables;
+  `defined-variables-anonymous-function-use.php`.
+- `foreach-nonempty-defines` (1 finding, 1 file; wrong today): a `foreach` over
+  a non-empty array defines its value variable after the loop; `bug-8467c.php`.
+- `foreach-unroll` (1 finding, 1 file; wrong today): `foreach` over a constant
+  shape writing `$r[$key]` builds `array{a: '1', b: '2'}`; `bug-13000.php`.
+- `goto` (1 finding, 1 file; wrong today): a `goto` back to a label in a `try`
+  runs `$attempt++` again, so `$attempt < 4` isn't always true; `bug-12167.php`.
+- `impure-invalidate` (1 finding, 1 file; wrong today): `$this->z()` may change
+  `self::$x`, so `self::$x = []` no longer holds after it; `bug-3747.php`.
+- `superglobals` (1 finding, 1 file; another identifier or a second report):
+  top-level `$argv` is `variable.undefined` ("might not be defined") in PHPStan;
+  `bug-4070.php`.
+
+**E1** (45 findings, 30 files, 9 causes):
+
+- `property-write-forms` (24 findings, 13 files; wrong today): offset writes,
+  appends, `unset()` of an offset, by-reference arguments (`uksort`, `exec`,
+  `proc_open`), references (`$a = &$this->p`, `$this->p = &$v`) are writes;
+  `unused-private-property.php`, `passed-by-reference.php`, `uksort_arrow.php`,
+  `uninitialized-property.php`, `bug-2689.php`, `bug-8648.php`,
+  `slevomat-foreach-unset-bug.php`, `bug-5935.php`, `bug-7251.php`,
+  `bug-8781.php`, `bug-9361.php`, `bug-11777.php`, `bug-6356.php`.
+- `untyped-implicit-null` (5 findings, 4 files; wrong today): an untyped
+  property is `null` until assigned, so its `@var`'s `null` isn't
+  `property.unusedType`; `too-wide-property-type.php`, `bug-6230.php`,
+  `bug-4526.php`, `bug-4680.php`.
+- `duplicate-promoted` (4 findings, 2 files; another identifier or a second
+  report): a property declared twice (a property and a promoted parameter) is
+  the redeclaration error, not
+  `property.unused`/`onlyWritten`/`missingType.property` on it;
+  `duplicate-promoted-property.php`, `default-value-for-promoted-property.php`.
+- `private-set-never-written` (4 findings, 3 files; approved, right at runtime):
+  a `private(set)` property never written (approved);
+  `overriding-final-property.php`, `property-assign-ref-asymmetric.php`,
+  `read-asymmetric-visibility.php`.
+- `trait-member-reads` (3 findings, 3 files; wrong today): a used trait's method
+  reading the host's property is a read; `bug-8850.php`,
+  `private-property-trait.php`, `bug-6175.php`.
+- `property-read-forms` (2 findings, 2 files; wrong today): `$this?->p` and a
+  read after `is_null()` are reads; `nullsafe-unused-private-property.php`,
+  `access-properties-after-isnull.php`.
+- `byref-hook-writes` (1 finding, 1 file; wrong today): a by-reference get hook
+  lets callers write any type, so the property's type isn't too wide;
+  `return-type-after-finally-property-hooks.php`.
+- `hook-property-unused` (1 finding, 1 file; another identifier or a second
+  report): a hooked property never read is `property.neverRead`, not
+  `property.unused`;
+  `too-wide-throw-type-always-check-final-property-hooks.php`.
+- `unused-ctor-param-shadow` (1 finding, 1 file; approved, right at runtime): a
+  constructor parameter shadowed by a closure's parameter is unused; PHPStan
+  counts the name; `unused-constructor-parameters.php`.
+
+**E2** (49 findings, 25 files, 21 causes):
+
+- `closure-bind-scope` (11 findings, 4 files; wrong today): `Closure::bind()`,
+  `bindTo()` and `->call()` give the closure the new `$this` and the scope
+  class's private access, arrow functions included; `closure-bind.php`,
+  `arrow-function-bind.php`, `bug-4808.php`, `bug-4906.php`.
+- `preg-byref-offset` (8 findings, 1 file; wrong today): `preg_match()` writing
+  into `$matches[2]` (an offset out-parameter) extends the shape;
+  `bug-11655.php`.
+- `preg-callback-flags` (5 findings, 1 file; wrong today):
+  `preg_replace_callback()`'s callback gets the `PREG_OFFSET_CAPTURE` shape and
+  `$count` is defined; `bug-8284.php`.
+- `array-map-generator` (2 findings, 1 file; approved, right at runtime):
+  `array_map()` over generator closures returned as `string[]`; right at
+  runtime, PHPStan is silent; `bug-3891.php`.
+- `byref-array-fns` (2 findings, 2 files; wrong today; an assertType mismatch):
+  `array_push($a, ...$b)` pushes `$b`'s elements, and in a loop gives
+  `list<int<0, max>>`; `bug-8449.php`, `bug-9403.php`.
+- `ext:ArrayChangeKeyCase` (2 findings, 1 file; wrong today):
+  `array_change_key_case()` on a shape changes the keys' case; today the keys
+  stay, a wrong value; `bug-10960.php`.
+- `ext:ArrayFilter` (2 findings, 1 file; wrong today): `array_filter()` with a
+  first-class-callable predicate that asserts the value narrows the result;
+  `bug-11337.php`.
+- `ext:CallUserFunc` (2 findings, 1 file; wrong today): `call_user_func()` of a
+  closure returns its return type; `vsprintf()`'s `$values` is reported twice;
+  `bug-7057.php`.
+- `key-exists-fold` (2 findings, 1 file; an assertType mismatch):
+  `array_key_exists()` and `is_string()` narrow to
+  `non-empty-array&hasOffsetValue`; `bug-7156.php`.
+- `method-exists-invoke` (2 findings, 1 file; wrong today): `method_exists($o,
+  '__invoke')` makes `$o` callable; `callables.php`.
+- `array-search-narrow` (1 finding, 1 file; wrong today): `array_search(…) !==
+  false` on `mixed` narrows it to an array; `bug-14312b.php`.
+- `dom-create-element-validator` (1 finding, 1 file; approved, right at
+  runtime): `createElement('')` throws at runtime (phpstan-rs's own validator);
+  `bug-13792.php`.
+- `ext:ArrayMerge` (1 finding, 1 file; wrong today): `array_merge($a, ['expr' =>
+  …])` has the `'expr'` key; `bug-8438.php`.
+- `ext:ArraySlice` (1 finding, 1 file; wrong today): `array_slice()` without
+  `preserve_keys` is a list; `bug-12880.php`.
+- `ext:End` (1 finding, 1 file; wrong today): `end()` of an array property after
+  an append is its value type; `bug-10686.php`.
+- `ext:FilterVar` (1 finding, 1 file; wrong today): `filter_var()` with a
+  non-constant flags argument that may hold `FILTER_NULL_ON_FAILURE` returns
+  `bool|null`; `bool` today, a wrong value; `bug-11485.php`.
+- `ext:GetParentClass` (1 finding, 1 file; wrong today): `get_parent_class()` of
+  an interface-typed object may be a class name; always false today, a wrong
+  value; `bug-4302.php`.
+- `ext:Sprintf` (1 finding, 1 file; wrong today): `sprintf()` with non-empty
+  arguments is non-empty; `bug-11491.php`.
+- `ext:Substr` (1 finding, 1 file; wrong today): `substr($s, 0, $pos + 1)` with
+  `$pos` `int<0, max>` is non-empty; `bug-15258.php`.
+- `property-exists-guard` (1 finding, 1 file; wrong today):
+  `property_exists(static::class, 'p')` guards `static::$p = …`;
+  `bug-2861-assign.php`.
+- `simplexml` (1 finding, 1 file; wrong today): `foreach` over
+  `SimpleXMLElement::children()` gives `SimpleXMLElement`; `bug-3947.php`.
+
+**E3** (192 findings, 85 files, 57 causes):
+
+- `fcc-purity` (19 findings, 1 file; wrong today): creating a first-class
+  callable is pure, and calling one takes the callee's purity
+  (`possiblyImpure.*` "unknown" today);
+  `first-class-callable-pure-function.php`.
+- `castable-to-number` (14 findings, 4 files; approved, right at runtime; a
+  bleeding-edge toggle): `array_sum()`/`array_product()` of arrays or objects
+  (`checkParameterCastableToNumberFunctions`, approved);
+  `param-castable-to-number-functions.php`, `bug-13775-bis.php`,
+  `bug-13775.php`, `param-castable-to-number-functions-named-args.php`.
+- `static-prop-statement` (14 findings, 3 files; approved, right at runtime): a
+  static property read as a statement is `expr.resultUnused` (approved);
+  `static::$instanceProp` is `property.staticAccess` in PHPStan;
+  `access-private-property-static.php`, `restricted-property.php`,
+  `static-property-access-on-internal-subclass.php`.
+- `invalid-binary-dup` (10 findings, 3 files; another identifier or a second
+  report): an operation PHPStan reports as `binaryOp.invalid` is
+  `expr.duplicateOperands`, `division.byZero`/`modulo.byZero`,
+  `deadCode.unreachable` or `expr.resultUnused` in phpstan-rs;
+  `invalid-binary.php`, `bug-5169.php`, `bug-7538.php`.
+- `unresolvable-native` (10 findings, 5 files; another identifier or a second
+  report): `int&mixed` is `*.unresolvableNativeType` once per declaration, not
+  `intersectionType.int` per occurrence;
+  `arrow-function-intersection-types.php`, `closure-intersection-types.php`,
+  `intersection-types.php`, `intersection-types.php`, `intersection-types.php`.
+- `finite-types-haystack` (9 findings, 1 file; a bleeding-edge toggle):
+  `finiteTypesInHaystack`; `impossible-in-array-finite-types.php`.
+- `abstract-rename` (7 findings, 6 files; the oracle setup or an approved
+  rename): `class.abstractMethodNotImplemented` for `method.abstract` and
+  `enum.duplicateConstant` for `enum.duplicateEnumCase`, the approved renames;
+  `overriding-method.php`, `duplicate-enum-cases.php`,
+  `invalid-promoted-properties.php`, `method-in-enum-without-body.php`,
+  `missing-method-impl-enum.php`, `missing-method-impl.php`.
+- `abstract-with-wrong-parent` (7 findings, 2 files; another identifier or a
+  second report): a class whose `@implements`/`@extends` names itself:
+  `generics.wrongParent` for `generics.notCompatible` and one
+  `class.abstractMethodNotImplemented` for PHPStan's `method.abstract` per
+  method (approved renames); `class-ancestors-implements.php`,
+  `class-ancestors-extends.php`.
+- `new-non-object` (7 findings, 1 file; a bleeding-edge toggle):
+  `newOnNonObject`; `instantiation-non-object.php`.
+- `var-tag-native` (7 findings, 2 files; another identifier or a second report):
+  an inline `@var` against the native type is `varTag.nativeType`; one above a
+  destructuring or `foreach` isn't checked per target;
+  `wrong-var-native-type.php`, `var-tag-destructuring-native.php`.
+- `date-interval-ctor` (5 findings, 1 file; a bleeding-edge toggle):
+  `checkDateIntervalConstructor`; `date-interval-instantiation.php`.
+- `unset-rules` (5 findings, 1 file; another identifier or a second report):
+  `unset()` on a scalar offset or an undefined variable is
+  `unset.offset`/`unset.variable`; `unset.php`.
+- `phpdoc-void-union` (4 findings, 1 file; wrong today): `@return int|void`
+  allows a bare `return` and a missing return; `return null` is a type error
+  only natively; `bug-11980-function.php`.
+- `property-assign-by-ref` (4 findings, 1 file; another identifier or a second
+  report): `&$o->private` is `property.assignByRef` where phpstan-rs says
+  `property.private`; a readonly property only assigned by reference counts as
+  written; `property-assign-ref.php`.
+- `require-constant-path` (4 findings, 2 files; approved, right at runtime):
+  `require_once` of a constant path that doesn't exist; right at runtime;
+  `bug-12203.php`, `unused-constructor-parameters-include.php`.
+- `static-access-instance` (4 findings, 1 file; another identifier or a second
+  report): `self::$instanceProp` is `property.staticAccess` in PHPStan,
+  `staticProperty.notFound` today; `bug-8668-bis.php`.
+- `ctor-validators` (3 findings, 1 file; a bleeding-edge toggle): the
+  `DateInterval` and `SimpleXMLElement` constructor validators
+  (`checkDateIntervalConstructor`, and phpstan-rs's own XML check);
+  `unthrown-exception.php`.
+- `impossible-vs-if` (3 findings, 3 files; another identifier or a second
+  report): a condition check PHPStan reports as
+  `if.alwaysTrue`/`if.alwaysFalse`/`elseif.alwaysFalse` is
+  `function.impossibleType`/`alreadyNarrowedType` in phpstan-rs;
+  `bug-10394.php`, `bug-6947.php`, `call-condition-cross-file-marker-b.php`.
+- `new-static-abstract` (3 findings, 3 files; a bleeding-edge toggle):
+  `newStaticInAbstractClassStaticMethod`, a bleeding-edge toggle (PHPStan says
+  `new.static`); `new-static-in-abstract-class-static-method.php`,
+  `bug-11900.php`, `bug-12137.php`.
+- `trait-protected-access` (3 findings, 1 file; wrong today): in a trait,
+  `$this` narrowed to the host's parent class may read its protected properties;
+  `bug-9386.php`.
+- `assert-both` (2 findings, 1 file; the oracle setup or an approved rename):
+  both tools report the mismatch (`phpstan.type` in PHPStan);
+  `generic-type-override.php`.
+- `generics-no-parent-dup` (2 findings, 1 file; another identifier or a second
+  report): `generics.noParent` once per `@implements` tag;
+  `interface-ancestors-implements.php`.
+- `implicit-mixed-offset` (2 findings, 1 file; approved, right at runtime): an
+  offset read on an untyped property's implicit `mixed` (level 10's
+  implicit-mixed check); PHPStan reports only the return; `bug-1903.php`.
+- `impure-marked-pure-final` (2 findings, 2 files; wrong today):
+  `impureMethod.pure` only for a final method or a method of a final class,
+  since a child may be impure; `noop-impure-points.php`, `bug-12382.php`.
+- `interface-conflict-enum` (2 findings, 1 file; approved, right at runtime): an
+  enum whose two interfaces give `Traversable` conflicting arguments; a real
+  conflict PHPStan misses; `enum-ancestors.php`.
+- `last-condition-always-true` (2 findings, 2 files; wrong today): the last
+  `elseif`'s always-true condition isn't reported;
+  `loose-comparison-report-always-true-last-condition.php`,
+  `loose-comparison.php`.
+- `parent-outside-class` (2 findings, 1 file; another identifier or a second
+  report): `parent` outside a class is `class.notFound`,
+  `return.unresolvableType` in phpstan-rs; `class.nameCase` reported once more;
+  `typehintsWithoutNamespace.php`.
+- `require-rename` (2 findings, 2 files; another identifier or a second report;
+  the oracle setup or an approved rename): `requireExtends.nonObject` for
+  `requireExtends.interface` (approved) and `requireImplements.class` for
+  `requireImplements.onClass`; `incompatible-require-extends.php`,
+  `incompatible-require-implements.php`.
+- `required-after-optional-nullable` (2 findings, 2 files; wrong today): a typed
+  parameter defaulting to `null` before a required one is implicitly nullable,
+  not PHP 8.0's required-after-optional deprecation;
+  `required-parameter-after-optional.php`,
+  `required-parameter-after-optional.php`.
+- `string-arg-not-callable` (2 findings, 1 file; wrong today): a string literal
+  argument naming a function (`'random_int'`) isn't an impure call;
+  `bug-12119.php`.
+- `trait-use-line` (2 findings, 1 file; another identifier or a second report):
+  a trait using a class or an unknown trait is reported on the `use`, not the
+  trait's line; `trait-use-error.php`.
+- `undefined-var-dup` (2 findings, 1 file; another identifier or a second
+  report): an undefined variable's offset read is `variable.undefined` only;
+  `bug-1746.php`.
+- `unknown-class-cascade` (2 findings, 2 files; another identifier or a second
+  report): an unknown class is `class.notFound` once; its object isn't also
+  `cast.string` or `property.phpDocType`; `invalid-cast.php`, `bug-6571.php`.
+- `assignop-offset-dup` (1 finding, 1 file; another identifier or a second
+  report): `$s['k'] += null` on a string is `offsetAccess.notFound` and
+  `assignOp.invalid`, not `offsetAssign.dimType`; `offset-access-assignop.php`.
+- `const-static-rename` (1 finding, 1 file; another identifier or a second
+  report): `const static FOO` is `classConstant.value` in PHPStan;
+  `return-type-class-constant.php`.
+- `empty-always-falsy` (1 finding, 1 file; approved, right at runtime):
+  `empty()` of `array{}|null` is always true; right at runtime;
+  `foreach-iterable.php`.
+- `impossible-vs-boolean` (1 finding, 1 file; another identifier or a second
+  report): a check inside `&&` that the other side decides is
+  `booleanNot`/`booleanAnd` in PHPStan, `function.alreadyNarrowedType` in
+  phpstan-rs; `bug-4969.php`.
+- `interface-not-found-rename` (1 finding, 1 file; another identifier or a
+  second report): an unknown interface in `extends` is `interface.notFound`, not
+  `class.notFound`; `interface-extends-error.php`.
+- `interface-visibility-rename` (1 finding, 1 file; another identifier or a
+  second report): a private method in an interface is `method.visibility`, not
+  `method.abstractPrivate`; `visibility-in-interace.php`.
+- `invalid-offset-rename` (1 finding, 1 file; another identifier or a second
+  report): an object key is `offsetAccess.invalidOffset`, not
+  `offsetAccess.notFound`; `invalid-key-array-dim-fetch.php`.
+- `match-statement-unused` (1 finding, 1 file; wrong today): a `match` statement
+  that may throw `UnhandledMatchError` isn't `expr.resultUnused`;
+  `last-match-arm-always-true.php`.
+- `offset-not-found-dup` (1 finding, 1 file; another identifier or a second
+  report): `offsetAccess.notFound` once per offset chain; `bug-5743.php`.
+- `override-magic-stdclass` (1 finding, 1 file; approved, right at runtime):
+  `#[\Override]` on a trait's `__get` in a `stdClass` subclass is a PHP fatal
+  error (checked with php 8.5); `bug-10149.php`.
+- `param-closure-this-callable` (1 finding, 1 file; wrong today):
+  `@param-closure-this` on a `callable` parameter is allowed (`callable` accepts
+  a `Closure`); `function-call-param-closure-this.php`.
+- `phpdoc-default-null` (1 finding, 1 file; wrong today): an untyped parameter
+  with `@param bool` defaulting to `null` isn't `parameter.defaultValue`;
+  `incompatible-default-parameter-type-methods.php`.
+- `property-tag-rename` (1 finding, 1 file; another identifier or a second
+  report): `@property-read` over a private property is `assign.propertyReadOnly`
+  in PHPStan; `private-property-tag-read.php`.
+- `readonly-phpdoc-hook` (1 finding, 1 file; wrong today): a `@readonly`
+  property assigned in its own set hook isn't assigned outside the constructor;
+  `property-hooks-readonly-by-phpdoc-assign.php`.
+- `return-never-rename` (1 finding, 1 file; another identifier or a second
+  report): a `never` function that returns is `return.never`, not `return.type`;
+  `arrow-function-never-return.php`.
+- `static-this-rename` (1 finding, 1 file; another identifier or a second
+  report): `$this` in a static arrow function is `mixed` (`property.nonObject`),
+  not `property.notFound`; `defined-variables-arrow-functions.php`.
+- `too-wide-trait-method` (1 finding, 1 file; approved, right at runtime): a
+  private trait method that never returns `null` in its only host; PHPStan skips
+  trait methods; `tooWideMethodReturnType-private.php`.
+- `trait-dir-include` (1 finding, 1 file; approved, right at runtime): `__DIR__`
+  in a trait is the trait's directory; the include fails at runtime;
+  `Bug15015Trait.php`.
+- `trait-duplicate-property` (1 finding, 1 file; another identifier or a second
+  report): a trait declaring a property twice is the duplicate, not
+  `missingType.property`; `bug-14250-promoted-properties.php`.
+- `unreachable-nop` (1 finding, 1 file; wrong today): an empty statement after
+  `return` isn't `deadCode.unreachable`; `unreachable.php`.
+- `use-const-not-found` (1 finding, 1 file; wrong today): an imported constant
+  that doesn't exist is reported where it is used, not on the `use`;
+  `group-uses.php`.
+- `var-tag-return` (1 finding, 1 file; approved, right at runtime): an `@var
+  string` above `return $this->foo` (`int`) is wrong; PHPStan doesn't check a
+  variable-less `@var` on a return; `var-tag-changed-expr-type.php`.
+- `var-tag-subtype` (1 finding, 1 file; approved, right at runtime): an `@var`
+  shape over a literal missing keys added later; PHPStan reports it only with
+  `reportWrongPhpDocTypeInVarTag`; `bug-12222.php`.
+- `yield-from-key-value` (1 finding, 1 file; wrong today): `yield from` checks
+  the inner generator's values as `generator.valueType`; phpstan-rs reports them
+  as `generator.keyType`; `yield-from.php`.
