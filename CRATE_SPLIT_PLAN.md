@@ -1000,9 +1000,10 @@ package's integration tests.
 - class names resolve case-insensitively everywhere, `self`/`static`/
   `parent` included (`Self::X` is `class.notFound` today), and `self` in an
   anonymous class is that class;
-- casts, `echo` and interpolation give precise types: `(array) true` is
-  `array{true}` (`array` today), `(object)` of an array `stdClass`,
-  `(array)` of an object its properties' values;
+- casts, `echo` and interpolation give precise types, a resource included:
+  `(array)` of a scalar is a one-element list and of a list stays one
+  (`(array) true` is `array{true}`, `array` today), `(object)` of an array
+  `stdClass`, `(array)` of an object its properties' values;
 - the `array_udiff()` family's trailing callbacks are accepted;
   `list<int>&non-empty-array` is one type;
 - a method called on an intersection uses its most visible declaration,
@@ -1100,18 +1101,20 @@ Follow-ups, behaviour fixes:
   rules-oracle `cast.void`); `yield $x = 1` is `yield ($x = 1)`; an
   assignment is an operand at every binary operator (`$a ?? $b = 1`; 22
   corpus `assign.invalidExpr`).
-- **Kept syntax.** Trait adaptations keep `insteadof` and `as` visibility;
-  promoted parameters keep `(set)` visibility; `&get` is by reference;
-  `$obj->$$name` keeps both indirections; interpolated parts and heredoc `{$…}`
+- **Kept syntax.** Trait adaptations keep `insteadof` and `as` visibility with
+  resolved trait names (C4's trait flattening reads them); promoted parameters
+  keep `(set)` visibility; `&get` is by reference; `$obj->$$name` and
+  `$obj->${expr}` keep both indirections; interpolated parts and heredoc `{$…}`
   get their own spans, heredoc positions accounting for the stripped indentation
   (LSP references land on the string's start today).
 
 Follow-ups, the typed AST (§3.1):
 
-- **Resolved names are read**: 109 re-resolutions in 43 files convert
-  (C4 the builders, D3 the checker, the rest with their phases);
-  `NameContext::build` (last namespace wins) goes first, and `NameContext`
-  becomes private to `syntax`.
+- **Resolved names are read**: 109 re-resolutions in 43 files convert (C4 the
+  builders, D3 the checker, the rest with their phases); `NameContext::build`
+  (last namespace wins) goes first, and `NameContext` becomes private to
+  `syntax`; its per-branch copy of the context for an `if` goes (PHP allows
+  `namespace` and `use` only at the top level), and with it `imbl` in `syntax`.
 - **Declarations carry their namespaced name** before C4 reads the AST.
 - **Names**: declaration and member names are `Name`s; named arguments,
   `static`/`global` variables, labels and `use` imports are spanned names;
@@ -1119,8 +1122,10 @@ Follow-ups, the typed AST (§3.1):
 - **Language constructs are nodes** (`isset`, `empty`, `unset`, `exit`,
   `eval`, `include`/`require`, `print`, `list()`, `@`, `Declare` with its
   block, shell-exec), not calls to resolved function names.
-- **`EnumDecl`** folds into `ClassDecl`; match arms are spanned nodes;
-  `NodeId`s on every node rules and side tables key on.
+- **`EnumDecl`** folds into `ClassDecl`; match arms are spanned nodes, the
+  default arm in its place; `NodeId`s on every node rules and side tables key on
+  (class-likes, methods, properties, constants, enum cases, parameters,
+  arguments, match arms, catch clauses, closure uses).
 - **One parse entry point**, `syntax::parse(source, &Interner) ->
   ParsedFile` (statements, comments, lexer warnings, annotations), for the
   ten call sites; the separate comment re-lexes (`ignore_comments.rs`,
@@ -1160,21 +1165,21 @@ Follow-ups:
   shapes intersect into one, a shape with `non-empty-array` stays a
   shape, and `HasOffset` makes an array non-empty (`argument.type` today,
   `bug-12847.php`).
-- **Error type.** PHPStan's `ErrorType` for an invalid operation, an
-  undefined member or destructuring a non-array; it accepts and is
-  accepted by everything, so a reported error doesn't cascade (`-'blabla'`
-  is `int` today; 289 nsrt `*ERROR*`, Appendix H's `error-type` 65).
-- **Type behaviour lives on the type.** Each question a rule asks of a
-  type (offsets, iteration, `is_array`/`is_string`/…, constants,
-  `generalize`, coercions, `looseCompare`, `tryRemove`) is one `Type`
-  method, trinary where PHPStan's is, or a `Relation` method where it needs
-  the hierarchy. Today 302 of the 373 functions taking a `Type` are such
-  questions, answered again in each checker file (four `flatten_union`s),
-  plus ~1,055 inline inspections. The helpers are deleted, disagreements
-  follow PHPStan with fixtures, and `Type` becomes opaque: an xtask gate
-  counts `Type::` patterns outside `crates/types` until they reach zero.
-  Subtraction, `Relation::remove` and the coercions follow the same shape;
-  member lookup (`getMethod`/`getProperty`/`getConstant`) moves once C8's
+- **Error type.** PHPStan's `ErrorType` for an invalid operation, an undefined
+  member or destructuring a non-array; it accepts and is accepted by everything,
+  so a reported error doesn't cascade; D3's handlers produce it (`-'blabla'` is
+  `int` today; 289 nsrt `*ERROR*`, Appendix H's `error-type` 65).
+- **Type behaviour lives on the type.** Each question a rule asks of a type
+  (offsets, iteration, `is_array`/`is_string`/…, constants, `generalize`,
+  coercions, `looseCompare`, `tryRemove`) is one `Type` method, trinary where
+  PHPStan's is, or a `Relation` method where it needs the hierarchy. Today 302
+  of the 373 functions taking a `Type` are such questions, answered again in
+  each checker file (four `flatten_union`s), plus ~1,055 inline inspections. The
+  helpers are deleted, disagreements follow PHPStan with fixtures, and `Type`
+  becomes opaque: an xtask gate counts `Type::` patterns outside `crates/types`
+  and fails when it grows; at zero the variants go private and the gate is
+  deleted. Subtraction, `Relation::remove` and the coercions follow the same
+  shape; member lookup (`getMethod`/`getProperty`/`getConstant`) moves once C8's
   reflection exists.
 - **Subtracted types** (`mixed~null`, `object~T`, `Foo~Bar`, `$this(Foo~Bar)`)
   as a field of the subtractable variants: narrowing away from `mixed`,
@@ -1182,9 +1187,13 @@ Follow-ups:
   leaves plain `mixed` today; Appendix H's `subtracted`, 54). `==` is structural
   and PHPStan's `equals()` is `Type::equals` (each `==` on types today audited
   into one or the other, and each `== Type::Mixed(false)` into `is_mixed()` or
-  an exact comparison); narrowing is `Relation::intersect`/`Relation::remove`,
-  whose rules absorb today's special cases. A `@phpstan-sealed` class is its
-  permitted subclasses (`match.unhandled` on an exhaustive match today).
+  an exact comparison); one set of methods (`subtracted`, `subtract`,
+  `with_subtracted`, `without_subtracted`) carries display (`mixed~null`,
+  `Foo~(Bar|Baz)`), the relations, union (`mixed~null|null` is `mixed`) and
+  intersection, and `mixed~null` answers every question `mixed` does; narrowing
+  is `Relation::intersect`/`Relation::remove`, whose rules absorb today's
+  special cases. A `@phpstan-sealed` class is its permitted subclasses
+  (`match.unhandled` on an exhaustive match today).
 - **Conditionals on a template distribute** (`(T is false ? never : T)`
   with `stdClass|false` is `stdClass`).
 - **Built-in offset-accessible classes**
@@ -1204,38 +1213,50 @@ Follow-ups:
   (`new Box(1)` is `Box<1>` today); a union parameter binds only what its other
   members don't cover; `mixed` binds `mixed`; inference reads through
   intersections and template arguments. Appendix H's template causes are 265
-  nsrt mismatches (`generic-new-infer` 54, `callable-template-infer` 35, …).
+  nsrt mismatches: `new` infers the class's templates from its arguments
+  (`generic-new-infer`, 54), a callable argument infers from its parameters and
+  return (`callable-template-infer`, 35), generic and union bounds stay `T`
+  (`template-bound-generic` 23, `template-bound-union` 15), and a `never` or
+  empty-array argument infers `never` (`template-never`, 14).
 - **A template narrows by intersection**: `$b instanceof A` on `T` is
   `A&T`, its else `T~A`.
-- **Late types**: `new<T>`, `template-type<…>`, `int-mask<>`,
-  `key-of<C::ARR>`, and `key-of<T>`/`value-of<T>`/`Bob[TKey]` over a
-  template stay late and resolve per call (`$y->x('b')` is
-  `string|bool|int|float` today where it is `bool`, `bug-13652.php`).
+- **Late types**: `new<T>`, `template-type<…>`, `int-mask<>`, `key-of<C::ARR>`,
+  and `key-of<T>`/`value-of<T>`/`Bob[TKey]` over a template stay late
+  (`NewObjectType`, `GetTemplateTypeType`, `KeyOfType`, `ValueOfType`,
+  `OffsetAccessType`), answer through the template's bound and resolve per call
+  and per object (`$y->x('b')` is `string|bool|int|float` today where it is
+  `bool`, `bug-13652.php`).
 - **Callability and class-strings in `accepts`**: a string or array is callable
-  only when it names a callable; a class-string literal must lie within its
-  bound; a closure fits a callable type only by signature (32 corpus findings);
-  `string` accepts a `Stringable` outside `strict_types`;
-  `DateTime|DateTimeImmutable` accepts `DateTimeInterface`; a union of literals
-  covering a shape's keys accepts it; a range is accepted by the constants it
-  spans. Accepted today and not: `T` of `mixed` for `int`, `object` for an
-  object shape, an uncovered key type (`array<mixed>` for
-  `array<string, mixed>`), an array lacking an unsealed shape's required key, an
-  invariant generic with `mixed` or with a template bounded by the argument
-  (`Format<O of Output>` for `Format<Output>`).
+  only when it names a callable (an array as `[object|class-string, method]`
+  with the method existing, static for a class-string); a class-string literal
+  must lie within its bound, and a plain `string` isn't a `class-string`; a
+  `static` parameter type is the called class and its subclasses
+  (`B::staticTest($b)` with `B|string` passes today); a closure fits a callable
+  type only by signature (32 corpus findings); `string` accepts a `Stringable`
+  outside `strict_types`; `DateTime|DateTimeImmutable` accepts
+  `DateTimeInterface`; a union of literals covering a shape's keys accepts it; a
+  range is accepted by the constants it spans. Accepted today and not: `T` of
+  `mixed` for `int`, `object` for an object shape, an uncovered key type
+  (`array<mixed>` for `array<string, mixed>`), an array lacking an unsealed
+  shape's required key, an invariant generic with `mixed` or with a template
+  bounded by the argument (`Format<O of Output>` for `Format<Output>`).
 - **Conditional parameter types** resolve per call and narrow with their
   parameter; conditional returns and `@param-out` resolve on emptiness,
   templates, `$this` and pre-call argument types (Appendix H's
   `conditional-*`, 81).
-- **Class-aware unions** drop covered members (`A|B` for `B extends A`)
-  with C8's hierarchy.
+- **Class-aware unions** drop covered members (`A|B` for `B extends A`) with
+  C8's hierarchy, and identical members collapse (`Node|Node|…&Return_&Return_`
+  today).
 - **Display is unambiguous**: quotes and control characters escaped,
   callable returns parenthesized, `0.0` keeps its point (Appendix H's
   `type-print`, 127).
 - **Callable parameters** carry names and purity; **`iterable<K, V>`**
   keeps its arguments (`array<V>|Traversable` today, so a `foreach` yields
   `mixed`); `T[]` in a union with an iterable types its values.
-- **Typed templates** (a `Name` and a scope enum); **patch versions** in
-  `PhpVersion` (`PHP_VERSION_ID >= 80105`'s false branch keeps 8.1).
+- **Typed templates** (a `Name` and a scope enum, not a `"callable"` sentinel;
+  a `Conditional`'s subject an enum of parameter or template); **patch
+  versions** in `PhpVersion` (`PHP_VERSION_ID >= 80105`'s false branch keeps
+  8.1).
 - **Tests move in**: the `types` unit tests living in `checker/tests`.
 
 **B5. phpdoc redesign.** `DocBlock` stores `TypeNode`s; resolution behind
@@ -1244,19 +1265,24 @@ fuzz target.
 
 Follow-ups:
 
-- **One tag splitter**: the grammar cuts lines at `//` (breaking a
-  `'http://a'` type) while `docblock::parse` doesn't; one splitter feeds
-  `DocBlock` and the rules that re-parse.
+- **One tag splitter**: the grammar cuts lines at `//` (breaking a `'http://a'`
+  type) while `docblock::parse` doesn't; one splitter feeds `DocBlock` (built
+  from its `PhpDocNode`), and `phpdoc_unresolvable`, `generics/ancestors` and
+  `unknown_phpstan_tags` read that parse (C4's store of parsed doc blocks holds
+  it).
 - **Number literals** follow phpdoc-parser (`int<0, 0xFF>`, `1_000`, `1e3`
   are `phpDoc.parseError` today).
 - **The rest of the type grammar**: nameless by-reference callable
   parameters, offset-access conditional subjects, chained conditionals,
   `$this` as a callable parameter type (each `phpDoc.parseError` today).
 - **What phpdoc-parser rejects is rejected** (`@use FooTrait` without
-  arguments, `A & B | C`, `\\Foo`; 11 rules-oracle findings), and a
-  dropped tag leaves the property untyped (`missingType.property`).
-- **A tag's diagnostics sit on its line**, so `@phpstan-ignore-line` inside
-  the doc block applies (12 phpstan-rs-only findings).
+  arguments, `callable() $cb` without a return type, `A & B | C`, `\\Foo`,
+  `@phpstan-type InvalidFoo what{}`, a hook's `@return Test(`; 11 rules-oracle
+  findings), and a dropped tag leaves the property untyped
+  (`missingType.property`).
+- **A tag's diagnostics sit on its line** (`DocBlock` keeps each tag's line),
+  so `@phpstan-ignore-line` inside the doc block applies (12 phpstan-rs-only
+  findings).
 - **Shape keys** take phpdoc-parser's identifier token (`array{psr-4?:
   …}` fails today; 13 cascading findings).
 - **Type parsing is linear** and depth-limited (1,000-deep `array<…>`
@@ -1272,8 +1298,9 @@ startup warning (silently dropped today).
 
 **B7. diagnostics.** The §3.7 model (`Identifier`, tips; `location` and
 `metadata` dropped; `RuleError`, file, families and AST fixes with E3's
-dispatcher); the versioned baseline and converter (an approved delta);
-extract `diagnostics`.
+dispatcher); the versioned baseline and converter (an approved delta); extract
+`diagnostics`, the ignore/baseline pipeline staying in the future `project`
+module.
 
 Follow-ups: `DiagnosticFix::within` (a text search for a missing span) is
 deleted; baseline paths are relative to the baseline file, so another
@@ -1293,8 +1320,9 @@ Follow-ups:
 - **The root package's own autoload is context**: a project class that
   isn't named is unknown today (1,253 of the corpus oracle's 1,855
   phpstan-rs-only `class.notFound` name a `Piwigo\` class).
-- **A package's bundled `vendor/` is context** (rector and ECS register
-  theirs at runtime; 495 `class.notFound` in `vendor/rector/rector`).
+- **A package's bundled `vendor/` is context** (rector and ECS register theirs
+  at runtime; 495 `class.notFound` in `vendor/rector/rector`): an installed
+  package's own `vendor/composer/autoload_*.php` is read like the root's.
 
 **B9. stub-sources.** The generated index, its xtask and regeneration
 test; the crate owns the `include!`; extract.
