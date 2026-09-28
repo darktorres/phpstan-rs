@@ -226,6 +226,19 @@ through `check-project`.
   covers expressions only; statement nesting (blocks, control-structure
   bodies, nested declarations) needs it too. No file may take the run
   down. (`16dd573b`)
+
+  Nesting in the source isn't needed (syntax final state, probed):
+  - a flat `if … elseif …` chain of 100,000 branches aborts too:
+    `parse_if` rewrites each `elseif` token into `if` and recurses;
+  - a flat concatenation `$x . $x . … . $x` of 1,000 terms aborts (500
+    doesn't; debug build). The parser's binary loops are iterative, but they
+    build a left-deep tree that a later pass recurses through once per
+    level: the resolver, a visitor, inference, or dropping the boxes.
+
+  PHP runs both files. Every consumer of the tree is iterative or bounded,
+  or analysis runs on a thread with a stack sized for a stated depth
+  limit.
+
 - [ ] **F29. Integer overflow crashes the checker.** Each of these aborts
   checking the file ("internal error while checking: attempt to … with
   overflow"); a release build wraps silently to the wrong literal instead:
@@ -330,6 +343,29 @@ through `check-project`.
   `checkUnionTypes`' level a union given is accepted when some member is,
   which needs a trinary `accepts` (Yes/Maybe/No) rather than the boolean
   one the doc admits to. (`91bc9e49`; accepts.rs final state)
+- [ ] **F54. `new $obj->prop(...)` is parsed as `(new $obj)->prop(...)`.**
+  The `new` arm (`parser/primary.rs`) takes a bare `$var` as the whole class
+  reference, but PHP's class reference is a full variable: `$a->b`,
+  `$a::$b`, `$a['k']` and chains of them. `return new $this->model($v);`
+  instantiates the class named by `$this->model` (php confirms), and
+  here reports `private $model` "never read, only written"
+  (`property.onlyWritten`); `new $this->map['m'](1)` likewise, and the
+  constructed type is lost. A common factory idiom. (syntax final state,
+  probed)
+- [ ] **F55. An anonymous class's constructor arguments are taken as its
+  own scope.** `opens_scope` (`visit.rs`) counts `NewAnonymousClass`, "its
+  constructor arguments included", but PHP evaluates `new class(ARGS)`'s
+  arguments in the enclosing scope. `body_contains_yield` misses `new
+  class(yield 1) {…}`, so a `\Generator` function holding it reports
+  `return.missing` (php confirms it's a generator). `any_expr_in_body`,
+  `any_expr_in_scope`, `any_child_expr` and 12 callers outside `visit.rs`
+  share it. Only the class body opens a scope. (`167ff73d` area; probed)
+- [ ] **F56. Nullsafe `?->` in simple interpolation isn't recognized.**
+  `"[$o?->b]"` lexes as `$o` plus the text `?->b`, so an object without
+  `__toString` reports `encapsedStringPart.nonString` (php prints `[B]`,
+  and `[]` for null), and `$o?->nope` isn't checked. `interpolation.rs`'s
+  comment says PHP has no such form; PHP 8 does. (lexer final state,
+  probed)
 
 ### False positives (from reading)
 
@@ -458,6 +494,11 @@ through `check-project`.
   whitespace is `" \t\n\r\v\f"`). `concat` keeps `numeric` for a left
   operand with trailing whitespace: `'1 ' . '5'` is `'1 5'`, not numeric.
   (`56e1f538`)
+- [ ] **F57. An interpolated `$a[01]` reads key 1.** `classify_index_key`
+  (`lexer/strings.rs`) reads a simple-interpolation key with
+  `parse::<i64>()`, so `"$a[01]"` gives `$a[1]` where PHP reads the string
+  key `'01'` (php confirms). Only `0|[1-9][0-9]*`, optionally with a
+  leading `-`, is an int there: `canonical_int_key`'s rule. (probed)
 
 ### Wrong types (from reading)
 
@@ -556,6 +597,15 @@ through `check-project`.
   `NameContext` stays only for PHPDoc text. `unused/rebind.rs` matches
   `Closure` on the written name, missing `\Closure` and aliases.
   (`271fa92a`, `c935b1be`)
+
+  The resolver's `visit_type_hint` skips every `is_primitive_type_name`,
+  PHPDoc-only keywords included (`integer`, `boolean`, `double`, `real`,
+  `resource`), but in a native hint PHP reads those as class names ("will
+  be interpreted as a class name"), so their `resolved` stays
+  `Unresolved`. The checker gets them right today through its own
+  `NameContext` (`class.notFound P22\integer`); switching to `resolved`
+  would regress it. One native-keyword list (`NATIVE_TYPE_KEYWORDS`).
+
 - [ ] **F13. Declarations' namespaced names are computed and ignored.**
   `namespaced_name` is read only by xtask's stub index. The registry
   (`class_info.rs` `ctx.declared_name`, `index.rs`'s namespace walk,
@@ -651,6 +701,22 @@ through `check-project`.
     (`f4c6eb9f`).
   - `Relation::intersect` leaves `list & array{a: int}` as an intersection
     instead of `never`: `ArrayList` isn't applied to a shape (`102b907f`).
+  - Syntax leniencies (final state):
+    - `1e` with no exponent digits lexes as `0.0`, `0x`/`0b` with no digits
+      as `0`, doubled or trailing `_` separators pass, and `\u{…}` with a
+      bad codepoint stays literal; each is a PHP parse error.
+    - An anonymous class records `is_final: false` and accepts several
+      `extends` names.
+    - An unknown member of an enum body (a property) is skipped token by
+      token, so the PHP compile error vanishes (F16's single body loop fixes
+      it).
+    - By-ref array elements (`[&$x]`, `[&$a, $b] = …`) are dropped; a spread
+      with a key and an empty `isset()` are accepted; `(real)`/`(unset)`
+      casts (removed in PHP 8) are accepted; a bare `yield` before `:`
+      breaks; a `{$…}` fragment with trailing tokens is accepted.
+    - The printer writes floats past 1e15 in Rust's form and control bytes
+      other than `\n\t\r` raw.
+
 - [ ] **F36. Structural leftovers from the "Type behaviour lives on the
   type" series.**
   - `Type::is_within` is public and general but uses
@@ -728,8 +794,7 @@ through `check-project`.
       `docblock/tests/param_and_return_tags.rs:283`).
 
     Re-read every comment that commit touched.
-- [ ] **F53. Stale or misplaced comments in the types crate's final
-  state.**
+- [ ] **F53. Stale or misplaced comments in the final state.**
   - Docs sitting on the wrong item:
     - `union.rs`: an orphan doc on `impl Type`;
     - `union.rs`: the 23-line empty-shape paragraph above
@@ -768,6 +833,19 @@ through `check-project`.
     "`rule_level_accepts`/`rule_level_accepts`".
   - Task and phase references: `Phase 84` and `Phase 77` in `Repr` docs
     and `parse.rs`, and `hierarchy.rs`' "Reflection implements it (C8)".
+  - Syntax crate:
+    - Process narration ("Found and fixed via a perf-optimization
+      investigation workflow") at five sites: `lexer.rs`, `lexer/strings.rs`,
+      `token.rs`, `parser/primary.rs`, `parser/tokens.rs`.
+    - `skip`'s doc and `current_pos`'s doc cite `advance()`, and `skip`
+      cites `classes.rs`'s `parse_class_like_decl`; neither exists.
+    - `interpolation.rs`: "simple interpolation syntax has no `?->` form"
+      (F56).
+    - The yield arm says generators "aren't modeled".
+    - `scan_interpolated` still calls the heredoc anchor "the best
+      available".
+    - `NameContext`'s doc cites "the extensive comment on this in
+      `checker.rs`'s module doc", which isn't there.
 
 ## Full review: coverage
 
@@ -880,9 +958,9 @@ its final state after the commit pass.
   `offsets`, `parse`, `php_float_format`, `queries`, `relation` (`accepts`,
   `kinds`, `super_type`), `shape`, `subtype`, `template_references`,
   `templates`, `transform`, `traverse`, `trinary`, `union`
-- [x] syntax: `ast`, `parse`, `php_string`
-- [ ] syntax: `name_resolution`, `visit`, `lexer` (with `strings`),
-  `parser/*`, `printer`, `annotations`, `token`, `lib`
+- [x] syntax: `annotations`, `ast`, `lexer` (with `strings`), `lib`,
+  `name_resolution`, `parse`, `parser` (every submodule), `php_string`,
+  `printer`, `token`, `visit`
 
 ## Deferred to C8 (reflection)
 
