@@ -3170,8 +3170,9 @@ deleted; the file-size gate.
       `mixed` where it is `B`, so `return $t->where('x')` under `@return
       B` is `return.type` (the rules oracle's `bug-11663.php`).
     - **A call on a union receiver** combines its members' methods
-      (`UnionTypeMethodReflection`, `ParametersAcceptorSelector::
-      combineAcceptors`): each parameter takes the union of the members'
+      (`UnionTypeMethodReflection`,
+      `ParametersAcceptorSelector::combineAcceptors`): each parameter takes
+      the union of the members'
       parameter types. `$u->apply($i)` on `Bar|Baz` with `apply(B)` and
       `apply(C)` checks against the first member only today, so `B|C` is
       `argument.type` (the rules oracle's `bug-6946.php`).
@@ -4940,8 +4941,9 @@ fixture:
     more lines in the oracle);
   - `return.unusedType` isn't reported for a union of constants when every
     return is a constant: `@return 1|2|3` returning `1`, or a
-    `'Test'|'Projekt in Umsetzung'` domain, stays (`TooWideTypeCheck::
-    narrowType`; 10 rules-oracle findings, `bug-11453.php`,
+    `'Test'|'Projekt in Umsetzung'` domain, stays
+    (`TooWideTypeCheck::narrowType`; 10 rules-oracle findings,
+    `bug-11453.php`,
     `bug-10312*.php`);
   - a return type that includes `void` accepts falling off the end (fixed
     first): `@return void|int` on a function that returns only on some
