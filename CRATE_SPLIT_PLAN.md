@@ -3232,7 +3232,8 @@ deleted; the file-size gate.
       `amphp/http-client/src/Interceptor/ModifyRequest.php:35`). A call with
       `@phpstan-assert*` tags is a type-check call too: PHPUnit's
       `assertNull($bool)` is `staticMethod.impossibleType` and
-      `$a->assertInt($int)` `method.alreadyNarrowedType`, unreported today (16
+      `$a->assertInt($int)` `method.alreadyNarrowedType` (and a static
+      one `staticMethod.alreadyNarrowedType`), unreported today (16
       `method.impossibleType` the corpus oracle finds in
       `php-openapi/openapi/tests/spec/SchemaTest.php`). Today the calls are
       `bool` although the rules report them, so `!is_int($c) && !is_string($c)`
@@ -4727,7 +4728,8 @@ fixture:
   - `null <= $object` is always true (`smallerOrEqual.alwaysTrue`,
     `bug-13001.php`), and enum cases compared with `<`, `>`, `<=` or `>=`
     are always false
-    (`Foo::A > Foo::B`; `greater.alwaysFalse`/`smaller.alwaysFalse`,
+    (`Foo::A > Foo::B`; `greater.alwaysFalse`, `smaller.alwaysFalse`,
+    `greaterOrEqual.alwaysFalse`, `smallerOrEqual.alwaysFalse`;
     `bug-7052.php`), and a ternary as a statement is
     `ternary.resultUnused` (`isset($d['x']) ? 'foo' : 'bar';`,
     `access-properties.php:127`, `bug-7109.php`), both unreported today;
@@ -4964,7 +4966,8 @@ fixture:
     `readOnlyByPhpDocAssignByRef`, unreported today
     (`readonly-assign-ref-phpdoc.php`, 6);
   - property hooks: the checks that a property overriding a writable or
-    readable one stays so (`property.notWritable`/`notReadable`) and that
+    readable one stays so (`property.notWritable`, `property.notReadable`)
+    and that
     a get hook of a non-virtual property reads its value and a set hook
     assigns it (`propertyGetHook.noRead`, `propertySetHook.noAssign`)
     exist and miss the rules oracle's cases (an interface property
@@ -4974,7 +4977,8 @@ fixture:
     hook (`set => $value + 1`, which assigns its expression) as
     `propertySetHook.noAssign` (`get-non-virtual-property-hook-read.php`);
     a `private(set)`/`protected(set)` static property assigned from outside
-    (`assign.staticPropertyPrivateSet`/`ProtectedSet`) and a `@readonly`
+    (`assign.staticPropertyPrivateSet`, `assign.staticPropertyProtectedSet`)
+    and a `@readonly`
     property assigned twice (`assign.readOnlyPropertyByPhpDoc`) are
     unreported today; a get-only virtual property may narrow the
     overridden type (`int` over `int|string`, as PHP allows), which is
@@ -5276,7 +5280,8 @@ fixture:
     check exists in `generics/bounds.rs` and misses a local alias), an
     alias doesn't shadow a class (`typeAlias.duplicate`), and
     `@phpstan-require-extends`/`-implements` sit only where PHPStan allows
-    them (`requireExtends.onClass`, `requireImplements.onEnum`, …); all
+    them (`requireExtends.onClass`, `requireExtends.onEnum`,
+    `requireImplements.onClass`, `requireImplements.onEnum`, …); all
     unreported today; an enum using a trait that requires an interface is
     `class.missingImplements` (`incompatible-require-implements.php:52`);
   - `@phpstan-consistent-constructor` on a class with a private
