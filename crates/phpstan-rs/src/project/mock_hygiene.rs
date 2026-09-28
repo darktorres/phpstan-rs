@@ -24,7 +24,7 @@ use std::path::PathBuf;
 
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{Visitor, opens_scope, walk_expr, walk_stmt, walk_stmts};
+use syntax::visit::{Visitor, walk_expr, walk_expr_in_scope, walk_stmt, walk_stmts};
 
 use super::Project;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
@@ -133,9 +133,7 @@ fn collect_origins(stmts: &[Stmt], out: &mut FxHashMap<String, bool>) {
             {
                 self.out.insert(key, is_mock);
             }
-            if !opens_scope(e) {
-                walk_expr(self, e);
-            }
+            walk_expr_in_scope(self, e);
         }
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}

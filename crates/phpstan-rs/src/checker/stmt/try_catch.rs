@@ -4,7 +4,7 @@ use crate::checker::{
 };
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{Visitor, any_expr_in_scope, opens_scope, walk_expr, walk_stmt, walk_stmts};
+use syntax::visit::{Visitor, any_expr_in_scope, walk_expr_in_scope, walk_stmt, walk_stmts};
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -447,9 +447,7 @@ impl<'s> Visitor<'s> for Throws<'s> {
         if let ExprKind::Throw(inner) = &e.kind {
             self.out.push((inner, e.span, false));
         }
-        if !opens_scope(e) {
-            walk_expr(self, e);
-        }
+        walk_expr_in_scope(self, e);
     }
 }
 

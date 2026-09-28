@@ -1125,6 +1125,11 @@ fn new_takes_a_property_chain_as_its_class_and_the_call_as_its_arguments() {
         };
         (class.kind.clone(), args.len())
     };
-    assert!(matches!(class_of(0), (ExprKind::PropertyAccess(_, ref name, false), 1) if &*name.name == "model"));
-    assert!(matches!(class_of(1), (ExprKind::StaticPropertyFetch(StaticTarget::Expr(_), _), 0)));
+    assert!(
+        matches!(class_of(0), (ExprKind::PropertyAccess(_, ref name, false), 1) if &*name.name == "model")
+    );
+    assert!(matches!(
+        class_of(1),
+        (ExprKind::StaticPropertyFetch(StaticTarget::Expr(_), _), 0)
+    ));
 }

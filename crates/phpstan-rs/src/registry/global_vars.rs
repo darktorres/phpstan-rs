@@ -27,7 +27,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::registry::infer_const_type;
 use syntax::ast::{BinOp, Expr, ExprKind, GlobalVar, Literal, StaticTarget, Stmt, StmtKind};
-use syntax::visit::{Visitor, any_stmt_in_body, opens_scope, walk_expr, walk_stmt};
+use syntax::visit::{Visitor, any_stmt_in_body, walk_expr_in_scope, walk_stmt};
 
 use types::{Shape, Type};
 
@@ -441,9 +441,7 @@ impl<'a> Visitor<'a> for Scope<'_, 'a> {
             }
             _ => {}
         }
-        if !opens_scope(expr) {
-            walk_expr(self, expr);
-        }
+        walk_expr_in_scope(self, expr);
     }
 }
 

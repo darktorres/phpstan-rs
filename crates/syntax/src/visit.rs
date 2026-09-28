@@ -554,13 +554,16 @@ pub fn walk_switch_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Swi
     walk_stmts(v, &c.body);
 }
 
-/// Whether an expression starts a scope of its own: a closure, an arrow
-/// function or an anonymous class (its constructor arguments included).
-pub fn opens_scope(expr: &Expr) -> bool {
-    matches!(
-        expr.kind,
-        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } | ExprKind::NewAnonymousClass(..)
-    )
+/// Visits the children of `expr` that run in its own scope: none of a
+/// closure's or arrow function's (its body runs later, in a scope of its
+/// own), and of an anonymous class only its constructor arguments (its body
+/// is its own scope).
+pub fn walk_expr_in_scope<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
+    match &expr.kind {
+        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {}
+        ExprKind::NewAnonymousClass(_, args) => walk_args(v, args),
+        _ => walk_expr(v, expr),
+    }
 }
 
 /// Whether `pred` holds for `stmt` or a statement nested in it within the
@@ -592,10 +595,10 @@ pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> 
 }
 
 /// Whether `pred` holds for an expression in `stmts` or in the statements
-/// nested in them, within the same function body: closures, arrow
-/// functions, anonymous classes and nested function and class
-/// declarations are not entered (though `pred` sees the expression that
-/// starts one). Stops at the first match.
+/// nested in them, within the same function body: closure, arrow-function
+/// and anonymous-class bodies and nested function and class declarations
+/// are not entered (though `pred` sees the expression that starts one, and
+/// an anonymous class's constructor arguments). Stops at the first match.
 pub fn any_expr_in_body<'ast>(stmts: &'ast [Stmt], pred: impl FnMut(&'ast Expr) -> bool) -> bool {
     struct Search<F> {
         pred: F,
@@ -615,9 +618,7 @@ pub fn any_expr_in_body<'ast>(stmts: &'ast [Stmt], pred: impl FnMut(&'ast Expr) 
                 self.found = true;
                 return;
             }
-            if !opens_scope(expr) {
-                walk_expr(self, expr);
-            }
+            walk_expr_in_scope(self, expr);
         }
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
@@ -628,9 +629,9 @@ pub fn any_expr_in_body<'ast>(stmts: &'ast [Stmt], pred: impl FnMut(&'ast Expr) 
 }
 
 /// Whether `pred` holds for `expr` or an expression nested in it within
-/// the same scope: closures, arrow functions and anonymous classes are
-/// not entered (though `pred` sees the expression that starts one). Stops
-/// at the first match.
+/// the same scope: closure, arrow-function and anonymous-class bodies are
+/// not entered (though `pred` sees the expression that starts one, and an
+/// anonymous class's constructor arguments). Stops at the first match.
 pub fn any_expr_in_scope<'ast>(expr: &'ast Expr, pred: impl FnMut(&'ast Expr) -> bool) -> bool {
     struct Search<F> {
         pred: F,
@@ -645,9 +646,7 @@ pub fn any_expr_in_scope<'ast>(expr: &'ast Expr, pred: impl FnMut(&'ast Expr) ->
                 self.found = true;
                 return;
             }
-            if !opens_scope(expr) {
-                walk_expr(self, expr);
-            }
+            walk_expr_in_scope(self, expr);
         }
     }
     let mut search = Search { pred, found: false };
@@ -655,9 +654,9 @@ pub fn any_expr_in_scope<'ast>(expr: &'ast Expr, pred: impl FnMut(&'ast Expr) ->
     search.found
 }
 
-/// Calls `f` on each expression directly inside `expr` (its children,
-/// not their descendants), in order, until `f` returns true. An
-/// expression that opens a scope has none.
+/// Calls `f` on each expression directly inside `expr` in its scope (its
+/// children, not their descendants; see `walk_expr_in_scope`), in order,
+/// until `f` returns true.
 pub fn any_child_expr<'ast>(expr: &'ast Expr, f: impl FnMut(&'ast Expr) -> bool) -> bool {
     struct Children<F> {
         f: F,
@@ -670,11 +669,8 @@ pub fn any_child_expr<'ast>(expr: &'ast Expr, f: impl FnMut(&'ast Expr) -> bool)
             }
         }
     }
-    if opens_scope(expr) {
-        return false;
-    }
     let mut children = Children { f, found: false };
-    walk_expr(&mut children, expr);
+    walk_expr_in_scope(&mut children, expr);
     children.found
 }
 

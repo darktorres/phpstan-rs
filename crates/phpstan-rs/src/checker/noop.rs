@@ -20,7 +20,7 @@ use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::TypeHint;
 use syntax::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
-use syntax::visit::{Visitor, any_expr_in_scope, opens_scope, walk_expr};
+use syntax::visit::{Visitor, any_expr_in_scope, walk_expr_in_scope};
 use types::Type;
 
 const PRECEDENCE_TIP: &str =
@@ -57,9 +57,7 @@ fn expr_side_effects(e: &Expr) -> Effects {
                 return;
             }
             self.0 = std::cmp::max(self.0, own_side_effects(e));
-            if !opens_scope(e) {
-                walk_expr(self, e);
-            }
+            walk_expr_in_scope(self, e);
         }
     }
     let mut strongest = Strongest(Effects::None);

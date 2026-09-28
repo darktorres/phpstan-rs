@@ -11,7 +11,7 @@ use crate::registry::{
 use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
-use syntax::visit::{Visitor, opens_scope, walk_expr, walk_stmt, walk_stmts};
+use syntax::visit::{Visitor, walk_expr_in_scope, walk_stmt, walk_stmts};
 use types::Type;
 
 /// One declaration's already-built, registry-independent info/sig, plus
@@ -723,9 +723,7 @@ impl<'ast> Visitor<'ast> for Defines<'_> {
         if let Some((name, ty)) = define_call_constant(e) {
             self.0.push(BuiltDecl::GlobalConst { name, ty });
         }
-        if !opens_scope(e) {
-            walk_expr(self, e);
-        }
+        walk_expr_in_scope(self, e);
     }
 }
 
