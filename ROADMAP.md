@@ -4310,7 +4310,7 @@ the gate's first run decides which.
   as a single page.
 - `report --export <dir>`: a read-only static copy, so a CI run's
   results can be browsed from its artifacts.
-- The page's data is the versioned JSON schema (F3), plus each
+- The page's data is F3's `phpstan-rs-json` record, plus each
   finding's minimum level and hidden-by reason. HTML, JS and CSS are
   embedded in the binary and work offline, with no CDN.
 - It lives in its own app-layer crate above the session. The finalizer
