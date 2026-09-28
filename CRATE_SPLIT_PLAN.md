@@ -2966,7 +2966,17 @@ deleted; the file-size gate.
       `strict-comparison.php:980`, `:983`).
     - **Identical** follows `resolveIdenticalType`: operand types that don't
       intersect make `===` constant false. `identical_result` tests type
-      families only, so `1|2 === 7` isn't reported today.
+      families only, so `1|2 === 7` isn't reported today, nor are `int<0,
+      1>` against `100`, `'/'|'\\'` against `'//'`, `array{X: 1}` against
+      `array{X: 2}`, a `non-empty-array` against `[]`, `lowercase-string`
+      against `'AB'`, `uppercase-string` against `'ab'` or
+      `class-string<stdClass>` against `'Exception'` (most of the rules
+      oracle's 80 PHPStan-only `identical.alwaysFalse`, `strict-comparison.php`,
+      `lowercase-string.php`, `uppercase-string.php`, `hashing.php`). The
+      truthy branch intersects: after `if ($x === 3) {}` on `1|2`, `$x` is
+      `3|1|2` today. An enum's `$this` narrows like any enum value: after
+      `if ($this === self::A) { return; }` it is still the whole enum today
+      (`bug-9142.php`).
     - **Comparisons between constants fold**, including `null` and `bool`
       operands by PHP's comparison table: `1 < null` and `null < 1` are
       `bool` today where PHPStan has `false` and `true` (96 nsrt mismatches
@@ -3038,6 +3048,9 @@ deleted; the file-size gate.
       `match` over the names is `match.unhandled`: the rules oracle's
       `bug-7698.php`, `bug-7746.php`, `bug-8536.php`, `bug-9534.php`,
       `match-expr.php:199`), and `get_debug_type()` likewise.
+      `get_class()` without an argument is the declaring class's name
+      (`string` today), and `get_class($this)` is `class-string<$this>`,
+      which an unrelated class's name can't equal (`bug-3633.php`, 8).
       `$o::class` is `class-string<C>&literal-string` for an object of
       class `C`, `class-string<T>&literal-string` for a template `T`, and
       `class-string&literal-string` for `object`: the template and `object`
@@ -3237,6 +3250,14 @@ deleted; the file-size gate.
     - **`new` into a generic property**: `$this->c = new Coll();` for a
       `@var Coll<int>` property types the `new` as `Coll<int>`
       (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
+    - **Array keys are cast as PHP casts them** on every write, read and
+      `unset()`: `true`/`false` to `1`/`0`, a decimal-integer string to an
+      `int`, a float truncated, `null` to `''`. After `$a[true] = 'x';
+      $a['1'] = 'y'; $a[1.7] = 'z';`, `$a` is `array<(int|string)|string,
+      …>` today where it is `array{1: 'z'}`; `$b[true]` on `[1 => 2]` is
+      `mixed`; and `unset($m[false])` leaves key `0`, so the rules oracle's
+      `unset-false-key.php`, where a missed `array_search()` unsets key `0`,
+      isn't `identical.alwaysFalse`.
     - **A `static` variable** starts as its initializer's type unioned
       with every value the body assigns it (a later call sees the earlier
       call's last value), and as `mixed` once it escapes by reference:
@@ -3571,7 +3592,9 @@ building on the previous one:
     `$x->getY()` is still `Y|null`, even when the method is `@phpstan-pure`,
     and a variable defined under `if (returnsBool($b))` is
     `variable.undefined` under the next `if (returnsBool($b))` (17 `Yes`
-    certainty assertions in nsrt `dependent-expression-certainty.php`).
+    certainty assertions in nsrt `dependent-expression-certainty.php`; 10
+    of the rules oracle's PHPStan-only `identical.alwaysFalse`, with the
+    tip naming the possibly impure call, `possibly-impure-tip.php`).
 - **Control-flow transitions:**
   - **Loops** follow `LOOP_SCOPE_ITERATIONS = 3` with `generalizeWith` after
     the first pass, then the final walk. Today there are up to 6 passes and
@@ -4010,7 +4033,13 @@ the rest), which the gate excludes and lists.
     `Closure|null` (`ClosureBindDynamicReturnTypeExtension`; the rules
     oracle's `bug-7675.php`);
   - `count()` of a non-empty array is `int<1, max>`: after `$w[] = $v` it
-    is `int<0, max>` today (the rules oracle's `bug-8277.php`);
+    is `int<0, max>` today (the rules oracle's `bug-8277.php`), and so it
+    is for a `non-empty-array<int>` parameter or after `if ($a === [])
+    { return; }` (`bug-6260.php`, `bug-7578.php`, `bug-9104.php`);
+  - the hash functions return what they produce: `md5()` is
+    `lowercase-string&non-falsy-string` and `md5_file()` that or `false`,
+    `string` today (`hashing.php`); `(int)` of a decimal string past
+    `PHP_INT_MAX` folds to `PHP_INT_MAX` (`bug-4848.php`);
   - `array_rand($a, $n)` is `int` instead of `int<0, max>|list<int<0,
     max>>` (a list's keys; a list of them for a count other than 1), so
     `array_keys()` of the result is `argument.type` (the rules oracle's
