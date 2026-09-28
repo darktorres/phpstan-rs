@@ -153,7 +153,7 @@ fn mentions_mixed(native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> boo
 /// both "no hint at all" and "explicit `mixed`" alike) where the source
 /// itself didn't actually spell out `mixed`.
 fn is_implicit_mixed(ty: &Type, native_hint: Option<&str>, doc_type: Option<&TypeNode>) -> bool {
-    matches!(ty, Type::Mixed(false)) && !is_explicit_mixed_text(native_hint, doc_type)
+    ty.is_implicit_mixed() && !is_explicit_mixed_text(native_hint, doc_type)
 }
 
 /// A bare `iterable`'s own two-member shape (`types::parse_type_string`
@@ -202,7 +202,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
     match ty {
         Type::TemplateParam(_) | Type::Accessory(_) => {}
         Type::Array(_, inner) => {
-            if matches!(inner.as_ref(), Type::Mixed(_)) {
+            if inner.as_ref().is_mixed() {
                 if !explicit_mixed {
                     out.push(format!("iterable type {ty}"));
                 }
@@ -212,7 +212,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
         }
         Type::Union(members) => {
             if let Some(inner) = iterable_union_value_type(members) {
-                if matches!(inner, Type::Mixed(_)) {
+                if inner.is_mixed() {
                     if !explicit_mixed {
                         out.push("iterable type iterable".to_string());
                     }
@@ -237,11 +237,8 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
                 })
                 .collect();
             if !values.is_empty() {
-                let specified: Vec<&Type> = values
-                    .iter()
-                    .copied()
-                    .filter(|v| !matches!(v, Type::Mixed(_)))
-                    .collect();
+                let specified: Vec<&Type> =
+                    values.iter().copied().filter(|v| !v.is_mixed()).collect();
                 if specified.is_empty() {
                     if !explicit_mixed {
                         out.push(format!("iterable type {ty}"));
@@ -649,7 +646,7 @@ impl<'a> Checker<'a> {
                 Some(param_sig) => param_sig.explicit_mixed_hint(),
                 None => mentions_mixed(native_hint, doc_ty),
             };
-            if *ty == Type::Mixed(false) && !explicit_mixed {
+            if ty.is_mixed() && !explicit_mixed {
                 self.report(
                     format!("{kind_word} {label}() has parameter ${name} with no type specified."),
                     *span,
@@ -728,7 +725,7 @@ impl<'a> Checker<'a> {
             None => mentions_mixed(native_return, doc_return),
         };
         let return_ty = declared_return.cloned().unwrap_or(Type::mixed());
-        if return_ty == Type::Mixed(false) && !return_explicit_mixed {
+        if return_ty.is_mixed() && !return_explicit_mixed {
             self.report(
                 format!("{kind_word} {label}() has no return type specified."),
                 f.span,

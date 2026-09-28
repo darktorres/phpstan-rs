@@ -25,7 +25,7 @@ fn union_types_collapses_an_int_literal_into_an_already_present_int() {
 #[test]
 fn union_types_collapses_a_mixed_member_reached_only_via_flattening() {
     // The pre-existing fast path only catches a *bare* `Mixed` operand
-    // (`a == Type::Mixed(false) || b == Type::Mixed(false)`) - a `Mixed`
+    // (`a.is_mixed() || b.is_mixed()`) - a `Mixed`
     // that only shows up once a multi-member `Union` operand gets
     // flattened into `members` (real shape: `?mixed`'s own
     // `Union([Mixed, Null])` construction, `types/parse.rs`, before its

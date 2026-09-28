@@ -538,7 +538,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if type_definitely_excludes_null(after_ty)
-                && *after_ty != Type::Mixed(false)
+                && !after_ty.is_mixed()
                 && !before.get(name).is_some_and(type_definitely_excludes_null)
             {
                 implied.push((name.clone(), after_ty.clone()));

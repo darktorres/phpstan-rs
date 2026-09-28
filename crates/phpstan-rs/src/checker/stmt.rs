@@ -433,7 +433,7 @@ impl<'a> Checker<'a> {
                 if self.collect_inlay_hints
                     && let ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) = &e.kind
                     && let ExprKind::Variable(name) = &lhs.kind
-                    && ty != Type::Mixed(false)
+                    && !ty.is_mixed()
                     && !inline_var.iter().any(|(n, _)| n.as_str() == name.as_ref())
                 {
                     self.inlay_local_type_hints.push((lhs.span, ty.clone()));
@@ -694,7 +694,7 @@ impl<'a> Checker<'a> {
                     // `Type::Mixed` (`Maybe`, matching `MixedType::
                     // isVoid`, no explicit/implicit distinction there
                     // either) are exempt.
-                    } else if !matches!(expected, Type::Void | Type::Mixed(_)) {
+                    } else if !(expected.is_mixed() || matches!(expected, Type::Void)) {
                         self.report(
                             format!("should return {expected} but empty return statement found"),
                             stmt.span,

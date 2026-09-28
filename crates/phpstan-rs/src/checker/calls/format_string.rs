@@ -584,7 +584,7 @@ impl<'a> Checker<'a> {
     /// only the members `matches` accepts kept when any does. An
     /// unconfigured level checks everything.
     fn type_to_check(&self, ty: &Type, matches: impl Fn(&Type, &Self) -> bool) -> Option<Type> {
-        if matches!(ty, Type::Mixed(_)) {
+        if ty.is_mixed() {
             return None;
         }
         let level = self.settings.rule_levels.configured_level;

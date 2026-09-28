@@ -56,7 +56,7 @@ impl<'a> Checker<'a> {
         };
         let container = self.infer_expr(base, locals);
         let dim = idx.as_deref().map(|i| self.infer_expr(i, locals));
-        if matches!(container, Type::Mixed(_) | Type::Null | Type::Never) {
+        if container.is_mixed() || matches!(container, Type::Null | Type::Never) {
             return;
         }
         if is_assign_op
@@ -106,7 +106,7 @@ impl<'a> Checker<'a> {
         if is_string_type(container) {
             let bad = match dim {
                 None => true,
-                Some(d) => !matches!(d, Type::Mixed(_)) && !is_integer_type(d),
+                Some(d) => !d.is_mixed() && !is_integer_type(d),
             };
             return bad.then_some("offsetAssign.dimType");
         }
@@ -121,12 +121,10 @@ impl<'a> Checker<'a> {
             return None;
         };
         let offset_ty = dim.cloned().unwrap_or(Type::null());
-        if !matches!(offset_ty, Type::Mixed(_))
-            && !self.accepts(offset_param.ty(), &offset_ty).yes()
-        {
+        if !offset_ty.is_mixed() && !self.accepts(offset_param.ty(), &offset_ty).yes() {
             return Some("offsetAssign.dimType");
         }
-        (!matches!(value, Type::Mixed(_)) && !self.accepts(value_param.ty(), value).yes())
+        (!value.is_mixed() && !self.accepts(value_param.ty(), value).yes())
             .then_some("offsetAssign.valueType")
     }
 }

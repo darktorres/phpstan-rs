@@ -234,7 +234,7 @@ impl<'a> Checker<'a> {
         // `Mixed | non-numeric-literal` fails *both* of `BitAnd`'s own
         // legal combinations even though either one might hold at
         // runtime.
-        if matches!(l_ty, Type::Mixed(_)) || matches!(r_ty, Type::Mixed(_)) {
+        if l_ty.is_mixed() || r_ty.is_mixed() {
             return;
         }
         let Some(valid) = self.binary_operand_validity(op, l_ty, r_ty) else {
@@ -273,7 +273,7 @@ impl<'a> Checker<'a> {
         if !self.settings.strict_rules.check_boolean_conditions {
             return;
         }
-        if matches!(ty, Type::Mixed(_)) || is_definitely_bool(ty) {
+        if ty.is_mixed() || is_definitely_bool(ty) {
             return;
         }
         self.report(
@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
         if !self.settings.strict_rules.check_boolean_conditions {
             return;
         }
-        if matches!(ty, Type::Mixed(_)) || is_definitely_bool(ty) {
+        if ty.is_mixed() || is_definitely_bool(ty) {
             return;
         }
         self.report(
@@ -470,7 +470,7 @@ impl<'a> Checker<'a> {
         let Some(identifier) = comparison_identifier(op) else {
             return;
         };
-        if matches!(l_ty, Type::Mixed(_)) || matches!(r_ty, Type::Mixed(_)) {
+        if l_ty.is_mixed() || r_ty.is_mixed() {
             return;
         }
         let l_num = self.is_strictly_number(l_ty);

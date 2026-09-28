@@ -211,7 +211,7 @@ impl<'a> Checker<'a> {
             let bounds = sig
                 .templates
                 .iter()
-                .filter(|t| !matches!(*t.bound, Type::Mixed(_)))
+                .filter(|t| !t.bound.is_mixed())
                 .map(|t| (t.name.as_str().into(), (*t.bound).clone()))
                 .collect();
             let defaults = sig

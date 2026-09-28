@@ -458,7 +458,7 @@ impl Locals {
     /// Records `key`'s native type, right after the `declare` binding it.
     /// `mixed` records nothing.
     pub(crate) fn set_native(&mut self, key: &str, ty: Type) {
-        if !matches!(ty, Type::Mixed(_)) {
+        if !ty.is_mixed() {
             self.native.insert(key.to_string(), ty);
         }
     }

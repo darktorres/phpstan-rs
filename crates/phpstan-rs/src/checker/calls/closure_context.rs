@@ -157,9 +157,7 @@ impl<'a> Checker<'a> {
                             "return.noParent",
                         );
                     }
-                    if body_ty != Type::Mixed(false)
-                        && !self.rule_level_accepts(&expected, &body_ty).yes()
-                    {
+                    if !body_ty.is_mixed() && !self.rule_level_accepts(&expected, &body_ty).yes() {
                         self.report(
                             format!("return type mismatch: expected {expected}, got {body_ty}"),
                             body.span,

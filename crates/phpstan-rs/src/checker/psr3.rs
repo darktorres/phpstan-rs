@@ -114,8 +114,7 @@ fn string_literals(ty: &Type) -> Option<Vec<&str>> {
 impl<'a> Checker<'a> {
     fn is_psr3_logger(&self, ty: &Type) -> bool {
         let logger = Type::object(("Psr\\Log\\LoggerInterface".to_string()).into(), Vec::new());
-        !matches!(ty, Type::Mixed(_))
-            && self.registry.is_super_type_of(&logger, ty) == types::TrinaryLogic::Yes
+        !ty.is_mixed() && self.registry.is_super_type_of(&logger, ty) == types::TrinaryLogic::Yes
     }
 
     pub(crate) fn check_psr3_call(&mut self, e: &Expr, locals: &Locals) {
@@ -195,7 +194,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_psr3_level(&mut self, level: &Type, span: Span) {
-        if matches!(level, Type::Mixed(_)) {
+        if level.is_mixed() {
             return;
         }
         let valid = string_literals(level).is_some_and(|ls| ls.iter().all(|l| LEVELS.contains(l)));
@@ -336,7 +335,7 @@ impl<'a> Checker<'a> {
             }
             if key == "exception" {
                 let throwable = Type::object("Throwable".into(), Vec::new());
-                if !matches!(value, Type::Mixed(_))
+                if !value.is_mixed()
                     && self.registry.is_super_type_of(&throwable, value) != types::TrinaryLogic::Yes
                 {
                     self.report(format!("Context key 'exception' of a logger call expects Throwable, {value} given."),

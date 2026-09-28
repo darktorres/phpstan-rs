@@ -99,7 +99,7 @@ impl<'a> Checker<'a> {
         let Some(enclosing) = self.current_declared_return_type.clone() else {
             return;
         };
-        if enclosing == Type::Mixed(false) {
+        if enclosing.is_mixed() {
             return;
         }
         // Real PHPStan's own `generator.void` check: the `yield from`
@@ -138,8 +138,8 @@ impl<'a> Checker<'a> {
         let enclosing_key = generator_template_param(&enclosing, self.registry, "TKey");
         let enclosing_value = generator_template_param(&enclosing, self.registry, "TYield");
         let enclosing_send = generator_template_param(&enclosing, self.registry, "TSend");
-        if enclosing_key != Type::Mixed(false)
-            && inner_key != Type::Mixed(false)
+        if !enclosing_key.is_mixed()
+            && !inner_key.is_mixed()
             && !self.rule_level_accepts(&enclosing_key, &inner_key).yes()
         {
             self.report(format!(
@@ -150,8 +150,8 @@ impl<'a> Checker<'a> {
                 "generator.keyType",
             );
         }
-        if enclosing_value != Type::Mixed(false)
-            && inner_value != Type::Mixed(false)
+        if !enclosing_value.is_mixed()
+            && !inner_value.is_mixed()
             && !self
                 .rule_level_accepts(&enclosing_value, &inner_value)
                 .yes()
@@ -168,8 +168,8 @@ impl<'a> Checker<'a> {
         // the delegated generator's own TSend must accept everything the
         // enclosing one does (a caller `->send()`ing into the outer
         // generator delegates that same value into the inner one).
-        if enclosing_send != Type::Mixed(false)
-            && inner_send != Type::Mixed(false)
+        if !enclosing_send.is_mixed()
+            && !inner_send.is_mixed()
             && !self.accepts(&inner_send, &enclosing_send).yes()
         {
             self.report(format!(

@@ -991,7 +991,7 @@ impl Registry {
     /// was deliberately written, rather than leaving the position
     /// looking entirely undocumented.
     pub(crate) fn safe_to_backfill_mixed(ancestor_ty: &Type, native_ty: &Type) -> bool {
-        *ancestor_ty != Type::Mixed(false) || *native_ty == Type::Mixed(false)
+        !ancestor_ty.is_mixed() || native_ty.is_mixed()
     }
 
     /// One pass of `flatten_phpdoc_inheritance` - see its doc comment.
@@ -1187,8 +1187,8 @@ impl Registry {
                     // (PHP 8.1): an override may omit it, and then has it
                     // still.
                     let inherits_tentative_type = registry.built_in_stub_classes.contains(&owner)
-                        && sig.return_type_native == Type::Mixed(false)
-                        && ancestor_sig.return_type_native != Type::Mixed(false);
+                        && sig.return_type_native.is_mixed()
+                        && !ancestor_sig.return_type_native.is_mixed();
                     let return_fill = (needs_return
                         && (ancestor_sig.return_has_own_doc || inherits_tentative_type)
                         && Registry::safe_to_backfill_mixed(
@@ -1595,7 +1595,7 @@ fn resolve_deferred_value_of_with_native_fallback(
     classes: &FxHashMap<Arc<str>, ClassReflection>,
 ) -> Type {
     let resolved = resolve_deferred_value_of_in_type(ty, classes);
-    if resolved == Type::Mixed(false) && *native != Type::Mixed(false) {
+    if resolved.is_mixed() && !native.is_mixed() {
         native.clone()
     } else {
         resolved
@@ -1716,7 +1716,7 @@ impl Registry {
     /// `ty` without the members `native` provably excludes, when any are
     /// excluded; `None` when nothing changes.
     fn excluding_native(&self, ty: &Type, native: &Type, class: Option<&Arc<str>>) -> Option<Type> {
-        if ty == native || matches!(native, Type::Mixed(_)) {
+        if ty == native || native.is_mixed() {
             return None;
         }
         let bind = |t: &Type| match class {

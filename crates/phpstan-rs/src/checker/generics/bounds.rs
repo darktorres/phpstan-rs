@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
                         // `rule_level_accepts` (see that
                         // method's own doc comment, which already
                         // disclosed this exact exclusion).
-                        if *checked_arg != Type::Mixed(false)
+                        if !checked_arg.is_mixed()
                             && self.is_type_fully_known(checked_arg)
                             && self.is_type_fully_known(&bound)
                             && !self.accepts(&bound, checked_arg).yes()
@@ -728,26 +728,26 @@ impl TemplateSubject<'_> {
 /// while a false "unsupported" only ever costs a single extra, real
 /// diagnostic on an already-unusual bound choice.
 fn is_supported_generic_bound(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Mixed(_)
-            | Type::Null
-            | Type::Array(_, _)
-            | Type::ArrayShape(_)
-            | Type::String
-            | Type::StringLiteral(_)
-            | Type::Int
-            | Type::IntLiteral(_)
-            | Type::Float
-            | Type::FloatLiteral(_)
-            | Type::Bool
-            | Type::True
-            | Type::False
-            | Type::Object(_, _)
-            | Type::ObjectWithoutClass
-            | Type::ObjectShape(_)
-            | Type::Union(_)
-            | Type::Intersection(_)
-            | Type::TemplateParam(_)
-    )
+    ty.is_mixed()
+        || matches!(
+            ty,
+            Type::Null
+                | Type::Array(_, _)
+                | Type::ArrayShape(_)
+                | Type::String
+                | Type::StringLiteral(_)
+                | Type::Int
+                | Type::IntLiteral(_)
+                | Type::Float
+                | Type::FloatLiteral(_)
+                | Type::Bool
+                | Type::True
+                | Type::False
+                | Type::Object(_, _)
+                | Type::ObjectWithoutClass
+                | Type::ObjectShape(_)
+                | Type::Union(_)
+                | Type::Intersection(_)
+                | Type::TemplateParam(_)
+        )
 }

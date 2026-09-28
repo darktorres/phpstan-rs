@@ -195,7 +195,7 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        if matches!(value, types::Type::Mixed(false)) || self.accepts(&configured, value).yes() {
+        if value.is_implicit_mixed() || self.accepts(&configured, value).yes() {
             return;
         }
         let display = match class {
@@ -263,7 +263,7 @@ impl<'a> Checker<'a> {
             ) || matches!(t, Type::Intersection(ms) if ms.iter().any(|m| matches!(m, Type::String)))
         };
         let is_unknown =
-            |t: &Type| matches!(t, Type::Mixed(_) | Type::Never | Type::TemplateParam(_));
+            |t: &Type| t.is_mixed() || matches!(t, Type::Never | Type::TemplateParam(_));
         let level = match name_ty {
             t if is_string(t) || is_unknown(t) => return,
             Type::Union(members) if members.iter().any(is_unknown) => return,

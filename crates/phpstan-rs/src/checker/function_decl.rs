@@ -1610,7 +1610,7 @@ impl<'a> Checker<'a> {
                 other => other,
             };
             let default_ty = self.infer_expr(default, &Locals::default());
-            if matches!(default_ty, Type::Mixed(_)) || self.accepts(param_ty, &default_ty).yes() {
+            if default_ty.is_mixed() || self.accepts(param_ty, &default_ty).yes() {
                 continue;
             }
             let target = match class_name {
@@ -1696,7 +1696,7 @@ pub(crate) fn missing_return_level(
     if matches!(expected, Type::Void) {
         return None;
     }
-    if matches!(expected, Type::Mixed(_)) && (!has_native_hint || is_generator_treturn) {
+    if expected.is_mixed() && (!has_native_hint || is_generator_treturn) {
         return None;
     }
     let contains_null = match expected {

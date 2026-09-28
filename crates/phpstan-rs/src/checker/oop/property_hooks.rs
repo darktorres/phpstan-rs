@@ -297,7 +297,7 @@ impl<'a> Checker<'a> {
         match body {
             PropertyHookBody::Arrow(e) => {
                 let body_ty = self.check_expr(e, &mut locals, &label);
-                if body_ty != Type::Mixed(false) && !self.accepts(prop_sig.ty(), &body_ty).yes() {
+                if !body_ty.is_mixed() && !self.accepts(prop_sig.ty(), &body_ty).yes() {
                     self.report(
                         format!(
                             "return type mismatch: expected {}, got {body_ty}",

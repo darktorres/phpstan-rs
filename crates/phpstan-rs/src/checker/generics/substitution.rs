@@ -221,10 +221,7 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
             if_false,
             negated,
             template_subject: true,
-        } if bindings
-            .get(subject)
-            .is_some_and(|b| !matches!(b, Type::Mixed(_))) =>
-        {
+        } if bindings.get(subject).is_some_and(|b| !b.is_mixed()) => {
             let target = substitute_scoped(target, bindings, scope);
             match types::conditional_branch(&bindings[subject], &target, *negated) {
                 Some(true) => substitute_scoped(if_true, bindings, scope),

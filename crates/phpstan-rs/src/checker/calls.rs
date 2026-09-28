@@ -581,7 +581,7 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(param_b.ty(), c),
                 None => param_b.ty().clone(),
             };
-            if ty_a == Type::Mixed(false) || ty_a != ty_b {
+            if ty_a.is_mixed() || ty_a != ty_b {
                 continue;
             }
             self.report(format!(

@@ -123,7 +123,7 @@ impl<'a> Checker<'a> {
             // flags a member, a Maybe keeps it - a returned type that fits
             // the member, or merely overlaps it, uses it.
             let is_used = actual_members.iter().any(|a| {
-                *a == Type::Mixed(false)
+                a.is_mixed()
                     || self.accepts(member, a).yes()
                     || !self.relation().disjoint(a, member)
             });

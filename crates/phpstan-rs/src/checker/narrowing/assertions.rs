@@ -106,7 +106,7 @@ impl<'a> Checker<'a> {
             return Some((target.clone(), Some(target)));
         }
         let element = Self::array_element_type(&haystack_ty)?;
-        if matches!(element, Type::Mixed(_)) {
+        if element.is_mixed() {
             return None;
         }
         Some((element, None))
@@ -178,7 +178,7 @@ impl<'a> Checker<'a> {
         let Some((key, narrowed_expr, target_ty)) = pair else {
             return;
         };
-        if target_ty == Type::Mixed(false) {
+        if target_ty.is_mixed() {
             return;
         }
         let current = self.current_narrowed_type(narrowed_expr, &key, locals);

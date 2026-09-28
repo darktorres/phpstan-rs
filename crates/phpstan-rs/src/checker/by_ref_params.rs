@@ -201,7 +201,7 @@ impl<'a> Checker<'a> {
             let Some(actual) = snapshots.iter().cloned().reduce(union_types) else {
                 continue;
             };
-            if actual == Type::Mixed(false) {
+            if actual.is_mixed() {
                 continue;
             }
             let actual_members = flatten_union(&actual);
@@ -210,7 +210,7 @@ impl<'a> Checker<'a> {
                 .filter(|m| {
                     !actual_members
                         .iter()
-                        .any(|a| **a == Type::Mixed(false) || self.accepts(m, a).yes())
+                        .any(|a| a.is_mixed() || self.accepts(m, a).yes())
                 })
                 .map(|m| m.to_string())
                 .collect();

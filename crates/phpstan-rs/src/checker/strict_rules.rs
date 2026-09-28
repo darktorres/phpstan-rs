@@ -383,7 +383,7 @@ impl<'a> Checker<'a> {
         let prefix = if compound { "assignOp" } else { "binaryOp" };
         for (one, other) in [(&left, &right), (&right, &left)] {
             let kind = if all_members(one, is_string)
-                && !matches!(other, Type::Mixed(_))
+                && !other.is_mixed()
                 && !is_string_or_nullable_string(other)
             {
                 if converts_to_string_ok
@@ -394,7 +394,7 @@ impl<'a> Checker<'a> {
                 }
                 "string"
             } else if all_members(one, is_array)
-                && !matches!(other, Type::Mixed(_))
+                && !other.is_mixed()
                 && !has_array(other)
                 && !contains_mixed(other)
             {

@@ -21,6 +21,7 @@ mod late;
 mod parse;
 mod php_float_format;
 pub mod php_version;
+mod queries;
 pub mod relation;
 mod shape;
 mod subtype;

@@ -608,7 +608,7 @@ impl<'a> Checker<'a> {
         // exactly this shape during this check's own corpus-style
         // regression pass.
         let arg_ty = self.infer_expr(&single_arg.value, locals);
-        if matches!(arg_ty, Type::Mixed(_) | Type::Never) {
+        if arg_ty.is_mixed() || matches!(arg_ty, Type::Never) {
             return;
         }
         if self.relation().disjoint(&target_ty, &arg_ty) {

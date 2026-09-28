@@ -446,7 +446,7 @@ impl<'a> Checker<'a> {
                     (None, Some(key)) => (key, r, self.infer_expr(l, locals)),
                     (None, None) => return None,
                 };
-                if target_ty == Type::Mixed(false) {
+                if target_ty.is_mixed() {
                     return None;
                 }
                 Some((key, target_ty, narrowed_expr))

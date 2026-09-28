@@ -87,7 +87,7 @@ fn negate_numeric_literal(ty: Type) -> Type {
 /// namespace-prefixing transform rewrites every unqualified global name
 /// to its fully-qualified form, including these three, so without this,
 /// such a name stayed `Mixed` and silently skipped narrowing through
-/// `apply_equality_narrowing`'s `target_ty == Type::Mixed(false)` bail-out.
+/// `apply_equality_narrowing`'s `target_ty.is_mixed()` bail-out.
 fn bare_name_literal_type(name: &str) -> Type {
     match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
         "true" => Type::bool_literal(true),
@@ -105,7 +105,7 @@ fn bare_name_literal_type(name: &str) -> Type {
 /// elsewhere in this file): if removing `null` changes nothing, `ty`
 /// never carried it to begin with.
 pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
-    !matches!(ty, Type::Mixed(_) | Type::Never) && narrow_type_excluding(ty, &Type::Null) == *ty
+    !(ty.is_mixed() || matches!(ty, Type::Never)) && narrow_type_excluding(ty, &Type::Null) == *ty
 }
 
 /// Whether `ty`'s value-space can never include a PHP object - real
@@ -1444,7 +1444,7 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed(false) {
+                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && !result.is_mixed() {
                     union_types(result, Type::null())
                 } else {
                     result
@@ -3031,7 +3031,7 @@ impl<'a> Checker<'a> {
                 // comment.
                 let result = self
                     .property_access_type(&narrow_type_excluding(&base_ty, &Type::null()), prop);
-                if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed(false) {
+                if (*nullsafe || postfix_chain_has_nullsafe(base)) && !result.is_mixed() {
                     union_types(result, Type::null())
                 } else {
                     result
@@ -4633,7 +4633,7 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed(false) {
+                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && !result.is_mixed() {
                     union_types(result, Type::null())
                 } else {
                     result
@@ -4828,7 +4828,7 @@ impl<'a> Checker<'a> {
                 let result = self.property_access_type(&base_ty, prop);
                 // Same implicit nullability as `?->method()` just above,
                 // for `$x?->prop`.
-                if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed(false) {
+                if (*nullsafe || postfix_chain_has_nullsafe(base)) && !result.is_mixed() {
                     union_types(result, Type::null())
                 } else {
                     result
@@ -4899,7 +4899,7 @@ impl<'a> Checker<'a> {
             return inferred;
         };
         let declared = self.resolve_type_hint(Some(hint));
-        if inferred != Type::Mixed(false) && self.accepts(&declared, &inferred).yes() {
+        if !inferred.is_mixed() && self.accepts(&declared, &inferred).yes() {
             inferred
         } else {
             declared
@@ -6756,7 +6756,7 @@ fn intersect_but_not_never(relation: &Relation, native: &Type, inferred: Type) -
     };
     let mut kept: Vec<Type> = Vec::new();
     for m in inferred_members {
-        if matches!(m, Type::Mixed(_)) {
+        if m.is_mixed() {
             return native.clone();
         }
         let int_like = matches!(m, Type::Int | Type::IntLiteral(_) | Type::IntRange(..));

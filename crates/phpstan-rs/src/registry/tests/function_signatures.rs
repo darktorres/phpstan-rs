@@ -11,14 +11,14 @@ fn a_native_mixed_parameter_hint_resolves_to_explicit_mixed() {
     // ParserNodeTypeToPHPStanType.php`).
     let r = build_registry(r#"<?php function g(mixed $m): void {}"#);
     let sig = r.functions.get("g").unwrap();
-    assert!(matches!(sig.params[0].ty, Type::Mixed(true)));
+    assert!(sig.params[0].ty.is_explicit_mixed());
 }
 
 #[test]
 fn an_untyped_parameter_resolves_to_implicit_mixed() {
     let r = build_registry(r#"<?php function g($m): void {}"#);
     let sig = r.functions.get("g").unwrap();
-    assert!(matches!(sig.params[0].ty, Type::Mixed(false)));
+    assert!(sig.params[0].ty.is_implicit_mixed());
 }
 
 #[test]
@@ -622,7 +622,7 @@ fn an_inline_var_tag_survives_an_attribute_between_it_and_the_parameter() {
     );
     let ty = &r.lookup_property("Entity93", "details").unwrap().ty;
     assert!(
-        matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Array(_, v) if **v == Type::Mixed(false)))),
+        matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Array(_, v) if v.is_mixed()))),
         "got: {ty:?}"
     );
 }

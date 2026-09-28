@@ -365,13 +365,13 @@ impl<'a> Checker<'a> {
                 .rev()
                 .find_map(|m| {
                     let ty = self.property_access_type(m, prop);
-                    (ty != Type::Mixed(false)).then_some(ty)
+                    (!ty.is_mixed()).then_some(ty)
                 })
                 .unwrap_or(Type::mixed()),
             Type::Union(members) => members
                 .iter()
                 .map(|m| self.property_access_type(m, prop))
-                .filter(|ty| *ty != Type::Mixed(false))
+                .filter(|ty| !ty.is_mixed())
                 .reduce(union_types)
                 .unwrap_or(Type::mixed()),
             _ => Type::mixed(),
@@ -595,10 +595,7 @@ impl<'a> Checker<'a> {
                 // stay unresolved, matching `Type::ReflectedMember`'s own
                 // "don't guess" leniency for a not-genuinely-concrete
                 // owner.
-                let owner_ty = type_args
-                    .first()
-                    .cloned()
-                    .filter(|t| *t != Type::Mixed(false));
+                let owner_ty = type_args.first().cloned().filter(|t| !t.is_mixed());
                 let name = args
                     .first()
                     .and_then(|a| match literal_string_value(&a.value) {
@@ -815,13 +812,13 @@ impl<'a> Checker<'a> {
                 .rev()
                 .find_map(|m| {
                     let ty = self.method_call_return_type(recv, m, method, args, locals);
-                    (ty != Type::Mixed(false)).then_some(ty)
+                    (!ty.is_mixed()).then_some(ty)
                 })
                 .unwrap_or(Type::mixed()),
             Type::Union(members) => members
                 .iter()
                 .map(|m| self.method_call_return_type(recv, m, method, args, locals))
-                .filter(|ty| *ty != Type::Mixed(false))
+                .filter(|ty| !ty.is_mixed())
                 .reduce(union_types)
                 .unwrap_or(Type::mixed()),
             _ => Type::mixed(),

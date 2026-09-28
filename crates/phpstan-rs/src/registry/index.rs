@@ -873,7 +873,7 @@ pub(crate) fn register_global_constant(
         None => {
             map.insert(name, ty);
         }
-        Some(existing) if *existing == ty && ty != Type::Mixed(false) => {}
+        Some(existing) if *existing == ty && !ty.is_mixed() => {}
         Some(_) => {
             map.insert(name, Type::mixed());
         }
@@ -911,14 +911,14 @@ fn conditional_declaration_may_replace_stub(
     if new_sig.params.len() != existing.params.len() {
         return false;
     }
-    if existing.return_type != Type::Mixed(false) && new_sig.return_type == Type::Mixed(false) {
+    if !existing.return_type.is_mixed() && new_sig.return_type.is_mixed() {
         return false;
     }
     existing
         .params
         .iter()
         .zip(&new_sig.params)
-        .all(|(old, new)| !(old.ty != Type::Mixed(false) && new.ty == Type::Mixed(false)))
+        .all(|(old, new)| !(!old.ty.is_mixed() && new.ty.is_mixed()))
 }
 
 /// The identical question as `conditional_declaration_may_replace_stub`

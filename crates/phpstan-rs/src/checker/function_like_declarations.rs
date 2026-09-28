@@ -351,7 +351,7 @@ impl<'a> Checker<'a> {
                 None => param_ty,
             };
             let default_ty = self.infer_expr(default, &Locals::default());
-            if matches!(default_ty, Type::Mixed(_)) || self.accepts(&param_ty, &default_ty).yes() {
+            if default_ty.is_mixed() || self.accepts(&param_ty, &default_ty).yes() {
                 continue;
             }
             self.report(format!(

@@ -553,9 +553,7 @@ impl<'a> Checker<'a> {
             // alone while leaving a wide native hint unchanged, as an
             // LSP violation real PHPStan doesn't, by default, check at
             // all.
-            if *own_param.ty_native() == Type::Mixed(false)
-                || *ancestor_param.ty_native() == Type::Mixed(false)
-            {
+            if own_param.ty_native().is_mixed() || ancestor_param.ty_native().is_mixed() {
                 continue;
             }
             // A bare `self`/`static` in either signature means "an
@@ -634,14 +632,14 @@ impl<'a> Checker<'a> {
             let own_ty = own_sig.return_type_native();
             // The child's own `self`/`static` is its own class, which a
             // built-in ancestor's class-named hint accepts.
-            let compatible = matches!(ancestor_ty, Type::Mixed(_))
+            let compatible = ancestor_ty.is_mixed()
                 || ancestor_return_uses_static(ancestor_ty)
-                || (!matches!(own_ty, Type::Mixed(false))
+                || (!own_ty.is_implicit_mixed()
                     && self
                         .accepts(ancestor_ty, &self.resolve_pseudo(own_ty, fqn))
                         .yes());
             if !will_change && !compatible {
-                let own_display = if matches!(own_ty, Type::Mixed(false)) {
+                let own_display = if own_ty.is_implicit_mixed() {
                     "mixed".to_string()
                 } else {
                     own_ty.to_string()
@@ -668,8 +666,8 @@ impl<'a> Checker<'a> {
         } else {
             fqn
         };
-        if *own_sig.return_type_native() != Type::Mixed(false)
-            && *ancestor_sig.return_type_native() != Type::Mixed(false)
+        if !own_sig.return_type_native().is_mixed()
+            && !ancestor_sig.return_type_native().is_mixed()
             && !ancestor_return_uses_static(ancestor_sig.return_type_native())
             && !self
                 .accepts(

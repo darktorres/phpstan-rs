@@ -1402,7 +1402,7 @@ pub(crate) fn offset_verdict(container: &Type, dim: &Type) -> Option<bool> {
             if !shape.is_sealed() {
                 return None;
             }
-            if shape.fields.is_empty() && !matches!(dim, Type::Mixed(_) | Type::Never) {
+            if shape.fields.is_empty() && !(dim.is_mixed() || matches!(dim, Type::Never)) {
                 return Some(false);
             }
             let (key, _) = normalized_literal_key(dim)?;

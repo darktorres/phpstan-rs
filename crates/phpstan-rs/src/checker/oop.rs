@@ -884,7 +884,7 @@ impl<'a> Checker<'a> {
             }
             if let Some(phpdoc_ty) = &phpdoc_ty {
                 let value_ty = self.infer_expr(&c.value, &Locals::default());
-                if value_ty != Type::Mixed(false) {
+                if !value_ty.is_mixed() {
                     self.check_constant_phpdoc_value(
                         fqn,
                         c,
@@ -909,7 +909,7 @@ impl<'a> Checker<'a> {
             // the same "don't guess wrong on Mixed" leniency
             // `check_method_overrides`'s parameter-narrowing check
             // applies for the identical reason.
-            if value_ty == Type::Mixed(false) {
+            if value_ty.is_mixed() {
                 continue;
             }
             if !self.accepts(&declared_ty, &value_ty).yes() {
@@ -1198,7 +1198,7 @@ impl<'a> Checker<'a> {
                 );
                 if immediate.contains(trait_fqn) {
                     let own_value = self.infer_expr(&cc.value, &Locals::default());
-                    if own_value != Type::Mixed(false) && own_value != *trait_const.value_ty() {
+                    if !own_value.is_mixed() && own_value != *trait_const.value_ty() {
                         self.report_builder(
                             DiagnosticBuilder::new(format!(
                                     "Constant {fqn}::{name} with value {own_value} overriding constant {trait_fqn}::{name} with different value {} should have the same value.",

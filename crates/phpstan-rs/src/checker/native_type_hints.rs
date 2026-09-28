@@ -227,7 +227,7 @@ impl<'a> Checker<'a> {
             };
             let suggested_ty = self.suggested_type(&suggested, class_name);
             if let Some(default) = param_sig.default_ty()
-                && !matches!(default, Type::Mixed(_))
+                && !default.is_mixed()
                 && !self.accepts(&suggested_ty, default).yes()
             {
                 continue;
@@ -240,7 +240,7 @@ impl<'a> Checker<'a> {
                     .registry
                     .is_super_type_of(&suggested_ty, overridden.ty_native())
                     != TrinaryLogic::Yes
-                    || matches!(overridden.ty_native(), Type::Mixed(false)) && suggested != "mixed"
+                    || overridden.ty_native().is_implicit_mixed() && suggested != "mixed"
                 {
                     continue;
                 }
@@ -267,7 +267,7 @@ impl<'a> Checker<'a> {
         };
         let suggested_ty = self.suggested_type(&suggested, class_name);
         if let Some(ancestor) = &ancestor
-            && !matches!(ancestor.return_type_native(), Type::Mixed(false))
+            && !ancestor.return_type_native().is_implicit_mixed()
             && self
                 .registry
                 .is_super_type_of(ancestor.return_type_native(), &suggested_ty)
@@ -391,7 +391,7 @@ impl<'a> Checker<'a> {
                     .lookup_method_with_owner(name, method)
                     .is_some_and(|(owner, overriding)| {
                         owner.as_ref() != class
-                            && (matches!(overriding.return_type_native(), Type::Mixed(false))
+                            && (overriding.return_type_native().is_implicit_mixed()
                                 || self
                                     .registry
                                     .is_super_type_of(suggested, overriding.return_type_native())

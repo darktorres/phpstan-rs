@@ -784,7 +784,7 @@ fn patch_phpstan_stub_classes(classes: &mut [(Arc<str>, ClassReflection)]) {
                 continue;
             }
             for (prop, stub_sig) in &stub.properties {
-                if matches!(stub_sig.ty, Type::Mixed(_)) {
+                if stub_sig.ty.is_mixed() {
                     continue;
                 }
                 if let Some(sig) = info.properties.get_mut(prop) {

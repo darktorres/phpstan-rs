@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
             ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
                 let l = self.native_expr_type(lhs, locals);
                 let r = self.native_expr_type(rhs, locals);
-                if matches!(l, Type::Mixed(_)) || matches!(r, Type::Mixed(_)) {
+                if l.is_mixed() || r.is_mixed() {
                     Type::mixed()
                 } else {
                     union_types(l, r)
@@ -222,7 +222,7 @@ impl<'a> Checker<'a> {
                 BinOp::Coalesce => {
                     let l = self.native_expr_type(lhs, locals);
                     let r = self.native_expr_type(rhs, locals);
-                    if matches!(l, Type::Mixed(_)) || matches!(r, Type::Mixed(_)) {
+                    if l.is_mixed() || r.is_mixed() {
                         Type::mixed()
                     } else {
                         union_types(l, r)
@@ -233,7 +233,7 @@ impl<'a> Checker<'a> {
             ExprKind::Ternary(cond, then, otherwise) => {
                 let t = self.native_expr_type(then.as_deref().unwrap_or(cond), locals);
                 let o = self.native_expr_type(otherwise, locals);
-                if matches!(t, Type::Mixed(_)) || matches!(o, Type::Mixed(_)) {
+                if t.is_mixed() || o.is_mixed() {
                     Type::mixed()
                 } else {
                     union_types(t, o)
@@ -259,7 +259,7 @@ impl<'a> Checker<'a> {
                     return Type::mixed();
                 };
                 let ty = self.native_method_return(&class, method);
-                if *nullsafe && !matches!(ty, Type::Mixed(_)) {
+                if *nullsafe && !ty.is_mixed() {
                     union_types(ty, Type::null())
                 } else {
                     ty
@@ -283,7 +283,7 @@ impl<'a> Checker<'a> {
                     return Type::mixed();
                 };
                 let ty = self.native_property_type(&class, prop, false);
-                if *nullsafe && !matches!(ty, Type::Mixed(_)) {
+                if *nullsafe && !ty.is_mixed() {
                     union_types(ty, Type::null())
                 } else {
                     ty
@@ -646,9 +646,7 @@ impl<'a> Checker<'a> {
         if !unusable.is_empty() {
             return;
         }
-        if !matches!(value.native, Type::Mixed(_))
-            && !self.var_tag_fits_value(&value.native, tag, value.shape)
-        {
+        if !value.native.is_mixed() && !self.var_tag_fits_value(&value.native, tag, value.shape) {
             self.report(
                 format!(
                     "PHPDoc tag @var with type {tag} is not subtype of native type {}.",
@@ -660,7 +658,7 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        if matches!(value.doc, Type::Mixed(_)) || matches!(tag, Type::Mixed(_)) {
+        if value.doc.is_mixed() || tag.is_mixed() {
             return;
         }
         if self.contains_phpstan_type(tag) {
@@ -722,7 +720,7 @@ impl<'a> Checker<'a> {
 
     /// `isValidSuperType` (the default, non-strict widening check).
     fn is_valid_var_tag_super_type(&self, ty: &Type, tag: &Type, depth: usize) -> bool {
-        if matches!(ty, Type::Mixed(_)) {
+        if ty.is_mixed() {
             return true;
         }
         if matches!(ty, Type::ArrayShape(shape) if shape.is_empty_array()) {
