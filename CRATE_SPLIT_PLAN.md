@@ -6960,7 +6960,7 @@ the whole registry (§1), which C4's memo already removes.
   keeps every one rechecks that file only, and one that changes a class's
   signature rechecks that class's readers, not every reader of the file's other
   declarations; each rechecked file's own fingerprints decide whether it goes
-  further.
+  further. This is ROADMAP Phase 105's G2, which F2 carries.
 - **Incremental collectors.** Collected data is cached per file; a run
   recollects the analysed files and reruns the project-level rules over the
   merged data. A fact producer → consumer edge keyed by host class (another
@@ -7236,6 +7236,10 @@ Navigation:
   for older clients). Today `class_declaration` and `function_declaration`
   answer only an `Origin::File`, so definition on `DateTime` or `array_map`
   answers nothing, and a name declared twice answers one site.
+- **Reference-count code lenses** (ROADMAP Phase 107): `textDocument/codeLens`
+  puts a "N references" lens on each declaration, counted from E1's
+  reference-site collector (the references request's own data) and resolved
+  lazily through `codeLens/resolve`; none is served today.
 - **Hierarchy**: `textDocument/implementation` (an interface's or abstract
   method's implementations, a class's subclasses), `typeHierarchy` (supertypes
   and subtypes) and `callHierarchy` (callers and callees), answered from
@@ -7298,7 +7302,7 @@ References and rename:
   - A class whose file is named after it under a PSR-4 root renames the file
     too, when the client supports resource operations, and
     `workspace/willRenameFiles` renaming such a file offers the class rename as
-    its edit.
+    its edit (ROADMAP Phase 109).
   - The edit is a versioned `documentChanges` edit, so a client rejects it
     against a document that changed since, where today it is an unversioned
     `changes` map.
