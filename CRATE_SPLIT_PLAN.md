@@ -4437,7 +4437,7 @@ fixture:
     (in `if`, `elseif` and `?:`; `boolean-not*.php`, `ternary.php`,
     `elseif-condition.php`), and `!$b` after `if ($b) { return; }` is
     `booleanNot.alwaysTrue`, and on the falsy side `if ($zero)`, `if ($i
-    and $zero)`, `if ($a xor $b)` on equal constants and `if
+    and $zero)`, `if ($a xor $b)` on two objects and `if
     ($this->returnsVoid())` are `if.alwaysFalse` (13), all unreported
     today (the rules oracle's 37
     PHPStan-only `if.alwaysTrue`: `if-condition.php`,
