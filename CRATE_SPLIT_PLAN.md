@@ -1250,7 +1250,7 @@ Follow-ups:
   callable type only when its signature fits (parameters contravariant,
   the return covariant): `set_error_handler(function (int $no, string
   $str): void {})` against `(callable(int, string, string, int): bool)|null`
-  is accepted today (28 corpus oracle findings).
+  is accepted today (32 corpus oracle findings).
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
   member covers (`A|B` for `B extends A` stays two members). Identical
   members collapse too: a closure parameter today reaches
@@ -2171,9 +2171,11 @@ to the engine identifiers. phpstan-rs gets the files by name from the corpus
 root, so until B8's root-autoload follow-up lands, a project class under `src/`
 that isn't named is unknown to it. Files that raise internal errors (missing
 optional classes, php-standard-library function redeclaration) are excluded,
-which leaves 941 files. At `76e738b4` phpstan-rs has 1,628 findings PHPStan
-doesn't, 1,060 of them `offsetAccess.nonOffsetAccessible` (1,013 on `mixed`),
-and misses 2,033, among them 735 `offsetAccess.nonOffsetAccessible`, 281
+which leaves 941 files. PHPStan reports an error found in a trait as
+`File.php (in context of class C)`, which the comparison strips. At
+`76e738b4` phpstan-rs has 1,620 findings PHPStan doesn't, 1,056 of them
+`offsetAccess.nonOffsetAccessible` (1,010 on `mixed`), and misses 2,039,
+among them 741 `offsetAccess.nonOffsetAccessible`, 284
 `foreach.nonIterable`, 263 `offsetAccess.notFound`, 244
 `function.alreadyNarrowedType` (188 of those are `assert()` of `true`, which
 phpstan-rs reports as `assert.alreadyNarrowedType`), 115
@@ -3044,7 +3046,7 @@ Each rule is moved once, onto its final API: D6's returned-error `Rule`,
 `RuleLevelHelper::find_type_to_check` and the rule → level table before any
 rule moves. The level-dependent checks are then one mechanism instead of a
 per-rule decision: on the corpus oracle's 941 files at `76e738b4` (level 10,
-PHP version pinned), about 2,900 of the 10,432 findings PHPStan reports and
+PHP version pinned), about 2,950 of the 9,623 findings PHPStan reports and
 phpstan-rs doesn't are a rule that doesn't treat an implicit `mixed`
 operand as reportable (listed under E3b). Findings phpstan-rs reports
 that PHPStan doesn't are mostly the corpus's own strict-rules-style
@@ -3196,12 +3198,12 @@ fixture:
 - (b) expression-level:
   - every operand check goes through `find_type_to_check`, so at level 10
     an implicit `mixed` is reported everywhere PHPStan reports it. The
-    corpus oracle's misses, by identifier: `binaryOp.invalid` (645, `.`
-    and `+` on `mixed`), `assignOp.invalid` (218), a `mixed` array key or
-    offset (`offsetAccess.invalidOffset` 952 and `array.invalidKey` 223
+    corpus oracle's misses, by identifier: `binaryOp.invalid` (652, `.`
+    and `+` on `mixed`), `assignOp.invalid` (223), a `mixed` array key or
+    offset (`offsetAccess.invalidOffset` 954 and `array.invalidKey` 223
     "Possibly invalid array key type mixed"), `encapsedStringPart.nonString`
-    (355), `foreach.nonIterable` (281), `echo.nonString` (39),
-    `cast.string`/`cast.int` (113), `postInc`/`preInc.type` (41) and
+    (356), `foreach.nonIterable` (284), `echo.nonString` (39),
+    `cast.string`/`cast.int` (135), `++`/`--` on `mixed` (55) and
     `callable.nonCallable` (30);
   - an offset or array key of an invalid type is reported for every
     type: `$a[$o]` and `$a[$o] = 1` with an object offset and `[$o => 1]`
@@ -3252,7 +3254,7 @@ fixture:
     `Generator::testDouble()` among them);
   - a `void` call's result is reported where it is used (`method.void`,
     `staticMethod.void`, `function.void`): `$x = $o->v();` for `v(): void`
-    isn't reported today (49 oracle findings, e.g. PSR-3
+    isn't reported today (54 oracle findings, e.g. PSR-3
     `LoggerInterface::debug()` results);
   - a discarded pure call is reported for built-ins too
     (`function.resultUnused`, `staticMethod.resultUnused`): the rule
@@ -3292,7 +3294,7 @@ fixture:
     `$i['x'] = 3` on an `int` throws at runtime and isn't reported today,
     and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
     (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
-    fail and stays unreported (331 PHPStan reports on `mixed`).
+    fail and stays unreported (341 PHPStan reports on `mixed`).
 - (e) declarations, generics checks and PHPDoc:
   - a PHPDoc type resolving to `never` (`int&string`, a template whose
     bound makes it empty) is `return.unresolvableType`/
