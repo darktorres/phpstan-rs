@@ -21,6 +21,7 @@ mod extension;
 mod hierarchy;
 mod intersection;
 mod late;
+mod missing;
 pub mod narrowing;
 mod native;
 mod offsets;
