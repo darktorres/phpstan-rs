@@ -6795,5 +6795,4 @@ suite's uncited files by cause), I (the rules oracle's unexplained
 phpstan-rs-only findings by cause) and J (the nsrt suite's cited files by
 cause) are in `CRATE_SPLIT_CAUSES.md`. An item here that names a cause key
 ("Appendix H's `count-narrow`") finds its count, description and files
-there. The full evidence the stage items were written from (every fixture,
-file and count) is in `CRATE_SPLIT_EVIDENCE.md`, by stage and phase.
+there.
