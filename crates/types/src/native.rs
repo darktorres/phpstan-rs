@@ -75,8 +75,11 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
             }
             Type(Repr::SelfRef(_)) => out.add("self"),
             Type(Repr::ParentRef) => out.add("parent"),
-            Type(Repr::EnumCase(class, _)) => out.add(class),
-            Type(Repr::Object(class, _)) => out.add(class),
+            // Fully qualified, so the declaration names the same class
+            // wherever it is written.
+            Type(Repr::EnumCase(class, _)) | Type(Repr::Object(class, _)) => {
+                out.add(&fully_qualified(class))
+            }
             Type(Repr::TemplateParam(param)) => return collect(&param.bound, position, out),
             Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
                 return members.iter().all(|m| collect(m, position, out));
@@ -91,7 +94,7 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
                     let Type(Repr::Object(class, _)) = base else {
                         return false;
                     };
-                    classes.push(class.clone());
+                    classes.push(fully_qualified(class));
                 }
                 out.add(&classes.join("&"));
             }
@@ -99,6 +102,11 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
         }
         true
     })
+}
+
+/// `class` with a leading `\`.
+fn fully_qualified(class: &str) -> String {
+    format!("\\{}", class.trim_start_matches('\\'))
 }
 
 /// Renders `native` for `version`, or `None` when that version can't
@@ -119,8 +127,8 @@ fn render(mut native: Native, version: Option<PhpVersion>) -> Option<String> {
     if atoms.iter().any(|a| a == "bool") {
         atoms.retain(|a| a != "true" && a != "false");
     }
-    if atoms.iter().any(|a| a == "array") && atoms.iter().any(|a| a == "Traversable") {
-        atoms.retain(|a| a != "array" && a != "Traversable");
+    if atoms.iter().any(|a| a == "array") && atoms.iter().any(|a| a == "\\Traversable") {
+        atoms.retain(|a| a != "array" && a != "\\Traversable");
         atoms.push("iterable".to_string());
     }
     if atoms.iter().any(|a| a == "object") {
@@ -160,9 +168,6 @@ fn render(mut native: Native, version: Option<PhpVersion>) -> Option<String> {
                 || (only.as_str() == "never" && !needs(PhpVersion::new(8, 1)))
                 || (only.as_str() == "object" && !needs(PhpVersion::new(7, 2)))
             {
-                if standalone_literal && nullable && needs(PhpVersion::new(8, 0)) {
-                    return Some(format!("{only}|null"));
-                }
                 return None;
             }
             Some(if nullable {

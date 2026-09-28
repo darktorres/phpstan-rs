@@ -33,7 +33,7 @@ impl<'a> Checker<'a> {
         label: &str,
         sig: &FunctionReflection,
     ) {
-        if f.name.starts_with("__") && class_name.is_some() {
+        if class_name.is_some() && has_fixed_signature(&f.name) {
             return;
         }
         let version = self.registry.php_version_min();
@@ -197,7 +197,8 @@ impl<'a> Checker<'a> {
 
     /// `suggested` as a type, with `self`/`static` bound to `class`.
     fn suggested_type(&self, suggested: &str, class_name: Option<&str>) -> Type {
-        let ty = types::parse_type_string(suggested);
+        let ty = types::parse_type_string(suggested)
+            .map_class_names(&mut |name| name.trim_start_matches('\\').into());
         match class_name {
             Some(class) => self.resolve_pseudo(&ty, class),
             None => ty,
@@ -223,4 +224,29 @@ impl<'a> Checker<'a> {
                     })
         })
     }
+}
+
+/// A magic method PHP checks the signature of: its parameters and return
+/// type are PHP's, not the author's to choose. `__construct` and
+/// `__invoke` take whatever their author declares.
+fn has_fixed_signature(method: &str) -> bool {
+    [
+        "__destruct",
+        "__call",
+        "__callStatic",
+        "__get",
+        "__set",
+        "__isset",
+        "__unset",
+        "__sleep",
+        "__wakeup",
+        "__serialize",
+        "__unserialize",
+        "__toString",
+        "__set_state",
+        "__clone",
+        "__debugInfo",
+    ]
+    .iter()
+    .any(|magic| method.eq_ignore_ascii_case(magic))
 }

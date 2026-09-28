@@ -1,0 +1,4 @@
+php_version = "8.2"
+
+[ext.extras]
+check_native_type_hints = true

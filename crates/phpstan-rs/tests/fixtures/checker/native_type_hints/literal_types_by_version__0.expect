@@ -1,0 +1,7 @@
+5:1-5:30 return.unusedType L4 | Function a() never returns false so it can be removed from the return type.
+9:10-9:11 missingNativeType.return L0 | Function c() return type can be declared natively as \\App\\Box.
+12:12-12:47 missingType.return L6 | Method App\\M::__get() has no return type specified.
+14:12-14:36 missingType.return L6 | Method App\\M::__invoke() has no return type specified.
+14:30-14:32 missingNativeType.parameter L0 | Method App\\M::__invoke() parameter $x can be declared natively as int.
+16:12-16:36 missingType.return L6 | Method App\\M::__custom() has no return type specified.
+16:30-16:32 missingNativeType.parameter L0 | Method App\\M::__custom() parameter $x can be declared natively as int.
