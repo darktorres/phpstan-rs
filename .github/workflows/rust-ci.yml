@@ -91,8 +91,7 @@ jobs:
       - name: Each feature on its own
         run: >
           cargo hack check --workspace --each-feature --exclude-all-features
-      # third_party/hotpath is vendored as released, unused dependencies
-      # included.
+      # Our crates only: vendor/ holds other projects' checkouts.
       - name: Unused dependencies
         run: cargo machete crates tools xtask fuzz
       - name: Licenses, advisories, duplicate versions

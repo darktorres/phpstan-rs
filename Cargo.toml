@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*", "tools/*", "xtask"]
 default-members = ["crates/phpstan-rs"]
-exclude = ["fuzz", "third_party/hotpath"]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"
@@ -52,16 +52,11 @@ inherits = "release"
 lto = false
 codegen-units = 16
 
-# Release-speed build that keeps debug info, so `dhat-heap`'s output can
-# symbolicate call stacks - `cargo build -p phpstan-rs --profile dhat --features dhat-heap`.
+# Release-speed build that keeps debug info, so profiles symbolicate their
+# call stacks: `dhat-heap`'s output
+# (`cargo build -p phpstan-rs --profile dhat --features dhat-heap`) and a
+# sampling profiler's (README, "Profiling").
 [profile.dhat]
 inherits = "release"
 debug = 1
 
-# `third_party/hotpath` - a vendored, patched `hotpath` 0.24.0 (bumps its
-# hardcoded hotpath-alloc frame-depth limit; see
-# `third_party/hotpath/HOTPATH_PATCH.md` for why). Zero effect on an
-# ordinary build - only the `hotpath`/`hotpath-alloc` features (both
-# off by default) exercise the patched code path at all.
-[patch.crates-io]
-hotpath = { path = "third_party/hotpath" }

@@ -168,8 +168,8 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
     and license, inherited by every member; the bin passes its version
     into the LSP entry point;
   - `default-members = ["crates/phpstan-rs"]`;
-  - `exclude = ["fuzz", "third_party/hotpath"]`;
-  - root `[profile.*]` and `[patch.crates-io] hotpath`.
+  - `exclude = ["fuzz"]`;
+  - root `[profile.*]`.
 - **Dependencies.** `[workspace.dependencies]` sets
   `default-features = false` wherever a member must not inherit defaults.
   Appendix E maps every third-party dependency to its crate(s).
@@ -191,7 +191,11 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
   - `hotpath`/`hotpath-alloc` are declared only by the bin. Other crates
     take a plain `hotpath` dependency; macro behaviour follows the hotpath
     crate's own features. hotpath measure labels change with module paths,
-    and the timing re-measurement maps old labels to new ones.
+    and the timing re-measurement maps old labels to new ones. hotpath
+    counts a function measured at every level of a recursion once per level
+    and holds at most 64 measured frames, so a recursive function is
+    measured at its outermost call only (`measure_outermost!`), and the
+    breakdown inside a recursion comes from a sampling profiler (README).
   - `dhat-heap` is bin-only and mutually exclusive with `hotpath-alloc`
     (`compile_error!`).
 - **Release profile.** Decided in Stage A: `lto = "thin"`,
@@ -799,8 +803,9 @@ corpus, type, baseline, performance and build-time gates run locally
    - fmt;
    - clippy `--workspace --all-targets -D warnings`;
    - `cargo doc --workspace --no-deps`;
-   - the feature matrix via `cargo hack --each-feature
-     --mutually-exclusive-features dhat-heap,hotpath-alloc`;
+   - the feature matrix via `cargo hack check --workspace --each-feature
+     --exclude-all-features` (`dhat-heap` and `hotpath-alloc` exclude each
+     other);
    - `--no-default-features` build and test;
    - per-crate standalone check (`cargo hack check --workspace
      --no-dev-deps`);
