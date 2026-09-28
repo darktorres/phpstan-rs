@@ -1377,8 +1377,16 @@ Follow-ups:
   `argument.type` with `mixed`, and `match.unhandled` on an exhaustive
   `match` over it, 12 findings that naming the enum's file too removes.
   PHPStan's autoloader covers the root package. The corpus oracle passes
-  phpstan-rs the files by name, so its 69 phpstan-rs-only findings under
-  `src/`, `install/` and `plugins/` at `76e738b4` include these.
+  phpstan-rs the files by name, and at `76e738b4` about 1,300 of its 1,855
+  phpstan-rs-only `class.notFound` name a `Piwigo\` class.
+- **A package's bundled `vendor/` is context.** `rector/rector` and
+  `symplify/easy-coding-standard` autoload only a `bootstrap.php` that
+  registers their own `vendor/autoload.php` at runtime, so their classes
+  (`Rector\NodeTypeResolver\…`, `PHP_CodeSniffer\…`) are unknown to
+  phpstan-rs, which reads composer metadata without running it: 495
+  phpstan-rs-only `class.notFound` in `vendor/rector/rector` alone. An
+  installed package's own `vendor/composer/autoload_*.php` is read like the
+  root's.
 
 **B9. stub-sources.**
 
