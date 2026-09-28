@@ -4017,7 +4017,13 @@ the rest), which the gate excludes and lists.
   constant-expression one included (`= self::NUMBER_TYPE_OFF`), and an
   assigned range covers each constant it spans: `@var 0|1|2|3` with `=
   0` and `$this->c = random_int(0, 3)` is "never assigned 0/1/2/3" today
-  (the rules oracle's `bug-4174.php`);
+  (the rules oracle's `bug-4174.php`). A property no code assigns is
+  checked too, from its default alone: `private ?string $s = null` read
+  but never written is "never assigned string", and a `@var A|B` property
+  without a default "never assigned A" and "never assigned B"; today a
+  property with no assignment is skipped (all 42 of the rules oracle's
+  PHPStan-only `property.unusedType`, e.g. `bug-6486.php`,
+  `bug-9155.php`, `call-methods.php`, `access-properties.php`);
 - renamed named arguments;
 - the trait-host constant-condition verdict as a collector plus rule;
 - the (span, message) dedup moved to the finalizer;
