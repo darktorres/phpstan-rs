@@ -62,6 +62,16 @@ Status: design. Nothing here is implemented.
   would add nothing for privacy and would cost the user CPU time.
 - **Debug info is kept out of the binaries** and uploaded to Sentry from the
   release workflow (§4.16).
+- **Credentials never leave the machine.** The config keys that hold them
+  (`ext.sql.reflection`'s `host`, `port`, `user`, `password`, `password_env`,
+  `database`, `path`, `session_init_sql`) are dropped from every bundle, crash
+  state and recorded command line (§4.8).
+- **A `crash-reporting` cargo feature**, on by default, carries all of it.
+  Without it `init` is a no-op and `sentry`, `reqwest`, the minidump crates
+  (with `crash-handler`'s `pthread_create` interposer) and the supervisor's
+  signal crates aren't linked, for anyone building a binary with no network
+  code. `--no-default-features`, which CI and the gates already build, drops
+  it with the rest.
 
 ## 2. Today
 
@@ -155,6 +165,10 @@ Status: design. Nothing here is implemented.
   `sentry::Transport` and is installed through `ClientOptions::transport`.
 - **Defaults:** `shutdown_timeout` 2 s, `max_breadcrumbs` 100, a transport
   queue of 30 envelopes.
+- **Dependency policy:** every crate the probe build adds has a license
+  `deny.toml` allows (`aws-lc-sys`'s compound expression is already in the
+  lock and passes today). `minidump-writer` depends on `nix` 0.30, so the
+  supervisor uses `nix` 0.30 too, adding no duplicate.
 - **`sentry-cli` 3.8.0** (current on 2026-09-28) has `debug-files upload
   --include-sources`, `debug-files check`, and `releases new`,
   `set-commits`, `finalize`. `sentry-cli-Linux-x86_64` from the 3.8.0 GitHub
@@ -204,9 +218,12 @@ returns `None` and nothing else in this plan runs. With it set:
 - `in_app_include`: the workspace crates (`phpstan_rs`, `syntax`, `types`,
   `phpdoc`, `sql`, `diagnostics`, `composer`, `config`, `stub_sources`), so
   Sentry folds std, rayon and the SDK out of the trace;
-- `shutdown_timeout` 30 s: a bundle can be megabytes. Before a CLI run waits
-  on it, it prints `phpstan-rs: sending N crash report(s) to <host>` to
-  stderr;
+- `shutdown_timeout` 30 s for CLI commands, so a report usually arrives
+  within the run that made it (a CI runner's disk, and so its outbox, is gone
+  after the job); before waiting, the run prints
+  `phpstan-rs: sending N crash report(s) to <host>` to stderr. 2 s for `lsp`,
+  whose editor is waiting for it to exit: whatever isn't sent by then stays in
+  the outbox for the next start;
 - `transport`: the outbox transport. It writes each envelope to the outbox
   (§4.12) with `Envelope::to_writer`, synchronously inside `send_envelope`, then
   queues it for a sender thread that POSTs it with its own `reqwest` client
@@ -241,7 +258,11 @@ through it. The hook:
   only when printed or sent;
 - **anywhere else** prints the default message (the previous hook, kept) and,
   with a client, builds the event with `PanicIntegration::event_from_panic_info`
-  and captures it as a pending report (§4.6).
+  and captures it as a pending report (§4.6). A location already reported by
+  this process is counted, not reported again, and a process makes at most 3
+  pending reports: a panic that poisons the LSP's `Server` mutex is followed by
+  a `PoisonError` panic on every later lock, and those would otherwise each
+  start a finisher.
 
 The hook itself never panics: every step returns a `Result` that it ignores,
 and it runs no allocation-heavy work beyond building the event.
@@ -302,8 +323,10 @@ was on.
   errors are grouped by panic location. Each group becomes one event: message
   and stack trace from the group's first error, fingerprint
   `["panic", <location>]` (stable across symbolicated and unsymbolicated
-  builds), tags and context (§4.7), every file in the group as an extra, and a
-  bundle (§4.8) for the group's smallest file, the cheapest to reproduce.
+  builds), tags and context (§4.7), the group's file count and first 20 paths
+  as extras (Sentry trims large extras; the full list goes in the bundle's
+  manifest), and a bundle (§4.8) for the group's smallest file, the cheapest
+  to reproduce.
 - **Isolated panics, LSP:** a `phpstan-rs-crash-report` thread takes internal
   errors over a channel. The thread holding the `Server` lock computes the
   bundle's file list and copies the overlay text it includes (lookups only),
@@ -342,8 +365,10 @@ was on.
   worker from the file it rechecks. In the app role each change is also sent
   to the reporter as the extra `focus.<thread name>`; the worker pool's
   threads are named `phpstan-rs-worker-<n>` for this (`ThreadPoolBuilder::
-  thread_name`). Setting it costs one thread-local write, plus one socket
-  message when a reporter is attached.
+  thread_name`). `isolated` clears it when its unit ends, and the reporter's
+  extra with it, so an idle thread never names a file it has finished.
+  Setting or clearing it costs one thread-local write, plus one socket message
+  when a reporter is attached.
 
 ### 4.8 Reproduction bundle
 
@@ -385,28 +410,47 @@ external/<n>/<name>      files outside the root, mapped in the manifest
   of source. A crashing file larger than the cap alone is sent as the manifest
   only, tagged `too_large`.
 - **Config:** the effective `ConfigFile` table (old keys moved, `--set`
-  applied) serialised back to TOML with path-valued keys rewritten: the
-  analysed paths become the crashing files, dependency and dependent files
-  become `scan_files`, stub directories point into the bundle, and keys naming
-  files the crash doesn't read (the baseline, output files) are dropped.
-  `config::Schema` gains a registry of its path-valued keys so the rewrite
-  doesn't hard-code them. In the LSP, the folder's config as
-  `workspace_config::resolve` loaded it.
+  applied) serialised back to TOML. `config::Schema` gains two key
+  registries, filled by the sections that own the keys:
+  - **path keys**, rewritten into the bundle: `paths` becomes the crashing
+    files; `scan_paths` becomes the dependency and dependent files; `stub_paths`
+    points at the bundled stubs; `ext.sql.reflection.schema_file` points at the
+    bundled DDL file; `baseline` and `ignore_errors` are dropped, since they
+    act after the check;
+  - **secret keys**, dropped everywhere: `ext.sql.reflection`'s `host`,
+    `port`, `user`, `password`, `password_env`, `database`, `path` (a SQLite
+    database file) and `session_init_sql`. A `--set` on a secret key is shown
+    as `--set <key>=<redacted>` in the recorded command line.
+
+  A schema test fails when a section deserialises a `PathBuf` field whose
+  key is in neither registry, so a new path key can't be missed. In the LSP,
+  the folder's config as `workspace_config::resolve` loaded it.
+- **Live SQL reflection:** when ext-sql reflected a live database, the
+  reflected catalog is written as DDL (`SchemaCatalog::to_ddl`, new, the
+  inverse of `parse_ddl` for the tables, columns and types the catalog holds)
+  into the bundle as `live-schema.sql`, and the bundle's config reads it as
+  its `schema_file`. What a live connection adds beyond the catalog (whether
+  the server accepts a query at prepare time) isn't in the bundle; the
+  manifest says `sql: live` so a replay that differs there is explained.
 - **Archive:** `tar` + `flate2` (`flate2` is already in the lock).
 
 ### 4.9 Crash state and minidumps
 
-- **Crash state:** at start, the app creates
-  `<cache>/crash-state/<pid>-<uuid>/` with `state.json`: the role, command
-  line, working directory, project root, config path and effective config
-  table; in the LSP the workspace folders, each folder's config path and
+- **Crash state:** the directory `<cache>/crash-state/<run id>/`, created
+  by the supervisor when there is one (so it knows the path) and by the app
+  otherwise, passed down in `_PHPSTAN_RS_CRASH_STATE`. The app writes
+  `state.json`: a format version, the role, command line, working directory,
+  project root, config path and effective config table, secret keys dropped
+  (§4.8); in the LSP the workspace folders, each folder's config path and
   table, the client's `initializationOptions` and `PhpstanRsSettings`, and
-  `clientInfo`. Its path goes to the reporter as an extra. The LSP writes an
+  `clientInfo`. The app holds `app.lock` in it for its whole life
+  (`File::lock`), and the reporter holds `reporter.lock` for its own; a
+  directory whose `app.lock` can be taken belongs to no live process. The LSP writes an
   overlay into `overlays/` when `didOpen` brings text that differs from the
   file on disk (an editor restoring an unsaved buffer) and whenever the
   debounce worker takes a change, and removes it on `didSave` and `didClose`.
   The app deletes the directory on a normal exit; the outbox drain (§4.12)
-  removes directories whose pid is gone.
+  removes directories whose `app.lock` and `reporter.lock` are both free.
 - **Integration:** `MinidumpIntegration` with `server_env_var`
   `_PHPSTAN_RS_CRASH_REPORTER`, `process_name` `phpstan-rs crash reporter`,
   `crashes_dir` `<cache>/crashes`, and `on_process` nulling the reporter's
@@ -425,7 +469,8 @@ external/<n>/<name>      files outside the root, mapped in the manifest
    finisher holds it;
 2. increments the entry's attempt count on disk before anything that could
    crash;
-3. on the first two attempts, loads the project from the entry's crash state
+3. on the first two attempts, and when the crash state's format version is
+   the finisher's own, loads the project from the entry's crash state
    (parse and index only, no checking: `Session` from `state.json` for the
    CLI, the LSP's workspace load from its folders and settings with the
    overlays applied) and builds the bundle (§4.8);
@@ -447,14 +492,25 @@ the worker with the same arguments, inherited stdio, and a run id in the
 environment. It waits for the worker, then:
 
 - on a normal exit, exits with the worker's code;
-- on a crash (a signal on Unix, an exception code on Windows), waits up to
-  60 s for the run's pending reports to be finished and sent, printing
-  `phpstan-rs: sending the crash report to <host>` first, then exits with
-  128 + the signal number on Unix, or the worker's exception code on Windows.
+- whatever the exit, checks for the run's reports: it waits until
+  `reporter.lock` in the run's crash state can be taken (the reporter has
+  written its pending report and gone, or never had one) and until no pending
+  entry carrying the run id is unfinished or locked by a finisher, for up to
+  60 s in all, printing `phpstan-rs: sending the crash report to <host>` once
+  it starts waiting on one. With no crash this takes one lock attempt and one
+  directory listing;
+- then exits with the worker's code, or after a crash with 128 + the signal
+  number on Unix and the worker's exception code on Windows.
 
-On Unix it forwards `SIGTERM`, `SIGHUP` and `SIGINT` to the worker
-(`signal-hook`'s iterator and `nix::sys::signal::kill`, no `unsafe`), so a CI
-timeout still stops the analysis. The LSP runs without a supervisor: the
+The worker must not outlive the supervisor. On Unix the supervisor forwards
+`SIGTERM`, `SIGHUP` and `SIGINT` to it (`signal-hook`'s iterator and
+`nix::sys::signal::kill`, no `unsafe`), so a CI timeout still stops the
+analysis, and on Linux the worker also sets `PR_SET_PDEATHSIG` to `SIGTERM`
+(`nix::sys::prctl::set_pdeathsig`) against a supervisor killed outright. On
+Windows the worker is started in a job object with kill-on-close
+(`win32job`), so ending the supervisor ends the worker. macOS has no
+parent-death signal; a supervisor killed with `SIGKILL` leaves its worker to
+finish its run. The LSP runs without a supervisor: the
 editor restarts it, and its detached finishers run on the same machine.
 
 ### 4.12 Outbox
@@ -495,6 +551,9 @@ the outbox passes 100 MiB.
   unchanged (Stage F moves those handlers onto the pool).
 - **Client:** `initialize` sets the `lsp.client` tags and writes `clientInfo`
   into the crash state.
+- **Shutdown:** on `exit`, the dispatch loop closes the report thread's
+  channel and waits up to 2 s for it to hand what it holds to the transport;
+  anything unfinished is already in the outbox.
 
 ### 4.15 VS Code
 
@@ -582,7 +641,16 @@ so the user's binary doesn't carry it:
   the candidate as reproducing and starts a new worker from the saved state.
   The result is a new bundle and a fixture directory ready to commit.
 - **`fetch <issue>`** downloads an issue's latest bundle through the Sentry
-  API (`SENTRY_URL`, `SENTRY_AUTH_TOKEN`).
+  API with `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` and a
+  `SENTRY_AUTH_TOKEN` with `event:read`: `GET /api/0/issues/<id>/events/latest/`
+  for the event id, then the event's attachments list
+  (`/api/0/projects/<org>/<project>/events/<event>/attachments/`) and the
+  `repro.tar.gz` entry with `?download=1`.
+- **Bundles are untrusted input**, since anyone with the DSN can send one.
+  Extraction rejects absolute paths, `..` components, links and device
+  entries, and stops past 256 MiB extracted; a bundle is only ever extracted
+  into a fresh temporary directory, and replay never runs anything but
+  phpstan-rs on it.
 
 ### 4.19 Tests
 
@@ -609,7 +677,30 @@ so the user's binary doesn't carry it:
   crashes produces one event with the client tags and the overlay text, and a
   repeat produces none.
 - **Replay:** a bundle from the end-to-end tests replays, and reduces to a
-  bundle that still reproduces.
+  bundle that still reproduces; hostile bundles (`..`, absolute paths, links,
+  a decompression bomb) are rejected.
+- **Supervisor:** exit codes passed through; `SIGTERM` forwarded; on Linux
+  the worker ends when the supervisor is killed.
+- **Secrets:** a config with `ext.sql.reflection.password` and a `--set` of
+  it produce a bundle, a crash state and a recorded command line with neither
+  value in them.
+
+The injection hook the unit tests already use (`tests::panic_injection`)
+becomes the `crash-injection` feature's hook, compiled under
+`#[cfg(any(test, feature = "crash-injection"))]`, so there is one mechanism.
+The end-to-end tests live in `crates/phpstan-rs/tests/crash_reporting.rs`
+with `required-features = ["crash-injection"]`; `rust-ci.yml` and
+`cargo xtask gates`' quick tier run them with
+`cargo test -p phpstan-rs --features crash-injection --test crash_reporting`,
+and `cargo hack --each-feature` covers the feature's build. Test-only
+dependencies: `rcgen` for the test CA, `rustls`'s blocking `ServerConnection`
+over a `std::net::TcpListener` for the server (no async runtime in tests),
+`tar` and `flate2` to read bundles.
+
+Step 3 also measures what the feature costs with no DSN: `hyperfine` on
+`phpstan-rs --version` and on `check-project` over a small fixture directory,
+before and after, must agree within noise, and the commit message records the
+release binary's size before and after.
 
 ### 4.20 README
 
@@ -623,8 +714,10 @@ A "Crash reporting" section, in these words:
 > A report contains the error message and stack trace, the command line,
 > the effective configuration, and a copy of the PHP source files needed to
 > reproduce the crash: the file being analysed and the files it depends
-> on, up to 10 MiB compressed, including unsaved editor buffers. It
-> contains your file paths, OS and CPU architecture, not your hostname.
+> on, up to 10 MiB compressed, including unsaved editor buffers, and the
+> schema ext-sql reflected. It contains your file paths, OS and CPU
+> architecture; it leaves out your hostname and the database connection
+> settings (host, user, password, database name).
 > Only turn it on for code you may send to that server.
 >
 > Reports that can't be sent are kept in the user cache directory and
@@ -663,18 +756,21 @@ tests; the end-to-end tests run from step 8 on and again at the end.
 2. **Build:** `[profile.dist]`, the build-ID flags, the release workflow's
    split, strip, artifact and `upload-debug-files` job (§4.16), the secrets,
    and `docs/crash-reporting-server.md` (§4.17).
-3. **Client and outbox:** dependencies, roles, `init`, options, the rustls
-   provider and CA file, the outbox transport and drain, `cache_dir`,
-   `crash_report::exit`, the `SENTRY_DSN` test; the §5 edit for F2.
+3. **Client and outbox:** the `crash-reporting` feature and dependencies,
+   roles, `init`, options, the rustls provider and CA file, the outbox
+   transport and drain, `cache_dir`, `crash_report::exit`, the `SENTRY_DSN`
+   test, the no-DSN cost measurement; the §5 edit for F2.
 4. **Events from internal errors:** grouping, fingerprint, tags, context and
    breadcrumbs, the CLI's sending and kept-for-later lines (§4.6, §4.7,
    §4.13), without bundles.
-5. **Bundles:** the builder, the schema's path-key registry, the config
-   rewrite, `sent.json` (§4.8).
+5. **Bundles:** the builder, the schema's path-key and secret-key registries
+   and their test, the config rewrite, `SchemaCatalog::to_ddl`, `sent.json`
+   (§4.8).
 6. **Pending reports and the finisher:** the crash state, the hook's
    unisolated path, `__crash-finish` (§4.9's crash state, §4.10); the §5 edit
    for F4.
-7. **Supervisor** (§4.11).
+7. **Supervisor** (§4.11): the crash-state handshake, signal forwarding,
+   the parent-death signal and the Windows job object.
 8. **Minidumps:** the integration, named workers, focus forwarding, overlays
    on disk (§4.9), `crash-injection` and the end-to-end tests.
 9. **LSP:** the report thread, dispatch focus and breadcrumbs, client tags,
