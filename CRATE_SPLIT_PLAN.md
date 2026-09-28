@@ -6453,13 +6453,18 @@ stdio.
   `paths = ["src"]`, opening `tests/t.php` publishes its `return.type` in the
   editor, where `check-project` reports nothing, and the file stays analysed for
   the session. A file's identity is its canonical path (C1's walker dedup), so
-  two spellings of one file are one file. A deleted directory removes every file
-  under it: a client may report a folder's deletion as one event for the folder,
-  and `handle_watched_files_changed` passes that path to `remove_file`, which
-  removes nothing, so the folder's files stay analysed and published. Contents
-  are read when needed and kept only for overlays and the files a request is
-  working on, with each file's line index; today `retain_source` keeps every
-  loaded file's text for the whole LSP session, vendor context included.
+  two spellings of one file are one file, while each open document keeps the URI
+  its client used, which diagnostics are published under (a workspace opened
+  through a symlink sees its own paths). The walk and the LSP's file watchers
+  follow C1's `file_extensions`, where both hard-code `.php` today
+  (`collect_php_files`, the `**/*.php` registration). A deleted directory
+  removes every file under it: a client may report a folder's deletion as one
+  event for the folder, and `handle_watched_files_changed` passes that path to
+  `remove_file`, which removes nothing, so the folder's files stay analysed and
+  published. Contents are read when needed and kept only for overlays and the
+  files a request is working on, with each file's line index; today
+  `retain_source` keeps every loaded file's text for the whole LSP session,
+  vendor context included.
 - **Panic isolation, on the pool.** Every parse and check runs on the process's
   worker pool (`project::worker_pool`, 64 MiB stacks) under `catch_unwind`, and
   a panic becomes that file's internal error. That covers the batch run and, in
@@ -6518,14 +6523,20 @@ stdio.
   `ignore_error_entries`, `level_cutoff` and the project's settings are
   last-root-wins across folders. A file opened outside every workspace folder
   gets a Session rooted at its nearest ancestor holding a config file or
-  `composer.json`, else one for the file alone with the default settings; today
-  it joins the one `Project` with whatever the last root configured, or with no
-  configuration when no folder is open.
+  `composer.json`, else one for the file alone with the default settings, as
+  does an unsaved `untitled:` buffer, which is analysed from its overlay and
+  never cached (today `uri_to_path` drops every non-`file:` URI, so a new PHP
+  buffer gets no diagnostics until saved); today it joins the one `Project` with
+  whatever the last root configured, or with no configuration when no folder is
+  open.
 - **The workspace load runs as the CLI's does**: parsed in parallel on the
-  pool, context files first, reported through `$/progress`. Today
-  `load_workspace_files` parses each file in turn on the main thread inside the
-  `initialized` notification, then checks, and no request is answered until both
-  finish.
+  pool, context files first, reported through `$/progress` on a token the server
+  creates (`window/workDoneProgress/create`) when the client supports it; today
+  progress shows only when the client happened to send a token with
+  `initialize`, and a recheck after `reconfigure` or a folder change reports
+  none. Today `load_workspace_files` parses each file in turn on the main thread
+  inside the `initialized` notification, then checks, and no request is answered
+  until both finish.
 - **LSP parity**, one commit per §1 divergence, each fixtured and held to gate 7:
   - the project-level rules (E1's collector rules: dead code, members, enum
     cases and abstract classes, duplicates, namespace cycles, architecture,
@@ -6664,7 +6675,10 @@ Behaviour commits, one each with its fixture:
   `Unnecessary` on dead and unused code (identifiers declared with the tag by
   their rules), and a finding naming other sites (a duplicate declaration's
   other declarations, a namespace cycle's edges) lists them as
-  `relatedInformation`, where today they are text in the message.
+  `relatedInformation`, where today they are text in the message;
+  `codeDescription` links each identifier to its page in the rule reference
+  (ROADMAP Phase 185), and the tip is a `relatedInformation` entry at the
+  finding's own span instead of being appended to the message text.
 
 **F2. Result cache and dependencies.** Today nothing persists between runs, and
 the LSP's invalidation is syntactic. `deps.rs` collects the names a file spells
@@ -6765,13 +6779,14 @@ Today's five formats (`text`, `friendly`, `json`, `checkstyle`, `junit`) live in
   `editorUrl`/`editorUrlTitle` links (`%file%`, `%relFile%`, `%line%`);
   `github`, workflow commands carrying `file`, `line`, `col`, `endLine` and
   `endColumn` from the span and the identifier as `title` (PHPStan writes
-  `col=0`), warnings as `::warning`; `gitlab` Code Quality JSON, whose
-  fingerprint hashes the relative path, identifier, message and the finding's
-  index among equal ones, so it survives a line shift that PHPStan's
-  file-line-message hash doesn't, a non-ignorable error being `blocker`;
-  `teamcity`; `ci-detected`, GitHub Actions or TeamCity from the environment and
-  `table` otherwise; `junit` and `checkstyle` with real columns, warnings and
-  not-file errors included.
+  `col=0`), warnings as `::warning`, and the whole report as a Markdown table in
+  `$GITHUB_STEP_SUMMARY` when it is set, since GitHub shows at most 10 error and
+  10 warning annotations per step; `gitlab` Code Quality JSON, whose fingerprint
+  hashes the relative path, identifier, message and the finding's index among
+  equal ones, so it survives a line shift that PHPStan's file-line-message hash
+  doesn't, a non-ignorable error being `blocker`; `teamcity`; `ci-detected`,
+  GitHub Actions or TeamCity from the environment and `table` otherwise; `junit`
+  and `checkstyle` with real columns, warnings and not-file errors included.
 - `json` and `prettyJson` in PHPStan's shape: `totals.errors`/`file_errors`,
   `files.<path>.errors` and `messages[]` (`message`, `line`, `ignorable`, `tip`,
   `identifier`), and `errors[]` for not-file errors. Today's JSON
@@ -6794,6 +6809,13 @@ Today's five formats (`text`, `friendly`, `json`, `checkstyle`, `junit`) live in
 - `--format` repeats, each `name[=path]`, so one analysis writes the console
   report and a CI file (`--format table --format junit=report.xml`) instead of
   running twice; one without a path writes to stdout, and at most one may.
+- Formatters write through `io::Write` and return its errors: a closed pipe
+  ends the output quietly, the run keeping its exit code. Today
+  `check-project | head -1` panics ("failed printing to stdout: Broken pipe")
+  and exits 101.
+- Colour follows the terminal: on when the output is a terminal, off under
+  `NO_COLOR`, forced by `FORCE_COLOR` or `--ansi`, disabled by `--no-ansi` (only
+  `friendly` reads `NO_COLOR` today).
 - Third parties register formatters through `app::run`'s registration closure.
 
 **F4. Binary.** Today the bin has six subcommands (`check`, `check-project`,
@@ -6823,10 +6845,17 @@ on.
   `analyze` name `check-project`; `-c`/`--configuration`, `-l`/`--level`,
   `-b`/`--generate-baseline` (its value optional, `phpstan-rs-baseline.json` by
   default), `--error-format` and `--autoload-file` (scanned as context) take
-  PHPStan's meaning; `--memory-limit`, `--xdebug`, `--debug`,
-  `--ansi`/`--no-ansi` and `-v`/`-vv`/`-vvv` are accepted, each one with no
-  meaning here reported once as ignored. `-c` naming a `.neon` file fails,
-  pointing at `init` (ROADMAP Phase 183).
+  PHPStan's meaning; `--ansi`/`--no-ansi` set colour (F3); `-v` adds the run's
+  statistics, elapsed time and peak memory, and internal errors' backtraces
+  without `RUST_BACKTRACE`, `-vv` each phase's timing, `-vvv` each file's;
+  `--debug` analyses one file at a time on one worker, printing each path before
+  it starts, so a crash no isolation can catch (a stack overflow aborts the
+  process) names its file; `--memory-limit` and `--xdebug` are accepted and
+  reported once as ignored. `-c` naming a `.neon` file fails, pointing at `init`
+  (ROADMAP Phase 183).
+- Flags that contradict each other are rejected: `--fix` with
+  `--generate-baseline` (today the baseline is written and `--fix` silently does
+  nothing), and `--generate-baseline` with `--baseline`.
 - Ctrl-C cancels the run's token: analysis stops at the next statement
   boundary, the files finished so far are cached, and the process exits 130.
   Today an interrupted run loses everything.
