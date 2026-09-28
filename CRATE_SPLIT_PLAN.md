@@ -5175,6 +5175,14 @@ fixture:
     (`less-parameters-variadics.php`, where `int ...$everything` over
     `doFoo(int $many, string $parameters, string $here)` is
     `method.childParameterType` against each `string` parameter);
+  - an override that adds a parameter must make it optional (PHP rejects
+    `doBar(int $i)` over `doBar()` and `doFoo(int $i, int $j)` over
+    `doFoo(int $i)`), and so must a child constructor under
+    `@phpstan-consistent-constructor`; `parameter.notOptional`,
+    unreported today (`overriding-method.php:205`, `:225`,
+    `consistent-constructor.php`), and a required parameter before an
+    inherited variadic is `parameter.notOptional`, where phpstan-rs says
+    `parameter.notVariadic` today (`overriding-variadics.php`);
   - a parameter is checked for contravariance against a trait's abstract
     method (private ones included), a built-in parent's native signature
     (`offsetExists(int $index)` in an `SplFixedArray` subclass, a compile
@@ -5487,7 +5495,11 @@ fixture:
     `latte/Essential/Filters.php:728`);
   - a `yield` is checked against the declared generator or iterable key
     and value types (`YieldTypeRule`): `yield 1` under `@return
-    Generator<int, string>` or `iterable<int, string>` is unreported today;
+    Generator<int, string>` or `iterable<int, string>` is unreported today,
+    and so is a key: `yield 1;` and a bare `yield;` produce `int` keys a
+    `Generator<string, …>` rejects (`generator.keyType`, `yield.php`, and
+    a template key `K of int|string` against `(K of int)|string`,
+    `bug-7484.php`);
     only `yield from` delegation is checked (28 oracle
     `generator.valueType` findings); a `yield` under a return type that
     isn't a generator is `generator.returnType` at each `yield` and `yield
