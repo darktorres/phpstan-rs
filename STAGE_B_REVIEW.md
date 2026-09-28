@@ -465,10 +465,10 @@ through `check-project`.
   `unset($b['x'])`. The offset goes (a list stops being a list, an array
   may become empty), and an unset property is uninitialized again.
   (`6bdce4ce`) Done in `6e274bf3`.
-- [ ] **F4. Method names are compared case-sensitively for unused private
+- [x] **F4. Method names are compared case-sensitively for unused private
   members.** `$this->HELPER()` calling `private function helper()` reports
   `helper()` unused (`checker/unused.rs`, `usage.methods`). PHP method names
-  are case-insensitive. (`481b224b` area)
+  are case-insensitive. (`481b224b` area) Done in `8e4ef41e`.
 - [ ] **F24. Property-hook bodies are skipped by "all code" walks.** A
   banned `eval()` in a `get { }` hook isn't reported, while the same call
   in a function is (`project/banned.rs`). `composer_hygiene.rs`'s `Facts`
