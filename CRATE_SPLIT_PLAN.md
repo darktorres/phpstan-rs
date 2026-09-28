@@ -1349,7 +1349,11 @@ Follow-ups:
   `null` is gone, and after `if ($o instanceof \Exception) { return; }` a
   later `$o instanceof \InvalidArgumentException` isn't
   `instanceof.alwaysFalse` (`impossible-instanceof.php:303`, `:307`,
-  `:318`, `:322`, `match-expr.php:86`, `:92`). A `@phpstan-sealed a|b|c`
+  `:318`, `:322`, `match-expr.php:86`, `:92`; Appendix H's `subtracted`,
+  75 nsrt mismatches: `mixed~null` after `isset`, `mixed~bool` after
+  `!is_bool`, `$this(Foo~(Bar|Baz))`, `mixed~object`,
+  `bug-15060.php`, `mixed-subtract.php`, `this-subtractable.php`).
+  A `@phpstan-sealed a|b|c`
   class is its permitted subclasses for narrowing (validated today,
   oop.rs and `sealed()`, but never read by inference): after `if ($s
   instanceof a) { return; }`, `$s` is `s~a` where it stays `s` today,
@@ -2853,7 +2857,15 @@ deleted; the file-size gate.
       `DisjunctionHolderProjectionAugment`), evaluated on the scope they
       are applied to.
   - The recipes replace `branch_implied_facts` and
-    `pending_or_disjunctions`.
+    `pending_or_disjunctions`. Appendix H's `conditional-holders` (63 nsrt
+    mismatches, 29 files) is what they add: a bool holding a check narrows
+    its source when tested (`bug-14545.php`, `bug-2980.php`), a variable
+    defined under a condition is certain and typed when the condition holds
+    again (`bug-10090.php`, `bug-2816.php`, `bug-7948.php`), and variables
+    holding `instanceof` results narrow in `||`
+    (`disjunction-holder-projection.php`, `bug-9519.php`). A holder is
+    never applied outside its condition: `bug-14891.php` pins a holder
+    that would narrow `$a` to `''` where `$a` is still `string`.
 - Assignment is two-phase (`PreparedAssignTarget`/`AssignTargetWalkMode`):
   the target's sub-expressions in PHP's evaluation order, then the value,
   then the write.
