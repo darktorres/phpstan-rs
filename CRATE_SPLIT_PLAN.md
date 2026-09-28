@@ -4340,7 +4340,11 @@ explain), and the phase that fixes it re-runs the oracle and removes
 its findings; what stays is approved: stricter checks that are right at
 runtime (`array_sum()` of arrays, printf placeholders that cast objects,
 `new self()` statements with no effects, `static::$p;` statements, a
-`private(set)` property never written, `5 / 0` ending reachability), the
+`private(set)` property never written, `5 / 0` ending reachability, a
+`catch (\Throwable)` after one that catches it, an `@var` naming an unknown
+class above an assignment operator, a promoted property never read,
+`#[\Override]` on a trait's `__get` in a `stdClass` subclass, a PHP fatal
+error), the
 bleeding-edge `featureToggles` C1 turns on by default, 246
 `phpstanRs.assertType` mismatches in rule-test data that the D and E2
 items name, and 145 findings in 13 files that use php-parser and PHPStan
@@ -4359,7 +4363,9 @@ the rest), which the gate excludes and lists.
   class-string (`$class::C`) and from a used trait's method is
   `classConstant.unused` today (16 rules-oracle findings: `bug-9402.php`,
   `bug-9005.php`, `bug-5651.php`, `bug-12011.php`, `bug-6758.php`,
-  `bug-4570.php`, `class-constant-attribute.php`); a property read through
+  `bug-4570.php`, `class-constant-attribute.php`; a read the rule reports
+  as `classConstant.private` is still a use, `class-constant-visibility.php:36`);
+  a property read through
   `?->`, `get_object_vars($this)`, `$this::$p`, a hooked property's own
   get or set, a trait method of the host, and a PHP 8.5 `clone($o, ['p'
   => …])` write are uses too, `property.unused`/`property.onlyWritten`
@@ -5030,7 +5036,9 @@ fixture:
     a static call on `mixed`, `T of mixed` or an `int` (`$m::foo()`,
     `$i::doFoo(...)`; `staticMethod.nonObject`, 6); all unreported today;
   - a constant `define()`d in a static or non-constructor method isn't
-    known in another method (only the constructor's scope is remembered):
+    known in another method (only the constructor's scope is remembered,
+    and with its value's type: `return REMEMBERED_FOO;` under `: string`
+    is `return.type` "got mixed" today, `remembered-constructor-scope.php:18`):
     `echo XYZ22;` after `static function s() { define('XYZ22', 1); }` is
     `constant.notFound`, as is `__COMPILER_HALT_OFFSET__` in a file
     without `__halt_compiler()`; both unreported today
@@ -5479,7 +5487,9 @@ fixture:
     (`assign.propertyPrivateSet`), `array_filter()` without a callback on
     an array with no falsy values (`arrayFilter.same`), `$a |> $cb` into a
     by-reference parameter (`pipe.byRef`), `BcMath\Number` compared with a
-    float (`greater.invalid`, `spaceship.invalid`), a constant overriding
+    float (`greater.invalid`, `spaceship.invalid`; compared `==` with an
+    object it is `false` at runtime, not `equal.invalid` as today,
+    `bug-13001.php`), a constant overriding
     a built-in typed one without the native type (`const BZ2` in a `Phar`
     subclass, `classConstant.missingNativeType`), `do {} while ($arr =
     [1])` (`doWhile.alwaysTrue`), a `goto` to an undefined label in a
@@ -5663,7 +5673,8 @@ fixture:
     (`FunctionPurityCheck`; `bug-12382.php`, `noop-impure-points.php`);
   - an enum's duplicate case value is found through constant expressions:
     `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
-    literal duplicate already is);
+    literal duplicate already is, on the later case, where PHPStan reports
+    it once on the enum naming both cases, `enum-sanity.php:86`);
   - a set hook's parameter type is contravariant with the property's
     (`propertySetHook.parameterType`/`propertySetHook.nativeParameterType`), a
     template
