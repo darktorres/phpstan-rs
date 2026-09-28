@@ -30,16 +30,6 @@ impl Registry {
         })
     }
 
-    /// `types::effective_slot_variance` against this registry.
-    pub(crate) fn effective_slot_variance(
-        &self,
-        class: &str,
-        index: usize,
-        arg: &Type,
-    ) -> Option<Variance> {
-        types::effective_slot_variance(self, class, index, arg)
-    }
-
     /// Binds a generic-typed receiver's own carried type arguments
     /// (`Collection<User>` -> `{"T": Object("User", [])}`) against
     /// `target`'s own declared `@template` parameter names, walking up

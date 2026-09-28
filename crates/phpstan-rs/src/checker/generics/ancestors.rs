@@ -11,7 +11,7 @@ use crate::registry;
 use phpdoc::grammar::{self, PhpDocTagValue};
 use syntax::ast::{ClassDecl, ClassKind, QualifiedName};
 use syntax::token::Span;
-use types::{self, Type};
+use types::{self, PositionVariance, Type};
 
 type Templates = rustc_hash::FxHashMap<String, types::TemplateParam>;
 
@@ -64,71 +64,6 @@ struct AncestorMessages {
     variance_context: Option<String>,
 }
 
-/// A position's variance while walking an ancestor type -
-/// `TemplateTypeVariance` with its `static` value.
-#[derive(Clone, Copy, PartialEq)]
-enum Position {
-    Invariant,
-    Covariant,
-    Contravariant,
-    Bivariant,
-    Static,
-}
-
-impl Position {
-    fn compose(self, other: Position) -> Position {
-        match self {
-            Position::Contravariant => match other {
-                Position::Contravariant => Position::Covariant,
-                Position::Covariant => Position::Contravariant,
-                Position::Bivariant => Position::Bivariant,
-                _ => Position::Invariant,
-            },
-            Position::Covariant => match other {
-                Position::Contravariant => Position::Contravariant,
-                Position::Covariant => Position::Covariant,
-                Position::Bivariant => Position::Bivariant,
-                _ => Position::Invariant,
-            },
-            Position::Invariant => Position::Invariant,
-            Position::Bivariant => Position::Bivariant,
-            Position::Static => other,
-        }
-    }
-
-    fn from_variance(v: types::Variance) -> Position {
-        match v {
-            types::Variance::Invariant => Position::Invariant,
-            types::Variance::Covariant => Position::Covariant,
-            types::Variance::Contravariant => Position::Contravariant,
-        }
-    }
-
-    fn from_call_site(v: types::CallSiteVariance) -> Position {
-        match v {
-            types::CallSiteVariance::Covariant => Position::Covariant,
-            types::CallSiteVariance::Contravariant => Position::Contravariant,
-            types::CallSiteVariance::Bivariant => Position::Bivariant,
-        }
-    }
-
-    fn valid_for(self, declared: types::Variance) -> bool {
-        declared == types::Variance::Invariant
-            || matches!(self, Position::Bivariant | Position::Static)
-            || Position::from_variance(declared) == self
-    }
-
-    fn describe(self) -> &'static str {
-        match self {
-            Position::Invariant => "invariant",
-            Position::Covariant => "covariant",
-            Position::Contravariant => "contravariant",
-            Position::Bivariant => "bivariant",
-            Position::Static => "static",
-        }
-    }
-}
-
 fn variance_word(v: types::Variance) -> &'static str {
     match v {
         types::Variance::Invariant => "invariant",
@@ -140,10 +75,7 @@ fn variance_word(v: types::Variance) -> &'static str {
 /// `TypeProjectionHelper::describe` for a call-site variance
 /// annotation; `None` for an ordinary (invariant) argument.
 fn call_site_projection(arg: &Type) -> Option<String> {
-    match arg {
-        Type::VarianceArg(..) => Some(arg.to_string()),
-        _ => None,
-    }
+    arg.call_site_variance().map(|_| arg.to_string())
 }
 
 impl<'a> Checker<'a> {
@@ -362,7 +294,7 @@ impl<'a> Checker<'a> {
         let location = format!("PHPDoc tag @{}", tag.word());
         let mut unused: Vec<&String> = names.iter().collect();
         for (node, ty) in &tag_types {
-            let Type::Object(class, args) = ty else {
+            let Some((class, args)) = ty.object_class_and_args() else {
                 self.report(
                     format!("{} {ty}.", messages.incompatible),
                     span,
@@ -438,8 +370,14 @@ impl<'a> Checker<'a> {
                     AncestorTag::Use => "used",
                 };
                 let context = format!("in {verb} type {ty} {context}");
-                let mut violations = Vec::new();
-                self.collect_ancestor_variance(ty, Position::Static, fqn, &mut violations);
+                let violations: Vec<_> = ty
+                    .referenced_templates(PositionVariance::Static, self.registry)
+                    .into_iter()
+                    .filter(|(tp, position)| {
+                        tp.scope.as_deref() == Some(fqn) && !position.is_valid_for(tp.variance)
+                    })
+                    .map(|(tp, position)| (tp.name.clone(), tp.variance, position))
+                    .collect();
                 for (name, declared, position) in violations {
                     self.report(format!(
                             "Template type {name} is declared as {}, but occurs in {} position {context}.",
@@ -523,9 +461,9 @@ impl<'a> Checker<'a> {
                 let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
                 let ty = registry::substitute_type_aliases(ty, &aliases);
                 let ty = self.registry.resolve_deferred_value_of_now(ty);
-                let key = match &ty {
-                    Type::Object(class, _) => class.to_ascii_lowercase(),
-                    other => other.to_string(),
+                let key = match ty.object_class_and_args() {
+                    Some((class, _)) => class.to_ascii_lowercase(),
+                    None => ty.to_string(),
                 };
                 match out.iter_mut().find(|(k, _, _)| *k == key) {
                     Some(slot) => {
@@ -537,80 +475,6 @@ impl<'a> Checker<'a> {
             }
         }
         out.into_iter().map(|(_, node, ty)| (node, ty)).collect()
-    }
-
-    /// `VarianceCheck::check` from a `static` position: every template of
-    /// `fqn` referenced in an ancestor type must sit where its declared
-    /// variance allows.
-    fn collect_ancestor_variance(
-        &self,
-        ty: &Type,
-        position: Position,
-        fqn: &str,
-        out: &mut Vec<(String, types::Variance, Position)>,
-    ) {
-        match ty {
-            Type::TemplateParam(tp) if tp.scope.as_deref() == Some(fqn) => {
-                if !position.valid_for(tp.variance) {
-                    out.push((tp.name.clone(), tp.variance, position));
-                }
-            }
-            Type::VarianceArg(variance, inner) => {
-                let inner_position = position.compose(Position::from_call_site(*variance));
-                self.collect_ancestor_variance(inner, inner_position, fqn, out);
-            }
-            Type::ValueOf(_) | Type::ClassConstant { .. } => ty.for_each_child(&mut |t| {
-                self.collect_ancestor_variance(t, position.compose(Position::Bivariant), fqn, out)
-            }),
-            Type::Object(class, args) => {
-                for (i, arg) in args.iter().enumerate() {
-                    let slot = self
-                        .registry
-                        .slot_variance(class, i)
-                        .unwrap_or(types::Variance::Invariant);
-                    let effective = match arg {
-                        Type::VarianceArg(variance, _) => Position::from_call_site(*variance),
-                        _ => Position::from_variance(slot),
-                    };
-                    let inner = match arg {
-                        Type::VarianceArg(_, inner)
-                        | Type::ValueOf(inner)
-                        | Type::ClassConstant { class: inner, .. } => inner,
-                        _ => arg,
-                    };
-                    self.collect_ancestor_variance(inner, position.compose(effective), fqn, out);
-                }
-            }
-            Type::Array(key, value) => {
-                let inner = position.compose(Position::Covariant);
-                self.collect_ancestor_variance(key, inner, fqn, out);
-                self.collect_ancestor_variance(value, inner, fqn, out);
-            }
-            Type::ArrayShape(fields) => {
-                let inner = position.compose(Position::Covariant);
-                for t in fields.types() {
-                    self.collect_ancestor_variance(t, inner, fqn, out);
-                }
-            }
-            Type::Union(members) | Type::Intersection(members) => {
-                for m in members {
-                    self.collect_ancestor_variance(m, position, fqn, out);
-                }
-            }
-            Type::Callable(Some(sig)) => {
-                let params = position.compose(Position::Contravariant);
-                for p in &sig.params {
-                    self.collect_ancestor_variance(&p.ty, params, fqn, out);
-                }
-                self.collect_ancestor_variance(
-                    &sig.return_type,
-                    position.compose(Position::Covariant),
-                    fqn,
-                    out,
-                );
-            }
-            _ => {}
-        }
     }
 }
 
@@ -624,16 +488,10 @@ fn upper_first(s: &str) -> String {
 
 /// Every class name `ty` references (the ancestor itself included).
 fn collect_class_names(ty: &Type, out: &mut Vec<String>) {
-    match ty {
-        Type::Object(name, args) => {
-            out.push(name.clone().to_string());
-            for a in args {
-                collect_class_names(a, out);
-            }
-        }
-        Type::TemplateParam(_) => {}
-        other => other.for_each_child(&mut |c| collect_class_names(c, out)),
+    if let Some((name, _)) = ty.object_class_and_args() {
+        out.push(name.to_string());
     }
+    ty.for_each_child(&mut |c| collect_class_names(c, out));
 }
 
 fn class_messages(fqn: &str, tag: AncestorTag) -> AncestorMessages {

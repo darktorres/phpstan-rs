@@ -1,6 +1,6 @@
 //! What a type is: the questions asked of a type from outside this crate.
 
-use crate::{AccessoryKind, Relation, Shape, TrinaryLogic, Type, union_types};
+use crate::{AccessoryKind, CallSiteVariance, Relation, Shape, TrinaryLogic, Type, union_types};
 
 impl Type {
     /// Whether this is `mixed`, written or not.
@@ -76,6 +76,76 @@ impl Type {
             }
             other => f(other),
         }
+    }
+
+    /// Whether this type, or one nested in it, is of the kind the keyword
+    /// `name` writes (`float`, `int`, `string`, `bool`, `array`, `mixed`,
+    /// `object`, `callable`, `iterable`), or is an object of class `name`.
+    pub fn mentions(&self, name: &str) -> bool {
+        let direct = match (name, self) {
+            ("float", Type::Float | Type::FloatLiteral(_)) => true,
+            ("int", Type::Int | Type::IntLiteral(_) | Type::IntRange(..)) => true,
+            (
+                "string",
+                Type::String
+                | Type::StringLiteral(_)
+                | Type::ClassString(_)
+                | Type::ClassKindString(_),
+            ) => true,
+            ("bool", Type::Bool | Type::True | Type::False) => true,
+            ("array", Type::Array(..) | Type::ArrayShape(_)) => true,
+            ("mixed", Type::Mixed(_)) => true,
+            ("object", Type::ObjectWithoutClass) => true,
+            ("callable", Type::Callable(_)) => true,
+            ("iterable", Type::Object(n, _)) if n.eq_ignore_ascii_case("Traversable") => true,
+            (class, Type::Object(n, _)) => n.trim_start_matches('\\').eq_ignore_ascii_case(class),
+            _ => false,
+        };
+        direct || self.any_child(|t| t.mentions(name))
+    }
+
+    /// The variance a generic argument is annotated with at its use site
+    /// (`covariant Foo`, `*`); `None` for a plain argument.
+    pub fn call_site_variance(&self) -> Option<CallSiteVariance> {
+        match self {
+            Type::VarianceArg(variance, _) => Some(*variance),
+            _ => None,
+        }
+    }
+
+    /// Whether `@template T of <this>` declares a bound a template can
+    /// take (PHPStan's `TemplateTypeFactory`): `mixed`, `null`, a
+    /// scalar, integer range or literal, an array or array shape, an
+    /// object, object shape or enum case, `key-of`, a union or an
+    /// intersection, or another template. A class-string, a callable or
+    /// a `resource` is not one.
+    pub fn is_supported_template_bound(&self) -> bool {
+        matches!(
+            self,
+            Type::Mixed(_)
+                | Type::Null
+                | Type::TemplateParam(_)
+                | Type::Array(..)
+                | Type::ArrayShape(_)
+                | Type::String
+                | Type::StringLiteral(_)
+                | Type::Int
+                | Type::IntLiteral(_)
+                | Type::IntRange(..)
+                | Type::Float
+                | Type::FloatLiteral(_)
+                | Type::Bool
+                | Type::True
+                | Type::False
+                | Type::Object(..)
+                | Type::EnumCase(..)
+                | Type::ObjectWithoutClass
+                | Type::ObjectShape(_)
+                | Type::KeyOf(_)
+                | Type::Union(_)
+                | Type::BenevolentUnion(_)
+                | Type::Intersection(_)
+        )
     }
 
     /// Whether a `value-of`, `key-of`, offset access or class-constant

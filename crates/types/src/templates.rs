@@ -188,12 +188,34 @@ impl CallableSig {
                 bind_template_param(&open(&param.ty), arg, &mut bindings);
             }
         }
-        substitute(&open(&self.return_type), &bindings, &|_| true)
+        substitute(
+            &open(&self.return_type),
+            &bindings,
+            &outside_callable,
+            &|_| true,
+        )
     }
 }
 
 pub fn substitute_template(ty: &Type, bindings: &FxHashMap<String, Type>) -> Type {
-    substitute(ty, bindings, &|_| false)
+    substitute(ty, bindings, &outside_callable, &|_| false)
+}
+
+/// `substitute_template` for the templates `scope` declares only: every
+/// other template stays as it is.
+pub fn substitute_templates_of(ty: &Type, bindings: &FxHashMap<String, Type>, scope: &str) -> Type {
+    substitute(
+        ty,
+        bindings,
+        &|tp| tp.scope.as_deref() == Some(scope),
+        &|_| false,
+    )
+}
+
+/// Whether a template belongs to something other than a callable type,
+/// whose own templates stay until that callable is itself called.
+fn outside_callable(tp: &TemplateParam) -> bool {
+    tp.scope.as_deref() != Some(crate::CALLABLE_TEMPLATE_SCOPE)
 }
 
 /// `substitute_template`, except that an unbound template `to_bound`
@@ -209,20 +231,20 @@ pub fn substitute_template_resolving_to_bounds(
     bindings: &FxHashMap<String, Type>,
     to_bound: &dyn Fn(&TemplateParam) -> bool,
 ) -> Type {
-    substitute(ty, bindings, to_bound)
+    substitute(ty, bindings, &outside_callable, to_bound)
 }
 
+/// `ty` with each template `substituted` selects replaced by its binding,
+/// else its default, else (when `to_bound` selects it) its bound, else
+/// `mixed`.
 fn substitute(
     ty: &Type,
     bindings: &FxHashMap<String, Type>,
+    substituted: &dyn Fn(&TemplateParam) -> bool,
     to_bound: &dyn Fn(&TemplateParam) -> bool,
 ) -> Type {
     match ty {
-        // A callable type's own template stays until that callable is
-        // itself called.
-        Type::TemplateParam(tp) if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {
-            ty.clone()
-        }
+        Type::TemplateParam(tp) if !substituted(tp) => ty.clone(),
         Type::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
             let fallback = match tp.default.as_deref() {
                 Some(default) => default,
@@ -235,7 +257,7 @@ fn substitute(
             // other, can't recurse forever.
             let mut guarded = bindings.clone();
             guarded.insert(tp.name.clone(), Type::Mixed(false));
-            substitute(fallback, &guarded, to_bound)
+            substitute(fallback, &guarded, substituted, to_bound)
         }),
         // A template-subject conditional (`(T is int ? A : B)`) resolves
         // once `T` is bound, the way real PHPStan's `ConditionalType`
@@ -251,13 +273,13 @@ fn substitute(
             .get(subject)
             .is_some_and(|b| !matches!(b, Type::Mixed(_))) =>
         {
-            let target = substitute(target, bindings, to_bound);
+            let target = substitute(target, bindings, substituted, to_bound);
             match super::conditional::conditional_branch(&bindings[subject], &target, *negated) {
-                Some(true) => substitute(if_true, bindings, to_bound),
-                Some(false) => substitute(if_false, bindings, to_bound),
+                Some(true) => substitute(if_true, bindings, substituted, to_bound),
+                Some(false) => substitute(if_false, bindings, substituted, to_bound),
                 None => crate::union_types(
-                    substitute(if_true, bindings, to_bound),
-                    substitute(if_false, bindings, to_bound),
+                    substitute(if_true, bindings, substituted, to_bound),
+                    substitute(if_false, bindings, substituted, to_bound),
                 ),
             }
         }
@@ -266,6 +288,8 @@ fn substitute(
         // conditional return type's branches (`subject` is a raw
         // parameter name, not a `Type`, so there's nothing to substitute
         // there).
-        _ => super::late::settle(ty.map_children(&mut |t| substitute(t, bindings, to_bound))),
+        _ => super::late::settle(
+            ty.map_children(&mut |t| substitute(t, bindings, substituted, to_bound)),
+        ),
     }
 }

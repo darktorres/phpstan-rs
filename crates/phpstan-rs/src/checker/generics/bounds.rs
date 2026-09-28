@@ -61,11 +61,11 @@ impl<'a> Checker<'a> {
         if check_arity {
             self.check_generic_reference_arity(ty, location, span);
         }
-        if check_arity && let Type::Object(class, args) = ty {
+        if check_arity && let Some((class, args)) = ty.object_class_and_args() {
             self.check_call_site_variance(class, args, location, span);
         }
-        match ty {
-            Type::Object(class, args) => {
+        match ty.object_class_and_args() {
+            Some((class, args)) => {
                 if !args.is_empty()
                     && let Some(info) = self.registry.classes.get(class.as_str())
                     && !info.template_bounds().is_empty()
@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
                     self.check_generic_bounds(arg, location, label, span);
                 }
             }
-            _ => ty.for_each_child(&mut |t| self.check_generic_bounds(t, location, label, span)),
+            None => ty.for_each_child(&mut |t| self.check_generic_bounds(t, location, label, span)),
         }
     }
 
@@ -151,29 +151,9 @@ impl<'a> Checker<'a> {
     /// already document). `check_generic_bounds` uses this to skip a
     /// bound it has no way to actually verify, rather than guess wrong.
     pub(crate) fn is_type_fully_known(&self, ty: &Type) -> bool {
-        match ty {
-            // Defers to the annotated type (`*` has none, trivially
-            // "known" the same way this function's own catch-all treats
-            // anything it doesn't otherwise recognize).
-            Type::VarianceArg(..) => types::strip_call_site_variance(ty)
-                .is_none_or(|inner| self.is_type_fully_known(inner)),
-            Type::Object(name, args) => {
-                self.registry.classes.contains_key(name.as_str())
-                    && args.iter().all(|a| self.is_type_fully_known(a))
-            }
-            Type::Array(key, inner) => {
-                self.is_type_fully_known(key) && self.is_type_fully_known(inner)
-            }
-            Type::ClassString(inner) => self.is_type_fully_known(inner),
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().all(|m| self.is_type_fully_known(m))
-            }
-            // `object{...}`'s own field types need checking too.
-            Type::ArrayShape(shape) | Type::ObjectShape(shape) => {
-                shape.types().all(|t| self.is_type_fully_known(t))
-            }
-            _ => true,
-        }
+        ty.object_class_and_args()
+            .is_none_or(|(name, _)| self.registry.classes.contains_key(name.as_str()))
+            && !ty.any_child(|t| !self.is_type_fully_known(t))
     }
 
     /// `check_generic_bounds` for everything a class declares outside
@@ -368,7 +348,7 @@ impl<'a> Checker<'a> {
     /// ordinary application code, whose registry state already reflects
     /// every stub-granted template correctly, ever reaches this check.
     fn check_generic_reference_arity(&mut self, ty: &Type, location: &str, span: Span) {
-        let Type::Object(class, args) = ty else {
+        let Some((class, args)) = ty.object_class_and_args() else {
             return;
         };
         if args.is_empty() {
@@ -479,13 +459,9 @@ impl<'a> Checker<'a> {
         let kind = class_kind_identifier(&info.kind());
         let ty = Type::object(class.into(), args.to_vec());
         for (i, arg) in args.iter().enumerate() {
-            let call_site = match arg {
-                Type::VarianceArg(types::CallSiteVariance::Covariant, _) => {
-                    types::Variance::Covariant
-                }
-                Type::VarianceArg(types::CallSiteVariance::Contravariant, _) => {
-                    types::Variance::Contravariant
-                }
+            let call_site = match arg.call_site_variance() {
+                Some(types::CallSiteVariance::Covariant) => types::Variance::Covariant,
+                Some(types::CallSiteVariance::Contravariant) => types::Variance::Contravariant,
                 // `*` (bivariant) is never flagged - see this function's
                 // own doc comment.
                 _ => continue,
@@ -576,7 +552,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if let Some(bound) = bounds.get(name)
-                && !is_supported_generic_bound(bound)
+                && !bound.is_supported_template_bound()
             {
                 self.report(
                     subject.unsupported_bound(name, bound),
@@ -716,38 +692,4 @@ impl TemplateSubject<'_> {
             ),
         }
     }
-}
-
-/// Mirrors real PHPStan's own `TemplateTypeCheck`-internal hardcoded
-/// whitelist of ~15 supported `@template ... of Bound` shapes -
-/// deliberately conservative, mapped onto
-/// this project's own `Type` variants rather than PHPStan's type-class
-/// list: anything not explicitly recognized here is treated as
-/// unsupported, since a false "supported" would silently let a genuinely
-/// nonsensical bound (e.g. `@template T of callable`) through uncaught,
-/// while a false "unsupported" only ever costs a single extra, real
-/// diagnostic on an already-unusual bound choice.
-fn is_supported_generic_bound(ty: &Type) -> bool {
-    ty.is_mixed()
-        || (ty.is_null().yes()
-            || ty.is_template()
-            || matches!(
-                ty,
-                Type::Array(_, _)
-                    | Type::ArrayShape(_)
-                    | Type::String
-                    | Type::StringLiteral(_)
-                    | Type::Int
-                    | Type::IntLiteral(_)
-                    | Type::Float
-                    | Type::FloatLiteral(_)
-                    | Type::Bool
-                    | Type::True
-                    | Type::False
-                    | Type::Object(_, _)
-                    | Type::ObjectWithoutClass
-                    | Type::ObjectShape(_)
-                    | Type::Union(_)
-                    | Type::Intersection(_)
-            ))
 }

@@ -32,6 +32,7 @@ mod queries;
 pub mod relation;
 mod shape;
 mod subtype;
+mod template_references;
 mod templates;
 mod transform;
 mod trinary;
@@ -59,9 +60,10 @@ pub use subtype::{
     callable_sig_is_subtype, is_numeric_string_literal, shape_fields_are_list_like, shape_key_type,
     types_equal_for_union,
 };
+pub use template_references::PositionVariance;
 pub use templates::{
     bind_template_param, promote_class_string_literals, substitute_template,
-    substitute_template_resolving_to_bounds,
+    substitute_template_resolving_to_bounds, substitute_templates_of,
 };
 pub use trinary::TrinaryLogic;
 pub use union::generalize_by_key_set;

@@ -3,7 +3,7 @@ use crate::registry::FunctionReflection;
 use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
-use types::{self, Type};
+use types::{self, PositionVariance, Type};
 
 impl<'a> Checker<'a> {
     /// Variance-enforcement: composes variance through nested generics
@@ -26,15 +26,15 @@ impl<'a> Checker<'a> {
     /// template is covariant (reading a `T` back out of a covariant
     /// container is exactly as safe as reading the container itself),
     /// flips when it's contravariant, and becomes doubly-restricted
-    /// (`Position::Inv`, flagged regardless of which direction this
+    /// (`PositionVariance::Invariant`, flagged regardless of which direction this
     /// class's own template varies) when it's invariant - unrelated
     /// generic containers don't let subtyping flow through their own
     /// invariant slot at all, so neither direction is sound there
-    /// either. See `walk_variance`/`Position::compose` below.
+    /// either. See `PositionVariance::compose`.
     ///
     /// Checks method params/return types only - a property's own single
-    /// type needs different position logic entirely (`Position::Out` when
-    /// write access is restricted, `Position::Inv` otherwise, not a
+    /// type needs different position logic entirely (`PositionVariance::Covariant` when
+    /// write access is restricted, `PositionVariance::Invariant` otherwise, not a
     /// param/return split), see `check_property_variances` below.
     pub(crate) fn check_variance(
         &mut self,
@@ -50,11 +50,16 @@ impl<'a> Checker<'a> {
         }
         let mut violations: Vec<String> = Vec::new();
         for param in sig.params() {
-            self.walk_variance(param.ty(), Position::In, class_name, &mut violations);
+            self.walk_variance(
+                param.ty(),
+                PositionVariance::Contravariant,
+                class_name,
+                &mut violations,
+            );
         }
         self.walk_variance(
             sig.return_type(),
-            Position::Out,
+            PositionVariance::Covariant,
             class_name,
             &mut violations,
         );
@@ -145,7 +150,7 @@ impl<'a> Checker<'a> {
     /// a property has one type, not a param/return pair, so this is a new
     /// sibling of `check_variance` above rather than a caller of it,
     /// reusing `walk_variance` directly with property-specific position
-    /// logic: `Position::Out` (real PHPStan's "covariant" - the property
+    /// logic: `PositionVariance::Covariant` (real PHPStan's "covariant" - the property
     /// can only ever be read back out, not written into, so a covariant
     /// template there is sound) when write access is restricted -
     /// `readonly`, private-set (`write_visibility == Private`, only
@@ -154,7 +159,7 @@ impl<'a> Checker<'a> {
     /// own `isPrivate()` early return - so this can only mean a genuine
     /// asymmetric `private(set)`, not a plain fully-private property), or
     /// a property with hooks where none of them is `set` (get-only, so
-    /// nothing can ever write through it either) - `Position::Inv`
+    /// nothing can ever write through it either) - `PositionVariance::Invariant`
     /// otherwise. `readonly`-by-PHPDoc isn't checked (this project has no
     /// such tracking at all).
     ///
@@ -189,9 +194,9 @@ impl<'a> Checker<'a> {
                     .as_ref()
                     .is_some_and(|h| h.set.is_none() && h.get.is_some());
             let pos = if has_restricted_write_access {
-                Position::Out
+                PositionVariance::Covariant
             } else {
-                Position::Inv
+                PositionVariance::Invariant
             };
             let mut violations: Vec<String> = Vec::new();
             self.walk_variance(prop_sig.ty(), pos, fqn, &mut violations);
@@ -228,9 +233,9 @@ impl<'a> Checker<'a> {
                         .as_deref()
                         .is_some_and(|h| h.set.is_none() && h.get.is_some());
                 let pos = if has_restricted_write_access {
-                    Position::Out
+                    PositionVariance::Covariant
                 } else {
-                    Position::Inv
+                    PositionVariance::Invariant
                 };
                 let mut violations: Vec<String> = Vec::new();
                 self.walk_variance(prop_sig.ty(), pos, fqn, &mut violations);
@@ -243,144 +248,30 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Walks `ty` composing `pos` through every nested generic argument
-    /// slot (see `check_variance`'s own doc comment for the composition
-    /// rules), flagging a `TemplateParam` belonging to `class_name` itself
-    /// (`TemplateParam::scope` - not some unrelated method's own template,
-    /// or an ancestor's, reached through a chain this walk doesn't itself
-    /// resolve) whose declared variance disagrees with the position it
-    /// was found in. `Array`/`ClassString`/`Union`/`Intersection`/
-    /// `ArrayShape` are structural wrappers that don't themselves carry a
-    /// declared variance to compose with, so they pass `pos` through
-    /// unchanged - only an `Object`'s own type-argument slots can flip or
-    /// force it, via `Registry::effective_slot_variance`.
-    ///
-    /// Uses `effective_slot_variance`, not the class's bare
-    /// declared variance alone - a call-site variance marker written on
-    /// this exact argument (`Collection<covariant T>`) overrides
-    /// `Collection`'s own declared slot variance for this composition,
-    /// exactly mirroring real PHPStan's `VarianceCheck`/
-    /// `getReferencedTemplateTypes`, which consult the identical
-    /// call-site-overrides-declared rule this project's own
-    /// `accepts` now also uses (`registry.rs`) - both are real
-    /// consumers of the same effective-variance concept, not just one.
+    /// A violation for each template of `class_name` that `ty`, at
+    /// position `pos`, uses where its declared variance doesn't allow.
     fn walk_variance(
         &self,
         ty: &Type,
-        pos: Position,
+        pos: PositionVariance,
         class_name: &str,
         violations: &mut Vec<String>,
     ) {
-        match ty {
-            Type::TemplateParam(tp) => {
-                if tp.scope.as_deref() != Some(class_name) {
-                    return;
-                }
-                match tp.variance {
-                    types::Variance::Covariant if pos != Position::Out => {
-                        violations.push(format!(
-                            "{class_name}'s @template-covariant {} cannot be used in an input (parameter) position",
-                            tp.name
-                        ));
-                    }
-                    types::Variance::Contravariant if pos != Position::In => {
-                        violations.push(format!(
-                            "{class_name}'s @template-contravariant {} cannot be used in an output (return) position",
-                            tp.name
-                        ));
-                    }
-                    _ => {}
-                }
+        for (tp, position) in ty.referenced_templates(pos, self.registry) {
+            if tp.scope.as_deref() != Some(class_name) || position.is_valid_for(tp.variance) {
+                continue;
             }
-            // The enclosing class's arm already read the annotation and
-            // composed `pos` accordingly before recursing into it.
-            Type::VarianceArg(..) => {
-                if let Some(inner) = types::strip_call_site_variance(ty) {
-                    self.walk_variance(inner, pos, class_name, violations);
-                }
+            match tp.variance {
+                types::Variance::Covariant => violations.push(format!(
+                    "{class_name}'s @template-covariant {} cannot be used in an input (parameter) position",
+                    tp.name
+                )),
+                types::Variance::Contravariant => violations.push(format!(
+                    "{class_name}'s @template-contravariant {} cannot be used in an output (return) position",
+                    tp.name
+                )),
+                types::Variance::Invariant => {}
             }
-            Type::Object(class, args) => {
-                for (i, arg) in args.iter().enumerate() {
-                    if let Some(slot) = self.registry.effective_slot_variance(class, i, arg) {
-                        self.walk_variance(arg, pos.compose(slot), class_name, violations);
-                    }
-                }
-            }
-            Type::Array(key, inner) => {
-                self.walk_variance(key, pos, class_name, violations);
-                self.walk_variance(inner, pos, class_name, violations);
-            }
-            Type::ClassString(inner) => self.walk_variance(inner, pos, class_name, violations),
-            Type::Union(members) | Type::Intersection(members) => {
-                for m in members {
-                    self.walk_variance(m, pos, class_name, violations);
-                }
-            }
-            Type::ArrayShape(fields) => {
-                for t in fields.types() {
-                    self.walk_variance(t, pos, class_name, violations);
-                }
-            }
-            // `object{...}`'s own field types must be walked for
-            // declaration-soundness too, or a covariant/contravariant
-            // template nested inside one (`object{value: T}`) would go
-            // unchecked.
-            Type::ObjectShape(fields) => {
-                for t in fields.types() {
-                    self.walk_variance(t, pos, class_name, violations);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// A position within a type expression, for `Checker::
-/// walk_variance`'s own real per-position variance composition -
-/// `Position::In` for a parameter type (real PHPStan's "negative"/input
-/// polarity), `Position::Out` for a return type ("positive"/output
-/// polarity), and `Position::Inv` once composition has passed through any
-/// nested generic argument slot this project knows to be invariant
-/// (`slot_variance` returning `Invariant`, or simply unresolved to any of
-/// the three - see `Position::compose`) - an invariant slot doesn't let
-/// subtyping flow through it in *either* direction, so from here on a
-/// covariant and a contravariant template are equally unsound to find,
-/// and `walk_variance`'s own `pos != Out`/`pos != In` checks flag both
-/// without needing a third, explicit case per variance kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Position {
-    In,
-    Out,
-    Inv,
-}
-
-impl Position {
-    /// Composes this position with a nested generic argument slot's own
-    /// declared variance, the same left-to-right composition real
-    /// PHPStan's own `TemplateTypeVariance::compose()` performs: a
-    /// covariant slot leaves the position unchanged (reading a value back
-    /// out of a covariant container is exactly as safe as reading the
-    /// container itself), a contravariant slot flips it, and an
-    /// invariant slot forces `Inv` outright, absorbing whatever this
-    /// position already was - once `self` is already `Inv`, every
-    /// further composition (through any slot variance) stays `Inv`, the
-    /// same "no further flipping/relaxing can undo becoming invariant"
-    /// invariant `compose`'s own match arms preserve without needing a
-    /// separate `self == Inv` guard: `Covariant` returns `self` (already
-    /// `Inv`) as-is, and `Contravariant`'s `flip()` maps `Inv` to `Inv`.
-    fn compose(self, slot: types::Variance) -> Position {
-        match slot {
-            types::Variance::Invariant => Position::Inv,
-            types::Variance::Covariant => self,
-            types::Variance::Contravariant => self.flip(),
-        }
-    }
-
-    fn flip(self) -> Position {
-        match self {
-            Position::In => Position::Out,
-            Position::Out => Position::In,
-            Position::Inv => Position::Inv,
         }
     }
 }

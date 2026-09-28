@@ -30,7 +30,7 @@ impl<'a> Checker<'a> {
     /// Scoped to only `TemplateParam`s whose own `scope` field is
     /// genuinely `owner` itself - not merely same-named as one of
     /// `owner`'s declared templates. `types::substitute_template`'s own
-    /// fallback for a name absent from `bindings` is `Type::Mixed(false)`,
+    /// fallback for a name absent from `bindings` is `mixed`,
     /// correct for a genuinely class-level template referenced with no or
     /// fewer type arguments than it declares (e.g. a bare `Collection`
     /// with no `<T>` at all), but that would wipe out every method's own
@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
         // whole structure exists to preserve - `Registry::
         // class_template_bindings_rec`'s own `zip(owner.templates,
         // type_args)` is always empty when the left side is, so every
-        // `substitute_scoped` call below would be a no-op walk that still
+        // `substitute_templates_of` call below would be a no-op walk that still
         // clones the whole signature (every `ParameterReflection`, the return/
         // throws/assert types); bailing straight to `sig.clone()` instead
         // skips that for real.
@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
                     if !bindings.contains_key(name.as_ref())
                         && let Some(default) = info.template_defaults().get(name)
                     {
-                        let default = substitute_scoped(default, &bindings, owner);
+                        let default = types::substitute_templates_of(default, &bindings, owner);
                         bindings.insert(name.to_string(), default);
                     }
                 }
@@ -147,7 +147,7 @@ impl<'a> Checker<'a> {
             scoped_bindings
                 .iter()
                 .fold(ty.clone(), |acc, (scope, bindings)| {
-                    substitute_scoped(&acc, bindings, scope)
+                    types::substitute_templates_of(&acc, bindings, scope)
                 })
         };
         std::borrow::Cow::Owned(sig.map_types(subst))
@@ -180,59 +180,7 @@ impl<'a> Checker<'a> {
             return ty.clone();
         }
         let bindings = self.class_template_bindings(class, type_args, owner);
-        substitute_scoped(ty, &bindings, owner)
-    }
-}
-
-/// Same structural walk as `types::substitute_template`, except a
-/// `TemplateParam` whose own `scope` field isn't `scope` (`owner`'s own
-/// name) is left completely untouched instead of defaulting to `Mixed` -
-/// see `substitute_class_templates`'s own doc comment for why that
-/// distinction (and comparing by declaration-site identity, not bare
-/// name) matters.
-fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Type {
-    match ty {
-        Type::TemplateParam(tp) => {
-            if tp.scope.as_deref() == Some(scope) {
-                // Mirrors `types::substitute_template`'s own
-                // `@template T = Default` fallback - an "erased" class
-                // reference (fewer type arguments than declared,
-                // including a bare one with none at all) leaves `bindings`
-                // with no entry for this name at all, same as before; the
-                // only change is falling back to this template's own
-                // declared default (when it has one) instead of
-                // unconditionally `Mixed`.
-                bindings.get(&tp.name).cloned().unwrap_or_else(|| {
-                    tp.default
-                        .as_ref()
-                        .map(|d| substitute_scoped(d, bindings, scope))
-                        .unwrap_or(Type::mixed())
-                })
-            } else {
-                ty.clone()
-            }
-        }
-        // A conditional on one of this class's templates resolves once
-        // that template is bound, like `types::substitute_template`'s.
-        Type::Conditional {
-            subject,
-            target,
-            if_true,
-            if_false,
-            negated,
-            template_subject: true,
-        } if bindings.get(subject).is_some_and(|b| !b.is_mixed()) => {
-            let target = substitute_scoped(target, bindings, scope);
-            match types::conditional_branch(&bindings[subject], &target, *negated) {
-                Some(true) => substitute_scoped(if_true, bindings, scope),
-                Some(false) => substitute_scoped(if_false, bindings, scope),
-                None => types::union_types(
-                    substitute_scoped(if_true, bindings, scope),
-                    substitute_scoped(if_false, bindings, scope),
-                ),
-            }
-        }
-        _ => types::settle(ty.map_children(&mut |t| substitute_scoped(t, bindings, scope))),
+        types::substitute_templates_of(ty, &bindings, owner)
     }
 }
 

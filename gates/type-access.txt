@@ -1,6 +1,6 @@
 # Paths naming a `types::Type` variant outside crates/types, per file.
 # A count may only fall; `cargo xtask arch --bless-types` records a fall.
-# total 702: 680 in patterns, 22 in comparisons, 0 building a type
+# total 525: 504 in patterns, 21 in comparisons, 0 building a type
 4	crates/phpstan-rs/src/checker.rs
 6	crates/phpstan-rs/src/checker/access_attributes.rs
 1	crates/phpstan-rs/src/checker/by_ref_params.rs
@@ -23,10 +23,6 @@
 2	crates/phpstan-rs/src/checker/expr/probe_checks.rs
 8	crates/phpstan-rs/src/checker/function_decl.rs
 1	crates/phpstan-rs/src/checker/function_like_declarations.rs
-19	crates/phpstan-rs/src/checker/generics/ancestors.rs
-29	crates/phpstan-rs/src/checker/generics/bounds.rs
-2	crates/phpstan-rs/src/checker/generics/substitution.rs
-9	crates/phpstan-rs/src/checker/generics/variance.rs
 9	crates/phpstan-rs/src/checker/global_constants.rs
 9	crates/phpstan-rs/src/checker/impossible_instanceof.rs
 3	crates/phpstan-rs/src/checker/includes.rs
@@ -35,16 +31,13 @@
 3	crates/phpstan-rs/src/checker/internal_usage.rs
 15	crates/phpstan-rs/src/checker/narrowing.rs
 8	crates/phpstan-rs/src/checker/narrowing/assertions.rs
-28	crates/phpstan-rs/src/checker/noop.rs
 16	crates/phpstan-rs/src/checker/offset_assignment.rs
 8	crates/phpstan-rs/src/checker/oop.rs
 3	crates/phpstan-rs/src/checker/oop/enums.rs
 5	crates/phpstan-rs/src/checker/oop/method_overrides.rs
 12	crates/phpstan-rs/src/checker/phpdoc_type_compat.rs
-20	crates/phpstan-rs/src/checker/phpdoc_unresolvable.rs
 2	crates/phpstan-rs/src/checker/pipe_operator.rs
 1	crates/phpstan-rs/src/checker/property_type_too_wide.rs
-28	crates/phpstan-rs/src/checker/psr3.rs
 8	crates/phpstan-rs/src/checker/resolve.rs
 9	crates/phpstan-rs/src/checker/restricted_symbol_usage.rs
 4	crates/phpstan-rs/src/checker/return_type_too_wide.rs
@@ -57,7 +50,6 @@
 9	crates/phpstan-rs/src/checker/stmt/loops.rs
 1	crates/phpstan-rs/src/checker/stmt/new_exception_discarded.rs
 12	crates/phpstan-rs/src/checker/stmt/try_catch.rs
-23	crates/phpstan-rs/src/checker/strict_idioms.rs
 3	crates/phpstan-rs/src/checker/strict_rules.rs
 1	crates/phpstan-rs/src/checker/tests/accessory_and_refinement_types.rs
 2	crates/phpstan-rs/src/checker/tests/array_literals_and_shapes.rs
@@ -71,7 +63,6 @@
 4	crates/phpstan-rs/src/lsp/completion.rs
 1	crates/phpstan-rs/src/lsp/workspace_symbol.rs
 1	crates/phpstan-rs/src/project/architecture.rs
-19	crates/phpstan-rs/src/project/banned.rs
 1	crates/phpstan-rs/src/project/whole_program/dead_enum_cases.rs
 1	crates/phpstan-rs/src/project/whole_program/dead_members.rs
 5	crates/phpstan-rs/src/registry/class_info.rs
