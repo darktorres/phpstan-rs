@@ -485,11 +485,11 @@ through `check-project`.
   code; audit every walker that claims to see all code (see F27).
   (`0e294c5b`) Done in `8a5ece52`; no other Visitor skips hooks, parameters
   or attributes, and the hand-rolled walkers stay with F27.
-- [ ] **F30. A modulo by a negative divisor is `never`.**
+- [x] **F30. A modulo by a negative divisor is `never`.**
   `int<0, max> % -3` infers `never`; PHP gives a value in `[0, 2]`.
   `mod_int_range`'s range fallback uses the divisor's signed maximum
   (`r_max - 1`) where it needs its magnitude over both bounds.
-  (`b62a1131`)
+  (`b62a1131`) Done in `ff36a896`.
 - [ ] **F31. Bitwise operators on strings are typed `int`.** `$a ^ $b`,
   `$a | $b` and `$a & $b` over strings give a string in PHP (bytewise;
   `'a' ^ "\x02"` is `'c'`). `binary_operation_type`'s bitwise arm returns
