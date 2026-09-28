@@ -286,6 +286,19 @@ struct Resolver {
 }
 
 impl Resolver {
+    /// The trait names a trait-use block's clauses name.
+    fn trait_adaptations(&self, aliases: &mut [TraitAlias], precedences: &mut [TraitPrecedence]) {
+        for name in aliases.iter_mut().filter_map(|a| a.trait_name.as_mut()) {
+            self.class(name);
+        }
+        for precedence in precedences {
+            self.class(&mut precedence.trait_name);
+            for name in &mut precedence.instead_of {
+                self.class(name);
+            }
+        }
+    }
+
     fn class(&self, name: &mut QualifiedName) {
         name.resolved = if is_class_keyword(&name.written) {
             ResolvedName::Unresolved
@@ -436,6 +449,7 @@ impl VisitorMut for Resolver {
         {
             self.class(name);
         }
+        self.trait_adaptations(&mut class.trait_aliases, &mut class.trait_precedences);
         walk_class_decl_mut(self, class);
     }
 
@@ -443,6 +457,7 @@ impl VisitorMut for Resolver {
         for name in decl.implements.iter_mut().chain(decl.uses.iter_mut()) {
             self.class(name);
         }
+        self.trait_adaptations(&mut decl.trait_aliases, &mut decl.trait_precedences);
         walk_enum_decl_mut(self, decl);
     }
 

@@ -14,7 +14,7 @@ use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
-use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
+use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
@@ -333,6 +333,15 @@ impl ConstantReflection {
     pub fn provenance(&self) -> &Provenance {
         &self.provenance
     }
+}
+
+/// A trait method's alias from a trait-use block (`use T { m as n; }`):
+/// `trait_name` resolved, `None` when the clause names no trait.
+#[derive(Debug, Clone)]
+pub struct TraitAlias {
+    pub trait_name: Option<Arc<str>>,
+    pub method: Arc<str>,
+    pub alias: Arc<str>,
 }
 
 #[derive(Debug, Clone)]
@@ -1545,10 +1554,15 @@ impl ClassReflection {
         let trait_aliases: Vec<TraitAlias> = c
             .trait_aliases
             .iter()
-            .map(|a| TraitAlias {
-                trait_name: a.trait_name.as_ref().map(|t| intern(&ctx.resolve(t))),
-                method: a.method.clone(),
-                alias: a.alias.clone(),
+            .filter_map(|a| {
+                Some(TraitAlias {
+                    trait_name: a
+                        .trait_name
+                        .as_ref()
+                        .map(|t| intern(&ctx.resolve(&t.written))),
+                    method: a.method.clone(),
+                    alias: a.alias.clone()?,
+                })
             })
             .collect();
 
@@ -2141,10 +2155,15 @@ impl ClassReflection {
         let trait_aliases: Vec<TraitAlias> = e
             .trait_aliases
             .iter()
-            .map(|a| TraitAlias {
-                trait_name: a.trait_name.as_ref().map(|t| intern(&ctx.resolve(t))),
-                method: a.method.clone(),
-                alias: a.alias.clone(),
+            .filter_map(|a| {
+                Some(TraitAlias {
+                    trait_name: a
+                        .trait_name
+                        .as_ref()
+                        .map(|t| intern(&ctx.resolve(&t.written))),
+                    method: a.method.clone(),
+                    alias: a.alias.clone()?,
+                })
             })
             .collect();
 

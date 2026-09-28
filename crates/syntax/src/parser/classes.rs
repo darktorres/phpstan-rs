@@ -13,6 +13,7 @@ pub(crate) struct ClassBody {
     pub uses_spans: Vec<Span>,
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
     pub trait_aliases: Vec<TraitAlias>,
+    pub trait_precedences: Vec<TraitPrecedence>,
     pub resolved_trait_conflicts: Vec<Arc<str>>,
     pub enum_cases: Vec<EnumCase>,
 }
@@ -110,6 +111,7 @@ impl Parser {
             uses_spans,
             uses_doc_comments,
             trait_aliases,
+            trait_precedences,
             resolved_trait_conflicts,
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
@@ -143,6 +145,7 @@ impl Parser {
             uses_spans,
             uses_doc_comments,
             trait_aliases,
+            trait_precedences,
             resolved_trait_conflicts,
             enum_cases,
             doc_comment: None,
@@ -168,6 +171,7 @@ impl Parser {
         let mut uses_spans = Vec::new();
         let mut uses_doc_comments = Vec::new();
         let mut trait_aliases = Vec::new();
+        let mut trait_precedences = Vec::new();
         let mut resolved_trait_conflicts = Vec::new();
         let mut enum_cases = Vec::new();
 
@@ -210,9 +214,10 @@ impl Parser {
                     uses_doc_comments.push(doc.clone());
                 }
                 if self.check(&Token::LBrace) {
-                    let (aliases, resolved) = self.parse_trait_adaptations()?;
-                    trait_aliases.extend(aliases);
-                    resolved_trait_conflicts.extend(resolved);
+                    let adaptations = self.parse_trait_adaptations()?;
+                    trait_aliases.extend(adaptations.aliases);
+                    trait_precedences.extend(adaptations.precedences);
+                    resolved_trait_conflicts.extend(adaptations.mentioned);
                 } else {
                     self.expect_semicolon()?;
                 }
@@ -458,71 +463,69 @@ impl Parser {
             uses_spans,
             uses_doc_comments,
             trait_aliases,
+            trait_precedences,
             resolved_trait_conflicts,
             enum_cases,
         })
     }
 
-    /// The `{ ... }` conflict-resolution block after a `use A, B;` clause
-    /// (`use A, B { A::hello insteadof B; B::hello as helloB; }`) - each
-    /// adaptation is `(TraitName::)?method` followed by either
-    /// `insteadof TraitName, ...` (parsed and discarded - not modeled,
-    /// see `ClassDecl.trait_aliases`'s own doc comment for why) or
-    /// `as [visibility] [newName]` (only a real `newName` is captured;
-    /// `as public;`, changing visibility with no rename, has nothing to
-    /// register). Real PHP allows a bare `method as newName;` with no
-    /// `TraitName::` prefix when the name is unambiguous among the
-    /// traits actually used - `trait_name: None` here defers resolving
-    /// that ambiguity to `flatten_traits`, which already has the full,
-    /// registry-wide picture this parser doesn't.
-    pub(crate) fn parse_trait_adaptations(
-        &mut self,
-    ) -> Result<(Vec<TraitAlias>, Vec<Arc<str>>), ParseError> {
-        let mut aliases = Vec::new();
-        let mut resolved = Vec::new();
+    /// The `{ ... }` block after `use A, B`: `[Trait::]method insteadof
+    /// Other, ...;` and `[Trait::]method as [visibility] [alias];`. A bare
+    /// `method as ...` names no trait; flattening finds the one that has it.
+    pub(crate) fn parse_trait_adaptations(&mut self) -> Result<TraitAdaptations, ParseError> {
+        let mut out = TraitAdaptations::default();
         self.expect(&Token::LBrace)?;
         while !self.check(&Token::RBrace) && !self.at_eof() {
-            // The trait name before `::` can be fully qualified
-            // (`\Some\Trait::method insteadof ...`, a real, valid PHP
-            // shape) - `parse_qualified_name` handles that and degrades
-            // to a single bare segment for the (far more common)
-            // unqualified-trait or bare-method case identically to a
-            // plain `expect_ident`.
             let first = self.parse_qualified_name();
-            let (trait_name, method): (Option<Arc<str>>, Arc<str>) =
+            let (trait_name, method): (Option<QualifiedName>, Arc<str>) =
                 if self.eat(&Token::DoubleColon) {
-                    (Some(self.interner.str(&first)), self.expect_ident()?)
+                    (Some(self.qualified_name(&first)), self.expect_ident()?)
                 } else {
                     (None, self.interner.str(&first))
                 };
             if matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("insteadof")) {
                 self.skip();
-                self.parse_qualified_name();
+                let first_other = self.parse_qualified_name();
+                let mut instead_of = vec![self.qualified_name(&first_other)];
                 while self.eat(&Token::Comma) {
-                    self.parse_qualified_name();
+                    let other = self.parse_qualified_name();
+                    instead_of.push(self.qualified_name(&other));
                 }
-                resolved.push(method);
-            } else if self.eat(&Token::Keyword(Keyword::As)) {
-                if matches!(
-                    self.peek(),
-                    Token::Keyword(Keyword::Public | Keyword::Private | Keyword::Protected)
-                ) {
-                    self.skip();
-                }
-                if !self.check(&Token::Semicolon) {
-                    let alias = self.expect_ident()?;
-                    aliases.push(TraitAlias {
+                if let Some(trait_name) = trait_name {
+                    out.precedences.push(TraitPrecedence {
                         trait_name,
                         method: method.clone(),
-                        alias,
+                        instead_of,
                     });
                 }
-                resolved.push(method);
+                out.mentioned.push(method);
+            } else if self.eat(&Token::Keyword(Keyword::As)) {
+                let visibility = match self.peek() {
+                    Token::Keyword(Keyword::Public) => Some(Visibility::Public),
+                    Token::Keyword(Keyword::Protected) => Some(Visibility::Protected),
+                    Token::Keyword(Keyword::Private) => Some(Visibility::Private),
+                    _ => None,
+                };
+                if visibility.is_some() {
+                    self.skip();
+                }
+                let alias = if self.check(&Token::Semicolon) {
+                    None
+                } else {
+                    Some(self.expect_ident()?)
+                };
+                out.aliases.push(TraitAlias {
+                    trait_name,
+                    method: method.clone(),
+                    visibility,
+                    alias,
+                });
+                out.mentioned.push(method);
             }
             self.expect_semicolon()?;
         }
         self.expect(&Token::RBrace)?;
-        Ok((aliases, resolved))
+        Ok(out)
     }
 
     pub(crate) fn parse_class_decl(&mut self) -> Result<ClassDecl, ParseError> {
@@ -622,6 +625,7 @@ impl Parser {
             uses_spans,
             uses_doc_comments,
             trait_aliases,
+            trait_precedences,
             resolved_trait_conflicts,
             enum_cases,
         } = self.parse_class_body(class_is_readonly)?;
@@ -644,6 +648,7 @@ impl Parser {
             uses_spans,
             uses_doc_comments,
             trait_aliases,
+            trait_precedences,
             resolved_trait_conflicts,
             enum_cases,
             doc_comment,

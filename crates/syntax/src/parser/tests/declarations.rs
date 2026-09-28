@@ -211,9 +211,10 @@ fn a_trait_as_alias_clause_is_captured_in_the_ast() {
         panic!("expected ClassDecl");
     };
     assert_eq!(c.trait_aliases.len(), 1);
-    assert_eq!(c.trait_aliases[0].trait_name.as_deref(), Some("B"));
+    let trait_name = c.trait_aliases[0].trait_name.as_ref().unwrap();
+    assert_eq!(&*trait_name.written, "B");
     assert_eq!(c.trait_aliases[0].method, "hello".into());
-    assert_eq!(c.trait_aliases[0].alias, "helloB".into());
+    assert_eq!(c.trait_aliases[0].alias, Some("helloB".into()));
 }
 
 #[test]
@@ -231,9 +232,9 @@ fn a_bare_as_alias_clause_with_no_trait_qualifier_is_captured() {
         panic!("expected ClassDecl");
     };
     assert_eq!(c.trait_aliases.len(), 1);
-    assert_eq!(c.trait_aliases[0].trait_name, None);
+    assert!(c.trait_aliases[0].trait_name.is_none());
     assert_eq!(c.trait_aliases[0].method, "greet".into());
-    assert_eq!(c.trait_aliases[0].alias, "greetAlias".into());
+    assert_eq!(c.trait_aliases[0].alias, Some("greetAlias".into()));
 }
 
 #[test]
@@ -250,7 +251,12 @@ fn an_as_clause_that_only_changes_visibility_captures_no_alias() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert!(c.trait_aliases.is_empty());
+    assert_eq!(c.trait_aliases.len(), 1);
+    assert!(matches!(
+        c.trait_aliases[0].visibility,
+        Some(Visibility::Protected)
+    ));
+    assert!(c.trait_aliases[0].alias.is_none());
     assert_eq!(c.resolved_trait_conflicts, vec!["greet".to_string().into()]);
 }
 
@@ -268,6 +274,15 @@ fn an_insteadof_clause_records_its_method_as_a_resolved_conflict() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
+    assert_eq!(c.trait_precedences.len(), 1);
+    assert_eq!(&*c.trait_precedences[0].trait_name.written, "A");
+    assert_eq!(c.trait_precedences[0].method, "hello".into());
+    let instead_of: Vec<&str> = c.trait_precedences[0]
+        .instead_of
+        .iter()
+        .map(|q| &*q.written)
+        .collect();
+    assert_eq!(instead_of, ["B"]);
     assert_eq!(c.resolved_trait_conflicts, vec!["hello".to_string().into()]);
 }
 

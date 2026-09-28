@@ -489,18 +489,12 @@ pub struct ClassDecl {
     // PHPStan resolves that tag from the `TraitUse` statement's own doc
     // comment, not the class's top-of-class docblock.
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
-    // `use A, B { B::hello as helloB; }` - each `as`-clause that
-    // introduces a new name for an existing trait method (a
-    // visibility-only `as public;` with no new name isn't captured, since
-    // it doesn't need any registration). `insteadof` conflict-resolution
-    // clauses are parsed (so the file doesn't fail to parse) but not
-    // modeled here.
+    // `use A, B { B::hello as protected helloB; A::hi as private; }`: each
+    // `as` clause, with its visibility and new name.
     pub trait_aliases: Vec<TraitAlias>,
-    // Every method/property name mentioned in ANY adaptation clause at
-    // all (`insteadof` or `as`, including a visibility-only `as public;`)
-    // - the trait-conflict check needs this to know a name the class
-    // author already explicitly addressed, even though this project
-    // doesn't model *which* trait `insteadof` actually picked.
+    // `use A, B { B::hello insteadof A; }`: each `insteadof` clause.
+    pub trait_precedences: Vec<TraitPrecedence>,
+    // Every method name an adaptation clause mentions.
     pub resolved_trait_conflicts: Vec<Arc<str>>,
     // `case` members, which PHP parses in any class-like body but only
     // allows in an enum (`enum.caseOutsideOfEnum`).
@@ -547,6 +541,7 @@ pub struct EnumDecl {
     // See `ClassDecl::uses_doc_comments`'s own doc comment.
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
     pub trait_aliases: Vec<TraitAlias>,
+    pub trait_precedences: Vec<TraitPrecedence>,
     pub resolved_trait_conflicts: Vec<Arc<str>>,
     // The enum's own `/** ... */` doc comment, if any - needed
     // only to reject a stray `@template` tag (enums can't be generic).
@@ -556,12 +551,31 @@ pub struct EnumDecl {
     pub span: Span,
 }
 
-// `use A, B { B::hello as helloB; }` - see `ClassDecl.trait_aliases`.
+/// `[Trait::]method as [visibility] [alias];` in a trait-use block.
 #[derive(Debug, Clone)]
 pub struct TraitAlias {
-    pub trait_name: Option<Arc<str>>,
+    pub trait_name: Option<QualifiedName>,
     pub method: Arc<str>,
-    pub alias: Arc<str>,
+    pub visibility: Option<Visibility>,
+    pub alias: Option<Arc<str>>,
+}
+
+/// `Trait::method insteadof Other, ...;` in a trait-use block: `trait_name`'s
+/// `method` wins over the one each trait in `instead_of` has.
+#[derive(Debug, Clone)]
+pub struct TraitPrecedence {
+    pub trait_name: QualifiedName,
+    pub method: Arc<str>,
+    pub instead_of: Vec<QualifiedName>,
+}
+
+/// A trait-use block's adaptations.
+#[derive(Debug, Clone, Default)]
+pub struct TraitAdaptations {
+    pub aliases: Vec<TraitAlias>,
+    pub precedences: Vec<TraitPrecedence>,
+    /// Every method name a clause mentions.
+    pub mentioned: Vec<Arc<str>>,
 }
 
 /// One argument in a call's own argument list - `name` is

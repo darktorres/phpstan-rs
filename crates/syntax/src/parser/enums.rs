@@ -80,6 +80,7 @@ impl Parser {
         let mut uses_spans = Vec::new();
         let mut uses_doc_comments = Vec::new();
         let mut trait_aliases = Vec::new();
+        let mut trait_precedences = Vec::new();
         let mut resolved_trait_conflicts = Vec::new();
 
         let mut pending_member: Option<crate::parser::MemberStart> = None;
@@ -115,9 +116,10 @@ impl Parser {
                     uses_doc_comments.push(doc.clone());
                 }
                 if self.check(&Token::LBrace) {
-                    let (aliases, resolved) = self.parse_trait_adaptations()?;
-                    trait_aliases.extend(aliases);
-                    resolved_trait_conflicts.extend(resolved);
+                    let adaptations = self.parse_trait_adaptations()?;
+                    trait_aliases.extend(adaptations.aliases);
+                    trait_precedences.extend(adaptations.precedences);
+                    resolved_trait_conflicts.extend(adaptations.mentioned);
                 } else {
                     self.expect_semicolon()?;
                 }
@@ -248,6 +250,7 @@ impl Parser {
             uses_spans,
             uses_doc_comments,
             trait_aliases,
+            trait_precedences,
             resolved_trait_conflicts,
             doc_comment,
             // Overwritten by `parse_statement`, the only caller that saw
