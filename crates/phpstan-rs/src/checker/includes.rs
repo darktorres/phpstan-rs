@@ -16,7 +16,7 @@ use crate::checker::{Checker, Locals};
 use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
+use syntax::visit::{Visitor, any_child_expr, walk_stmt, walk_stmts};
 use types::Type;
 
 const GUARD_FUNCTIONS: [&str; 6] = [
@@ -46,50 +46,56 @@ fn class_constant_key(class: &str, constant: &str) -> String {
 /// (`Class::NAME` lowercased on the class). A name declared twice is
 /// dropped.
 pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, Expr> {
-    let mut found: FxHashMap<String, Option<Expr>> = FxHashMap::default();
-    let mut add = |key: String, value: &Expr| {
-        found
+    let mut initializers = Initializers(FxHashMap::default());
+    walk_stmts(&mut initializers, program);
+    initializers
+        .0
+        .into_iter()
+        .filter_map(|(k, v)| Some((k, v?)))
+        .collect()
+}
+
+/// Each constant's initializer, `None` once a name is declared twice.
+/// Function bodies are not entered, and a `define()` counts only as a
+/// statement's own expression.
+struct Initializers(FxHashMap<String, Option<Expr>>);
+
+impl Initializers {
+    fn add(&mut self, key: String, value: &Expr) {
+        self.0
             .entry(key)
             .and_modify(|v| *v = None)
             .or_insert_with(|| Some(value.clone()));
-    };
-    let mut stack: Vec<&Stmt> = program.iter().rev().collect();
-    while let Some(stmt) = stack.pop() {
+    }
+}
+
+impl<'ast> Visitor<'ast> for Initializers {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match &stmt.kind {
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
-                    add(short_name(&c.name).to_string(), &c.value);
-                }
-            }
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                for k in &e.consts {
-                    add(class_constant_key(class_decl_name(e), &k.name), &k.value);
+                    self.add(short_name(&c.name).to_string(), &c.value);
                 }
             }
             StmtKind::ClassDecl(c) => {
                 for k in &c.consts {
-                    add(class_constant_key(class_decl_name(c), &k.name), &k.value);
+                    self.add(class_constant_key(class_decl_name(c), &k.name), &k.value);
                 }
             }
             StmtKind::FunctionDecl(_) => {}
-            _ => {
-                for e in stmt_exprs(stmt) {
-                    if let ExprKind::Call(callee, args) = &e.kind
-                        && callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
-                        && let [name, value, ..] = args.as_slice()
-                        && let ExprKind::Literal(Literal::String(name)) = &name.value.kind
-                    {
-                        add(short_name(&name.to_str_lossy()).to_string(), &value.value);
-                    }
-                }
-                stack.extend(child_stmts(stmt).into_iter().rev());
-            }
+            _ => walk_stmt(self, stmt),
         }
     }
-    found
-        .into_iter()
-        .filter_map(|(k, v)| Some((k, v?)))
-        .collect()
+
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        if let ExprKind::Call(callee, args) = &e.kind
+            && callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("define"))
+            && let [name, value, ..] = args.as_slice()
+            && let ExprKind::Literal(Literal::String(name)) = &name.value.kind
+        {
+            self.add(short_name(&name.to_str_lossy()).to_string(), &value.value);
+        }
+    }
 }
 
 /// `(construct as written, identifier prefix)` for an include kind.
@@ -359,24 +365,28 @@ enum IncludeCall<'e> {
 }
 
 fn visit_guard_args_in_stmt(stmt: &Stmt, out: &mut dyn FnMut(IncludeCall)) {
-    match &stmt.kind {
-        StmtKind::FunctionDecl(f) => f.body.iter().for_each(|s| visit_guard_args_in_stmt(s, out)),
-        StmtKind::ClassDecl(c) => {
-            for m in &c.methods {
-                m.function
-                    .body
-                    .iter()
-                    .for_each(|s| visit_guard_args_in_stmt(s, out));
+    GuardArgs(out).visit_stmt(stmt);
+}
+
+/// Hands every statement expression, in function and method bodies too,
+/// to `visit_guard_args_in_expr`.
+struct GuardArgs<'o>(&'o mut dyn FnMut(IncludeCall));
+
+impl<'ast> Visitor<'ast> for GuardArgs<'_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            StmtKind::FunctionDecl(f) => walk_stmts(self, &f.body),
+            StmtKind::ClassDecl(c) => {
+                for m in &c.methods {
+                    walk_stmts(self, &m.function.body);
+                }
             }
+            _ => walk_stmt(self, stmt),
         }
-        _ => {
-            for e in stmt_exprs(stmt) {
-                visit_guard_args_in_expr(e, out);
-            }
-            for child in child_stmts(stmt) {
-                visit_guard_args_in_stmt(child, out);
-            }
-        }
+    }
+
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        visit_guard_args_in_expr(e, self.0);
     }
 }
 

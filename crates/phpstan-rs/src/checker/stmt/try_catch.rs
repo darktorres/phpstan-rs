@@ -4,6 +4,7 @@ use crate::checker::{
 };
 use syntax::ast::*;
 use syntax::token::Span;
+use syntax::visit::{Visitor, any_expr_in_scope, opens_scope, walk_expr, walk_stmt, walk_stmts};
 use types::Type;
 
 impl<'a> Checker<'a> {
@@ -407,45 +408,56 @@ impl<'a> Checker<'a> {
 /// Every `throw` in `stmts` with whether it's a direct statement of
 /// `stmts` itself, not reaching into nested functions, classes, or
 /// nested `catch` clauses (checked on their own).
-fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Span, bool)>) {
-    fn in_expr<'e>(e: &'e Expr, out: &mut Vec<(&'e Expr, Span, bool)>) {
-        if let ExprKind::Throw(inner) = &e.kind {
-            out.push((inner, e.span, false));
-        }
-        for child in syntax::visit::child_exprs(e) {
-            in_expr(child, out);
-        }
-    }
-    for stmt in stmts {
+fn collect_throws(stmts: &[Stmt]) -> Vec<(&Expr, Span, bool)> {
+    let mut throws = Throws {
+        out: Vec::new(),
+        top: true,
+    };
+    walk_stmts(&mut throws, stmts);
+    throws.out
+}
+
+struct Throws<'s> {
+    out: Vec<(&'s Expr, Span, bool)>,
+    // Whether the statement being visited is directly in the list.
+    top: bool,
+}
+
+impl<'s> Visitor<'s> for Throws<'s> {
+    fn visit_stmt(&mut self, stmt: &'s Stmt) {
+        let top = std::mem::replace(&mut self.top, false);
         match &stmt.kind {
             StmtKind::Throw(e) => {
-                out.push((e, stmt.span, top));
-                in_expr(e, out);
+                self.out.push((e, stmt.span, top));
+                self.visit_expr(e);
             }
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
             StmtKind::Try { body, finally, .. } => {
-                collect_throws(body, false, out);
+                walk_stmts(self, body);
                 if let Some(finally) = finally {
-                    collect_throws(finally, false, out);
+                    walk_stmts(self, finally);
                 }
             }
-            _ => {
-                for e in syntax::visit::stmt_exprs(stmt) {
-                    in_expr(e, out);
-                }
-                for child in syntax::visit::child_stmts(stmt) {
-                    collect_throws(std::slice::from_ref(child), false, out);
-                }
-            }
+            _ => walk_stmt(self, stmt),
+        }
+        self.top = top;
+    }
+
+    fn visit_expr(&mut self, e: &'s Expr) {
+        if let ExprKind::Throw(inner) = &e.kind {
+            self.out.push((inner, e.span, false));
+        }
+        if !opens_scope(e) {
+            walk_expr(self, e);
         }
     }
 }
 
 fn mentions_variable(e: &Expr, name: &str) -> bool {
-    matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name)
-        || syntax::visit::child_exprs(e)
-            .into_iter()
-            .any(|child| mentions_variable(child, name))
+    any_expr_in_scope(
+        e,
+        |e| matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name),
+    )
 }
 
 const BASE_EXCEPTIONS: [&str; 3] = ["Throwable", "Exception", "Error"];
@@ -455,8 +467,7 @@ impl<'a> Checker<'a> {
     /// exception on as `X`'s previous exception, and a catch of a base
     /// exception type with no unconditional rethrow.
     fn check_catch_hygiene(&mut self, c: &CatchClause) {
-        let mut throws = Vec::new();
-        collect_throws(&c.body, true, &mut throws);
+        let throws = collect_throws(&c.body);
         if let Some(var) = &c.var {
             for (thrown, span, _) in &throws {
                 let ExprKind::New(class, args) = &thrown.kind else {

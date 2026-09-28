@@ -43,7 +43,7 @@ use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
 use syntax::intern::intern;
 use syntax::token::Span;
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{any_child_expr, any_child_stmt};
 use types::Type;
 
 /// One real, resolved call target a declaration's own effect-freedom is
@@ -366,9 +366,9 @@ fn stmt_disqualifies(
         }),
         _ => false,
     };
-    own || child_stmts(stmt)
-        .into_iter()
-        .any(|s| stmt_disqualifies(s, declaring_class, registry, deps))
+    own || any_child_stmt(stmt, |s| {
+        stmt_disqualifies(s, declaring_class, registry, deps)
+    })
 }
 
 fn expr_disqualifies(
@@ -477,9 +477,7 @@ fn expr_disqualifies(
             };
             resolve_new(&target_class, registry, deps)
         }
-        _ => child_exprs(e)
-            .into_iter()
-            .any(|c| expr_disqualifies(c, declaring_class, registry, deps)),
+        _ => any_child_expr(e, |c| expr_disqualifies(c, declaring_class, registry, deps)),
     }
 }
 
@@ -797,9 +795,10 @@ fn collect_stmt_impure_points(
         }
         _ => {}
     }
-    for child in child_stmts(stmt) {
+    any_child_stmt(stmt, |child| {
         collect_stmt_impure_points(child, declaring_class, registry, out);
-    }
+        false
+    });
 }
 
 fn collect_expr_impure_points(
@@ -852,9 +851,10 @@ fn collect_expr_impure_points(
                 description: construct,
                 certain: true,
             });
-            for child in child_exprs(e) {
+            any_child_expr(e, |child| {
                 collect_expr_impure_points(child, declaring_class, registry, out);
-            }
+                false
+            });
         }
         ExprKind::Assign(lhs, rhs) | ExprKind::CompoundAssign(_, lhs, rhs) => {
             if property_write_target(lhs) {
@@ -998,15 +998,16 @@ fn collect_expr_impure_points(
         // children` unconditionally after the match, the way `stmt_
         // children` safely does in `collect_stmt_impure_points` just
         // above, would double-visit (and so double-report) every one of
-        // those same children here, since `child_exprs` returns a
+        // those same children here, since `any_child_expr` reaches a
         // matched arm's own sub-expressions too, not just an unhandled
         // arm's. Only reachable for anything *not* explicitly matched
         // above (`BinaryOp`, `Ternary`, ...), exactly like `expr_
         // disqualifies`'s own `_` arm.
         _ => {
-            for child in child_exprs(e) {
+            any_child_expr(e, |child| {
                 collect_expr_impure_points(child, declaring_class, registry, out);
-            }
+                false
+            });
         }
     }
 }
