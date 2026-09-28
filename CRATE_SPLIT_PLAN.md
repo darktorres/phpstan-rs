@@ -3818,7 +3818,15 @@ building on the previous one:
     every iteration makes holds after the loop: when a `foreach` body's
     `else` throws for `$number <= $compareTo`, `$compareTo` is `int<min,
     0>` after it, so a second loop's `$number > $compareTo` is
-    `greater.alwaysTrue` (the rules oracle's `bug-7531.php`).
+    `greater.alwaysTrue` (the rules oracle's `bug-7531.php`). Appendix H's
+    `loop-generalize` is this item's nsrt count (232 mismatches, 66
+    files): counters (`for-loop-i-type.php`, `bug-12163.php`,
+    `bug-2835.php`), conditional appends that make an optional-key list
+    rather than a union of lists (`constant-array-optional-set.php`,
+    `bug-9753.php`, `bug-14297.php`), nested offset writes that keep a
+    non-empty optional-key shape (`bug-14551.php`, `bug-13786.php`,
+    `bug-6173.php`), constant floats (`bug-5309.php`) and appends that
+    generalize to a list (`bug-13705.php`, `bug-7996.php`).
   - **For** follows `ForHandler`:
     - a loop whose first condition is `true` runs at least once: after
       `for ($i = 0; $i < 10; $i++) { $x = 1; }`, `echo $x` is
@@ -3836,7 +3844,9 @@ building on the previous one:
       wrong value (nsrt `unsealed-array-shapes.php`);
     - the body sees the iteratee narrowed by `!== []`, and the post-loop
       scope merges `=== [] || is_object()`; today `$arr` in the body is
-      `array<string, int>`, not non-empty;
+      `array<string, int>`, not non-empty (nsrt `bug-13312.php`,
+      `bug-13270a.php`, `foreach-with-specified-key-type.php`), and a
+      `for` loop over `count($arr)` sees it non-empty the same way;
     - `$arr[$k]` is the value type in the body, through the
       `OriginalForeachKey`/`OriginalForeachValue` virtual keys;
     - after the loop, the iteratee's value and key types are rewritten from
