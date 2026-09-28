@@ -907,7 +907,12 @@ corpus, type, baseline, performance and build-time gates run locally
     - `cargo xtask rules-oracle` (from Stage E) runs the phar and
       phpstan-rs over PHPStan's own rule-test data
       (`vendor/phpstan-src/tests/PHPStan/Rules/**/data`, 2,936 files, the
-      five PHPStan can't parse excluded), level 10, PHP 8.5, and matches
+      five PHPStan can't parse excluded), level 10, PHP 8.5 given to the
+      phar as the range `phpVersion: {min: 80500, max: 80599}` (a single
+      `phpVersion` leaves `PHP_VERSION_ID` unbounded in PHPStan, so
+      phpstan-rs's `PHP_VERSION_ID >= 80400` is `greaterOrEqual.alwaysTrue`
+      where the phar is silent: 6 of the first run's phpstan-rs-only
+      findings), and matches
       findings by file and identifier within three lines, or within one
       declaration for the signature-level identifiers (`missingType.*`,
       which PHPStan puts on the declaration's line and phpstan-rs on the
@@ -3308,7 +3313,11 @@ building on the previous one:
       if ($this->hasChanged)` reported `if.alwaysFalse`: ten in rector's rules
       (e.g. `rector/rules/Arguments/Rector/ClassMethod/ArgumentAdderRector.php:120`),
       none of which the oracle reports. Fixed first: before D5, a call on
-      `$this` not known to be pure drops the `$this->…` narrowing entries.
+      `$this` not known to be pure drops the `$this->…` narrowing entries,
+      and a static call drops `self::$…`/`static::$…` ones: after
+      `self::$i = new H(); self::bazz();` where `bazz()` resets it,
+      `self::$i?->foo()` is `nullsafe.neverNull` today (the rules oracle's
+      `bug-8523*.php`).
       With invalidation in place, the constant-comparison rules' property
       guards that compensate for it are deleted: `expr_reads_a_property`
       (the loose and numeric comparisons in `probe_checks.rs`) and
@@ -4006,6 +4015,15 @@ fixture:
     (`unset.variable`), `unset()` of an offset on a non-array
     (`unset.offset`), and a statement with no effect for `new class {};`
     (`expr.resultUnused`) are unreported today;
+  - a call to a method declared `@phpstan-impure`, abstract or on an
+    interface has effects: `X::impureFunc();`, `self::fooStaticMethod();`
+    of an interface and `$foo::doFoo();` are `staticMethod.resultUnused`
+    today (8 rules-oracle findings,
+    `call-to-static-method-without-impure-points.php`,
+    `call-interface-methods.php`, `call-static-methods.php`),
+    and an interface or abstract method marked `@phpstan-impure` is not
+    `impureMethod.pure` (it has no body to judge; 7 findings,
+    `bug-5984.php`, `bug-6702.php`, `strict-comparison.php`);
   - `new static(…);` as a statement is not `new.resultUnused`: a subclass's
     constructor may have effects (13 of the rules oracle's 19
     phpstan-rs-only `new.resultUnused`, in `instantiation.php` and
@@ -4171,6 +4189,24 @@ fixture:
     Box<TKey>)` and `FooBoxedArray<T>` inside the class's own `T` are
     `generics.notSubtype` today (8 rules-oracle findings,
     `bug-11776.php`, `bug-10622b.php`);
+  - a template referenced inside a callable parameter's signature is in a
+    parameter: `@param callable(T, K): iterable<L, U> $fn` references `L`,
+    `method.templateTypeNotInParameter` today (7 rules-oracle findings,
+    `bug-10297.php`, `bug-8074.php`, `bug-13247.php`, `yield.php`);
+  - an assertion of a template type narrows (`@phpstan-assert T $value` on
+    `mixed` is `assert.alreadyNarrowedType` today,
+    `assert-unresolved-generic.php`, `bug-10573.php`);
+  - a covariant template may type a property that can't be written from
+    outside after construction (readonly, `private(set)`, a class marked
+    `@immutable`/`@readonly`): `public $value` typed `Value` in an
+    `@immutable` class is `generics.variance` "input (parameter) position"
+    today, and the message names a property, not a parameter
+    (`bug-13049.php`, `bug-9153.php`, `bug-12964.php`);
+  - imports are per namespace block: repeating `use X\Y;` in a second
+    `namespace N;` block, and `use \stdClass;` in the global namespace
+    (a PHP warning, "no effect"), are `use.nameInUse` today (7 findings,
+    `repeated-namespaces.php`, `repeated-braced-namespaces.php`,
+    `bug-15215.php`);
   - a template bound is supported when `TemplateTypeCheck` lists its type:
     `self` (an object type) and `key-of<…>` are, and are
     `generics.notSupportedBound` today (15 rules-oracle findings,
@@ -4262,7 +4298,13 @@ fixture:
   - a concrete function with an empty body still checks its `@throws`:
     `/** @throws \Exception */ function ex(): void {}` isn't
     `throws.unusedType` today (the empty-body exemption is for abstract and
-    interface methods);
+    interface methods), while a call to a method without `@throws` is an
+    implicit throw point that satisfies it (`exceptions.implicitThrows`,
+    on by default): `@throws \Exception` over `$this->doBar();` is
+    `throws.unusedType` today, as is one over an immediately called arrow
+    function that throws (5 rules-oracle findings,
+    `too-wide-throws-explicit.php`, `too-wide-throws-method.php`,
+    `immediately-called-arrow-function.php`);
   - a `catch` its `try` can't reach is `catch.neverThrown` (from D2's
     throw points): `try { $q = 1; } catch (\Throwable $e) {}` and a
     `catch (\LogicException)` around a call declared `@throws
