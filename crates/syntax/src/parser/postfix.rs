@@ -17,33 +17,25 @@ impl Parser {
                 Token::Arrow | Token::NullsafeArrow => {
                     let nullsafe = matches!(self.peek(), Token::NullsafeArrow);
                     self.skip();
-                    // `$obj->{expr}` - a fully dynamic property/method
-                    // name, computed from an arbitrary expression rather
-                    // than a fixed identifier. `$obj->${expr}` and
-                    // `$obj->$$expr` (the name comes from a variable-
-                    // variable instead of a plain `$var`) are treated the
-                    // same way - the exact double-indirection isn't
-                    // modeled (the inner variable's own name, not the
-                    // variable *it* names, ends up as the computed
-                    // expression) - a real, disclosed simplification, but
-                    // a plain `$obj->$var` (below) is not: `$var`'s own
-                    // runtime value is always the real member name, so
-                    // it gets a real `Variable` sub-expression here too,
-                    // not just its own declared name as a bare string.
-                    let dynamic_name =
-                        if self.check(&Token::LBrace) || self.check(&Token::DollarBrace) {
-                            self.skip();
-                            let e = self.parse_expression()?;
-                            self.expect(&Token::RBrace)?;
-                            Some(e)
-                        } else if self.check(&Token::Dollar) {
-                            self.skip();
-                            Some(self.parse_primary()?)
-                        } else if matches!(self.peek(), Token::Variable(_)) {
-                            Some(self.parse_primary()?)
-                        } else {
-                            None
-                        };
+                    // A computed member name: `$obj->{expr}` is `expr`,
+                    // `$obj->$var` the value of `$var`, `$obj->$$var` and
+                    // `$obj->${expr}` the value of the variable they name.
+                    let dynamic_name = if self.check(&Token::LBrace) {
+                        self.skip();
+                        let e = self.parse_expression()?;
+                        self.expect(&Token::RBrace)?;
+                        Some(e)
+                    } else if self.check(&Token::DollarBrace) {
+                        let brace_start = self.current_pos();
+                        self.skip();
+                        let e = self.parse_expression()?;
+                        self.expect(&Token::RBrace)?;
+                        Some(self.expr(ExprKind::DynamicVariable(Box::new(e)), brace_start))
+                    } else if matches!(self.peek(), Token::Dollar | Token::Variable(_)) {
+                        Some(self.parse_primary()?)
+                    } else {
+                        None
+                    };
                     if let Some(name_expr) = dynamic_name {
                         expr = if self.check(&Token::LParen) {
                             let (args, is_fcc) = self.parse_args()?;

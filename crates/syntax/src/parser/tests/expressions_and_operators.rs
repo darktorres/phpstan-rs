@@ -1082,3 +1082,30 @@ fn array_cast_parses() {
     };
     assert!(matches!(&rhs.kind, ExprKind::Cast(CastSpelling::Array, _)));
 }
+
+#[test]
+fn a_variable_variable_member_name_keeps_both_levels_of_indirection() {
+    let program = parse(
+        r#"<?php
+            $obj->$$name;
+            $obj->${'pick'};
+            $obj->{'pick'};
+        "#,
+    );
+    let name_of = |i: usize| match &program[i].kind {
+        StmtKind::Expression(Expr {
+            kind: ExprKind::DynamicPropertyAccess(_, name),
+            ..
+        }) => &name.kind,
+        other => panic!("expected a dynamic property access, got {other:?}"),
+    };
+    assert!(matches!(
+        name_of(0),
+        ExprKind::DynamicVariable(inner) if matches!(inner.kind, ExprKind::Variable(_))
+    ));
+    assert!(matches!(
+        name_of(1),
+        ExprKind::DynamicVariable(inner) if matches!(inner.kind, ExprKind::Literal(_))
+    ));
+    assert!(matches!(name_of(2), ExprKind::Literal(_)));
+}
