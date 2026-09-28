@@ -1377,7 +1377,7 @@ Follow-ups:
   `argument.type` with `mixed`, and `match.unhandled` on an exhaustive
   `match` over it, 12 findings that naming the enum's file too removes.
   PHPStan's autoloader covers the root package. The corpus oracle passes
-  phpstan-rs the files by name, and at `76e738b4` about 1,300 of its 1,855
+  phpstan-rs the files by name, and at `76e738b4` 1,253 of its 1,855
   phpstan-rs-only `class.notFound` name a `Piwigo\` class.
 - **A package's bundled `vendor/` is context.** `rector/rector` and
   `symplify/easy-coding-standard` autoload only a `bootstrap.php` that
