@@ -4855,7 +4855,14 @@ fixture:
     shadowing a parameter (`callable-type-predicate-rule.php`);
   - `@var` above `global $x;` and `static $x = 1;` sets the variable's
     type; it is `varTag.nativeType` against the default today
-    (`bug-4500.php`, `invalid-var-tag-type.php`);
+    (`bug-4500.php`, `invalid-var-tag-type.php`). A `@var` is checked
+    against the native type wherever it applies: a nameless one above
+    `return` (`/** @var list<string> */ return [1 => 'b', 2 => 'c'];`,
+    `bug-12708.php`, 4), above `??=` and `.=` of a `void` call
+    (`wrong-variable-name-var-assign-op.php`), and above a closure
+    (`bug-11535.php`), all unreported today; a named one above a
+    destructuring whose native type decides is `varTag.nativeType`, not
+    `varTag.type` (`wrong-var-native-type.php:109`);
   - `#[\Override]` on a trait member is checked in each host: a trait
     property overriding the host's parent's is `property.override` "no
     matching parent property" today (`property-override-attr.php`);
@@ -5070,6 +5077,12 @@ fixture:
     function that throws (5 rules-oracle findings,
     `too-wide-throws-explicit.php`, `too-wide-throws-method.php`,
     `immediately-called-arrow-function.php`);
+  - a conditional `@throws ($x is 0 ? Exception : void)` resolves at each
+    call: `inverse(0)` under `@throws void` is `throws.void`, through
+    function, method, static and constructor calls, nested and inherited
+    ones, unreported today (`conditional-throws-function.php`,
+    `conditional-throws-method.php`, 12), as is `array_combine()` of
+    `mixed` arrays throwing `ValueError` (`bug-13642.php`);
   - a `catch` its `try` can't reach is `catch.neverThrown` (from D2's
     throw points): `try { $q = 1; } catch (\Throwable $e) {}` and a
     `catch (\LogicException)` around a call declared `@throws
