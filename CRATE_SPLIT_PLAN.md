@@ -71,6 +71,10 @@ L0  syntax        typed AST with NodeIds, lexer (returns warnings), parser,
                   coercions, accessory types, ExtensionTypeData, PhpVersion(s),
                   float formatting
     stub-sources  embedded stub sources + checked-in generated symbol index
+    crash-context panic isolation: the hook, `isolated`, InternalError,
+                  the Reporter trait                              (backtrace)
+    pcre          PCRE2 behind a safe API, knowing nothing of PHP (pcre2-sys)
+    crash-sys     the crash reporter's process FFI                (no deps)
 L1  phpdoc        the single PHPDoc grammar -> TypeNode AST; DocBlock  (syntax)
     sql           standalone SQL reflection with its own column-type model:
                   config section, DDL schema, live reflector (DB drivers,
@@ -97,24 +101,31 @@ L4  analyser      engine: holder scope, ExprHandlers, results, TypeSpecifier,
                   Emits nothing
                                     (reflection and below; no composer, no I/O)
 L5  builtins      = phpstan-src/src/Type/Php: always registered, can't be
-                  switched off; incl. regex + PCRE validation (`pcre-validate`)
-                  and the date parser                             (analyser)
+                  switched off; incl. regex + PCRE validation (`pcre-validate`,
+                  over `pcre`) and the date parser                (analyser)
     rules         phpstan-src/src/Rules equivalents + project-level
                   collector rules                                 (analyser,
                   builtins)
-    ext-*         one crate per mirrored package (list below)     (analyser,
-    builtins, rules, sql)
+    ext-*         one crate per mirrored package (list below)
+                                    (analyser, builtins, rules, sql)
 L6  project       Session, SessionBuilder (generic registrations, no ext-*
                   deps), AnalysisResult, result finalizer, VFS, result
                   cache, dependency graph, LSP-facing indexes     (analyser)
     testing       RuleTestCase / TypeInferenceTestCase / LevelsTestCase /
                   Integration / codemod harness + libtest-mimic runner (project)
 L7  app           composition root: registers builtins + rules + every ext-*,
-                  ErrorFormatter set; `run(args, extra)`          (project, all
-                  L5)
+                  ErrorFormatter set, crash reporting; `run(args, extra)`
+                                    (project, all L5, crash-sys)
     lsp           protocol and features over Session + observers  (project)
-L8  phpstan-rs    bin: clap global flags + `--set`, calls app::run
+L8  phpstan-rs    bin: clap global flags + `--set`, calls app::run, or
+                  lsp's entry point with app's registrations      (app, lsp)
 ```
+
+`crash-context`, `pcre` and `crash-sys` come from the sibling plans
+(`CRASH_REPORTING_PLAN.md` §5, `UNSAFE_PLAN.md`): the engine crates and
+`project` call `crash-context`, `builtins` alone links `pcre` (optionally, under
+`pcre-validate`), and `app` alone links `crash-sys` (under its
+`crash-reporting` feature).
 
 **L5 sub-DAG.** `builtins ← rules ← ext-*`. An `ext-*` crate may depend on
 `analyser`, `builtins`, `rules`, `reflection` and `sql`, and never on
@@ -181,17 +192,19 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 - **Lints.** `[workspace.lints]`, with every member setting
   `[lints] workspace = true`, active from the commit that extracts each
   crate:
-  - `unreachable_pub`, `unsafe_code` and `rustdoc::broken_intra_doc_links`
-    at `deny` (with a scoped `allow` on the PCRE2 FFI module);
+  - `unreachable_pub` and `rustdoc::broken_intra_doc_links` at `deny`;
+  - `unsafe_code` at `forbid` in every crate but the two FFI crates, `pcre`
+    and `crash-sys`, whose each `unsafe` block carries a clippy-checked
+    `// SAFETY:` comment (`UNSAFE_PLAN.md`); no `allow(unsafe_code)` anywhere;
   - `clippy::print_stdout` / `print_stderr` at `deny` in every library
     crate;
   - `missing_docs` on the API crates (`reflection`, `analyser`, `project`,
     `testing`).
 - **Features.**
-  - `pcre-validate` lives in `builtins` with no default. The bin declares
-    `default = ["pcre-validate"]` and forwards it. Tests that need real
-    PCRE2 are `#[cfg(feature = "pcre-validate")]`, with complements for
-    the disabled path.
+  - `pcre-validate` lives in `builtins` with no default, and links `pcre`.
+    The bin declares `default = ["pcre-validate"]` and forwards it. Tests that
+    need real PCRE2 are `#[cfg(feature = "pcre-validate")]`, with complements
+    for the disabled path.
   - `fuzzing` lives in `syntax`.
   - `hotpath`/`hotpath-alloc` are declared only by the bin. Other crates
     take a plain `hotpath` dependency; macro behaviour follows the hotpath
@@ -7482,7 +7495,10 @@ moves in the phase named.
 | var_tag_types | analyser (native_expr_type → native_type_of) + rules::phpdoc (VarTag checks) | D5/E3e |
 | whole_program/* | rules (collector rules) | E1 |
 | access_attributes | ext-language-extensions; TEST_BASE_CLASSES → test-framework hook (ext-phpunit / ext-codeception) | E4 |
-| tests/cli.rs, version.rs, lsp_exit_code.rs | bin package | B1 |
+| tests/cli.rs, version.rs, lsp_exit_code.rs, common | bin package | B1 |
+| tests/scaling.rs | syntax (a test over `syntax::parse`; F4 deletes `check`) | F4 |
+| tests/stub_index.rs | reflection (§3.4's regeneration test) | C10 |
+| tests/fixtures.rs (the harness) | testing (the runner); each owner's `tests/fixtures.rs` calls it | G1/G2 |
 | benches/vendored_corpus.rs | project/benches | G2 |
 | fuzz targets | lex_parse / token_stream_parse → syntax; parse_type_string → phpdoc; structured_php → project | B3/B5/G2 |
 | examples/stress*.php | fixtures or deleted | A2 |
@@ -7608,7 +7624,9 @@ its owner. Non-Registry keys follow the table.
 | imbl | syntax (name resolution's `use` map); analyser (holder maps); reflection only if its snapshots use it |
 | indexmap | reflection |
 | md5 | reflection (anonymous-class naming) |
-| pcre2-sys | builtins (`pcre-validate`) |
+| pcre2-sys | pcre, which `builtins` links under `pcre-validate` (`UNSAFE_PLAN.md`) |
+| backtrace | crash-context |
+| the crash reporter's (sentry and the rest `CRASH_REPORTING_PLAN.md` lists) | app, under `crash-reporting`; crash-sys |
 | rayon | project; reflection while it indexes stubs and runs purity in parallel (decided in C5) |
 | regex | config (globs), app, lsp (reflection uses none) |
 | roxmltree | builtins (xml validators) |
