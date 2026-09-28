@@ -48,15 +48,8 @@ pub(crate) fn is_switch_break_equivalent(stmt: &Stmt) -> bool {
         | StmtKind::Declare {
             body: Some(stmts), ..
         } => stmts.last().is_some_and(is_switch_break_equivalent),
-        StmtKind::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
-            is_switch_break_equivalent(then_branch)
-                && else_branch
-                    .as_deref()
-                    .is_some_and(is_switch_break_equivalent)
+        StmtKind::If(if_stmt) => {
+            if_stmt.else_branch.is_some() && if_stmt.bodies().all(is_switch_break_equivalent)
         }
         _ => false,
     })
@@ -110,15 +103,9 @@ impl<'a> Checker<'a> {
                 | StmtKind::Declare {
                     body: Some(stmts), ..
                 } => stmts.iter().any(|s| self.always_terminates(s, locals)),
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    self.always_terminates(then_branch, locals)
-                        && else_branch
-                            .as_deref()
-                            .is_some_and(|e| self.always_terminates(e, locals))
+                StmtKind::If(if_stmt) => {
+                    if_stmt.else_branch.is_some()
+                        && if_stmt.bodies().all(|b| self.always_terminates(b, locals))
                 }
                 // A `switch` guarantees ending control flow only when there's
                 // a `default` (otherwise the subject might match nothing and
@@ -238,15 +225,11 @@ impl<'a> Checker<'a> {
                 } => stmts
                     .last()
                     .is_some_and(|s| self.exits_function_or_loop(s, locals)),
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    self.exits_function_or_loop(then_branch, locals)
-                        && else_branch
-                            .as_deref()
-                            .is_some_and(|e| self.exits_function_or_loop(e, locals))
+                StmtKind::If(if_stmt) => {
+                    if_stmt.else_branch.is_some()
+                        && if_stmt
+                            .bodies()
+                            .all(|b| self.exits_function_or_loop(b, locals))
                 }
                 // A `try`/`catch` introduces no new `break`/`continue` scope
                 // of its own (a bare `continue;` inside a `try` still
@@ -742,17 +725,10 @@ pub(crate) fn collect_exit_point_statements(stmt: &Stmt) -> Vec<&Stmt> {
             .last()
             .map(collect_exit_point_statements)
             .unwrap_or_default(),
-        StmtKind::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
-            let mut out = collect_exit_point_statements(then_branch);
-            if let Some(e) = else_branch {
-                out.extend(collect_exit_point_statements(e));
-            }
-            out
-        }
+        StmtKind::If(if_stmt) => if_stmt
+            .bodies()
+            .flat_map(collect_exit_point_statements)
+            .collect(),
         _ => Vec::new(),
     })
 }

@@ -127,7 +127,7 @@ fn do_while_parses_its_body_and_trailing_condition() {
 }
 
 #[test]
-fn if_alt_syntax_with_elseif_and_else_folds_into_nested_if() {
+fn if_alt_syntax_with_elseif_and_else_is_one_chain() {
     let program = parse(
         r#"<?php
             if ($a):
@@ -139,33 +139,30 @@ fn if_alt_syntax_with_elseif_and_else_folds_into_nested_if() {
             endif;
         "#,
     );
-    let StmtKind::If {
-        then_branch,
-        else_branch,
-        ..
-    } = &program[0].kind
-    else {
+    let StmtKind::If(if_stmt) = &program[0].kind else {
         panic!("expected If");
     };
-    assert!(matches!(&then_branch.kind, StmtKind::Block(s) if s.len() == 1));
-    let Some(else_branch) = else_branch else {
-        panic!("expected an elseif chain, got no else branch at all");
+    assert!(matches!(&if_stmt.then_branch.kind, StmtKind::Block(s) if s.len() == 1));
+    let [elseif] = if_stmt.elseifs.as_slice() else {
+        panic!("expected one elseif, got {}", if_stmt.elseifs.len());
     };
-    // The `elseif` re-dispatches as a nested `if`, exactly like the
-    // brace syntax's own elseif handling - one `endif;` still closes
-    // the whole chain, not just the innermost `if`.
-    let StmtKind::If {
-        then_branch: elseif_then,
-        else_branch: elseif_else,
-        ..
-    } = &else_branch.kind
-    else {
-        panic!("expected a nested If for the elseif branch");
-    };
-    assert!(matches!(&elseif_then.kind, StmtKind::Block(s) if s.len() == 1));
+    assert!(matches!(&elseif.body.kind, StmtKind::Block(s) if s.len() == 1));
     assert!(
-        matches!(elseif_else.as_deref(), Some(Stmt { kind: StmtKind::Block(s), .. }) if s.len() == 1)
+        matches!(if_stmt.else_branch.as_deref(), Some(Stmt { kind: StmtKind::Block(s), .. }) if s.len() == 1)
     );
+}
+
+#[test]
+fn elseif_is_part_of_the_chain_and_else_if_is_a_nested_if() {
+    let program = parse("<?php if ($a) { } elseif ($b) { } else if ($c) { }");
+    let StmtKind::If(if_stmt) = &program[0].kind else {
+        panic!("expected If");
+    };
+    assert_eq!(if_stmt.elseifs.len(), 1);
+    assert!(matches!(
+        if_stmt.else_branch.as_deref(),
+        Some(Stmt { kind: StmtKind::If(nested), .. }) if nested.elseifs.is_empty()
+    ));
 }
 
 #[test]

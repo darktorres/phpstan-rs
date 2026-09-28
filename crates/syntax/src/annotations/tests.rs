@@ -125,7 +125,7 @@ fn php_version_id_comparisons_are_read_either_way_round() {
     );
     let a = annotate(&program);
     let cond = |i: usize| match &program[i].kind {
-        StmtKind::If { cond, .. } => cond.id,
+        StmtKind::If(IfStmt { cond, .. }) => cond.id,
         _ => panic!(),
     };
     assert_eq!(

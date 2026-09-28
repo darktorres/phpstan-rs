@@ -67,9 +67,14 @@ fn walk_stmt_for_vars(stmt: &Stmt, names: &mut FxHashSet<Arc<str>>, escaped: &mu
                     walk_expr_for_vars(e, names, escaped);
                 }
             }
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => walk_expr_for_vars(cond, names, escaped),
+            StmtKind::If(if_stmt) => {
+                for cond in if_stmt.conditions() {
+                    walk_expr_for_vars(cond, names, escaped);
+                }
+            }
+            StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
+                walk_expr_for_vars(cond, names, escaped)
+            }
             StmtKind::For {
                 init, cond, step, ..
             } => {

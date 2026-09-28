@@ -252,12 +252,58 @@ fn stmt_definitely_terminates(stmt: &Stmt) -> bool {
         | StmtKind::Declare {
             body: Some(stmts), ..
         } => stmts.iter().any(stmt_definitely_terminates),
-        StmtKind::If {
-            then_branch,
-            else_branch: Some(else_branch),
-            ..
-        } => stmt_definitely_terminates(then_branch) && stmt_definitely_terminates(else_branch),
+        StmtKind::If(if_stmt) => {
+            if_stmt.else_branch.is_some() && if_stmt.bodies().all(stmt_definitely_terminates)
+        }
         _ => false,
+    })
+}
+
+/// An `if` chain from `branches[0]` on: the condition, its body, then the
+/// rest of the chain (`elseif`s) or the `else`. A branch that
+/// unconditionally exits the method (a guard clause) doesn't vote on what's
+/// true afterward.
+fn walk_if_chain(
+    branches: &[(&Expr, &Stmt)],
+    else_branch: Option<&Stmt>,
+    state: PropertyInitState,
+    ctx: &mut PropertyInitCtx,
+    declaring_class: &str,
+) -> PropertyInitState {
+    syntax::stack::guard(|| {
+        let [(cond, then_branch), rest @ ..] = branches else {
+            return match else_branch {
+                Some(e) => walk_stmt(e, state, ctx, declaring_class),
+                None => state,
+            };
+        };
+        let state_after_cond = walk_expr(cond, state, ctx, declaring_class);
+        let then_terminates = stmt_definitely_terminates(then_branch);
+        let then_state = walk_stmt(then_branch, state_after_cond.clone(), ctx, declaring_class);
+        if rest.is_empty() && else_branch.is_none() {
+            return if then_terminates {
+                state_after_cond
+            } else {
+                intersect(then_state, &state_after_cond)
+            };
+        }
+        let else_terminates = else_branch.is_some_and(stmt_definitely_terminates)
+            && rest
+                .iter()
+                .all(|(_, body)| stmt_definitely_terminates(body));
+        let else_state = walk_if_chain(
+            rest,
+            else_branch,
+            state_after_cond.clone(),
+            ctx,
+            declaring_class,
+        );
+        match (then_terminates, else_terminates) {
+            (true, true) => state_after_cond,
+            (true, false) => else_state,
+            (false, true) => then_state,
+            (false, false) => intersect(then_state, &else_state),
+        }
     })
 }
 
@@ -306,36 +352,18 @@ fn walk_stmt(
                 }
                 state
             }
-            StmtKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                // A branch that unconditionally exits the method (an
-                // `if (...) { return ...; }` guard-clause with no `else`)
-                // doesn't get to vote on what's true afterward - otherwise
-                // code placed after such a guard would be wrongly analyzed as
-                // if it could also run on the path the guard already ruled
-                // out.
-                let state_after_cond = walk_expr(cond, state, ctx, declaring_class);
-                let then_terminates = stmt_definitely_terminates(then_branch);
-                let then_state =
-                    walk_stmt(then_branch, state_after_cond.clone(), ctx, declaring_class);
-                match else_branch {
-                    Some(else_stmt) => {
-                        let else_terminates = stmt_definitely_terminates(else_stmt);
-                        let else_state =
-                            walk_stmt(else_stmt, state_after_cond.clone(), ctx, declaring_class);
-                        match (then_terminates, else_terminates) {
-                            (true, true) => state_after_cond, // unreachable past here either way
-                            (true, false) => else_state,
-                            (false, true) => then_state,
-                            (false, false) => intersect(then_state, &else_state),
-                        }
-                    }
-                    None if then_terminates => state_after_cond,
-                    None => intersect(then_state, &state_after_cond),
-                }
+            StmtKind::If(if_stmt) => {
+                let branches: Vec<(&Expr, &Stmt)> =
+                    std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
+                        .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
+                        .collect();
+                walk_if_chain(
+                    &branches,
+                    if_stmt.else_branch.as_deref(),
+                    state,
+                    ctx,
+                    declaring_class,
+                )
             }
             // `while`/`for`/`foreach` may run their own body zero times - see
             // the module doc comment for why intersecting the zero-iteration

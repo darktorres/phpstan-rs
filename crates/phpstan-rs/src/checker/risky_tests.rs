@@ -124,9 +124,8 @@ fn stmt_has_assertion(stmt: &Stmt) -> bool {
         StmtKind::Return(Some(e)) => expr_has_assertion(e),
         StmtKind::Return(None) => false,
         StmtKind::Echo(exprs) => exprs.iter().any(expr_has_assertion),
-        StmtKind::If { cond, .. }
-        | StmtKind::While { cond, .. }
-        | StmtKind::DoWhile { cond, .. } => expr_has_assertion(cond),
+        StmtKind::If(if_stmt) => if_stmt.conditions().any(expr_has_assertion),
+        StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => expr_has_assertion(cond),
         StmtKind::For {
             init, cond, step, ..
         } => init.iter().chain(cond).chain(step).any(expr_has_assertion),

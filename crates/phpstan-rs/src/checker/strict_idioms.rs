@@ -257,31 +257,37 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            StmtKind::If { .. } => {
+            StmtKind::If(_) => {
                 if self.enum_chain_tails.contains(&stmt.span) {
                     return;
                 }
+                // The chain's conditions, `elseif`s and `else if`s alike,
+                // while each compares one subject with an enum case.
                 let mut compared: Vec<(String, String)> = Vec::new();
                 let mut chain_ifs: Vec<syntax::token::Span> = Vec::new();
                 let mut current = Some(stmt);
-                while let Some(StmtKind::If {
-                    cond, else_branch, ..
-                }) = current.map(|s| &s.kind)
+                'chain: while let Some(Stmt {
+                    kind: StmtKind::If(if_stmt),
+                    span,
+                    ..
+                }) = current
                 {
-                    let ExprKind::Binary(BinOp::Identical, l, r) = &cond.kind else {
-                        break;
-                    };
-                    let (subject, case) = match (&l.kind, &r.kind) {
-                        (_, ExprKind::ClassConstFetch(..)) => (l, r),
-                        (ExprKind::ClassConstFetch(..), _) => (r, l),
-                        _ => break,
-                    };
-                    let Some(enum_name) = self.enum_of(&self.infer_expr(case, locals)) else {
-                        break;
-                    };
-                    compared.push((syntax::printer::print_expr(subject), enum_name));
-                    chain_ifs.push(current.map_or(stmt.span, |s| s.span));
-                    current = else_branch.as_deref();
+                    chain_ifs.push(*span);
+                    for cond in if_stmt.conditions() {
+                        let ExprKind::Binary(BinOp::Identical, l, r) = &cond.kind else {
+                            break 'chain;
+                        };
+                        let (subject, case) = match (&l.kind, &r.kind) {
+                            (_, ExprKind::ClassConstFetch(..)) => (l, r),
+                            (ExprKind::ClassConstFetch(..), _) => (r, l),
+                            _ => break 'chain,
+                        };
+                        let Some(enum_name) = self.enum_of(&self.infer_expr(case, locals)) else {
+                            break 'chain;
+                        };
+                        compared.push((syntax::printer::print_expr(subject), enum_name));
+                    }
+                    current = if_stmt.else_branch.as_deref();
                 }
                 if compared.len() >= 2 && compared.windows(2).all(|w| w[0] == w[1]) {
                     self.enum_chain_tails.extend(chain_ifs);

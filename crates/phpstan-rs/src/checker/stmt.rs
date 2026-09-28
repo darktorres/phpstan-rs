@@ -720,15 +720,14 @@ impl<'a> Checker<'a> {
             | StmtKind::Declare {
                 body: Some(stmts), ..
             } => self.check_block(stmts, locals, declared_return, label),
-            StmtKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
+            StmtKind::If(if_stmt) => {
+                let branches: Vec<(&Expr, &Stmt)> =
+                    std::iter::once((&if_stmt.cond, &*if_stmt.then_branch))
+                        .chain(if_stmt.elseifs.iter().map(|e| (&e.cond, &*e.body)))
+                        .collect();
                 self.check_if(
-                    cond,
-                    then_branch,
-                    else_branch,
+                    &branches,
+                    if_stmt.else_branch.as_deref(),
                     locals,
                     declared_return,
                     label,
@@ -1087,40 +1086,33 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `StmtKind::If`'s own real body, extracted so a nested `elseif`
-    /// (which the parser already desugars into a nested `If` inside
-    /// `else_branch`, in `parser/stmt.rs::parse_if`:
-    /// `self.tokens[self.pos] = Token::Keyword(Keyword::If); Some(Box::new
-    /// (self.parse_if()?))`) can recurse into `check_if` itself
-    /// (`is_elseif: true`) instead of the generic `check_stmt` dispatch,
-    /// carrying its own chain-position context along - `check_stmt` never
-    /// gains an `is_elseif` parameter, so its ~dozens of other call sites
-    /// need no change at all.
+    /// An `if` chain from `branches[0]` on: its condition, its body, then
+    /// the rest of the chain (each later branch an `elseif`) or the
+    /// `else`, in the scope the condition leaves false.
     ///
     /// `IfConstantConditionRule`/`ElseIfConstantConditionRule` trust
-    /// type inference (`inferred_constant_condition`, see its own doc
-    /// comment). A genuine `elseif` gets its own real identifier/message
-    /// (not `if.*`) and real PHPStan's own "last condition, no trailing
-    /// else" exemption for `alwaysTrue` only, matching
-    /// `vendor/phpstan-src`'s `reportAlwaysTrueInLastCondition: false`
-    /// default - a trailing `elseif (true)` with nothing after it is a
-    /// common "acts as an implicit else" idiom; `alwaysFalse` is never
-    /// exempted this way, dead code is dead code regardless of position.
-    /// A bare, non-elseif `If` has no such chain-position concept at all
-    /// and is never exempted.
+    /// type inference (`inferred_constant_condition`). An `elseif` gets its
+    /// own identifier and message, and the last `elseif` with no `else`
+    /// after it is exempt from `alwaysTrue` (PHPStan's
+    /// `reportAlwaysTrueInLastCondition: false`): a trailing `elseif (true)`
+    /// is the "acts as an implicit else" idiom. `alwaysFalse` is never
+    /// exempted, and an `if` has no such position.
     #[allow(clippy::too_many_arguments)]
     fn check_if(
         &mut self,
-        cond: &Expr,
-        then_branch: &Stmt,
-        else_branch: &Option<Box<Stmt>>,
+        branches: &[(&Expr, &Stmt)],
+        else_branch: Option<&Stmt>,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
         is_elseif: bool,
     ) {
         syntax::stack::guard(|| {
-            let is_last_without_else = else_branch.is_none();
+            let [(cond, then_branch), rest @ ..] = branches else {
+                return;
+            };
+            let (cond, then_branch) = (*cond, *then_branch);
+            let is_last_without_else = rest.is_empty() && else_branch.is_none();
             self.in_condition_position = true;
             self.in_exempt_last_condition = is_elseif && is_last_without_else;
             let cond_ty = self.check_expr(cond, locals, label);
@@ -1223,25 +1215,17 @@ impl<'a> Checker<'a> {
             if let Some(subject) = &discriminant_subject {
                 self.active_discriminant.push((subject.clone(), false));
             }
-            if let Some(e) = else_branch {
-                if let StmtKind::If {
-                    cond: nested_cond,
-                    then_branch: nested_then,
-                    else_branch: nested_else,
-                } = &e.kind
-                {
-                    self.check_if(
-                        nested_cond,
-                        nested_then,
-                        nested_else,
-                        &mut else_locals,
-                        declared_return,
-                        label,
-                        true,
-                    );
-                } else {
-                    self.check_stmt(e, &mut else_locals, declared_return, label);
-                }
+            if !rest.is_empty() {
+                self.check_if(
+                    rest,
+                    else_branch,
+                    &mut else_locals,
+                    declared_return,
+                    label,
+                    true,
+                );
+            } else if let Some(e) = else_branch {
+                self.check_stmt(e, &mut else_locals, declared_return, label);
             }
             if discriminant_subject.is_some() {
                 self.active_discriminant.pop();
@@ -1257,8 +1241,10 @@ impl<'a> Checker<'a> {
             // code after the guard.
             let then_terminates = self.always_terminates(then_branch, &then_locals);
             let else_terminates = else_branch
-                .as_deref()
-                .is_some_and(|e| self.always_terminates(e, &else_locals));
+                .is_some_and(|e| self.always_terminates(e, &else_locals))
+                && rest
+                    .iter()
+                    .all(|(_, body)| self.always_terminates(body, &else_locals));
 
             *locals = match (then_terminates, else_terminates) {
                 (true, false) => else_locals,

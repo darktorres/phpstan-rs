@@ -149,7 +149,7 @@ fn declarations_carry_the_namespace_they_are_declared_in() {
         StmtKind::GlobalConst(consts) => {
             names.extend(consts.iter().map(|c| c.namespaced_name.clone()))
         }
-        StmtKind::If { then_branch, .. } => {
+        StmtKind::If(IfStmt { then_branch, .. }) => {
             let StmtKind::Block(body) = &then_branch.kind else {
                 panic!("expected a block, got {:?}", then_branch.kind);
             };

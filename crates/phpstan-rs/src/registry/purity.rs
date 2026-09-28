@@ -323,9 +323,10 @@ fn stmt_disqualifies(
             StmtKind::InlineHtml(_) => true,
             StmtKind::Expression(e) => expr_disqualifies(e, declaring_class, registry, deps),
             StmtKind::Return(Some(e)) => expr_disqualifies(e, declaring_class, registry, deps),
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => {
+            StmtKind::If(if_stmt) => if_stmt
+                .conditions()
+                .any(|cond| expr_disqualifies(cond, declaring_class, registry, deps)),
+            StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
                 expr_disqualifies(cond, declaring_class, registry, deps)
             }
             StmtKind::For {
@@ -753,9 +754,12 @@ fn collect_stmt_impure_points(
             StmtKind::Return(Some(e)) => {
                 collect_expr_impure_points(e, declaring_class, registry, out)
             }
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => {
+            StmtKind::If(if_stmt) => {
+                for cond in if_stmt.conditions() {
+                    collect_expr_impure_points(cond, declaring_class, registry, out);
+                }
+            }
+            StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
                 collect_expr_impure_points(cond, declaring_class, registry, out);
             }
             StmtKind::For {

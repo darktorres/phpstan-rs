@@ -84,6 +84,11 @@ pub trait Visitor<'ast> {
     fn visit_switch_case(&mut self, case: &'ast SwitchCase) {
         walk_switch_case(self, case);
     }
+
+    /// One `elseif` of an `if` chain.
+    fn visit_elseif(&mut self, elseif: &'ast ElseIf) {
+        walk_elseif(self, elseif);
+    }
 }
 
 pub fn walk_stmts<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmts: &'ast [Stmt]) {
@@ -113,14 +118,13 @@ pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
             }
         }
         StmtKind::Block(stmts) => walk_stmts(v, stmts),
-        StmtKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            v.visit_expr(cond);
-            v.visit_stmt(then_branch);
-            if let Some(else_branch) = else_branch {
+        StmtKind::If(if_stmt) => {
+            v.visit_expr(&if_stmt.cond);
+            v.visit_stmt(&if_stmt.then_branch);
+            for elseif in &if_stmt.elseifs {
+                v.visit_elseif(elseif);
+            }
+            if let Some(else_branch) = &if_stmt.else_branch {
                 v.visit_stmt(else_branch);
             }
         }
@@ -538,6 +542,11 @@ pub fn walk_catch_clause<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Ca
     walk_stmts(v, &c.body);
 }
 
+pub fn walk_elseif<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, e: &'ast ElseIf) {
+    v.visit_expr(&e.cond);
+    v.visit_stmt(&e.body);
+}
+
 pub fn walk_switch_case<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast SwitchCase) {
     if let Some(test) = &c.test {
         v.visit_expr(test);
@@ -774,6 +783,10 @@ pub trait VisitorMut {
     fn visit_switch_case(&mut self, case: &mut SwitchCase) {
         walk_switch_case_mut(self, case);
     }
+
+    fn visit_elseif(&mut self, elseif: &mut ElseIf) {
+        walk_elseif_mut(self, elseif);
+    }
 }
 
 pub fn walk_stmts_mut<V: VisitorMut + ?Sized>(v: &mut V, stmts: &mut [Stmt]) {
@@ -803,14 +816,13 @@ pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
             }
         }
         StmtKind::Block(stmts) => walk_stmts_mut(v, stmts),
-        StmtKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            v.visit_expr(cond);
-            v.visit_stmt(then_branch);
-            if let Some(else_branch) = else_branch {
+        StmtKind::If(if_stmt) => {
+            v.visit_expr(&mut if_stmt.cond);
+            v.visit_stmt(&mut if_stmt.then_branch);
+            for elseif in &mut if_stmt.elseifs {
+                v.visit_elseif(elseif);
+            }
+            if let Some(else_branch) = &mut if_stmt.else_branch {
                 v.visit_stmt(else_branch);
             }
         }
@@ -1205,6 +1217,11 @@ pub fn walk_arg_mut<V: VisitorMut + ?Sized>(v: &mut V, arg: &mut Arg) {
 
 pub fn walk_catch_clause_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut CatchClause) {
     walk_stmts_mut(v, &mut c.body);
+}
+
+pub fn walk_elseif_mut<V: VisitorMut + ?Sized>(v: &mut V, e: &mut ElseIf) {
+    v.visit_expr(&mut e.cond);
+    v.visit_stmt(&mut e.body);
 }
 
 pub fn walk_switch_case_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut SwitchCase) {

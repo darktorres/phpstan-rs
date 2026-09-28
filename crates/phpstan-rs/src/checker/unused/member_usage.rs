@@ -130,9 +130,14 @@ fn walk_stmt_for_members(stmt: &Stmt, fqn: &str, ctx: &NameContext, usage: &mut 
                     walk_expr_for_members(e, fqn, ctx, usage);
                 }
             }
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => walk_expr_for_members(cond, fqn, ctx, usage),
+            StmtKind::If(if_stmt) => {
+                for cond in if_stmt.conditions() {
+                    walk_expr_for_members(cond, fqn, ctx, usage);
+                }
+            }
+            StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
+                walk_expr_for_members(cond, fqn, ctx, usage)
+            }
             StmtKind::For {
                 init, cond, step, ..
             } => {

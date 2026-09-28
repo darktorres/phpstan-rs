@@ -85,21 +85,10 @@ impl DuplicateClassSites {
                             is_stub,
                         );
                     }
-                    StmtKind::If {
-                        then_branch,
-                        else_branch,
-                        ..
-                    } => {
-                        self.index(
-                            std::slice::from_ref(then_branch),
-                            &mut ctx.clone(),
-                            path,
-                            true,
-                            is_stub,
-                        );
-                        if let Some(else_branch) = else_branch {
+                    StmtKind::If(if_stmt) => {
+                        for body in if_stmt.bodies() {
                             self.index(
-                                std::slice::from_ref(else_branch),
+                                std::slice::from_ref(body),
                                 &mut ctx.clone(),
                                 path,
                                 true,

@@ -24,14 +24,9 @@ pub(super) fn document_symbols(stmts: &[Stmt]) -> Vec<DocumentSymbol> {
                 // A conditional top-level declaration (`if (...) { class Foo {} }`)
                 // still gets an outline entry - mirrors `DeclLocations::index`'s
                 // own recursion into `If`/`Block` for the identical reason.
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    symbols.extend(document_symbols(std::slice::from_ref(then_branch)));
-                    if let Some(else_branch) = else_branch {
-                        symbols.extend(document_symbols(std::slice::from_ref(else_branch)));
+                StmtKind::If(if_stmt) => {
+                    for body in if_stmt.bodies() {
+                        symbols.extend(document_symbols(std::slice::from_ref(body)));
                     }
                 }
                 StmtKind::Block(inner)

@@ -27,7 +27,7 @@ fn word_operators_bind_looser_than_assignment() {
 #[test]
 fn an_assignment_nested_as_an_identical_comparisons_rhs_parses_as_real_php_does() {
     let program = parse("<?php if (false === $params = parse_url($x)) { return; }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Binary(BinOp::Identical, lhs, rhs) = &cond.kind else {
@@ -44,7 +44,7 @@ fn an_assignment_nested_as_an_identical_comparisons_rhs_parses_as_real_php_does(
 #[test]
 fn a_compound_assignment_nested_as_a_not_equal_comparisons_rhs_parses_as_real_php_does() {
     let program = parse("<?php if (null !== $total += $x) { return; }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Binary(BinOp::NotIdentical, _, rhs) = &cond.kind else {
@@ -59,7 +59,7 @@ fn a_compound_assignment_nested_as_a_not_equal_comparisons_rhs_parses_as_real_ph
 #[test]
 fn an_assignment_nested_as_a_relational_comparisons_rhs_parses_as_real_php_does() {
     let program = parse("<?php if (0 > $pos = strrpos($x, ':')) { return; }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Binary(BinOp::Gt, _, rhs) = &cond.kind else {
@@ -74,7 +74,7 @@ fn an_assignment_nested_as_a_relational_comparisons_rhs_parses_as_real_php_does(
 #[test]
 fn an_ordinary_comparison_with_no_trailing_assignment_is_unaffected() {
     let program = parse("<?php if (false === $params) { return; }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Binary(BinOp::Identical, _, rhs) = &cond.kind else {
@@ -95,7 +95,7 @@ fn an_ordinary_comparison_with_no_trailing_assignment_is_unaffected() {
 #[test]
 fn an_assignment_nested_as_a_logical_and_rhs_parses_as_real_php_does() {
     let program = parse("<?php if ($e instanceof Foo && $x = find($e)) { return; }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Binary(BinOp::And, lhs, rhs) = &cond.kind else {
@@ -112,7 +112,7 @@ fn an_assignment_nested_as_a_logical_and_rhs_parses_as_real_php_does() {
 #[test]
 fn an_assignment_nested_as_a_logical_or_rhs_parses_as_real_php_does() {
     let program = parse("<?php if ($e === null || $x = find($e)) { return; }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Binary(BinOp::Or, _, rhs) = &cond.kind else {
@@ -124,7 +124,7 @@ fn an_assignment_nested_as_a_logical_or_rhs_parses_as_real_php_does() {
 #[test]
 fn an_ordinary_logical_and_with_no_trailing_assignment_is_unaffected() {
     let program = parse("<?php if ($e instanceof Foo && $x) { return; }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Binary(BinOp::And, _, rhs) = &cond.kind else {
@@ -143,7 +143,7 @@ fn an_ordinary_logical_and_with_no_trailing_assignment_is_unaffected() {
 #[test]
 fn a_bang_negated_assignment_parses_as_negating_the_assignment_result() {
     let program = parse("<?php if (!$dir = opendir($path)) { return; }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Unary(UnaryOp::Not, inner) = &cond.kind else {
@@ -162,7 +162,7 @@ fn a_bang_negated_assignment_parses_as_negating_the_assignment_result() {
 #[test]
 fn a_bang_negated_assignment_nested_in_a_logical_or_still_assigns() {
     let program = parse("<?php if (!is_dir($path) || !$dir = opendir($path)) { readdir($dir); }");
-    let StmtKind::If { cond, .. } = &program[0].kind else {
+    let StmtKind::If(IfStmt { cond, .. }) = &program[0].kind else {
         panic!("expected an If statement, got {:?}", program[0].kind);
     };
     let ExprKind::Binary(BinOp::Or, _, rhs) = &cond.kind else {

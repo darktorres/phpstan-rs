@@ -74,11 +74,7 @@ pub enum StmtKind {
     Echo(Vec<Expr>),
     Return(Option<Expr>),
     Block(Vec<Stmt>),
-    If {
-        cond: Expr,
-        then_branch: Box<Stmt>,
-        else_branch: Option<Box<Stmt>>,
-    },
+    If(IfStmt),
     While {
         cond: Expr,
         body: Box<Stmt>,
@@ -143,6 +139,41 @@ pub enum StmtKind {
     // modeled (no effect on narrowing, terminal-statement detection,
     // etc.) - only enough structure to parse past them.
     Label(Ident),
+}
+
+/// `if (cond) then elseif (…) … else …`. An `elseif` is part of the chain;
+/// `else if` is an `else` whose statement is another `if`.
+#[derive(Debug, Clone)]
+pub struct IfStmt {
+    pub cond: Expr,
+    pub then_branch: Box<Stmt>,
+    pub elseifs: Vec<ElseIf>,
+    pub else_branch: Option<Box<Stmt>>,
+}
+
+/// One `elseif (cond) body` of an `if` chain.
+#[derive(Debug, Clone)]
+pub struct ElseIf {
+    pub id: NodeId,
+    pub cond: Expr,
+    pub body: Box<Stmt>,
+    pub span: Span,
+}
+
+impl IfStmt {
+    /// Every condition of the chain in order: the `if`'s, then each
+    /// `elseif`'s.
+    pub fn conditions(&self) -> impl Iterator<Item = &Expr> {
+        std::iter::once(&self.cond).chain(self.elseifs.iter().map(|e| &e.cond))
+    }
+
+    /// Every branch body in order: the `if`'s, each `elseif`'s, then the
+    /// `else`.
+    pub fn bodies(&self) -> impl Iterator<Item = &Stmt> {
+        std::iter::once(&*self.then_branch)
+            .chain(self.elseifs.iter().map(|e| &*e.body))
+            .chain(self.else_branch.as_deref())
+    }
 }
 
 #[derive(Debug, Clone)]

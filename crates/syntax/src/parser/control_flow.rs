@@ -44,129 +44,105 @@ impl Parser {
     pub(crate) fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
         self.skip(); // if
-        self.expect(&Token::LParen)?;
-        let cond = self.parse_expression()?;
-        self.expect(&Token::RParen)?;
-
+        let cond = self.parse_paren_condition()?;
         if self.check(&Token::Colon) {
             return self.parse_if_alt(cond, start);
         }
-
         let then_branch = Box::new(self.parse_braced_or_single()?);
-
-        let else_branch = if self.eat(&Token::Keyword(Keyword::ElseIf)) {
-            self.pos -= 1; // put back; re-dispatch as a nested `if`
-            self.tokens[self.pos] = Token::Keyword(Keyword::If);
-            Some(Box::new(crate::stack::guard(|| self.parse_if())?))
-        } else if self.eat(&Token::Keyword(Keyword::Else)) {
+        let mut elseifs = Vec::new();
+        while self.check(&Token::Keyword(Keyword::ElseIf)) {
+            let elseif_start = self.current_pos();
+            self.skip();
+            let cond = self.parse_paren_condition()?;
+            let body = Box::new(self.parse_braced_or_single()?);
+            elseifs.push(ElseIf {
+                id: self.node_id(),
+                cond,
+                body,
+                span: Span {
+                    start: elseif_start,
+                    end: self.previous_end(),
+                },
+            });
+        }
+        let else_branch = if self.eat(&Token::Keyword(Keyword::Else)) {
             Some(Box::new(self.parse_braced_or_single()?))
         } else {
             None
         };
-
         Ok(self.stmt(
-            StmtKind::If {
+            StmtKind::If(IfStmt {
                 cond,
                 then_branch,
+                elseifs,
                 else_branch,
-            },
+            }),
             start,
         ))
     }
 
-    // `if (c1): ... elseif (c2): ... else: ... endif;` - only one `endif;`
-    // terminates the whole chain, so branches are collected flat and then
-    // folded (innermost-out) into the same nested StmtKind::If shape the
-    // brace syntax produces. `if_start` is where the very first `if`
-    // keyword began (captured by the caller, `parse_if`, before it
-    // consumed anything) - each nested synthesized `If`/`Block` below
-    // still gets its own more specific start where possible (the
-    // branch's own condition/keyword), rather than every level collapsing
-    // onto the same outer position.
-    pub(crate) fn parse_if_alt(
-        &mut self,
-        first_cond: Expr,
-        if_start: Position,
-    ) -> Result<Stmt, ParseError> {
-        let mut branches: Vec<(Position, Expr, Vec<Stmt>)> = Vec::new();
-        let mut cond = first_cond;
-        let mut branch_start = if_start;
-        self.expect(&Token::Colon)?;
-        loop {
-            let mut stmts = Vec::new();
-            while !matches!(
-                self.peek(),
-                Token::Keyword(Keyword::ElseIf)
-                    | Token::Keyword(Keyword::Else)
-                    | Token::Keyword(Keyword::EndIf)
-            ) && !self.at_eof()
-            {
-                stmts.push(self.parse_statement()?);
-            }
-            branches.push((branch_start, cond.clone(), stmts));
-            if self.eat(&Token::Keyword(Keyword::ElseIf)) {
-                branch_start = self.previous_end(); // approx: right at `elseif`
-                self.expect(&Token::LParen)?;
-                cond = self.parse_expression()?;
-                self.expect(&Token::RParen)?;
-                self.expect(&Token::Colon)?;
-                continue;
-            }
-            break;
-        }
+    /// `( expr )`.
+    fn parse_paren_condition(&mut self) -> Result<Expr, ParseError> {
+        self.expect(&Token::LParen)?;
+        let cond = self.parse_expression()?;
+        self.expect(&Token::RParen)?;
+        Ok(cond)
+    }
 
-        let else_start = self.current_pos();
-        let else_stmts = if self.eat(&Token::Keyword(Keyword::Else)) {
-            self.expect(&Token::Colon)?;
-            let mut stmts = Vec::new();
-            while !self.check(&Token::Keyword(Keyword::EndIf)) && !self.at_eof() {
-                stmts.push(self.parse_statement()?);
-            }
-            Some(stmts)
+    /// `if (c1): … elseif (c2): … else: … endif;`, the `if` keyword and its
+    /// condition already read.
+    pub(crate) fn parse_if_alt(&mut self, cond: Expr, start: Position) -> Result<Stmt, ParseError> {
+        let then_branch = Box::new(self.parse_alt_branch()?);
+        let mut elseifs = Vec::new();
+        while self.check(&Token::Keyword(Keyword::ElseIf)) {
+            let elseif_start = self.current_pos();
+            self.skip();
+            let cond = self.parse_paren_condition()?;
+            let body = Box::new(self.parse_alt_branch()?);
+            elseifs.push(ElseIf {
+                id: self.node_id(),
+                cond,
+                body,
+                span: Span {
+                    start: elseif_start,
+                    end: self.previous_end(),
+                },
+            });
+        }
+        let else_branch = if self.eat(&Token::Keyword(Keyword::Else)) {
+            Some(Box::new(self.parse_alt_branch()?))
         } else {
             None
         };
-
         self.expect(&Token::Keyword(Keyword::EndIf))?;
         self.expect_semicolon()?;
-        let end = self.previous_end();
+        Ok(self.stmt(
+            StmtKind::If(IfStmt {
+                cond,
+                then_branch,
+                elseifs,
+                else_branch,
+            }),
+            start,
+        ))
+    }
 
-        let mut result = else_stmts.map(|stmts| Stmt {
-            id: self.node_id(),
-            kind: StmtKind::Block(stmts),
-            span: Span {
-                start: else_start,
-                end,
-            },
-            doc_comment: None,
-            doc_line: None,
-        });
-        for (branch_pos, c, stmts) in branches.into_iter().rev() {
-            result = Some(Stmt {
-                id: self.node_id(),
-                kind: StmtKind::If {
-                    cond: c,
-                    then_branch: Box::new(Stmt {
-                        id: self.node_id(),
-                        kind: StmtKind::Block(stmts),
-                        span: Span {
-                            start: branch_pos,
-                            end,
-                        },
-                        doc_comment: None,
-                        doc_line: None,
-                    }),
-                    else_branch: result.map(Box::new),
-                },
-                span: Span {
-                    start: branch_pos,
-                    end,
-                },
-                doc_comment: None,
-                doc_line: None,
-            });
+    /// One branch of the alternative `if` syntax: `:` and the statements up
+    /// to the next `elseif`, `else` or `endif`, as a block.
+    fn parse_alt_branch(&mut self) -> Result<Stmt, ParseError> {
+        let start = self.current_pos();
+        self.expect(&Token::Colon)?;
+        let mut stmts = Vec::new();
+        while !matches!(
+            self.peek(),
+            Token::Keyword(Keyword::ElseIf)
+                | Token::Keyword(Keyword::Else)
+                | Token::Keyword(Keyword::EndIf)
+        ) && !self.at_eof()
+        {
+            stmts.push(self.parse_statement()?);
         }
-        Ok(result.unwrap())
+        Ok(self.stmt(StmtKind::Block(stmts), start))
     }
 
     pub(crate) fn parse_while(&mut self) -> Result<Stmt, ParseError> {

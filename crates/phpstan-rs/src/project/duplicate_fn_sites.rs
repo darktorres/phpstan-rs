@@ -69,24 +69,9 @@ impl DuplicateFunctionSites {
                         }
                         self.record(ctx.declared_name(&f.name), path, f);
                     }
-                    StmtKind::If {
-                        then_branch,
-                        else_branch,
-                        ..
-                    } => {
-                        self.index(
-                            std::slice::from_ref(then_branch),
-                            &mut ctx.clone(),
-                            path,
-                            true,
-                        );
-                        if let Some(else_branch) = else_branch {
-                            self.index(
-                                std::slice::from_ref(else_branch),
-                                &mut ctx.clone(),
-                                path,
-                                true,
-                            );
+                    StmtKind::If(if_stmt) => {
+                        for body in if_stmt.bodies() {
+                            self.index(std::slice::from_ref(body), &mut ctx.clone(), path, true);
                         }
                     }
                     StmtKind::Block(inner)

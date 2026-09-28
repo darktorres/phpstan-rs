@@ -1118,9 +1118,12 @@ impl<'a> Walker<'a> {
                     self.check_expr(e, ctx, param_types, label);
                 }
             }
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => {
+            StmtKind::If(if_stmt) => {
+                for cond in if_stmt.conditions() {
+                    self.check_expr(cond, ctx, param_types, label);
+                }
+            }
+            StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
                 self.check_expr(cond, ctx, param_types, label);
             }
             StmtKind::For {

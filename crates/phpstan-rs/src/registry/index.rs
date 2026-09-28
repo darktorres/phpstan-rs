@@ -657,21 +657,10 @@ fn build_declarations_with_context(
                 // condition text - nothing downstream has a notion of which
                 // conditions are actually guards, only "was this declaration
                 // reached unconditionally or not."
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    build_declarations_with_context(
-                        std::slice::from_ref(then_branch),
-                        origin,
-                        ctx,
-                        true,
-                        out,
-                    );
-                    if let Some(else_branch) = else_branch {
+                StmtKind::If(if_stmt) => {
+                    for body in if_stmt.bodies() {
                         build_declarations_with_context(
-                            std::slice::from_ref(else_branch),
+                            std::slice::from_ref(body),
                             origin,
                             ctx,
                             true,

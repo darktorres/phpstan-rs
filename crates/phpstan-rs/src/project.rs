@@ -2226,20 +2226,10 @@ fn declared_names_with_context(
                 // wouldn't know to remove a conditionally-declared symbol
                 // that index() itself did pick up, leaving a stale entry
                 // behind after the declaring file changes or is removed.
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    let (f, c) = declared_names_with_context(
-                        std::slice::from_ref(then_branch),
-                        &mut ctx.clone(),
-                    );
-                    functions.extend(f);
-                    classes.extend(c);
-                    if let Some(else_branch) = else_branch {
+                StmtKind::If(if_stmt) => {
+                    for body in if_stmt.bodies() {
                         let (f, c) = declared_names_with_context(
-                            std::slice::from_ref(else_branch),
+                            std::slice::from_ref(body),
                             &mut ctx.clone(),
                         );
                         functions.extend(f);

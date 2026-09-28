@@ -8,7 +8,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::*;
-use crate::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
+use crate::visit::{Visitor, walk_elseif, walk_expr, walk_stmt, walk_stmts};
 
 const CONDITION: u8 = 1;
 const LAST_CONDITION: u8 = 2;
@@ -100,7 +100,6 @@ pub fn annotate(stmts: &[Stmt]) -> Annotations {
         current_catch: NO_CATCH,
         gotos: FxHashSet::default(),
         labels: Vec::new(),
-        elseifs: FxHashSet::default(),
     };
     mark_first_statements(stmts, &mut builder.out);
     builder.body(stmts);
@@ -117,8 +116,6 @@ struct Builder {
     /// The current function body's `goto` targets and labels.
     gotos: FxHashSet<crate::name::Name>,
     labels: Vec<(crate::name::Name, NodeId)>,
-    /// `if` statements that are an `elseif` of a chain already marked.
-    elseifs: FxHashSet<NodeId>,
 }
 
 impl Builder {
@@ -190,22 +187,17 @@ impl Builder {
         }
     }
 
-    /// Conditions of an `if` and its `elseif` chain.
-    fn if_chain(&mut self, stmt: &Stmt, is_elseif: bool) {
-        crate::stack::guard(|| {
-            if let StmtKind::If {
-                cond, else_branch, ..
-            } = &stmt.kind
-            {
-                self.condition(cond, is_elseif && else_branch.is_none());
-                if let Some(else_branch) = else_branch
-                    && matches!(else_branch.kind, StmtKind::If { .. })
-                {
-                    self.elseifs.insert(else_branch.id);
-                    self.if_chain(else_branch, true);
-                }
-            }
-        })
+    /// Conditions of an `if` and its `elseif` chain; the last `elseif`
+    /// before no `else` acts as the chain's implicit `else`.
+    fn if_chain(&mut self, if_stmt: &IfStmt) {
+        self.condition(&if_stmt.cond, false);
+        let last = if_stmt.elseifs.len().checked_sub(1);
+        for (i, elseif) in if_stmt.elseifs.iter().enumerate() {
+            self.condition(
+                &elseif.cond,
+                Some(i) == last && if_stmt.else_branch.is_none(),
+            );
+        }
     }
 }
 
@@ -267,10 +259,7 @@ impl<'ast> Visitor<'ast> for Builder {
         self.enter(stmt.id);
         match &stmt.kind {
             StmtKind::Expression(e) => self.set(e.id, STATEMENT_EXPRESSION),
-            // An `elseif` is marked by the `if` that heads its chain.
-            StmtKind::If { .. } if !self.elseifs.contains(&stmt.id) => {
-                self.if_chain(stmt, false);
-            }
+            StmtKind::If(if_stmt) => self.if_chain(if_stmt),
             StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
                 self.condition(cond, false)
             }
@@ -333,6 +322,13 @@ impl<'ast> Visitor<'ast> for Builder {
             }
             _ => walk_expr(self, expr),
         }
+        self.path.pop();
+    }
+
+    fn visit_elseif(&mut self, elseif: &'ast ElseIf) {
+        self.enter(elseif.id);
+        self.path.push(elseif.id);
+        walk_elseif(self, elseif);
         self.path.pop();
     }
 

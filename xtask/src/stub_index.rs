@@ -94,14 +94,9 @@ impl Walk<'_, '_> {
                 | StmtKind::Declare {
                     body: Some(inner), ..
                 } => self.stmts(inner),
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    self.stmts(std::slice::from_ref(then_branch));
-                    if let Some(e) = else_branch {
-                        self.stmts(std::slice::from_ref(e));
+                StmtKind::If(if_stmt) => {
+                    for body in if_stmt.bodies() {
+                        self.stmts(std::slice::from_ref(body));
                     }
                 }
                 StmtKind::ClassDecl(en) if en.kind == ClassKind::Enum => {

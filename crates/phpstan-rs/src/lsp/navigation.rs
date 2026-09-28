@@ -447,9 +447,12 @@ impl<'a> Walker<'a> {
                         self.expr(e, ctx, current_class, out);
                     }
                 }
-                StmtKind::If { cond, .. }
-                | StmtKind::While { cond, .. }
-                | StmtKind::DoWhile { cond, .. } => {
+                StmtKind::If(if_stmt) => {
+                    for cond in if_stmt.conditions() {
+                        self.expr(cond, ctx, current_class, out);
+                    }
+                }
+                StmtKind::While { cond, .. } | StmtKind::DoWhile { cond, .. } => {
                     self.expr(cond, ctx, current_class, out);
                 }
                 StmtKind::For {
