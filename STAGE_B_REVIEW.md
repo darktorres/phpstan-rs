@@ -333,7 +333,7 @@ through `check-project`.
   key, while int keys keep their literal. The key type is the union of the
   literal keys (`'a'|'b'`); `proves_super_type`'s `(ArrayShape, Array)` arm
   and `accepts` read the same aggregate. (`91bc9e49`)
-- [ ] **F38. Template inference keeps the first binding.**
+- [x] **F38. Template inference keeps the first binding.** (`b274f947`)
   `infer_template_bindings` (`templates.rs`) is `or_insert`, so with
   `@param T $a @param T $b @return T`, `pick(1, 'a')` is `1`, and
   `pick(1, 'a') === 'a'` reports `identical.alwaysFalse`. The bindings of
