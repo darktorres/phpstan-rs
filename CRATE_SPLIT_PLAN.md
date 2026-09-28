@@ -6986,7 +6986,12 @@ on.
 - A progress line (files analysed of total) goes to stderr when it's a
   terminal, off with `--no-progress` and when stderr isn't one; today a run
   prints nothing until it finishes.
-- The subcommands are `check-project`, `lsp` (accepting `--stdio`),
+- The analysis command is `analyse`, with `analyze` as its spelling alias, as
+  PHPStan names it; nothing is released, so `check-project` goes rather than
+  staying beside them, and xtask, the gate runner's and
+  `.corpus-runs/README.md`'s commands, `tests/cli.rs`, the README and the VS
+  Code docs move in the same commit.
+- The subcommands are `analyse`, `lsp` (accepting `--stdio`),
   `clear-result-cache` and `completions` (`convert-baseline` goes with the old
   baseline formats, F1), plus the crash reporter's hidden `__crash-finish` and
   its supervisor and worker roles (`CRASH_REPORTING_PLAN.md` §4.1, §4.10); Phase
@@ -6995,8 +7000,8 @@ on.
   becomes `project/examples/incremental.rs`, over any directory, plus a
   criterion bench.
 - PHPStan's command line works as is, so a CI script or tool that runs
-  `vendor/bin/phpstan analyse` can run phpstan-rs instead: `analyse` and
-  `analyze` name `check-project`; `-c`/`--configuration`, `-l`/`--level`,
+  `vendor/bin/phpstan analyse` can run phpstan-rs instead: `analyse`/`analyze`
+  is the command itself (above); `-c`/`--configuration`, `-l`/`--level`,
   `-b`/`--generate-baseline` (its value optional, `phpstan-rs-baseline.json` by
   default), `--error-format` and `--autoload-file` (scanned as context) take
   PHPStan's meaning; `--ansi`/`--no-ansi` set colour (F3); `-v` adds the run's
@@ -7608,6 +7613,9 @@ its owner. Non-Registry keys follow the table.
   PHPStan config is converted once into `phpstan-rs.toml` by `init` (ROADMAP
   Phase 183), never read as a live source; the `neon` crate exists for that
   conversion.
+- **One analysis command.** `analyse` (with `analyze`), PHPStan's name, is the
+  command; `check-project` goes in F4 rather than staying as an alias, since
+  nothing is released.
 - **Exit codes.** 0 when nothing remains after the finalizer, 1 when errors
   remain, 2 when the result can't be trusted (a run that couldn't start, or one
   with an internal error), 130 on an interrupt, 141 on a closed output pipe. A
