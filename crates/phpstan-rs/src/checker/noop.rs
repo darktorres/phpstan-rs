@@ -153,7 +153,7 @@ impl<'a> Checker<'a> {
             Type::EnumCase(..) => true,
             Type::Union(members) => members
                 .iter()
-                .all(|m| matches!(m, Type::Null) || self.property_read_is_plain(m, name)),
+                .all(|m| m.is_null().yes() || self.property_read_is_plain(m, name)),
             _ => false,
         }
     }
@@ -502,7 +502,7 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if *sig.return_type() == Type::Void
+        if sig.return_type().is_void()
             && !f.name.eq_ignore_ascii_case("__construct")
             && sig.throws().is_none()
             && sig.assert().is_empty()

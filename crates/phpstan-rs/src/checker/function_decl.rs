@@ -846,7 +846,7 @@ impl<'a> Checker<'a> {
             // opt-in flag: only ever fires when the docblock itself
             // explicitly claims "never throws," directly contradicted by
             // a real `throw` sitting right there in the body.
-            if *throws == Type::Void
+            if throws.is_void()
                 && let Some(throw_span) = body_contains_explicit_throw(&f.body)
             {
                 let kind_word = if class_name.is_some() {
@@ -1161,7 +1161,7 @@ impl<'a> Checker<'a> {
                 // implicit fall-through instead of an explicit `return`
                 // statement - real PHPStan's `return.never` covers both
                 // shapes identically.
-                if expected == Type::Never {
+                if expected.is_never() {
                     self.report(
                         "should never return, but a return statement was reached".to_string(),
                         f.span,
@@ -1656,7 +1656,7 @@ impl<'a> Checker<'a> {
             Some(c) => self.resolve_pseudo(expected, &c.clone()),
             None => expected.clone(),
         };
-        if expected == Type::Never {
+        if expected.is_never() {
             self.report_builder(
                 DiagnosticBuilder::new(
                     "should never return, but a return statement was reached".to_string(),
@@ -1693,7 +1693,7 @@ pub(crate) fn missing_return_level(
     has_native_hint: bool,
     is_generator_treturn: bool,
 ) -> Option<u8> {
-    if matches!(expected, Type::Void) {
+    if expected.is_void() {
         return None;
     }
     if expected.is_mixed() && (!has_native_hint || is_generator_treturn) {

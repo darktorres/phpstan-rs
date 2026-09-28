@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
             self.call_throw_types.insert(span, thrown);
         }
         if let Some(t) = dynamic {
-            if t != Type::Void {
+            if !t.is_void() {
                 self.current_function_throw_points.push(t);
             }
             return;
@@ -117,7 +117,7 @@ impl<'a> Checker<'a> {
             return;
         };
         if let Some(t) = sig.throws()
-            && *t != Type::Void
+            && !t.is_void()
         {
             self.current_function_throw_points.push(t.clone());
         }

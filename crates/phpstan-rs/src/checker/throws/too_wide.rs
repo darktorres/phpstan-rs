@@ -73,7 +73,7 @@ impl<'a> Checker<'a> {
     /// unannotated_call` are fully populated), and before either resets
     /// for the next declaration.
     pub(crate) fn check_too_wide_throw_type(&mut self, throws: &Type, subject: &str, span: Span) {
-        if *throws == Type::Void || self.current_function_has_unannotated_call {
+        if throws.is_void() || self.current_function_has_unannotated_call {
             return;
         }
         let actual = self

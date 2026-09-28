@@ -2101,7 +2101,7 @@ fn filter_array_elements(ty: Type, keep: &dyn Fn(&Type) -> Type) -> Type {
                 .into_iter()
                 .filter_map(|field| {
                     let narrowed = keep(&field.ty);
-                    if narrowed == Type::Never {
+                    if narrowed.is_never() {
                         return None;
                     }
                     let maybe_dropped = narrowed != field.ty;
@@ -2406,7 +2406,7 @@ fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
                 .into_iter()
                 .filter_map(|field| {
                     let narrowed = narrow_type_excluding_falsy(&field.ty);
-                    if narrowed == Type::Never {
+                    if narrowed.is_never() {
                         // Provably always-falsy (a bare `null`, `false`,
                         // literal `0`/`''`/`'0'`) - array_filter always
                         // drops it, so the field is genuinely gone.

@@ -44,7 +44,6 @@ use syntax::ast::*;
 use syntax::intern::intern;
 use syntax::token::Span;
 use syntax::visit::{any_child_expr, any_child_stmt};
-use types::Type;
 
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base
@@ -257,7 +256,7 @@ fn purity_gate_passes(sig: &FunctionReflection, is_constructor: bool) -> bool {
     if sig.is_stub {
         return false;
     }
-    if !is_constructor && sig.return_type == Type::Void {
+    if !is_constructor && sig.return_type.is_void() {
         return false;
     }
     if sig.params.iter().any(|p| p.by_ref) {

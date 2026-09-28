@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
         // Real PHPStan's own `generator.void` check: the `yield from`
         // expression's own result (the delegated generator's TReturn) is
         // `void` but consumed in a non-statement position.
-        if *result_ty == Type::Void && !is_bare_statement {
+        if result_ty.is_void() && !is_bare_statement {
             self.report("Result of yield from is used but the delegated generator never returns anything, it's return type is void.".to_string(),
                 span,
                 0,

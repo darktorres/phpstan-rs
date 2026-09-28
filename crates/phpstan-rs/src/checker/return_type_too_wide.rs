@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
         // union is exactly one of `null`/`true`/`false` is exempt.
         if !is_first_declaration
             && !is_private
-            && matches!(actual, Type::Null | Type::True | Type::False)
+            && (actual.is_null().yes() || matches!(actual, Type::True | Type::False))
         {
             return;
         }

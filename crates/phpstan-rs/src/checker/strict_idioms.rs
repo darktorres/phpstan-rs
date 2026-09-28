@@ -34,9 +34,9 @@ fn is_object_like(ty: &Type) -> bool {
             members
                 .iter()
                 .any(|m| matches!(m, Type::Object(..) | Type::ObjectWithoutClass))
-                && members
-                    .iter()
-                    .all(|m| matches!(m, Type::Object(..) | Type::ObjectWithoutClass | Type::Null))
+                && members.iter().all(|m| {
+                    m.is_null().yes() || matches!(m, Type::Object(..) | Type::ObjectWithoutClass)
+                })
         }
         Type::Intersection(members) => members
             .iter()

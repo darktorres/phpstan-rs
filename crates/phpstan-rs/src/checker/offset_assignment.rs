@@ -55,7 +55,7 @@ impl<'a> Checker<'a> {
         };
         let container = self.infer_expr(base, locals);
         let dim = idx.as_deref().map(|i| self.infer_expr(i, locals));
-        if container.is_mixed() || matches!(container, Type::Null | Type::Never) {
+        if container.is_mixed() || (container.is_never() || container.is_null().yes()) {
             return;
         }
         if is_assign_op
@@ -65,10 +65,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let members: Vec<&Type> = match &container {
-            Type::Union(members) => members
-                .iter()
-                .filter(|m| !matches!(m, Type::Null))
-                .collect(),
+            Type::Union(members) => members.iter().filter(|m| !m.is_null().yes()).collect(),
             other => vec![other],
         };
         let verdicts: Vec<Option<&'static str>> = members

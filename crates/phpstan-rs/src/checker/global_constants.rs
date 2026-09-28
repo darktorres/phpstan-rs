@@ -262,8 +262,7 @@ impl<'a> Checker<'a> {
                     | Type::ClassKindString(_)
             ) || matches!(t, Type::Intersection(ms) if ms.iter().any(|m| matches!(m, Type::String)))
         };
-        let is_unknown =
-            |t: &Type| t.is_mixed() || matches!(t, Type::Never | Type::TemplateParam(_));
+        let is_unknown = |t: &Type| t.is_mixed() || (t.is_never() || t.is_template());
         let level = match name_ty {
             t if is_string(t) || is_unknown(t) => return,
             Type::Union(members) if members.iter().any(is_unknown) => return,

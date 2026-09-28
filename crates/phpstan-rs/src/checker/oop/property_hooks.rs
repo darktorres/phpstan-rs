@@ -214,7 +214,7 @@ impl<'a> Checker<'a> {
             self.check_throws_tag_validity(throws, span);
             // `ThrowsVoidPropertyHookWithExplicitThrowPointRule`, same
             // simplified wording as `check_function_with_ancestor_hint`.
-            if *throws == Type::Void {
+            if throws.is_void() {
                 let throw_span = match body {
                     PropertyHookBody::Arrow(e) => expr_contains_explicit_throw(e),
                     PropertyHookBody::Block(stmts) => body_contains_explicit_throw(stmts),
@@ -389,7 +389,7 @@ impl<'a> Checker<'a> {
         let throws = self.resolve_hook_throws(doc);
         if let Some(throws) = &throws {
             self.check_throws_tag_validity(throws, span);
-            if *throws == Type::Void {
+            if throws.is_void() {
                 let throw_span = match body {
                     PropertyHookBody::Arrow(e) => expr_contains_explicit_throw(e),
                     PropertyHookBody::Block(stmts) => body_contains_explicit_throw(stmts),

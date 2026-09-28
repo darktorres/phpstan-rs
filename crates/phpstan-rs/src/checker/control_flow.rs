@@ -500,18 +500,19 @@ fn discriminant_may_hold(locals: &Locals, key: &str) -> bool {
     match value {
         "True" => members
             .iter()
-            .any(|m| !matches!(m, Type::False | Type::Null)),
+            .any(|m| !(m.is_null().yes() || matches!(m, Type::False))),
         "False" => members.iter().any(|m| !matches!(m, Type::True)),
         literal => members.iter().any(|m| {
-            !matches!(
-                m,
-                Type::True
-                    | Type::False
-                    | Type::Null
-                    | Type::IntLiteral(_)
-                    | Type::StringLiteral(_)
-                    | Type::EnumCase(..)
-            ) || format!("{m:?}") == literal
+            !(m.is_null().yes()
+                || matches!(
+                    m,
+                    Type::True
+                        | Type::False
+                        | Type::IntLiteral(_)
+                        | Type::StringLiteral(_)
+                        | Type::EnumCase(..)
+                ))
+                || format!("{m:?}") == literal
         }),
     }
 }

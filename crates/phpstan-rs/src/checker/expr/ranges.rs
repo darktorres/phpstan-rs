@@ -62,7 +62,7 @@ pub(crate) type NullProbeVerdictFn = fn(&Type) -> Option<&'static str>;
 /// `IssetCheck` draws the identical two-way split (`isNull()->yes()` vs.
 /// `isNull()->no()`, `maybe()` staying silent either way).
 pub(crate) fn null_probe_verdict(ty: &Type) -> Option<&'static str> {
-    if *ty == Type::Null {
+    if ty.is_null().yes() {
         return Some("is always null");
     }
     if type_definitely_excludes_null(ty) {

@@ -593,7 +593,7 @@ impl<'a> Checker<'a> {
         };
         let mut members: Vec<Type> = members.clone();
         if level.is_some_and(|l| l < 8) {
-            members.retain(|m| !matches!(m, Type::Null));
+            members.retain(|m| !m.is_null().yes());
         }
         if level.is_some_and(|l| l < 7) {
             let accepted: Vec<Type> = members

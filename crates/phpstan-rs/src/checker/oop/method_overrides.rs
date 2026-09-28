@@ -99,7 +99,7 @@ impl<'a> Checker<'a> {
         };
         let throwable = || Type::object("Throwable".into(), Vec::new());
         let own_throws = own_sig.throws().clone().unwrap_or_else(throwable);
-        if own_throws == Type::Void {
+        if own_throws.is_void() {
             return;
         }
 
@@ -149,7 +149,7 @@ impl<'a> Checker<'a> {
         }
 
         for (owner, parent_throws) in ancestors {
-            if parent_throws == Type::Void {
+            if parent_throws.is_void() {
                 self.report(format!(
                         "Method {fqn}::{method_name}() should not throw {own_throws} because parent method {owner}::{method_name}() has PHPDoc tag @throws void."
                     ),

@@ -729,25 +729,25 @@ impl TemplateSubject<'_> {
 /// diagnostic on an already-unusual bound choice.
 fn is_supported_generic_bound(ty: &Type) -> bool {
     ty.is_mixed()
-        || matches!(
-            ty,
-            Type::Null
-                | Type::Array(_, _)
-                | Type::ArrayShape(_)
-                | Type::String
-                | Type::StringLiteral(_)
-                | Type::Int
-                | Type::IntLiteral(_)
-                | Type::Float
-                | Type::FloatLiteral(_)
-                | Type::Bool
-                | Type::True
-                | Type::False
-                | Type::Object(_, _)
-                | Type::ObjectWithoutClass
-                | Type::ObjectShape(_)
-                | Type::Union(_)
-                | Type::Intersection(_)
-                | Type::TemplateParam(_)
-        )
+        || (ty.is_null().yes()
+            || ty.is_template()
+            || matches!(
+                ty,
+                Type::Array(_, _)
+                    | Type::ArrayShape(_)
+                    | Type::String
+                    | Type::StringLiteral(_)
+                    | Type::Int
+                    | Type::IntLiteral(_)
+                    | Type::Float
+                    | Type::FloatLiteral(_)
+                    | Type::Bool
+                    | Type::True
+                    | Type::False
+                    | Type::Object(_, _)
+                    | Type::ObjectWithoutClass
+                    | Type::ObjectShape(_)
+                    | Type::Union(_)
+                    | Type::Intersection(_)
+            ))
 }

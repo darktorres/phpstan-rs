@@ -246,7 +246,7 @@ impl<'a> Checker<'a> {
             if let Some(base_key) = narrowing_key(base) {
                 let current = self.current_narrowed_type(base, &base_key, locals);
                 let narrowed = narrow_isset_container(&current, lit_key.as_deref());
-                if narrowed != Type::Never {
+                if !narrowed.is_never() {
                     locals.insert(base_key, narrowed);
                 }
             }
@@ -487,7 +487,7 @@ impl<'a> Checker<'a> {
             for (name, after_ty) in after.iter() {
                 if !is_real_variable_key(name)
                     || subjects.iter().any(|(k, _)| k == name)
-                    || *after_ty == Type::Never
+                    || after_ty.is_never()
                 {
                     continue;
                 }

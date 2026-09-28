@@ -347,7 +347,7 @@ fn a_method_scoped_template_parameterized_type_is_inherited() {
         );
     };
     assert!(
-        matches!(**inner, Type::TemplateParam(_)),
+        inner.is_template(),
         "expected a TemplateParam inside the ClassString, got {inner:?}"
     );
     let Type::Union(members) = &sig.return_type else {
@@ -357,7 +357,7 @@ fn a_method_scoped_template_parameterized_type_is_inherited() {
         );
     };
     assert!(
-        members.iter().any(|m| matches!(m, Type::TemplateParam(_))),
+        members.iter().any(|m| m.is_template()),
         "expected a TemplateParam member in the return union, got {:?}",
         sig.return_type
     );

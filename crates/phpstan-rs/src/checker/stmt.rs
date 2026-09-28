@@ -555,20 +555,20 @@ impl<'a> Checker<'a> {
                     // "returns the wrong type." Checked before the
                     // generic path below, which would otherwise report
                     // this identically to any other type mismatch.
-                    if expected == Type::Never {
+                    if expected.is_never() {
                         self.report(
                             "should never return, but a return statement was reached".to_string(),
                             e.span,
                             3,
                             "return.never",
                         );
-                    } else if expected == Type::Void && actual != Type::Void {
+                    } else if expected.is_void() && !actual.is_void() {
                         // A `void` function returning an actual value is
                         // real PHPStan's own dedicated `return.void`,
                         // not the generic mismatch path (`void` isn't a
                         // "wrong type" the way e.g. `string` vs `int`
                         // is - it's "no value was ever supposed to come
-                        // back"). `actual != Type::Void` is a real,
+                        // back"). `!actual.is_void()` is a real,
                         // necessary exception: `return anotherVoidFn();`
                         // delegating to another void-returning call is
                         // legal, common PHP (real PHPStan doesn't flag
@@ -664,7 +664,7 @@ impl<'a> Checker<'a> {
                     // `Return(Some(e))` just above - a bare `return;`
                     // reaches this exact "never returns" claim just as
                     // surely as one with a value does.
-                    if expected == Type::Never {
+                    if expected.is_never() {
                         self.report(
                             "should never return, but a return statement was reached".to_string(),
                             stmt.span,
@@ -694,7 +694,7 @@ impl<'a> Checker<'a> {
                     // `Type::Mixed` (`Maybe`, matching `MixedType::
                     // isVoid`, no explicit/implicit distinction there
                     // either) are exempt.
-                    } else if !(expected.is_mixed() || matches!(expected, Type::Void)) {
+                    } else if !(expected.is_mixed() || expected.is_void()) {
                         self.report(
                             format!("should return {expected} but empty return statement found"),
                             stmt.span,

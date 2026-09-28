@@ -530,9 +530,7 @@ impl<'a> Checker<'a> {
         expr: &Type,
         span: syntax::token::Span,
     ) {
-        if matches!(expr, Type::Never)
-            || self.registry.is_super_type_of(cast, expr) != TrinaryLogic::Yes
-        {
+        if expr.is_never() || self.registry.is_super_type_of(cast, expr) != TrinaryLogic::Yes {
             return;
         }
         self.report(
@@ -690,10 +688,7 @@ impl<'a> Checker<'a> {
     ) -> Option<(String, String)> {
         let ty = self.infer_expr(receiver, locals);
         let members: Vec<&Type> = match &ty {
-            Type::Union(members) => members
-                .iter()
-                .filter(|m| !matches!(m, Type::Null))
-                .collect(),
+            Type::Union(members) => members.iter().filter(|m| !m.is_null().yes()).collect(),
             other => vec![other],
         };
         let mut found: Option<(String, String)> = None;

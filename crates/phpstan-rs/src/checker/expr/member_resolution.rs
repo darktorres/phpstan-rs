@@ -1194,7 +1194,7 @@ impl<'a> Checker<'a> {
                 return Type::mixed();
             }
             match (&element, &key) {
-                (Some(el), Some(key)) if keyed && *key != Type::Null => {
+                (Some(el), Some(key)) if keyed && !key.is_null().yes() => {
                     Type::array(key.clone(), el.clone())
                 }
                 (Some(el), _) => Type::list_of(el.clone()),
@@ -1207,7 +1207,7 @@ impl<'a> Checker<'a> {
             "getOneOrNullResult" => union_types(element_or_mixed, Type::null()),
             "toIterable" => Type::union_of(vec![
                 Type::array(
-                    key.filter(|k| *k != Type::Null)
+                    key.filter(|k| !k.is_null().yes())
                         .unwrap_or_else(Type::unknown_array_key),
                     element_or_mixed,
                 ),

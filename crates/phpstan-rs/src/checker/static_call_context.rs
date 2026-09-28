@@ -61,7 +61,7 @@ impl<'a> Checker<'a> {
                 let every_member = match &ty {
                     Type::Union(members) => members
                         .iter()
-                        .filter(|m| !matches!(m, Type::Null))
+                        .filter(|m| !m.is_null().yes())
                         .all(|m| self.relation().can_name_a_class(m).no()),
                     _ => true,
                 };

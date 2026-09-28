@@ -489,8 +489,8 @@ impl<'a> Checker<'a> {
                         // `Closure::bind`/`->bindTo()` third argument does,
                         // since `current_class` has no other way to
                         // reflect Pest's file-scoped binding.
-                        let scope_class = match &this_ty {
-                            Type::Object(name, _) => Some(name.to_string()),
+                        let scope_class = match this_ty.object_class_names()[..] {
+                            [class] => Some(class.to_string()),
                             _ => None,
                         };
                         self.check_closure_literal_with_this_and_scope(
@@ -1009,18 +1009,7 @@ impl<'a> Checker<'a> {
                 // for a `Union`/`Intersection` receiver (e.g. a multi-type
                 // `catch` variable), using a representative member (the
                 // first `Object` found) for argument-checking.
-                let recv_class = match &recv_ty {
-                    Type::Object(class, _) => Some(class.clone()),
-                    Type::EnumCase(fqn, _) => Some(fqn.clone()),
-                    Type::Union(members) | Type::Intersection(members) => {
-                        members.iter().find_map(|m| match m {
-                            Type::Object(class, _) => Some(class.clone()),
-                            Type::EnumCase(fqn, _) => Some(fqn.clone()),
-                            _ => None,
-                        })
-                    }
-                    _ => None,
-                };
+                let recv_class = recv_ty.object_class_names().first().map(|c| (*c).clone());
                 // `method.nonObject` - a receiver whose type is confirmed
                 // to never be an object at all (a scalar, an array,
                 // `stdClass`) gets flagged here and short-circuits the
@@ -1756,7 +1745,10 @@ impl<'a> Checker<'a> {
                     // anything that comes back as an `Object` here is a
                     // genuine bare class-name reference.
                     InstanceofTarget::Name(name, name_span) => {
-                        if let Type::Object(class, _) = self.resolve_name_expr(name) {
+                        let resolved = self.resolve_name_expr(name);
+                        if let [class] = resolved.object_class_names()[..]
+                            && !resolved.is_enum_case()
+                        {
                             if !self.class_name_exists(&class)
                                 && !Self::class_guarded(&class, locals)
                             {
@@ -2127,8 +2119,8 @@ impl<'a> Checker<'a> {
                 // the way real PHPStan does, when `Foo` is itself generic
                 // (`@template` on the class).
                 let new_ty = self.infer_expr(e, locals);
-                let resolved_class = match &new_ty {
-                    Type::Object(class, _) => Some(class.clone()),
+                let resolved_class = match new_ty.object_class_names()[..] {
+                    [class] => Some(class.clone()),
                     _ => None,
                 };
                 // Rebind to the registry's canonical-case spelling up
@@ -2665,16 +2657,9 @@ impl<'a> Checker<'a> {
                 };
                 let name_ty = self.check_expr(name, locals, label);
                 self.check_dynamic_class_constant_fetch(&name_ty, e.span);
-                let literal_names: Option<Vec<String>> = match &name_ty {
-                    Type::StringLiteral(s) => Some(vec![s.to_string()]),
-                    Type::Union(members) => members
-                        .iter()
-                        .map(|m| match m {
-                            Type::StringLiteral(s) => Some(s.to_string()),
-                            _ => None,
-                        })
-                        .collect(),
-                    _ => None,
+                let literal_names: Option<Vec<String>> = {
+                    let names = name_ty.constant_strings();
+                    (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
                 };
                 match (literal_names, receiver) {
                     (Some(names), None) if !names.is_empty() => names
@@ -2962,9 +2947,7 @@ impl<'a> Checker<'a> {
                 let name_ty = self.check_expr(name, locals, label);
                 // `Foo::{'bar'}()`, or a name variable holding one known
                 // string: a call to that method.
-                if let Type::StringLiteral(method) = name_ty
-                    && let Some(method) = method.as_str()
-                {
+                if let [method] = name_ty.constant_strings()[..] {
                     let call = static_call(target, method.to_string(), args, e.span);
                     return self.check_expr(&call, locals, label);
                 }
@@ -3276,12 +3259,12 @@ impl<'a> Checker<'a> {
                                 }
                             }
                         }
-                        if remaining != Type::Never
+                        if !remaining.is_never()
                             && let Some(before) = &before_match
                         {
                             self.record_throw_state(unhandled_match_error(), before);
                         }
-                        if remaining != Type::Never && !exempted {
+                        if !remaining.is_never() && !exempted {
                             self.report(
                                 format!(
                                     "Match expression does not handle remaining value: {remaining}"
@@ -4049,16 +4032,7 @@ impl<'a> Checker<'a> {
                     }
                     ExprKind::MethodCall(recv, method, _, _) => {
                         let recv_ty = self.check_expr(recv, locals, label);
-                        let recv_class = match &recv_ty {
-                            Type::Object(class, _) => Some(class.clone()),
-                            Type::Union(members) | Type::Intersection(members) => {
-                                members.iter().find_map(|m| match m {
-                                    Type::Object(class, _) => Some(class.clone()),
-                                    _ => None,
-                                })
-                            }
-                            _ => None,
-                        };
+                        let recv_class = recv_ty.object_class_names().first().map(|c| (*c).clone());
                         if let Some(class) = &recv_class
                             && self.registry.classes.contains_key(class.as_str())
                         {
@@ -4560,8 +4534,8 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::mixed())
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
-                match self.infer_expr(name, locals) {
-                    Type::StringLiteral(method) if method.as_str().is_some() => self.infer_expr(
+                match self.infer_expr(name, locals).constant_strings()[..] {
+                    [method] => self.infer_expr(
                         &static_call(target, method.to_string(), args, e.span),
                         locals,
                     ),
@@ -4569,16 +4543,10 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::DynamicClassConstFetch(target, name) => {
-                let names: Option<Vec<String>> = match self.infer_expr(name, locals) {
-                    Type::StringLiteral(s) => Some(vec![s.to_string()]),
-                    Type::Union(members) => members
-                        .into_iter()
-                        .map(|m| match m {
-                            Type::StringLiteral(s) => Some(s.to_string()),
-                            _ => None,
-                        })
-                        .collect(),
-                    _ => None,
+                let names: Option<Vec<String>> = {
+                    let names = self.infer_expr(name, locals);
+                    let names = names.constant_strings();
+                    (!names.is_empty()).then(|| names.iter().map(|n| n.to_string()).collect())
                 };
                 names
                     .into_iter()
@@ -5056,7 +5024,7 @@ impl<'a> Checker<'a> {
         // down to bare `Type::Null`, when code checking the original
         // expression with `is_array($selection_raw)` immediately after
         // should still be checking a real `Mixed`.
-        if r_ty == Type::Null {
+        if r_ty.is_null().yes() {
             let l_ty = self.infer_expr(l, locals);
             // The no-op reasoning above only holds when `l` is a bare
             // variable - `locals`'s tracked type for one already
@@ -5091,7 +5059,7 @@ impl<'a> Checker<'a> {
         // expression at all already proves the right side never ran, so
         // the result is exactly the left side's own non-null type, the
         // same as the `?? null` case above computes.
-        if r_ty == Type::Never {
+        if r_ty.is_never() {
             return l_ty;
         }
         // Still scoped to exactly `Type::Array` on the left, matching
@@ -6289,11 +6257,11 @@ fn closure_inferred_return_type(
     if falls_off_end {
         members.push(Type::void());
     }
-    let has_value = members.iter().any(|m| *m != Type::Void);
+    let has_value = members.iter().any(|m| !m.is_void());
     let mut members: Vec<Type> = members
         .into_iter()
         .map(|m| {
-            if has_value && m == Type::Void {
+            if has_value && m.is_void() {
                 Type::null()
             } else {
                 m
@@ -6302,7 +6270,7 @@ fn closure_inferred_return_type(
         .collect();
     // `null` last, the order real PHPStan's own union description uses
     // (`int|null`, not `null|int`).
-    members.sort_by_key(|m| *m == Type::Null);
+    members.sort_by_key(|m| m.is_null().yes());
     members
         .into_iter()
         .reduce(union_types)
