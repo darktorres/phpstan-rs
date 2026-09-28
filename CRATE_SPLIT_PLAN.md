@@ -5020,8 +5020,12 @@ fixture:
     a built-in typed one without the native type (`const BZ2` in a `Phar`
     subclass, `classConstant.missingNativeType`), `do {} while ($arr =
     [1])` (`doWhile.alwaysTrue`), a `goto` to an undefined label in a
-    property hook (`goto.labelUndefined`), and `@phpstan-assert … $this`
-    on a static method (`parameter.notFound`);
+    property hook (`goto.labelUndefined`), `@phpstan-assert … $this`
+    on a static method (`parameter.notFound`), an interface binding one
+    ancestor's template two ways through two parents (`TValue` as `Item`
+    via `Traversable` and as `string` via `IteratorAggregate`;
+    `generics.interfaceConflict`), and a `catch (\Exception $p)` writing a
+    by-reference `int &$p` (`parameterByRef.type`);
   - a template's variance is checked through composition, each parameter
     on its own (`VarianceCheck`, `TemplateTypeVariance::compose`): a
     covariant `X` in `Out<X>`, `In<Out<X>>`, `Inv<X>` (an invariant
