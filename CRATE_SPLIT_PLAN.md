@@ -1236,7 +1236,9 @@ Follow-ups:
   relation.
 - **One union.** `union_of_branches` and `late::join` go through
   `union_types`. A union keeps an explicit `mixed` explicit (behaviour fix:
-  `$b ? $mixedParam : null` is reported at level 10 only, not 9). It
+  `$b ? $mixedParam : null` is reported at level 10 only, not 9; `@var
+  array|mixed|null` is a declared type, `missingType.property` today, the
+  rules oracle's `bug-5834.php`). It
   follows `TypeCombinator::union` (behaviour fixes, each reproduced):
   `never` is absorbed (`$c ? 1 : throw new E()` is `1|never` today, 48
   nsrt mismatches), and integer ranges merge when they overlap or touch
@@ -2106,10 +2108,14 @@ Follow-ups:
     impure points: an `echo` in it is `impure.echo`, unreported today) and
     method templates, and a property
     redeclared without `@var` keeps its parent's (`mixed` today; nsrt
-    `inherit-phpdoc-merging-var.php`). Inheritance searches every parent
-    interface: for `interface MC extends CC, M` with `add()` declared on
-    the second, an untyped `add($item)` in an implementing class reads
-    `$item` as `mixed` and is `missingType.parameter` today, so
+    `inherit-phpdoc-merging-var.php`) and so isn't `missingType.property`
+    (`protected $message = '…'` in an `Exception` subclass, `public $layout
+    = null` over a typed parent: the rules oracle's `bug-11761-bis.php`,
+    `bug-10987.php`, `bug-7074.php`, `bug-7692.php`, `bug-7839.php`).
+    Inheritance searches every parent interface: for `interface MC
+    extends CC, M` with `add()` declared on the second, an untyped
+    `add($item)` in an implementing class reads `$item` as `mixed` and is
+    `missingType.parameter` today, so
     `$item->getName()` is `method.nonObject` (the rules oracle's
     `bug-4415.php`);
   - `@phpstan-type` aliases apply in `@property`/`@method` and
@@ -2223,6 +2229,9 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   `vsprintf` (32, a `Stringable` object given), `round()`'s `RoundingMode`
   from PHP 8.4 (9), `time_nanosleep()`'s `int` parameters where the stub
   says `positive-int` (3, `0` given), `strpos()`'s `int` offset (1),
+  `PDO::prepare()`'s and `DOMDocument::createElement()`'s benevolent
+  `…|false` (6, `method.nonObject`/`property.nonObject` "non-object type
+  PDOStatement|false" today), `DOMElement::getAttributeNode()`'s (2),
   `DateTimeImmutable::createFromFormat()`'s `static|false` on a subclass
   (1, `DateTimeImmutable|false` today), `mysqli::$affected_rows`'s
   `int<0, max>|numeric-string` (1, `int<-1, max>` today),
@@ -2632,7 +2641,13 @@ deleted; the file-size gate.
   (isset($v)) { return; }` or inside `if (!isset($v))` on
   `int|string|float|null` (or `?int`), `$v` keeps its type today, so
   `onlyNull($v)` is `argument.type` (the rules oracle's `bug-9580.php`);
-  `$v !== null` already narrows. `isset($t['foo'])` with a non-numeric
+  `$v !== null` already narrows; `isset($m->foo)` on `mixed` gives
+  `object&hasProperty(foo)` (`echo $m->foo` after it is
+  `property.nonObject` "on mixed" today, `access-properties.php:437`,
+  `bug-13539.php`), and `isset($o->foo)` on `self|false` leaves
+  `self` (`echo $o->foo` after it is `property.nonObject` "non-object
+  type …|false" today, the rules oracle's `access-properties.php:320`).
+  `isset($t['foo'])` with a non-numeric
   key drops a `string` member (a string has only integer offsets): on
   `string|array`
   it leaves `string|array&hasOffsetValue('foo', mixed)` today, so the
@@ -2962,6 +2977,12 @@ deleted; the file-size gate.
       `$who` `mixed` and is `argument.type` "expects callable(A): array,
       Closure(static): array{} given" today (the rules oracle's
       `bug-11591.php`, `bug-14893.php`).
+    - **Unpacked constant arrays** bind their elements to the parameters
+      they reach: `$c->access(...['view', null, true])` for `@return
+      ($return_as_object is true ? AccessResultInterface : bool)` is
+      `bool` today, so `->isAllowed()` on it is `method.nonObject` (the
+      rules oracle's `bug-7369.php`; the literal-argument call already
+      resolves).
     - **By-reference out types of built-in functions** apply to the
       argument: after `exec($c, $out)`, `parse_str($s, $ps)`,
       `preg_match_all($p, $s, $mm)` or `preg_match` with a non-constant
@@ -3666,6 +3687,15 @@ rules-oracle findings).
     string, 1?: string}` it is `array<string>` today (the rules oracle's
     `bug-11549.php`); `array_sum()` of ints is `int`, not `int|float`
     (`bug-9699.php`);
+  - `json_decode()` of a constant string folds to its value
+    (`JsonDecodeFunctionReturnTypeExtension`): `json_decode('{"class":
+    "x"}')->class` is `property.nonObject` "on mixed" today (the rules
+    oracle's `bug-12273.php`);
+  - `XMLReader::open()` is `XMLReader|false` called statically and `bool`
+    on an instance (`XMLReaderOpenReturnTypeExtension`); it is
+    `XMLReader|bool` today, so `->read()` after `!== false` is
+    `method.nonObject` "XMLReader|true" (the rules oracle's
+    `call-methods.php:1676`);
   - `Closure::bind()`/`bindTo()` of a closure literal is `Closure`, not
     `Closure|null` (`ClosureBindDynamicReturnTypeExtension`; the rules
     oracle's `bug-7675.php`);
@@ -3880,6 +3910,10 @@ fixture:
     `method.notFound`/`property.notFound` (it declares no members):
     `$o->getItem()` and `$o->x` on `object $o` are unreported today (the
     oracle finds 59 "undefined method/property object::");
+  - a call to a method a class doesn't have is `method.notFound`, never
+    `method.nonObject`: `(new stdClass())->foo()` is "call to method foo()
+    on a non-object type stdClass" today (the rules oracle's
+    `bug-12548.php`, `invalid-assign-var.php`);
   - a method call or property read on a possibly-null receiver is
     reported from level 8 (`findTypeToCheck`'s `checkNullables`), as a
     `null` receiver throws an `Error`: `$c->has()` and `$c->p` on `?C` are
