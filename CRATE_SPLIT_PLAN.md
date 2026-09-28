@@ -1102,9 +1102,9 @@ Follow-ups, behaviour fixes:
   corpus `assign.invalidExpr`).
 - **Kept syntax.** Trait adaptations keep `insteadof` and `as` visibility;
   promoted parameters keep `(set)` visibility; `&get` is by reference;
-  `$obj->$$name` keeps both indirections; interpolated parts and heredoc
-  `{$…}` get their own spans (LSP references land on the string's start
-  today).
+  `$obj->$$name` keeps both indirections; interpolated parts and heredoc `{$…}`
+  get their own spans, heredoc positions accounting for the stripped indentation
+  (LSP references land on the string's start today).
 
 Follow-ups, the typed AST (§3.1):
 
@@ -1150,6 +1150,9 @@ Follow-ups:
   (`@var array|mixed|null` is a declared type); `never` is absorbed
   (`$c ? 1 : throw …` is `1|never` today, 48 nsrt); integer ranges merge when
   they touch; constant arrays union by `reduceArrays`, keeping tagged unions
+  (shapes merge only when lossless, `array{}` stays its own member unless an
+  all-optional shape absorbs it, and same-key-set variants merge per position
+  only past `ARRAY_COUNT_LIMIT`)
   (`$c ? ['t' => 'a', 'v' => 1] : ['t' => 'b', 'v' => 's']` merges to one shape
   today, 163 nsrt); members deduplicate, generic arguments included, and `bool`
   absorbs `true`/`false`; `union_types_keep_shapes_distinct` is deleted.
@@ -1173,15 +1176,15 @@ Follow-ups:
   Subtraction, `Relation::remove` and the coercions follow the same shape;
   member lookup (`getMethod`/`getProperty`/`getConstant`) moves once C8's
   reflection exists.
-- **Subtracted types** (`mixed~null`, `object~T`, `Foo~Bar`,
-  `$this(Foo~Bar)`) as a field of the subtractable variants: narrowing away
-  from `mixed`, `object`, a class, `$this` or a template keeps what was
-  removed (`isset($m)` leaves plain `mixed` today; Appendix H's
-  `subtracted`, 54). `==` is structural and PHPStan's `equals()` is
-  `Type::equals`; narrowing is `Relation::intersect`/`Relation::remove`,
-  whose rules absorb today's special cases. A `@phpstan-sealed` class is
-  its permitted subclasses (`match.unhandled` on an exhaustive match
-  today).
+- **Subtracted types** (`mixed~null`, `object~T`, `Foo~Bar`, `$this(Foo~Bar)`)
+  as a field of the subtractable variants: narrowing away from `mixed`,
+  `object`, a class, `$this` or a template keeps what was removed (`isset($m)`
+  leaves plain `mixed` today; Appendix H's `subtracted`, 54). `==` is structural
+  and PHPStan's `equals()` is `Type::equals` (each `==` on types today audited
+  into one or the other, and each `== Type::Mixed(false)` into `is_mixed()` or
+  an exact comparison); narrowing is `Relation::intersect`/`Relation::remove`,
+  whose rules absorb today's special cases. A `@phpstan-sealed` class is its
+  permitted subclasses (`match.unhandled` on an exhaustive match today).
 - **Conditionals on a template distribute** (`(T is false ? never : T)`
   with `stdClass|false` is `stdClass`).
 - **Built-in offset-accessible classes**
@@ -1192,30 +1195,33 @@ Follow-ups:
 - **Removing an enum case** leaves the others (`FE::B|FE` today, a wrong
   value); **truthiness removes whole members** (`array{}|true` survives
   the falsey side today).
-- **Template inference** is PHPStan's structural `inferTemplateTypes`,
-  unioning every binding: `@param T ...$v` binds only the first argument
-  today (`collect('a', 'b')` is `'a'`, a wrong value); an inferred literal
-  generalizes unless covariant or scalar-bounded (`new Box(1)` is
-  `Box<1>` today); a union parameter binds only what its other members
-  don't cover; `mixed` binds `mixed`; inference reads through
-  intersections and template arguments. Appendix H's template causes are
-  265 nsrt mismatches (`generic-new-infer` 54, `callable-template-infer`
-  35, …).
+- **Template inference** is PHPStan's structural `inferTemplateTypes`, through
+  generic arguments (by ancestor bindings), callables, shapes, array keys and
+  iterables, unioning every binding (`array<K, V>` keys, `ArrayObject<int, T>`,
+  `callable(): T` and `array{x: T}` infer nothing today): `@param T ...$v` binds
+  only the first argument today (`collect('a', 'b')` is `'a'`, a wrong value);
+  an inferred literal generalizes unless covariant or scalar-bounded
+  (`new Box(1)` is `Box<1>` today); a union parameter binds only what its other
+  members don't cover; `mixed` binds `mixed`; inference reads through
+  intersections and template arguments. Appendix H's template causes are 265
+  nsrt mismatches (`generic-new-infer` 54, `callable-template-infer` 35, …).
 - **A template narrows by intersection**: `$b instanceof A` on `T` is
   `A&T`, its else `T~A`.
 - **Late types**: `new<T>`, `template-type<…>`, `int-mask<>`,
   `key-of<C::ARR>`, and `key-of<T>`/`value-of<T>`/`Bob[TKey]` over a
   template stay late and resolve per call (`$y->x('b')` is
   `string|bool|int|float` today where it is `bool`, `bug-13652.php`).
-- **Callability and class-strings in `accepts`**: a string or array is
-  callable only when it names a callable; a class-string literal must lie
-  within its bound; a closure fits a callable type only by signature (32
-  corpus findings); `string` accepts a `Stringable` outside
-  `strict_types`; `DateTime|DateTimeImmutable` accepts
-  `DateTimeInterface`; a union of literals covering a shape's keys accepts
-  it; a range is accepted by the constants it spans. Accepted today and
-  not: `T` of `mixed` for `int`, `object` for an object shape, an
-  uncovered key type, an invariant generic with `mixed`.
+- **Callability and class-strings in `accepts`**: a string or array is callable
+  only when it names a callable; a class-string literal must lie within its
+  bound; a closure fits a callable type only by signature (32 corpus findings);
+  `string` accepts a `Stringable` outside `strict_types`;
+  `DateTime|DateTimeImmutable` accepts `DateTimeInterface`; a union of literals
+  covering a shape's keys accepts it; a range is accepted by the constants it
+  spans. Accepted today and not: `T` of `mixed` for `int`, `object` for an
+  object shape, an uncovered key type (`array<mixed>` for
+  `array<string, mixed>`), an array lacking an unsealed shape's required key, an
+  invariant generic with `mixed` or with a template bounded by the argument
+  (`Format<O of Output>` for `Format<Output>`).
 - **Conditional parameter types** resolve per call and narrow with their
   parameter; conditional returns and `@param-out` resolve on emptiness,
   templates, `$this` and pre-call argument types (Appendix H's
@@ -1309,13 +1315,17 @@ owner module; the `config` crate holds loader and schema; extract.
 
 Follow-ups, one commit each with its test:
 
-- **Nested validation**: `deny_unknown_fields` on every nested struct.
-  `[[ignore_errors]]` takes PHPStan's whole shape (`raw_message`,
-  `messages`, `identifiers`, `paths`, per-entry `report_unmatched`;
-  same-key entries merge counts), compiles once at load through PCRE2 with
-  the pattern's delimiters (`regex` without `pcre-validate`, divergences
-  documented), and applies `IgnoredRegexValidator`'s checks as load
-  errors. **Error paths** name the full dotted key.
+- **Nested validation**: `deny_unknown_fields` on every nested struct
+  (`IgnoreErrorEntry`, `RestrictedSymbolEntry`, `ParamCondition`, `ParamRef`,
+  `ParamFlagsCondition`, `DoctrineCustomFunctionEntry`,
+  `sql::config::SqlReflectionConfig`). `[[ignore_errors]]` takes PHPStan's whole
+  shape (`raw_message`, `messages`, `identifiers`, `paths`, per-entry
+  `report_unmatched`; same-key entries merge counts), compiles once at load
+  through PCRE2 with the pattern's delimiters (`regex` without `pcre-validate`,
+  divergences documented), and applies `IgnoredRegexValidator`'s checks as load
+  errors (an unescaped `||` or `()`, a top-level alternation starting with a
+  type name, a mid-pattern anchor; they need a PCRE-syntax parser and the phpdoc
+  type parser). **Error paths** name the full dotted key.
 - **Missing settings**, each with the phase that implements it: mixin exclude
   classes (`ReflectionSettings`, C8), universal object crates
   (`ReflectionSettings`, C8; replacing the hard-coded `stdClass` in
@@ -1510,24 +1520,23 @@ model lands in C4.
     (`@inheritdoc` forms 12, `iterable<T>&Collection` 19, child templates
     21, `@use` templates 11).
 
-  Class constants type through the ConstantResolver (C2's follow-up
-  first); a constant reference cycle types as `mixed` (nine nested
-  `array{0: …}` today); enum case values are constants; a function
-  resolves lazily the same way. A cycle through
-  `extends`/`implements`/`use` is broken on the ancestor level,
-  order-independently; a reentrant resolution panics and the cell stays
-  retryable (panic-injection and parallel tests). Levels share what they
-  don't change; any reflection input change resets every memo; trait and
-  mixin members stop outliving their source (the file-removal test
-  inverts). `has_unresolvable_ancestor` reads the unresolved edges;
-  `is_subclass_of` keeps counting unresolved names until C8.
-  Whole-registry iterations decide from declarations and the ancestor
-  level until C5's scoped queries (the `demo` command resolves what it
-  prints). Approved deltas: nested-trait methods by `use` order, constant
-  cycles as `mixed`; purity moving after resolution changes nothing (a
-  fixture pins `@return null` on `: void`). Full gate tier; peak RSS at
-  or below the phase start; a test pins that checking one file resolves
-  only what it reaches.
+  Class constants type through the ConstantResolver (C2's follow-up first); a
+  constant reference cycle types as `mixed` (nine nested `array{0: …}` today);
+  enum case values are constants; a function resolves lazily the same way. A
+  cycle through `extends`/`implements`/`use` is broken on the ancestor level,
+  order-independently; `@mixin` edges are never followed at their own level, so
+  a mixin cycle needs no breaking; a reentrant resolution panics and the cell
+  stays retryable (panic-injection and parallel tests). Levels share what they
+  don't change; any reflection input change resets every memo; trait and mixin
+  members stop outliving their source (the file-removal test inverts).
+  `has_unresolvable_ancestor` reads the unresolved edges; `is_subclass_of` keeps
+  counting unresolved names until C8. Whole-registry iterations decide from
+  declarations and the ancestor level until C5's scoped queries (the `demo`
+  command resolves what it prints). Approved deltas: nested-trait methods by
+  `use` order, constant cycles as `mixed`; purity moving after resolution
+  changes nothing (a fixture pins `@return null` on `: void`). Full gate tier;
+  peak RSS at or below the phase start; a test pins that checking one file
+  resolves only what it reaches.
 - **`ReflectionBuilder::apply` snapshots.** `apply` takes `FileDelta`s
   (with the file's role); a name's entry is recomputed from its declaring
   files in canonical order (stubs, context, analysed, by path), so a delta
@@ -1697,9 +1706,12 @@ views, exposing templates and enum cases).
 - The `Relation::structural()` callers (24 package, 3 in `types`) switch to
   the hierarchy-aware relation (an approved delta: `instanceof Child`
   narrows `Base`, `Foo&SubFoo` collapses, …).
-- The boolean `is_subclass_of` is deleted; an ancestor behind an
-  unresolved edge, or a missing class, relates `Maybe` (an approved delta:
-  `argument.type` against a mistyped namespaced `SplObjectStorage` today).
+- The boolean `is_subclass_of` is deleted; an ancestor behind an unresolved
+  edge, or a missing class, relates `Maybe` (an approved delta: consumers
+  needing certainty treat `Maybe` as unknown, and the file-removal tests
+  asserting an unresolved ancestor answer `Maybe`, renamed through
+  `gates/test-renames`; `argument.type` against a mistyped namespaced
+  `SplObjectStorage` today).
 - The `@property`/`@method`/`@mixin` implementors replace C4's copies:
   native members first, a tag at the same or a closer distance winning.
   Behaviour fixes, one commit each: `@mixin` on a trait reaches its hosts;
@@ -1736,11 +1748,12 @@ Fixes, each its own behaviour commit:
   may reach it (a dynamic-key `$GLOBALS` write, `extract()`, `parse_str()`,
   a file-scope variable variable, an unresolved include). `global
   $global;` after `$global = "foo"` is `'foo'` today;
-- purity: shell-exec and `throw` are impure, constant reads pure, calls
-  resolve by parse-time names, method dependencies follow inheritance, a
-  static call has its method's purity, a pure callable parameter is pure
-  (79 rules-oracle `possiblyImpure.*`), and a user call is judged by its
-  body (`pureFunction();` is "unknown function" today).
+- purity: shell-exec and `throw` are impure, constant reads pure, calls resolve
+  by parse-time names, method dependencies follow inheritance, a static call has
+  its method's purity, a pure callable parameter is pure (79 rules-oracle
+  `possiblyImpure.*`), and a user call is judged by its body (`pureFunction();`
+  is "unknown function" today), a static method calling an impure function being
+  impure (not `staticMethod.resultUnused`).
 
 **C10. Extract `reflection`.** No module-graph edge remains; `cargo machete`
 checks Appendix E's rows for it.
@@ -1921,19 +1934,21 @@ deleted; the file-size gate.
       branch types its subject as the guard's type;
     - a nested write through a non-constant key is dropped
       (`$array[$name][] = $v` leaves `$array` unchanged);
-    - a property write narrows only where `canChangeTypeAfterAssignment`
-      holds (`$xml->foo = 'foo'` reads back `'foo'` on a
-      `SimpleXMLElement` today); a `new` into a generic property takes its
-      declared arguments;
-    - a by-reference argument to a closure or variable function keeps its
-      value (`$save === false` reported always false after `$cb($save)`),
-      and one is checked with its value before the call:
-      `predefine_byref_or_unknown_args` widens it to `mixed` first, so
-      `r($e)` for `string &$x` is "mixed given" (Appendix I's
-      `byref-out-undefined` 60 and `byref-arg-type`); the widening moves
-      after the check and after the call's return type, which reads the
-      widened argument today (`$this->p = array_pop($objs)` on a
-      `non-empty-list<O>` is `O|null` and `assign.propertyType`);
+    - a property write narrows only where `canChangeTypeAfterAssignment` holds
+      (`$xml->foo = 'foo'` reads back `'foo'` on a `SimpleXMLElement` today); a
+      `new` into a generic property takes its declared arguments; a template
+      `new` can't infer takes its bound (`new Lorem2(new stdClass)` is
+      `Lorem2<stdClass>` today where it is `Lorem2<stdClass, object>`);
+    - a by-reference argument to a closure or variable function keeps its value
+      (`$save === false` reported always false after `$cb($save)`), an offset
+      passed by reference keeps its value too (`$array['key']` after
+      `test($array['key'])`), and one is checked with its value before the call:
+      `predefine_byref_or_unknown_args` widens it to `mixed` first, so `r($e)`
+      for `string &$x` is "mixed given" (Appendix I's `byref-out-undefined` 60
+      and `byref-arg-type`); the widening moves after the check and after the
+      call's return type, which reads the widened argument today
+      (`$this->p = array_pop($objs)` on a `non-empty-list<O>` is `O|null` and
+      `assign.propertyType`);
     - a by-reference variadic argument is read with its type;
     - `||` narrowing on an unnormalized union loses members (a rector
       `instanceof.alwaysFalse`);
@@ -1955,10 +1970,11 @@ deleted; the file-size gate.
     - **`NAN`** is never identical to itself (`NAN === NAN` is
       `identical.alwaysTrue` today, a wrong value, and `NAN !== NAN`
       `notIdentical.alwaysFalse`).
-    - **Identical** follows `resolveIdenticalType`: non-intersecting
-      operands make `===` false (`1|2 === 7` unreported today; most of the
-      80 rules-oracle `identical.alwaysFalse` and 26
-      `notIdentical.alwaysTrue`); the truthy branch intersects.
+    - **Identical** follows `resolveIdenticalType`: non-intersecting operands
+      make `===` false (`1|2 === 7` unreported today; most of the 80
+      rules-oracle `identical.alwaysFalse` and 26 `notIdentical.alwaysTrue`);
+      the truthy branch intersects; an enum's `$this` narrows like any enum
+      value (`if ($this === self::A) { return; }` leaves the whole enum today).
     - **Constant comparisons fold**, `null`/`bool` included (96 nsrt);
       **ranges narrow at their ends**, and a comparison narrows each
       union member (`$foo > 1` on `?int` is `int<2, max>`).
@@ -1980,8 +1996,10 @@ deleted; the file-size gate.
       key per PHP version; none after `PHP_INT_MAX`), appending keeps the
       shape, and a non-constant key gives a general array.
     - **`$o::class`** and `get_class()` are literals for final classes and
-      `class-string<C>&literal-string` otherwise (`match.unhandled` over
-      class names today).
+      `class-string<C>&literal-string` otherwise, `get_debug_type()` likewise,
+      `get_class()` without an argument is the declaring class's name, and
+      `get_class($this)` is `class-string<$this>`, which an unrelated class's
+      name can't equal (8) (`match.unhandled` over class names today).
     - **Key-producing assignments** prove the key
       (`AssignHandler::specifyTypes`: `$a[$k]` exists after `$k =
       array_key_first($a)`, `array_key_last`, `array_search`,
@@ -2049,20 +2067,25 @@ deleted; the file-size gate.
     - **A `static` variable** is its initializer unioned with every value
       the body assigns, `mixed` once it escapes by reference.
     - **Function scope effects** follow `FuncCallScopeEffectsHelper`
-      (`array_pop` keeps a shape, `$http_response_header` defined,
-      `json_last_error()` dropped).
+      (`array_pop` and friends keep a shape, `fopen()`/`file_get_contents()`
+      define `$http_response_header`, `json_encode`/`json_decode` drop
+      `json_last_error()`, `file_put_contents` drops `file_get_contents()` of
+      the same path).
   - **Narrowing gaps** in `specifyTypes`: `$e === E::A` subtracts the case;
-    `!empty($v)` on `int`; a condition on an increment; `instanceof
-    $classString`; `gettype()` comparisons; loose `==` with a constant
-    (Appendix H's `loose-eq-narrow`, 78); a list offset implies the lower
-    ones; a cast narrows its operand; `!is_scalar` on `string`; boolean
+    `!empty($v)` on `int`; a condition on an increment;
+    `instanceof $classString`; `gettype()` comparisons; loose `==` with a
+    constant (Appendix H's `loose-eq-narrow`, 78); a list offset implies the
+    lower ones; a cast narrows its operand; `!is_scalar` on `string`; boolean
     composition through the recipes; nullsafe chains; `if ($this->prop)` and
-    `match (get_class($obj))`; a template keeps `null`; conditional return
-    types and conditional assertions narrow arguments; and
+    `match (get_class($obj))`; a template keeps `null`; conditional return types
+    and conditional assertions narrow arguments; and
     `EqualityTypeSpecifyingHelper`'s comparisons: `count()` (Appendix H's
     `count-narrow`, 217), `strlen()` (`strlen-narrow`, 59),
     `array_key_first() !== null`, `preg_match() === 1`, `get_class() ===`,
-    string functions against non-empty literals (`string-fn-narrow`, 52).
+    string functions against non-empty literals (`string-fn-narrow`, 52), and
+    `strtolower($s) === 'abc'` making the other side lowercase; a
+    decimal-integer string can't be a key of `array<string, …>`, so
+    `isset($strings[(string) $int])` doesn't exist.
   - **Deep expressions** don't overflow the stack: a 32,000-term `.` chain
     aborts `check-project` today, and 8,000 terms take 58 s.
 
@@ -2163,11 +2186,11 @@ by-reference `use`d variable inside a closure body. In order:
     `method-call-memory` 29, `impure-invalidate` 42, `readonly-remember`
     25, `ob-level` 47).
 - **Control-flow transitions**:
-  - **Loops** run `LOOP_SCOPE_ITERATIONS = 3` with `generalizeWith`, then
-    the final walk: `$i++` in a `while` gives `0|…|6` today where PHPStan
-    has `int<0, max>` (Appendix H's `loop-generalize`, 208); the 14
-    `loop_depth` guards go; a narrowing every iteration makes holds after
-    the loop.
+  - **Loops** run `LOOP_SCOPE_ITERATIONS = 3` with `generalizeWith`, then the
+    final walk: `$i++` in a `while` gives `0|…|6` today where PHPStan has
+    `int<0, max>` (Appendix H's `loop-generalize`, 208); the 14 `loop_depth`
+    guards go; the doc comments saying 3 passes go too; a narrowing every
+    iteration makes holds after the loop.
   - **For**: a first condition that is `true` runs the body (`$x` after it
     is `variable.undefined` today), `false` makes it unreachable; the exit
     scope applies the falsey narrowing; `$a[$i]` is known under `$i <
@@ -2190,10 +2213,11 @@ by-reference `use`d variable inside a closure body. In order:
   - **Goto**: forward gotos merge at the label, backward ones run a
     fixpoint (`resolveBackwardGotoScope`; `retry:` loops are
     `smaller.alwaysTrue` today).
-  - **Short-circuit scopes**: an assignment on the right of `&&`/`||`/`??=`
-    is Maybe; an increment there counts (`$foo && $j++` leaves `0` today, a
-    wrong value); a `never` side keeps the other's scope; a nullsafe call's
-    arguments run only on a non-null receiver.
+  - **Short-circuit scopes**: an assignment on the right of `&&`/`||`/`??=` is
+    Maybe; an increment there counts (`$foo && $j++` leaves `0` today, a wrong
+    value); a `while` condition's first run is on the scope before the loop
+    (`$w` in `while ($w && $w = 1)`); a `never` side keeps the other's scope; a
+    nullsafe call's arguments run only on a non-null receiver.
   - **Switch**: each case entered with `$subject == $case`; later cases see
     terminated ones excluded (`switch (true)` by falsey narrowing);
     `default` excludes handled cases, and an exhausting switch has no
@@ -2517,17 +2541,19 @@ classes, excluded and listed by the gate.
     `array_key_exists()` narrows the key and a `mixed` array (Appendix H's
     `key-exists-fold`, 153); `ctype_digit()`, `function_exists()`,
     `class_exists()`, `is_subclass_of()` give their string kinds;
-    `array_search() !== false` and `count($a) === 1` make the array
-    non-empty; `in_array()` narrows through enum and integer haystacks and
-    narrows the haystack (`in-array-haystack`, 65), intersecting a strict
-    subject; `count()`/`strlen()` of a union of constants are unions;
-    `is_numeric()` drops non-numeric literals; `is_callable([$this, 'm'])`,
+    `array_search() !== false` and `count($a) === 1` make the array non-empty;
+    `in_array()` narrows through enum and integer haystacks and narrows the
+    haystack (`in-array-haystack`, 65), intersecting a strict subject;
+    `count()`/`strlen()` of a union of constants are unions; `is_numeric()`
+    drops non-numeric literals; `is_callable([$this, 'm'])`,
     `defined('Foo::X')`, `property_exists(static::class, …)` and
-    `method_exists(static::class, …)` guard their members; `is_callable()`
-    keeps `Class&callable` and gives `callable-array`; `is_a($s, A::class,
-    true)` on a string is `class-string<A>` (the object `A` today, a wrong
-    value); `str_contains()` and friends make the haystack non-empty (29
-    nsrt).
+    `method_exists(static::class, …)` guard their members; `is_callable()` keeps
+    `Class&callable` and gives `callable-array`; `is_a($s, A::class, true)` on a
+    string is `class-string<A>` (the object `A` today, a wrong value);
+    `!is_a($a, B::class, true)` removes `class-string<B>` from a union;
+    `is_real` is `is_float`'s alias, `is_array` on `mixed` gives
+    `array<mixed, mixed>` and `is_callable` `callable(): mixed` (24);
+    `str_contains()` and friends make the haystack non-empty (29 nsrt).
 
   Then the rest, by each function's count in Appendix G: `filter_var` and
   friends (290, 194 `mixed`), `min`/`max` (217, 198 `mixed`),
@@ -2816,7 +2842,8 @@ fixture:
     doesn't exist; 84 and 30
     rules-oracle findings, 12 corpus);
   - an `ArrayAccess` offset write checks the key against `offsetSet`
-    (`offsetAssign.dimType`) and the value (`offsetAssign.valueType`; 20);
+    (`offsetAssign.dimType`) and the value (`offsetAssign.valueType`; 20), and
+    `unset()` of an `ArrayObject<never, never>` offset is `unset.offset`;
   - an offset write or append checks its container as a read does (383
     corpus findings on `mixed`), and a read inside `isset()`/`??`/`empty()`
     or an `unset()` on an object without `ArrayAccess` throws and is
@@ -2919,7 +2946,8 @@ fixture:
     call; `impureMethod.pure` needs a final method or class
     (`FunctionPurityCheck`);
   - an enum's duplicate case value is found through constant expressions
-    (`enum.duplicateValue`);
+    (`enum.duplicateValue`, reported once on the enum naming both cases, where
+    phpstan-rs reports a literal duplicate on the later case today);
   - `propertySetHook.parameterType`, `propertySetHook.nativeParameterType`,
     `generics.existingTypeAlias` for a local alias, `typeAlias.duplicate`,
     `requireExtends.onClass`, `requireExtends.onEnum`,
@@ -2942,12 +2970,18 @@ fixture:
   - an anonymous class is a declaration like any other (41 rules-oracle
     findings name a `class@anonymous`, `trait.notFound` among them);
     `abstract` on an interface method is `method.abstract`;
-  - `missingType.iterableValue` walks every type `MissingTypehintCheck`
-    walks (~75 of 118), and the generics checks the same sites
-    (`missingType.generics` 18, `generics.notGeneric` 15,
-    `generics.lessTypes` 10, `generics.moreTypes` 7, `generics.notSubtype`
-    15, `generics.callSiteVarianceRedundant` and
-    `generics.callSiteVarianceConflict` 7 each).
+  - `missingType.iterableValue` walks every type `MissingTypehintCheck` walks
+    (~75 of 118): `@var` above an assignment, named or not, by-reference and
+    closure types included (22), each conditional-return branch (23), a bare
+    `Traversable` and intersections with it (13), class
+    `@method`/`@property`/`@phpstan-type` tags, `@param-out`, generic arguments
+    (`static<array>`, `self<array>`, `@mixin Dolor<array>`), callable
+    parameters, a set hook's wider parameter, and the native type where the
+    PHPDoc doesn't apply; and the generics checks the same sites
+    (`missingType.generics` 18, `generics.notGeneric` 15, `generics.lessTypes`
+    10, `generics.moreTypes` 7, `generics.notSubtype` 15,
+    `generics.callSiteVarianceRedundant` and `generics.callSiteVarianceConflict`
+    7 each).
 - **(f) control flow, returns, throws and generators**:
   - an empty body is checked like any other: a non-`void` function with an
     empty body is `return.missing` (507 of 517 rules-oracle PHPStan-only),
@@ -2976,12 +3010,17 @@ fixture:
   - `throw` checks its operand (`throw.notThrowable`, 6); a conditional
     `@throws` resolves per call (`throws.void`, 12);
   - `catch.neverThrown` from D2's throw points (the rule doesn't exist; 189
-    rules-oracle findings), reading PHPStan's throw points: a typed
-    property write throws only when the value may not fit, a division only
-    by a possible zero, `match` only when inexhaustive, `__toString()` and
-    `__call()` by their `@throws`, `isset()` on `ArrayAccess` by
-    `offsetExists()`, `new $class` by its constructor, hooks by their own
-    `@throws`, each multi-catch member alone.
+    rules-oracle findings), reading PHPStan's throw points: a typed property
+    write throws only when the value may not fit, a division only by a possible
+    zero, `match` only when inexhaustive, `__toString()` and `__call()` by their
+    `@throws`, `isset()` on `ArrayAccess` by `offsetExists()`, `new $class` by
+    its constructor, hooks by their own `@throws`, each multi-catch member
+    alone; `foreach` over an array, creating a first-class callable and
+    `assert(false)` throw nothing a `catch (\RuntimeException)` takes; a read of
+    a hook's own backing property can't throw, so a get hook's
+    `try { return $this->i; } catch` returns on every path (`return.missing`
+    today); and a caught class that isn't an exception, or is guarded by
+    `class_exists()`, is judged too.
 - **(g) the restricted-usage framework**: one set of usage sites (calls,
   property and constant reads, `new`, `instanceof`, `catch`,
   `extends`/`implements`/`use`, attributes, native and PHPDoc types,
@@ -3054,13 +3093,16 @@ for the analyser.
   Each crate mirrors its package completely (§2). Compared rule class by
   rule class against the packages' current releases, today's coverage:
 
-  - ext-shipmonk has comparable types, null in operations and
-    interpolation, and enum match exhaustiveness (with ext-extras and
-    `restricted_symbols` covering four more); missing:
-    `BackedEnumGenerics`, `ClassSuffixNaming`,
-    `EnforceClosureParamNativeTypehint`, `EnforceListReturn`,
-    `EnforceReadonlyPublicProperty`, `ForbidArithmeticOperationOnNonNumber`,
-    `ForbidCast`, `ForbidCheckedExceptionInCallable`,
+  - ext-shipmonk has comparable types, null in operations and interpolation,
+    and enum match exhaustiveness; ext-extras and `restricted_symbols` cover
+    `ForbidUnusedException`, `RequirePreviousExceptionPass`,
+    `EnforceNativeReturnTypehint` (partly) and `ForbidCustomFunctions`, and
+    ext-strict-rules' strict function calls
+    `EnforceIteratorToArrayPreserveKeys`; missing: `BackedEnumGenerics`,
+    `ClassSuffixNaming`, `EnforceClosureParamNativeTypehint`,
+    `EnforceListReturn`, `EnforceReadonlyPublicProperty`,
+    `ForbidArithmeticOperationOnNonNumber`, `ForbidCast`,
+    `ForbidCheckedExceptionInCallable`,
     `ForbidCheckedExceptionInYieldingMethod`, `ForbidEnumInFunctionArguments`,
     `ForbidFetchOnMixed`, `ForbidIdenticalClassComparison`,
     `ForbidIncrementDecrementOnNonInteger`, `ForbidMethodCallOnMixed`,
