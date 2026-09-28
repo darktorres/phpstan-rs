@@ -4632,8 +4632,13 @@ fixture:
     `bug-10729.php`), a `class-string` that `method_exists()` narrowed
     (`$s->nonExistent()`,
     `impossible-method-exists-on-generic-class-string.php`, 6), and a
-    `global $pdo` variable, `mixed` at level 10 (`bug-14318.php`, 4); all
-    unreported today;
+    `global $pdo` variable, `mixed` at level 10 (`bug-14318.php`, 4), and
+    a static call on `mixed`, `T of mixed` or an `int` (`$m::foo()`,
+    `$i::doFoo(...)`; `staticMethod.nonObject`, 6); all unreported today;
+  - `__TRAIT__` outside a trait is `magicConstant.outOfTrait` in a
+    parameter's or a property's default too (`string $trait =
+    __TRAIT__`, `public $t = __TRAIT__;`), unreported today
+    (`magic-constant*.php`, 6);
   - a parent's private constant read through a child (`self::PRIVATE_FOO`
     in `Bar extends P`, `$bar::PRIVATE_FOO`) is `classConstant.notFound`
     "undefined constant Bar::PRIVATE_FOO", as PHP reports it, not
@@ -4826,7 +4831,10 @@ fixture:
     `unset-hooked-property.php`; `ksort($this->a)` on a `@readonly` one
     is `argument.byRef` too, `bug-12676.php`), and a `@readonly` one alike
     (`property.readOnlyByPhpDocAssignNotInConstructor`, 7,
-    `readonly-assign-phpdoc.php`);
+    `readonly-assign-phpdoc.php`); taking a reference to one (`$a =
+    &$this->a`) is `property.readOnlyAssignByRef`/
+    `readOnlyByPhpDocAssignByRef`, unreported today
+    (`readonly-assign-ref-phpdoc.php`, 6);
   - property hooks: the checks that a property overriding a writable or
     readable one stays so (`property.notWritable`/`notReadable`) and that
     a get hook of a non-virtual property reads its value and a set hook
@@ -5075,9 +5083,10 @@ fixture:
     of the rules oracle's 16 PHPStan-only, `typehints-nodiscard.php`,
     `closure-typehints-nodiscard.php`,
     `arrow-function-typehints-nodiscard.php`);
-  - `parameter.requiredAfterOptional` and `parameter.implicitlyNullable`
+  - `parameter.requiredAfterOptional`, `parameter.implicitlyNullable`
     ("Deprecated in PHP 8.4: … implicitly nullable via default value
-    null", 9) cover closures and arrow functions as they do functions and
+    null", 9) and `parameter.unresolvableNativeType` (`fn (Lorem&Ipsum
+    $a)`, 4) cover closures and arrow functions as they do functions and
     methods, `requiredAfterOptional` with the same per-version wording
     (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`);
     unreported today (all 25 of the rules oracle's PHPStan-only,
