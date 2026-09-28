@@ -6659,6 +6659,41 @@ Behaviour commits, one each with its fixture:
   workspace's config names (ext-sql's live reflector reads the DDL schema only)
   and says so once. Today opening a repository whose `phpstan-rs.toml` names a
   database connects to it with the credentials in the file.
+- **Navigation covers every name.** Definition, type definition, hover,
+  document highlight, references and rename resolve a name in a PHPDoc type
+  (C7's name scope: `@param`, `@var`, `@return`, `@throws`,
+  `@extends`/`@implements`/`@use` arguments, `@method`, `@property`, `@mixin`,
+  template bounds) and in a `use` import as they do one in code. Today, in a
+  file with `use App\Foo;` and `/** @param Foo $f */`, definition and hover
+  answer `null` on both, and references to `App\Foo` list neither.
+- **Rename produces code that still resolves.**
+  - Each site is rewritten in its written form. A fully-qualified or
+    namespace-relative name keeps its qualifier; a name reached through an
+    import renames the import, and the uses under an alias stay; a name in its
+    own namespace renames its last segment. Today every site is replaced by the
+    bare new name: renaming `App\Foo` to `Bar` turns `\App\Foo` in
+    `namespace Other` into `Bar`, which resolves to `Other\Bar`, and leaves
+    `use App\Foo;` pointing at nothing while `b(Foo $g)` becomes an unimported
+    `b(Bar $g)`.
+  - A rename that would collide with a name already declared or imported in a
+    file is refused, naming the file.
+  - The new name is checked as an identifier PHP accepts for that kind of
+    symbol (`1 bad` is applied as is today, and a class can't be named `self`,
+    `int` or another reserved name).
+  - `prepareRename` answers the range and placeholder, and refuses a symbol
+    declared in a stub or a context file, whose rename would edit vendor code
+    (`method not found` today).
+  - Methods, properties, class constants and enum cases rename through the
+    member index, across the hierarchy (an interface method with its
+    implementations and overrides, a `@method` or `@property` tag with its
+    uses); today a member rename returns `null`. Local variables and parameters
+    rename within their function, a parameter's named arguments at its call
+    sites included.
+  - A class whose file is named after it under a PSR-4 root renames the file
+    too, when the client supports resource operations.
+  - The edit is a versioned `documentChanges` edit, so a client rejects it
+    against a document that changed since, where today it is an unversioned
+    `changes` map.
 - **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
   the document at once, which editors can run on save; today each quick fix is
   offered alone.
