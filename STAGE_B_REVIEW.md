@@ -11,7 +11,8 @@ were not a full review. The full review reads every commit's diff in
 order; its coverage is tracked at the end, and its findings are the F
 tasks.
 
-Legend: `[x]` done (commit given), `[ ]` open.
+Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
+(where given), `[ ]` open.
 
 ## Validation
 
@@ -355,7 +356,8 @@ through `check-project`.
   `resolve_class_references` (`late.rs`) maps a `ValueOf` over anything
   but a class constant or an object to implicit `mixed`. It should recurse
   and settle like `KeyOf` does. (`0e309c03`)
-- [ ] **F40. PHPDoc parsing misreads names and pseudo-types.**
+- [>] **F40. PHPDoc parsing misreads names and pseudo-types.** (the
+  crate-split plan's C7, which deletes `parse_type_string`)
   - `parse_type_atom` tries `s.parse::<f64>()` before class names, and
     Rust accepts `nan`, `inf` and `infinity` in any case: `@param Nan $n`,
     with a class `Nan`, is typed `NaN`, and `@param Infinity $n` is `inf`.
@@ -514,7 +516,7 @@ through `check-project`.
   `(T is Foo ? …)`. `conditional_branch` (`conditional.rs`) uses
   `Relation::structural()`, which knows no classes; it needs the
   hierarchy. (`0e309c03`)
-- [ ] **F45. `iterable<K, V>` loses both types.** It parses as
+- [>] **F45. `iterable<K, V>` loses both types.** (C7) It parses as
   `array<int|string, V>|Traversable`, dropping `K` and leaving
   `Traversable` bare, so a `foreach` over `iterable<string, int>` gives
   `mixed` key and value. `Traversable<K, V>` carries them. (parse.rs final
@@ -527,7 +529,8 @@ through `check-project`.
   `for_each_child`, with the template early return, covers every position.
   Explicit `mixed` is a text search over the whole declaration
   (`text_mentions_mixed`), not the `Mixed(true)` flag each node carries,
-  so `array{a: array, b: mixed}` hides `a`'s missing value type.
+  so `array{a: array, b: mixed}` hides `a`'s missing value type; that part
+  moved to C7, whose resolver keeps the flag.
   (`dbe500c5`)
 - [ ] **F47. Raw constructors break the canonical forms.** `Type::int_range`
   is public and builds any pair beside the normalizing `int_interval`
@@ -537,7 +540,8 @@ through `check-project`.
   5)` is `int<5, 5>` (so `=== 5` isn't always-true), and `random_int(10,
   1)` is `int<10, 1>` and not `never`. The PHPDoc parser builds
   `Repr::Union` directly (no deduplication or absorption, `?T` included),
-  as does `parse_native_type_string`. One normalizing constructor per
+  as does `parse_native_type_string`; that part moved to C7, which deletes
+  both. One normalizing constructor per
   form, with raw construction kept private. (`5fc4e990`, `4dc6a4b7`)
 - [ ] **F48. Numeric strings are recognized too widely.**
   `is_numeric_string_literal` trims with Rust's Unicode `trim()`, so
