@@ -4292,6 +4292,19 @@ fixture:
     type: `$a[$o]` and `$a[$o] = 1` with an object offset and `[$o => 1]`
     throw a `TypeError` and aren't reported today (an `array` offset and,
     with a PHP version known, a `float` one already are);
+  - `offsetAccess.notFound` covers every container and offset. A
+    maybe-missing offset (an optional shape key, a union of keys some of
+    which are missing, a nullable offset) is "might not exist" at level
+    7, never reported today (the level table's row). Definite misses
+    beyond a constant shape are unreported today too: a key type disjoint
+    from the array's (`$ss[$int]` on `array<string, string>`, `'b'` on
+    `array<'a', string>`), `null['t']`, a constant string's non-integer
+    offset (`'foo'['foo']`, `'foo'[12.34]`), `'foo'` on an
+    `ArrayAccess<int, …>`, a `foreach` value's destructuring key
+    (`foreach ($rows as ['b' => $v])` over `list<array{a: 0}>`,
+    `bug-8075.php`, 5), and a destructuring past a folded `explode()`
+    (`[$x, $y] = explode(':::', 'a')`, `bug-15013.php`); these are the
+    rules oracle's 47 PHPStan-only;
   - arithmetic with a `string` operand that isn't `numeric-string` is
     `binaryOp.invalid` (PHP 8 throws a `TypeError` for a non-numeric
     string): `$s / 2`, `$s * 2`, `2 / $s` on `string $s` are unreported
