@@ -7639,9 +7639,14 @@ crates, in one commit:
   (`checker/access_attributes/friends_are_the_only_other_callers: …`) and the
   dumps sorted by it, so the move rewrites every key and the order while no
   type changes: its comparison maps the parent snapshot's names through the
-  same manifest and reorders before comparing, and `xtask`'s recorder runs
-  `cargo test --profile gate --workspace --test fixtures` with the dump on,
-  where it runs the package's target alone today.
+  same manifest and reorders before comparing.
+- **`xtask`'s fixture runs select every member.** Its three runs of the target,
+  the suite with type dumps that records `types-fixtures`, gate 3's test
+  listing and the no-default-features run, pass `--test fixtures` without
+  `--workspace` today, so they select the default member's target alone; after
+  the move they would find no fixture, and gate 3 would read every fixture as
+  deleted. Each gains `--workspace` in the commit that moves the first
+  fixtures.
 - **Fixtures in plain `cargo test`.** The package's fixtures target is
   `test = false` today and runs in the `gate` profile, because each fixture
   builds a whole `Project`, stubs included (about 210 ms of its setup clones the
