@@ -39,7 +39,7 @@ S0's first quick-tier run, at `8682ba07` (`gatetime/8682ba07….gates.tsv`),
 took 2,252 s (37.5 min) in total:
 
 | Step | Wall | Cause |
-|---|---|---|
+| --- | --- | --- |
 | `cargo bench --no-run` | 570 s | a release build with thin LTO and one codegen unit; `test --all-targets` already compiles every bench |
 | fixture suite (gate profile) | 483 s | ~250 ms per fixture, see below |
 | cli tests (debug) | 173 s for 44 tests | ~60 spawned debug binaries, each parsing every stub |
@@ -52,6 +52,7 @@ took 2,252 s (37.5 min) in total:
 | clippy, fmt, doc, arch, module graph, test manifest | 10, 2, 6, 6, 6, 4 s | |
 
 The quick tier's six corpus runs:
+
 - the recorded scoped run (57 s) and all-on run (121 s). Both include
   `--dump-types`' second checker pass (S3). Measured on their own,
   without it, they took 29 s and 71 s;
@@ -65,6 +66,7 @@ and 22 per-level runs (~17 min).
 **Corpus runs are mostly serial.** A scoped run uses 1.7 cores of 8 and
 an all-on run 1.4. In the frame-pointer profile of all-on, the main
 thread does 57% of all CPU work:
+
 - `collect_named_argument_facts` (~24% of total CPU): a facts-only
   checker pass over every loaded file, serial, only when
   `check_renamed_named_arguments` is on. Neither of its inputs needs it:
@@ -91,6 +93,7 @@ thread does 57% of all CPU work:
   map.
 
 **Per-fixture cost:**
+
 - `Project::new`: ~65 ms to clone and merge the stubs;
 - `finish_loading`: ~145 ms to re-run every registry pass over the stub
   classes;
@@ -106,6 +109,7 @@ faster than one.
 The order is the order of the sections below.
 
 ### S0. Gate step timing (xtask)
+
 - `gates` and `corpus` print each step's wall time and write
   `.corpus-runs/gate/gatetime/<hash>.<command>.tsv` (step, seconds), with
   `gates`, `gates-full` or `corpus` as the command. The file is written
@@ -116,11 +120,14 @@ The order is the order of the sections below.
   separately from libtest's `finished in` summary.
 
 ### S1. Type-dump compression (xtask)
+
 - `zstd -3 -T0` instead of `-19` for the `types-*` snapshots.
 - `compare` already decompresses, so older `-19` snapshots stay readable.
 
 ### S2. Named-argument facts without a second pass (engine)
+
 This is the collector shape of crate-split §3.8.
+
 - The rename overrides come from a walk over each loaded file's
   top-level statements, with registry lookups and no checker. Today's
   recording runs only in `check_program`'s top-level loop, so the walk
@@ -153,6 +160,7 @@ This is the collector shape of crate-split §3.8.
 - Verify: `project/renamed_named_arguments` identical.
 
 ### S3. Type dump from the main pass (engine and gate)
+
 - `--dump-types` and `PHPSTAN_RS_DUMP_TYPES` go through
   `Project::dump_types`, which runs a second full checker pass per
   analysed file through `checker_for`. That checker never gets the
@@ -182,6 +190,7 @@ This is the collector shape of crate-split §3.8.
     `checker/narrowing` identical to S3a's.
 
 ### S4. One injected worker pool (engine and harness)
+
 - `Session` stops building a pool per session. It takes a shared
   `Arc<rayon::ThreadPool>`, which is the 64 MiB-stack pool crate-split
   §3.10 assigns to the Session.
@@ -197,7 +206,9 @@ This is the collector shape of crate-split §3.8.
   identical; LSP tests pass.
 
 ### S5. Property-assign facts in parallel, in a defined order (engine)
+
 This is the per-file-then-merge summary shape of crate-split §3.8.
+
 - **S5a (behaviour, only if output changes):** merge the per-file facts
   in sorted path order instead of `files.keys()` order. The CLI and LSP
   then agree by construction. If the corpus or fixtures change, the
@@ -224,6 +235,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   identical; LSP tests pass.
 
 ### S6. Case-folded function keys, pulled forward from C5 (engine)
+
 - The C5 item "a case-folded function key map replacing the linear
   scan" lands now, in its designed form.
 - `Registry::functions` is a `FunctionTable` (`registry/function_table.rs`):
@@ -259,6 +271,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   LSP tests pass.
 
 ### S7. Composer hygiene without engine I/O (engine)
+
 - The session canonicalizes its root once (`Project::set_absolute_root`),
   and so does the LSP. `Project::absolute_path` maps an analysed path
   spelled from the working directory onto it: swap the spelled root for
@@ -309,6 +322,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   composer tests pass; `cargo xtask arch` passes.
 
 ### S8. Stub-proportional work in per-project passes (engine)
+
 - Profiled at S7 with timers around `analyse`'s parts, over
   `checker/cast_and_coercion`: a one-line fixture's `analyse` now takes
   ~4 ms, not ~38 ms. The facts pass and the main check take under 1 ms
@@ -320,6 +334,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   stub setup §4 leaves to C4/C5.
 
 ### S9. Analysis result, finalizer and CLI entry point in the library, plus a gate runner
+
 - **S9a:** F1's `AnalysisResult` and finalizer land now. `analyse`
   returns unfinalized per-file results. One finalizer then applies, in
   today's order:
@@ -407,6 +422,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   identical.
 
 ### S10. Quick-tier redundancy (xtask)
+
 - `cargo bench --no-run` leaves the quick tier: `test --all-targets`
   already compiles every bench, and it only adds a release-profile
   build. `--full` and CI keep it.
@@ -416,6 +432,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   S0 showed neither is material.
 
 ### S11. Measure, then decide (build config)
+
 - **Dev-profile optimization:**
   - third-party dependencies: `[profile.dev.package."*"] opt-level = 1`
     or `2`;
@@ -451,6 +468,7 @@ This is the per-file-then-merge summary shape of crate-split §3.8.
   goes.
 
 ### S12. Fixed sleeps in LSP tests (harness)
+
 `run_across_debounce` sleeps a fixed 500 ms. Replace the sleep with a
 wait on an explicit signal from the server's run loop, such as a
 debounce-drained notification the test can observe, so the test is
@@ -475,6 +493,7 @@ After S12, `perf` with frame pointers over three workloads: 257 fixtures
   lexing, parsing and indexing the 2,351 stub files one after another.
 
 ### S13. Ancestor bindings computed once per class (engine)
+
 - `flatten_phpdoc_inheritance_one_pass` rebuilds a class's ancestor
   template bindings (`all_ancestor_names`, then `class_template_bindings`
   per templated ancestor) for every method that needs a backfill, on
@@ -491,6 +510,7 @@ After S12, `perf` with frame pointers over three workloads: 257 fixtures
   and `checker/type_declarations` identical; registry tests pass.
 
 ### S14. Stub data generated in parallel (engine)
+
 - `generated_stub_data` lexes, parses, rewrites stub attributes and
   indexes each of the 2,351 files one after another. That per-file work is
   independent: it runs on rayon, and the results are merged
@@ -506,6 +526,7 @@ After S12, `perf` with frame pointers over three workloads: 257 fixtures
   pass; a cli test spawn is timed before and after.
 
 ### S15. Pool and test-thread sizing (measure, then decide)
+
 - About 48% of fixture samples are pool threads spinning between each
   fixture's tiny jobs, taking CPU from the 8 test threads. The lib tests'
   registry passes run their `par_iter`s on the global rayon pool, which
@@ -527,6 +548,7 @@ After S12, `perf` with frame pointers over three workloads: 257 fixtures
 
 These are the largest remaining costs. The C4, C5 and D designs remove
 them, so an interim fix would be thrown away:
+
 - per-fixture and per-lib-test stub setup: the stub clone and
   `finish_loading` re-running the passes over every stub class
   (~210 ms per fixture). C4 resolves each class lazily and memoizes it;
@@ -548,6 +570,7 @@ them, so an interim fix would be thrown away:
 ## 5. Edits to CRATE_SPLIT_PLAN.md and ROADMAP.md
 
 Each is a targeted edit in the step's own commit:
+
 - S4, §3.10: the Session takes its pool injected.
 - S6, §3.5 enumeration APIs and C5: the case-folded function key map is
   marked as landed early. Class keys stay with C3.
@@ -579,7 +602,7 @@ delta was needed. The quick tier took 814 s (13.6 min), against 2,252 s
 (37.5 min) at `8682ba07`:
 
 | Step | Before | After |
-|---|---|---|
+| --- | --- | --- |
 | corpus step | 667 s | 152 s (gate build 80 s, scoped 25 s, all-on 24 s, determinism 23 s) |
 | `cargo bench --no-run` | 570 s | `--full` only |
 | benches in test mode | ~82 s (debug) | 11 s, plus an 85 s gate-profile build the fixtures reuse |

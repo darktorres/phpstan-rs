@@ -1,9 +1,11 @@
 # Per-package research notes (source-grounded, one at a time)
 
 ## 1. phpstan/phpstan-phpunit — DONE
+
 Real source read (cloned, `src/Rules/PHPUnit/*.php`). Genuine new
 inspirations for phpstan-rs (PHPUnit assertion narrowing already exists
 via `checker/narrowing/assertions.rs`, this is additive):
+
 - `ShouldCallParentMethodsRule` (`phpunit.callParent`): a TestCase
   subclass overriding `setUp()`/`tearDown()` when a real parent
   implementation exists (beyond bare `TestCase`) must call
@@ -37,6 +39,7 @@ via `checker/narrowing/assertions.rs`, this is additive):
   skip, PHPUnit-doc-comment-syntax trivia with no real correctness value.
 
 ## 2. phpstan/phpstan-deprecation-rules — DONE
+
 Real source read. Most of this package's core (the `Restricted
 Deprecated{Property,Method,Function,ClassName,ClassConstant}
 UsageExtension` family) is already ported — matches phpstan-rs's
@@ -45,6 +48,7 @@ staticMethod/property/staticProperty/classConstant/new.deprecated.
 `FetchingDeprecatedConstRule` (a deprecated class-constant *fetch*,
 distinct from other member deprecation) is also already covered
 (`classConstant.deprecated`). One genuinely new, small, concrete find:
+
 - `CallWithDeprecatedIniOptionRule` (`function.deprecated`):
   `ini_get`/`ini_set`/`ini_alter`/`ini_restore`/`get_cfg_var` called
   with a literal string naming a PHP ini directive deprecated as of a
@@ -55,6 +59,7 @@ distinct from other member deprecation) is also already covered
   existing `PhpFeature`/`php_version.rs` framework.
 
 ## 3. phpstan/phpstan-symfony — DONE
+
 Real source read (`src/Rules/Symfony/*.php`: `UndefinedOptionRule`/
 `UndefinedArgumentRule`/`InvalidOptionDefaultValueRule`/
 `InvalidArgumentDefaultValueRule`/`ContainerInterfaceUnknownServiceRule`/
@@ -77,6 +82,7 @@ cover it either — those are about *rule* extension, not *type-
 resolution* extension for a specific framework's runtime magic).**
 
 ## 4. phpstan/phpstan-doctrine — DONE
+
 Real source read. `EntityColumnRule`/`EntityRelationRule` (checking a
 mapped entity property's native PHP type against its `@ORM\Column`/
 `@OneToMany` mapping declaration) depend on `ObjectMetadataResolver`,
@@ -87,7 +93,7 @@ static AST inspection, real framework-runtime-equivalent metadata
 resolution. Replicating this in phpstan-rs would mean writing a
 from-scratch Doctrine ORM mapping-annotation/attribute parser, a
 large, framework-specific undertaking on its own. Confirms and deepens
-#3's verdict: this is the same "framework-specific metadata/type-
+\#3's verdict: this is the same "framework-specific metadata/type-
 resolution extension" capability class, not a portable generic rule.
 `RepositoryMethodCallRule` (validating repository magic-method field
 names, e.g. `findByFoo()`) is *already* built in phpstan-rs (Item 4's
@@ -97,11 +103,13 @@ DQL query strings) needs an actual DQL grammar parser — its own
 separate, large, narrow undertaking.
 
 ## 5. phpstan/phpstan-strict-rules — DONE (re-verified from real cloned
+
 source, not the earlier rejected WebFetch summary — confirms it but
 finds much more depth). ROADMAP's Phase 101 (§E) only covers 4 of
 this package's ~45 rule files (boolean-in-conditions, `array_filter`
 strictness, `parent::__construct()`, inherited-method name-casing).
 Real, concrete, NOT-yet-catalogued findings, grouped:
+
 - **Disallowed-construct family** (`DisallowedShortTernaryRule`/
   `DisallowedLooseComparisonRule`/`DisallowedImplicitArrayCreationRule`/
   `DisallowedEmptyRule`/`DisallowedBacktickRule`): five single-purpose
@@ -156,6 +164,7 @@ Real, concrete, NOT-yet-catalogued findings, grouped:
   way).
 
 ## 6/7. larastan/larastan (+ nunomaduro/larastan, identical repo, same
+
 GitHub source — Packagist rename, not a separate package) — DONE
 Real source read (`src/Rules/*.php`, 28 rule files, plus separate
 `Collectors`/`Reflection`/`ReturnTypes`/`Properties`/`Methods`
@@ -175,10 +184,11 @@ needs its own dedicated, large, separate capability" verdict from
 packages #3/#4. Not directly relevant to phpstan-rs's own Piwigo
 verification target either (not a Laravel app). Skip deep-diving the
 remaining Laravel-specific packages in this list (#47, #52, #79, #81,
-#83, #94) at the same depth — same verdict applies by construction;
+\#83, #94) at the same depth — same verdict applies by construction;
 still confirm each briefly for anything genuinely generic hiding inside.
 
 ## 8. mglaman/phpstan-drupal — DONE
+
 Real source read (~85 files under `src/`). Overwhelmingly Drupal
 entity-system/dependency-injection/plugin-manager framework-specific —
 same "needs a full framework runtime model" verdict as #3/#4/#6.
@@ -189,6 +199,7 @@ spaze/phpstan-disallowed-calls #11) — no additional generic
 inspiration beyond those. **No new portable finding.**
 
 ## 9. phpstan/phpstan-mockery — DONE
+
 Real source read (8 files, all under `src/Type`/`src/PhpDoc`). Purely
 Mockery-library-specific mock/stub return-type resolution (`Mockery::
 mock(Interface::class)` returning an intersection of the mocked type
@@ -201,6 +212,7 @@ finding** — pure library-specific type-resolution glue, same
 packages, at a much smaller scale.
 
 ## 10. phpstan/phpstan-webmozart-assert — DONE
+
 Real source read: one 896-line file, ~64 distinct static-method-name
 narrowing rules for `webmozart/assert`'s `Assert::string()`/
 `Assert::nullOrString()`/`Assert::allIsInstanceOf()`/`Assert::integer()`/
@@ -218,6 +230,7 @@ transitive Composer dependency (unlike Mockery/Laravel/Drupal above) —
 worth checking Piwigo's own vendor tree for it before triaging size.
 
 ## 11. spaze/phpstan-disallowed-calls — DONE (re-verified from real
+
 source; already cited in ROADMAP.md Phase 67 and this project's own
 `restricted_symbols` design). Real source confirms `DisallowedKeyword`/
 `DisallowedVariable`/`DisallowedNamespace`/`DisallowedAttribute`
@@ -231,6 +244,7 @@ finding beyond what's already documented** — confirms the existing
 citation is accurate, not stale.
 
 ## 12. jangregor/phpstan-prophecy — DONE
+
 Real source read: 2 files. Teaches PHPStan that a Prophecy
 `ObjectProphecy`'s `__call` magic proxies to the mocked interface's
 real methods (so `$prophecy->realMethod()->willReturn(...)` isn't
@@ -238,6 +252,7 @@ flagged undefined) — same shape as #1/#9's mock-object handling, for
 yet another mocking library. **No new generic finding.**
 
 ## 13. symplify/phpstan-rules — DONE
+
 Real source read (~100 rule files under `src/Rules/`). Sampled broadly:
 the overwhelming majority are opinionated house-style rules specific to
 Symplify's own Symfony/Doctrine/Rector projects (controller/route/
@@ -246,12 +261,14 @@ repository-layering conventions) — not portable. `NoDynamicNameRule`
 duplicates the same "ban dynamic member-name expressions" pattern
 already found in phpstan-strict-rules' Variable* family (#5), no new
 information. One genuinely new, small, generic find:
+
 - `ForbiddenMultipleClassLikeInOneFileRule`: flags a file declaring more
   than one top-level class/interface/trait/enum (a real PSR-1-adjacent
   convention many projects want) — a trivial file-level top-level-
   declaration count, easy to add.
 
 ## 14. tomasvotruba/type-coverage — DONE
+
 Real source read. A genuinely new idea, distinct from anything already
 catalogued: a **project-wide type-coverage ratchet**. Real PHPStan
 Collectors tally, project-wide, what fraction of return
@@ -268,11 +285,12 @@ data already computed" shape ROADMAP's Part 1 (B/H/X sections)
 already establishes repeatedly for other facts.
 
 ## 15. szepeviktor/phpstan-wordpress — DONE
+
 Real source read (16 files). Overwhelmingly WordPress-core dynamic-
 function type resolution (`apply_filters()`, `wp_parse_args()`,
 `esc_sql()`, `stripslashes`/`normalize_whitespace` helpers) plus
 `is_wp_error()` assertion narrowing (same already-covered pattern as
-#10). One conceptually interesting but tightly WP-specific pattern:
+\#10). One conceptually interesting but tightly WP-specific pattern:
 `HookCallbackRule`/`HookDocsRule` cross-check a registered
 `add_filter`/`add_action` callback's own parameter signature against
 the hook's doc-documented signature (parsed from WordPress core's own
@@ -283,6 +301,7 @@ portable generalization visible without WordPress itself. **No
 build-ready generic finding** — WP-specific framework glue.
 
 ## 16. phpstan/phpstan-nette - DONE
+
 Real source read (~25 files). Mostly Nette-framework-specific dynamic
 type extensions (Strings/Forms/ComponentModel/Presenter/Html), same
 theme as #3/#4/#8/#15. RegularExpressionPatternRule wires PCRE pattern
@@ -308,6 +327,7 @@ Phase 88 as a concrete consumer of U2's own computed throw types, not a
 separate framework-specific item.
 
 ## 17. ergebnis/phpstan-rules - DONE
+
 Real source read (~30 rule files). A large family of trivial,
 single-purpose, opt-in "ban this language construct entirely" rules:
 NoCompactRule, NoErrorSuppressionRule (the @ operator), NoEvalRule,
@@ -338,6 +358,7 @@ versions). DeclareStrictTypesRule duplicates real PHPStan's own core
 DeclareStrictTypesRule already catalogued in Phase 137.
 
 ## 18. thecodingmachine/phpstan-safe-rule - DONE
+
 Real source read. Core mechanism (UseSafeFunctionsRule/
 UseSafeClassesRule) enforces a project-wide convention: call the
 thecodingmachine/safe library's exception-throwing wrapper functions
@@ -351,6 +372,7 @@ ALREADY built in phpstan-rs (src/checker/expr/preg_shapes.rs exists).
 No new finding from this package.
 
 ## 19. symplify/phpstan-extensions - DONE
+
 Real source read (10 small files). Mostly framework-container glue
 (Laravel make(), generic PSR container get()) already covered by the
 established "framework support" category, plus a narrow opinionated
@@ -358,8 +380,10 @@ leniency tweak (forcing getcwd()/dirname()/realpath() to plain string
 instead of string|false). No new generic finding.
 
 ## 20. thecodingmachine/phpstan-strict-rules - DONE
+
 Real source read (7 files). A small, genuinely valuable, fully generic
 exception-hygiene family, none of it framework-specific:
+
 - ThrowMustBundlePreviousExceptionRule: inside a catch block, a newly
   thrown wrapping exception must pass the caught variable as its own
   $previous constructor argument somewhere - otherwise the original
@@ -385,6 +409,7 @@ framework dependency - among the highest-value/effort-ratio findings
 so far.
 
 ## 21. rector/type-perfect - DONE
+
 Real source read (~27 files). Strong independent real-world validation
 of ROADMAP's already-documented Phase 91 (X1): its
 PublicClassMethodParamTypesCollector/NarrowPublicClassMethodParamTypeRule
@@ -396,6 +421,7 @@ tool" evidence when Phase 91 is picked up. NarrowReturnObjectTypeRule
 is the closely-related return-type sibling, closer in spirit to
 phpstan-rs's own already-built too-wide-return-type check (Item
 11/45A) than to X1. Two more genuinely new, small, generic finds:
+
 - NoMixedMethodCallerRule/NoMixedPropertyFetcherRule: opt-in ban on
   calling a method/accessing a property on a `mixed`-typed value at
   all (forces explicit typing before allowing any member access) - a
@@ -407,6 +433,7 @@ phpstan-rs's own already-built too-wide-return-type check (Item
   methods) - real, simple, easy checks.
 
 ## 22. phpstan/phpstan-beberlei-assert - DONE
+
 Real source read (9 files). Same shape as #10 (webmozart/assert):
 static/fluent assertion-narrowing for the beberlei/assert library
 (Assert::that($x)->string(), ->isInstanceOf(), etc.) - confirms the
@@ -416,12 +443,14 @@ assert library. No new distinct idea beyond reinforcing #10's finding
 not just one hardcoded library).
 
 ## 23. ekino/phpstan-banned-code - DONE
+
 Real source read (3 files). A config-driven "ban this function call by
 name" mechanism (Expr_FuncCall keyed config) - same scope as
 restricted_symbols' already-built Function kind. BannedUseTestRule is
 a narrow test-file-specific `use`-import ban. No new finding.
 
 ## 24/100. phpat/phpat (+ carlosas/phpat, identical repo, Packagist
+
 rename) - DONE
 Real source read + a real usage example. This is a full, popular,
 well-established ARCHITECTURE-TESTING tool (1276 favers - among the
@@ -454,6 +483,7 @@ banning) and from the internal/@internal engine (package-boundary
 enforcement, not namespace-layer direction).
 
 ## 25. tomasvotruba/cognitive-complexity - DONE
+
 Real source read. Directly validates and refines ROADMAP's
 already-documented D1 (function/method complexity metrics): this real,
 popular tool implements "Cognitive Complexity" specifically (Campbell/
@@ -471,12 +501,14 @@ constructor-param-type resolution through the closed-world registry,
 which phpstan-rs already has.
 
 ## 26. shipmonk/dead-code-detector - DONE
+
 Real source read (~48 files). A comprehensive, production-grade,
 whole-project dead-code detector - strong, direct validation of
 ROADMAP's already-documented Phase 86 (B1: whole-application
 unused protected/public member detection; B2: dead function/class
 detection). Two real refinements worth folding into Phase 86 when it's
 picked up:
+
 1. It ships a real AUTO-FIX capability (RemoveDeadCodeFormatter/
    RemoveDeadCodeTransformer/RemoveClassMemberVisitor actually delete
    the dead declaration's source text) - not just detection. Worth
@@ -497,16 +529,19 @@ picked up:
    protected/public and top-level functions/classes.
 
 ## 27. bnf/phpstan-psr-container - DONE
+
 Real source read: 1 file, PSR-11 container get() dynamic return type.
 Same DI-container-magic category already noted (#3). No new finding.
 
 ## 28. saschaegerer/phpstan-typo3 - DONE
+
 Real source read (~28 files). Entirely TYPO3-framework-specific
 (Context/Site/Request "aspect" system, DI service definitions,
 GeneralUtility helpers). Same "framework support" category as
-#3/#4/#6/#8/#15/#16. No new generic finding.
+\#3/#4/#6/#8/#15/#16. No new generic finding.
 
 ## 29. tomasvotruba/unused-public - DONE
+
 Real source read (~40 files). A second, independent, real production
 implementation of Phase 86's B1 (same author as #14/#21/#25) - strong
 triple-validation (with #26) that whole-project unused-public-member
@@ -524,6 +559,7 @@ detection) reinforces the same escape-hatch discipline note already
 recorded there.
 
 ## 30. phpstan/phpstan-php-parser - DONE
+
 Real source inspected: no src/ content at all, just stub files
 (Name.stub/Function_.stub/Const_.stub/ClassLike.stub) narrowing
 nikic/php-parser's own AST node property types for PHPStan's own
@@ -532,6 +568,7 @@ self-analysis stub-precision tool specific to PHPStan's own codebase.
 No applicable finding.
 
 ## 31. timeweb/phpstan-enum - DONE
+
 Real source read. Targets the legacy myclabs/php-enum userland
 "enum simulation" library (pre-PHP-8.1), not native PHP enums -
 duplicate-backing-value detection for that library's own class-constant
@@ -541,6 +578,7 @@ different, already-more-relevant surface, already real PHPStan core
 functionality).
 
 ## 32. shipmonk/phpstan-rules - DONE
+
 Real source read (~36 rule files, headers/purpose confirmed per file
 name + spot checks of the most novel ones). By the same author as #26
 (shipmonk/dead-code-detector) - high quality, generic, zero framework
@@ -548,6 +586,7 @@ dependency across the whole package. One of the richest finds in the
 whole top-100. Grouped by theme:
 
 **Exception hygiene (reinforces #16/#20):**
+
 - RequirePreviousExceptionPassRule: third independent implementation of
   the exception-chaining rule (#16 Nette, #20 thecodingmachine) - strong
   signal this is a real, widely-valued, easy check.
@@ -561,11 +600,13 @@ whole top-100. Grouped by theme:
   missing-checked-exception work.
 
 **"No mixed" family (reinforces #21):**
+
 - ForbidMethodCallOnMixedRule/ForbidFetchOnMixedRule: third independent
   confirmation (after #21's NoMixedMethodCallerRule/
   NoMixedPropertyFetcherRule) of the "ban member access on mixed" idea.
 
 **Enum-exhaustiveness family (genuinely novel, high value):**
+
 - ForbidMatchDefaultArmForEnumsRule: a `match` over an enum subject that
   has a `default` arm defeats PHPStan's own exhaustiveness benefit -
   when a new enum case is added later, the default arm silently
@@ -580,6 +621,7 @@ whole top-100. Grouped by theme:
   independent confirmation the idea has real value.
 
 **Null-coercion-safety family (novel):**
+
 - ForbidNullInInterpolatedStringRule/ForbidNullInBinaryOperationsRule/
   ForbidNullInAssignOperationsRule: ban a possibly-null value silently
   participating in string interpolation (renders as `""`), a binary
@@ -588,6 +630,7 @@ whole top-100. Grouped by theme:
   clean, novel, buildable family.
 
 **Native-typehint-preference family (novel, easy):**
+
 - EnforceNativeReturnTypehintRule/EnforceClosureParamNativeTypehintRule:
   require a *native* type hint (not just a PHPDoc-only one) wherever
   PHP's own grammar could already express it - closes real precision
@@ -599,6 +642,7 @@ whole top-100. Grouped by theme:
   building first as a quick win before the full rule.
 
 **Real, sharp-edge gotcha checks (novel, easy):**
+
 - EnforceIteratorToArrayPreserveKeysRule: `iterator_to_array($x)` should
   pass `$preserve_keys` explicitly - silently losing/colliding keys
   when iterating a Generator yielding non-sequential/string keys is a
@@ -625,18 +669,21 @@ ForbidEnumInFunctionArgumentsRule, ForbidUnusedClosureParametersRule,
 ForbidUnusedMatchResultRule.
 
 ## 33. symplify/astral - DONE (abandoned, unreachable)
+
 Confirmed via Packagist API: officially marked abandoned (suggested
 replacement: nikic/php-parser), and its GitHub repository has been
 deleted (404). Nothing to investigate. No finding possible or needed -
 its own download count is legacy/historical, not a live tool.
 
 ## 34. bitexpert/phpstan-magento - DONE
+
 Real source read (~29 files). Entirely Magento-framework-specific
 (ObjectManager/DataObject magic methods, Magento code-generation
 autoloaders, resource models). Same "framework support" category as
 the other framework packages. No new generic finding.
 
 ## 35. staabm/phpstan-dba - DONE
+
 Real source read (top-level structure + Rules/). A sophisticated real
 SQL-query analyzer: validates raw SQL strings passed to PDO/mysqli/
 Doctrine/Dibi against a real database schema (needs actual schema
@@ -651,6 +698,7 @@ grammar parser plus schema-reflection connectivity), not something to
 reconsider building. No new actionable finding.
 
 ## 36. slam/phpstan-extensions - DONE
+
 Real source read (~15 files). A genuinely novel, valuable family: "no
 implicit current-time dependence" ("NotNow" namespace) - NoTimeRule
 (bans time()), NoRelativeStrtotimeRule (bans strtotime('now'/'+1 day'/
@@ -669,9 +717,11 @@ variants of things phpstan-rs or real PHPStan core probably already
 handles - not detailed further given time budget.
 
 ## 37. staabm/phpstan-todo-by - DONE
+
 Real source read (~21 files). A genuinely novel, well-designed
 "actionable TODO comment" family - turns `// TODO` comments into live,
 checkable facts instead of text that rots forever:
+
 - TodoByDateRule: `// TODO: fix by 2024-01-01` flags once that date has
   passed - pure, self-contained (compare a parsed date literal against
   wall-clock "now"), no network needed, easy.
@@ -692,6 +742,7 @@ validation) in spirit (checking a comment's own claim against reality)
 but is a distinct, separately-valuable idea.
 
 ## 38. pepakriz/phpstan-exception-rules - DONE
+
 Real source read (~27 files). A comprehensive @throws-tag ecosystem;
 much of it overlaps with phpstan-rs's own already-built throw-type
 machinery (UselessThrowsPhpDocRule - a `@throws X` tag naming
@@ -700,6 +751,7 @@ phpstan-rs's own ported TooWideFunctionThrowTypeRule/
 TooWideMethodThrowTypeRule; ThrowsPhpDocInheritanceRule/covariance
 already covered by MethodThrowTypeCovarianceRule). One genuinely new,
 valuable pair not yet catalogued anywhere:
+
 - UnreachableCatchRule/DeadCatchUnionRule: a `catch (SpecificException
   $e)` clause (or one member of a `catch (A|B $e)` union) that matches
   nothing the try block's own statements can actually throw, given the
@@ -710,6 +762,7 @@ valuable pair not yet catalogued anywhere:
   specifically for exception handling.
 
 ## 39. shipmonk/phpstan-baseline-per-identifier - DONE
+
 Real source read (8 files). A focused, genuinely novel baseline-
 management idea, directly relevant to already-documented Phase 122
 (baseline robustness, N1-N3): split one monolithic baseline file into
@@ -724,6 +777,7 @@ feature on top of phpstan-rs's own existing baseline.rs, no new
 matching logic needed.
 
 ## 40. prestashop/phpstan-prestashop - DONE
+
 Real source read (8 files). UseTypedReturnForNewMethodsRule/
 UseTypeHintForNewMethodsRule/UseStrictTypesForNewClassesRule turned
 out simpler than the name suggests: "new" isn't git-blame/date-based,
@@ -738,12 +792,14 @@ explicit visibility on class constants; require it) - trivial, opinionated,
 easy to add if wanted.
 
 ## 41. spaze/phpstan-stripe - DONE
+
 Real source read: purely Stripe SDK-specific dynamic property modeling
 (Stripe's PHP SDK response objects use magic __get extensively). Same
 "third-party SDK magic-property modeling" theme as the framework
 packages, just for one specific SDK. No new generic finding.
 
 ## 42. swissspidy/phpstan-no-private - DONE
+
 Real source read (6 files). Implements the same restriction semantics
 as phpstan-rs's already-built @internal engine (Phase 67), just keyed
 off the legacy `@access private` PHPDoc tag spelling (a pre-visibility-
@@ -754,9 +810,11 @@ style legacy code were a real target, but low general value otherwise -
 narrow, single-ecosystem convention.
 
 ## 43. yamadashy/phpstan-friendly-formatter - DONE
+
 Real source read (6 files) + README. A custom output formatter
 rendering each diagnostic with a syntax-highlighted source code frame
 around the offending line (the same UX convention modern compilers use
+
 - rustc, ESLint's codeframe formatter - versus PHPStan's own terse
 default "file:line: message" one-liner). phpstan-rs already ships
 text/json/checkstyle formats; a "friendly"/codeframe terminal formatter
@@ -766,12 +824,14 @@ already-resolved file's own source text plus the diagnostic's already-
 known span.
 
 ## 44. php-standard-library/phpstan-extension - DONE
+
 Real source read (4 files): type/assertion narrowing for the
 azjezz/psl (PHP Standard Library) utility library. Same
 assertion-narrowing-table pattern already noted (#10/#22). No new
 distinct idea.
 
 ## 45. staabm/phpstan-psr3 - DONE
+
 Real source read (1 file). A real, valuable, easy, generalizable
 finding: validates PSR-3 logger calls (any Psr\Log\LoggerInterface
 method - log/debug/info/notice/warning/error/critical/alert/
@@ -786,27 +846,34 @@ machinery) - just PSR-3's `{key}`-brace syntax instead of printf's
 positional arguments. Genuinely good real-corpus-value potential given
 how nearly-universal PSR-3 logging is in any DI-framework-based PHP
 app.
+
+```sh
 cd /tmp/claude-1000/-home-torres-projects-phpstan-rs/2c47181b-0480-4b7e-8676-db42b8807004/scratchpad/repos
 git clone --depth 1 "https://github.com/canvural/larastan-strict-rules.git" larastan-strict-rules 2>&1 | tail -2
 find larastan-strict-rules/src -name "*.php" | xargs -I{} basename {}
+```
 
 ## 46. staabm/phpstan-deployer6 - DONE
+
 Real source inspected: no rule logic at all, purely PHP stub files for
 the Deployer deployment-tool library's own DSL (functions.stub,
 Task.stub) - a niche type-precision stub package, not a check. No
 finding.
 
 ## 47. canvural/larastan-strict-rules - DONE
+
 Real source read (8 files). Entirely Laravel-specific opinionated
 style rules (facades, dynamic where(), query scopes, controllers).
 Same Laravel-framework theme as #6/#7 - no portable finding.
 
 ## 48. cakedc/cakephp-phpstan - DONE
+
 Real source read (~20+ files). Entirely CakePHP-framework-specific
 (TableLocator/Entity/Repository/Component/Controller dynamic type
 resolution). Same "framework support" theme. No new generic finding.
 
 ## 49. korbeil/phpstan-generic-rules - DONE
+
 Real source read (4 files). MbStringRule bans 12 byte-oriented string
 functions (strlen/substr/strtolower/strpos/stripos/strstr/etc.) in
 favor of their mb_*-prefixed multibyte-safe counterparts - a real,
@@ -819,26 +886,31 @@ NeverEmptyRule not deep-dived (low apparent novelty vs. existing
 always-true/false condition checks).
 
 ## 50. phpstan/phpstan-dibi - DONE
+
 Real source read: 2 files, Dibi (Nette-ecosystem DB library) fluent
 query-builder magic-method modeling. Same framework/library-magic
 theme. No new finding.
 
 ## 51. rector/phpstan-rules - DONE (abandoned)
+
 Confirmed via Packagist API: abandoned, merged into symplify/
 phpstan-rules (already fully investigated as #13). No separate
 investigation needed.
 
 ## 52. calebdw/larastan-livewire - DONE
+
 Real source read (7 files). Laravel Livewire-component-specific magic
 property/method modeling. Same Laravel-framework theme (#6/#7/#47/#83
 below). No portable finding.
 
-## 53. marc-mabe/php-enum-phpstan - DONE (re-verified from source;
+## 53. marc-mabe/php-enum-phpstan - DONE (re-verified from source
+
 already cited in ROADMAP.md for the MabeEnum\Enum keyword-corruption
 bug). Type modeling for marc-mabe/php-enum's own userland enum
 simulation library. No new finding beyond what's already documented.
 
 ## 54. tomasvotruba/bladestan - DONE
+
 Real source read (~20+ files). Analyzes Laravel Blade template files
 (compiles them to PHP, then type-checks variable usage against what
 the calling controller passed in) - a genuinely interesting
@@ -847,6 +919,7 @@ coupled to Blade's own template compiler. No portable finding without
 Blade itself; Piwigo doesn't use Blade.
 
 ## 55. ticketswap/phpstan-error-formatter - DONE
+
 Real source read (2 files). A small formatter tweak: detects the
 GITHUB_ACTIONS env var to switch the file-location link format
 between a clickable-terminal style and a plain one. Minor, low-priority
@@ -854,14 +927,17 @@ idea - not the full GitHub Actions ::error annotation protocol, just a
 link-format switch.
 
 ## 56. codeigniter/phpstan-codeigniter - DONE
+
 Real source read (~20 files). CodeIgniter-framework-specific dynamic
 type extensions. Same framework-support theme, no new finding.
 
 ## 57. friendsoftypo3/phpstan-typo3 - DONE
+
 Real source read (6 files). TYPO3-framework-specific, same theme as
-#28. No new finding.
+\#28. No new finding.
 
 ## 58. sidz/phpstan-rules - DONE
+
 Real source read (13 files). A genuinely novel, comprehensive "no
 magic numbers" family: bans a bare numeric literal (int/float, with a
 configurable exempt-numbers list e.g. [0, 1, -1] and an optional
@@ -876,11 +952,13 @@ numeric-string literals) that all position-specific checks reuse -
 easy to port as one shared helper plus N small call-site checks.
 
 ## 59. swisnl/phpstan-faker - DONE
+
 Real source read: 2 files, Faker library magic-property/method
 modeling ($faker->name, $faker->email via __get/__call). Same
 library-magic pattern already noted. No new finding.
 
 ## 60. grifart/phpstan-oneline - DONE
+
 Real source read: 1 file. A compact, configurable-template, exactly-
 one-line-per-error formatter (grep/editor-quickfix friendly). Minor;
 phpstan-rs's existing default text format may already be close to this
@@ -888,9 +966,11 @@ shape - worth a quick side-by-side comparison at triage time rather
 than assuming a gap.
 
 ## 61. dave-liddament/phpstan-php-language-extensions - DONE
+
 Real source read (~28 files). A genuinely rich, novel "extended
 access-control" family, complementing (not duplicating) the already-
 built @internal/restricted_symbols work:
+
 - Friend{Static,New,Method}CallRule: a real `#[Friend(AllowedCaller::
   class)]` PHP attribute placed on a method/class, explicitly
   whitelisting which specific OTHER classes may call it - the classic
@@ -920,14 +1000,17 @@ MustUseResultRule/OverrideRule look like already-covered patterns
 further.
 
 ## 62. ekino/phpstan-sonata - DONE
+
 Real source read: 3 files, Sonata Admin (Symfony ecosystem)-specific.
 No new finding.
 
 ## 63. nepada/phpstan-nette-tester - DONE
+
 Real source read: 2 files, Nette Tester's own Assert::* narrowing.
 Same assertion-narrowing pattern already established. No new finding.
 
 ## 64. hiperdk/phpstan-rules - DONE
+
 Real source read: 1 file. TypedConstantRule requires every class
 constant carry an explicit PHP 8.3 native type declaration
 (`const int FOO = 5;`, not bare `const FOO = 5;`) - a small, real,
@@ -936,9 +1019,11 @@ own existing missingType.* family (param/property/return) if class
 constants aren't already covered by an equivalent native-type check.
 
 ## 65. struggle-for-php/sfp-phpstan-psr-log - DONE
+
 Real source read (~18 files). A second, more thorough, independent
 PSR-3 logging package - deepens #45's already-noted finding with
 genuinely new sub-checks beyond simple placeholder matching:
+
 - MessageStaticStringRule: requires the log message itself be a
   static/literal string, not a dynamically-concatenated one -
   dynamic values belong in the context array's own placeholders for
@@ -956,6 +1041,7 @@ Fold these into the same PSR-3-logging-hygiene family as #45 when
 triaging - a strictly richer version of the same idea.
 
 ## 66. roave/no-floaters - DONE
+
 Real source read (6 files). Bans the `float`/`double` type from
 appearing anywhere in a codebase (property types, function/method
 param/return signatures, variable assignments) - an opinionated but
@@ -967,6 +1053,7 @@ already-established "ban this construct"/"ban this call" families:
 (walk every type-hint position, flag Type::Float).
 
 ## 67. pestphp/pest-plugin-phpstan - DONE
+
 Real source read (~45 files: src/Rules, src/Type/Pest, src/Analysis/
 Expectation). Entirely Pest-test-framework-specific: every rule
 (ImpossibleExpectationRule, RedundantExpectationRule,
@@ -989,6 +1076,7 @@ rules since they're all defined in terms of Pest's own call structure -
 noted for completeness, not a new finding category.
 
 ## 68. slam/phpstan-laminas-framework - DONE
+
 Real source read (~20 files). Entirely Laminas/Zend-framework-specific:
 ServiceManager/PluginManager container get() dynamic-return-type
 resolution based on the framework's own service-config wiring
@@ -1002,6 +1090,7 @@ portable generic-rule value without framework-specific config-resolution
 infrastructure. No new finding category.
 
 ## 69. mavimo/phpstan-junit - DONE (genuinely new, easy finding)
+
 Real source read (1 file, ~70 lines). A JUnit-XML `ErrorFormatter` -
 each diagnostic becomes a `<testcase>` (failure) in a `<testsuite>`,
 consumable natively by Jenkins/GitLab-CI/GitHub Actions test-report UI
@@ -1013,9 +1102,11 @@ not a checker rule. Genuinely novel, not covered anywhere in
 ROADMAP.md.
 
 ## 70. brainbits/phpstan-rules - DONE (small, genuinely new finding)
+
 Real source read (2 files). PHPUnit `@covers`/`#[CoversClass]`/
 `#[CoversFunction]`/`#[CoversNothing]` tag hygiene, config-driven by a
 unit-test-namespace-pattern string:
+
 - CoversClassExistsRule: validates the class named in a `@covers`/
   `#[CoversClass]` tag actually exists (via ReflectionProvider) - a
   real, generic, cheap symbol-existence check, natural extension of
@@ -1028,6 +1119,7 @@ unit-test-namespace-pattern string:
   team-specific policy, lower priority than the exists-check.
 
 ## 71. johnbillion/wp-compat - DONE
+
 Real source read (main SinceVersionRule.php, ~400 lines, plus support
 files). WordPress-core version-gating: given a `Requires at least:`
 plugin-header version, flags any WP core function/method/filter/action
@@ -1050,6 +1142,7 @@ distinct from the function's own "since" that this project has needed
 to model, unlike WordPress's hook-parameter-versioning convention).
 
 ## 72. nextras/orm-phpstan - DONE
+
 Real source read (4 files). Nextras ORM-specific: entity magic-property
 reflection extensions (annotation-driven property/relationship/datetime
 type resolution for Nextras\Orm\Entity\IEntity subclasses) and a
@@ -1059,6 +1152,7 @@ package already catalogued - needs the ORM's own entity-metadata
 resolution mechanism, no portable generic-rule value. No new finding.
 
 ## 73. swisnl/phpstan-bitbucket - DONE
+
 Real source read (1 file). Not a pure-text output format like #69's
 JUnit formatter - this one makes live network calls to Bitbucket's own
 REST API (BitbucketApiClient::createReport/addAnnotation) to post
@@ -1073,6 +1167,7 @@ add network-calling side effects to a diagnostic formatter, unlike the
 pure-text JUnit case.
 
 ## 74. gosuperscript/phpstan-rules - DONE (two genuinely new findings)
+
 Real source read (3 files, small package). Both rules are novel and
 NOT framework-specific:
 
@@ -1110,12 +1205,14 @@ NOT framework-specific:
   phase.
 
 ## 75. symplify/template-phpstan-compiler - DONE (abandoned, repo deleted)
+
 Packagist confirms `abandoned: true`, repository URL
 (deprecated-packages/template-phpstan-compiler) 404s - the repo has
 been deleted entirely, not just archived. No source available to
 review. No finding possible.
 
 ## 76. kcs/psr-phpstan-rules (real repo: alekitto/psr-phpstan-rules) - DONE
+
 Real source read (1 real file, rest is tests). PSR-11 container
 `->get('service-id')` dynamic-return-type extension via a config-driven
 service-id-to-class map. Same DI-container/PSR-11 family already
@@ -1123,6 +1220,7 @@ catalogued repeatedly (kcs on Packagist is an alias to alekitto's real
 repo). No new finding.
 
 ## 77. glpi-project/phpstan-glpi - DONE
+
 Real source read (8 files). Entirely single-application-specific (GLPI
 ticketing system's own house rules), version-gated to GLPI's own
 release stream: bans `exit`/`die` (GLPI's own post-request-routine
@@ -1136,11 +1234,13 @@ config values. The globals/ORM-hook resolvers are GLPI-app-specific,
 zero portable value. No new finding.
 
 ## 78. rector/mockstan - DONE (genuinely new family, high value)
+
 Real source read (17 files: all Rules + support classes). A rich,
 entirely generic (PHPUnit-native-mock-API-only, no framework-specific
 type-extension infra needed) family of PHPUnit mock-hygiene checks -
 each a pure AST/method-call-shape pattern, buildable with phpstan-rs's
 existing test-class detection + method-name matching, no new mechanism:
+
 - AvoidAnyExpectsRule: `->expects($this->any())` is ambiguous - use an
   explicit count or a stub instead.
 - NoWithOnStubRule: `->method('x')->with(...)` without a preceding
@@ -1176,6 +1276,7 @@ sub-phase, most of them individually cheap (single AST-shape pattern
 match each).
 
 ## 79. mrpunyapal/peststan - DONE (near-duplicate of #67)
+
 File listing confirms this is essentially the same package as #67
 pestphp/pest-plugin-phpstan (identical class names/namespaces structure:
 PestFunctionDetector, ExpectationSemanticAnalyzer, the same Rules/ and
@@ -1184,6 +1285,7 @@ package #67 itself forked from. Same entirely-Pest-DSL-specific
 conclusion as #67 applies; no new finding.
 
 ## 80. cambis/silverstan - DONE (one generic finding, rest framework-specific)
+
 Real source read (~15 files: Rule/, Reflection/, PhpDoc/,
 ConfigurationResolver/). Overwhelmingly SilverStripe-CMS-specific:
 DataObject ORM config-property resolution (SilverStripe's own
@@ -1207,6 +1309,7 @@ hooks, kernel boot sequences, etc.). Not covered anywhere in
 ROADMAP.md - genuinely new, small, worth adding.
 
 ## 81. calebdw/fakerstan - DONE
+
 Real source read (7 files). Faker library-specific: resolves the
 concrete return type of Faker's magic `$faker->word()`/`->email()`/etc.
 provider-method calls (Faker exposes these via `__call` magic dispatch
@@ -1217,6 +1320,7 @@ packages already catalogued (needs Faker's own provider-method
 signature catalog, not a portable generic mechanism). No new finding.
 
 ## 82. mark-gerarts/phpstan-automapper-plus - DONE
+
 Real source read (no PHP source at all - just a `phpstan.neon`-style
 `ignoreErrors` config suppressing one specific "too many args" false
 positive for AutoMapper+'s own `MapperInterface::map()` BC-compat
@@ -1224,6 +1328,7 @@ history). Not a checker mechanism at all, purely a config workaround for
 one library's own interface-versioning quirk. No finding.
 
 ## 83. calebdw/larastan (abandoned, renamed to calebdw/phpstan-laravel) - DONE
+
 Packagist confirms abandoned/renamed. Real source read of the renamed
 package's Rules/ directory (28 rule files) - entirely Laravel-specific:
 Eloquent Model magic-method/scope/accessor/relation checks, Queue job
@@ -1241,11 +1346,13 @@ as a portable check without that framework's own API knowledge. No new
 finding category.
 
 ## 84. pb30/phpstan-composer-analysis - DONE (strong 2nd confirmation of #74's idea, deepens it significantly)
+
 Real source read (3 files). A thin PHPStan-collector wrapper around the
 separate standalone tool `shipmonk/composer-dependency-analyser`
 (vendored as a real dependency, not reimplemented) that runs once per
 analysis and reports 4 distinct composer.json-hygiene checks, each
 scoped per prod-path/dev-path classification:
+
 1. **Shadow dependency**: a class is used but its owning package is NOT
    declared in `composer.json` (only resolvable via Composer's flat
    autoloader because some *other* direct dependency happens to also
@@ -1278,6 +1385,7 @@ into ONE new phase covering all 4 sub-checks when triaging, not two
 separate half-finished phases.
 
 ## 85. localheinz/phpstan-rules - DONE (rich, highest-value package found so far - fork of ergebnis/phpstan-rules by the same author)
+
 Real source read (~35 files). Namespace/copyright headers confirm this
 is Andreas Möller's own fork/republish of the well-known
 `ergebnis/phpstan-rules` package (already referenced earlier in this
@@ -1339,6 +1447,7 @@ defaults alone are broadly useful for any PHPUnit-based codebase).
 convention), NoParameterWithNullableTypeDeclarationRule variants.
 
 ## 86. bonami/phpstan-collections - DONE
+
 Real source read (7 files). Entirely specific to the `bonami/collections`
 generic-collections library's own classes (ArrayList/Map/etc.):
 late-static-binding return-type propagation for its own fluent builder
@@ -1356,10 +1465,12 @@ mechanism, just applied to a higher-order-function argument instead of
 a direct boolean expression. No concrete new finding.
 
 ## 87. symplify/twig-phpstan-compiler - DONE (abandoned, repo deleted)
+
 Same situation as #75: `abandoned: true`, repository URL 404s (deleted
 entirely). No source available, no finding possible.
 
 ## 88. jiripudil/phpstan-sealed-classes - DONE (reinforces already-covered ground)
+
 Real source read (4 files). A custom `#[Sealed(SubtypeA::class, ...)]`
 PHP attribute (not real PHPStan's own native `@phpstan-sealed` PHPDoc
 tag) enforcing exhaustive, closed-set subtyping: (1) the attribute can
@@ -1380,6 +1491,7 @@ own `@phpstan-sealed` support is built/audited. Not a new finding
 category.
 
 ## 89. mahocommerce/maho-phpstan-plugin - DONE
+
 Real source read (8 files). Maho (a Magento 1 fork/OpenMage successor)
 e-commerce-platform-specific: VarienObject magic-property/magic-method
 reflection (Magento's own base-object pattern, `getData('key')`/
@@ -1390,6 +1502,7 @@ catalogued (Magento/CakePHP/Drupal/WordPress/TYPO3/SilverStripe/GLPI).
 No new finding.
 
 ## 90. symplify/latte-phpstan-compiler - DONE (abandoned, chain of dead redirects)
+
 Packagist shows `abandoned -> reveal/latte-phpstan-compiler`, but that
 replacement package doesn't exist on Packagist either, and the GitHub
 org named in the original repository URL (`reveal-php/latte-phpstan-
@@ -1399,6 +1512,7 @@ abandoned/deleted with no live successor). No source available, no
 finding possible.
 
 ## 91. eloquent/phpstan-phony - DONE
+
 Real source read (9 files). Type extensions for the `eloquent/phony`
 third-party mocking library's own fluent builder API (MockBuilder,
 InstanceHandle, mock-return-type propagation) - same shape as the
@@ -1408,6 +1522,7 @@ this project's future pluggable-table design would need a mapping
 entry for. No new finding.
 
 ## 92. voku/phpstan-rules - DONE (one high-value new finding, one family-reinforcement)
+
 Real source read (21 files). Entirely generic, no framework dependency:
 
 - **InArrayLooseComparisonRule (HIGH VALUE, new, easy)**: flags
@@ -1449,6 +1564,7 @@ Real source read (21 files). Entirely generic, no framework dependency:
   a string-to-int cast against) - low priority.
 
 ## 93. fooman/phpstan-magento2-magic-methods - DONE
+
 Real source read (2 files). Magento 2-specific: resolves
 `AbstractExtensibleModel`-derived classes' code-generated magic
 `getX()`/`setX()`/`hasX()`/`unsX()` accessors from their own extension-
@@ -1457,6 +1573,7 @@ cause as every other e-commerce/CMS-platform package already
 catalogued. No new finding.
 
 ## 94. canvural/phpstan-blade-rule - DONE
+
 Real source read (~24 files). Laravel Blade-template-specific: compiles
 `.blade.php` templates to plain PHP (reusing Laravel's own Blade
 compiler), analyzes the compiled PHP, and maps diagnostics back to the
@@ -1471,6 +1588,7 @@ beyond what's already conceptually noted from those dead packages, and
 is itself entirely Blade/Laravel-View-specific. No new finding.
 
 ## 95. bellangelo/phpstan-migration-rules - DONE
+
 Real source read (14 files, duplicated 1:1 across Laravel-migration and
 Phinx-migration variants). A "database migration hygiene" rule family -
 genuinely distinct category not seen elsewhere in this survey, but
@@ -1495,6 +1613,7 @@ DSL-aware checker layer from scratch with no existing precedent in this
 project - not a natural next step without a concrete first consumer.
 
 ## 96. sustainabil-it/phpstan-higher-order-collections - DONE
+
 Real source read (11 files). Laravel-Collection-specific: resolves the
 type of Laravel's "higher order collection proxy" pattern
 (`$collection->each->someMethod()`/`->map->someMethod()`, where the
@@ -1505,12 +1624,14 @@ framework-specific root cause as every other Laravel package already
 catalogued. No new finding.
 
 ## 97. raul338/cakephp-phpstan-extensions - DONE
+
 Real source read (3 files). CakePHP ORM-specific: `Table::findByX()`
 magic-finder method resolution and CRUD-component dynamic-method-return
 typing - same CakePHP-metadata root cause already catalogued at #48.
 No new finding.
 
 ## 98. patchlevel/event-sourcing-phpstan-extension - DONE
+
 Real source read (5 files). Entirely specific to the
 `patchlevel/event-sourcing` library's own AggregateRoot pattern:
 validates event-`#[Apply]`-method conventions (don't call `recordThat()`
@@ -1518,6 +1639,7 @@ from within an `apply()` method, don't mutate state outside an `apply()`
 method), plus a "write-only property" check scoped specifically to
 AggregateRoot subclasses (a property assigned somewhere but never read
 anywhere, since event-sourced state should only ever be read via getters
+
 - otherwise it's dead state). Checked against this project's own
 existing member-usage machinery first: `src/checker/unused/
 member_usage.rs` already tracks write-only/read-only distinctly
@@ -1530,6 +1652,7 @@ new finding; confirms existing coverage is already at least as complete
 as this package's own generic half.
 
 ## 99. zorac/phpstan-php-di - DONE
+
 Real source read (1 file). PHP-DI-specific: resolves an
 `#[Inject]`-annotated property's type from the container's own service
 definitions. Same DI-container root cause as every other DI package

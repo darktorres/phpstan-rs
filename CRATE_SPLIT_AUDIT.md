@@ -6,15 +6,16 @@ conventions), §3.1–§3.3 and §3.7 (designs of the extracted crates), §4
 (gates), §6 (risks that apply from Stage A/B), Appendix A rows due by B7,
 Appendix F decisions, Stage A (A0–A2) and B1–B7.
 
-Status: **OK** done as planned · **GAP** planned, not done, no step
-schedules it · **DONE** fixed after the audit · **RECORDED** nothing left to change · **SKIPPED** not done by decision · **PARTIAL** done in part · **DEVIATION** done differently
-from the plan's wording · **SCHEDULED** deferred and recorded in a later
-step.
+Status: **OK** done as planned · **GAP** planned, not done, no step schedules it
+· **DONE** fixed after the audit · **RECORDED** nothing left to change ·
+**SKIPPED** not done by decision · **PARTIAL** done in part · **DEVIATION** done
+differently from the plan's wording · **SCHEDULED** deferred and recorded in a
+later step.
 
 ## Findings (to act on)
 
 | # | Area | Status | Finding | Evidence | Resolution |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | 1 | §2 lints | DONE | No `[workspace.lints]`; none of the five extracted crates sets `[lints] workspace = true`, though the plan activates the lints in each extraction commit. Measured impact: `unreachable_pub` 5 hits (all in `types`), `cargo doc` 0 warnings, no print macros in library crates. | root `Cargo.toml`, `crates/*/Cargo.toml` | `[workspace.lints]` (unreachable_pub, unsafe_code, broken intra-doc links) in every member, print macros denied in each library crate root; the 5 `types` hits and 2 others narrowed. (`c17fd451`) |
 | 2 | §2 manifest | DONE | `[workspace.package]` has no `license`. | root `Cargo.toml` | `license = "MIT"` in `[workspace.package]`, inherited by every member, and a LICENSE file. (`c17fd451`) |
 | 3 | §2 dependencies | DONE | Shared third-party dependencies are declared per crate (`rustc-hash` ×5, `hotpath` ×3, `serde` ×2, `sqlparser` ×2, `imbl` ×2) instead of in `[workspace.dependencies]`. Appendix E does not list `imbl` for `syntax`, which uses it (`name_resolution.rs` use map). | `crates/*/Cargo.toml` | Shared dependencies live in `[workspace.dependencies]`; Appendix E lists `imbl` for `syntax`. (`c17fd451`) |
@@ -52,8 +53,9 @@ step.
 ## Checked and in order
 
 ### §2 Crates, layers and workspace conventions
+
 | Item | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | Virtual workspace, crates under `crates/`, `phpstan-rs-<name>` packages aliased in `[workspace.dependencies]` | OK | root `Cargo.toml` |
 | `resolver = "3"`, edition 2024, version, `publish = false` inherited | OK | root `Cargo.toml` |
 | `default-members`, `exclude = ["fuzz", "third_party/hotpath"]`, root profiles, `[patch.crates-io] hotpath` | OK | root `Cargo.toml` |
@@ -62,8 +64,9 @@ step.
 | Layer dependencies of the extracted crates (syntax; types → syntax; phpdoc → syntax; sql → none; diagnostics → syntax) | OK | manifests; module-graph gate passes |
 
 ### §3.1 syntax
+
 | Item | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | Dense `NodeId` on every `Expr`/`Stmt` | OK | `ast.rs:10,47,1031`; `2bc27bab` |
 | Spanned `TypeHint` incl. DNF | OK | `TypeHintKind` Name/Nullable/Union/Intersection; `9efed953` |
 | Names resolved at parse time, written and resolved kept | OK | `QualifiedName { written, resolved }`; `2ec57e43` |
@@ -80,8 +83,9 @@ step.
 | Extraction; fuzz targets repointed; lex/parse microbench | OK | `dcc5974b`; `crates/syntax/benches/lex_parse.rs` |
 
 ### §3.2 types
+
 | Item | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | Variance args, late-resolvable (value-of, key-of, offset access, class constant, conditional) | OK | `VarianceArg`, `ValueOf`/`KeyOf`/`OffsetAccess`/`ClassConstant`, `Conditional` |
 | `Static`/`This` unbound with args; bound form at D4 | SCHEDULED | §3.2 text, D4 |
 | `ObjectWithoutClass`, `Resource`, `BenevolentUnion` | OK | variants |
@@ -102,8 +106,9 @@ step.
 | Proptest seeds moved to `crates/types/proptest-regressions/`, default layout | OK | `proptest-regressions/tests/subtyping_properties.txt` mirrors `src/tests/subtyping_properties.rs` |
 
 ### §3.3 phpdoc
+
 | Item | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | `DocBlock` stores `TypeNode`s | OK | `a9a17985` |
 | Docblock string tokenizer deleted | OK | `b5a6d9ec` (was missed in B5, done in this pass) |
 | `types::parse_type_string` deleted | SCHEDULED | C7 (with the adapter and `mentions_mixed`) |
@@ -111,8 +116,9 @@ step.
 | Extraction; fuzz target repointed | OK | `8b2fd202` |
 
 ### B6 sql
+
 | Item | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | Own column model | OK | `sql::column` `Column`/`ColumnType`; `ff7655e9` |
 | `[sql_reflection]` parsing in `sql` | OK | `sql::config` (`Deserialize`) |
 | `SqlContext` service; state off `Registry` | OK | `sql::context`; `c2376d66`; corpus byte-identical |
@@ -120,8 +126,9 @@ step.
 | Extraction with the drivers | OK | `6c23897a` |
 
 ### §3.7 / B7 diagnostics
+
 | Item | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | Message, span, validated `Identifier`, list of tips, text fixes, `non_ignorable` | OK | `crates/diagnostics/src/lib.rs` |
 | `location` and `metadata` removed | OK | `bad4a754`, `00a4b609` |
 | File/trait file, identifier families, AST-node fixes, `accepts` reasons | SCHEDULED | E3 |
@@ -129,8 +136,9 @@ step.
 | Extraction; ignore/baseline pipeline stays in the package | OK | `673bd53b` |
 
 ### Stage A
+
 | Item | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | A0: all baselines recorded (corpus all configs and levels, type snapshots, Stage-A baseline, test manifest) | OK | `.corpus-runs/gate/*` from 2026-09-23 |
 | A0: performance and build-time baselines | GAP | see #7, #8 |
 | A0: CI runs the build-and-test half; submodule fetch limited to `vendor/phpstan-src` | OK | `.github/workflows/*.yml` |
@@ -144,8 +152,9 @@ step.
 | A2 known bugs | OK | see #16 |
 
 ### B1, B2
+
 | Item | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | Package under `crates/phpstan-rs`; fuzz repointed | OK | `3c1cde91`; `fuzz/Cargo.toml` |
 | Bench and build script anchored on `CARGO_MANIFEST_DIR` | OK | `benches/vendored_corpus.rs:35`, `build.rs:43` |
 | README / VSCode README / profile comments use `-p phpstan-rs` | OK | `README.md:54`, `editors/vscode/README.md:67`, `Cargo.toml:36` |
@@ -154,8 +163,9 @@ step.
 | No listed exception past its phase | OK | every `allow` dated C1 or later |
 
 ### Appendix A rows due by B7
+
 | Row | Status |
-|---|---|
+| --- | --- |
 | token, lexer, parser, ast, printer, intern, ast_walk → syntax | OK |
 | text_split deleted | OK |
 | types/*, php_version, php_float_format, type_union → types | OK |
@@ -171,8 +181,9 @@ step.
 | proptest-regressions → bin, then types | OK |
 
 ### Appendix F decisions touching finished work
+
 | Decision | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | Subtyping home: oracle trait in types, one tri-state relation | OK | see §3.2 |
 | ext-sql / ext-doctrine: no crate edge | OK | separate mappings, B6 |
 | Fixture timing: harness backend | DEVIATION (early) | the harness already runs through `Session::for_fixture`, which F1 was to introduce |

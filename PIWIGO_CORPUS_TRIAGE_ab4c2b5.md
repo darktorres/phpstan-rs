@@ -13,8 +13,10 @@ Real PHPStan (Piwigo's own `phpstan.neon`: level 10, bleedingEdge,
 phpstan-doctrine with a DB-backed `objectManagerLoader`, phpstan-dba,
 strict-rules) run over all 80 flagged files reports **0 errors**:
 
-    cd /home/torres/piwigo17-frozen
-    php -d memory_limit=6G vendor/bin/phpstan analyse --no-progress --error-format=raw <files>
+```sh
+cd /home/torres/piwigo17-frozen
+php -d memory_limit=6G vendor/bin/phpstan analyse --no-progress --error-format=raw <files>
+```
 
 Every diagnostic is therefore phpstan-rs-only: either a false positive or
 a stricter-than-PHPStan true positive. Each false-positive root cause below
@@ -23,7 +25,7 @@ was reproduced with a minimal `assertType` probe.
 ## False positives (100)
 
 | # | Count | Root cause | Location |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | 28 | Pest `beforeEach`/`afterEach` closures are checked against a clone of the locals, so `use (&$x)` write-back is discarded; the next hook still sees the pre-hook `$x = null` | `check_closure_literal_with_this_and_scope`, `src/checker/calls/closure_context.rs:34` |
 | 2 | 14 | `PHP_SAPI` resolves to the phpstorm-stubs literal `'cli'`; PHPStan's `ConstantResolver` widens it to a union (it also widens `PHP_OS`, `PHP_EOL`, `DIRECTORY_SEPARATOR`, `PHP_INT_SIZE`, …) | `global_constant_type`, `src/checker/expr/probe_checks.rs` |
 | 3 | 10 | Joining two branches where one side is an open shape (`array{…, ...}`) ignores that the `...` tail could hold the key: after `if (!isset($p['section'])) { $p['section'] = X; }` the result is `section?: X` instead of `mixed` | `merge_array_shape_pair`, `src/checker/type_union.rs:418` |
@@ -52,24 +54,70 @@ that happen to be rare in Piwigo.
 
 ### Affected diagnostics per root cause
 
-1. **Pest by-ref hooks (28)**: `tests/Unit/Admin/Maintenance/DbMaintenanceRepositorySqliteTest.php:44,45` (×2 each), `tests/Unit/Core/UniqueExecLockSqliteTest.php:45,46` (×2 each), `tests/Unit/Db/AdvisorySessionLockSqliteTest.php:44,45` (×2 each), `tests/Unit/Db/SchemaDumpServiceSqliteTest.php:47,48` (×2 each), `tests/Unit/Db/SortRendererSqliteTest.php:36,37` (×2 each), `tests/Unit/Db/SqlDialectExecutorSqliteTest.php:37,38` (×2 each), `tests/Unit/Db/SqlDialectTest.php:24`, `tests/Unit/Session/SessionServiceTest.php:59`, `tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php:281`, `tests/Unit/Admin/ThemesInstalledPageRendererTest.php:387`
-2. **`PHP_SAPI` (14)**: `src/Piwigo/Core/Env.php:53`; `tools/coverage-merge.php:5`, `tools/doc-drift-check.php:5`, `tools/latte-lint.php:5`, `tools/normalize-fixture.php:5`, `tools/opcache-preload.php:74`, `tools/openapi-bootstrap.php:25`, `tools/openapi-generate-input-dto.php:13`, `tools/p58/{assign,census,trace,unflatten}.php:5`, `tools/regenerate-fixture-photos.php:5`, `tools/triggers_list.php:7`
-3. **Open-shape join (10)**: `src/Piwigo/Section/SectionPopulator.php:188,200,264` (`identical.alwaysTrue`), `:440,484,511,556,588,598,613` (`identical.alwaysFalse`)
-4. **`proc_get_status` (7)**: `tests/Unit/Admin/Extensions/PemCatalogTest.php:589`, `tests/Unit/Core/ErrorCollectorTest.php:765`, `tests/Unit/Core/ShutdownHandlerTest.php:170`, `tests/Unit/GeoIp/GeoIpDatabaseUpdaterTest.php:59`, `tests/Unit/Html/HtmlServiceTest.php:2034`, `tests/Unit/Http/HttpClientServiceTest.php:74`, `tests/Unit/Http/ResponseEmitterTest.php:72`
-5. **Property default `self::` (5)**: `src/Piwigo/Config/CurrentConfig.php:2356,2434,2472`, `src/Piwigo/Core/Logger.php:87,99`
-6. **`get_defined_vars()` after include (5)**: `tools/i18n/php-to-po-fn.php:41` (×2), `:42` (×2), `tools/i18n/verify-parity.php:97`
-7. **Doctrine `MIN`/`MAX` (5)**: `src/Piwigo/Category/CategoryRepository.php:2527,2528`, `src/Piwigo/Comment/CommentRepository.php:1020,1021`, `src/Piwigo/Rate/RateRepository.php:405`
-8. **Static-schema nullability (5)**: `tests/Integration/InstallationStatsTest.php:164,194`, `tests/Unit/Audit/AuditRepositoryTest.php:87`, `tests/Integration/MaintenanceActionDispatcherTest.php:429,443`
-9. **Switch fall-through (3)**: `src/Piwigo/Notification/NotificationRepository.php:118`, `src/Piwigo/Controller/CommentsController.php:397`, `src/Piwigo/Controller/PictureController.php:509`
-10. **Relative `dirname` (3)**: `src/Piwigo/Db/EntityManagerFactory.php:212`, `tests/Integration/ContainerSmokeTest.php:142`, `tools/opcache-preload.php:80`
-11. **Stale branch-implied facts (2)**: `tools/phpstan/Latte/ContextVariableExtractor.php:318`, `src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php:188`
-12. **`HYDRATE_SINGLE_SCALAR` (2)**: `src/Piwigo/Config/ConfigRepository.php:215`, `src/Piwigo/Site/SiteRepository.php:148`
+1. **Pest by-ref hooks (28)**:
+   `tests/Unit/Admin/Maintenance/DbMaintenanceRepositorySqliteTest.php:44,45`
+   (×2 each), `tests/Unit/Core/UniqueExecLockSqliteTest.php:45,46` (×2 each),
+   `tests/Unit/Db/AdvisorySessionLockSqliteTest.php:44,45` (×2 each),
+   `tests/Unit/Db/SchemaDumpServiceSqliteTest.php:47,48` (×2 each),
+   `tests/Unit/Db/SortRendererSqliteTest.php:36,37` (×2 each),
+   `tests/Unit/Db/SqlDialectExecutorSqliteTest.php:37,38` (×2 each),
+   `tests/Unit/Db/SqlDialectTest.php:24`,
+   `tests/Unit/Session/SessionServiceTest.php:59`,
+   `tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php:281`,
+   `tests/Unit/Admin/ThemesInstalledPageRendererTest.php:387`
+2. **`PHP_SAPI` (14)**: `src/Piwigo/Core/Env.php:53`;
+   `tools/coverage-merge.php:5`, `tools/doc-drift-check.php:5`,
+   `tools/latte-lint.php:5`, `tools/normalize-fixture.php:5`,
+   `tools/opcache-preload.php:74`, `tools/openapi-bootstrap.php:25`,
+   `tools/openapi-generate-input-dto.php:13`,
+   `tools/p58/{assign,census,trace,unflatten}.php:5`,
+   `tools/regenerate-fixture-photos.php:5`, `tools/triggers_list.php:7`
+3. **Open-shape join (10)**:
+   `src/Piwigo/Section/SectionPopulator.php:188,200,264`
+   (`identical.alwaysTrue`), `:440,484,511,556,588,598,613`
+   (`identical.alwaysFalse`)
+4. **`proc_get_status` (7)**:
+   `tests/Unit/Admin/Extensions/PemCatalogTest.php:589`,
+   `tests/Unit/Core/ErrorCollectorTest.php:765`,
+   `tests/Unit/Core/ShutdownHandlerTest.php:170`,
+   `tests/Unit/GeoIp/GeoIpDatabaseUpdaterTest.php:59`,
+   `tests/Unit/Html/HtmlServiceTest.php:2034`,
+   `tests/Unit/Http/HttpClientServiceTest.php:74`,
+   `tests/Unit/Http/ResponseEmitterTest.php:72`
+5. **Property default `self::` (5)**:
+   `src/Piwigo/Config/CurrentConfig.php:2356,2434,2472`,
+   `src/Piwigo/Core/Logger.php:87,99`
+6. **`get_defined_vars()` after include (5)**: `tools/i18n/php-to-po-fn.php:41`
+   (×2), `:42` (×2), `tools/i18n/verify-parity.php:97`
+7. **Doctrine `MIN`/`MAX` (5)**:
+   `src/Piwigo/Category/CategoryRepository.php:2527,2528`,
+   `src/Piwigo/Comment/CommentRepository.php:1020,1021`,
+   `src/Piwigo/Rate/RateRepository.php:405`
+8. **Static-schema nullability (5)**:
+   `tests/Integration/InstallationStatsTest.php:164,194`,
+   `tests/Unit/Audit/AuditRepositoryTest.php:87`,
+   `tests/Integration/MaintenanceActionDispatcherTest.php:429,443`
+9. **Switch fall-through (3)**:
+   `src/Piwigo/Notification/NotificationRepository.php:118`,
+   `src/Piwigo/Controller/CommentsController.php:397`,
+   `src/Piwigo/Controller/PictureController.php:509`
+10. **Relative `dirname` (3)**: `src/Piwigo/Db/EntityManagerFactory.php:212`,
+    `tests/Integration/ContainerSmokeTest.php:142`,
+    `tools/opcache-preload.php:80`
+11. **Stale branch-implied facts (2)**:
+    `tools/phpstan/Latte/ContextVariableExtractor.php:318`,
+    `src/Piwigo/Controller/Api/Categories/CategoryAvailableListController.php:188`
+12. **`HYDRATE_SINGLE_SCALAR` (2)**:
+    `src/Piwigo/Config/ConfigRepository.php:215`,
+    `src/Piwigo/Site/SiteRepository.php:148`
 13. **Dynamic-key write not purging nested entry (2)**: `src/Piwigo/Search/SearchService.php:1632,1635`
 14. **Template defaults (1)**: `src/Piwigo/Auth/Event/TryLogUser.php:32`
 15. **Bare `exit;` (1)**: `src/Piwigo/Admin/PluginsInstalledPageRenderer.php:117`
 16. **`use const` (1)**: `src/Piwigo/Core/CoverageCollector.php:79`
 17. **`isset` on `array|false` (1)**: `src/Piwigo/Http/HttpClientService.php:422`
-18. **`in_array` with class-constant haystack (1)**: `src/Piwigo/Controller/Api/Images/ImageSetCategoryController.php:60` (`match.unhandled`)
+18. **`in_array` with class-constant haystack (1)**:
+    `src/Piwigo/Controller/Api/Images/ImageSetCategoryController.php:60`
+    (`match.unhandled`)
 19. **`array_filter` with `is_int(...)` (1)**: `src/Piwigo/Controller/CommentsController.php:142`
 20. **`@var` before RHS (1)**: `src/Piwigo/Category/CategoryDefaultRenderer.php:94`
 21. **`documentElement` nullability (1)**: `src/Piwigo/Admin/Upload/UploadService.php:745`
@@ -123,7 +171,7 @@ function g(array $sel): void {
 ## True positives (135)
 
 | Count | Identifier | Why they are correct |
-|---|---|---|
+| --- | --- | --- |
 | 39 | `arrayValues.list` | Each wraps `getSingleColumnResult()` (DBAL `fetchFirstColumn()`, always a list) or a `getArrayResult()` with no `INDEX BY` |
 | 73 | `function.alreadyNarrowedType` | Mostly `is_array($row)` on Doctrine rows; the rest are `is_string`/`is_scalar`/`is_int` on non-null columns, `COUNT`, `fetchOne`, or native-typed properties read through reflection |
 | 12 | `instanceof.alwaysTrue` | Non-null custom-typed ID columns whose converter returns the value object; one `ReflectionProperty::getValue()` on a native-typed readonly property |
@@ -138,14 +186,20 @@ level-10 PHPStan gate, and developers may treat them as noise.
 
 ## Latent issues (no current false positive)
 
-- Fields from a `leftJoin`ed entity keep non-null types (`UserRepository.php:2079` shows `status: UserStatus`; should be `UserStatus|null`).
-- Doctrine `INDEX BY` isn't modelled; results are always treated as lists (no corpus usage today).
+- Fields from a `leftJoin`ed entity keep non-null types
+  (`UserRepository.php:2079` shows `status: UserStatus`; should be
+  `UserStatus|null`).
+- Doctrine `INDEX BY` isn't modelled; results are always treated as lists (no
+  corpus usage today).
 - `Expr&Arr` isn't simplified to `Arr` in intersection display.
 - `DOMDocument::$doctype` has the same non-null issue as #21.
 
 ## Tooling notes
 
-- Corpus-context probe: a scratch dir with `vendor`, `src`, `install` and `phpstan-stubs` symlinked from the corpus, plus a toml of `paths = ["probe"]`, `scan_paths = ["src", "phpstan-stubs"]` and the same `[sql_reflection]` block. A copied corpus file can then be probed with `assertType` (about 35s per run).
+- Corpus-context probe: a scratch dir with `vendor`, `src`, `install` and
+  `phpstan-stubs` symlinked from the corpus, plus a toml of `paths = ["probe"]`,
+  `scan_paths = ["src", "phpstan-stubs"]` and the same `[sql_reflection]` block.
+  A copied corpus file can then be probed with `assertType` (about 35s per run).
 
 ## Results (after the fix round)
 
@@ -154,7 +208,7 @@ fixes exposed. Every triaged false-positive location is gone from the
 scoped run.
 
 | Run | Before (`ab4c2b5`) | After |
-|---|---|---|
+| --- | --- | --- |
 | Scoped (`phpstan-rs.toml`) | 235 | 159 |
 | Unscoped (whole checkout incl. `vendor/`) | 44,921 | 43,330 |
 

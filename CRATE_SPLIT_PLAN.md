@@ -2,6 +2,7 @@
 
 This plan moves phpstan-rs to its target architecture, and the crate split
 falls out of that. The target mirrors PHPStan:
+
 - an inference engine that emits no diagnostics;
 - rules and collectors that receive nodes plus a read-only `Scope`, and
   return errors;
@@ -14,6 +15,7 @@ falls out of that. The target mirrors PHPStan:
 brought to its target shape while it is still inside the package, with its
 layering enforced by a mechanical module-graph gate. It becomes a crate only
 once its API is final. So:
+
 - no crate is ever cut along a temporary boundary;
 - nothing is parked in an interim home;
 - nothing is widened to `pub` and then narrowed again;
@@ -27,7 +29,7 @@ extracted in one final wave.
 ## 1. Measured state (HEAD `89d468c` + docs)
 
 | Area | Measured |
-|---|---|
+| --- | --- |
 | Size | 216k lines in one crate; 4,869 `#[test]` in `src/`; `src/checker/tests/` holds 3,297 tests in 67,140 lines, and all checker test modules together hold 3,441 |
 | Diagnostic emission | 544 `report`/`report_builder` call sites under `src/checker` (433 + 111), ~324 of them in the inference modules (`expr`, `stmt`, `calls`, `oop`, `function_decl`, `assignment`, `operators`, `control_flow`, `comparisons`, `coercion`, `resolve`, `narrowing`). Plus 13 raw `Diagnostic {}` literals (`phpstan_api.rs` ×11, `duplicate_classes.rs`, `duplicate_functions.rs`) and 3 vector splices: external-`Rule` dispatch at `expr.rs:248`/`stmt.rs:393`, and the trait-host dedup at `function_decl.rs:126` |
 | Post-emission processing | extract()/eval() truncates *every* diagnostic of the enclosing body (`saw_dynamic_var_construct`). Loop bodies run up to 6 passes, and `while`/`for` conditions get a quiet pre-pass; diagnostics from non-final passes are truncated, but return points, throw points and property facts leak across passes. Trait methods are checked once per host, then deduplicated by (span, message) and filtered by a cross-host constant-condition verdict |
@@ -60,7 +62,7 @@ A virtual workspace with every crate under `crates/`. Package names are
 `phpstan-rs-<name>` (the bin keeps `phpstan-rs`), aliased in
 `[workspace.dependencies]` so code reads `syntax::ast::Expr`.
 
-```
+```text
 L0  syntax        typed AST with NodeIds, lexer (returns warnings), parser,
                   name resolution, Visitor/VisitorMut, parse-time node
                   annotations, printer, interned Name
@@ -112,6 +114,7 @@ L8  phpstan-rs    bin: clap global flags + `--set`, calls app::run
 **L5 sub-DAG.** `builtins ← rules ← ext-*`. An `ext-*` crate may depend on
 `analyser`, `builtins`, `rules`, `reflection` and `sql`, and never on
 another `ext-*`. Shared concepts go through registration APIs:
+
 - parent-call rules register into `rules::class_shape`;
 - mock types register through a mock-type provider hook;
 - test base classes register through a test-framework hook;
@@ -122,7 +125,7 @@ another `ext-*`. Shared concepts go through registration APIs:
 section, settings, fixtures and diagnostics (Appendix A lists every module):
 
 | Crate | Mirrors |
-|---|---|
+| --- | --- |
 | `ext-strict-rules` | phpstan-strict-rules, exactly. Includes porting its remaining families: disallowedBacktick, disallowedEmpty, disallowedShortTernary, closureUsesThis, matchingInheritedMethodNames, noVariableVariables, booleansInLoopConditions |
 | `ext-deprecation-rules` | phpstan-deprecation-rules (built on the restricted-usage framework) |
 | `ext-doctrine` | phpstan-doctrine: ORM + DQL, entity metadata, `doctrine_functions` |
@@ -144,6 +147,7 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 | `ext-extras` | phpstan-rs originals with no upstream package (Appendix A) |
 
 **Composition model.**
+
 - `project::SessionBuilder` takes registrations: rules, collectors,
   observers, extensions and config-section owners. It depends on no
   `ext-*` crate.
@@ -200,6 +204,7 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 ## 3. Designs
 
 ### 3.1 syntax
+
 - **Node identity:** a dense `NodeId` on every `Expr`/`Stmt`, assigned by
   the parser.
 - **Typed AST:**
@@ -228,6 +233,7 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
   here.
 
 ### 3.2 types
+
 - **Dedicated variants:**
   - variance-annotated generic arguments;
   - late-resolvable types (value-of, key-of, offset-access, class-constant
@@ -271,18 +277,21 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
   cap.
 
 ### 3.3 phpdoc
+
 One grammar produces a `TypeNode` AST, which `DocBlock` stores. The
 docblock string tokenizer and `types::parse_type_string` are deleted.
 TypeNode → Type resolution lives in reflection. Doctrine-annotation
 argument parsing stays in the grammar.
 
 ### 3.4 stub-sources
+
 A checked-in, generated symbol index, produced by an `xtask` that uses
 `syntax`. A test in `reflection` regenerates it from the embedded sources
 and asserts it is identical. build.rs stays a parser-free file list plus
 `include_str!` generator.
 
 Each index entry records:
+
 - kind;
 - case rules: classes and functions fully case-folded; constants exact,
   with only the namespace prefix folded; legacy `define(..., true)`
@@ -299,6 +308,7 @@ The index covers `resources/functionMap.php` and its per-version deltas
 Visitor-based walk.
 
 ### 3.5 reflection
+
 - **Data model.** Opaque `ClassReflection`, `MethodReflection`,
   `PropertyReflection`, `ParameterReflection`, `FunctionReflection` and
   `ConstantReflection`, with accessors:
@@ -398,6 +408,7 @@ Visitor-based walk.
   constants through it.
 
 ### 3.6 config
+
 - Global keys plus per-owner tables (`[rules.*]`, `[ext.<name>]`, the
   existing tables re-homed).
 - Each owner registers a typed serde section with `deny_unknown_fields`,
@@ -426,6 +437,7 @@ Visitor-based walk.
     rememberPossiblyImpureFunctionValues).
 
 ### 3.7 diagnostics
+
 - `Diagnostic`, built by `DiagnosticBuilder`, is the reported item: what
   the output formats, the baseline, ignores and the LSP consume, whatever
   produced it (a rule, a parse error, an unmatched ignore, a project-level
@@ -448,6 +460,7 @@ Visitor-based walk.
 - No `clap` in any library crate.
 
 ### 3.8 analyser
+
 - **Scope storage.**
   - Expression-keyed holders (type, native type, TrinaryLogic certainty)
     over an interned structured `ExprKey` (variable, property path, offset
@@ -632,6 +645,7 @@ Visitor-based walk.
   existence comes from the Session VFS, which records a dependency.
 
 ### 3.9 Levels
+
 - PHPStan's 0–10 plus `max` ladder, following `conf/config.level0.neon`…
   `config.level10.neon` and `config.levelmax.neon`.
 - Each rule has a registration level. Computed-level sites become named
@@ -652,6 +666,7 @@ Visitor-based walk.
   rule-declared severity.
 
 ### 3.10 project, app, lsp, bin
+
 - **`Session::run() -> AnalysisResult`**, containing:
   - file errors, not-file errors and internal errors;
   - collected data and dependencies;
@@ -722,6 +737,7 @@ Visitor-based walk.
   - the `format_signature` test moves to `reflection`.
 
 ### 3.11 Tests
+
 - **The `testing` library crate** provides RuleTestCase (with collectors),
   TypeInferenceTestCase, LevelsTestCase, Integration (every rule at a level
   and config, an exact list) and Codemod kinds.
@@ -891,6 +907,7 @@ point.
 ### Stage A: oracle and gates (structure unchanged)
 
 **A0. Measurement and CI.**
+
 - Release profile decision (§2).
 - Record every baseline in §4: corpus (all configs and levels), type
   snapshot, Stage-A baseline file, performance, build-time scenarios, the
@@ -905,6 +922,7 @@ point.
 commit); the unsorted corpus comparison starts here.
 
 **A2. Fixture capture.**
+
 - Instrument every `diagnostics_for*`, local test helper and project-test
   entry point to dump each analysis call at runtime: test name, call
   index, final sources, config as a toml / fixture header, full output.
@@ -930,6 +948,7 @@ commit); the unsorted corpus comparison starts here.
 
 **A2 behaviour fixes**, one commit each with fixtures (approved delta
 `gates/approved/a2-known-bugs`):
+
 - class names resolve case-insensitively, in `catch`, static-call targets
   and types;
 - casts, `echo` and interpolation give precise types, a resource included;
@@ -960,6 +979,7 @@ commit); the unsorted corpus comparison starts here.
 - a dynamic method call is impure.
 
 Follow-ups:
+
 - **Full tier.** `xtask gates --full` runs at the end of every phase. The
   catch-up run (`25d63876` against `1e5e42be`) is reviewed: levels 0–8 of
   `scoped` and `all-on` change exactly as the quick tier's approved deltas
@@ -988,6 +1008,7 @@ they change. Each behaviour fix is its own approved-delta commit with a
 fixture.
 
 **B1. Workspace skeleton.**
+
 - Virtual root, conventions (§2), and the package moved to
   `crates/phpstan-rs`.
 - Fuzz repointed to `../crates/phpstan-rs`.
@@ -1000,6 +1021,7 @@ fixture.
   `-p phpstan-rs` now.
 
 **B2. Module graph.**
+
 - A mechanical edge inventory against Appendix A, including
   `text_split → deps`, `registry → {restricted_symbols, doctrine_functions,
   assertion_tables, sql_*}`, `config → rule configs`, `checker ↔ rule`,
@@ -1013,6 +1035,7 @@ fixture.
 - The strict gate is on from here.
 
 **B3. syntax redesign**, one commit each:
+
 - NodeId;
 - the typed AST (hints, resolved names, split StaticAccess, Cast enum,
   sub-name spans; `text_split` deleted);
@@ -1027,6 +1050,7 @@ Then extract `syntax`: the `lex_parse`/`token_stream_parse` fuzz targets
 repoint to it, and a new lex / parse microbench is added.
 
 Follow-ups, behaviour fixes:
+
 - **Interpolation.** `"${name}"` and `"${expr}"` interpolate (read as
   literal text today; nsrt `literal-string.php` types
   `"foo ${literalString}"` as the literal `'foo ${literalString}'`).
@@ -1073,6 +1097,7 @@ Follow-ups, behaviour fixes:
   positions account for the stripped indentation.
 
 Follow-ups, the typed AST (§3.1):
+
 - **Resolved names are read.** No engine code reads
   `QualifiedName::resolved`; 109 calls in 43 files re-resolve through a
   `NameContext`. C4 converts the builders and D3 the checker; the project
@@ -1118,6 +1143,7 @@ Follow-ups, the typed AST (§3.1):
   project's interner.
 
 **B4. types redesign**, one commit each (§3.2):
+
 - variants;
 - shape keys and unsealed tail;
 - `Name`-based classes;
@@ -1136,6 +1162,7 @@ Then extract `types`, with the proptest seeds moved to
 `crates/types/proptest-regressions/`.
 
 Follow-ups:
+
 - **One subtyping implementation.** `Relation::subtype` (a bool, the old
   `is_subtype` renamed, 56 callers) is deleted; its callers use
   `is_super_type_of(..).yes()`. `is_super_type_of` stands on its own and
@@ -1237,6 +1264,7 @@ Follow-ups:
   `generalize_by_key_set`) move to `crates/types`.
 
 **B5. phpdoc redesign.**
+
 - `DocBlock` stores `TypeNode`s.
 - TypeNode → Type resolution goes behind an interface that reflection
   fills in C7; until then a resolver adapter.
@@ -1259,6 +1287,7 @@ with a parse error: an `array<...>` nested 1,000 deep takes 3 s and 2,000
 deep 9 s today (20,000 deep does not finish).
 
 **B6. sql.**
+
 - Its own column-type model, `[sql_reflection]` parsing, and `SqlContext`
   as a service.
 - The SQL state moves off `Registry` (byte-identical).
@@ -1267,6 +1296,7 @@ deep 9 s today (20,000 deep does not finish).
 - Extract `sql`.
 
 Follow-ups:
+
 - **Identifier case per driver.** `SchemaCatalog` compares table and column
   names exactly; lookups fold case where the driver does (MySQL and SQLite
   column names; Postgres folds unquoted identifiers to lowercase), fixture
@@ -1280,6 +1310,7 @@ Follow-ups:
   reflection off; it becomes a startup warning.
 
 **B7. diagnostics.**
+
 - The diagnostic model (§3.7): `Diagnostic` gets its validated
   `Identifier` and a list of tips, and drops `location` and `metadata`.
   `RuleError`, the file and trait file, identifier families and AST-node
@@ -1290,6 +1321,7 @@ Follow-ups:
   package's future `project` module.
 
 Follow-ups:
+
 - `DiagnosticFix::within` (a text search for a name whose span is missing)
   is deleted; its two sites use the name's span.
 - **Baseline paths** are relative to the baseline file's directory, as in
@@ -1302,6 +1334,7 @@ default `PhpVersions` range comes from it (§3.2): composer
 own.
 
 Follow-ups:
+
 - **Constraints follow Composer's grammar**, whitespace after an operator
   included: `"php": ">= 8.1"` gives no range today, so every
   version-gated rule is silent. An open upper bound runs to PHPStan's
@@ -1327,6 +1360,7 @@ Follow-ups:
   `src/`, `install/` and `plugins/` at `76e738b4` include these.
 
 **B9. stub-sources.**
+
 - The generated index plus the xtask plus the regeneration test.
 - The crate owns the `include!`.
 - Extract.
@@ -1343,6 +1377,7 @@ first and is fixed in that phase, as its own behaviour commit after the
 structural one (Appendix F).
 
 **C1. config.**
+
 - Schema, owner sections, the shim, `--set`, deletion of per-rule flags
   and setters (approved delta for the CLI surface), extension activation.
 - The setting split per Appendix B; each settings type lives in its owner
@@ -1353,6 +1388,7 @@ structural one (Appendix F).
 - Extract `config`.
 
 Follow-ups, one commit each, each with its test:
+
 - **Nested validation.** `deny_unknown_fields` on every struct nested in a
   section: `IgnoreErrorEntry`, `RestrictedSymbolEntry`, `ParamCondition`,
   `ParamRef`, `ParamFlagsCondition`, `DoctrineCustomFunctionEntry`,
@@ -1459,6 +1495,7 @@ Follow-ups, one commit each, each with its test:
   its own doc comment (`project/session.rs`).
 
 **C2. Settings leave `Registry`**, following Appendix B:
+
 - `RuleLevelHelper` lands in the package's future `analyser` module;
 - `ConstantResolver` moves to `reflection` (below);
 - rule and extension settings go to their owner modules;
@@ -1469,6 +1506,7 @@ Gate: reflection reads no settings type but `ReflectionSettings`
 named under `registry`/`stub_attributes`).
 
 Follow-ups:
+
 - **The gate is implemented**: `xtask/src/arch.rs` has no settings rule.
 - **Predefined constants over a version range** (fixed first): `PHP_VERSION_ID`
   is `int<min.id, max.id + 99>`, `PHP_MAJOR_VERSION`/`PHP_MINOR_VERSION` are
@@ -1506,6 +1544,7 @@ Follow-ups:
 arguments, provenance, no AST bodies.
 
 Follow-ups:
+
 - **C3a's `property.unused` delta** (fixed first): ORM-mapped properties
   count as used while ext-doctrine is active, view objects passed to a
   template renderer are not reported, and every line of
@@ -1522,6 +1561,7 @@ Follow-ups:
   one no-native-type encoding (`Option<Type>`).
 
 **C4. Snapshots and lazy resolution**, one commit each, in this order:
+
 - **`xtask gatetime`**: `--record` runs HEAD's gated steps (the fixture
   suite and the lib tests; C5 adds the cli tests) N = 3 times each, with
   the binaries prebuilt and the same profile and environment `gates` uses
@@ -1883,6 +1923,7 @@ tier (§4): they change every lookup's hashing, the resolution path, and
 the LSP's per-edit invalidation.
 
 **C5. Locator chain and stub layer**, one commit each:
+
 - the stub layer's version key over a `PhpVersions` range, decided first
   and recorded in Appendix F. It governs 2,234 `LanguageLevelTypeAware` and
   598 `PhpStormStubsElementAvailable` attributes in 88 phpstorm-stubs files
@@ -1928,6 +1969,7 @@ approved-delta commits.
 
 **C6. Overlay layer**, one commit each. Every entry's types are parsed with
 the phpdoc grammar (TypeNode), never `parse_type_string`:
+
 - phpstan-src `.stub` PHPDoc overlays (approved delta, split per stub
   file): the 30 files `conf/config.neon` lists (phpstan-src 2.2.16), plus
   the 10 selected by the six gated `StubFilesExtension`s (`BcMathNumber`,
@@ -1962,6 +2004,7 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
 
 **C7. TypeNodeResolver** with `TypeNodeResolverExtension`, replacing the B5
 adapter (`registry::type_node`) and the checker's `resolve_type_node`:
+
 - one name scope - namespace and `use` imports, active templates, class
   aliases, the current class for `self` - used by both the registry and the
   checker (`resolve_written_type`);
@@ -2024,6 +2067,7 @@ as `ClassReflection::hasMethod` does; a tag declared at the same or a
 closer hierarchy distance than the native member wins, as in
 `PhpClassReflectionExtension`. Behaviour fixes, one commit each after the
 structural one, each fixtured:
+
 - a mixin member never shadows a native one, inherited ones included
   (`@mixin Mx` on a class whose parent declares `m()` types `$h->m()` by
   `Mx::m()` today);
@@ -2059,6 +2103,7 @@ H2, H3, U1-U4, U6, P1; reflection enumeration - A5, U5; collector rules
 (E1) - H1, V1, V2, Phase 90; neither - A2-A4, A6, C1, P2, D1.
 
 Fixes, each its own behaviour commit:
+
 - global-variable sites include `foreach` bindings, destructuring,
   by-reference out arguments and appends (the registry test
   `a_bare_top_level_append_contributes_nothing` flips); expression typing
@@ -2082,79 +2127,72 @@ behaviour commits a phase lists follow it as approved deltas. D5 is the
 semantics phase. Every behaviour bug below is reproduced and gets its
 fixture before its phase's structural commit.
 
-Gate 12 runs both oracles below. The oracle is real PHPStan 2.2.16 over
-the corpus files with engine-sensitive diagnostics: the phar copied
-outside `vendor/` (so the
-corpus's extensions don't load), Piwigo's `vendor/autoload.php` as the only
-bootstrap file, level 10, run from a directory with no `vendor/`, with
-`phpVersion` set to the range phpstan-rs reads from the corpus's
-`composer.json` (`min: 80500, max: 80599`; PHPStan's own reading of
-`^8.5` runs to 80699, B8). Without it the phar uses its
-runtime version, and at least 63 of phpstan-rs's constant comparisons
-(`PHP_VERSION_ID < 70400` always false, `symfony/polyfill-*`) and the
-`&&` results built on them show as phpstan-rs-only. phpstan-rs runs at
-`--level 10` too: with the level unset it skips the
-level-10 implicit-`mixed` checks (§1's level row), which turned 2,519
-`offsetAccess.nonOffsetAccessible` into apparent misses. Both sides are
-filtered to the engine identifiers. phpstan-rs gets the files by name
-from the corpus root, so until B8's root-autoload follow-up lands, a
-project class under `src/` that isn't named is unknown to it. Files that
-raise internal errors
-(missing optional classes, php-standard-library function redeclaration)
-are excluded, which leaves 941 files. At `76e738b4` phpstan-rs has 1,628
-findings PHPStan doesn't, 1,060 of them `offsetAccess.nonOffsetAccessible`
-(1,013 on `mixed`), and misses 2,033, among them 735
-`offsetAccess.nonOffsetAccessible`, 281 `foreach.nonIterable`, 263
-`offsetAccess.notFound`, 244 `function.alreadyNarrowedType` (188 of those
-are `assert()` of `true`, which phpstan-rs reports as
-`assert.alreadyNarrowedType`), 115 `booleanAnd.alwaysFalse` and 63
-`deadCode.unreachable`. The counts that cite snapshot 0a8fe69 below come
-from the earlier run with the level and the PHP version unpinned. Each phase reruns the
-comparison, and every phpstan-rs-only finding it names is a fixture.
+Gate 12 runs both oracles below. The oracle is real PHPStan 2.2.16 over the
+corpus files with engine-sensitive diagnostics: the phar copied outside
+`vendor/` (so the corpus's extensions don't load), Piwigo's
+`vendor/autoload.php` as the only bootstrap file, level 10, run from a directory
+with no `vendor/`, with `phpVersion` set to the range phpstan-rs reads from the
+corpus's `composer.json` (`min: 80500, max: 80599`; PHPStan's own reading of
+`^8.5` runs to 80699, B8). Without it the phar uses its runtime version, and at
+least 63 of phpstan-rs's constant comparisons (`PHP_VERSION_ID < 70400` always
+false, `symfony/polyfill-*`) and the `&&` results built on them show as
+phpstan-rs-only. phpstan-rs runs at `--level 10` too: with the level unset it
+skips the level-10 implicit-`mixed` checks (§1's level row), which turned 2,519
+`offsetAccess.nonOffsetAccessible` into apparent misses. Both sides are filtered
+to the engine identifiers. phpstan-rs gets the files by name from the corpus
+root, so until B8's root-autoload follow-up lands, a project class under `src/`
+that isn't named is unknown to it. Files that raise internal errors (missing
+optional classes, php-standard-library function redeclaration) are excluded,
+which leaves 941 files. At `76e738b4` phpstan-rs has 1,628 findings PHPStan
+doesn't, 1,060 of them `offsetAccess.nonOffsetAccessible` (1,013 on `mixed`),
+and misses 2,033, among them 735 `offsetAccess.nonOffsetAccessible`, 281
+`foreach.nonIterable`, 263 `offsetAccess.notFound`, 244
+`function.alreadyNarrowedType` (188 of those are `assert()` of `true`, which
+phpstan-rs reports as `assert.alreadyNarrowedType`), 115
+`booleanAnd.alwaysFalse` and 63 `deadCode.unreachable`. The counts that cite
+snapshot 0a8fe69 below come from the earlier run with the level and the PHP
+version unpinned. Each phase reruns the comparison, and every phpstan-rs-only
+finding it names is a fixture.
 
 The second oracle is PHPStan's own inference suite,
 `vendor/phpstan-src/tests/PHPStan/Analyser/nsrt` (1,688 files, 18,480
-`assertType` and 313 `assertNativeType` calls), checked by `check-project
---php-version 8.5` with `tests/PHPStan` as a scan directory (the fixtures'
-classes live in `tests/PHPStan/Analyser/data`, which PHPStan loads through
-its `autoload-dev` classmap) and phpstan-src's composer dependencies
-installed (`nikic/php-parser`'s node classes). A file whose `// lint`
-header excludes 8.5 runs at the highest version it allows (60 files, 47 of
-them `< 8.0` at 7.4). Mismatches are compared
-after a normalization of display forms that carry the same information:
-union member order, benevolent parentheses, shape key order,
-`array<(int|string), T>` as `array<T>`, a list shape's explicit keys
-(`array{0: 'a'}` is `array{'a'}`), `true|false` as `bool`, a template's
-scope suffix (`T (function f(), argument)`), an accessory string's
-combined name (`non-falsy-lowercase-string` is
-`lowercase-string&non-falsy-string`), a small integer range against its
-literals (`int<0, 1>` is `0|1`), PHPStan's implicit `*NEVER*` against
-`never`, and backslashes in a string literal
-(`'A\\B'` is `'A\B'`). The files that assert an unpinned version range
-(`predefined-constants.php`, `bug-4434.php`) are the pinned version's
-approved deviations. phpstan-rs misses 11,106 at `76e738b4`.
-By asserted expression: 4,788 are variables, 3,399 are calls to functions
-PHPStan types through an extension (E2; 413 of them `mixed`, among them
-`filter_var` 191 and `min`/`max` 198), 1,016 are operators (D3), 707 are
-method calls, 347 other function calls, 300 properties, 179 offsets and
-35 `new`. Two classes are flagged as possible wrong values: 100 where
-every member of both types is a literal and an expected literal is missing
-from phpstan-rs's type, and 65 where phpstan-rs has literals and PHPStan
-the general type covering them. Each flagged line is either a wrong value,
-fixed first in its owning phase and listed there, or phpstan-rs being
-right at runtime (after `assert(($a[1] ?? null) === null)`, `$a[1]` is
-`null`, where PHPStan keeps `object|null`), an approved deviation. The count is a
-tracked number: each phase records it, and a phase that raises it has a
-named reason in its commit. The suite's other two assertions,
-`assertNativeType` (313 calls) and `assertVariableCertainty` (681), are
-ignored today; the assertion DSL reads both before D1, so D5's natives and
-certainty are measured by the same suite. Until then, `variable.undefined`
-approximates certainty: of the 327 `Yes` assertions phpstan-rs reports 97
-as undefined (17 in `dependent-expression-certainty.php`, about 40 in
-`throw-points/*`: correlated conditions, `finally` scopes and
-possibly-impure calls, D5), and of the 351 `No`/`Maybe` it leaves 112
-unreported. `cargo xtask nsrt` and `cargo
-xtask oracle` land with it, and their first recorded counts are D1's
+`assertType` and 313 `assertNativeType` calls), checked by
+`check-project --php-version 8.5` with `tests/PHPStan` as a scan directory (the
+fixtures' classes live in `tests/PHPStan/Analyser/data`, which PHPStan loads
+through its `autoload-dev` classmap) and phpstan-src's composer dependencies
+installed (`nikic/php-parser`'s node classes). A file whose `// lint` header
+excludes 8.5 runs at the highest version it allows (60 files, 47 of them `< 8.0`
+at 7.4). Mismatches are compared after a normalization of display forms that
+carry the same information: union member order, benevolent parentheses, shape
+key order, `array<(int|string), T>` as `array<T>`, a list shape's explicit keys
+(`array{0: 'a'}` is `array{'a'}`), `true|false` as `bool`, a template's scope
+suffix (`T (function f(), argument)`), an accessory string's combined name
+(`non-falsy-lowercase-string` is `lowercase-string&non-falsy-string`), a small
+integer range against its literals (`int<0, 1>` is `0|1`), PHPStan's implicit
+`*NEVER*` against `never`, and backslashes in a string literal (`'A\\B'` is
+`'A\B'`). The files that assert an unpinned version range
+(`predefined-constants.php`, `bug-4434.php`) are the pinned version's approved
+deviations. phpstan-rs misses 11,106 at `76e738b4`. By asserted expression:
+4,788 are variables, 3,399 are calls to functions PHPStan types through an
+extension (E2; 413 of them `mixed`, among them `filter_var` 191 and `min`/`max`
+198), 1,016 are operators (D3), 707 are method calls, 347 other function calls,
+300 properties, 179 offsets and 35 `new`. Two classes are flagged as possible
+wrong values: 100 where every member of both types is a literal and an expected
+literal is missing from phpstan-rs's type, and 65 where phpstan-rs has literals
+and PHPStan the general type covering them. Each flagged line is either a wrong
+value, fixed first in its owning phase and listed there, or phpstan-rs being
+right at runtime (after `assert(($a[1] ?? null) === null)`, `$a[1]` is `null`,
+where PHPStan keeps `object|null`), an approved deviation. The count is a
+tracked number: each phase records it, and a phase that raises it has a named
+reason in its commit. The suite's other two assertions, `assertNativeType` (313
+calls) and `assertVariableCertainty` (681), are ignored today; the assertion DSL
+reads both before D1, so D5's natives and certainty are measured by the same
+suite. Until then, `variable.undefined` approximates certainty: of the 327 `Yes`
+assertions phpstan-rs reports 97 as undefined (17 in
+`dependent-expression-certainty.php`, about 40 in `throw-points/*`: correlated
+conditions, `finally` scopes and possibly-impure calls, D5), and of the 351
+`No`/`Maybe` it leaves 112 unreported. `cargo xtask nsrt` and
+`cargo xtask oracle` land with it, and their first recorded counts are D1's
 baseline.
 
 The mismatches span stages: `filterVar.php` (156 `mixed`),
@@ -2169,6 +2207,7 @@ remaining line is an approved deviation that names its runtime reason.
 the corpus oracle's phpstan-rs-only identifiers get owners the same way.
 
 **D1. Holder storage (byte-identical).**
+
 - Every `Locals` map moves into holder storage with its current per-kind
   merge and invalidation policy, `guarded_classes` and
   `clone_reinitialized` included.
@@ -2179,6 +2218,7 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
   unmeasured; they move onto it before the baseline is recorded.
 
 **D2. Statement results, contexts and StmtHandlers.**
+
 - The annotation kinds the handlers need are added to `syntax::annotations`
   first, following 2.2.16's parser visitors:
   - `GotoLabelVisitor`, `LastConditionVisitor`, `TryCatchTypeVisitor`;
@@ -2236,9 +2276,9 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
       (`symfony/cache/PhpArrayAdapter.php:82`).
     - The interim fix before D2: `always_terminates` gains a `DoWhile` arm;
       `while`/`for`/`do` read the condition's inferred type instead of
-      `is_truthy_literal`, which misses `\true`; a `break` counts only when its level reaches
-      the loop; and `Switch` without `default` counts when the subject's
-      enum cases are all covered.
+      `is_truthy_literal`, which misses `\true`; a `break` counts only when its
+      level reaches the loop; and `Switch` without `default` counts when the
+      subject's enum cases are all covered.
   - **Last conditions** follow `LastConditionVisitor`: besides an `elseif`
     with no `else`, an `elseif` whose `else` only throws, an `if` without
     `else` followed by its block's final `throw`, and a `match`'s last arm
@@ -2247,17 +2287,18 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
     snapshot 0a8fe69 with the `if … throw` shape, e.g.
     `nikic/php-parser/BuilderFactory.php:369`.
   - **Constant conditions prune branches** (`IfHandler`): an `if` whose
-    condition type is `true` skips the `else`/`elseif` merge, and a
-    `false` condition drops its branch. An always-true `elseif` ends the
-    chain the same way: `symfony/cache/Traits/RedisTrait.php:631` reports
-    `$prefix` undefined after `if (…) {…} elseif (!$host instanceof
-    Predis) {…}` where an earlier `continue` already excluded Predis. The condition's type is the PHPDoc
-    type, or the native type when `treatPhpDocTypesAsCertain` is off.
-    After `$flag = true; if ($flag) { $x = 1; }`, `echo $x` is
-    `variable.undefined` today.
+    condition type is `true` skips the `else`/`elseif` merge, and a `false`
+    condition drops its branch. An always-true `elseif` ends the chain the same
+    way: `symfony/cache/Traits/RedisTrait.php:631` reports `$prefix` undefined
+    after `if (…) {…} elseif (!$host instanceof Predis) {…}` where an earlier
+    `continue` already excluded Predis. The condition's type is the PHPDoc type,
+    or the native type when `treatPhpDocTypesAsCertain` is off. After
+    `$flag = true; if ($flag) { $x = 1; }`, `echo $x` is `variable.undefined`
+    today.
 
 **D3. One inference path.** ExprHandlers, per-`NodeId` results, `infer_expr`
 deleted; the file-size gate.
+
 - An ExprHandler has three parts, as in 2.2.16: processing, type
   resolution, and its `specifyTypes`. The TypeSpecifier is built here, as
   the dispatcher over the handlers' `specifyTypes`; D6 only makes it
@@ -2438,20 +2479,21 @@ deleted; the file-size gate.
       (`Type::This`/`StaticRef` bound), displayed `$this(Base)`/
       `static(Base)`, and `@return $this` rejects a returned `new static()`.
     - **Type-check calls** type as the constant the impossible-check logic
-      decides: `is_string($s)` with a `string` is `true`, `is_string($i)`
-      with an `int` is `false`, and `!`/`method_exists`/`instanceof` follow
-      (an `instanceof` expression is `mixed` today, not even `bool`, so on
+      decides: `is_string($s)` with a `string` is `true`, `is_string($i)` with
+      an `int` is `false`, and `!`/`method_exists`/`instanceof` follow (an
+      `instanceof` expression is `mixed` today, not even `bool`, so on
       `?Req $x`, `$x instanceof Req || $x === null` isn't
       `booleanOr.alwaysTrue`, one of the 11 the corpus oracle finds and
-      phpstan-rs misses, `amphp/http-client/src/Interceptor/ModifyRequest.php:35`). A
-      call with `@phpstan-assert*` tags is a type-check call too: PHPUnit's
+      phpstan-rs misses,
+      `amphp/http-client/src/Interceptor/ModifyRequest.php:35`). A call with
+      `@phpstan-assert*` tags is a type-check call too: PHPUnit's
       `assertNull($bool)` is `staticMethod.impossibleType` and
-      `$a->assertInt($int)` `method.alreadyNarrowedType`, unreported today
-      (16 `method.impossibleType` the corpus oracle finds in
-      `php-openapi/openapi/tests/spec/SchemaTest.php`). Today
-      the calls are `bool` although the rules report them, so `!is_int($c) &&
-      !is_string($c)` on `int|string` isn't `booleanAnd.alwaysFalse` (105
-      oracle findings phpstan-rs misses in snapshot 0a8fe69, e.g.
+      `$a->assertInt($int)` `method.alreadyNarrowedType`, unreported today (16
+      `method.impossibleType` the corpus oracle finds in
+      `php-openapi/openapi/tests/spec/SchemaTest.php`). Today the calls are
+      `bool` although the rules report them, so `!is_int($c) && !is_string($c)`
+      on `int|string` isn't `booleanAnd.alwaysFalse` (105 oracle findings
+      phpstan-rs misses in snapshot 0a8fe69, e.g.
       `nyholm/psr7/src/Response.php:75`), and the `throw` after an exhausted
       `if` chain isn't `deadCode.unreachable` (57, e.g.
       `nikic/php-parser/BuilderFactory.php:373`).
@@ -2562,6 +2604,7 @@ deleted; the file-size gate.
 
 **D4. NodeCallback sink, observers and result storage** (approved deltas
 for `return.unusedType`, `throws.*` and `property.unusedType`).
+
 - The RefCell recording channels (`probe_hit`, `probe_var_provenance`,
   `member_ref_sites`, `escaped_enums`, `escaped_member_classes`) become
   observer events; `by_ref_empty_dim_args` becomes the by-ref argument
@@ -2920,15 +2963,17 @@ building on the previous one:
       Snapshot 0a8fe69 has 12 `$this` hits, among them
       `collision/ResultReflection.php:19`. The bound closure's read also
       leaves `property.onlyWritten` on `$n`.
-  - **PHP version** narrows in a version branch: inside `if (PHP_VERSION_ID
-    >= 80400)`, `PHP_VERSION_ID` and the scope's `php_version()` (§3.8) are
-    the configured range cut at 80400, so version-gated checks there read
-    the narrowed range. C2 first types the constant over the configured
-    range; today `"php": "^8.1"` or `">=8.1"` leaves it the stub's `50306`
-    (`~8.3.0` gives `int<80300, 80399>`, and `">= 8.1"` gives
-    `int<50207, max>`, B8's grammar item).
+  - **PHP version** narrows in a version branch: inside
+    `if (PHP_VERSION_ID >= 80400)`, `PHP_VERSION_ID` and the scope's
+    `php_version()` (§3.8) are the configured range cut at 80400, so
+    version-gated checks there read the narrowed range. C2 first types the
+    constant over the configured range; today `"php": "^8.1"` or
+    `">=8.1"` leaves it the stub's `50306` (`~8.3.0` gives
+    `int<80300, 80399>`, and `">= 8.1"` gives `int<50207, max>`, B8's
+    grammar item).
 
 **D6. Engine APIs**, one commit each:
+
 - Scope API (§3.8's list);
 - TypeSpecifier made public, with the type-specifying extension hooks;
 - returned-error `Rule` and dispatcher;
@@ -2946,6 +2991,7 @@ building on the previous one:
 ### Stage E: everything out of the engine (in the package, module-gated)
 
 **E1. Collectors and project-level rules**, one commit each:
+
 - the reference-site collector (a built-in collector, consumed by the dead
   code rules and, later, the LSP);
 - dead code / members / enum cases / abstract classes;
@@ -2965,6 +3011,7 @@ building on the previous one:
 - `constant_facts` as per-file rule state.
 
 **E2. builtins.**
+
 - Moves onto the extension traits: `throws/dynamic.rs`, `builtin_calls`,
   `array_ops` returns, `preg_shapes`, `date_time`, the contextual-callback
   block, preg `$matches` out-types, GMP / BcMath operators, the built-in
@@ -3044,6 +3091,7 @@ Gate: the analyser's built-in-name allowlist.
 
 **E3. Every diagnostic to `rules`/ext modules.** Sub-phases grouped by
 derived node, each listing its Appendix A rows:
+
 - (a) file-level (`keywords`, `whitespace`, RequireFileExists over the VFS
   from `includes.rs`);
 - (b) expression-level; the level-9/10 `mixed` checks cover every
@@ -3086,6 +3134,7 @@ Mixed modules are split row by row (Appendix A). Gate: architecture rule 10
 for the analyser.
 
 The rest of the diagnostic model (§3.7), each its own commit:
+
 - `RuleError` and `RuleErrorBuilder`: rules return them, and the dispatcher
   turns each into a `Diagnostic`;
 - file and trait file on every diagnostic, attached by the dispatcher (a
@@ -3109,6 +3158,7 @@ The rest of the diagnostic model (§3.7), each its own commit:
   those tips.
 
 **E4. Extension modules.**
+
 - Order:
   1. ext-doctrine's remaining modules (its reflection data extension moved
      in C8, and E4 fixes its entity metadata: only mapped properties are
@@ -3134,14 +3184,14 @@ The rest of the diagnostic model (§3.7), each its own commit:
   fixtures for aliasing, statement mutation and arguments that change
   between assignment and use.
 
-**E5. Levels** (§3.9): the ladder, `RuleLevelHelper` parameters,
-computed-level sites, the default level, and the replacement consumers for
-JSON and the LSP. The level-dependent acceptance in
-`types::Relation::accepts` moves into `RuleLevelHelper::accepts`/
-`find_type_to_check`, and `types::Relation` loses its `configured_level`,
-`strict_mixed_arrays` and `check_benevolent_union_types` fields. The level
-tests become level-header fixtures. LevelsTestCase fixtures are added. Gate: for every level in 0..=10 plus
-unset, before == after, except approved deltas.
+**E5. Levels** (§3.9): the ladder, `RuleLevelHelper` parameters, computed-level
+sites, the default level, and the replacement consumers for JSON and the LSP.
+The level-dependent acceptance in `types::Relation::accepts` moves into
+`RuleLevelHelper::accepts`/ `find_type_to_check`, and `types::Relation` loses
+its `configured_level`, `strict_mixed_arrays` and `check_benevolent_union_types`
+fields. The level tests become level-header fixtures. LevelsTestCase fixtures
+are added. Gate: for every level in 0..=10 plus unset, before == after, except
+approved deltas.
 
 The rule → level table starts from these divergences, measured by running
 the same probes through PHPStan 2.2.16 and phpstan-rs at every level
@@ -3165,6 +3215,7 @@ engine context, file state, function frame and traversal context
 ### Stage F: Session and LSP (in the package)
 
 **F1. Session** (§3.10), one commit each:
+
 - `AnalysisResult` (`project::session::AnalysisResult`);
 - the finalizer (`AnalysisResult::finalize`, with a temporary level stage
   E5 removes; the LSP moves onto it in this phase's parity commits);
@@ -3203,6 +3254,7 @@ fixtures. The bench moves to `project/benches` over the embedded sources.
 The `structured_php` fuzz target moves to `project`.
 
 **G3. Docs.**
+
 - README;
 - ROADMAP (56 `src/` citations);
 - the fuzz guide;
@@ -3241,7 +3293,7 @@ The `structured_php` fuzz target moves to `project`.
 moves in the phase named.
 
 | Module | Destination | Phase |
-|---|---|---|
+| --- | --- | --- |
 | token, lexer, parser, ast, printer, intern, ast_walk | syntax (ast_walk → Visitor) | B3 |
 | text_split | deleted (typed AST sub-name spans) | B3 |
 | types/* | types | B4 |
@@ -3357,7 +3409,7 @@ Every setting that was on `Registry` before C2, with its readers then and
 its owner. Non-Registry keys follow the table.
 
 | Setting | Read in | Owner |
-|---|---|---|
+| --- | --- | --- |
 | strict_mixed_arrays | registry/assignability | RuleLevelHelper param |
 | configured_level, check_benevolent_union_types | registry/assignability | RuleLevelHelper / level param set |
 | check_uninitialized_properties | checker, uninitialized* | rules param (PHPStan core `checkUninitializedProperties`) |
@@ -3392,7 +3444,7 @@ its owner. Non-Registry keys follow the table.
 **Non-Registry keys.**
 
 | Keys | Owner |
-|---|---|
+| --- | --- |
 | paths, level, ignore_errors, baseline_*, report_unmatched_ignored_errors | SessionSettings |
 | scan_paths, stub_paths, no_composer | ReflectionSettings |
 | architecture, banned_*, check_closed_classes, check_composer_hygiene | rules sections |
@@ -3403,7 +3455,7 @@ its owner. Non-Registry keys follow the table.
 ## Appendix C: `Checker` fields (74) and where they go
 
 | Fields | Disposition |
-|---|---|
+| --- | --- |
 | registry | AnalysisContext (reflection snapshot) |
 | settings, bodies | AnalysisContext (settings, body source) |
 | sql | ext-sql (the `sql` service in AnalysisContext) |
@@ -3431,7 +3483,7 @@ its owner. Non-Registry keys follow the table.
 | loop_break_states, loop_continue_states, loop_depth | StatementResult exit points + traversal context |
 | try_throw_states, call_throw_types | StatementResult / ExpressionResult throw points |
 | in_range_index_writes, active_discriminant | conditional holders / loop context |
-| pending_or_disjunctions | `&&`/`||` holder recipes and augments (D3) |
+| pending_or_disjunctions | `&&`/`\|\|` holder recipes and augments (D3) |
 | static_var_names | scope state (static-variable status) |
 | rebind_target_classes, rebind_escape_all | reference-site collector (escape analysis) |
 | call_candidate_cache | pure memo cache (allowed) |
@@ -3440,7 +3492,7 @@ its owner. Non-Registry keys follow the table.
 ## Appendix D: `Locals` and its merge policies
 
 | Member | Current merge | Target |
-|---|---|---|
+| --- | --- | --- |
 | types | only if on both sides, unioned | holders with certainty (Maybe for one side) |
 | native | only if on both sides, unioned | native holders, narrowed |
 | provenance | per-variable union | holder metadata (on observer request) |
@@ -3448,7 +3500,7 @@ its owner. Non-Registry keys follow the table.
 | guarded_methods / guarded_properties | intersection, never invalidated | HasMethod / HasProperty accessories |
 | clone_reinitialized | union | `CloneReinitializationExpr` virtual key |
 | condition_aliases | `Rc::ptr_eq` (AST replayed lazily) | conditional holders created at assignment (`AssignHandler`) |
-| branch_implied_facts | union | `&&`/`||` holder recipes and merge-created conditional holders |
+| branch_implied_facts | union | `&&`/`\|\|` holder recipes and merge-created conditional holders |
 | container_field_facts | `Rc::ptr_eq` | element-type refinement |
 | discriminant_array_facts | union | conditional holders |
 | query_builder_aliases | `Rc::ptr_eq` | ext-doctrine extension type data |
@@ -3459,7 +3511,7 @@ its owner. Non-Registry keys follow the table.
 ## Appendix E: third-party dependencies
 
 | Dependency | Crate(s) |
-|---|---|
+| --- | --- |
 | clap | bin |
 | crossbeam-channel, lsp-server, lsp-types | lsp |
 | dhat | bin |

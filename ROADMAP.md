@@ -275,28 +275,29 @@ infer `literal-string`/`non-falsy-string` instead of collapsing to plain
 new `format_php_float` module gives concat's float-to-string coercion
 PHP's real fixed-14-significant-digit algorithm.
 
-**Level-aware type-acceptance** (Phase 84). `Registry::configured_level:
-Option<u8>` plus `Registry::accepts_at_configured_level` give
-`project.level` real teeth at 8 call sites, mirroring real PHPStan's own
-`RuleLevelHelper::accepts()` (below level 8, `Null` is stripped from an
-accepted Union; below level 7, a Union comparison uses `.any()` instead
-of `.all()`). `checkExplicitMixed`/`checkImplicitMixed` (real level
-9/10) are done too: `Type::Mixed` widened to `Type::Mixed(bool)`
-(explicit vs. implicit provenance, matching real PHPStan's own
-`MixedType::isExplicitMixed()`, with `PartialEq` staying provenance-
-blind), plus a full per-site explicit-vs-implicit construction audit
-against every real `new MixedType(true)` site in `vendor/phpstan-src`. The receiver half (Phase 139, `RuleLevelHelper::findTypeToCheck`'s
-`StrictMixedType` branch) is built too: at level 9 (explicit `mixed`)
-or 10 (implicit), calling a method, reading a property, or taking an
-offset on a `mixed` value reports `Cannot call method foo() on mixed.`
-and its siblings, via `Registry::strict_mixed_receiver_level`. An
-unconfigured level never triggers it.
-`checkBenevolentUnionTypes` is done too - confirmed real PHPStan's own
+**Level-aware type-acceptance** (Phase 84).
+`Registry::configured_level: Option<u8>` plus
+`Registry::accepts_at_configured_level` give `project.level` real teeth at 8
+call sites, mirroring real PHPStan's own `RuleLevelHelper::accepts()` (below
+level 8, `Null` is stripped from an accepted Union; below level 7, a Union
+comparison uses `.any()` instead of `.all()`).
+`checkExplicitMixed`/`checkImplicitMixed` (real level 9/10) are done too:
+`Type::Mixed` widened to `Type::Mixed(bool)` (explicit vs. implicit provenance,
+matching real PHPStan's own `MixedType::isExplicitMixed()`, with `PartialEq`
+staying provenance- blind), plus a full per-site explicit-vs-implicit
+construction audit against every real `new MixedType(true)` site in
+`vendor/phpstan-src`. The receiver half (Phase 139,
+`RuleLevelHelper::findTypeToCheck`'s `StrictMixedType` branch) is built too: at
+level 9 (explicit `mixed`) or 10 (implicit), calling a method, reading a
+property, or taking an offset on a `mixed` value reports
+`Cannot call method foo() on mixed.` and its siblings, via
+`Registry::strict_mixed_receiver_level`. An unconfigured level never triggers
+it. `checkBenevolentUnionTypes` is done too - confirmed real PHPStan's own
 default (`false`) matches this project's pre-existing lenient
 `AccessoryKind::Benevolent` behavior already; the flag opts *into* real
-PHPStan's stricter, non-default behavior, and `Registry::check_
-benevolent_union_types` supplies it at the identical 4 call sites real
-PHPStan's own flag touches.
+PHPStan's stricter, non-default behavior, and
+`Registry::check_ benevolent_union_types` supplies it at the identical 4 call
+sites real PHPStan's own flag touches.
 
 A long tail of small, real stdlib/type-inference precision fixes, each
 corpus-verified and independently regression-tested: `array + array`'s
@@ -480,113 +481,112 @@ distinguished from phpstorm-stubs' own legitimate multi-declaration
 pattern).
 
 **Override-compatibility**, essentially complete: visibility narrowing,
-missing/extra/optional/by-ref/variadic parameter mismatches,
-`#[Override]`'s unconditional-fatal-error half (methods and properties
-alike), the interface-vs-trait-vs-extends ancestor-lookup priority fix
-(matching real `MethodPrototypeFinder` exactly), an overriding method's
-own casing mismatch against its parent/interface (`method.nameCase`),
-property hooks (`property.notReadable`/`.notWritable`/
-`.abstractOverridingNonAbstractHook`), PHP 8.4 `final`/`abstract`
-property modifiers including on a promoted constructor property,
-`method.nonStatic`/`.static` and the general
-`method.abstractOverridingNonAbstract` case, both real-keyword and
-docblock-only (`@final`/`@phpstan-final`) ancestor-final checks for
-methods and properties, and native-type property-override variance
+missing/extra/optional/by-ref/variadic parameter mismatches, `#[Override]`'s
+unconditional-fatal-error half (methods and properties alike), the
+interface-vs-trait-vs-extends ancestor-lookup priority fix (matching real
+`MethodPrototypeFinder` exactly), an overriding method's own casing mismatch
+against its parent/interface (`method.nameCase`), property hooks
+(`property.notReadable`/`.notWritable`/ `.abstractOverridingNonAbstractHook`),
+PHP 8.4 `final`/`abstract` property modifiers including on a promoted
+constructor property, `method.nonStatic`/`.static` and the general
+`method.abstractOverridingNonAbstract` case, both real-keyword and docblock-only
+(`@final`/`@phpstan-final`) ancestor-final checks for methods and properties,
+and native-type property-override variance
 (`property.nativeType`/`.missingNativeType`/`.extraNativeType`). Nine
 declaration-site modifier-consistency checks plus the class-constant
-`final`/native-type-modifier trio. Enum sanity and generic-bound
-checking wired to enums. Every `extends`/`implements`/trait-`use`
-target checked against the kind of symbol it resolves to
-(`class.extendsInterface`/`.extendsTrait`/`.extendsEnum`,
-`classImplements.*`, `enumImplements.*`, `interfaceExtends.*`,
-`traitUse.*`, `interface.traitUse`), plus `class.extendsFinalByPhpDoc`
-and `class.readOnly`/`.nonReadOnly` parent readonly-parity, anonymous
-classes included. `InvalidPromotedPropertiesRule`'s promotion
-legality (`property.invalidPromoted` outside a non-abstract constructor,
-on a variadic parameter, or `final` below PHP 8.5;
-`property.promotedNotSupported` below PHP 8.0), on every function-like
-including closures, arrow functions, and a trait method aliased as
-`__construct`; a `readonly`/`final`/set-visibility-only parameter now
-promotes with implicit `public` visibility. `ReadOnlyClassRule`'s version gate
-(`readonly class` below PHP 8.2, an anonymous one below 8.3). `InstantiationRule` end to end: `new.trait`/`.enum`/
-`.interface`/`.abstract` (never for `new static`, nor a dynamic
-`new $expr()`), `new.noConstructor`, `new.privateConstructor`/
+`final`/native-type-modifier trio. Enum sanity and generic-bound checking wired
+to enums. Every `extends`/`implements`/trait-`use` target checked against the
+kind of symbol it resolves to
+(`class.extendsInterface`/`.extendsTrait`/`.extendsEnum`, `classImplements.*`,
+`enumImplements.*`, `interfaceExtends.*`, `traitUse.*`, `interface.traitUse`),
+plus `class.extendsFinalByPhpDoc` and `class.readOnly`/`.nonReadOnly` parent
+readonly-parity, anonymous classes included. `InvalidPromotedPropertiesRule`'s
+promotion legality (`property.invalidPromoted` outside a non-abstract
+constructor, on a variadic parameter, or `final` below PHP 8.5;
+`property.promotedNotSupported` below PHP 8.0), on every function-like including
+closures, arrow functions, and a trait method aliased as `__construct`; a
+`readonly`/`final`/set-visibility-only parameter now promotes with implicit
+`public` visibility. `ReadOnlyClassRule`'s version gate (`readonly class` below
+PHP 8.2, an anonymous one below 8.3). `InstantiationRule` end to end:
+`new.trait`/`.enum`/ `.interface`/`.abstract` (never for `new static`, nor a
+dynamic `new $expr()`), `new.noConstructor`, `new.privateConstructor`/
 `.protectedConstructor`, `new.nonObject`, `class.noParent`, and
-`outOfClass.self`/`.static`/`.parent`. `NewStaticRule` (`new.static`, exempting final
-classes, `@phpstan-consistent-constructor`, interface-pinned, `final`,
-or abstract-prototype constructors) and
-`new.staticInAbstractClassStaticMethod`; `new Foo(...)` reports
-`callable.notSupported`. `ImpossibleInstanceOfRule`
-(`instanceof.alwaysTrue`/`.alwaysFalse` from a registry-aware
-always/never/maybe verdict over the checked expression's type, the
-always-true half exempt as the last `elseif`; a dynamic target typed as a
-class-name literal or `class-string<C>` decided too;
-`instanceof.invalidExprType` for a dynamic target that can't name a
-class). A constant-condition
-finding inside a trait is kept only when every using host reports it
-with the same verdict, matching `ConstantConditionInTraitRule`. `MissingMagicSerializationMethodsRule`
-(`class.serializable`, PHP 8.1+, anonymous classes included). A bodiless non-abstract method outside an interface
-(`method.nonAbstract`), from a new `FunctionDecl::has_body`; an
-empty-bodied constructor's unused parameters are now reported too. First-class-callable syntax below PHP 8.1
+`outOfClass.self`/`.static`/`.parent`. `NewStaticRule` (`new.static`, exempting
+final classes, `@phpstan-consistent-constructor`, interface-pinned, `final`, or
+abstract-prototype constructors) and `new.staticInAbstractClassStaticMethod`;
+`new Foo(...)` reports `callable.notSupported`. `ImpossibleInstanceOfRule`
+(`instanceof.alwaysTrue`/`.alwaysFalse` from a registry-aware always/never/maybe
+verdict over the checked expression's type, the always-true half exempt as the
+last `elseif`; a dynamic target typed as a class-name literal or
+`class-string<C>` decided too; `instanceof.invalidExprType` for a dynamic target
+that can't name a class). A constant-condition finding inside a trait is kept
+only when every using host reports it with the same verdict, matching
+`ConstantConditionInTraitRule`. `MissingMagicSerializationMethodsRule`
+(`class.serializable`, PHP 8.1+, anonymous classes included). A bodiless
+non-abstract method outside an interface (`method.nonAbstract`), from a new
+`FunctionDecl::has_body`; an empty-bodied constructor's unused parameters are
+now reported too. First-class-callable syntax below PHP 8.1
 (`callable.notSupported`, `FunctionCallableRule`/`MethodCallableRule`/
 `StaticMethodCallableRule`). `StaticMethodCallCheck`'s remainder:
-`method.staticCall` (an instance method called statically without a
-compatible `$this`), `method.callToAbstract`/
-`staticMethod.callToAbstract`, `staticMethod.nonObject`, and
-`outOfClass.*`/`class.noParent` for `self::`/`static::`/`parent::`
-calls; `@method static` tags and enum `cases()`/`from()`/`tryFrom()` are
-now recorded in `ClassInfo::static_methods`. `OverridingMethodRule`'s
-`method.tentativeReturnType` (PHP 8.1+, a stub's `#[TentativeType]`
-return replacing `method.childReturnType`, `#[\ReturnTypeWillChange]`
-exempt). Property declaration legality for plain and promoted
-properties: `PropertiesInInterfaceRule` and `PropertyInClassRule`'s full
-hook/modifier matrix and PHP 8.4/8.5 gates, `ReadOnlyPropertyRule`,
-`ReadOnlyByPhpDocPropertyRule` (with `@phpstan-allow-private-mutation`
-modeled, which also exempts its own class's writes from
-`property.readOnlyAssignNotInConstructor`), `property.callableType`, and `property.unresolvableNativeType`. The
-write-only/read-only/by-ref cluster: `property.writeOnly` and
-`assign.propertyReadOnly` (a `@property-read`/`@property-write` tag, or a
-virtual hooked property missing that hook, via `PropertySig::
-is_readable`/`is_writable`), and `property.assignByRef`/
-`.readOnlyAssignByRef`/`.readOnlyByPhpDocAssignByRef` for `$x = &...`. Once per
-function-like (function, method, closure, arrow function, hook `set`
-parameter): `parameter.superglobal`/`.this`/`.duplicate`/
-`.variadicNotLast`, and `nullsafe.byRef` for a by-ref function-like
-returning through `?->` (`FunctionDecl`/`ArrowFn` now record `by_ref`). `parameter.defaultValue` for closure and arrow-function
-literals (`IncompatibleClosureDefaultParameterTypeRule`/
-`IncompatibleArrowFunctionDefaultParameterTypeRule`). `return.missing` now follows
-`MissingReturnRule` exactly: a nullable type is owed a return too (level 2
-when PHPDoc-only, `checkPhpDocMissingReturn`), a native `mixed` is owed
-one, and closures with a native return type are checked. `CallCallablesRule`'s
+`method.staticCall` (an instance method called statically without a compatible
+`$this`), `method.callToAbstract`/ `staticMethod.callToAbstract`,
+`staticMethod.nonObject`, and `outOfClass.*`/`class.noParent` for
+`self::`/`static::`/`parent::` calls; `@method static` tags and enum
+`cases()`/`from()`/`tryFrom()` are now recorded in `ClassInfo::static_methods`.
+`OverridingMethodRule`'s `method.tentativeReturnType` (PHP 8.1+, a stub's
+`#[TentativeType]` return replacing `method.childReturnType`,
+`#[\ReturnTypeWillChange]` exempt). Property declaration legality for plain and
+promoted properties: `PropertiesInInterfaceRule` and `PropertyInClassRule`'s
+full hook/modifier matrix and PHP 8.4/8.5 gates, `ReadOnlyPropertyRule`,
+`ReadOnlyByPhpDocPropertyRule` (with `@phpstan-allow-private-mutation` modeled,
+which also exempts its own class's writes from
+`property.readOnlyAssignNotInConstructor`), `property.callableType`, and
+`property.unresolvableNativeType`. The write-only/read-only/by-ref cluster:
+`property.writeOnly` and `assign.propertyReadOnly` (a
+`@property-read`/`@property-write` tag, or a virtual hooked property missing
+that hook, via `PropertySig:: is_readable`/`is_writable`), and
+`property.assignByRef`/ `.readOnlyAssignByRef`/`.readOnlyByPhpDocAssignByRef`
+for `$x = &...`. Once per function-like (function, method, closure, arrow
+function, hook `set` parameter): `parameter.superglobal`/`.this`/`.duplicate`/
+`.variadicNotLast`, and `nullsafe.byRef` for a by-ref function-like returning
+through `?->` (`FunctionDecl`/`ArrowFn` now record `by_ref`).
+`parameter.defaultValue` for closure and arrow-function literals
+(`IncompatibleClosureDefaultParameterTypeRule`/
+`IncompatibleArrowFunctionDefaultParameterTypeRule`). `return.missing` now
+follows `MissingReturnRule` exactly: a nullable type is owed a return too (level
+2 when PHPDoc-only, `checkPhpDocMissingReturn`), a native `mixed` is owed one,
+and closures with a native return type are checked. `CallCallablesRule`'s
 remainder: invoking a value that names a function or method (`'strlen'`,
-`'Foo::bar'`, `[$obj, 'method']`, `['Foo', 'bar']`, an `__invoke`
-object) checks the resolved signature's arity and argument types, plus
+`'Foo::bar'`, `[$obj, 'method']`, `['Foo', 'bar']`, an `__invoke` object) checks
+the resolved signature's arity and argument types, plus
 `callable.inaccessibleMethod`. The castable-array-argument family
 (`ParameterCastableToStringRule`/`ToNumberRule`/
 `ImplodeParameterCastableToStringRule`/`SortParameterCastableToStringRule`,
 flag-aware for the sort functions). `ImpossibleInArrayHaystackFiniteTypesRule`
 (`function.impossibleHaystackValue` for `in_array()`/`array_search()`/
-`array_keys()` against a constant-array haystack). `UsageOfVoidMatchExpressionRule` (`match.void`). `DeadForeachRule` (`foreach.emptyArray`). `OffsetAccessWithoutDimForReadingRule`
-(`offsetAccess.noDim`; a by-reference argument slot and `$r = &$a[]`
-legally create the element). `ArrayUnpackingRule`'s
-`arrayUnpacking.stringOffset` below PHP 8.1. `NonexistentOffsetInArrayDimFetchCheck`'s
-definite half as `offsetAccess.notFound` (replacing this project's own
-`shapeAccess.notFound`): a literal key missing from a sealed shape, or
-ruled out by a general array's/list's key type, on reads and on every
-destructured key (`ArrayDestructuringRule`'s per-key half). `OffsetAccessAssignmentRule`/
+`array_keys()` against a constant-array haystack).
+`UsageOfVoidMatchExpressionRule` (`match.void`). `DeadForeachRule`
+(`foreach.emptyArray`). `OffsetAccessWithoutDimForReadingRule`
+(`offsetAccess.noDim`; a by-reference argument slot and `$r = &$a[]` legally
+create the element). `ArrayUnpackingRule`'s `arrayUnpacking.stringOffset` below
+PHP 8.1. `NonexistentOffsetInArrayDimFetchCheck`'s definite half as
+`offsetAccess.notFound` (replacing this project's own `shapeAccess.notFound`): a
+literal key missing from a sealed shape, or ruled out by a general
+array's/list's key type, on reads and on every destructured key
+(`ArrayDestructuringRule`'s per-key half). `OffsetAccessAssignmentRule`/
 `OffsetAccessAssignOpRule`/`OffsetAccessValueAssignmentRule`
-(`offsetAssign.dimType`/`.valueType`: a string written through `[]` or a
-non-int offset, an `ArrayAccess` object given an offset or value its
-`offsetSet()` rejects). `OverridingConstantRule` (`classConstant.final`/
-`.visibility`, and at level 3 `.nativeType`/`.missingNativeType`/`.type`),
-from `ConstSig`'s new `is_final`/`native_ty`/`has_phpdoc_type`. `ValueAssignedToClassConstantRule`'s `@var`
-half (`classConstant.phpDocType`, and `classConstant.value` against a
+(`offsetAssign.dimType`/`.valueType`: a string written through `[]` or a non-int
+offset, an `ArrayAccess` object given an offset or value its `offsetSet()`
+rejects). `OverridingConstantRule` (`classConstant.final`/ `.visibility`, and at
+level 3 `.nativeType`/`.missingNativeType`/`.type`), from `ConstSig`'s new
+`is_final`/`native_ty`/`has_phpdoc_type`. `ValueAssignedToClassConstantRule`'s
+`@var` half (`classConstant.phpDocType`, and `classConstant.value` against a
 typed constant's `@var`). `ConstantRule` (`constant.notFound`, level 1; a
 `defined('NAME')` test exempts `NAME` flow-sensitively, through the new
-`Locals::guarded_constants` narrowing) and
-`MagicConstantContextRule` (`magicConstant.outOfClass`/`.outOfTrait`/
-`.outOfFunction`/`.outOfNamespace`). A `define()` anywhere - a function
-or method body, a loop, a `try`, inside an expression like `defined('X')
+`Locals::guarded_constants` narrowing) and `MagicConstantContextRule`
+(`magicConstant.outOfClass`/`.outOfTrait`/ `.outOfFunction`/`.outOfNamespace`).
+A `define()` anywhere - a function or method body, a loop, a `try`, inside an
+expression like `defined('X')
 || define('X', 1)` - now registers its global constant. `dynamicConstantNames` (config
 `dynamic_constant_names`, a list or a name-to-type table, global and
 `Class::NAME` constants): a configured constant reads as its configured
@@ -754,40 +754,36 @@ binary) - deliberately conservative, silent on an unrecognized shape.
 **Structural Callable/Closure type** (Phase 53): contextual closure-body
 checking generalized to *any* `Closure(...)`-typed parameter via
 `Type::Callable(Option<Arc<CallableSig>>)`, not just the six originally
-special-cased functions; invoking a callable-typed value directly infers
-its declared return type and checks its arguments. **Dynamic static-call
-target resolution** (`$obj::method()`, Phase 158):
-`ExprKind::StaticCall`'s receiver is now a real `StaticTarget` enum
-(`Name`/`Expr`) instead of discarding a non-literal receiver into a
-`"?"` sentinel - existence, visibility, arg-type checking, return-type
-inference, and LSP hover/go-to-definition all now work through
-`$obj::method()`, not just `Foo::method()`. A closure/arrow-fn literal's own value carries its declared
-signature too - an unhinted, non-generator arrow fn's return is its
-body expression's own inferred type, and an unhinted closure's is its
-own return statements' union (`void` with none, `null` added when it
-can fall off its end), computed from the closure body's own return
-points, which no longer leak into the enclosing function's too-wide-
-return accumulator. A literal passed to a shaped parameter is typed
-in that context, with its unhinted parameters taken from the shape
-(`Type::closure_literal`: an `Object("Closure") &
-Callable(Some(sig))` intersection, displayed `Closure(int): string` the
-way real PHPStan displays a `ClosureType`). That means invoking a
-closure-valued variable checks its arguments and infers its declared
-return type, and passing a literal to a shaped `Closure(...)`/
+special-cased functions; invoking a callable-typed value directly infers its
+declared return type and checks its arguments. **Dynamic static-call target
+resolution** (`$obj::method()`, Phase 158): `ExprKind::StaticCall`'s receiver is
+now a real `StaticTarget` enum (`Name`/`Expr`) instead of discarding a
+non-literal receiver into a `"?"` sentinel - existence, visibility, arg-type
+checking, return-type inference, and LSP hover/go-to-definition all now work
+through `$obj::method()`, not just `Foo::method()`. A closure/arrow-fn literal's
+own value carries its declared signature too - an unhinted, non-generator arrow
+fn's return is its body expression's own inferred type, and an unhinted
+closure's is its own return statements' union (`void` with none, `null` added
+when it can fall off its end), computed from the closure body's own return
+points, which no longer leak into the enclosing function's too-wide- return
+accumulator. A literal passed to a shaped parameter is typed in that context,
+with its unhinted parameters taken from the shape (`Type::closure_literal`: an
+`Object("Closure") & Callable(Some(sig))` intersection, displayed
+`Closure(int): string` the way real PHPStan displays a `ClosureType`). That
+means invoking a closure-valued variable checks its arguments and infers its
+declared return type, and passing a literal to a shaped `Closure(...)`/
 `callable(...)` parameter is checked structurally, while `->bindTo()`/
-`instanceof Closure`/a plain `Closure`/`callable` parameter keep
-resolving through the object member. Callable-shape comparison follows
-real PHPStan's `CallableTypeHelper::isParametersAcceptorSuperTypeOf`
-accepts rules: fewer parameters on the passed callable is fine, an
-optional accepting parameter paired with a required passed one isn't,
-and `mixed` counts as any. Each parameter/return comparison is
-class-hierarchy-aware, and an accepting shape's still-unbound method
-template (`callable(T): T` on a generic method) is inferred from the
-passed closure, so only its bound constrains the parameter. A hinted
+`instanceof Closure`/a plain `Closure`/`callable` parameter keep resolving
+through the object member. Callable-shape comparison follows real PHPStan's
+`CallableTypeHelper::isParametersAcceptorSuperTypeOf` accepts rules: fewer
+parameters on the passed callable is fine, an optional accepting parameter
+paired with a required passed one isn't, and `mixed` counts as any. Each
+parameter/return comparison is class-hierarchy-aware, and an accepting shape's
+still-unbound method template (`callable(T): T` on a generic method) is inferred
+from the passed closure, so only its bound constrains the parameter. A hinted
 closure's return is narrowed by what its body returns (real PHPStan's
 `intersectButNotNever`: `function (): array { return ['a' => 1]; }` is
-`Closure(): array{a: int}`), keeping the native type when the two are
-disjoint.
+`Closure(): array{a: int}`), keeping the native type when the two are disjoint.
 
 **Unreachable-code / constant-condition family**: the full, inferred-
 type-trusting family - `if`/`elseif` (with real PHPStan's own
@@ -838,6 +834,7 @@ statement, and only tags phpdoc-parser itself parses: a plain `@type`/
 `@assert`/`@import-type` is never reported, and neither is a
 `@psalm-`/`@phan-` tag. The PHPDoc grammar gained the phpdoc-parser
 rules the corpus needed:
+
 - `@param`/`@param-out`/`@property*` require a `$variable`, and `@var`
   requires a type.
 - A type can't start with a non-`$this` variable.
@@ -879,6 +876,7 @@ large type-inference shift across `vendor/`.
 
 **`Type::Array` key-type/offset engine** (Phase 50):
 `InvalidKeyInArrayDimFetchRule` (reverted once, reattempted successfully
+
 - see Reverted); the `array_key_exists()`-narrows-a-specific-element
 equivalent of `HasOffsetValueType`; unsealed-shape (`array{...}`)
 tracking with a real `...` sentinel field gating both narrowing and
@@ -1057,135 +1055,124 @@ variant, threaded through every real consumer. `BacktickRule`
 against the right-hand side's own literal syntax rather than a full
 parameter-shaped callable type).
 
-**`function.alreadyNarrowedType`/`function.impossibleType`**: a single-
-argument type-check call (`is_string($x)`, `is_int($x)`, ...) whose
-outcome is already statically decided, scoped to exactly the predicate
-table the narrowing engine already trusts (real PHPStan's own
-additional `in_array()`/`method_exists()`/`assert()` reasoning isn't
-attempted). Reuses the same disjointness/subtyping primitives
-`assert.impossibleType`/`.alreadyNarrowedType` already established for
-the PHPDoc-tag version of this idea. **`and`/`or` word-operator
-identifier fidelity**: a new `BinOp::LogicalAnd`/`LogicalOr` (parsed
-only by the word-keyword precedence tier) lets `booleanAnd`/`logicalAnd`
-report under their real, distinct identifiers/message sigils, with
-every purely-semantic consumer (narrowing, `infer_binary`) widened to
-treat both spellings identically. **`parameter.defaultValue`**/
-**`property.defaultValue`**: a parameter's/property's own default value
-must be assignable to its declared type, resolving a bare top-level
-`@template`-typed parameter to its own bound first, and never
-reporting a default of unknown (`mixed`) type, which real PHPStan's
-direct `accepts()` call always accepts; the property check
-replicates real PHPStan's own untyped-property `null`-default exemption
-exactly. **`parameter.phpDocType`/`return.phpDocType`/
-`parameter.notFound`/`parameter.notByRef`** (`IncompatiblePhpDocTypeRule`,
-level 2, `checker/phpdoc_type_compat.rs`): a function/method's own
-`@param`/`@param-out`/`@return` type must fit its native hint -
-"incompatible" when no value satisfies both, "not subtype" when only
-some do - via a trinary, hierarchy-aware `Registry::is_super_type_of`
-(unions, templates by bound, conditionals by branch, benevolent unions
-by member, final/interface-aware class relations, `No` only with the
-whole hierarchy indexed); a tag naming no parameter, or `@param-out` on
-a by-value one, is reported too, in tag order. Matches real PHPStan
-47/47 on the Piwigo corpus. `property.phpDocType` applies the same to a
-property's `@var` (a promoted property's constructor `@param`/inline
-`@var`, its "PHPDoc type"). **`parameter.unresolvableType`/
+**`function.alreadyNarrowedType`/`function.impossibleType`**: a single- argument
+type-check call (`is_string($x)`, `is_int($x)`, ...) whose outcome is already
+statically decided, scoped to exactly the predicate table the narrowing engine
+already trusts (real PHPStan's own additional
+`in_array()`/`method_exists()`/`assert()` reasoning isn't attempted). Reuses the
+same disjointness/subtyping primitives
+`assert.impossibleType`/`.alreadyNarrowedType` already established for the
+PHPDoc-tag version of this idea. **`and`/`or` word-operator identifier
+fidelity**: a new `BinOp::LogicalAnd`/`LogicalOr` (parsed only by the
+word-keyword precedence tier) lets `booleanAnd`/`logicalAnd` report under their
+real, distinct identifiers/message sigils, with every purely-semantic consumer
+(narrowing, `infer_binary`) widened to treat both spellings identically.
+**`parameter.defaultValue`**/ **`property.defaultValue`**: a
+parameter's/property's own default value must be assignable to its declared
+type, resolving a bare top-level `@template`-typed parameter to its own bound
+first, and never reporting a default of unknown (`mixed`) type, which real
+PHPStan's direct `accepts()` call always accepts; the property check replicates
+real PHPStan's own untyped-property `null`-default exemption exactly.
+**`parameter.phpDocType`/`return.phpDocType`/
+`parameter.notFound`/`parameter.notByRef`** (`IncompatiblePhpDocTypeRule`, level
+2, `checker/phpdoc_type_compat.rs`): a function/method's own
+`@param`/`@param-out`/`@return` type must fit its native hint - "incompatible"
+when no value satisfies both, "not subtype" when only some do - via a trinary,
+hierarchy-aware `Registry::is_super_type_of` (unions, templates by bound,
+conditionals by branch, benevolent unions by member, final/interface-aware class
+relations, `No` only with the whole hierarchy indexed); a tag naming no
+parameter, or `@param-out` on a by-value one, is reported too, in tag order.
+Matches real PHPStan 47/47 on the Piwigo corpus. `property.phpDocType` applies
+the same to a property's `@var` (a promoted property's constructor
+`@param`/inline `@var`, its "PHPDoc type"). **`parameter.unresolvableType`/
 `return.unresolvableType`/`property.unresolvableType`**
-(`checker/phpdoc_unresolvable.rs`) decide on the tag's parsed type node
-where PHPStan's `TypeNodeResolver` yields an `ErrorType` or implicit
-`never`: an invalid offset access (`string[optional]`), an unimported
-`Closure(...)` in a namespace (still typed as the global `Closure`),
-a missing class or constant in `Foo::BAR`/`Foo::X_*`, `self`/`static`/
-`parent` with no class, an empty `int<5, 1>`, a disjoint `int&string`,
-too many built-in generic arguments, and an unknown hyphenated keyword.
-Matches real PHPStan 55/55 on the Piwigo corpus. `closed-resource` is
-its own type, disjoint from an open `resource` (`is_resource()` rejects
-it), and class constants and enum cases keep declaration order
-(`IndexMap`), so a `match` remainder and a `Foo::X_*` union list them as
-PHP's own `getConstants()` does. **`assert.unresolvableType`** and the
-missing-type checks on an asserted type complete `AssertRuleHelper`;
-**`varTag.unresolvableType`** covers every statement-level `@var`,
-reported on the comment's own line (`Stmt::doc_line`).
-**`WrongVariableNameInVarTagRule`** is built in full:
-`varTag.differentVariable`/`.variableNotFound`/`.noVariable`/
-`.multipleTags` for assignments (including destructuring), `foreach`,
-`static`, `global`, `return`/`throw` and every other statement, with
-superglobals and a script's top-level `$argv`/`$argc` counted as
-defined, and `varTag.misplaced` above a class, interface, enum,
-function or method. Every doc comment directly above a statement is
-read, not only the last (`doc_comments_all`), and a bare `$` in a
-PHPDoc (`$$x`) is no variable name. **`VarTagTypeRuleHelper`** and
-**`VarTagChangedExpressionTypeRule`** check every value a statement's
-`@var` tags describe - an assignment (and each destructured item), a
-`foreach` subject/key/value, a `static` default, a `return`/`throw`
-expression, and an existing variable a tag re-types: `varTag.nativeType`
-against the value's native type (literals only have to overlap, an empty
-array widens to `array`), then `varTag.type` when the tag shares no value
-with the inferred type (or, for a PHPStan `Type`, isn't a subtype, plus
-`phpstanApi.varTagAssumption`). Native types come from
-`Checker::native_expr_type` and a per-variable native map on `Locals`
-(parameters' hints, assignments; cleared by any rebind, by-ref argument
-or by-ref closure `use`; unioned at merges) - `mixed` whenever unknown,
-so it can only miss. `varTag.trait` and `class.notFound`/`class.prefixed`
-cover the tags of every statement. Every named tag on a statement is
-applied (not only the last), a `foreach` key tag types the key, and
-`@psalm-`/`@phan-` typed tags parse with the same grammar as `@phpstan-`
-ones.
+(`checker/phpdoc_unresolvable.rs`) decide on the tag's parsed type node where
+PHPStan's `TypeNodeResolver` yields an `ErrorType` or implicit `never`: an
+invalid offset access (`string[optional]`), an unimported `Closure(...)` in a
+namespace (still typed as the global `Closure`), a missing class or constant in
+`Foo::BAR`/`Foo::X_*`, `self`/`static`/ `parent` with no class, an empty
+`int<5, 1>`, a disjoint `int&string`, too many built-in generic arguments, and
+an unknown hyphenated keyword. Matches real PHPStan 55/55 on the Piwigo corpus.
+`closed-resource` is its own type, disjoint from an open `resource`
+(`is_resource()` rejects it), and class constants and enum cases keep
+declaration order (`IndexMap`), so a `match` remainder and a `Foo::X_*` union
+list them as PHP's own `getConstants()` does. **`assert.unresolvableType`** and
+the missing-type checks on an asserted type complete `AssertRuleHelper`;
+**`varTag.unresolvableType`** covers every statement-level `@var`, reported on
+the comment's own line (`Stmt::doc_line`). **`WrongVariableNameInVarTagRule`**
+is built in full: `varTag.differentVariable`/`.variableNotFound`/`.noVariable`/
+`.multipleTags` for assignments (including destructuring), `foreach`, `static`,
+`global`, `return`/`throw` and every other statement, with superglobals and a
+script's top-level `$argv`/`$argc` counted as defined, and `varTag.misplaced`
+above a class, interface, enum, function or method. Every doc comment directly
+above a statement is read, not only the last (`doc_comments_all`), and a bare
+`$` in a PHPDoc (`$$x`) is no variable name. **`VarTagTypeRuleHelper`** and
+**`VarTagChangedExpressionTypeRule`** check every value a statement's `@var`
+tags describe - an assignment (and each destructured item), a `foreach`
+subject/key/value, a `static` default, a `return`/`throw` expression, and an
+existing variable a tag re-types: `varTag.nativeType` against the value's native
+type (literals only have to overlap, an empty array widens to `array`), then
+`varTag.type` when the tag shares no value with the inferred type (or, for a
+PHPStan `Type`, isn't a subtype, plus `phpstanApi.varTagAssumption`). Native
+types come from `Checker::native_expr_type` and a per-variable native map on
+`Locals` (parameters' hints, assignments; cleared by any rebind, by-ref argument
+or by-ref closure `use`; unioned at merges) - `mixed` whenever unknown, so it
+can only miss. `varTag.trait` and `class.notFound`/`class.prefixed` cover the
+tags of every statement. Every named tag on a statement is applied (not only the
+last), a `foreach` key tag types the key, and `@psalm-`/`@phan-` typed tags
+parse with the same grammar as `@phpstan-` ones.
 **`IncompatiblePropertyHookPhpDocTypeRule`** checks a hook's own
-`@param`/`@param-out`/`@return` against its native signature (a `set`
-hook's explicit or implicit `$value`, returning `void`; a `get` hook
-returning the property's type). **Generic callables** -
-`callable<T of B = D>(T): T`, `Closure<...>(...)`, and the
-`pure-callable`/`pure-Closure` spellings - parse in both grammars and
-keep their templates (`CallableSig::templates`, scoped
+`@param`/`@param-out`/`@return` against its native signature (a `set` hook's
+explicit or implicit `$value`, returning `void`; a `get` hook returning the
+property's type). **Generic callables** - `callable<T of B = D>(T): T`,
+`Closure<...>(...)`, and the `pure-callable`/`pure-Closure` spellings - parse in
+both grammars and keep their templates (`CallableSig::templates`, scoped
 `CALLABLE_TEMPLATE_SCOPE`, never substituted or bound by an enclosing
 signature); calling one binds them from the arguments
-(`CallableSig::instantiated_return`). **`GenericCallableRuleHelper`**
-validates those templates like `@template` tags (existing class/alias
-name, unsupported bound, default outside its bound, required after
-optional) and reports `callable.shadowTemplate` against the function's,
-method's or class's templates, on `@param`/`@param-out`/`@return` and a
-property's `@var`. A plain function's own `@template` tags get the same
-declaration checks a method's always had.
+(`CallableSig::instantiated_return`). **`GenericCallableRuleHelper`** validates
+those templates like `@template` tags (existing class/alias name, unsupported
+bound, default outside its bound, required after optional) and reports
+`callable.shadowTemplate` against the function's, method's or class's templates,
+on `@param`/`@param-out`/`@return` and a property's `@var`. A plain function's
+own `@template` tags get the same declaration checks a method's always had.
 `missingType.iterableValue` reads "iterable type array" exactly as real
-PHPStan's descriptions do. A second declaration of a top-level function
-(another file, a polyfill branch, a merged overload) is checked against
-its own signature: the registry records which declaration fills each
-function slot (`function_decl_sites`), and any other declaration is
-rebuilt and finalized on its own (`Registry::finalize_standalone_sig`).
-**`conditionalType.subjectNotFound`/`.alwaysTrue`/`.alwaysFalse`** and
-a conditional's unknown-parameter `parameter.notFound` validate each
-conditional type a declaration's own PHPDoc writes. A template-subject
-conditional (`(T is 'array' ? A : B)`) is now modeled, not collapsed to
-its branches: it resolves once `T` is bound, by a call's inference or a
-class's type arguments, falling back to the template's declared default
-on an erased receiver. `Registry::is_super_type_of` compares arrays and
-shapes structurally (optional vs required keys), keeps `string` a
-`Maybe` for `class-string`, and treats an unresolved constant reference
-or unknown class name as proving nothing. **`@phpstan-self-out`/
-`@phpstan-this-out`** (and the `@psalm-` spellings) are real: after
-`$x->method(...)`, `$x` (or a narrowable `$this->prop`) takes the tag's
-type, its templates bound as for a return type; `selfOut.type`/
-`.static`/`.unresolvableType` validate the declaration. `self<T>`/
-`static<T>` keep their type arguments (resolved to the class with those
-arguments) instead of dropping them, and a bare prefixed-only tag
-(`@assert`, `@self-out`, `@type`, ...) no longer applies. **`function.alreadyNarrowedType`** answers
-"always true" through that strict relation, so `is_string()` on a
-benevolent `(int|string)` key is no longer flagged. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
-alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose outcome is
-provably constant, via a new shared `registry::identical_result`
-primitive - two operands reducing to the same single finite value decide
-both directions via `Type::eq`; otherwise a new `registry::types_
-provably_disjoint` decides only the "always false" direction (real
-PHPStan's own `isSuperTypeOf` is trinary, a "provably no overlap"
-answer plain `is_assignable` can't give - disjoint on a scalar-family
-mismatch, or two unrelated classes/enums, neither an ancestor of the
-other, both closed `ClassKind::Class`/`Enum`, never `Interface`/`Trait`).
-**`return.empty`**: a bare `return;` against a return type that requires
-one - this project's own pre-existing check for this shape was reporting
-under the wrong identifier *and* the wrong condition (gated on whether
-`null` happened to be assignable, silently exempting every nullable/
-union return type); both fixed, now matching real PHPStan's own
-`Type::isVoid()`-based condition exactly.
+PHPStan's descriptions do. A second declaration of a top-level function (another
+file, a polyfill branch, a merged overload) is checked against its own
+signature: the registry records which declaration fills each function slot
+(`function_decl_sites`), and any other declaration is rebuilt and finalized on
+its own (`Registry::finalize_standalone_sig`).
+**`conditionalType.subjectNotFound`/`.alwaysTrue`/`.alwaysFalse`** and a
+conditional's unknown-parameter `parameter.notFound` validate each conditional
+type a declaration's own PHPDoc writes. A template-subject conditional
+(`(T is 'array' ? A : B)`) is now modeled, not collapsed to its branches: it
+resolves once `T` is bound, by a call's inference or a class's type arguments,
+falling back to the template's declared default on an erased receiver.
+`Registry::is_super_type_of` compares arrays and shapes structurally (optional
+vs required keys), keeps `string` a `Maybe` for `class-string`, and treats an
+unresolved constant reference or unknown class name as proving nothing.
+**`@phpstan-self-out`/ `@phpstan-this-out`** (and the `@psalm-` spellings) are
+real: after `$x->method(...)`, `$x` (or a narrowable `$this->prop`) takes the
+tag's type, its templates bound as for a return type; `selfOut.type`/
+`.static`/`.unresolvableType` validate the declaration. `self<T>`/ `static<T>`
+keep their type arguments (resolved to the class with those arguments) instead
+of dropping them, and a bare prefixed-only tag (`@assert`, `@self-out`, `@type`,
+...) no longer applies. **`function.alreadyNarrowedType`** answers "always true"
+through that strict relation, so `is_string()` on a benevolent `(int|string)`
+key is no longer flagged. **`identical.alwaysFalse`/`.alwaysTrue`,
+`notIdentical. alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose
+outcome is provably constant, via a new shared `registry::identical_result`
+primitive - two operands reducing to the same single finite value decide both
+directions via `Type::eq`; otherwise a new `registry::types_ provably_disjoint`
+decides only the "always false" direction (real PHPStan's own `isSuperTypeOf` is
+trinary, a "provably no overlap" answer plain `is_assignable` can't give -
+disjoint on a scalar-family mismatch, or two unrelated classes/enums, neither an
+ancestor of the other, both closed `ClassKind::Class`/`Enum`, never
+`Interface`/`Trait`). **`return.empty`**: a bare `return;` against a return type
+that requires one - this project's own pre-existing check for this shape was
+reporting under the wrong identifier *and* the wrong condition (gated on whether
+`null` happened to be assignable, silently exempting every nullable/ union
+return type); both fixed, now matching real PHPStan's own `Type::isVoid()`-based
+condition exactly.
 
 **Receiver-type-checks phase**: nine real-PHPStan identifiers for "this
 receiver's own type provably can never support the operation at all" -
@@ -1200,35 +1187,36 @@ zero false positives on piwigo16.
 
 ## Performance & tooling
 
-CI-friendly output formats (`json`, `checkstyle`, `junit` - a failing test case per diagnostic and a passing one per clean file) and a `friendly` terminal format (each diagnostic framed by its surrounding source lines, span underlined, code syntax-highlighted on a colour terminal). Baseline suppression
-(`--generate-baseline`/`--baseline`, on by default reporting an
-unmatched baseline entry): entries record their occurrence count and
-absorb at most that many (reporting "expected N, found M" when fewer
-occur), an opt-in identifier-anchored match mode
-(`baseline_match_identifier`) keeps an entry matching after its message
-is reworded, and `baseline_per_identifier` writes one file per
-identifier behind an `includes` index and inline `@phpstan-ignore-line`/`-next-line`/
-`<identifier list>` suppression, read from real comment tokens with
-upstream's placement rules and identifier-list grammar; a malformed list
-is `ignore.parseError` (non-ignorable, upstream's messages), and opt-in
-`report_unmatched_ignored_errors` reports ignores that suppressed
-nothing (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`, traits
-exempt), applied once after whole-program checks and level filtering. `ignoreErrors:` config support.
-`--level`/`--php-version`-gated portability checks (`PhpFeature::
-NoncapturingCatch`/`ThrowExpression` are declared with the correct
-threshold but not yet wired to a diagnostic - a real, small residual).
-Incremental multi-file `Project` with cross-file dependency invalidation.
-An 8MiB worker stack, persistent structurally-shared `Locals` (O(1)
-clone), `FxHashMap` for hot build-once maps, a criterion regression-
-guard benchmark, and `hotpath`, an opt-in in-process instrumentation
-profiler. `check-project`'s own parse and check phases both run on a
-shared rayon thread pool, files pre-sorted largest-first to shrink the
-straggler tail. Class-hierarchy member lookups are memoized (Phase 95's
-C3): per-class method/property/constant owner maps
-(`method_owner_by_class` and siblings) and each class's full ancestor
-set are precomputed once the class graph freezes, so
-`lookup_method`/`lookup_property`/`lookup_const`/`is_subclass_of` no
-longer re-walk the ancestor BFS on every call.
+CI-friendly output formats (`json`, `checkstyle`, `junit` - a failing test case
+per diagnostic and a passing one per clean file) and a `friendly` terminal
+format (each diagnostic framed by its surrounding source lines, span underlined,
+code syntax-highlighted on a colour terminal). Baseline suppression
+(`--generate-baseline`/`--baseline`, on by default reporting an unmatched
+baseline entry): entries record their occurrence count and absorb at most that
+many (reporting "expected N, found M" when fewer occur), an opt-in
+identifier-anchored match mode (`baseline_match_identifier`) keeps an entry
+matching after its message is reworded, and `baseline_per_identifier` writes one
+file per identifier behind an `includes` index and inline
+`@phpstan-ignore-line`/`-next-line`/ `<identifier list>` suppression, read from
+real comment tokens with upstream's placement rules and identifier-list grammar;
+a malformed list is `ignore.parseError` (non-ignorable, upstream's messages),
+and opt-in `report_unmatched_ignored_errors` reports ignores that suppressed
+nothing (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`, traits exempt),
+applied once after whole-program checks and level filtering. `ignoreErrors:`
+config support. `--level`/`--php-version`-gated portability checks
+(`PhpFeature:: NoncapturingCatch`/`ThrowExpression` are declared with the
+correct threshold but not yet wired to a diagnostic - a real, small residual).
+Incremental multi-file `Project` with cross-file dependency invalidation. An
+8MiB worker stack, persistent structurally-shared `Locals` (O(1) clone),
+`FxHashMap` for hot build-once maps, a criterion regression- guard benchmark,
+and `hotpath`, an opt-in in-process instrumentation profiler. `check-project`'s
+own parse and check phases both run on a shared rayon thread pool, files
+pre-sorted largest-first to shrink the straggler tail. Class-hierarchy member
+lookups are memoized (Phase 95's C3): per-class method/property/constant owner
+maps (`method_owner_by_class` and siblings) and each class's full ancestor set
+are precomputed once the class graph freezes, so
+`lookup_method`/`lookup_property`/`lookup_const`/`is_subclass_of` no longer
+re-walk the ancestor BFS on every call.
 
 **Composer/dependency hygiene** (opt-in `check_composer_hygiene`,
 `project/composer_hygiene.rs`, reading the root `composer.json` and
@@ -1370,6 +1358,7 @@ enum's cases). Member access on `mixed` is the level-9/10
 
 **`phpstan-strict-rules` ports** (`checker/strict_rules.rs`). Each
 family has its own opt-in flag, like upstream's per-rule toggles:
+
 - `check_illegal_constructor_calls`: `constructor.call`, which also
   covers Psalm's `DirectConstructorCall`. A static `X::__construct()`
   passes only from a constructor, or from a trait method some class
@@ -1402,6 +1391,7 @@ loose comparison, backticks and variable variables, and
 
 **Operand and comparison policies from other rule packages**, each
 opt-in:
+
 - `check_comparable_types` (`shipmonk`'s
   `AllowComparingOnlyComparableTypesRule`): `comparison.nonComparable`/
   `comparison.differentTypes` for `< > <= >= <=>`.
@@ -1439,6 +1429,7 @@ opt-in:
 **PSR-3 logger calls** (`checker/psr3.rs`, from `staabm/phpstan-psr3` and
 `sfp-phpstan-psr-log`). They apply to `Psr\Log\LoggerInterface`
 receivers and Laravel's `Log` facade.
+
 - Opt-in `check_psr3_logging`:
   - `psr3.interpolated`: a concatenated or interpolated value that isn't
     a number, bool, literal string or enum. For a variable, its native
@@ -1459,6 +1450,7 @@ carry arbitrary extra data.
 
 **Implicit current-time dependence** (`checker/current_time.rs`, opt-in
 `check_current_time_dependence`, from `slam/phpstan-extensions`):
+
 - `currentTime.time`: `time()`/`microtime()`.
 - `currentTime.defaultTimestamp`: `date`, `gmdate`, `idate`, `getdate`,
   `localtime`, `strftime`, `gmstrftime` or `unixtojd` without their
@@ -1609,6 +1601,7 @@ review).** Findings that are correct but reported on the wrong line, twice,
 or under a shared identifier, plus one false-positive source; the named
 fixture shows each one. The pure correctness bugs from the same review are
 listed in `CRATE_SPLIT_PLAN.md` (A2, "Known bugs found during A2").
+
 - Wrong line: a property hook's own problems (`propertySetHook.*`,
   `propertyGetHook.*`, its `@param`/`@return`/`@throws` checks,
   `parameter.trait`) are reported on the property, not the hook
@@ -1651,6 +1644,7 @@ flipped status tag. Numbers are sequential by source, not by priority.
 Pick items the same way any other Pending/partial phase gets picked up.
 
 **Numbering and sources:**
+
 - **85-124** (Parts 1-9) are "beyond parity" findings: concrete,
   source-grounded opportunities for phpstan-rs to do things real PHPStan
   doesn't do, or can't do as well, usually because parity work turned up
@@ -1697,8 +1691,8 @@ Pick items the same way any other Pending/partial phase gets picked up.
   the AST instead of compiling them to PHP first; Piwigo's own
   compile-then-analyse pipeline is its reference (2026-09-27).
 
-A number between 85 and 179 with no entry here (86, 92, 93, 99,
-102-104, 106, 108, 135, 138, 158-172, 174, 175, 179) belongs to a phase that has fully
+A number between 85 and 179 with no entry here (86, 92, 93, 99, 102-104, 106,
+108, 135, 138, 158-172, 174, 175, 179) belongs to a phase that has fully
 shipped, and Done records it.
 
 Two structural facts most of the beyond-parity findings (Parts 1-9 and
@@ -1854,6 +1848,7 @@ collapsing to `NeverType` once every allowed subtype is exhausted) only ever
 fires when fed data from an explicit author-written `@phpstan-sealed`/
 `@psalm-inheritors` tag (`SealedAllowedSubTypesClassReflectionExtension.php:16-19`,
 gated on `count($classReflection->getSealedTags()) > 0`) or a real PHP enum
+
 - for an ordinary untagged class, `ObjectType::isInstanceOf`
 (`ObjectType.php:1726-1750`) always returns `Maybe`, and there is no
 descendant-enumeration API anywhere in `Reflection/` (confirmed: no
@@ -2093,6 +2088,7 @@ false-positive risk that keeps it opt-in no longer applies.
 
 **Two concrete follow-on consumers, both from the top-100 Packagist
 survey:**
+
 - `nette`'s own `RethrowExceptionRule` idea (flag a `try` block
   containing a call that can throw a specific exception subtype when
   the only `catch` present is a bare `\Exception`/`\Throwable` with no
@@ -3049,7 +3045,7 @@ the use-site span index the now-shipped `rename` support already built.
 
 Real PHPStan's only type-introspection tool, `PHPStan\dumpType()`,
 computes and prints one final type per call site via a plain `sprintf`
-(`Rules/Debug/DumpTypeRule.php:32-50) with no accumulated reasoning kept -
+(`Rules/Debug/DumpTypeRule.php:32-50`) with no accumulated reasoning kept -
 each `Scope::getType()` call that fed it is discarded the instant the
 message string is built, and it requires editing the analyzed source and
 re-running the whole CLI, since PHPStan ships no LSP or resident process
@@ -3270,6 +3266,7 @@ six `DOMDocument` methods' `filename`/`source` parameters narrowed from
 stricter file when `$this->stricterFunctionMap` is true, and that flag
 (`featureToggles.stricterFunctionMap`) defaults to `false` in
 `conf/config.neon:38`, flipped to `true` only by `conf/bleedingEdge.neon:7`
+
 - functionally the same opt-in-for-BC gating as `BleedingEdgeToggle::
 isBleedingEdge()` (M1's own mechanism), just expressed as a plain DI
 parameter instead of the static call. It exists because narrowing a stub
@@ -3847,6 +3844,7 @@ phpstan-rs's `check_inline_var_annotation_type`
 (`checker/stmt.rs:978`) already mirrors real PHPStan's
 `VarTagTypeRuleHelper::checkExprType`
 (`vendor/phpstan-src/src/Rules/PhpDoc/VarTagTypeRuleHelper.php:100-140`)
+
 - read directly, that helper only ever checks *compatibility* (is the
 `@var` type a valid super/subtype of the inferred type -
 `varTag.nativeType`/`varTag.type`), never *redundancy*. Psalm adds the
@@ -3887,7 +3885,7 @@ error, with a short, fixed exception list of SPL/extension classes PHP
 itself special-cases (`PDOStatement`, `Ds\Collection`, `DOMNodeList`,
 `DatePeriod`) - `ClassAnalyzer.php:2130-2144`, condition: `$fq_interface_
 name_lc === 'traversable' && !$storage->abstract && !isset($storage->
-class_implements['iteratoraggregate'|'iterator']) && ` (four more
+class_implements['iteratoraggregate'|'iterator']) &&` (four more
 `parent_classes` exceptions). The identical rule applies to `Throwable`
 (must extend `Exception`/`Error`, not implement `Throwable` directly) -
 same file, `ClassAnalyzer.php:2148-2156`, same condition shape. Confirmed
@@ -4258,6 +4256,7 @@ variant with its level range, or the viewer rescans for that level;
 the gate's first run decides which.
 
 **Shape:**
+
 - `phpstan-rs report`: one analysis through `Session`, kept as the
   unfinalized `AnalysisResult` (crate split F1), served on `127.0.0.1`
   as a single page.
@@ -4274,6 +4273,7 @@ the gate's first run decides which.
   deleted.
 
 **Filters:**
+
 - level (a slider, applied instantly);
 - rule identifier, grouped by family;
 - path tree;
@@ -4287,6 +4287,7 @@ Each finding shows the source around its span, its message, tips,
 identifier and level, and a preview of its fix when it has one.
 
 **One-click actions** (served mode only):
+
 - **Ignore here:** writes `// @phpstan-ignore <identifier>`, using the
   same-line/previous-line semantics `Project::apply_inline_ignores`
   already implements. The file is then re-checked through the Session's
@@ -4303,6 +4304,7 @@ matches the scanned one, and refuses if it doesn't. Every action records
 its reverse edit, so it can be undone from the page.
 
 **Security.** The endpoints write files, so the server:
+
 - binds to loopback only;
 - requires a random per-run token in the URL;
 - rejects requests whose `Origin`/`Host` isn't its own, which blocks
@@ -4316,7 +4318,6 @@ of the F2 result cache and the Session VFS.
 after Stage F.
 
 **Effort: large.**
-
 
 ## Part 13: Templates
 
@@ -4351,6 +4352,7 @@ read as, and that version is added only after the same source reading.
 
 **What Piwigo's pipeline has to do today** (the corpus analyses its
 output as plain PHP under `_analysis/phpstan-latte/`):
+
 - compiled filter and function calls, `($this->filters->translate)(...)`
   and `($this->global->fn->x)($this, ...)`, type as bare `callable`; the
   pipeline redirects them to generated shims carrying the real
@@ -4373,22 +4375,22 @@ calls with their signatures, declared types are declarations, and
 findings are born on template lines.
 
 **Corpus shape** (Piwigo, Latte 3.1.6, 119 templates, 19.5k lines): 111
-templates declare `{templateType}`; the other 8 (the three layouts and
-five mail templates) carry a generated 131-line `{varType}` block of the
-ambient variables instead, and none uses `{parameters}`. About 2,000
-prints (`{$x}`/`{=...}`), 1,460 `{if}`, 170 `{foreach}`, 74
-`{spaceless}`, 55 `{block}`, 51 `{var}`, 51 `{include}`, 27 `{layout}`,
-15 `{_}`; 289 `n:if`, 148 `n:foreach`, 58 `n:attr`. The engine enables `Feature::Dedent` and
-`Feature::ScopedLoopVariables` (`src/Piwigo/Template/LatteEngine.php`).
-Most of the 978 `property.unused` findings on `*\Projection\*View`
-classes approved in C3 (`gates/approved/c3-provenance-declarations`) are
-View properties no PHP code reads; how many of them a template reads is
-182g's delta.
+templates declare `{templateType}`; the other 8 (the three layouts and five mail
+templates) carry a generated 131-line `{varType}` block of the ambient variables
+instead, and none uses `{parameters}`. About 2,000 prints (`{$x}`/`{=...}`),
+1,460 `{if}`, 170 `{foreach}`, 74 `{spaceless}`, 55 `{block}`, 51 `{var}`, 51
+`{include}`, 27 `{layout}`, 15 `{_}`; 289 `n:if`, 148 `n:foreach`, 58 `n:attr`.
+The engine enables `Feature::Dedent` and `Feature::ScopedLoopVariables`
+(`src/Piwigo/Template/LatteEngine.php`). Most of the 978 `property.unused`
+findings on `*\Projection\*View` classes approved in C3
+(`gates/approved/c3-provenance-declarations`) are View properties no PHP code
+reads; how many of them a template reads is 182g's delta.
 
 **182a — Latte syntax.** A lossless front end for Latte 3 in its own crate
 (`latte-syntax`, depending on `syntax` only), following
 `TemplateLexer`/`TemplateParser`/`TemplateParserHtml`/`TagLexer`/
 `TagParser`:
+
 - an HTML-aware lexer: text, elements and attributes, comments, bogus
   tags (`<!...>`, `<?...>`), raw-text elements (`<script>`, `<style>`,
   `<textarea>`, `<title>`) and attribute-value contexts, with `{...}`
@@ -4481,6 +4483,7 @@ declaration-level rules never fire on a template, while statement- and
 expression-level rules run on its code unchanged. The units and what
 each starts with, as `TemplateGenerator` and `Runtime\Template` build
 them:
+
 - the template's prepared variables (`prepare()`): its header code run
   over the passed parameters - with `{parameters}`, exactly the declared
   parameters, each defaulted, and nothing else (no `extract()`, a closed
@@ -4518,6 +4521,7 @@ undefined there.
 Core tags (`CoreExtension::getTags()`) lower to what each node class's
 `print()` generates, which isn't always the PHP construct of the same
 name:
+
 - control flow: `if`/`elseif`/`else`, `n:else`, `ifset` (narrowing as
   `isset()` does, and `{ifset block name}`/`{ifset #name}` testing a
   block's existence), `ifchanged` (its arguments compared strictly with
@@ -4584,6 +4588,7 @@ checked as expressions.
 **182d — Types.** Beyond the parameters and locals 182c builds, in
 precedence order - a declared type wins over an inferred one, and an
 inferred one only types a variable nothing declares:
+
 - `{templateType Cls}`: each of `Cls`'s public properties types the
   parameter of that name, as `render()` passes an object
   (`Helpers::resolveParams()`: `get_object_vars()` from outside the class,
@@ -4641,6 +4646,7 @@ resolved to its real signature: a first-class callable
 (`strtolower(...)`, `$this->translate(...)`, `self::jsonEncode(...)`,
 `$this->template->once(...)` through the property's type), a closure, or
 `[$obj, 'method']`. At the call, as the executors do at runtime:
+
 - a filter whose first parameter is `Latte\Runtime\FilterInfo` gets it
   injected (the content type), and a function whose first parameter is
   `Latte\Runtime\Template` gets the template;
@@ -4652,46 +4658,46 @@ resolved to its real signature: a first-class callable
   filters, and a URL attribute's print gets `checkUrl` appended the way
   `checkUrlsPass` appends it.
 
-With a filter loader registered (`addFilterLoader`), a filter name
-nothing else registers can't be called unknown; it becomes `mixed` and
-the unknown-filter check stays quiet. `{translate}...{/translate}` and `{_ ...}` (`TranslatorExtension`) are the
-`translate` filter over their content or argument, typed by the
-translator callable the extension is constructed with. A custom tag is
-PHP code run at compile time and can't be read: `[ext.latte] tags` maps one to a core
-tag's meaning (Piwigo's `{_ ...}` behaves as `TranslatorExtension`'s
-`{translate}`). The companion extensions of Latte's own ecosystem are
-the exception, as their packages are known: nette/application's
+With a filter loader registered (`addFilterLoader`), a filter name nothing else
+registers can't be called unknown; it becomes `mixed` and the unknown-filter
+check stays quiet. `{translate}...{/translate}` and `{_ ...}`
+(`TranslatorExtension`) are the `translate` filter over their content or
+argument, typed by the translator callable the extension is constructed with. A
+custom tag is PHP code run at compile time and can't be read: `[ext.latte] tags`
+maps one to a core tag's meaning (Piwigo's `{_ ...}` behaves as
+`TranslatorExtension`'s `{translate}`). The companion extensions of Latte's own
+ecosystem are the exception, as their packages are known: nette/application's
 `UIExtension` (`{link}`, `n:href`, `{plink}`, `{control}`,
-`{snippet}`/`{snippetArea}`, ...) and nette/forms' `FormsExtension`
-(`{form}`, `n:name`, `{input}`, `{label}`, ...) get their semantics when
-the package is installed, read from its own node classes - most Latte
-templates are Nette applications'. The corpus uses neither, so a
-fixture set stands in for its oracle.
+`{snippet}`/`{snippetArea}`, ...) and nette/forms' `FormsExtension` (`{form}`,
+`n:name`, `{input}`, `{label}`, ...) get their semantics when the package is
+installed, read from its own node classes - most Latte templates are Nette
+applications'. The corpus uses neither, so a fixture set stands in for its
+oracle.
 
-**182f — Checks.** Latte's own compile-time errors, each a diagnostic
-where Latte would throw a `CompileException`: the validations in the node
-classes (`{parameters}`, `{templateType}`, `{extends}`/`{layout}` and
-`{contentType}` outside the header, an unclosed or mismatched tag, an
-unknown tag (with Latte's own "did you mean" suggestion), `n:else` without its `n:if`/`n:foreach`, a block name used
-twice in one layer or a block or define name not starting with a letter,
-a PHP reserved keyword called as a function (`exit()`, `die()`,
+**182f — Checks.** Latte's own compile-time errors, each a diagnostic where
+Latte would throw a `CompileException`: the validations in the node classes
+(`{parameters}`, `{templateType}`, `{extends}`/`{layout}` and `{contentType}`
+outside the header, an unclosed or mismatched tag, an unknown tag (with Latte's
+own "did you mean" suggestion), `n:else` without its `n:if`/`n:foreach`, a block
+name used twice in one layer or a block or define name not starting with a
+letter, a PHP reserved keyword called as a function (`exit()`, `die()`,
 `eval()`, `print()`, `unset()`, `include()`, ...: `NameNode::isKeyword()`,
-"Keyword 'x' cannot be used in Latte"), a `{/x}` closing another tag
-than the open one, `{tag/}` on a tag that
-takes content, `n:tag` on `<script>`/`<style>`, a `|noescape` where
-no filter is expected, `{iterateWhile}` outside a `{foreach}`, `n:class`
-beside a `class` attribute, `n:ifcontent` on an empty element,
-`n:embed`, loose content beside an explicit `{block default}` in an
+"Keyword 'x' cannot be used in Latte"), a `{/x}` closing another tag than the
+open one, `{tag/}` on a tag that takes content, `n:tag` on `<script>`/`<style>`,
+a `|noescape` where no filter is expected, `{iterateWhile}` outside a
+`{foreach}`, `n:class` beside a `class` attribute, `n:ifcontent` on an empty
+element, `n:embed`, loose content beside an explicit `{block default}` in an
 `{embed}`, `{spaceless}` where it can't apply, an unknown `n:` attribute
-- with Latte's own "did you mean" suggestion - or one given twice, one
-inside a `{tag}`, `n:inner-`/`n:tag-` on a void element, an element name
-that's a tag rather than an expression, ...) and in the
-core passes (`$GLOBALS` and `$ʟ_*` always; `$this` and `$__*` a
-deprecation unless `StrictParsing`, an error with it; a registered
-function used as a partial `fn(...)`; a print followed by quotes inside
-`<script>`; strict-HTML errors under `StrictParsing`); and the
-deprecations Latte raises at compile time (`{first}`/`{last}`/`{sep}`
-outside a `foreach`, among others), as deprecation findings. Then, with `latte.*` identifiers:
+
+- with Latte's own "did you mean" suggestion - or one given twice, one inside a
+  `{tag}`, `n:inner-`/`n:tag-` on a void element, an element name that's a tag
+  rather than an expression, ...) and in the core passes (`$GLOBALS` and `$ʟ_*`
+  always; `$this` and `$__*` a deprecation unless `StrictParsing`, an error with
+  it; a registered function used as a partial `fn(...)`; a print followed by
+  quotes inside `<script>`; strict-HTML errors under `StrictParsing`); and the
+  deprecations Latte raises at compile time (`{first}`/`{last}`/`{sep}` outside
+  a `foreach`, among others), as deprecation findings. Then, with `latte.*`
+  identifiers:
 - an unknown filter or function (an unknown tag is Latte's own compile
   error, above);
 - a `{foreach}` key or value variable named like one of the template's
@@ -4785,6 +4791,7 @@ directory form for includes, layouts and several engines), one category
 per sub-phase.
 
 **Oracles.**
+
 - Findings: Piwigo's own pipeline. Compile with `bin/piwigo
   phpstan-latte:compile`, run real PHPStan on the generated files, and
   map each error back with the pipeline's `GeneratedFileErrorMapper`; the
@@ -4799,6 +4806,7 @@ per sub-phase.
   rejects, and where, must equal ours.
 
 **Configuration.** `[ext.latte]`, every key optional:
+
 - `enabled` - C1 activation;
 - `paths` - the template directories, in the loader's search order, for a
   loader the app defines itself (182f);
@@ -4926,6 +4934,7 @@ bleedingEdge. A parameter whose default phpstan-rs matches was also run
 with that parameter flipped; the row counts as verified only when the
 flip changes PHPStan's output, and phpstan-rs was checked on exactly the
 lines it changed. Buckets:
+
 - **M** maps to an existing key;
 - **S** maps once a crate-split phase lands;
 - **K** needs a key (crate-split C1 "Missing settings");
@@ -4936,6 +4945,7 @@ lines it changed. Buckets:
   silently.
 
 Core parameters:
+
 - The 18 level-file parameters: S (E5, named as keys in §3.9). Matching
   first levels: `checkExtraArguments` 1, class name case 0,
   `checkFunctionArgumentTypes`/`checkArgumentsPassedByReference` 5,
@@ -4988,6 +4998,7 @@ Core parameters:
   activation.
 
 Feature toggles (`bleedingEdge` sets them all):
+
 - `>`: `skipCheckGenericClasses` (phpstan-rs skips none),
   `checkDateIntervalConstructor`, `magicDirInInclude`, `newOnNonObject`,
   `newStaticInAbstractClassStaticMethod`, `unusedLabel`,
@@ -5007,6 +5018,7 @@ Feature toggles (`bleedingEdge` sets them all):
   consumer in 2.2.16). S (C6): `stricterFunctionMap`.
 
 Extensions (schemas read at each package's release):
+
 - phpstan-strict-rules: `booleansInConditions`/`booleansInLoopConditions`,
   `uselessCast`, `requireParentConstructorCall`,
   `disallowedImplicitArrayCreation`, `overwriteVariablesWithLoop`,
@@ -5061,6 +5073,7 @@ Extensions (schemas read at each package's release):
 **183a. `crates/neon`.** A leaf crate: the full nette/neon syntax,
 comments kept as trivia on the node they precede, and resolution ported
 from PHPStan's `NeonAdapter::process` plus Nette's merge:
+
 - includes (later files win, lists append, maps recurse), `key!`,
   entities, the `(?)` optional exclude path;
 - `%currentWorkingDirectory%`, `%rootDir%`, `%env.X%`, `%tmpDir%`;
@@ -5096,6 +5109,7 @@ literal message, else matched as a pattern). The LSP watches the whole
 include set.
 
 **183c. `phpstan-rs init [dir]`.**
+
 - `--link` (the default when `phpstan/phpstan` is required) writes
   `phpstan_config` plus phpstan-rs-only keys; `--convert` writes a
   standalone TOML through `toml_edit`, keeping the NEON's comments and
@@ -5131,6 +5145,7 @@ Flags: `--from`, `--link`/`--convert`, `--level <n|max>`,
 workspace without one, previewing `init --dry-run --yes`.
 
 **Gates.**
+
 - The level oracle: the probe corpus and PHPStan's rule fixtures, run
   through the pinned phar and phpstan-rs at every level and with
   bleedingEdge, plus the per-parameter flip runs, kept as
@@ -5153,7 +5168,6 @@ the scan half of 183c can start now.
 **Effort: very large** (the NEON resolver with its oracle gate, and the
 mapping).
 
-
 ## Part 15: Identity
 
 ### Phase 184 — Rename the project (§AV)
@@ -5168,6 +5182,7 @@ Marketplace), and no Pages site exists.
 
 **Choosing the name.** A shortlist the maintainer decides on, each
 candidate checked for:
+
 - a free crate name on crates.io (`/api/v1/crates/<name>` answers 404);
 - a free VS Code Marketplace publisher and extension id, and Open VSX's;
 - a free GitHub repository name, and a domain for Phase 185;
@@ -5179,6 +5194,7 @@ candidate checked for:
 `phpstan_rs`, `PHPSTAN_RS` and `phpstanRs`. `phpstan` on its own always
 means PHPStan. So the rename is mechanical over those four tokens and
 nothing else, followed by a review of each file. Measured today:
+
 - the Cargo packages: the bin `phpstan-rs` and the `phpstan-rs-<name>`
   libraries (crate-split §2's naming rule changes with them); the lib
   crate `phpstan_rs`, which 24 sites import (the bin, benches, tests,
@@ -5236,6 +5252,7 @@ generated from the code or from measurements, so the site can't drift
 from the tool.
 
 **Pages:**
+
 - **Landing:** what the tool is (an analyser and language server for PHP
   that reads PHPStan's configuration), what it adds (the LSP, the checks
   past PHPStan's, speed), and one quick start: install, then `init`
@@ -5277,7 +5294,6 @@ follow-up (the config reference); E3 (the rule reference); Phase 183 and
 (`release.yml` has never run), so the install page links real assets.
 
 **Effort: medium** (the playground: large).
-
 
 ---
 

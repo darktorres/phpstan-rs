@@ -11,6 +11,7 @@ syntactically-interesting input for the byte/token-level targets, and how
 ## 1. Feed `lex_parse` a bigger real corpus
 
 `fuzz/seed_corpus.sh` already does this (seeds from `vendor/phpstorm-stubs`
+
 + `vendor/phpstan-src/src`) - run it once per checkout:
 
     ./fuzz/seed_corpus.sh
@@ -41,8 +42,8 @@ Recommended combined invocation for a longer session:
 
     cargo fuzz run lex_parse -- -dict=fuzz/php.dict -max_len=500 -max_total_time=300
 
-- `-max_len=500` keeps inputs small and iteration fast.
-- `-only_ascii=1` (not in the default recommendation above) stops
++ `-max_len=500` keeps inputs small and iteration fast.
++ `-only_ascii=1` (not in the default recommendation above) stops
   mutation from spending budget on multi-byte UTF-8 - trades away real
   coverage (the lexer's own `is_ident_start`/`is_ident_continue` accept
   bytes `>= 0x80` as identifier characters, so real Unicode identifiers

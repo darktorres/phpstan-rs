@@ -11,7 +11,7 @@ Used as the starting point for a one-by-one "what could phpstan-rs
 learn from this" pass, triaged into ROADMAP.md.
 
 | # | Package | Downloads | Favers | Description |
-|---|---------|-----------|--------|-------------|
+| --- | --------- | ----------- | -------- | ------------- |
 | 1 | [phpstan/phpstan-phpunit](https://packagist.org/packages/phpstan/phpstan-phpunit) | 124,022,310 | 546 | PHPUnit extensions and rules for PHPStan |
 | 2 | [phpstan/phpstan-deprecation-rules](https://packagist.org/packages/phpstan/phpstan-deprecation-rules) | 98,779,800 | 467 | PHPStan rules for detecting usage of deprecated classes, methods, properties, constants and traits. |
 | 3 | [phpstan/phpstan-symfony](https://packagist.org/packages/phpstan/phpstan-symfony) | 81,908,597 | 800 | Symfony Framework extensions and rules for PHPStan |
@@ -46,9 +46,9 @@ learn from this" pass, triaged into ROADMAP.md.
 | 32 | [shipmonk/phpstan-rules](https://packagist.org/packages/shipmonk/phpstan-rules) | 3,112,130 | 157 | Various extra strict PHPStan rules we found useful in ShipMonk. |
 | 33 | [symplify/astral](https://packagist.org/packages/symplify/astral) | 2,909,414 | 25 | Toolking for smart daily work with AST |
 | 34 | [bitexpert/phpstan-magento](https://packagist.org/packages/bitexpert/phpstan-magento) | 2,752,388 | 150 | PHPStan Magento Extension |
-| 35 | [staabm/phpstan-dba](https://packagist.org/packages/staabm/phpstan-dba) | 2,746,336 | 299 |  |
+| 35 | [staabm/phpstan-dba](https://packagist.org/packages/staabm/phpstan-dba) | 2,746,336 | 299 | |
 | 36 | [slam/phpstan-extensions](https://packagist.org/packages/slam/phpstan-extensions) | 2,698,017 | 72 | Slam extension of phpstan |
-| 37 | [staabm/phpstan-todo-by](https://packagist.org/packages/staabm/phpstan-todo-by) | 2,374,903 | 206 |  |
+| 37 | [staabm/phpstan-todo-by](https://packagist.org/packages/staabm/phpstan-todo-by) | 2,374,903 | 206 | |
 | 38 | [pepakriz/phpstan-exception-rules](https://packagist.org/packages/pepakriz/phpstan-exception-rules) | 2,318,296 | 111 | Exception rules for PHPStan |
 | 39 | [shipmonk/phpstan-baseline-per-identifier](https://packagist.org/packages/shipmonk/phpstan-baseline-per-identifier) | 2,289,317 | 95 | Split your PHPStan baseline into multiple files, one per error identifier. Supports both neon baseline and PHP baseline. |
 | 40 | [prestashop/phpstan-prestashop](https://packagist.org/packages/prestashop/phpstan-prestashop) | 1,888,478 | 6 | PrestaShop extension for PHPStan |
@@ -56,8 +56,8 @@ learn from this" pass, triaged into ROADMAP.md.
 | 42 | [swissspidy/phpstan-no-private](https://packagist.org/packages/swissspidy/phpstan-no-private) | 1,763,195 | 9 | PHPStan rules for detecting usage of pseudo-private functions, classes, and methods. |
 | 43 | [yamadashy/phpstan-friendly-formatter](https://packagist.org/packages/yamadashy/phpstan-friendly-formatter) | 1,488,117 | 65 | Simple error formatter for PHPStan that display code frame |
 | 44 | [php-standard-library/phpstan-extension](https://packagist.org/packages/php-standard-library/phpstan-extension) | 1,401,400 | 22 | PHPStan PSL extension |
-| 45 | [staabm/phpstan-psr3](https://packagist.org/packages/staabm/phpstan-psr3) | 1,302,640 | 23 |  |
-| 46 | [staabm/phpstan-deployer6](https://packagist.org/packages/staabm/phpstan-deployer6) | 1,281,966 | 4 |  |
+| 45 | [staabm/phpstan-psr3](https://packagist.org/packages/staabm/phpstan-psr3) | 1,302,640 | 23 | |
+| 46 | [staabm/phpstan-deployer6](https://packagist.org/packages/staabm/phpstan-deployer6) | 1,281,966 | 4 | |
 | 47 | [canvural/larastan-strict-rules](https://packagist.org/packages/canvural/larastan-strict-rules) | 1,194,199 | 91 | Extra strict and opinionated PHPStan rules for Laravel. |
 | 48 | [cakedc/cakephp-phpstan](https://packagist.org/packages/cakedc/cakephp-phpstan) | 1,008,858 | 43 | CakePHP plugin extension for PHPStan. |
 | 49 | [korbeil/phpstan-generic-rules](https://packagist.org/packages/korbeil/phpstan-generic-rules) | 989,792 | 12 | Generic rules extensions for PHPStan |
@@ -85,7 +85,7 @@ learn from this" pass, triaged into ROADMAP.md.
 | 71 | [johnbillion/wp-compat](https://packagist.org/packages/johnbillion/wp-compat) | 274,455 | 25 | PHPStan extension to help verify that your PHP code is compatible with a given version of WordPress |
 | 72 | [nextras/orm-phpstan](https://packagist.org/packages/nextras/orm-phpstan) | 243,431 | 11 | PHPStan extension for Nextras Orm |
 | 73 | [swisnl/phpstan-bitbucket](https://packagist.org/packages/swisnl/phpstan-bitbucket) | 237,989 | 6 | PHPStan error formatter for Bitbucket Pipeline Reports |
-| 74 | [gosuperscript/phpstan-rules](https://packagist.org/packages/gosuperscript/phpstan-rules) | 237,051 | 0 |  |
+| 74 | [gosuperscript/phpstan-rules](https://packagist.org/packages/gosuperscript/phpstan-rules) | 237,051 | 0 | |
 | 75 | [symplify/template-phpstan-compiler](https://packagist.org/packages/symplify/template-phpstan-compiler) | 220,006 | 3 | Internal package for template to PHPStan-compatible compilers |
 | 76 | [kcs/psr-phpstan-rules](https://packagist.org/packages/kcs/psr-phpstan-rules) | 195,224 | 1 | Rules and stubs of PSR interfaces for PHPStan |
 | 77 | [glpi-project/phpstan-glpi](https://packagist.org/packages/glpi-project/phpstan-glpi) | 194,700 | 0 | PHPStan rules for GLPI. |
@@ -95,7 +95,7 @@ learn from this" pass, triaged into ROADMAP.md.
 | 81 | [calebdw/fakerstan](https://packagist.org/packages/calebdw/fakerstan) | 166,536 | 3 | PHPStan extension for Faker |
 | 82 | [mark-gerarts/phpstan-automapper-plus](https://packagist.org/packages/mark-gerarts/phpstan-automapper-plus) | 160,880 | 0 | PHPStan configuration for AutoMapper+ |
 | 83 | [calebdw/larastan](https://packagist.org/packages/calebdw/larastan) | 151,992 | 16 | Larastan - Discover bugs in your code without running it. A phpstan/phpstan extension for Laravel |
-| 84 | [pb30/phpstan-composer-analysis](https://packagist.org/packages/pb30/phpstan-composer-analysis) | 150,077 | 17 |  |
+| 84 | [pb30/phpstan-composer-analysis](https://packagist.org/packages/pb30/phpstan-composer-analysis) | 150,077 | 17 | |
 | 85 | [localheinz/phpstan-rules](https://packagist.org/packages/localheinz/phpstan-rules) | 149,924 | 460 | Provides rules for phpstan/phpstan. |
 | 86 | [bonami/phpstan-collections](https://packagist.org/packages/bonami/phpstan-collections) | 149,473 | 1 | Phpstan extension for bonami/collections library |
 | 87 | [symplify/twig-phpstan-compiler](https://packagist.org/packages/symplify/twig-phpstan-compiler) | 124,516 | 8 | Compile twig template to PHPStan-compatible PHP code to allow its static analysis |

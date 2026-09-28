@@ -1,6 +1,7 @@
 # Vendored patch: `hotpath` 0.24.0
 
-Source: https://crates.io/crates/hotpath (https://github.com/pawurb/hotpath-rs), MIT.
+Source: <https://crates.io/crates/hotpath>
+(<https://github.com/pawurb/hotpath-rs>), MIT.
 
 Only `src/` plus a trimmed `Cargo.toml` (its own `[[bin]]`/`[[test]]`
 targets removed, since we don't vendor `bin/`/`tests/`) are kept here.
@@ -34,5 +35,5 @@ would abort outright at the original limit.
 ## Re-syncing with a newer upstream release
 
 Re-apply the same two-line change (search each file for
-`MAX_DEPTH: usize = `) after copying in the new version's `src/`, and
+`MAX_DEPTH: usize =`) after copying in the new version's `src/`, and
 re-trim the new `Cargo.toml`'s `[[bin]]`/`[[test]]` sections the same way.

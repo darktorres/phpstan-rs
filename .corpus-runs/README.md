@@ -568,7 +568,7 @@ runs go through `cargo xtask corpus`.
   215 -> 75, unscoped 40236 -> 39444 across this whole round
   (`01cc3f2`..`0e34322`). Every one of the remaining 39 new-vs-`2c6bf5f`
   scoped findings is now individually accounted for: 26 `arrayValues.list`
-  + 8 `nullCoalesce.offset` are confirmed genuine (real precision from
+  - 8 `nullCoalesce.offset` are confirmed genuine (real precision from
   Doctrine-aware inference actually engaging with Piwigo's real
   entities/`QueryBuilder` chains for the first time), and the remaining
   4 (`return.type` x2, `greater.invalid`, `argument.type`) are every one
