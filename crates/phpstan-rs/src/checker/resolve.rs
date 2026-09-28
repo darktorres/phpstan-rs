@@ -370,14 +370,14 @@ impl<'a> Checker<'a> {
     /// runtime dispatch; `parent` resolves via the registry's `extends`
     /// chain, falling back to leaving it unresolved if the class has no
     /// declared parent (so it still hits the permissive `Object`
-    /// fallback in `subtype`/`accepts` rather than being
+    /// fallback in `is_super_type_of`/`accepts` rather than being
     /// wrongly flagged).
     ///
     /// Recurses into `Union`/`Intersection`/`Array`/`ArrayShape` the same
     /// way `types::substitute_template` does, not just the bare
     /// top-level case - needed for the common nullable-self return type
     /// (`?self`/`self|null`, e.g. `tryFromArray`-style factory methods):
-    /// `accepts`/`subtype` have no arm for a concrete class
+    /// `accepts`/`is_super_type_of` have no arm for a concrete class
     /// instance satisfying a still-unresolved `SelfRef` (only the
     /// reverse direction is handled), so a bare `self` return type
     /// wrapped in any union must be resolved here first.

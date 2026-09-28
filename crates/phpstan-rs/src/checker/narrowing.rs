@@ -487,7 +487,11 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(before_ty) = before.get(name)
                     && before_ty != after_ty
-                    && self.registry.relation().subtype(after_ty, before_ty)
+                    && self
+                        .registry
+                        .relation()
+                        .is_super_type_of(before_ty, after_ty)
+                        .yes()
                 {
                     narrowed.push((name.clone(), after_ty.clone()));
                 }
@@ -1582,7 +1586,7 @@ impl<'a> Checker<'a> {
         };
         let negated_prefix = if info.negated { "negated " } else { "" };
         let is_super = self.accepts(&info.ty, param.ty()).yes();
-        let is_disjoint = types_definitely_disjoint(&info.ty, param.ty());
+        let is_disjoint = self.relation().disjoint(&info.ty, param.ty());
         let (impossible, already_narrowed) = if info.negated {
             (is_super, is_disjoint)
         } else {
@@ -1609,5 +1613,3 @@ impl<'a> Checker<'a> {
         }
     }
 }
-
-pub(crate) use types::types_definitely_disjoint;

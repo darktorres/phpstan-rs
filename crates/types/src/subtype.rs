@@ -27,7 +27,7 @@ pub fn shape_fields_are_list_like(shape: &Shape) -> bool {
 
 /// The aggregate key type real PHPStan's `ConstantArrayType::
 /// getIterableKeyType()` reports for a shape - the union of each
-/// field's key kind (an unsealed tail contributes nothing). Lets `registry::assignability`/`subtype` compare an
+/// field's key kind (an unsealed tail contributes nothing). Lets `registry::assignability`/`is_super_type_of` compare an
 /// `ArrayShape`'s real key type against a `Type::Array`'s declared one,
 /// so `array{name: string}` isn't wrongly assignable to
 /// `array<int, string>`. `Type::Never` for a shape with no real fields
@@ -66,7 +66,7 @@ pub fn shape_key_type(shape: &Shape) -> Type {
 /// deduplication - ordinary `==` for everything except a `list<T>`/
 /// `non-empty-list<T>` pair, which can be structurally unequal (a
 /// literal `Type::Int` key vs. the generic `unknown_array_key()`
-/// sentinel - see `subtype`'s `Intersection`-vs-`Intersection` list
+/// sentinel - see `is_super_type_of`'s `Intersection`-vs-`Intersection` list
 /// arm) while still the same type PHPStan-visibly. Without this,
 /// `union_types` would print a duplicate `list<int>|list<int>` whenever
 /// a docblock-declared `list<T>` and a runtime-inferred one of the same
@@ -98,45 +98,16 @@ pub fn types_equal_for_union(a: &Type, b: &Type) -> bool {
 }
 
 impl Relation<'_> {
-    /// PHPStan's `isSuperTypeOf` answering yes: every value of `sub` is
-    /// a `sup`, read against the class hierarchy. A class the hierarchy
-    /// doesn't know is only itself.
-    pub fn subtype(&self, sub: &Type, sup: &Type) -> bool {
+    /// The structural half of `is_super_type_of`'s `Yes`: every value of
+    /// `sub` provably is a `sup`, for the pairs `is_super_type_of` doesn't
+    /// answer itself first.
+    pub(crate) fn proves_super_type(&self, sup: &Type, sub: &Type) -> bool {
         match (sub, sup) {
-            (_, Type::Mixed(_)) => true,
-            (Type::Never, _) => true,
-            // A `key-of<T>`/`T[K]` still over a template is what `T`'s bound
-            // makes it.
-            (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
-                self.subtype(&crate::resolve_late_to_bounds(sub), sup)
-            }
-            (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
-                self.subtype(sub, &crate::resolve_late_to_bounds(sup))
-            }
-            // `Type` derives plain structural `PartialEq`, so the
-            // `a == b` fast path just below is `false` for `FloatLiteral
-            // (f64::NAN)` compared to itself (Rust's own `f64: PartialEq`
-            // makes `NAN != NAN`) - needs its own arm for reflexivity to hold
-            // (see `types/tests/subtyping_properties.rs`). Mirrors real PHPStan's own
-            // `ConstantFloatType::equals()` (`vendor/phpstan-src/src/Type/
-            // Constant/ConstantFloatType.php:42-45`), which explicitly
-            // special-cases exactly this (`is_nan(a) && is_nan(b)`).
-            (Type::FloatLiteral(a), Type::FloatLiteral(b)) if a.is_nan() && b.is_nan() => true,
-            (a, b) if a == b => true,
-            // An extension payload is at least its base type.
-            (Type::Extension(data), _) => self.subtype(&data.base(), sup),
-
-            // A shaped callable is always compatible with a bare marker -
-            // no shape to compare against on the other side at all.
+            // A shaped callable is always compatible with a bare marker.
             (Type::Callable(Some(_)), Type::Callable(None)) => true,
-            // Real contravariant-parameter/covariant-return comparison
-            // between two *shaped* callables, reusing the identical
-            // variance-composition pattern `registry/assignability.rs`
-            // already has for generic template arguments (parameters
-            // contravariant, return type covariant is that same pattern's
-            // textbook motivating example, not a new concept).
+            // Parameters contravariant, the return covariant.
             (Type::Callable(Some(a)), Type::Callable(Some(b))) => {
-                callable_sig_is_subtype(a, b, &|x, y| self.subtype(x, y))
+                callable_sig_is_subtype(a, b, &|x, y| self.is_super_type_of(y, x).yes())
             }
 
             (Type::IntLiteral(_), Type::Int) => true,
@@ -228,134 +199,40 @@ impl Relation<'_> {
                 shape_fields_are_list_like(shape)
             }
 
-            // An unbound template parameter is a placeholder; call sites
-            // should have already substituted it away
-            // (checker::infer_call_return_type) - this is the safety net.
-            //
-            // Used as `sub`, bound-aware rather than an unconditional escape
-            // hatch: `T` is a subtype of `sup` exactly when its bound is
-            // (real PHPStan's own upper-bound semantics). An undeclared
-            // bound is `Mixed`, and `subtype(Mixed, sup)` isn't generally
-            // true, so bound-free `@template T` gets an explicit `true`.
-            //
-            // Placed *before* the `(_, Union(members))` arm below: that arm's
-            // "is `sub` a subtype of *any one* union member" splitting is
-            // wrong when a `TemplateParam`'s own bound is *itself* a union
-            // (`@template TKey of array-key`) - it would check
-            // `subtype(TemplateParam(TKey), Int)` and `...String)`
-            // *separately* (both false) instead of recognizing `TKey`'s bound
-            // as exactly the target union as a whole (real shape:
-            // doctrine/collections' `Collection<TKey, T>` self-reference in
-            // its own `map()`/`filter()`/`partition()` `@phpstan-return`
-            // tags).
-            (Type::TemplateParam(tp), _) => self.subtype(&tp.bound, sup),
             // An unresolved `Conditional` - either it leaked into a
-            // position `resolve_conditional` never runs against (a
-            // `@param`/`@var` tag, or a `return` statement's own compliance
-            // check, which has no call-site argument to resolve against), or
-            // the subject was left unbound/`Mixed`. Falls back to the eager
-            // `Union([if_true, if_false])`, delegating to `subtype` rather
-            // than a narrower `subtype(sub, if_true) ||
-            // self.subtype(sub, if_false)` check, which would wrongly reject a
-            // `sub` that's itself a `Union` straddling both branches (e.g.
-            // `list<string>|list<X>`). Placed *before* the `Union` arms
-            // below so a `Conditional` nested inside a `Union` (or vice
-            // versa) still reaches this arm.
-            (
-                Type::Conditional {
-                    if_true, if_false, ..
-                },
-                _,
-            ) => self.subtype(
-                &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
-                sup,
-            ),
+            // position `resolve_conditional` never runs against, or its
+            // subject was left unbound - is either branch.
             (
                 _,
                 Type::Conditional {
                     if_true, if_false, ..
                 },
-            ) => self.subtype(
-                sub,
-                &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
-            ),
-            // `A & B <: B` must hold unconditionally, but the generic
-            // `(_, Union(members)) => any(self.subtype(sub, m))` rule below
-            // would decompose the *target* union's members and ask whether
-            // the whole, undecomposed intersection satisfies either alone
-            // (e.g. `Intersection([Void, Union([Null, Bool])])` against
-            // `Union([Null, Bool])` - correctly false either way alone),
-            // never trying the intersection's own member-projection instead.
-            // This arm tries both projections, succeeding if either proves
-            // it - strictly additive.
-            (
-                Type::Intersection(sub_members),
-                Type::Union(sup_members) | Type::BenevolentUnion(sup_members),
-            ) => {
-                sub_members.iter().any(|m| self.subtype(m, sup))
-                    || sup_members.iter().any(|s| self.subtype(sub, s))
+            ) => self
+                .is_super_type_of(
+                    &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
+                    sub,
+                )
+                .yes(),
+            (Type::Intersection(_), Type::Intersection(sup_members)) => sup_members
+                .iter()
+                .all(|m| self.is_super_type_of(m, sub).yes()),
+            (Type::Intersection(members), _) => {
+                members.iter().any(|m| self.is_super_type_of(sup, m).yes())
             }
-            (Type::Union(members) | Type::BenevolentUnion(members), _) => {
-                members.iter().all(|m| self.subtype(m, sup))
+            (_, Type::Intersection(members)) => {
+                members.iter().all(|m| self.is_super_type_of(m, sub).yes())
             }
-            (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
-                members.iter().any(|m| self.subtype(sub, m))
-            }
-
-            // An intersection-vs-intersection pair needs its own rule:
-            // `sub` satisfies `sup` as a whole only if it satisfies *every*
-            // one of `sup`'s members - the generic `(sub is Intersection) =>
-            // any(...)` rule alone only checks whether one *bare* member of
-            // `sub` satisfies the whole `sup` intersection, never whether
-            // `sub`'s own combination does (e.g. `non-falsy-string` proving
-            // itself a subtype of `non-empty-string`).
-            //
-            // A `list<T>`/`non-empty-list<T>` pair also needs its own rule:
-            // this project builds the same `list<T>` shape two different
-            // ways - a docblock-parsed one uses a literal `Type::Int` key
-            // (so stripping the list marker later still shows a known
-            // `array<int, T>`, not a keyless `array<T>`), while a
-            // runtime-inferred one (`array_values()`, `sort()`, ...) uses the
-            // generic `unknown_array_key()` sentinel (a list's key is always
-            // int by definition, so encoding it twice is redundant - see
-            // `upgrade_array_to_list`). The generic `Array` key check below
-            // is directionally asymmetric between the two, so without this a
-            // real runtime `list<int>` would fail to satisfy an
-            // otherwise-identical docblock-declared `list<int>` type. Keys
-            // are skipped here (both are provably int either way); only the
-            // element type and `NonEmptyArray` need comparing.
-            (Type::Intersection(sub_members), Type::Intersection(sup_members))
-                if sub_members.contains(&Type::Accessory(AccessoryKind::ArrayList))
-                    && sup_members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
-            {
-                fn elem_of(members: &[Type]) -> Option<&Type> {
-                    members.iter().find_map(|m| match m {
-                        Type::Array(_, v) => Some(v.as_ref()),
-                        _ => None,
-                    })
-                }
-                match (elem_of(sub_members), elem_of(sup_members)) {
-                    (Some(sub_elem), Some(sup_elem)) if self.subtype(sub_elem, sup_elem) => {
-                        !sup_members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
-                            || sub_members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
-                    }
-                    _ => false,
-                }
-            }
-            (Type::Intersection(_), Type::Intersection(sup_members)) => {
-                sup_members.iter().all(|m| self.subtype(sub, m))
-            }
-            (Type::Intersection(members), _) => members.iter().any(|m| self.subtype(m, sup)),
-            (_, Type::Intersection(members)) => members.iter().all(|m| self.subtype(sub, m)),
 
             // A key-type check alongside the value-type one - `array<int, T>`
             // is not a subtype of `array<string, T>`. The common "don't know
             // the real key" case (`unknown_array_key()`, `int|string`) still
             // passes via the ordinary `Union` subtype rule above.
-            (Type::Array(ka, a), Type::Array(kb, b)) => self.subtype(ka, kb) && self.subtype(a, b),
+            (Type::Array(ka, a), Type::Array(kb, b)) => {
+                self.is_super_type_of(kb, ka).yes() && self.is_super_type_of(b, a).yes()
+            }
 
             // `class-string<T>` is a string; two recurse like `Array` does.
-            (Type::ClassString(a), Type::ClassString(b)) => self.subtype(a, b),
+            (Type::ClassString(a), Type::ClassString(b)) => self.is_super_type_of(b, a).yes(),
             (Type::ClassString(_) | Type::ClassKindString(_), Type::String) => true,
             (Type::ClassString(a), Type::ClassKindString(kind)) => match &**a {
                 Type::Object(name, _) => self
@@ -370,8 +247,8 @@ impl Relation<'_> {
             // The reverse - does some array have these exact keys - is never
             // provable.
             (Type::ArrayShape(shape), Type::Array(key, value)) => {
-                self.subtype(&shape_key_type(shape), key)
-                    && shape.types().all(|t| self.subtype(t, value))
+                self.is_super_type_of(key, &shape_key_type(shape)).yes()
+                    && shape.types().all(|t| self.is_super_type_of(value, t).yes())
             }
 
             // An object shape is structurally an object, as is every class
@@ -443,9 +320,11 @@ impl Relation<'_> {
                 .cloned()
                 .unwrap_or(Type::Mixed(false));
             match variance {
-                Variance::Covariant => self.subtype(&a_i, b_i),
-                Variance::Contravariant => self.subtype(b_i, &a_i),
-                Variance::Invariant => self.subtype(&a_i, b_i) && self.subtype(b_i, &a_i),
+                Variance::Covariant => self.is_super_type_of(b_i, &a_i).yes(),
+                Variance::Contravariant => self.is_super_type_of(&a_i, b_i).yes(),
+                Variance::Invariant => {
+                    self.is_super_type_of(b_i, &a_i).yes() && self.is_super_type_of(&a_i, b_i).yes()
+                }
             }
         })
     }
@@ -464,7 +343,7 @@ fn effective_callable_param_at(params: &[CallableParam], i: usize) -> Option<&Ca
 }
 
 /// `Type::Callable(Some(a))` vs `Type::Callable(Some(b))`'s own
-/// `subtype` arm - is `a` safely substitutable wherever `b` is
+/// `is_super_type_of` arm - is `a` safely substitutable wherever `b` is
 /// expected? Real contravariant-parameter/covariant-return function-type
 /// subtyping: `a`'s return type must satisfy wherever `b`'s return is
 /// relied on (covariant), and `a` must accept at least everything `b`
@@ -581,81 +460,4 @@ pub fn is_numeric_string_literal(s: &str) -> bool {
 /// them - a mismatched round trip, not a hand-maintained rule list.
 pub(crate) fn is_decimal_integer_string_literal(s: &str) -> bool {
     s.parse::<i64>().is_ok_and(|n| n.to_string() == s)
-}
-
-/// A narrow, conservative type-disjointness primitive. Declares two types
-/// disjoint in exactly two situations: two different values of one
-/// literal kind (`'send'` vs `'list_to_send'`, `1` vs `2`, `true` vs
-/// `false`, two cases of one enum, an int literal outside an int range),
-/// or two types in different coarse, mutually-exclusive "scalar families"
-/// (`scalar_family` below - `string` vs `int`, `array` vs `object`).
-/// Recurses into `Union` on either side (every member of a union side
-/// must be disjoint from the other side for the whole comparison to
-/// count - the same "stay on the lenient side" direction this project's
-/// own union-legality check already established).
-/// Returns `false` (not confidently disjoint - "don't guess") for
-/// anything else: `Mixed`/`Never`/`Void`, two non-literal same-family
-/// types (e.g. two unrelated object types - real PHPStan's own
-/// object-vs-object disjointness needs a `final`-class/no-subtype-relation
-/// check this primitive deliberately doesn't attempt), `Intersection`,
-/// `Callable`, `Accessory`, templates, and every pseudo-type.
-pub fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
-    match (a, b) {
-        (Type::Union(members) | Type::BenevolentUnion(members), _) => {
-            members.iter().all(|m| types_definitely_disjoint(m, b))
-        }
-        (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
-            members.iter().all(|m| types_definitely_disjoint(a, m))
-        }
-        // Two different values of the same kind can never overlap - real
-        // PHPStan's `ConstantStringType('send')->isSuperTypeOf(
-        // 'list_to_send')` is a definite no, not a maybe.
-        (Type::StringLiteral(x), Type::StringLiteral(y)) => x != y,
-        (Type::IntLiteral(x), Type::IntLiteral(y)) => x != y,
-        (Type::True, Type::False) | (Type::False, Type::True) => true,
-        // An open and a closed resource are never the same value.
-        (Type::Resource { closed: a }, Type::Resource { closed: b }) => a != b,
-        (Type::EnumCase(class_a, case_a), Type::EnumCase(class_b, case_b)) => {
-            class_a == class_b && case_a != case_b
-        }
-        (Type::IntLiteral(n), Type::IntRange(min, max))
-        | (Type::IntRange(min, max), Type::IntLiteral(n)) => {
-            min.is_some_and(|m| *n < m) || max.is_some_and(|m| *n > m)
-        }
-        _ => match (scalar_family(a), scalar_family(b)) {
-            (Some(fa), Some(fb)) => fa != fb,
-            _ => false,
-        },
-    }
-}
-
-#[derive(PartialEq)]
-enum ScalarFamily {
-    Int,
-    Float,
-    String,
-    Bool,
-    Null,
-    Array,
-    Object,
-    Resource,
-}
-
-fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
-    match ty {
-        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some(ScalarFamily::Int),
-        Type::Float | Type::FloatLiteral(_) => Some(ScalarFamily::Float),
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
-            Some(ScalarFamily::String)
-        }
-        Type::Bool | Type::True | Type::False => Some(ScalarFamily::Bool),
-        Type::Null => Some(ScalarFamily::Null),
-        Type::Array(_, _) | Type::ArrayShape(_) => Some(ScalarFamily::Array),
-        Type::Object(_, _)
-        | Type::ObjectWithoutClass
-        | Type::EnumCase(_, _)
-        | Type::ObjectShape(_) => Some(ScalarFamily::Object),
-        Type::Resource { .. } => Some(ScalarFamily::Resource),
-        _ => None,
-    }
 }

@@ -3,10 +3,16 @@ use crate::{AccessoryKind, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
 
 impl Relation<'_> {
+    /// Whether no value is both an `a` and a `b`: `is_super_type_of`
+    /// answers no one way round or the other.
+    pub fn disjoint(&self, a: &Type, b: &Type) -> bool {
+        self.is_super_type_of(a, b).no() || self.is_super_type_of(b, a).no()
+    }
+
     /// Whether every value of `sub` is a `sup` (`Yes`), none is (`No`),
     /// or some are (`Maybe`) - real PHPStan's `isSuperTypeOf`, as the
-    /// PHPDoc-vs-native rules read it. `Yes` follows `accepts`, so it
-    /// inherits that relation's leniencies; `No` needs a proof (disjoint
+    /// PHPDoc-vs-native rules read it. `Yes` needs a structural proof;
+    /// `No` needs a proof (disjoint
     /// scalar families, distinct literals, or two unrelated classes
     /// neither of which can be extended into the other), and anything
     /// unprovable is `Maybe`, including any comparison with a class the
@@ -14,6 +20,12 @@ impl Relation<'_> {
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         match (sup, sub) {
             (Type::Mixed(_), _) | (_, Type::Never) => TrinaryLogic::Yes,
+            // `NAN` is itself, as `ConstantFloatType::equals()` has it.
+            (Type::FloatLiteral(a), Type::FloatLiteral(b)) if a.is_nan() && b.is_nan() => {
+                TrinaryLogic::Yes
+            }
+            (a, b) if a == b => TrinaryLogic::Yes,
+            (Type::Never, _) => TrinaryLogic::No,
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
                 self.is_super_type_of(&crate::resolve_late_to_bounds(sup), sub)
             }
@@ -48,7 +60,20 @@ impl Relation<'_> {
                     .map(|branch| self.is_super_type_of(sup, branch)),
             ),
             (Type::Union(members) | Type::BenevolentUnion(members), _) => {
-                TrinaryLogic::max_min(members.iter().map(|m| self.is_super_type_of(m, sub)))
+                let by_member =
+                    TrinaryLogic::max_min(members.iter().map(|m| self.is_super_type_of(m, sub)));
+                // `A & B` is within a union one of its own members is.
+                match sub {
+                    Type::Intersection(sub_members)
+                        if by_member != TrinaryLogic::Yes
+                            && sub_members
+                                .iter()
+                                .any(|m| self.is_super_type_of(sup, m).yes()) =>
+                    {
+                        TrinaryLogic::Yes
+                    }
+                    _ => by_member,
+                }
             }
             (_, Type::Mixed(_)) | (Type::TemplateParam(_), _) => TrinaryLogic::Maybe,
             (Type::Void, Type::Void) => TrinaryLogic::Yes,
@@ -62,6 +87,39 @@ impl Relation<'_> {
                 match sig {
                     None => TrinaryLogic::Yes,
                     Some(_) => TrinaryLogic::Maybe,
+                }
+            }
+            // Two `list<T>`s compare by element type and non-emptiness: a
+            // PHPDoc `list<T>` keys on `int`, one built at runtime on the
+            // unknown array key, and both are int-keyed.
+            (Type::Intersection(sup_members), Type::Intersection(sub_members))
+                if sup_members.contains(&Type::Accessory(AccessoryKind::ArrayList))
+                    && sub_members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
+            {
+                let elem_of = |members: &[Type]| {
+                    members.iter().find_map(|m| match m {
+                        Type::Array(_, v) => Some(v.as_ref().clone()),
+                        _ => None,
+                    })
+                };
+                let non_empty = |members: &[Type]| {
+                    members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
+                };
+                match (elem_of(sup_members), elem_of(sub_members)) {
+                    (Some(sup_elem), Some(sub_elem)) => {
+                        let elem = self.is_super_type_of(&sup_elem, &sub_elem);
+                        match elem {
+                            TrinaryLogic::Yes
+                                if non_empty(sup_members) && !non_empty(sub_members) =>
+                            {
+                                TrinaryLogic::Maybe
+                            }
+                            TrinaryLogic::No => TrinaryLogic::No,
+                            TrinaryLogic::Yes => TrinaryLogic::Yes,
+                            TrinaryLogic::Maybe => TrinaryLogic::Maybe,
+                        }
+                    }
+                    _ => TrinaryLogic::Maybe,
                 }
             }
             (Type::Intersection(members), _) => {
@@ -132,7 +190,7 @@ impl Relation<'_> {
             }
             // A general array may or may not carry a shape's keys.
             (Type::ArrayShape(_), Type::Array(..)) => TrinaryLogic::Maybe,
-            _ if self.subtype(sub, sup) => TrinaryLogic::Yes,
+            _ if self.proves_super_type(sup, sub) => TrinaryLogic::Yes,
             (_, Type::Intersection(members)) => {
                 let refused = members
                     .iter()
@@ -145,7 +203,7 @@ impl Relation<'_> {
                 }
             }
             (Type::Object(a, _), Type::Object(b, _)) => self.object_super_type_of(a, b),
-            _ if crate::types_definitely_disjoint(sup, sub) => TrinaryLogic::No,
+            _ if scalars_disjoint(sup, sub) => TrinaryLogic::No,
             (Type::Accessory(kind), _) if accessory_refuses(kind, sub) => TrinaryLogic::No,
             _ => TrinaryLogic::Maybe,
         }
@@ -266,7 +324,7 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
     match kind {
         AccessoryKind::NonEmptyArray | AccessoryKind::ArrayList => {
             !is_array
-                && crate::types_definitely_disjoint(
+                && scalars_disjoint(
                     &Type::Array(Box::new(Type::Mixed(false)), Box::new(Type::Mixed(false))),
                     sub,
                 )
@@ -277,8 +335,71 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         | AccessoryKind::LiteralString
         | AccessoryKind::LowercaseString
         | AccessoryKind::UppercaseString
-        | AccessoryKind::DecimalIntegerString => {
-            !is_string && crate::types_definitely_disjoint(&Type::String, sub)
+        | AccessoryKind::DecimalIntegerString => !is_string && scalars_disjoint(&Type::String, sub),
+    }
+}
+
+/// Two different values of one literal kind (`'a'`/`'b'`, `1`/`2`,
+/// `true`/`false`, two cases of one enum, an int outside a range), or two
+/// types of different scalar families (`string`/`int`, `array`/`object`).
+/// Anything else is not proven disjoint.
+fn scalars_disjoint(a: &Type, b: &Type) -> bool {
+    match (a, b) {
+        (Type::Union(members) | Type::BenevolentUnion(members), _) => {
+            members.iter().all(|m| scalars_disjoint(m, b))
         }
+        (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
+            members.iter().all(|m| scalars_disjoint(a, m))
+        }
+        // Two different values of the same kind can never overlap - real
+        // PHPStan's `ConstantStringType('send')->isSuperTypeOf(
+        // 'list_to_send')` is a definite no, not a maybe.
+        (Type::StringLiteral(x), Type::StringLiteral(y)) => x != y,
+        (Type::IntLiteral(x), Type::IntLiteral(y)) => x != y,
+        (Type::True, Type::False) | (Type::False, Type::True) => true,
+        // An open and a closed resource are never the same value.
+        (Type::Resource { closed: a }, Type::Resource { closed: b }) => a != b,
+        (Type::EnumCase(class_a, case_a), Type::EnumCase(class_b, case_b)) => {
+            class_a == class_b && case_a != case_b
+        }
+        (Type::IntLiteral(n), Type::IntRange(min, max))
+        | (Type::IntRange(min, max), Type::IntLiteral(n)) => {
+            min.is_some_and(|m| *n < m) || max.is_some_and(|m| *n > m)
+        }
+        _ => match (scalar_family(a), scalar_family(b)) {
+            (Some(fa), Some(fb)) => fa != fb,
+            _ => false,
+        },
+    }
+}
+
+#[derive(PartialEq)]
+enum ScalarFamily {
+    Int,
+    Float,
+    String,
+    Bool,
+    Null,
+    Array,
+    Object,
+    Resource,
+}
+
+fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
+    match ty {
+        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some(ScalarFamily::Int),
+        Type::Float | Type::FloatLiteral(_) => Some(ScalarFamily::Float),
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
+            Some(ScalarFamily::String)
+        }
+        Type::Bool | Type::True | Type::False => Some(ScalarFamily::Bool),
+        Type::Null => Some(ScalarFamily::Null),
+        Type::Array(_, _) | Type::ArrayShape(_) => Some(ScalarFamily::Array),
+        Type::Object(_, _)
+        | Type::ObjectWithoutClass
+        | Type::EnumCase(_, _)
+        | Type::ObjectShape(_) => Some(ScalarFamily::Object),
+        Type::Resource { .. } => Some(ScalarFamily::Resource),
+        _ => None,
     }
 }

@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
             let is_used = actual_members.iter().any(|a| {
                 *a == Type::Mixed(false)
                     || self.accepts(member, a).yes()
-                    || !types::types_definitely_disjoint(a, member)
+                    || !self.relation().disjoint(a, member)
             });
             if is_used {
                 continue;

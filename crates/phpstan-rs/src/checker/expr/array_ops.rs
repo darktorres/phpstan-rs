@@ -353,7 +353,7 @@ impl<'a> Checker<'a> {
     /// Whether `ty` is already provably int-key-sequential from zero - a
     /// real `list<T>`/`non-empty-list<T>`, or an `ArrayShape` whose own
     /// keys happen to be canonical and sequential. Shares the exact
-    /// `subtype`-side rule for an `ArrayShape` against
+    /// `is_super_type_of`-side rule for an `ArrayShape` against
     /// `Accessory::ArrayList` rather than re-deriving it.
     pub(crate) fn is_list_like(ty: &Type) -> bool {
         match ty {

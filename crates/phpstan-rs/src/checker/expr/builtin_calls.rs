@@ -1311,16 +1311,24 @@ impl<'a> Checker<'a> {
             // The real stub declares `microtime(bool $as_float = false):
             // string|float` unconditionally; a literal `true` argument
             // narrows to plain `float`, a literal `false` (or no
-            // argument) to a string. `subtype`, not `==`, since a
+            // argument) to a string. `is_super_type_of`, not `==`, since a
             // `Union` that happens to be all-`True` or all-`False` (e.g.
             // narrowed from a wider type) should narrow the same way a
             // bare `True`/`False` would.
             "microtime" => match args.first().map(|a| self.infer_expr(&a.value, locals)) {
                 None => return Type::String,
-                Some(ty) if types::Relation::structural().subtype(&ty, &Type::True) => {
+                Some(ty)
+                    if types::Relation::structural()
+                        .is_super_type_of(&Type::True, &ty)
+                        .yes() =>
+                {
                     return Type::Float;
                 }
-                Some(ty) if types::Relation::structural().subtype(&ty, &Type::False) => {
+                Some(ty)
+                    if types::Relation::structural()
+                        .is_super_type_of(&Type::False, &ty)
+                        .yes() =>
+                {
                     return Type::String;
                 }
                 _ => {}
@@ -1329,13 +1337,14 @@ impl<'a> Checker<'a> {
             // `array` (`str_replace(...): array|string`), even though the
             // function only ever returns an array when `$subject` itself
             // is one. Scoped to "subject is string-like"
-            // (`Relation::subtype` against `Type::String`, not a bare
+            // (`Relation::is_super_type_of` against `Type::String`, not a bare
             // `==`) - an accessory-refined subject (`non-empty-string`
             // parses to `Intersection([String, Accessory(_)])`) would
             // silently fail to match a bare `== Type::String`.
             "str_replace" | "str_ireplace" if args.len() == 3 || args.len() == 4 => {
                 if types::Relation::structural()
-                    .subtype(&self.infer_expr(&args[2].value, locals), &Type::String)
+                    .is_super_type_of(&Type::String, &self.infer_expr(&args[2].value, locals))
+                    .yes()
                 {
                     return Type::String;
                 }
@@ -1349,7 +1358,8 @@ impl<'a> Checker<'a> {
             "preg_replace" | "preg_replace_callback" | "preg_filter"
                 if args.len() >= 3
                     && types::Relation::structural()
-                        .subtype(&self.infer_expr(&args[2].value, locals), &Type::String) =>
+                        .is_super_type_of(&Type::String, &self.infer_expr(&args[2].value, locals))
+                        .yes() =>
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
@@ -1362,7 +1372,8 @@ impl<'a> Checker<'a> {
             // Never returns `null`, so a plain early return suffices.
             "substr_replace" if args.len() == 3 || args.len() == 4 => {
                 if types::Relation::structural()
-                    .subtype(&self.infer_expr(&args[0].value, locals), &Type::String)
+                    .is_super_type_of(&Type::String, &self.infer_expr(&args[0].value, locals))
+                    .yes()
                 {
                     return Type::String;
                 }
@@ -1389,7 +1400,9 @@ impl<'a> Checker<'a> {
                     .copied()
                     .flatten()
                     .map(|e| self.infer_expr(e, locals))
-                    && types::Relation::structural().subtype(&name_ty, &Type::String)
+                    && types::Relation::structural()
+                        .is_super_type_of(&Type::String, &name_ty)
+                        .yes()
                 {
                     return Type::Union(vec![Type::String, Type::False]);
                 }
@@ -1533,7 +1546,8 @@ impl<'a> Checker<'a> {
             "preg_replace_callback_array"
                 if args.len() >= 2
                     && types::Relation::structural()
-                        .subtype(&self.infer_expr(&args[1].value, locals), &Type::String) =>
+                        .is_super_type_of(&Type::String, &self.infer_expr(&args[1].value, locals))
+                        .yes() =>
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
@@ -1546,7 +1560,8 @@ impl<'a> Checker<'a> {
             "mb_convert_encoding"
                 if args.len() >= 2
                     && types::Relation::structural()
-                        .subtype(&self.infer_expr(&args[0].value, locals), &Type::String) =>
+                        .is_super_type_of(&Type::String, &self.infer_expr(&args[0].value, locals))
+                        .yes() =>
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
@@ -2367,7 +2382,7 @@ fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
 /// type to `target` specifically.
 fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) -> Type {
     filter_array_elements(ty, &|elem| {
-        if types::types_definitely_disjoint(elem, target) {
+        if relation.disjoint(elem, target) {
             Type::Never
         } else {
             narrow_type_to(relation, elem, target)

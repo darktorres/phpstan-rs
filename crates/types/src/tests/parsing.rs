@@ -627,7 +627,7 @@ fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() 
 // `unknown_array_key()` sentinel for that same position instead
 // (deliberately - a list's key is always int by definition, so encoding
 // it twice would be redundant). Both print identically as `list<int>`
-// but aren't structurally `==`-equal, and `subtype`'s generic `Array`
+// but aren't structurally `==`-equal, and `is_super_type_of`'s generic `Array`
 // key check is directionally asymmetric between the two representations
 // (`subtype(unknown_array_key(), Int)` is false, the reverse true),
 // so a genuine runtime `list<int>` would otherwise fail to satisfy an

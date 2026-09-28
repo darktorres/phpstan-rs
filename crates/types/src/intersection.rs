@@ -42,9 +42,9 @@ pub fn intersect_types(members: Vec<Type>) -> Type {
 /// The narrower of two types when one contains the other, both otherwise.
 fn narrower(a: Type, b: Type) -> Type {
     let relation = Relation::structural();
-    if matches!(b, Type::Mixed(_)) || relation.subtype(&a, &b) {
+    if matches!(b, Type::Mixed(_)) || relation.is_super_type_of(&b, &a).yes() {
         a
-    } else if matches!(a, Type::Mixed(_)) || relation.subtype(&b, &a) {
+    } else if matches!(a, Type::Mixed(_)) || relation.is_super_type_of(&a, &b).yes() {
         b
     } else {
         intersect_types(vec![a, b])

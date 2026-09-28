@@ -1,6 +1,5 @@
 use crate::relation::{AcceptsResult, Relation};
 use crate::{ShapeKey, Type, Variance};
-use syntax::ast::ClassKind;
 
 // Real PHPStan's own level-gated `RuleLevelHelper` behaviors
 // (`rule_level_accepts`/`rule_level_accepts`/
@@ -30,7 +29,7 @@ impl Relation<'_> {
 
     /// `accepts` as a plain relation of `sub` to `sup`, consulting the
     /// class hierarchy for `Object` types; every other case defers to
-    /// `Relation::subtype`, which has no notion of class context.
+    /// `Relation::is_super_type_of`, which has no notion of class context.
     pub(crate) fn accepts_type(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
             // A `key-of<T>`/`T[K]` still over a template is what `T`'s
@@ -223,7 +222,7 @@ impl Relation<'_> {
                 }
                 true
             }
-            // Hierarchy-aware version of `Relation::subtype`'s own bare
+            // Hierarchy-aware version of `Relation::is_super_type_of`'s own bare
             // `EnumCase -> Object` name-equality rule - a case
             // is assignable not just to its own enum's bare type but to
             // `UnitEnum`/`BackedEnum` (both synthesized `implements`
@@ -237,7 +236,7 @@ impl Relation<'_> {
                 class_a == class_b && case_a == case_b
             }
             // Same hierarchy-aware override as the plain Object-vs-Object
-            // arm just above, one level up: `Relation::subtype`'s own
+            // arm just above, one level up: `Relation::is_super_type_of`'s own
             // `ClassString` arm inherits its non-hierarchy-aware Object
             // comparison (name equality only), so without this a
             // `class-string<Derived>` value would incorrectly fail to
@@ -256,12 +255,12 @@ impl Relation<'_> {
                     .is_some_and(|class| class.kind == *kind)
             }
             (Type::ClassString(a), Type::ClassString(b)) => self.accepts_type(a, b),
-            // Mirrors `Relation::subtype`'s own bound-aware `TemplateParam`
+            // Mirrors `Relation::is_super_type_of`'s own bound-aware `TemplateParam`
             // arm (see its doc comment for the full reasoning and why
             // this needs to run *before* the `Union` arms just below),
             // but recurses through `self.accepts` rather than the
-            // plain, hierarchy-*unaware* `Relation::subtype`: delegating
-            // straight to `Relation::subtype(sub, sup)` would silently
+            // plain, hierarchy-*unaware* `Relation::is_super_type_of`: delegating
+            // straight to `Relation::is_super_type_of(sub, sup)` would silently
             // drop the class-hierarchy-walking half of this whole method
             // for any bound check involving a `TemplateParam`, wrongly
             // flagging code where a template's own bound is a union of
@@ -274,7 +273,7 @@ impl Relation<'_> {
             (Type::TemplateParam(tp), _) => {
                 matches!(*tp.bound, Type::Mixed(_)) || self.accepts_type(&tp.bound, sup)
             }
-            // Mirrors `Relation::subtype`'s own identically-placed
+            // Mirrors `Relation::is_super_type_of`'s own identically-placed
             // `Type::Conditional` arm exactly (see that arm's own doc
             // comment) - a real, independent gap this project's own
             // `Type::Conditional`-returning-function corpus checks were
@@ -290,7 +289,7 @@ impl Relation<'_> {
             // represents "a real list" any more, so a value that
             // genuinely satisfies one of the two conditional arms was
             // wrongly rejected. Placed before every arm that could
-            // decompose `sub` first, exactly like `subtype`'s own
+            // decompose `sub` first, exactly like `is_super_type_of`'s own
             // arm, so `sup`'s real shape is always resolved before
             // `sub`'s is.
             (
@@ -315,7 +314,7 @@ impl Relation<'_> {
             (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
                 members.iter().any(|m| self.accepts_type(sub, m))
             }
-            // Mirrors `Relation::subtype`'s own dedicated
+            // Mirrors `Relation::is_super_type_of`'s own dedicated
             // Intersection-vs-Intersection rule, and for the same reason
             // - without it, this function's own generic `(Intersection,
             // _) => any(...)` rule below intercepts a same-shaped pair
@@ -357,7 +356,7 @@ impl Relation<'_> {
             }
             (Type::Intersection(members), _) => members.iter().any(|m| self.accepts_type(m, sup)),
             (_, Type::Intersection(members)) => members.iter().all(|m| self.accepts_type(sub, m)),
-            // Deliberately more lenient here than Relation::subtype's pure
+            // Deliberately more lenient here than Relation::is_super_type_of's pure
             // structural relation (which correctly treats Array(Mixed) as
             // NOT a subtype of Array(Int)): an array literal's element type
             // is never inferred precisely by this checker, so it always
@@ -488,7 +487,7 @@ impl Relation<'_> {
             (_, Type::Object(name, _)) if self.hierarchy.find_class(name).is_none() => true,
             // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
             (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => true,
-            _ => self.subtype(sub, sup) || accepted_though_no_subtype(sub, sup),
+            _ => self.is_super_type_of(sup, sub).yes() || accepted_though_no_subtype(sub, sup),
         }
     }
 
@@ -648,15 +647,15 @@ impl Relation<'_> {
     /// `accepts`, additionally aware of real PHPStan's own level
     /// 9/10 `checkExplicitMixed`/`checkImplicitMixed`.
     ///
-    /// This project's `subtype`/`accepts` never actually gave
+    /// This project's `is_super_type_of`/`accepts` never actually gave
     /// `Mixed` a blanket "accepted anywhere" structural rule the way real
     /// PHPStan's own `MixedType::isAcceptedBy()` unconditionally does
     /// (confirmed directly: there is no `(Type::Mixed(_), _) => true` arm
-    /// in `Relation::subtype`, only the mirror-image `(_, Type::Mixed(_))
+    /// in `Relation::is_super_type_of`, only the mirror-image `(_, Type::Mixed(_))
     /// => true`, a different direction entirely) - every one of dozens of
     /// existing call sites instead bails out ad hoc, on its own, whenever
     /// its *own* actual type happens to be `Mixed`. Rather than widen
-    /// `subtype` itself with a new unconditional arm (real, foundational
+    /// `is_super_type_of` itself with a new unconditional arm (real, foundational
     /// surgery with unknown blast radius across every existing caller,
     /// not something this one opt-in feature should force), this method
     /// supplies that same "accepted anywhere below the matching strict
@@ -707,85 +706,6 @@ impl Relation<'_> {
         self.accepts_type(sub, sup)
     }
 
-    /// `checker::check_strict_comparison_of_different_types`'s own
-    /// disjointness primitive - real PHPStan's `InitializerExprTypeResolver::
-    /// resolveIdenticalType` reaches this same question via `leftType->
-    /// isSuperTypeOf(rightType)->no() && rightType->isSuperTypeOf(leftType)
-    /// ->no()`, a genuinely *trinary* (yes/no/maybe) answer this project's
-    /// own `accepts` doesn't give (`!accepts(a, b)` only means
-    /// "not provably a subtype," not "provably no overlap at all" - the
-    /// stronger claim this function exists to answer directly, class by
-    /// class, rather than trying to derive it from two `accepts`
-    /// calls that can't actually express it). Recurses into `Union` on
-    /// either side (every member of one side must be disjoint from the
-    /// other for the whole comparison to count, the same "stay on the
-    /// lenient side" direction `narrowing::types_definitely_disjoint`'s
-    /// own doc comment already established for its narrower version of
-    /// this same idea) - `Type::Never` is vacuously disjoint from
-    /// anything (no real value to overlap with).
-    ///
-    /// A leaf pair is disjoint when either (1) they resolve to different
-    /// coarse scalar families (`int` vs `string`, `array` vs `object`,
-    /// ...), or (2) both are object-family with two *different* class
-    /// names, neither an ancestor of the other, and **both** names
-    /// resolve to a real, registered `ClassKind::Class` or `ClassKind::
-    /// Enum` (never `Interface`/`Trait`) - real PHP's single-inheritance
-    /// rule means one concrete object's class has exactly one linear
-    /// `extends` chain, so two unrelated classes/enums neither of which
-    /// is the other's ancestor genuinely can never share an instance;
-    /// requiring *both* sides closed this way is what makes the claim
-    /// sound even though real PHP allows multiple *interface*
-    /// implementation - if either side is an interface, an unrelated
-    /// third class could still freely implement both, so nothing is
-    /// provably disjoint there, matching this project's own established
-    /// "don't know, don't guess" precedent (real PHPStan's own analogous
-    /// case additionally leans on `final`-ness, not attempted here - a
-    /// disclosed narrower scope, not an oversight; a non-final class vs
-    /// an unrelated non-final class stays undecided here rather than
-    /// guessing "maybe" the way `final` alone would let real PHPStan
-    /// still answer "no"). `Type::EnumCase`/a bare enum-typed
-    /// `Type::Object` share this exact same class-name-based reasoning -
-    /// a specific case and its own enum's bare type are never disjoint
-    /// (same class name), while two *different* enums always are (an
-    /// enum can never extend or be extended).
-    pub fn types_provably_disjoint(&self, a: &Type, b: &Type) -> bool {
-        match (a, b) {
-            (Type::Never, _) | (_, Type::Never) => true,
-            (Type::Union(members), _) => members.iter().all(|m| self.types_provably_disjoint(m, b)),
-            (_, Type::Union(members)) => members.iter().all(|m| self.types_provably_disjoint(a, m)),
-            _ => {
-                let (fam_a, class_a) = leaf_family_and_class(a);
-                let (fam_b, class_b) = leaf_family_and_class(b);
-                match (fam_a, fam_b) {
-                    (Some(fa), Some(fb)) if fa != fb => true,
-                    (Some(ScalarFamily::Object), Some(ScalarFamily::Object)) => {
-                        let (Some(ca), Some(cb)) = (class_a, class_b) else {
-                            return false;
-                        };
-                        if ca == cb
-                            || self.hierarchy.is_subclass_of(ca, cb)
-                            || self.hierarchy.is_subclass_of(cb, ca)
-                        {
-                            return false;
-                        }
-                        self.is_closed_class_kind(ca) && self.is_closed_class_kind(cb)
-                    }
-                    _ => false,
-                }
-            }
-        }
-    }
-
-    /// `types_provably_disjoint`'s own "single linear `extends` chain"
-    /// requirement - `Class`/`Enum` only, never `Interface`/`Trait`
-    /// (freely, multiply implementable) or an unregistered name (unknown
-    /// hierarchy, don't guess).
-    fn is_closed_class_kind(&self, name: &str) -> bool {
-        self.hierarchy
-            .find_class(name)
-            .is_some_and(|class| matches!(class.kind, ClassKind::Class | ClassKind::Enum))
-    }
-
     /// Real PHPStan's own `InitializerExprTypeResolver::
     /// resolveIdenticalType` - what `left === right` provably evaluates
     /// to from both operands' own types alone, `None` when it could go
@@ -812,7 +732,7 @@ impl Relation<'_> {
         if is_finite_scalar_type(left) && is_finite_scalar_type(right) {
             return Some(left == right);
         }
-        if self.types_provably_disjoint(left, right) {
+        if self.disjoint(left, right) {
             return Some(false);
         }
         None
@@ -863,41 +783,4 @@ fn is_finite_scalar_type(ty: &Type) -> bool {
             | Type::FloatLiteral(_)
             | Type::EnumCase(_, _)
     ) || matches!(ty, Type::ArrayShape(shape) if shape.is_empty_array())
-}
-
-#[derive(PartialEq)]
-enum ScalarFamily {
-    Int,
-    Float,
-    String,
-    Bool,
-    Null,
-    Array,
-    Object,
-}
-
-/// `types_provably_disjoint`'s own leaf classifier - `None` for anything
-/// with no confident family (`Mixed`, `Never` - handled separately by
-/// its own caller before this is ever reached, `Callable` - a real
-/// runtime value could be a string/array/`Closure` object, genuinely
-/// ambiguous, `Intersection`/`Accessory`/templates/every pseudo-type),
-/// matching `narrowing::types_definitely_disjoint`'s own identically-
-/// named, identically-scoped helper - this version additionally returns
-/// the class name for `Object`/`EnumCase`, needed for the object-family
-/// case's own closed-class-kind/ancestor check just above.
-fn leaf_family_and_class(ty: &Type) -> (Option<ScalarFamily>, Option<&str>) {
-    match ty {
-        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => (Some(ScalarFamily::Int), None),
-        Type::Float | Type::FloatLiteral(_) => (Some(ScalarFamily::Float), None),
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
-            (Some(ScalarFamily::String), None)
-        }
-        Type::Bool | Type::True | Type::False => (Some(ScalarFamily::Bool), None),
-        Type::Null => (Some(ScalarFamily::Null), None),
-        Type::Array(_, _) | Type::ArrayShape(_) => (Some(ScalarFamily::Array), None),
-        Type::Object(name, _) => (Some(ScalarFamily::Object), Some(name.as_str())),
-        Type::EnumCase(class, _) => (Some(ScalarFamily::Object), Some(class.as_str())),
-        Type::ObjectShape(_) => (Some(ScalarFamily::Object), None),
-        _ => (None, None),
-    }
 }

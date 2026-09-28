@@ -16,7 +16,7 @@ use types::{AccessoryKind, Relation, Type};
 /// scoped to this `Union(members)` branch only, not the `_ => target.
 /// clone()` fallback below it for a non-`Union` `original` - that
 /// fallback already unconditionally trusts `target` regardless of
-/// `original`'s own content, so there's nothing for `subtype` to
+/// `original`'s own content, so there's nothing for `is_super_type_of` to
 /// usefully change there.
 /// `instanceof`'s own true-branch narrowing - deliberately not
 /// `narrow_type_to` above, which unconditionally trusts `target` for a
@@ -36,10 +36,16 @@ use types::{AccessoryKind, Relation, Type};
 /// (`?Foo` narrowed to `Foo`) cases both still resolve to a single
 /// class/interface exactly as before.
 pub(crate) fn narrow_instanceof_true(current: &Type, target: &Type) -> Type {
-    if types::Relation::structural().subtype(target, current) {
+    if types::Relation::structural()
+        .is_super_type_of(current, target)
+        .yes()
+    {
         return target.clone();
     }
-    if types::Relation::structural().subtype(current, target) {
+    if types::Relation::structural()
+        .is_super_type_of(target, current)
+        .yes()
+    {
         return current.clone();
     }
     // A nullable `current` (`?Socket`, i.e. `Union([Object("Socket"),
@@ -83,7 +89,7 @@ fn is_object_like(ty: &Type) -> bool {
 }
 
 /// `relation` (the checker's, over the registry's classes) is needed for
-/// the `Union` arm's own member filter below - plain `Relation::subtype`
+/// the `Union` arm's own member filter below - plain `Relation::is_super_type_of`
 /// has no class-hierarchy awareness at all, so it only ever matches
 /// a union member against `target` by exact structural equality. An
 /// interface a concrete class implements only transitively (through an
@@ -91,7 +97,7 @@ fn is_object_like(ty: &Type) -> bool {
 /// down to zero matching members, falling through to the
 /// `target.clone()` case below and discarding every member's own
 /// additional properties/methods entirely - `Relation::accepts`
-/// is the identical hierarchy-aware check `subtype` is documented as
+/// is the identical hierarchy-aware check `is_super_type_of` is documented as
 /// a non-hierarchy-aware subset of, so using it here can only keep
 /// strictly more genuinely-compatible members than before, never fewer.
 pub(crate) fn narrow_type_to(relation: &Relation, original: &Type, target: &Type) -> Type {
@@ -158,7 +164,7 @@ pub(crate) fn narrow_type_to(relation: &Relation, original: &Type, target: &Type
 /// `==` to the generic target it should match as "an array").
 ///
 /// Deliberately **not** applied to the non-`Union` fallback below
-/// (`other if other == excluded => Type::Never`): `subtype`'s own
+/// (`other if other == excluded => Type::Never`): `is_super_type_of`'s own
 /// int-to-float argument-coercion rule (`Type::Int` is a subtype of
 /// `Type::Float`) would make `narrow_type_excluding(Type::Int,
 /// Type::Float)` wrongly collapse a plain, correctly-known `int` to
@@ -208,7 +214,11 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         Type::Union(members) | Type::BenevolentUnion(members) => {
             let kept: Vec<Type> = members
                 .iter()
-                .filter(|m| !types::Relation::structural().subtype(m, excluded))
+                .filter(|m| {
+                    !types::Relation::structural()
+                        .is_super_type_of(excluded, m)
+                        .yes()
+                })
                 .map(|m| narrow_type_excluding(m, excluded))
                 .collect();
             match kept.len() {

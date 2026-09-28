@@ -204,7 +204,7 @@ impl<'a> Checker<'a> {
                 types.iter().enumerate().any(|(i, a)| {
                     types[i + 1..]
                         .iter()
-                        .any(|b| types::types_definitely_disjoint(a, b))
+                        .any(|b| self.relation().disjoint(a, b))
                 })
             }
             TypeNode::Callable {

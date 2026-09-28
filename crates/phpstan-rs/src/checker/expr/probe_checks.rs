@@ -4,7 +4,7 @@ use crate::checker::expr::ranges::{
 };
 use crate::checker::{
     Checker, Locals, array_value_type_for_key, literal_string_key,
-    narrow_array_shape_by_key_presence, narrowing_type_for_predicate, types_definitely_disjoint,
+    narrow_array_shape_by_key_presence, narrowing_type_for_predicate,
 };
 use syntax::ast::*;
 use syntax::token::Span;
@@ -555,11 +555,11 @@ impl<'a> Checker<'a> {
     /// false negative on those shapes over a wrong guess. Reuses the
     /// exact same disjointness/subtyping primitives `assert.
     /// impossibleType`/`.alreadyNarrowedType` already established for
-    /// the PHPDoc-tag version of this same idea (`types_definitely_
-    /// disjoint`, `registry.accepts`) - `types_definitely_disjoint`
-    /// only fires on a genuinely different scalar family (never a guess
-    /// between two object types), so `is_string((object) $x)` stays
-    /// silent rather than risking a wrong "always false".
+    /// the PHPDoc-tag version of this same idea (`Relation::disjoint`,
+    /// `registry.accepts`) - disjointness needs a proof (different scalar
+    /// families, distinct literals, or classes neither of which can be
+    /// extended into the other), so an unprovable case stays silent
+    /// rather than risking a wrong "always false".
     ///
     /// Deliberately not guarded on `loop_depth` the way
     /// `check_constant_numeric_comparison` above is - that guard exists
@@ -570,7 +570,7 @@ impl<'a> Checker<'a> {
     /// body path's own facts before a post-loop condition ever sees
     /// them, so a variable that's sometimes `string` and sometimes `int`
     /// across iterations already reads back as `string|int` here, which
-    /// neither `types_definitely_disjoint` nor `accepts` treats as
+    /// neither `Relation::disjoint` nor `accepts` treats as
     /// decided.
     pub(crate) fn check_impossible_type_check_call(
         &mut self,
@@ -611,7 +611,7 @@ impl<'a> Checker<'a> {
         if matches!(arg_ty, Type::Mixed(_) | Type::Never) {
             return;
         }
-        if types_definitely_disjoint(&target_ty, &arg_ty) {
+        if self.relation().disjoint(&target_ty, &arg_ty) {
             self.report(
                 format!("Call to function {name}() with {arg_ty} will always evaluate to false."),
                 span,

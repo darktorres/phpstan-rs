@@ -1253,7 +1253,6 @@ pub(crate) use narrowing::{
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
     narrow_type_to, narrowing_key, narrowing_type_for_predicate, propagate_container_field_facts,
     purge_stale_narrowing_for, resolve_concat_type, string_type_has_accessory,
-    types_definitely_disjoint,
 };
 pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,

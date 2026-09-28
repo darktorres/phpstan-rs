@@ -57,10 +57,12 @@ pub(crate) fn upgrade_string_with_accessory(ty: &Type, kind: AccessoryKind) -> T
 /// a reusable predicate for any accessory kind
 /// (`is_non_falsy_string` is a one-line delegate to this).
 pub(crate) fn string_type_has_accessory(ty: &Type, kind: AccessoryKind) -> bool {
-    types::Relation::structural().subtype(
-        ty,
-        &Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
-    )
+    types::Relation::structural()
+        .is_super_type_of(
+            &Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
+            ty,
+        )
+        .yes()
 }
 
 /// Strips a `Type::StringLiteral("")` member out of a `Union` (a no-op

@@ -301,7 +301,13 @@ impl<'a> Checker<'a> {
         if sig.has_get_hook() || sig.has_set_hook() {
             return sig.ty().clone();
         }
-        if !sig.has_native_type() || self.registry.relation().subtype(value, sig.ty_native()) {
+        if !sig.has_native_type()
+            || self
+                .registry
+                .relation()
+                .is_super_type_of(sig.ty_native(), value)
+                .yes()
+        {
             return value.clone();
         }
         sig.ty().clone()
@@ -1106,9 +1112,15 @@ fn literal_keys_from_type(ty: &Type) -> Vec<String> {
 /// key" question, just asked about a fetched column's own value instead
 /// of a write's own index expression.
 pub(crate) fn dynamic_write_key_type(idx_ty: &Type) -> Type {
-    if types::Relation::structural().subtype(idx_ty, &Type::Int) {
+    if types::Relation::structural()
+        .is_super_type_of(&Type::Int, idx_ty)
+        .yes()
+    {
         Type::Int
-    } else if types::Relation::structural().subtype(idx_ty, &Type::String) {
+    } else if types::Relation::structural()
+        .is_super_type_of(&Type::String, idx_ty)
+        .yes()
+    {
         Type::String
     } else {
         // Mirrors real PHPStan's own `MixedType::toArrayKey()`/

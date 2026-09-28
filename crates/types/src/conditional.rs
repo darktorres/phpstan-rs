@@ -29,16 +29,12 @@ use crate::Type;
 /// Real PHPStan's `ConditionalType`/`ConditionalTypeForParameter` are
 /// trinary: `target->isSuperTypeOf(subject)` yes picks one branch, no
 /// the other, and maybe (a possibly-empty `array<T>` checked against
-/// `non-empty-array<T>`) keeps both. "No" here is
-/// `types_definitely_disjoint`'s conservative answer; anything it can't
-/// prove disjoint stays "maybe" rather than guessing a branch.
+/// `non-empty-array<T>`) keeps both.
 pub fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<bool> {
-    let matches = if crate::Relation::structural().subtype(bound, target) {
-        Some(true)
-    } else if crate::types_definitely_disjoint(bound, target) {
-        Some(false)
-    } else {
-        None
+    let matches = match crate::Relation::structural().is_super_type_of(target, bound) {
+        crate::TrinaryLogic::Yes => Some(true),
+        crate::TrinaryLogic::No => Some(false),
+        crate::TrinaryLogic::Maybe => None,
     };
     matches.map(|m| m != negated)
 }

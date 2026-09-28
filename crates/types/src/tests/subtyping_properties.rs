@@ -1,14 +1,14 @@
-//! Proptest-based subtyping properties for `Relation::subtype`. A
+//! Proptest-based subtyping properties for `Relation::is_super_type_of`. A
 //! bounded-depth `Type` generator (`prop_recursive` - the correct tool
 //! for a genuinely recursive ~20-variant enum, not a hand-rolled
 //! recursive fn), plus 5 properties, each evidenced by real reasoning
-//! about `subtype`'s own arms, not merely assumed to hold.
+//! about `is_super_type_of`'s own arms, not merely assumed to hold.
 //!
 //! Transitivity is deliberately NOT asserted as a blanket property: a
 //! real, existing, documented non-transitive chain (`ClassString(Foo) <:
 //! String <: ClassString(Bar)` while `ClassString(Foo) <: ClassString
 //! (Bar)` is false - a deliberate false-negative-avoiding design choice,
-//! see `subtype`'s own `ClassString`/`String` interchangeability
+//! see `is_super_type_of`'s own `ClassString`/`String` interchangeability
 //! comment) would make a blanket transitivity property either fail on a
 //! case this file's own author already reasoned through on purpose, or
 //! need ad hoc generator exclusions purpose-built to dodge this
@@ -31,7 +31,7 @@ fn leaf_type() -> impl Strategy<Value = Type> {
         Just(Type::String),
         any::<i64>().prop_map(Type::IntLiteral),
         // `f64::NAN` is generated too (`any::<f64>()` includes it) -
-        // exactly the case the reflexivity fix in `subtype` exists
+        // exactly the case the reflexivity fix in `is_super_type_of` exists
         // for.
         any::<f64>().prop_map(Type::FloatLiteral),
         "[a-z]{0,5}".prop_map(|s| Type::StringLiteral(s.into())),
@@ -60,7 +60,7 @@ fn any_type() -> impl Strategy<Value = Type> {
 }
 
 proptest! {
-    /// Every generated type is its own subtype - `subtype` needs a
+    /// Every generated type is its own subtype - `is_super_type_of` needs a
     /// dedicated arm for this, since `FloatLiteral(NAN)` would otherwise
     /// fail under `Type`'s plain structural `PartialEq`, where
     /// `NAN != NAN`.
@@ -69,14 +69,14 @@ proptest! {
         prop_assert!(super::is_subtype(&t, &t));
     }
 
-    /// `(_, Type::Mixed(false)) => true` is `subtype`'s own first arm -
+    /// `(_, Type::Mixed(false)) => true` is `is_super_type_of`'s own first arm -
     /// `Mixed` accepts everything.
     #[test]
     fn mixed_is_top(t in any_type()) {
         prop_assert!(super::is_subtype(&t, &Type::Mixed(false)));
     }
 
-    /// `(Type::Never, _) => true` is `subtype`'s own second arm -
+    /// `(Type::Never, _) => true` is `is_super_type_of`'s own second arm -
     /// `Never` satisfies everything.
     #[test]
     fn never_is_bottom(t in any_type()) {
@@ -123,7 +123,7 @@ fn nan_float_literal_is_reflexive() {
 /// counterexample `proptest-regressions/types/tests/subtyping_
 /// properties.txt` records: `A & B` must always be a subtype of `B`,
 /// even when `B` is itself a `Union` that also happens to be one of
-/// `A & B`'s own members - see `subtype`'s own new arm for the full
+/// `A & B`'s own members - see `is_super_type_of`'s own new arm for the full
 /// reasoning.
 #[test]
 fn an_intersection_is_a_subtype_of_its_own_union_shaped_member() {

@@ -109,7 +109,11 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
                 .map(|(property, _)| property);
             let entity_ty = property.and_then(|p| entity.fields.get(p));
             match entity_ty {
-                Some(entity_ty) if types::Relation::structural().subtype(entity_ty, &f.ty) => {
+                Some(entity_ty)
+                    if types::Relation::structural()
+                        .is_super_type_of(&f.ty, entity_ty)
+                        .yes() =>
+                {
                     ShapeField::new(f.key.clone(), entity_ty.clone(), f.optional)
                 }
                 _ => f.clone(),

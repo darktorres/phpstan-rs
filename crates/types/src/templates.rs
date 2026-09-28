@@ -24,7 +24,7 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut FxHash
             // member's own, stricter arm declined to match - producing a
             // bound-violating `ReflectionClass<string>` that then breaks
             // real downstream `ReflectionClass<object>` call sites.
-            // Deliberately narrower than a full `subtype`/bound check:
+            // Deliberately narrower than a full `is_super_type_of`/bound check:
             // this module has no registry access, so it can't tell a
             // real subclass (`T of Base` satisfied by a `Derived`
             // argument, the common case) from an unrelated class - only

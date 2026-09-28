@@ -246,11 +246,11 @@ fn string_accessory_subtype_rules() {
 #[test]
 fn array_accessory_subtype_rules() {
     // Scoped to `Array(Mixed)` as the intersection's own base member
-    // deliberately: `subtype`'s own pre-existing, unrelated
+    // deliberately: `is_super_type_of`'s own pre-existing, unrelated
     // `(ArrayShape(_), Array(b)) => matches!(**b, Mixed)` rule is
     // already conservative about a *specific*-element `Array(b)`
     // (that per-field check is `accepts`'s own job, not
-    // `subtype`'s) - using `Array(Mixed)` here isolates the new
+    // `is_super_type_of`'s) - using `Array(Mixed)` here isolates the new
     // accessory logic from that pre-existing, unrelated asymmetry.
     let list_ty = Type::Intersection(vec![
         Type::Array(

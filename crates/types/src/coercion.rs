@@ -91,7 +91,9 @@ impl Type {
             ])
         };
         if !matches!(self, Type::Mixed(_) | Type::Never)
-            && crate::Relation::structural().subtype(self, &Type::String)
+            && crate::Relation::structural()
+                .is_super_type_of(&Type::String, self)
+                .yes()
         {
             return Some(self.clone());
         }

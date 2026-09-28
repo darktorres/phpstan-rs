@@ -42,7 +42,6 @@ pub use php_version::{
 };
 pub use relation::{AcceptsResult, Relation};
 pub use shape::{Shape, ShapeField, ShapeKey};
-pub use subtype::types_definitely_disjoint;
 pub use subtype::{
     callable_sig_is_subtype, is_numeric_string_literal, shape_fields_are_list_like, shape_key_type,
     types_equal_for_union,
@@ -123,7 +122,7 @@ pub enum Type {
     },
     // A single enum case's singleton type (enum fqn, case name), distinct
     // from the coarser `Object(Suit, [])`. Not a subtype target in
-    // `Relation::subtype`'s class-hierarchy sense; `registry::accepts`
+    // `Relation::is_super_type_of`'s class-hierarchy sense; `registry::accepts`
     // handles `EnumCase -> Object(enum_fqn)` assignability instead.
     EnumCase(Name, Name),
     // `None` = unknown shape; `Some(sig)` = a parsed `Closure(int):

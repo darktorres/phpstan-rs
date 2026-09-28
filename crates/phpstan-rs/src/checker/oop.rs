@@ -948,8 +948,8 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let definitely = value_type_is_constant(value_ty)
-            || types::types_definitely_disjoint(value_ty, phpdoc_ty);
+        let definitely =
+            value_type_is_constant(value_ty) || self.relation().disjoint(value_ty, phpdoc_ty);
         let relation = if definitely {
             "is incompatible with"
         } else {

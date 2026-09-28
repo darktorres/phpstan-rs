@@ -8,7 +8,9 @@ mod templates_and_substitution;
 /// The structural relation's subtype answer: `sub` is provably a `sup`
 /// with no class knowledge.
 fn is_subtype(sub: &crate::Type, sup: &crate::Type) -> bool {
-    crate::Relation::structural().subtype(sub, sup)
+    crate::Relation::structural()
+        .is_super_type_of(sup, sub)
+        .yes()
 }
 
 /// The structural relation's `accepts` answer: a `declared` slot takes

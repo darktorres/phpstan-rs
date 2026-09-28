@@ -59,10 +59,12 @@ impl<'a> Checker<'a> {
             Type::ClassString(_) | Type::ClassKindString(_) => false,
             Type::String => false,
             Type::StringLiteral(_) => types::Relation::structural()
-                .subtype(ty, &Type::Accessory(AccessoryKind::NumericString)),
+                .is_super_type_of(&Type::Accessory(AccessoryKind::NumericString), ty)
+                .yes(),
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
                 types::Relation::structural()
-                    .subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
+                    .is_super_type_of(&Type::Accessory(AccessoryKind::NumericString), ty)
+                    .yes()
             }
             Type::Resource { .. } => false,
             Type::Object(name, _) if self.registry.classes.contains_key(name.as_str()) => {
@@ -110,10 +112,12 @@ impl<'a> Checker<'a> {
         match ty {
             Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => true,
             Type::StringLiteral(_) => types::Relation::structural()
-                .subtype(ty, &Type::Accessory(AccessoryKind::NumericString)),
+                .is_super_type_of(&Type::Accessory(AccessoryKind::NumericString), ty)
+                .yes(),
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
                 types::Relation::structural()
-                    .subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
+                    .is_super_type_of(&Type::Accessory(AccessoryKind::NumericString), ty)
+                    .yes()
             }
             Type::Object(name, _) => self.registry.is_subclass_of(name, class),
             // Same reasoning as `type_is_instance_of` just above -
@@ -602,7 +606,9 @@ impl<'a> Checker<'a> {
     /// matching this project's own existing number-castable-class
     /// precedent everywhere else in this file/`coercion.rs`.
     fn is_strictly_number(&self, ty: &Type) -> bool {
-        types::Relation::structural().subtype(ty, &Type::Union(vec![Type::Int, Type::Float]))
+        types::Relation::structural()
+            .is_super_type_of(&Type::Union(vec![Type::Int, Type::Float]), ty)
+            .yes()
             || matches!(ty, Type::Object(name, _) if
                 self.registry.is_subclass_of(name, "SimpleXMLElement")
                     || self.registry.is_subclass_of(name, "GMP")
