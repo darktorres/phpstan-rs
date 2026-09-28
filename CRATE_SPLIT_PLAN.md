@@ -6730,6 +6730,22 @@ Behaviour commits, one each with its fixture:
   predicate widens which), so a file using neither answers `{"data": []}` and
   the editor keeps its grammar's guesses (a constant and a class look alike
   after `::`).
+- **Quick fixes follow §3.7's fix list**: each of a diagnostic's fixes is its
+  own action, the first preferred, and a fix editing several places (an import
+  added beside the use it enables) is one edit. Today `Diagnostic.fix` is an
+  `Option`, so a diagnostic offers at most one single-edit action, always marked
+  preferred.
+- **The outline is complete**: promoted constructor properties are listed as
+  the class's properties (`private float $r` in `__construct` is missing today),
+  and declarations below the top level (C4's indexed ones in function bodies,
+  `try` and `switch`) are listed where they sit; today only `if` and block
+  nesting is followed.
+- **Hierarchy navigation**: `textDocument/implementation` (an interface's or
+  abstract method's implementations, a class's subclasses), `typeHierarchy`
+  (supertypes and subtypes) and `callHierarchy` (callers and callees), answered
+  from reflection's `ClassHierarchy` and E1's reference-site collector; none is
+  served today. `workspace/willRenameFiles` renaming a PSR-4 class's file offers
+  the class rename (above) as its edit.
 - **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
   the document at once, which editors can run on save; today each quick fix is
   offered alone.
