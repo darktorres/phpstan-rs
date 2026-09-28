@@ -4581,13 +4581,18 @@ the rest), which the gate excludes and lists.
   narrowing predicates, the date / xml / DateInterval validators (as
   throw-type extensions), regex / PCRE, and the date parser.
 - `builtins` is always registered, including by the testing harness.
-- Every return-type extension in Appendix G reaches PHPStan's value in the nsrt
-  suite (3,022 mismatches over 93 extensions today), unless phpstan-rs is right
-  at runtime. Each was read against its fixture and php 8.5: 2,525 are wider
-  than PHPStan's type and hold every value it holds; the other 497 are wrong at
-  runtime, 220 missing a value the call can return, 170 typing a call PHP
-  rejects as returning and 107 giving another PHP version's return, and the
-  items below name every one of them, fixed first.
+- Every return-type extension in Appendix G reaches the most precise type that
+  holds at runtime in the nsrt suite (3,015 mismatches over 93 extensions
+  today). PHPStan's value is the candidate, not the target: ten of Appendix G's
+  are wrong at runtime and stay approved deviations. Of the 3,015, 2,498 are
+  wider than PHPStan's type and hold every value it holds; the 396 of them php
+  can evaluate outside their fixture were run in php 8.5 and PHPStan's value
+  held, and the other 2,102 need their fixture's context, so the commit adopting
+  each value runs it in php 8.5 first and keeps phpstan-rs's type where
+  PHPStan's is wrong. The other 517 are wrong at runtime, 220 missing a value
+  the call can return, 190 typing a call PHP rejects as returning and 107 giving
+  another PHP version's return, and the items below name every one of them,
+  fixed first.
 - The throw-type extensions `throws/dynamic.rs` lacks are added, each
   throwing only for the arguments that can fail: `array_chunk()`/
   `str_split()` with a length that may be below 1 (`ValueError`),
@@ -4809,19 +4814,24 @@ the rest), which the gate excludes and lists.
     `array_keys`, `array_slice`, `array_chunk` and `array_replace`:
     `array_values()` of `array{1, 2, ...<string>}` is `list<1|2>` today,
     dropping the tail's values (nsrt `unsealed-derivations.php`, 6);
-  - a file analysed for a PHP version before 8 gets that version's returns: the
-    BcMath functions return `null` or `false` for a zero divisor or a bad
-    operand, `round()`, `ceil()` and `floor()` `false` for an array, the hash
-    functions `false` for an unknown algorithm, `substr()` `false` past the end,
-    the array functions `null` for a non-array, `explode('')` `false`, and
-    `count_chars()`, `get_class()`, `version_compare()` and `trigger_error()`
-    their PHP 7 results, inside a `PHP_VERSION_ID < 80000` branch too; before
-    8.4 `highlight_string()` returns `bool`. Today every file gets PHP 8.5's
-    returns (107 nsrt mismatches: `bcmath-dynamic-return-php7.php` 32,
+  - a return that changed between PHP versions follows the analysed version
+    range (`PhpVersions`, narrowed by `PHP_VERSION_ID`): over a range it is the
+    union of each version's (under `^7.4 || ^8.0`, `bcdiv('10', '0')` returns
+    `null` or throws, so it is `null`), and a file or branch narrowed below 8
+    gets PHP 7's alone: the BcMath functions return `null` or `false` for a zero
+    divisor or a bad operand, `round()`, `ceil()` and `floor()` `false` for an
+    array, the hash functions `false` for an unknown algorithm, `substr()`
+    `false` past the end, the array functions `null` for a non-array,
+    `explode('')` `false`, and `count_chars()`, `get_class()`,
+    `version_compare()` and `trigger_error()` their PHP 7 results; before 8.4
+    `highlight_string()` returns `bool`. Today every call gets PHP 8.5's return
+    (107 nsrt mismatches in files run at 7.4 or 8.3 and in `PHP_VERSION_ID <
+    80000` branches: `bcmath-dynamic-return-php7.php` 32,
     `hash-functions-74.php` 15, `round.php` 12, `count-chars-7.4.php` 8 and the
     rest);
-  - `gettype()` of a resource omits `'resource (closed)'`, as `is_resource`
-    does (D3);
+  - `gettype()` of a `resource` is `'resource'|'resource (closed)'`, since a
+    resource may have been closed (D3's `is_resource()` soundness item is the
+    same fact); it is `'resource'` today (nsrt `gettype.php`, 2);
   - `Throwable::getCode()` is `int`, but a `PDOException`'s code is a
     string, so `is_string($t->getCode())` reads as always false;
     `ThrowableReturnTypeExtension` gives `int|string` (benevolent) unless
@@ -4850,31 +4860,34 @@ the rest), which the gate excludes and lists.
     bytes are folded as UTF-8 (nsrt `str-casing.php`, 7);
   - a call PHP 8 rejects returns `*NEVER*`, so the code after it is unreachable;
     today each returns its ordinary type. Checked one by one against php 8.5,
-    the 170 in Appendix G throw a `TypeError`, `ValueError`,
+    the 190 in Appendix G throw a `TypeError`, `ValueError`,
     `DivisionByZeroError` or `Error`: an array function given a non-array
     (`array_flip`, `array_keys`, `array_values`, `array_reverse`,
     `array_search`, `array_intersect_key`, `array_fill_keys`) or an invalid
-    callback (`array_filter($a, '')`); `array_combine()` of unequal sizes and
-    `array_chunk()` with a length below 1; the BcMath functions with a zero
-    divisor or modulus, a non-numeric operand or a negative root (`bcdiv('10',
-    '0')`, `bcpowmod('10', '-2', '1')`, `bcsqrt('-10')`); `explode('')`;
+    callback (`array_filter($a, '')`); `array_combine()` of unequal sizes,
+    `array_chunk()` with a length below 1, `array_fill()` past `PHP_INT_MAX` and
+    `range()` past the largest array; the BcMath functions with a zero divisor
+    or modulus, a non-numeric operand or a negative root (`bcdiv('10', '0')`,
+    `bcpowmod('10', '-2', '1')`, `bcsqrt('-10')`); `explode('')`;
     `filter_input()` of an invalid input type; `get_class()` without an argument
     outside a class; the hash functions with an unknown or non-cryptographic
     algorithm (`hash_hmac('crc32', …)`); `iterator_to_array()` of a generator
     yielding array keys; `mb_strlen()` and `mb_substitute_character()` with an
-    invalid encoding or character; `mt_rand()` and `random_int()` with `$min >
-    $max` (`random_int(10, 1)` is the empty `int<10, 1>` today); `round()`,
-    `ceil()` and `floor()` of a non-number under `strict_types`;
-    `str_increment()` and `str_decrement()` of an empty or non-alphanumeric
-    string; `str_repeat()` with a negative count (`''` today); `trigger_error()`
-    with a level other than `E_USER_*`; `version_compare()` with an unknown
-    operator; `count()` of an object that isn't `Countable`; `pow()` of an
-    object or array operand; `preg_split()` with a non-integer limit or flags;
-    and `strval()`, `intval()`, `floatval()` and `boolval()` without an argument
-    or of an object without `__toString()` (`round-php8-strict-types.php` 30,
+    invalid encoding or character, and `mb_convert_kana()` with an invalid mode;
+    `mt_rand()` and `random_int()` with `$min > $max` (`random_int(10, 1)` is
+    the empty `int<10, 1>` today); under `strict_types`, `abs()`, `mb_strlen()`,
+    `round()`, `ceil()` and `floor()` of a value of the wrong type
+    (`abs('123')`, where PHPStan has `123` too); `str_increment()` and
+    `str_decrement()` of an empty or non-alphanumeric string; `str_repeat()`
+    with a negative count (`''` today); `trigger_error()` with a level other
+    than `E_USER_*`; `version_compare()` with an unknown operator; `count()` of
+    an object that isn't `Countable`; `pow()` of an object or array operand;
+    `preg_split()` with a non-integer limit or flags; and `strval()`,
+    `intval()`, `floatval()` and `boolval()` without an argument or of an object
+    without `__toString()` (`round-php8-strict-types.php` 30,
     `bcmath-dynamic-return-php8.php` 27, `round-php8.php` 15,
     `hash-functions-80.php` 11, `mb_substitute_character-php8.php` 9,
-    `str_decrement.php` 8 and the rest);
+    `mb-strlen-php83.php` 8, `str_decrement.php` 8, `abs.php` 7 and the rest);
   - the built-in narrowing predicates follow the 2.2.16
     `*TypeSpecifyingExtension`s; compared one by one, these leave the type
     wider today: `array_key_exists($k, $a)` doesn't narrow `$k` to the key
@@ -4950,7 +4963,7 @@ the rest), which the gate excludes and lists.
 
   Then the rest, by each function's count in Appendix G (the wrong ones among
   them are the items above): `filter_var`, `filter_var_array` and `filter_input`
-  (291, 194 of them `mixed`), `min`/`max` (217, 198 `mixed`), `array_column`
+  (290, 194 of them `mixed`), `min`/`max` (217, 198 `mixed`), `array_column`
   (211), `sprintf`/`vsprintf` (135), the BcMath functions (134), `count` (114)
   and `array_slice` (101); beside Appendix G, `settype`'s narrowing
   (`set-type-type-specifying.php`, 156), the preg `$matches` shapes
@@ -6794,25 +6807,38 @@ E2's spread-argument item (2, `array-intersect-key.php`); Appendix I's
 `constant-condition-certainty` (`get-defined-vars.php`); and C9's
 global-variable item: `global $global;` in a function is `'foo'` from a
 file-scope assignment, where the function can run before it or after a
-`$GLOBALS` write (`get-defined-vars.php`). Three are phpstan-rs right, approved
-deviations: `vsprintf('foo', [])` is always `'foo'`, so its `non-falsy-string`
-stands where PHPStan has `string` (`non-falsy-string.php`); `array_flip()` of an
-array holding `'foo' => 17` and `'bar' => 17` is `array<int, string>` where
-PHPStan has `*NEVER*`, PHP returning `[17 => 'bar']` (`array-flip.php:93`); and
-`get_class($mixed)` is `string` where PHPStan adds `false`, which PHP 8 never
-returns (`generics.php:1344`). The other 3,022, over 93 extensions, are the
-extensions' own, each read against its fixture and, where the two tools
-disagree, php 8.5: 2,525 are wider than PHPStan's type and hold every value it
-holds; 170 are calls PHP rejects (a `TypeError`, `ValueError` or `Error`) typed
-as returning; 107 are in files that run before PHP 8 or 8.4 and get PHP 8.5's
-return; and 220 miss a value the call can return. E2 names each group; one that
-stays is phpstan-rs being right at runtime and is listed as an approved
-deviation. Each entry gives the extension, the functions the suite asserts, the
-mismatch count and files, and one mismatch from the run (phpstan-rs's type
-first). The extensions not listed have no mismatches of their own;
-`ArrayFindKeyFunctionReturnTypeExtension`'s two differ only in display.
+`$GLOBALS` write (`get-defined-vars.php`). Ten are phpstan-rs right where
+PHPStan's value is wrong at runtime, approved deviations: `vsprintf('foo', [])`
+is always `'foo'`, so its `non-falsy-string` stands where PHPStan has `string`
+(`non-falsy-string.php`); `array_flip()` of an array holding `'foo' => 17` and
+`'bar' => 17` is `array<int, string>` where PHPStan has `*NEVER*`, PHP returning
+`[17 => 'bar']` (`array-flip.php:93`); `get_class($mixed)` is `string` where
+PHPStan adds `false`, which PHP 8 never returns (`generics.php:1344`);
+`array_fill(-2, 4, 'pear')` has the keys `-2` to `1` from PHP 8, where PHPStan
+has PHP 7's `-2`, `0`, `1`, `2` (`array-functions.php:261`);
+`ini_get('auto_prepend_file')` is `''` by default, which PHPStan's
+`non-falsy-string` excludes (`bug-3382.php`); `filter_var(null,
+FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)` returns `false`, not PHPStan's
+`null` (`filter-var.php:118`); `mb_substitute_character(null)` returns the
+current setting, not PHPStan's `true` (`mb_substitute_character-php8.php:5`);
+and `strval([])`, an invalid pattern in `preg_split()` and its `null` flags
+return (`'Array'`, `false`, a list) where PHPStan has `*ERROR*`
+(`strval.php:26`, `preg_split.php:32`, `:38`). The other 3,015, over 93
+extensions, are the extensions' own, each read against its fixture and, where
+the two tools disagree, php 8.5: 2,498 are wider than PHPStan's type and hold
+every value it holds; 190 are calls PHP rejects (a `TypeError`, `ValueError` or
+`Error`) typed as returning; 107 are in files that run before PHP 8 or 8.4 and
+get PHP 8.5's return; and 220 miss a value the call can return. The rows whose
+expression php can evaluate outside its fixture were run in php 8.5: that found
+seven of the ten above and 20 of the 190, and for 396 of the 2,498 PHPStan's
+value held. E2 names each group; one that stays is phpstan-rs being right at
+runtime and is listed as an approved deviation. Each entry gives the extension,
+the functions the suite asserts, the mismatch count and files, and one mismatch
+from the run (phpstan-rs's type first). The extensions not listed have no
+mismatches of their own; `ArrayFindKeyFunctionReturnTypeExtension`'s two differ
+only in display.
 
-- `FilterVarDynamicReturnTypeExtension` (`filter_var()`; 278, 3 files):
+- `FilterVarDynamicReturnTypeExtension` (`filter_var()`; 277, 3 files):
   `filter_var(17)` is `mixed` where PHPStan has `'17'`;
 - `MinMaxFunctionReturnTypeExtension` (`max()`, `min()`; 217, 10 files):
   `max([1])` is `mixed` where PHPStan has `1`;
@@ -6836,7 +6862,7 @@ first). The extensions not listed have no mismatches of their own;
 - `ArraySearchFunctionDynamicReturnTypeExtension` (`array_search()`; 63, 8
   files): `array_search('b', $arr)` is `int|false` where PHPStan has `1`;
 - `StrvalFamilyFunctionReturnTypeExtension` (`boolval()`, `floatval()`,
-  `intval()`, `strval()`; 61, 3 files): `intval([])` is `int` where PHPStan has
+  `intval()`, `strval()`; 60, 3 files): `intval([])` is `int` where PHPStan has
   `0`;
 - `HashFunctionsReturnTypeExtension` (`hash()`, `hash_file()`, `hash_hkdf()`,
   `hash_hmac()`, `hash_hmac_file()`, `hash_pbkdf2()`; 58, 3 files):
@@ -6848,7 +6874,7 @@ first). The extensions not listed have no mismatches of their own;
   has `'a'`;
 - `SubstrDynamicReturnTypeExtension` (`mb_substr()`, `substr()`; 55, 10 files):
   `substr('de_DE', 5, -5)` is `string` where PHPStan has `''`;
-- `PregSplitDynamicReturnTypeExtension` (`preg_split()`; 44, `preg_split.php`):
+- `PregSplitDynamicReturnTypeExtension` (`preg_split()`; 42, `preg_split.php`):
   `preg_split('/-/', '')` is `list<string>|false` where PHPStan has
   `array{''}|false`;
 - `ImplodeFunctionReturnTypeExtension` (`implode()`, `join()`; 42, 9 files):
@@ -6869,7 +6895,7 @@ first). The extensions not listed have no mismatches of their own;
 - `ArrayReplaceFunctionReturnTypeExtension` (`array_replace()`; 38, 4 files):
   `array_replace($array)` is `array` where PHPStan has `non-empty-array`;
 - `MbSubstituteCharacterDynamicReturnTypeExtension`
-  (`mb_substitute_character()`; 38, 2 files): `mb_substitute_character('')` is
+  (`mb_substitute_character()`; 37, 2 files): `mb_substitute_character('')` is
   `bool|int|string` where PHPStan has `true`;
 - `ArrayMapFunctionReturnTypeExtension` (`array_map()`; 36, 9 files):
   `array_map(null, [])` is `array` where PHPStan has `array{}`;
@@ -6939,9 +6965,6 @@ first). The extensions not listed have no mismatches of their own;
 - `FilterInputDynamicReturnTypeExtension` (`filter_input()`; 13, 4 files):
   `filter_input(-1, 'foo', FILTER_VALIDATE_INT)` is `int|null|false` where
   PHPStan has `null`;
-- `ArrayFillFunctionReturnTypeExtension` (`array_fill()`; 12, 3 files):
-  `array_fill(2, $integer, new \stdClass())` is `array<stdClass>` where PHPStan
-  has `array<int, stdClass>`;
 - `ArrayRandFunctionReturnTypeExtension` (`array_rand()`; 12,
   `array-functions.php`): `array_rand(["a" => 1, 2 => "b"])` is `string|2` where
   PHPStan has `2|'a'`;
@@ -6954,6 +6977,9 @@ first). The extensions not listed have no mismatches of their own;
 - `VersionCompareFunctionDynamicReturnTypeExtension` (`version_compare()`; 12, 2
   files): `\version_compare('Foo','Bar','<')` is `int|bool` where PHPStan has
   `false`;
+- `ArrayFillFunctionReturnTypeExtension` (`array_fill()`; 11, 3 files):
+  `array_fill(2, $integer, new \stdClass())` is `array<stdClass>` where PHPStan
+  has `array<int, stdClass>`;
 - `OpensslCipherFunctionsReturnTypeExtension` (`openssl_cipher_iv_length()`,
   `openssl_cipher_key_length()`; 11, 3 files):
   `openssl_cipher_iv_length('unknown')` is `int|false` where PHPStan has
@@ -6971,8 +6997,6 @@ first). The extensions not listed have no mismatches of their own;
   has `array<string, int>`;
 - `HighlightStringDynamicReturnTypeExtension` (`highlight_string()`; 8, 2
   files): `highlight_string($string)` is `string|true` where PHPStan has `true`;
-- `IniGetReturnTypeExtension` (`ini_get()`; 8, 2 files):
-  `ini_get("memory_limit")` is `string|false` where PHPStan has `string`;
 - `PregFilterFunctionReturnTypeExtension` (`preg_filter()`; 8,
   `preg_filter.php`): `preg_filter($pattern)` is `string|array<(int|string),
   string>|null` where PHPStan has `list<string>|string|null`;
@@ -6981,6 +7005,8 @@ first). The extensions not listed have no mismatches of their own;
   `non-empty-string`;
 - `StrSplitFunctionReturnTypeExtension` (`mb_str_split()`; 8, 2 files):
   `mb_str_split('', 1)` is `array` where PHPStan has `array{}`;
+- `IniGetReturnTypeExtension` (`ini_get()`; 7, `ini-get.php`):
+  `ini_get("memory_limit")` is `string|false` where PHPStan has `string`;
 - `PgLastNoticeDynamicReturnTypeExtension` (`pg_last_notice()`; 7,
   `pg-last-notice.php`): `pg_last_notice($connection)` is `array|string|bool`
   where PHPStan has `string`;
