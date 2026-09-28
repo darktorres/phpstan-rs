@@ -1021,79 +1021,81 @@ pub(crate) struct AssignedVariable {
 /// Every site in `body` that binds a variable, outside nested functions,
 /// closures and classes.
 pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {
-    let mut out = Vec::new();
-    let mut loops = Vec::new();
-    for stmt in body {
-        walk_stmt(stmt, &mut loops, &mut out);
-    }
-    out
+    let mut assigned = Assigned {
+        loops: Vec::new(),
+        out: Vec::new(),
+    };
+    syntax::visit::walk_stmts(&mut assigned, body);
+    assigned.out
 }
 
-fn walk_stmt(stmt: &Stmt, loops: &mut Vec<syntax::token::Span>, out: &mut Vec<AssignedVariable>) {
-    match &stmt.kind {
-        StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => return,
-        StmtKind::Foreach { key, value, .. } => {
-            loops.push(stmt.span);
-            for target in key.iter().chain(std::iter::once(value)) {
-                bind_targets(target, loops, out);
+struct Assigned {
+    loops: Vec<syntax::token::Span>,
+    out: Vec<AssignedVariable>,
+}
+
+impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        let loops = &mut self.loops;
+        let out = &mut self.out;
+        match &stmt.kind {
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => return,
+            StmtKind::Foreach { key, value, .. } => {
+                loops.push(stmt.span);
+                for target in key.iter().chain(std::iter::once(value)) {
+                    bind_targets(target, loops, out);
+                }
             }
-        }
-        StmtKind::For { .. } | StmtKind::While { .. } | StmtKind::DoWhile { .. } => {
-            loops.push(stmt.span);
-        }
-        StmtKind::Try { catches, .. } => {
-            for catch in catches {
-                if let (Some(var), Some(span)) = (&catch.var, catch.var_span) {
+            StmtKind::For { .. } | StmtKind::While { .. } | StmtKind::DoWhile { .. } => {
+                loops.push(stmt.span);
+            }
+            StmtKind::Try { catches, .. } => {
+                for catch in catches {
+                    if let (Some(var), Some(span)) = (&catch.var, catch.var_span) {
+                        out.push(AssignedVariable {
+                            name: var.clone(),
+                            span,
+                            loops: loops.clone(),
+                        });
+                    }
+                }
+            }
+            StmtKind::StaticVar(vars) => {
+                for (name, _) in vars {
                     out.push(AssignedVariable {
-                        name: var.clone(),
-                        span,
+                        name: syntax::intern::intern(name),
+                        span: stmt.span,
                         loops: loops.clone(),
                     });
                 }
             }
+            _ => {}
         }
-        StmtKind::StaticVar(vars) => {
-            for (name, _) in vars {
-                out.push(AssignedVariable {
-                    name: syntax::intern::intern(name),
-                    span: stmt.span,
-                    loops: loops.clone(),
-                });
-            }
+        syntax::visit::walk_stmt(self, stmt);
+        if matches!(
+            stmt.kind,
+            StmtKind::Foreach { .. }
+                | StmtKind::For { .. }
+                | StmtKind::While { .. }
+                | StmtKind::DoWhile { .. }
+        ) {
+            self.loops.pop();
         }
-        _ => {}
     }
-    for expr in syntax::visit::stmt_exprs(stmt) {
-        walk_expr(expr, loops, out);
-    }
-    for child in syntax::visit::child_stmts(stmt) {
-        walk_stmt(child, loops, out);
-    }
-    if matches!(
-        stmt.kind,
-        StmtKind::Foreach { .. }
-            | StmtKind::For { .. }
-            | StmtKind::While { .. }
-            | StmtKind::DoWhile { .. }
-    ) {
-        loops.pop();
-    }
-}
 
-fn walk_expr(e: &Expr, loops: &mut Vec<syntax::token::Span>, out: &mut Vec<AssignedVariable>) {
-    match &e.kind {
-        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } | ExprKind::NewAnonymousClass(..) => {
-            return;
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        match &e.kind {
+            ExprKind::Closure { .. }
+            | ExprKind::ArrowFn { .. }
+            | ExprKind::NewAnonymousClass(..) => return,
+            ExprKind::Assign(target, _)
+            | ExprKind::AssignRef(target, _)
+            | ExprKind::CompoundAssign(_, target, _) => {
+                bind_targets(target, &self.loops, &mut self.out);
+            }
+            _ => {}
         }
-        ExprKind::Assign(target, _)
-        | ExprKind::AssignRef(target, _)
-        | ExprKind::CompoundAssign(_, target, _) => {
-            bind_targets(target, loops, out);
-        }
-        _ => {}
-    }
-    for child in syntax::visit::child_exprs(e) {
-        walk_expr(child, loops, out);
+        syntax::visit::walk_expr(self, e);
     }
 }
 

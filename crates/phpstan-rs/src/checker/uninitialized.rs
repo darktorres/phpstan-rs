@@ -25,7 +25,7 @@ use rustc_hash::FxHashSet;
 use crate::checker::Checker;
 use crate::registry::class_decl_name;
 use syntax::ast::*;
-use syntax::visit::child_stmts;
+use syntax::visit::any_stmt_in_body;
 
 impl<'a> Checker<'a> {
     /// Flags `property.uninitialized` for a concrete class's own typed,
@@ -145,15 +145,13 @@ fn body_ever_assigns_property(stmts: &[Stmt], prop: &str, self_vars: &FxHashSet<
 /// ...;` for a variable known to hold a fresh instance of the same
 /// class) anywhere at all, however deeply nested and however
 /// conditional - deliberately permissive, unlike a real dataflow
-/// guarantee. Doesn't descend into a closure/arrow-fn's own body
-/// (`child_stmts`'s documented boundary); a property assigned only
-/// inside one is an accepted gap.
+/// guarantee. Doesn't descend into a closure/arrow-fn's own body; a
+/// property assigned only inside one is an accepted gap.
 fn stmt_ever_assigns_property(stmt: &Stmt, prop: &str, self_vars: &FxHashSet<String>) -> bool {
-    let own =
-        matches!(&stmt.kind, StmtKind::Expression(e) if initializes_property(e, prop, self_vars));
-    own || child_stmts(stmt)
-        .into_iter()
-        .any(|s| stmt_ever_assigns_property(s, prop, self_vars))
+    any_stmt_in_body(
+        stmt,
+        |s| matches!(&s.kind, StmtKind::Expression(e) if initializes_property(e, prop, self_vars)),
+    )
 }
 
 fn initializes_property(e: &Expr, prop: &str, self_vars: &FxHashSet<String>) -> bool {
@@ -197,17 +195,17 @@ fn collect_self_instance_vars(stmts: &[Stmt], class_name: &str) -> FxHashSet<Str
 }
 
 fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut FxHashSet<String>) {
-    for s in stmts {
-        if let StmtKind::Expression(e) = &s.kind
-            && let ExprKind::Assign(lhs, rhs) = &e.kind
-            && let ExprKind::Variable(v) = &lhs.kind
-            && is_new_self_instance(rhs, class_name)
-        {
-            vars.insert(v.to_string());
-        }
-        for child in child_stmts(s) {
-            collect_self_instance_vars_into(std::slice::from_ref(child), class_name, vars);
-        }
+    for stmt in stmts {
+        any_stmt_in_body(stmt, |s| {
+            if let StmtKind::Expression(e) = &s.kind
+                && let ExprKind::Assign(lhs, rhs) = &e.kind
+                && let ExprKind::Variable(v) = &lhs.kind
+                && is_new_self_instance(rhs, class_name)
+            {
+                vars.insert(v.to_string());
+            }
+            false
+        });
     }
 }
 

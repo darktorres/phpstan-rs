@@ -17,7 +17,7 @@ use crate::registry::class_decl_name;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
+use syntax::visit::{Visitor, any_child_expr, any_stmt_in_body, walk_stmt};
 use types::Type;
 use types::php_version::PhpFeature;
 
@@ -43,13 +43,32 @@ const SUPERGLOBALS: [&str; 9] = [
 /// function-like or class declaration.
 fn collect_return_exprs<'s>(body: &'s [Stmt], out: &mut Vec<&'s Expr>) {
     for stmt in body {
-        if let StmtKind::Return(Some(e)) = &stmt.kind {
-            out.push(e);
-        }
-        for child in child_stmts(stmt) {
-            collect_return_exprs(std::slice::from_ref(child), out);
-        }
+        any_stmt_in_body(stmt, |s| {
+            if let StmtKind::Return(Some(e)) = &s.kind {
+                out.push(e);
+            }
+            false
+        });
     }
+}
+
+/// Hands a statement's own expressions and the statements directly in it
+/// back to the promotion walk.
+struct PromotionChildren<'c, 'a, 'l> {
+    checker: &'c mut Checker<'a>,
+    label: &'l str,
+}
+
+impl<'ast> Visitor<'ast> for PromotionChildren<'_, '_, '_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        self.checker
+            .check_function_like_declarations_in_stmt(stmt, self.label);
+    }
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        self.checker.walk_promoted_in_expr(e, self.label);
+    }
+    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
 }
 
 fn is_promoted(p: &Param) -> bool {
@@ -87,14 +106,13 @@ impl<'a> Checker<'a> {
                 self.walk_promoted_in_property_hooks(&fqn, &c.properties);
                 self.current_class = previous_class;
             }
-            _ => {
-                for e in stmt_exprs(stmt) {
-                    self.walk_promoted_in_expr(e, label);
-                }
-                for child in child_stmts(stmt) {
-                    self.check_function_like_declarations_in_stmt(child, label);
-                }
-            }
+            _ => walk_stmt(
+                &mut PromotionChildren {
+                    checker: self,
+                    label,
+                },
+                stmt,
+            ),
         }
     }
 
