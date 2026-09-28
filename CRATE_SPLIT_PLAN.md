@@ -1234,7 +1234,9 @@ Follow-ups:
   `Class::method`, an array only as `[object|class-string, method]` with the
   method existing, and a class-string literal must name a class within the
   bound. Today `'no_such_function'`, `[1, 2]` and `'stdClass'` for
-  `class-string<DateTimeInterface>` are accepted.
+  `class-string<DateTimeInterface>` are accepted. A plain `string` isn't a
+  `class-string` either: `make($s)` for `@param class-string<T> $c` is
+  `argument.type` in PHPStan and accepted today.
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
   member covers (`A|B` for `B extends A` stays two members). Identical
   members collapse too: a closure parameter today reaches
@@ -1538,9 +1540,10 @@ Follow-ups:
   every lookup, `checker/imports.rs`'s `use const` check and
   `dynamic_constant_names` included.
 - **`generalize`** keeps list-ness and the key type and flattens unions.
-- **`RuleLevelHelper` owns the rule** (E5): the level thresholds, benevolent
-  unions and strict mixed arrays move out of `types::Relation::accepts`,
-  and `types::Relation` loses `configured_level`, `strict_mixed_arrays` and
+- **`RuleLevelHelper` owns the rule** (E3's prologue): the level
+  thresholds, benevolent unions and strict mixed arrays move out of
+  `types::Relation::accepts`, and `types::Relation` loses
+  `configured_level`, `strict_mixed_arrays` and
   `check_benevolent_union_types`.
 - **Assertion tables** are reapplied on reconfigure until C6 compiles them
   to overlays.
@@ -2530,6 +2533,9 @@ deleted; the file-size gate.
       `$matches` (41 findings, in each of its three copies).
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
       is `Closure(): mixed` today instead of returning a `Generator`.
+    - **`new $c()`** for a `class-string<T> $c` is `T` (`NewHandler`); it is
+      `mixed` today, so `function make(string $c) { return new $c(); }`
+      with `@return T` is `return.type` "expected T, got mixed".
     - **`new` into a generic property**: `$this->c = new Coll();` for a
       `@var Coll<int>` property types the `new` as `Coll<int>`
       (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
@@ -2981,7 +2987,16 @@ building on the previous one:
 
 - Scope API (§3.8's list);
 - TypeSpecifier made public, with the type-specifying extension hooks;
-- returned-error `Rule` and dispatcher;
+- returned-error `Rule` and dispatcher: rules return `RuleError`s built by
+  `RuleErrorBuilder`, and the dispatcher turns each into a `Diagnostic`,
+  attaching the file and the trait file (a trait method's error analysed in
+  a using class carries the trait's file). Each rule declares its
+  identifiers as prefix × suffix sets, the dispatcher debug-asserts every
+  error against its rule's declaration, and the `format!`-built
+  identifiers (about 40 sites) become family members. An
+  `[[ignore_errors]]` entry whose identifiers all lie outside every family
+  is never reported unmatched: it names a check phpstan-rs doesn't have,
+  not a stale entry;
 - the rest of the derived-node catalogue (D2 and D4 emit the execution-end,
   unreachable-statement and call-expression nodes) plus the site-mapping
   table, recounted at D6 (543 report sites at `76e738b4`);
@@ -2994,6 +3009,18 @@ building on the previous one:
 - porting the external `Rule`/`ReflectionRule` users.
 
 ### Stage E: everything out of the engine (in the package, module-gated)
+
+Each rule is moved once, onto its final API: D6's returned-error `Rule`,
+`RuleErrorBuilder` and identifier families, and E3's prologue, which lands
+`RuleLevelHelper::find_type_to_check` and the rule → level table before any
+rule moves. The level-dependent checks are then one mechanism instead of a
+per-rule decision: on the corpus oracle's 941 files at `76e738b4` (level 10,
+PHP version pinned), about 2,900 of the 10,432 findings PHPStan reports and
+phpstan-rs doesn't are a rule that doesn't treat an implicit `mixed`
+operand as reportable (listed under E3b). Findings phpstan-rs reports
+that PHPStan doesn't are mostly the corpus's own strict-rules-style
+extensions (`*.condNotBoolean`, `staticMethod.dynamicCall`,
+`possiblyImpure.*`), which the extension-free oracle doesn't load.
 
 **E1. Collectors and project-level rules**, one commit each:
 
@@ -3061,16 +3088,14 @@ building on the previous one:
   - `mb_strtolower`, `mb_strtoupper` and `mb_convert_case` fold only ASCII in
     a literal: `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` and
     `mb_convert_case('Česká republika', MB_CASE_UPPER)` is
-    `'ČESKá REPUBLIKA'` (nsrt `str-casing.php`).
-
+    `'ČESKá REPUBLIKA'` (nsrt `str-casing.php`);
   - a call PHP 8 rejects with a `TypeError` or `ValueError` returns
     `*NEVER*`, so the code after it is unreachable: `array_combine([1, 2],
     [3])`, `array_chunk($a, 0)`, `array_flip`/`array_keys` of a non-array,
     `round('x')` under `strict_types`; today each returns its ordinary
     type (304 nsrt `*NEVER*` expectations, most of them in these
     functions' `-php8` files, `round-php8*.php`, `math.php` and the BcMath
-    files).
-
+    files);
   - the built-in narrowing predicates follow the 2.2.16
     `*TypeSpecifyingExtension`s; compared one by one, these leave the type
     wider today: `array_key_exists($k, $a)` doesn't narrow `$k` to the key
@@ -3094,73 +3119,130 @@ building on the previous one:
 
 Gate: the analyser's built-in-name allowlist.
 
-**E3. Every diagnostic to `rules`/ext modules.** Sub-phases grouped by
-derived node, each listing its Appendix A rows:
+**E3. Every diagnostic to `rules`/ext modules.**
+
+The prologue, one commit each, before any rule moves:
+
+- `RuleLevelHelper::find_type_to_check` (PHPStan's `findTypeToCheck`): a
+  rule asks it for the operand type to check and gets PHPStan's
+  `FoundTypeResult` (the type with the level's mixed, union and nullable
+  handling applied, plus the unknown-class errors). Today
+  `RuleLevelHelper` only carries the three settings into
+  `types::Relation`, and each rule decides for itself whether a `mixed`
+  operand is reportable;
+- `RuleLevelHelper::accepts` takes the level-dependent acceptance out of
+  `types::Relation::accepts` (`configured_level`, `strict_mixed_arrays`
+  and `check_benevolent_union_types` leave `types::Relation`);
+- the rule → level table (§3.9), cross-checked against the level neon files,
+  each rule registered at its level, and the level filter in the dispatcher:
+  rules above the level never run. It replaces the CLI's
+  `apply_level_filter` (`MAX_LEVEL = 6`) and the LSP's separate cutoff (§1's
+  level row). It starts from these divergences, measured by
+  running the same probes through PHPStan 2.2.16 and phpstan-rs at every level
+  (first level reporting, PHPStan / phpstan-rs): `isset.variable` and
+  `nullCoalesce.variable` 1 / 0; a maybe-defined or top-level undefined variable
+  1 / 0; `method.notFound` on a receiver other than `$this` 2 / 0; a method or
+  property reached only through `__call`/`__get` 2 / never; a union argument
+  7 / 5 and a union return 7 / 3 (the `.all()` arm in
+  `types::Relation::accepts` below level 7); a maybe-non-offset-accessible
+  7 / 3; a maybe-missing constant-array offset 7 / never; a PHPDoc-only child
+  parameter type conflict 3 / never; `@var array` without a value type
+  6 / never. The approved deltas are these rows.
+- the rest of the diagnostic model (§3.7): AST-node fixes beside text
+  fixes, rendered to diffs through `syntax::printer`, which gains
+  statements and declarations, keeps the surrounding formatting
+  (php-parser's format-preserving printer) and parenthesizes a generated
+  node by precedence (it prints expressions only, as written, and a
+  closure without its body); `accepts` reasons, `Relation::accepts`
+  filling `AcceptsResult.reasons` for the argument, return and property
+  rules to show as tips; PHPStan's standard tip helpers (§3.7:
+  discovering symbols, `treatPhpDocTypesAsCertain`, and the rest).
+
+Then the sub-phases, grouped by derived node, each listing its Appendix A
+rows, and each rule's behaviour commits after its move, each with its
+fixture:
 
 - (a) file-level (`keywords`, `whitespace`, RequireFileExists over the VFS
-  from `includes.rs`);
-- (b) expression-level; the level-9/10 `mixed` checks cover every
-  expression rule: a `foreach` over `mixed` (`foreach.nonIterable`) and an
-  `echo` of `mixed` (`echo.nonString`) aren't reported today at
-  `--level 10` (282 and 39 corpus oracle findings phpstan-rs misses); a
-  non-numeric string offset on a string throws a `TypeError`, and
-  `$s['x']` on a `string` isn't reported today, nor `$d['priority']` on
-  `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
-- (c) calls and member access (a by-reference argument PHP creates on
-  the call is not type-checked against the parameter);
-- (d) assignments and properties (`uninitialized` and
-  `uninitialized_dataflow` rewritten over the ClassPropertiesNode
-  initialization state, with the dataflow walker deleted); an offset write
-  or append checks its container as a read does: `$i['x'] = 3` on an `int`
-  throws at runtime and isn't reported today, and at level 10 neither is
-  `$m['k'] = 1` or `$m[] = 2` on `mixed` (383 corpus oracle findings
-  phpstan-rs misses). A read inside `isset()`/`??`/`empty()` can't fail
-  and stays unreported (331 PHPStan reports on `mixed`);
-- (e) declarations, generics checks and PHPDoc;
-- (f) control flow, returns, throws and generators; a return type that
-  includes `void` accepts falling off the end (fixed first): `@return
-  void|int` on a function that returns only on some paths is
-  `return.missing` today, 10 of the corpus oracle's 38 phpstan-rs-only
-  `return.missing` (the `php_codesniffer` sniffs' `process()`); a
-  conditional return type is resolved at each `return` against the
-  scope's parameter types: after `if ($lazy) { return …; }`, nette's
-  `Strings::matchAll` returns a `list` against `($lazy is true ? Generator
-  : list)`, and `return is_int($value);` under `@return ($value is int ?
-  true : false)` returns `bool`; both are `return.type` today (phpstan-rs
-  reports 12 against a conditional in the corpus; PHPStan reports 1 of the
-  5 checked, e.g. not `nette/utils/src/Utils/Strings.php:538` or
-  `latte/Essential/Filters.php:728`);
+  from `includes.rs`).
+- (b) expression-level:
+  - every operand check goes through `find_type_to_check`, so at level 10
+    an implicit `mixed` is reported everywhere PHPStan reports it. The
+    corpus oracle's misses, by identifier: `binaryOp.invalid` (645, `.`
+    and `+` on `mixed`), `assignOp.invalid` (218), a `mixed` array key or
+    offset (`offsetAccess.invalidOffset` 952 and `array.invalidKey` 223
+    "Possibly invalid array key type mixed"), `encapsedStringPart.nonString`
+    (355), `foreach.nonIterable` (281), `echo.nonString` (39),
+    `cast.string`/`cast.int` (113), `postInc`/`preInc.type` (41) and
+    `callable.nonCallable` (30);
+  - an offset or array key of an invalid type is reported for every
+    type, not only `array`: `$a[$o]` and `$a[$o] = 1` with an object
+    offset and `[$o => 1]` throw a `TypeError` and aren't reported today,
+    nor a `float` offset (`$a[1.5]` truncates);
+  - `++`/`--` check their operand (`postInc.type` and the rest): `$b++` on
+    a `bool` does nothing at runtime and isn't reported today;
+  - a non-numeric string offset on a string throws a `TypeError`:
+    `$s['x']` on a `string` isn't reported today, nor `$d['priority']` on
+    `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
+  - a constant operand of `&&`/`||` is reported on either side: `$b &&
+    true` isn't `booleanAnd.rightAlwaysTrue` today (the left side already
+    is), and the oracle finds 21 `booleanAnd.leftAlwaysTrue` and 23
+    `booleanOr.alwaysFalse` phpstan-rs misses.
+- (c) calls and member access:
+  - a by-reference argument PHP creates on the call is not type-checked
+    against the parameter;
+  - a `void` call's result is reported where it is used (`method.void`,
+    `staticMethod.void`, `function.void`): `$x = $o->v();` for `v(): void`
+    isn't reported today (49 oracle findings, e.g. PSR-3
+    `LoggerInterface::debug()` results);
+  - a template the call can't resolve is `argument.templateType`:
+    `make($s)` for `@param class-string<T> $c` with a plain `string` is
+    unreported today (17 oracle findings).
+- (d) assignments and properties:
+  - `uninitialized` and `uninitialized_dataflow` are rewritten over the
+    ClassPropertiesNode initialization state, with the dataflow walker
+    deleted;
+  - a readonly property read before its initialization is reported
+    (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
+    $this->x; $this->x = 1;` in a constructor isn't reported today (12
+    oracle findings in revolt's event loop drivers);
+  - an offset write or append checks its container as a read does:
+    `$i['x'] = 3` on an `int` throws at runtime and isn't reported today,
+    and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
+    (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
+    fail and stays unreported (331 PHPStan reports on `mixed`).
+- (e) declarations, generics checks and PHPDoc.
+- (f) control flow, returns, throws and generators:
+  - a return type that includes `void` accepts falling off the end (fixed
+    first): `@return void|int` on a function that returns only on some
+    paths is `return.missing` today, 10 of the oracle's 38 phpstan-rs-only
+    `return.missing` (the `php_codesniffer` sniffs' `process()`);
+  - a conditional return type is resolved at each `return` against the
+    scope's parameter types: after `if ($lazy) { return …; }`, nette's
+    `Strings::matchAll` returns a `list` against `($lazy is true ?
+    Generator : list)`, and `return is_int($value);` under `@return ($value
+    is int ? true : false)` returns `bool`; both are `return.type` today
+    (phpstan-rs reports 12 against a conditional in the corpus; PHPStan
+    reports 1 of the 5 checked, e.g. not
+    `nette/utils/src/Utils/Strings.php:538` or
+    `latte/Essential/Filters.php:728`);
+  - a `yield` is checked against the declared generator or iterable key
+    and value types (`YieldTypeRule`): `yield 1` under `@return
+    Generator<int, string>` or `iterable<int, string>` is unreported today;
+    only `yield from` delegation is checked (28 oracle
+    `generator.valueType` findings);
+  - a `catch` its `try` can't reach is `catch.neverThrown` (from D2's
+    throw points): `try { $q = 1; } catch (\Throwable $e) {}` and a
+    `catch (\LogicException)` around a call declared `@throws
+    \RuntimeException` are unreported today.
 - (g) the restricted-usage framework: `@internal` core, deprecation
-  (ext-deprecation-rules), disallowed-calls, and `phpstan_api`;
-- (h) `FileAssertRule`, the dump rules and the four asserts;
+  (ext-deprecation-rules), disallowed-calls, and `phpstan_api`.
+- (h) `FileAssertRule` (with the `assertNativeType` and
+  `assertVariableCertainty` support Stage D's oracle added), the dump rules
+  and the four asserts.
 - (i) semantic-token predicates exposed.
 
 Mixed modules are split row by row (Appendix A). Gate: architecture rule 10
 for the analyser.
-
-The rest of the diagnostic model (§3.7), each its own commit:
-
-- `RuleError` and `RuleErrorBuilder`: rules return them, and the dispatcher
-  turns each into a `Diagnostic`;
-- file and trait file on every diagnostic, attached by the dispatcher (a
-  trait method's error analysed in a using class carries the trait's
-  file);
-- identifier families: each rule declares its identifiers as prefix ×
-  suffix sets, the dispatcher debug-asserts every error against its rule's
-  declaration, and the `format!`-built identifiers (about 40 sites)
-  become family members. An `[[ignore_errors]]` entry whose identifiers all
-  lie outside every family is never reported unmatched: it names a check
-  phpstan-rs doesn't have, not a stale entry;
-- AST-node fixes beside text fixes, rendered to diffs through
-  `syntax::printer`, which gains statements and declarations, keeps the
-  surrounding formatting (php-parser's format-preserving printer) and
-  parenthesizes a generated node by precedence (it prints expressions only,
-  as written, and a closure without its body);
-- `accepts` reasons: `Relation::accepts` fills `AcceptsResult.reasons`, and
-  the argument, return and property type rules show them as tips;
-- PHPStan's standard tip helpers (§3.7: discovering symbols,
-  `treatPhpDocTypesAsCertain`, and the rest), used by the rules that show
-  those tips.
 
 **E4. Extension modules.**
 
@@ -3189,26 +3271,12 @@ The rest of the diagnostic model (§3.7), each its own commit:
   fixtures for aliasing, statement mutation and arguments that change
   between assignment and use.
 
-**E5. Levels** (§3.9): the ladder, `RuleLevelHelper` parameters, computed-level
-sites, the default level, and the replacement consumers for JSON and the LSP.
-The level-dependent acceptance in `types::Relation::accepts` moves into
-`RuleLevelHelper::accepts`/ `find_type_to_check`, and `types::Relation` loses
-its `configured_level`, `strict_mixed_arrays` and `check_benevolent_union_types`
-fields. The level tests become level-header fixtures. LevelsTestCase fixtures
-are added. Gate: for every level in 0..=10 plus unset, before == after, except
-approved deltas.
-
-The rule → level table starts from these divergences, measured by running
-the same probes through PHPStan 2.2.16 and phpstan-rs at every level
-(first level reporting, PHPStan / phpstan-rs): `isset.variable` and
-`nullCoalesce.variable` 1 / 0; a maybe-defined or top-level undefined
-variable 1 / 0; `method.notFound` on a receiver other than `$this` 2 / 0;
-a method or property reached only through `__call`/`__get` 2 / never; a
-union argument 7 / 5 and a union return 7 / 3 (the `.all()` arm in
-`types::Relation::accepts` below level 7); a maybe-non-offset-accessible
-7 / 3; a maybe-missing constant-array offset 7 / never; a PHPDoc-only
-child parameter type conflict 3 / never; `@var array` without a value
-type 6 / never. The approved deltas are these rows.
+**E5. Levels** (§3.9), after E3 moved every rule at its level: the `max`
+alias, the default level for CLI and LSP, and the replacement consumers for
+JSON and the LSP (`Diagnostic.level` goes). The level tests become
+level-header fixtures, and LevelsTestCase fixtures are added. Gate: for
+every level in 0..=10 plus unset, before == after, except the approved
+deltas E3's table names.
 
 **E6. Observers.** LSP-only presentation (semantic tokens, inlay hints,
 hover, definition probes) on observer events.
@@ -3222,8 +3290,9 @@ engine context, file state, function frame and traversal context
 **F1. Session** (§3.10), one commit each:
 
 - `AnalysisResult` (`project::session::AnalysisResult`);
-- the finalizer (`AnalysisResult::finalize`, with a temporary level stage
-  E5 removes; the LSP moves onto it in this phase's parity commits);
+- the finalizer (`AnalysisResult::finalize`, with no level stage: E3's
+  dispatcher already filters by level; the LSP moves onto it in this
+  phase's parity commits);
 - entry points;
 - the VFS;
 - panic isolation;
@@ -3320,7 +3389,7 @@ moves in the phase named.
 | registry/assignability | types (unified relation) + analyser RuleLevelHelper | B4/C2 |
 | registry/assertion_table, assertion_tables | reflection overlays; defaults → ext-nette-tester / ext-mockery | C6 |
 | checker/predefined_constants, checker/constant_resolver | reflection ConstantResolver | C2 |
-| checker/rule_level_helper | analyser RuleLevelHelper | C2/E5 |
+| checker/rule_level_helper | analyser RuleLevelHelper | C2/E3 |
 | registry/purity, registry/global_vars | analyser summaries | C9 |
 | registry/access_attributes | ext-language-extensions (class-reflection data ext) | C8 |
 | registry/class_info/doctrine_entity | ext-doctrine (class-reflection data ext) | C8 |
@@ -3562,6 +3631,12 @@ its owner. Non-Registry keys follow the table.
   dropping `$this->…` narrowing (D5) and `finally` reads of variables the
   `try` assigns (D5) and `return.missing` on a `void|…` return type (E3f),
   each a false positive on ordinary code; D2 and D5 name the interim fix.
+- **Stage E order.** Each rule moves once, onto its final API: D6 lands
+  the returned-error `Rule` with `RuleErrorBuilder` and the identifier
+  families, E3's prologue lands `RuleLevelHelper::find_type_to_check`,
+  `RuleLevelHelper::accepts` and the rule → level table, and only then do
+  the sub-phases move rules. Moving rules first and adding levels or the
+  error builder after would edit each of them twice.
 - **Stage D order.** Structure before semantics: holders (D1), statement
   results and handlers (D2), one inference path with the TypeSpecifier
   (D3), the sink (D4), then the semantics (D5) and the public APIs (D6).
