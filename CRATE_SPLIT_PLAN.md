@@ -1401,7 +1401,18 @@ Follow-ups:
   52}" today (the rules oracle's `bug-8683.php`). An integer range is
   accepted by a union of the constants it spans: `int<0, 3>` by `0|1|2|3`
   is `assign.propertyType` today (`bug-3383.php`,
-  `int-ranges-and-constants.php`).
+  `int-ranges-and-constants.php`). In the other direction these are
+  accepted today and are not: a template `T` (bound `mixed`) passed to an
+  `int` parameter (`check-explicit-mixed.php:65`,
+  `check-implicit-mixed.php:65`, `call-static-method-mixed.php:81`); a
+  `stdClass` or plain `object` for an object shape (`object{foo: int, bar:
+  string}`; `object-shapes.php`, 7); an array whose key type isn't covered
+  (`array<int>`, keys `int|string`, for `array<string, int>`,
+  `bug-3107.php`).
+- **Conditional parameter types** resolve per call: `@param ($flags is 256
+  ? string : bool) $demoArg` takes a `string` only when `$flags` is `256`;
+  `cond('s')` and `cond(true, 256)` are unreported today
+  (`conditional-param.php`, 3).
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
   member covers (`A|B` for `B extends A` stays two members). Identical
   members collapse too: a closure parameter today reaches
@@ -2264,7 +2275,10 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   and `offsetSet($offset, $value)` read `$offset`/`$value` as `mixed`
   today where the stub's `TKey`/`TValue` give `string`/`int`, so
   `key_exists($offset, $this->args)` is `argument.type` (the rules
-  oracle's `bug-12984.php`);
+  oracle's `bug-12984.php`), and a generic built-in's methods read its
+  arguments: `$ao->append(new Exception())` on `ArrayObject<int,
+  stdClass>` is unreported today (3 findings in
+  `calling-method-with-phpDocs-implicit-inheritance.php`);
 - declarative patch entries replacing the Rust patch functions;
 - the `functionMap.php` layer: `stub-sources` embeds
   `resources/functionMap.php` and the seven
@@ -2922,7 +2936,12 @@ deleted; the file-size gate.
       arrow function's parameter takes its type and the statement is a
       call: `5 |> (fn ($x) => $foo->m($x))` gives `$x` `mixed` (an
       `argument.type` at level 10) and is `expr.resultUnused` today (the
-      rules oracle's `call-to-method-without-impure-points-pipe.php`).
+      rules oracle's `call-to-method-without-impure-points-pipe.php`). The
+      left side is checked against the callable's first parameter: `'Hello'
+      |> doBar(...)` and `$this->doFoo(1) |> $this->doBar(...)` for
+      `doBar(int $i)` are unreported today (10 rules-oracle findings,
+      `func-call-pipe.php`, `method-call-pipe.php`, `static-call-pipe.php`,
+      `call-callable-pipe.php`, `pipe-operator.php`).
     - **Magic constants** type as their values: `__DIR__`, `__FILE__`,
       `__LINE__`, `__CLASS__`, `__FUNCTION__`, `__METHOD__`,
       `__NAMESPACE__`, `__TRAIT__` and `__PROPERTY__` are all `mixed` today
@@ -3065,6 +3084,19 @@ deleted; the file-size gate.
       `$who` `mixed` and is `argument.type` "expects callable(A): array,
       Closure(static): array{} given" today (the rules oracle's
       `bug-11591.php`, `bug-14893.php`).
+    - **An inherited constructor** takes the child's ancestor bindings:
+      `new Foo(['foo' => 1])` for a parent constructor's `@param T $d`
+      under `@extends P<array{foo: int, bar: int}>` is unreported today
+      (a method call already binds; the rules oracle's `bug-14138.php`).
+    - **A dynamic method name** that is a constant string resolves the
+      method: `$name = 'doFoo'; $this->$name('x')` and `self::$name(…)`
+      check the arguments against `doFoo()`, unreported today
+      (`dynamic-call.php`, 5).
+    - **`call_user_func()`/`call_user_func_array()`** check their arguments
+      against the callable's parameters, named ones and array keys
+      included (`call_user_func($f, 'foo')` for `function (int $i)` is
+      unreported today; 8 rules-oracle findings, `call-user-func.php`,
+      `call-user-func-array.php`).
     - **A variadic parameter** is `list<T>` in the body under
       `@no-named-arguments` and `array<int|string, T>` otherwise; it is
       `array<T>` today, so `$this->b = $b` into `list<B>` is
@@ -4003,7 +4035,13 @@ The prologue, one commit each, before any rule moves:
   handling applied, plus the unknown-class errors). Today
   `RuleLevelHelper` only carries the three settings into
   `types::Relation`, and each rule decides for itself whether a `mixed`
-  operand is reportable;
+  operand is reportable. The implicit `mixed` inside a type counts too:
+  at level 10 a plain `array` (or `array<mixed>` from untyped data)
+  passed to `array<string>`, `array<literal-string>` or a shape is
+  `argument.type`, unreported today (`bug-14234.php`, `bug-6443.php`,
+  `vprintf.php`, `discussion-7004.php`, `literal-string.php`,
+  `bug-14549-bis.php`, `call-methods.php:1332`, `invalid-binary.php:127`
+  among the rules oracle's PHPStan-only `argument.type`);
 - `RuleLevelHelper::accepts` takes the level-dependent acceptance out of
   `types::Relation::accepts` (`configured_level`, `strict_mixed_arrays`
   and `check_benevolent_union_types` leave `types::Relation`);
@@ -4211,6 +4249,17 @@ fixture:
     `function-with-variadic-parameters.php`, `bug-15168.php`,
     `first-class-callable-function-without-side-effect.php` and the
     rest);
+  - arrays passed where PHP casts their values to string are checked for
+    castable values (`ParameterCastableToStringRule` and its sort
+    variant): `array_fill_keys([E::A], …)`, `array_diff`/`array_intersect`
+    and their `_assoc` forms, `array_combine`, `array_count_values`,
+    `array_unique`, `natsort`/`natcasesort`, `sort`/`rsort`/`asort`/
+    `arsort` of enum cases or arrays, and `implode`/`join` of such an
+    array, are unreported today (about 35 rules-oracle findings,
+    `param-castable-to-string-functions*.php`,
+    `sort-param-castable-to-string-functions-enum.php`, `bug-11111.php`,
+    `bug-11141.php`, `bug-3946.php`); phpstan-rs checks the
+    castable-to-number variant already;
   - a template the call can't resolve is `argument.templateType`:
     `make($s)` for `@param class-string<T> $c` with a plain `string` is
     unreported today (17 oracle findings).
