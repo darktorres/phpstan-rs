@@ -3417,7 +3417,16 @@ for the analyser.
      (`phpunit.mockMethod`), and data providers that are missing, private
      or non-static (`phpunit.dataProvider*`). Its `test.risky` has no
      phpstan-phpunit counterpart and stays;
-  4. ext-pest (closure-this, the file-set hook, pest risky tests);
+  4. ext-pest (closure-this, the file-set hook, pest risky tests), then
+     pest-plugin-phpstan's rules, none of which exist today (checked
+     against the vendored plugin's 20 identifiers): duplicate test
+     descriptions, invalid group names, static or empty test closures,
+     invalid `->repeat()` values, `beforeAll`/`afterAll` inside `describe`
+     and their `$this` use, `covers()` of a missing class or function,
+     `throws()` of a missing or non-`Throwable` class, `describe()` without
+     tests, the expectation checks (`toBeString()`-style requirements on
+     the value, impossible and redundant expectations) and a redundant
+     local `uses()`;
   5. ext-nette-tester;
   6. ext-strict-rules, completing phpstan-strict-rules: today's 11 toggles
      cover parent-constructor calls, boolean conditions, useless casts,
