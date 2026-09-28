@@ -47,7 +47,9 @@ fn stmt_contains_explicit_throw(stmt: &Stmt) -> Option<Span> {
         StmtKind::Expression(e) => expr_contains_explicit_throw(e),
         StmtKind::Return(Some(e)) => expr_contains_explicit_throw(e),
         StmtKind::Return(None) => None,
-        StmtKind::Echo(exprs) => exprs.iter().find_map(expr_contains_explicit_throw),
+        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
+            exprs.iter().find_map(expr_contains_explicit_throw)
+        }
         StmtKind::If { cond, .. }
         | StmtKind::While { cond, .. }
         | StmtKind::DoWhile { cond, .. } => expr_contains_explicit_throw(cond),

@@ -420,6 +420,20 @@ impl Parser {
                         None
                     };
                     self.expr(ExprKind::Exit(kind, arg), start)
+                } else if name.eq_ignore_ascii_case("isset") && self.check(&Token::LParen) {
+                    let (args, _) = self.parse_args()?;
+                    let operands = args.into_iter().map(|a| a.value).collect();
+                    self.expr(ExprKind::Isset(operands), start)
+                } else if name.eq_ignore_ascii_case("empty") && self.check(&Token::LParen) {
+                    let paren = self.spans.get(self.pos).copied().unwrap_or_default();
+                    let (args, _) = self.parse_args()?;
+                    let Some(operand) = args.into_iter().next() else {
+                        return Err(ParseError {
+                            message: "parse error: empty() needs an operand".to_string(),
+                            span: paren,
+                        });
+                    };
+                    self.expr(ExprKind::Empty(Box::new(operand.value)), start)
                 } else if name.eq_ignore_ascii_case("eval") && self.check(&Token::LParen) {
                     let paren = self.spans.get(self.pos).copied().unwrap_or_default();
                     let (args, _) = self.parse_args()?;

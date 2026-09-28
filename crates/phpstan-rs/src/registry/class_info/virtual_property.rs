@@ -136,7 +136,7 @@ fn stmt_expr_fields(stmt: &Stmt) -> Vec<&Expr> {
     match &stmt.kind {
         StmtKind::Expression(e) | StmtKind::Throw(e) => vec![e],
         StmtKind::Return(Some(e)) => vec![e],
-        StmtKind::Echo(exprs) => exprs.iter().collect(),
+        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => exprs.iter().collect(),
         StmtKind::If { cond, .. }
         | StmtKind::While { cond, .. }
         | StmtKind::DoWhile { cond, .. } => vec![cond],

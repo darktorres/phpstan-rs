@@ -224,3 +224,21 @@ fn foreach_alt_syntax_parses_its_body_via_parse_alt_block() {
     };
     assert!(matches!(&body.kind, StmtKind::Block(s) if s.len() == 2));
 }
+
+#[test]
+fn isset_empty_and_unset_are_their_own_nodes() {
+    let program = parse("<?php\n$a = isset($x, $y['k']) || empty($z);\nunset($x, $y['k']);\n");
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected an assignment, got {:?}", program[0].kind);
+    };
+    let ExprKind::Binary(_, isset, empty) = &rhs.kind else {
+        panic!("expected a binary, got {:?}", rhs.kind);
+    };
+    assert!(matches!(&isset.kind, ExprKind::Isset(operands) if operands.len() == 2));
+    assert!(matches!(&empty.kind, ExprKind::Empty(_)));
+    assert!(matches!(&program[1].kind, StmtKind::Unset(targets) if targets.len() == 2));
+}

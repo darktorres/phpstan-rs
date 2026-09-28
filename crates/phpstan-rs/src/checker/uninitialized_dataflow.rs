@@ -158,10 +158,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn is_unset_call(callee: &Expr) -> bool {
-    matches!(&callee.kind, ExprKind::Name(name) if name == "unset")
-}
-
 fn is_this(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Variable(v) if **v == *"this")
 }
@@ -194,10 +190,6 @@ fn resolves_to_this(e: &Expr, ctx: &PropertyInitCtx) -> bool {
 
 fn intersect(a: PropertyInitState, b: &PropertyInitState) -> PropertyInitState {
     a.into_iter().filter(|k| b.contains(k)).collect()
-}
-
-fn is_probe_call(callee: &Expr) -> bool {
-    matches!(&callee.kind, ExprKind::Name(name) if name == "isset" || name == "empty")
 }
 
 /// Walks an `isset()`/`empty()`/bare-`??`-quieted expression - real PHP
@@ -302,6 +294,21 @@ fn walk_stmt(
         | StmtKind::Declare {
             body: Some(stmts), ..
         } => walk_stmts(stmts, state, ctx, declaring_class),
+        // `unset($this->prop)` is neither a read nor an initializer: it
+        // never throws whatever the property's state, and leaves a typed
+        // property uninitialized again.
+        StmtKind::Unset(targets) => {
+            for target in targets {
+                if let ExprKind::PropertyAccess(base, name, _) = &target.kind
+                    && is_this(base)
+                {
+                    state = state.without(&*name.name);
+                    continue;
+                }
+                state = walk_expr(target, state, ctx, declaring_class);
+            }
+            state
+        }
         StmtKind::If {
             cond,
             then_branch,
@@ -466,29 +473,13 @@ fn walk_expr(
         // `isset($this->prop)`/`empty($this->prop)` - same quiet-probe
         // exemption as `??`'s left side, and neither one ever initializes
         // anything.
-        ExprKind::Call(callee, args) if is_probe_call(callee) => {
-            for a in args {
-                state = walk_quiet_probe(&a.value, state, ctx, declaring_class);
+        ExprKind::Isset(operands) => {
+            for operand in operands {
+                state = walk_quiet_probe(operand, state, ctx, declaring_class);
             }
             state
         }
-        // `unset($this->prop)` is neither a read nor an initializer:
-        // `unset` never throws regardless of the property's current init
-        // state, matching `check_expr`'s identical `unset`-recognition
-        // (`checker/expr.rs`). Genuinely removes the property afterward
-        // (a typed property, once unset, is uninitialized again).
-        ExprKind::Call(callee, args) if is_unset_call(callee) => {
-            for a in args {
-                if let ExprKind::PropertyAccess(base, name, _) = &a.value.kind
-                    && is_this(base)
-                {
-                    state = state.without(&*name.name);
-                    continue;
-                }
-                state = walk_expr(&a.value, state, ctx, declaring_class);
-            }
-            state
-        }
+        ExprKind::Empty(operand) => walk_quiet_probe(operand, state, ctx, declaring_class),
         ExprKind::MethodCall(recv, name, args, _) => {
             state = walk_expr(recv, state, ctx, declaring_class);
             for a in args {

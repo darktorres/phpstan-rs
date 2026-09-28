@@ -1,4 +1,3 @@
-use crate::checker::calls::is_language_construct;
 use crate::checker::{Checker, Locals, narrow_type_excluding};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
@@ -33,9 +32,6 @@ impl<'a> Checker<'a> {
                 let ExprKind::Name(name) = &callee.kind else {
                     return;
                 };
-                if is_language_construct(name) {
-                    return;
-                }
                 let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
                 let Some((resolved_name, sig)) = self
                     .registry

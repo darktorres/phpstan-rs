@@ -223,15 +223,11 @@ fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
 fn truthiness_discriminant_subject(cond: &Expr) -> Option<String> {
     match &cond.kind {
         ExprKind::Variable(_) => narrowing_key(cond),
-        ExprKind::Call(callee, args) => {
-            let ExprKind::Name(name) = &callee.kind else {
+        ExprKind::Isset(operands) => {
+            let [operand] = operands.as_slice() else {
                 return None;
             };
-            let [single_arg] = args.as_slice() else {
-                return None;
-            };
-            let key = narrowing_key(&single_arg.value)?;
-            (name.trim_start_matches('\\') == "isset").then(|| format!("isset({key})"))
+            Some(format!("isset({})", narrowing_key(operand)?))
         }
         _ => None,
     }
@@ -905,6 +901,42 @@ impl<'a> Checker<'a> {
             ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => {
                 self.apply_narrowing(inner, locals, branch_true);
             }
+            // `empty($x)` is PHP's own falsy check - only the branch where
+            // it evaluated `false` (`$x` proven truthy) is safely
+            // narrowable, the same asymmetry as a bare truthiness check.
+            ExprKind::Empty(operand) => {
+                if !branch_true && let Some(key) = narrowing_key(operand) {
+                    let current = self.current_narrowed_type(operand, &key, locals);
+                    locals.insert(key, narrow_type_excluding_falsy(&current));
+                }
+            }
+            // `isset($x)`'s truthy branch means specifically "not null" -
+            // it's true for `0`, `''`, `false`, an empty array - so this
+            // narrows only `Null` away. The false branch isn't narrowable:
+            // it doesn't say which operand was unset.
+            ExprKind::Isset(operands) => {
+                if let [operand] = operands.as_slice()
+                    && let Some(key) = narrowing_key(operand)
+                {
+                    // The identical `isset($x)` re-checked later replays
+                    // what the first occurrence's matching branch learned
+                    // (`truthiness_discriminant_subject`), both branches.
+                    self.replay_truthiness_discriminant_facts(
+                        &format!("isset({key})"),
+                        locals,
+                        branch_true,
+                    );
+                }
+                if branch_true {
+                    for operand in operands {
+                        if let Some(key) = narrowing_key(operand) {
+                            let current = self.current_narrowed_type(operand, &key, locals);
+                            locals.insert(key, narrow_type_excluding(&current, &Type::Null));
+                        }
+                        self.narrow_isset_containers(operand, locals);
+                    }
+                }
+            }
             ExprKind::Call(callee, args) => {
                 // `narrowing_key`, not a bare `ExprKind::
                 // Variable` match - without this, `is_string($arr['key'])`
@@ -927,46 +959,7 @@ impl<'a> Checker<'a> {
                     // `is_iterable($value)` guard) needs stripping the
                     // backslash first.
                     let name = name.trim_start_matches('\\');
-                    if name == "empty" {
-                        // `empty($x)` is PHP's own falsy check - only the
-                        // branch where it evaluated `false` (`$x` proven
-                        // truthy) is safely narrowable, the same asymmetry
-                        // as a bare truthiness check.
-                        if !branch_true {
-                            let current =
-                                self.current_narrowed_type(&single_arg.value, &key, locals);
-                            locals.insert(key, narrow_type_excluding_falsy(&current));
-                        }
-                    } else if name == "isset" {
-                        // `isset($x)`'s truthy branch means
-                        // specifically "not null" - it's true for `0`,
-                        // `''`, `false`, an empty array, every falsy-but-
-                        // non-null value - so this narrows only `Null`
-                        // away, unlike `empty()`'s full falsy exclusion
-                        // above. The false branch isn't safely narrowable
-                        // to anything more specific, the same asymmetry
-                        // `empty`/the truthy fallback below already accept.
-                        //
-                        // Same-condition-recurrence replay
-                        // (`truthiness_discriminant_subject`'s own doc
-                        // comment): the identical `isset($x)` re-checked
-                        // later, even in a fresh, lexically-unrelated
-                        // `if`/`else`, replays whatever the first
-                        // occurrence's own matching branch already
-                        // learned - both branches, unlike the narrowing
-                        // just below, which is truthy-only.
-                        self.replay_truthiness_discriminant_facts(
-                            &format!("isset({key})"),
-                            locals,
-                            branch_true,
-                        );
-                        if branch_true {
-                            let current =
-                                self.current_narrowed_type(&single_arg.value, &key, locals);
-                            locals.insert(key, narrow_type_excluding(&current, &Type::Null));
-                            self.narrow_isset_containers(&single_arg.value, locals);
-                        }
-                    } else if name == "count" && branch_true {
+                    if name == "count" && branch_true {
                         // A bare `if (count($x))`/`while
                         // (count($x))` truthiness check, not the `> 0`/
                         // `>= 1` comparison form the `Binary` arm above
@@ -1061,28 +1054,6 @@ impl<'a> Checker<'a> {
                     };
                     if let Some(narrowed) = narrowed {
                         locals.insert(key, narrowed);
-                    }
-                } else if let ExprKind::Name(name) = &callee.kind
-                    && name.trim_start_matches('\\') == "isset"
-                    && branch_true
-                    && args.len() > 1
-                {
-                    // Real PHP's `isset()` is genuinely variadic
-                    // (`isset($a, $b, ...)`, equivalent to `isset($a) &&
-                    // isset($b) && ...` - *every* argument must be set) -
-                    // the single-arg dispatch above's own `[single_arg]`
-                    // slice pattern never matches here at all, silently
-                    // narrowing none of them, not just the ones past
-                    // the first. Only the true branch is narrowable, the
-                    // same asymmetry the single-arg case above already
-                    // has (a multi-arg `isset()` being false doesn't say
-                    // which argument was unset).
-                    for arg in args {
-                        if let Some(key) = narrowing_key(&arg.value) {
-                            let current = self.current_narrowed_type(&arg.value, &key, locals);
-                            locals.insert(key, narrow_type_excluding(&current, &Type::Null));
-                        }
-                        self.narrow_isset_containers(&arg.value, locals);
                     }
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "array_key_exists"

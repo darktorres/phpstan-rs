@@ -288,6 +288,21 @@ fn write_expr(out: &mut String, e: &Expr) {
             write_expr(out, callee);
             write_args(out, args);
         }
+        ExprKind::Isset(operands) => {
+            out.push_str("isset(");
+            for (i, operand) in operands.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                write_expr(out, operand);
+            }
+            out.push(')');
+        }
+        ExprKind::Empty(operand) => {
+            out.push_str("empty(");
+            write_expr(out, operand);
+            out.push(')');
+        }
         ExprKind::Print(inner) => {
             out.push_str("print ");
             write_expr(out, inner);

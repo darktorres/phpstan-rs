@@ -110,6 +110,8 @@ pub enum StmtKind {
     Break(Option<i64>),
     Continue(Option<i64>),
     Global(Vec<GlobalVar>),
+    // `unset($a, $b[1], ...)`.
+    Unset(Vec<Expr>),
     FunctionDecl(FunctionDecl),
     ClassDecl(ClassDecl),
     Namespace(String),
@@ -1196,6 +1198,10 @@ pub enum ExprKind {
     // `` `cmd $interpolated` ``: runs the command, as `shell_exec()` does.
     // Holds the command string.
     ShellExec(Box<Expr>),
+    // `isset($a, $b, ...)`: whether every operand is set and not null.
+    Isset(Vec<Expr>),
+    // `empty(expr)`: whether the operand is unset or falsy.
+    Empty(Box<Expr>),
     // `print expr`, which evaluates to `1`.
     Print(Box<Expr>),
     // `exit`/`die`, with its status or message when one is given.

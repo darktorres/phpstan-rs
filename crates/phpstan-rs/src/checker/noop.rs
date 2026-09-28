@@ -33,10 +33,6 @@ enum Effects {
     Some,
 }
 
-fn is_pure_language_construct(callee: &Expr) -> bool {
-    matches!(&callee.kind, ExprKind::Name(n) if n.eq_ignore_ascii_case("isset") || n.eq_ignore_ascii_case("empty"))
-}
-
 fn is_local_assign_target(target: &Expr) -> bool {
     match &target.kind {
         ExprKind::Variable(name) => name.as_ref() != "this",
@@ -55,7 +51,6 @@ fn is_local_assign_target(target: &Expr) -> bool {
 /// doesn't count.
 fn expr_side_effects(e: &Expr) -> Effects {
     let own = match &e.kind {
-        ExprKind::Call(callee, _) if is_pure_language_construct(callee) => Effects::None,
         ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _)
             if is_local_assign_target(target) =>
         {

@@ -61,7 +61,7 @@ fn walk_stmt_for_vars(stmt: &Stmt, names: &mut FxHashSet<Arc<str>>, escaped: &mu
     match &stmt.kind {
         StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr_for_vars(e, names, escaped),
         StmtKind::Return(Some(e)) => walk_expr_for_vars(e, names, escaped),
-        StmtKind::Echo(exprs) => {
+        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
             for e in exprs {
                 walk_expr_for_vars(e, names, escaped);
             }

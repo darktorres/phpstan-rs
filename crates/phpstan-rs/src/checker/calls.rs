@@ -803,27 +803,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// PHP superglobals are implicitly defined in every scope without any
-/// assignment ever appearing in source - undefined-variable detection must
-/// never flag these.
-/// Real PHP language constructs that are syntactically indistinguishable
-/// from an ordinary function call in this parser (none of `isset`,
-/// `empty`, `unset` are lexed as keywords - see
-/// `token.rs` - so `isset($x)` parses as `ExprKind::Call(Name("isset"), ...)`
-/// exactly like a real call). None of them are declared in any stub
-/// source (they're compiler intrinsics, not functions - a real PHP
-/// function can be called through a variable, `$f = 'isset'; $f();` is a
-/// fatal error), so without this list every real codebase's constant use
-/// of `isset`/`empty`/`unset` would be flagged as calling an undefined
-/// function. Matched case-insensitively since PHP itself treats function
-/// (and construct) names case-insensitively.
-pub(crate) fn is_language_construct(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "isset" | "empty" | "unset"
-    )
-}
-
 /// Resolves a call's argument list against the declared parameter list
 /// it's being checked against, producing one slot per declared parameter:
 /// `Some(&Expr)` when some argument (positional or named) actually

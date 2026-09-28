@@ -328,15 +328,19 @@ impl Parser {
                 self.stmt(StmtKind::Throw(e), start)
             }
             Token::Keyword(Keyword::Switch) => self.parse_switch()?,
+            Token::Identifier(s)
+                if s.eq_ignore_ascii_case("unset") && matches!(self.peek_at(1), Token::LParen) =>
+            {
+                self.skip();
+                let (args, _) = self.parse_args()?;
+                self.expect_semicolon()?;
+                let targets = args.into_iter().map(|a| a.value).collect();
+                self.stmt(StmtKind::Unset(targets), start)
+            }
             // `declare(strict_types=1);` / `declare(ticks=1) { ... }` -
             // `declare` isn't a reserved word (a real PHP file can have a
             // function or constant named `declare`), so it's only treated
-            // specially when immediately followed by `(`. The directives
-            // themselves (`name = value` pairs) aren't modeled - just
-            // consumed as generic expressions - and the optional
-            // block-scoped form's body is a plain nested block, unlike
-            // `namespace { ... }`, since declare directives don't carry
-            // any declarations that a registry needs to see spliced out.
+            // specially when immediately followed by `(`.
             Token::Identifier(s)
                 if s.eq_ignore_ascii_case("declare")
                     && matches!(self.peek_at(1), Token::LParen) =>

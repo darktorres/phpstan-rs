@@ -116,7 +116,7 @@ fn walk_stmt<'a>(stmt: &'a Stmt, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
     match &stmt.kind {
         StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr(e, found),
         StmtKind::Return(Some(e)) => walk_expr(e, found),
-        StmtKind::Echo(exprs) => {
+        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
             for e in exprs {
                 walk_expr(e, found);
             }

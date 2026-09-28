@@ -5,8 +5,8 @@ use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberVisibilityCheck, TemplateBindings,
     UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
-    is_known_single_value, is_language_construct, is_real_variable_key, literal_string_key,
-    merge_scopes, narrow_type_excluding, narrowing_key, propagate_container_field_facts,
+    is_known_single_value, is_real_variable_key, literal_string_key, merge_scopes,
+    narrow_type_excluding, narrowing_key, propagate_container_field_facts,
     purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
     superglobal_default_type,
 };
@@ -213,6 +213,40 @@ pub(crate) fn type_can_never_call_methods(ty: &Type) -> bool {
 }
 
 impl<'a> Checker<'a> {
+    /// An `isset`/`empty` operand. PHP raises no notice for a missing
+    /// variable, offset or property inside one, so the operand's root is
+    /// read quietly (as `??`'s left side is); the probe is flagged when it
+    /// can't fail or can't pass. A bare variable probed here is declared
+    /// from this point on, so the branch the probe guards can read it.
+    fn check_existence_probe(
+        &mut self,
+        operand: &Expr,
+        locals: &mut Locals,
+        label: &str,
+        (identifier_prefix, operator_description, verdict_fn): (&str, &str, NullProbeVerdictFn),
+    ) {
+        if let ExprKind::Variable(name) = &operand.kind
+            && !locals.contains_key(name)
+        {
+            locals.declare(name.to_string(), Type::Mixed(false), operand.span);
+        }
+        self.check_expr_quiet_root(operand, locals, label);
+        self.check_pointless_null_probe(
+            operand,
+            locals,
+            identifier_prefix,
+            operator_description,
+            verdict_fn,
+        );
+        self.check_pointless_offset_or_property_probe(
+            operand,
+            locals,
+            identifier_prefix,
+            operator_description,
+            verdict_fn,
+        );
+    }
+
     /// What a backtick command returns: `shell_exec()`'s return type.
     fn shell_exec_type(&self) -> Type {
         self.registry
@@ -353,30 +387,6 @@ impl<'a> Checker<'a> {
         }
         match &e.kind {
             ExprKind::Call(callee, args) => {
-                // `unset($x)` genuinely removes `$x` from scope in real
-                // PHP - a real bug if it's used afterward. Checked before
-                // anything else below: `predefine_byref_or_unknown_args`
-                // treats *any* bare-variable argument to an unknown-
-                // signature call as a definition site (a mechanism built
-                // for a different reason - conservatively assuming an
-                // unresolvable call might take the argument by
-                // reference - that happens to also make `isset`/`empty`
-                // safe to use on a maybe-undefined variable), which is
-                // backwards for `unset` specifically: it would make
-                // `unset($x)` look like it *defines* `$x` instead of
-                // removing it.
-                if let ExprKind::Name(name) = &callee.kind
-                    && name == "unset"
-                {
-                    for a in args {
-                        if let ExprKind::Variable(var_name) = &a.value.kind {
-                            locals.remove(var_name);
-                        } else {
-                            self.check_expr(&a.value, locals, label);
-                        }
-                    }
-                    return Type::Mixed(false);
-                }
                 // `PHPStan\Testing\assertType('expected type string', $expr)`
                 // is PHPStan's own testing-DSL function, used to pin down
                 // an exact expected inferred type at a point of interest.
@@ -419,13 +429,8 @@ impl<'a> Checker<'a> {
                 // PHP gives an unqualified function call) so both the
                 // arg-checking path and the undefined-call diagnostic
                 // below see the same name(s) a real call would actually
-                // resolve to. `is_language_construct` is checked against
-                // the original name, before any namespace-qualification -
-                // `isset`/`empty`/etc. are never real namespaced symbols,
-                // unlike an actual function call, even though the parser
-                // models both the same way.
+                // resolve to.
                 let resolved_name = match &callee.kind {
-                    ExprKind::Name(name) if is_language_construct(name) => None,
                     ExprKind::Name(name) => {
                         let (primary, fallback) =
                             self.resolve_function_candidates_cached(callee.span, name);
@@ -528,35 +533,6 @@ impl<'a> Checker<'a> {
                     ExprKind::Name(name) if is_this_binding_call => Some(name.as_ref()),
                     _ => None,
                 };
-                // `isset($x['maybe_missing'])`/`empty($x['maybe_missing'])`
-                // are exactly PHP's own sanctioned way to safely probe a
-                // possibly-absent array key/property/variable - real PHP
-                // raises no notice either way, and real PHPStan explicitly
-                // never flags an "offset doesn't exist"-style diagnostic
-                // for either construct's own direct argument(s), the same
-                // "root of this expression chain isn't checked for
-                // existence" leniency `check_expr_quiet_root` already
-                // grants `??`'s left side. Scoped to these two names only,
-                // matched on the *original* (pre-resolution) name exactly
-                // like `is_language_construct` itself, since neither is a
-                // real, resolvable function call.
-                let is_existence_probe = matches!(&callee.kind, ExprKind::Name(name) if name == "isset" || name == "empty");
-                // `isset($x)` and `empty($x)` each get their own verdict
-                // function - `null_probe_verdict` (just nullability) for
-                // the former, `empty_probe_verdict` (full falsiness, via
-                // `type_truthiness`) for the latter, matching real
-                // PHPStan's `EmptyRule` requiring both nullability and
-                // falsiness to be unambiguous before it says anything.
-                let existence_probe_kind: Option<(&str, &str, NullProbeVerdictFn)> =
-                    match &callee.kind {
-                        ExprKind::Name(name) if name == "isset" => {
-                            Some(("isset", "in isset()", null_probe_verdict))
-                        }
-                        ExprKind::Name(name) if name == "empty" => {
-                            Some(("empty", "in empty()", empty_probe_verdict))
-                        }
-                        _ => None,
-                    };
                 // `array_map($callback, $items)`'s contextual parameter-
                 // type injection - computed once, up front, from
                 // `$items`' element type (not per-argument inside the
@@ -672,26 +648,6 @@ impl<'a> Checker<'a> {
                             && let Some(name) = pest_call_name
                         {
                             self.check_pest_risky_test(name, unwrap_grouping(&a.value), e.span);
-                        }
-                    } else if is_existence_probe {
-                        self.check_expr_quiet_root(&a.value, locals, label);
-                        if let Some((identifier_prefix, operator_description, verdict_fn)) =
-                            existence_probe_kind
-                        {
-                            self.check_pointless_null_probe(
-                                &a.value,
-                                locals,
-                                identifier_prefix,
-                                operator_description,
-                                verdict_fn,
-                            );
-                            self.check_pointless_offset_or_property_probe(
-                                &a.value,
-                                locals,
-                                identifier_prefix,
-                                operator_description,
-                                verdict_fn,
-                            );
                         }
                     } else if i == 0
                         && let Some(elem_ty) = &array_map_elem_override
@@ -1796,6 +1752,28 @@ impl<'a> Checker<'a> {
                     self.check_useless_cast(&cast_result_type(cast.kind()), &inner_ty, e.span);
                 }
                 self.cast_type(cast.kind(), &inner_ty)
+            }
+            // `null_probe_verdict` (nullability) for `isset`,
+            // `empty_probe_verdict` (falsiness) for `empty`.
+            ExprKind::Isset(operands) => {
+                for operand in operands {
+                    self.check_existence_probe(
+                        operand,
+                        locals,
+                        label,
+                        ("isset", "in isset()", null_probe_verdict),
+                    );
+                }
+                Type::Bool
+            }
+            ExprKind::Empty(operand) => {
+                self.check_existence_probe(
+                    operand,
+                    locals,
+                    label,
+                    ("empty", "in empty()", empty_probe_verdict),
+                );
+                Type::Bool
             }
             // The operand must be string-coercible (`print.nonString`) and
             // triggers the implicit `__toString()` call `echo` does.
@@ -4132,72 +4110,64 @@ impl<'a> Checker<'a> {
                 match &inner.kind {
                     ExprKind::Call(callee, _) => {
                         if let ExprKind::Name(name) = &callee.kind {
-                            if !is_language_construct(name) {
-                                let (primary, fallback) =
-                                    self.name_ctx.resolve_function_candidates(name);
-                                let resolved_sig = self
-                                    .registry
-                                    .lookup_function(&primary)
-                                    .map(|s| (primary.clone(), s))
-                                    .or_else(|| {
-                                        fallback.as_deref().and_then(|g| {
-                                            self.registry
-                                                .lookup_function(g)
-                                                .map(|s| (g.to_string(), s))
-                                        })
-                                    });
-                                match resolved_sig {
-                                    Some((resolved_name, sig)) => {
-                                        self.check_internal_function_call(
-                                            &resolved_name,
-                                            sig,
+                            let (primary, fallback) =
+                                self.name_ctx.resolve_function_candidates(name);
+                            let resolved_sig = self
+                                .registry
+                                .lookup_function(&primary)
+                                .map(|s| (primary.clone(), s))
+                                .or_else(|| {
+                                    fallback.as_deref().and_then(|g| {
+                                        self.registry.lookup_function(g).map(|s| (g.to_string(), s))
+                                    })
+                                });
+                            match resolved_sig {
+                                Some((resolved_name, sig)) => {
+                                    self.check_internal_function_call(&resolved_name, sig, e.span);
+                                    // Closes a real, live bypass: a
+                                    // banned function's own
+                                    // first-class-callable syntax
+                                    // (`banned_func(...)`) previously
+                                    // went unchecked even though the
+                                    // ordinary call site
+                                    // (`banned_func()`) already was.
+                                    self.check_restricted_function_call(
+                                        &resolved_name,
+                                        &[],
+                                        locals,
+                                        e.span,
+                                    );
+                                    self.check_deprecated_function_call(
+                                        &resolved_name,
+                                        sig,
+                                        e.span,
+                                    );
+                                    self.record_function_usage_token(
+                                        &resolved_name,
+                                        sig,
+                                        callee.span,
+                                    );
+                                }
+                                None => {
+                                    // Same `function_exists()`-guard
+                                    // suppression as the ordinary-call
+                                    // site above.
+                                    let guarded = !locals.guarded_functions.is_empty()
+                                        && locals.guarded_functions.contains(
+                                            primary
+                                                .rsplit('\\')
+                                                .next()
+                                                .unwrap_or(&primary)
+                                                .to_ascii_lowercase()
+                                                .as_str(),
+                                        );
+                                    if !guarded {
+                                        self.report(
+                                            format!("call to undefined function {primary}()"),
                                             e.span,
+                                            0,
+                                            "function.notFound",
                                         );
-                                        // Closes a real, live bypass: a
-                                        // banned function's own
-                                        // first-class-callable syntax
-                                        // (`banned_func(...)`) previously
-                                        // went unchecked even though the
-                                        // ordinary call site
-                                        // (`banned_func()`) already was.
-                                        self.check_restricted_function_call(
-                                            &resolved_name,
-                                            &[],
-                                            locals,
-                                            e.span,
-                                        );
-                                        self.check_deprecated_function_call(
-                                            &resolved_name,
-                                            sig,
-                                            e.span,
-                                        );
-                                        self.record_function_usage_token(
-                                            &resolved_name,
-                                            sig,
-                                            callee.span,
-                                        );
-                                    }
-                                    None => {
-                                        // Same `function_exists()`-guard
-                                        // suppression as the ordinary-call
-                                        // site above.
-                                        let guarded = !locals.guarded_functions.is_empty()
-                                            && locals.guarded_functions.contains(
-                                                primary
-                                                    .rsplit('\\')
-                                                    .next()
-                                                    .unwrap_or(&primary)
-                                                    .to_ascii_lowercase()
-                                                    .as_str(),
-                                            );
-                                        if !guarded {
-                                            self.report(
-                                                format!("call to undefined function {primary}()"),
-                                                e.span,
-                                                0,
-                                                "function.notFound",
-                                            );
-                                        }
                                     }
                                 }
                             }
@@ -4494,6 +4464,7 @@ impl<'a> Checker<'a> {
             ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
             ExprKind::ShellExec(_) => self.shell_exec_type(),
             ExprKind::Print(_) => Type::IntLiteral(1),
+            ExprKind::Isset(_) | ExprKind::Empty(_) => Type::Bool,
             ExprKind::Exit(..) => Type::Never,
             ExprKind::Eval(_) | ExprKind::Include(..) => Type::Mixed(false),
             ExprKind::Cast(cast, inner) => {
@@ -4631,7 +4602,7 @@ impl<'a> Checker<'a> {
                 _ => Type::Mixed(false),
             },
             ExprKind::Call(callee, args) => match &callee.kind {
-                ExprKind::Name(name) if !is_language_construct(name) => {
+                ExprKind::Name(name) => {
                     let (primary, fallback) =
                         self.resolve_function_candidates_cached(callee.span, name);
                     self.registry
@@ -5909,31 +5880,18 @@ impl<'a> Checker<'a> {
     /// `check_expr`'s dynamic-call branch makes on the diagnostic-producing
     /// side.
     fn call_fallback_return_type(&self, callee: &Expr, args: &[Arg], locals: &Locals) -> Type {
-        match &callee.kind {
-            // `isset(...)`/`empty(...)` are real PHP language constructs
-            // that always evaluate to a real `bool` when read as a value,
-            // not just narrowed as a condition - `is_language_construct`
-            // routes both away from ever resolving a real signature here
-            // (`sig` stays `None`, so this whole function is the only
-            // place their call-expression type gets decided), and
-            // `self.infer_expr(callee, locals)` on the bare `Name` below
-            // has no special case for either, which would otherwise
-            // silently collapse to `Mixed`.
-            ExprKind::Name(name) if name == "isset" || name == "empty" => Type::Bool,
-            _ => self
-                .infer_expr(callee, locals)
-                .callable_sig()
-                .map_or(Type::Mixed(false), |sig| {
-                    if sig.templates.is_empty() {
-                        return (*sig.return_type).clone();
-                    }
-                    let arg_types: Vec<Type> = args
-                        .iter()
-                        .map(|a| self.infer_expr(&a.value, locals))
-                        .collect();
-                    sig.instantiated_return(&arg_types)
-                }),
-        }
+        self.infer_expr(callee, locals)
+            .callable_sig()
+            .map_or(Type::Mixed(false), |sig| {
+                if sig.templates.is_empty() {
+                    return (*sig.return_type).clone();
+                }
+                let arg_types: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.infer_expr(&a.value, locals))
+                    .collect();
+                sig.instantiated_return(&arg_types)
+            })
     }
 
     /// `@phpstan-self-out`: after `$x->method(...)`, `$x` has the tag's

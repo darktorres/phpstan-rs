@@ -262,8 +262,6 @@ impl<'a> Walker<'a> {
                 if let ExprKind::Name(name) = &callee.kind {
                     let lower = name.trim_start_matches('\\').to_ascii_lowercase();
                     let construct = match lower.as_str() {
-                        "isset" => Some(BannedConstruct::Isset),
-                        "empty" => Some(BannedConstruct::Empty),
                         "compact" => Some(BannedConstruct::Compact),
                         "extract" => Some(BannedConstruct::Extract),
                         _ => None,
@@ -275,6 +273,8 @@ impl<'a> Walker<'a> {
                 self.arguments(args, e.span);
             }
             ExprKind::Eval(_) => self.ban(BannedConstruct::Eval, e.span, "eval()".to_string()),
+            ExprKind::Isset(_) => self.ban(BannedConstruct::Isset, e.span, "isset()".to_string()),
+            ExprKind::Empty(_) => self.ban(BannedConstruct::Empty, e.span, "empty()".to_string()),
             ExprKind::Exit(kind, arg) => {
                 // A bare `exit;` spans just the keyword, and is reported as
                 // written.

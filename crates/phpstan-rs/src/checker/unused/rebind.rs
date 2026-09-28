@@ -39,7 +39,7 @@ fn scan_stmt_for_rebinds(stmt: &Stmt, targets: &mut FxHashSet<Arc<str>>, escape_
             scan_expr_for_rebinds(e, targets, escape_all)
         }
         StmtKind::Return(Some(e)) => scan_expr_for_rebinds(e, targets, escape_all),
-        StmtKind::Echo(exprs) => {
+        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
             for e in exprs {
                 scan_expr_for_rebinds(e, targets, escape_all);
             }

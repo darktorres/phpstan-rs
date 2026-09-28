@@ -122,7 +122,7 @@ fn walk_stmt_for_members(stmt: &Stmt, fqn: &str, ctx: &NameContext, usage: &mut 
     match &stmt.kind {
         StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr_for_members(e, fqn, ctx, usage),
         StmtKind::Return(Some(e)) => walk_expr_for_members(e, fqn, ctx, usage),
-        StmtKind::Echo(exprs) => {
+        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
             for e in exprs {
                 walk_expr_for_members(e, fqn, ctx, usage);
             }

@@ -439,7 +439,7 @@ impl<'a> Walker<'a> {
             StmtKind::Use(imports) => ctx.add_uses(imports),
             StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, ctx, current_class, out),
             StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, out),
-            StmtKind::Echo(exprs) => {
+            StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
                 for e in exprs {
                     self.expr(e, ctx, current_class, out);
                 }

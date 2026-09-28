@@ -136,43 +136,42 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `isset`/`empty` of a variable or property holding an object, which a
+    /// null check or `instanceof` says more precisely.
+    fn check_object_probes(&mut self, which: &str, operands: &[Expr], locals: &Locals) {
+        for operand in operands {
+            // An offset or static probe asks whether the key or member
+            // exists, not what the value is.
+            if !matches!(
+                operand.kind,
+                ExprKind::Variable(_) | ExprKind::PropertyAccess(..)
+            ) {
+                continue;
+            }
+            let ty = self.infer_expr(operand, locals);
+            if is_object_like(&ty) {
+                let instead = if matches!(ty, Type::Union(_)) {
+                    "a !== null check"
+                } else {
+                    "instanceof"
+                };
+                self.report(
+                    format!("{which}() on an object ({ty}) says less than {instead}."),
+                    operand.span,
+                    0,
+                    format!("{which}.object"),
+                );
+            }
+        }
+    }
+
     /// The expression-level checks, before `e` itself is checked.
     pub(crate) fn check_strict_expression_idioms(&mut self, e: &Expr, locals: &Locals) {
         if self.settings.shipmonk.check_null_coercion {
             match &e.kind {
-                ExprKind::Call(callee, args) => {
-                    if let ExprKind::Name(name) = &callee.kind
-                        && let Some(which) = ["isset", "empty"]
-                            .into_iter()
-                            .find(|n| name.eq_ignore_ascii_case(n))
-                    {
-                        for arg in args {
-                            // An offset or static probe asks whether the key
-                            // or member exists, not what the value is.
-                            if !matches!(
-                                arg.value.kind,
-                                ExprKind::Variable(_) | ExprKind::PropertyAccess(..)
-                            ) {
-                                continue;
-                            }
-                            let ty = self.infer_expr(&arg.value, locals);
-                            if is_object_like(&ty) {
-                                let instead = if matches!(ty, Type::Union(_)) {
-                                    "a !== null check"
-                                } else {
-                                    "instanceof"
-                                };
-                                self.report(
-                                    format!(
-                                        "{which}() on an object ({ty}) says less than {instead}."
-                                    ),
-                                    arg.value.span,
-                                    0,
-                                    format!("{which}.object"),
-                                );
-                            }
-                        }
-                    }
+                ExprKind::Isset(operands) => self.check_object_probes("isset", operands, locals),
+                ExprKind::Empty(operand) => {
+                    self.check_object_probes("empty", std::slice::from_ref(&**operand), locals)
                 }
                 ExprKind::Interpolated(parts) => {
                     for part in parts {

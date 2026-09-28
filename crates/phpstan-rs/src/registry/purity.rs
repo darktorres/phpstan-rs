@@ -358,6 +358,12 @@ fn stmt_disqualifies(
         StmtKind::GlobalConst(consts) => consts
             .iter()
             .any(|c| expr_disqualifies(&c.value, declaring_class, registry, deps)),
+        // Unsetting a variable changes nothing outside the function;
+        // unsetting a property does (`propertyUnset`).
+        StmtKind::Unset(targets) => targets.iter().any(|target| {
+            property_write_target(target)
+                || expr_disqualifies(target, declaring_class, registry, deps)
+        }),
         _ => false,
     };
     own || child_stmts(stmt)
@@ -396,25 +402,6 @@ fn expr_disqualifies(
         }
         ExprKind::Call(callee, args) => {
             if let ExprKind::Name(name) = &callee.kind {
-                let lname = name.trim_start_matches('\\').to_ascii_lowercase();
-                match lname.as_str() {
-                    // Never disqualifying on their own - `unset` only
-                    // disqualifies when it targets a property
-                    // (`propertyUnset`); a plain-variable `unset` has no
-                    // impure point in real PHPStan's own model at all.
-                    "isset" | "empty" => {
-                        return args
-                            .iter()
-                            .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps));
-                    }
-                    "unset" => {
-                        return args.iter().any(|a| {
-                            property_write_target(&a.value)
-                                || expr_disqualifies(&a.value, declaring_class, registry, deps)
-                        });
-                    }
-                    _ => {}
-                }
                 if args
                     .iter()
                     .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
@@ -795,6 +782,19 @@ fn collect_stmt_impure_points(
                 collect_expr_impure_points(&c.value, declaring_class, registry, out);
             }
         }
+        StmtKind::Unset(targets) => {
+            for target in targets {
+                if property_write_target(target) {
+                    out.push(ImpurePointOccurrence {
+                        span: stmt.span,
+                        identifier: "propertyUnset",
+                        description: "property unset",
+                        certain: true,
+                    });
+                }
+                collect_expr_impure_points(target, declaring_class, registry, out);
+            }
+        }
         _ => {}
     }
     for child in child_stmts(stmt) {
@@ -870,31 +870,13 @@ fn collect_expr_impure_points(
         }
         ExprKind::Call(callee, args) => {
             if let ExprKind::Name(name) = &callee.kind {
-                let lname = name.trim_start_matches('\\').to_ascii_lowercase();
-                match lname.as_str() {
-                    "isset" | "empty" => {}
-                    "unset" => {
-                        for a in args {
-                            if property_write_target(&a.value) {
-                                out.push(ImpurePointOccurrence {
-                                    span: e.span,
-                                    identifier: "propertyUnset",
-                                    description: "property unset",
-                                    certain: true,
-                                });
-                            }
-                        }
-                    }
-                    _ => {
-                        if registry.lookup_function(name).is_none() {
-                            out.push(ImpurePointOccurrence {
-                                span: e.span,
-                                identifier: "functionCall",
-                                description: "call to unknown function",
-                                certain: false,
-                            });
-                        }
-                    }
+                if registry.lookup_function(name).is_none() {
+                    out.push(ImpurePointOccurrence {
+                        span: e.span,
+                        identifier: "functionCall",
+                        description: "call to unknown function",
+                        certain: false,
+                    });
                 }
             } else {
                 out.push(ImpurePointOccurrence {

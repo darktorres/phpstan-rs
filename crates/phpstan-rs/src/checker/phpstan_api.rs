@@ -1093,6 +1093,11 @@ impl<'a> Walker<'a> {
             StmtKind::Expression(e) | StmtKind::Throw(e) => {
                 self.check_expr(e, ctx, param_types, label)
             }
+            StmtKind::Unset(targets) => {
+                for target in targets {
+                    self.check_expr(target, ctx, param_types, label);
+                }
+            }
             StmtKind::Return(e) => {
                 if let Some(e) = e {
                     self.check_expr(e, ctx, param_types, label);

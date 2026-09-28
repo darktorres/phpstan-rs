@@ -1236,7 +1236,7 @@ mod xml_name;
 mod xml_wellformedness;
 
 pub(crate) use assignment::{literal_string_key, superglobal_default_type};
-pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
+pub(crate) use calls::{CheckArgsCall, resolve_call_args};
 pub(crate) use control_flow::{
     LoopZeroIterations, collect_exit_point_statements, collect_goto_targets,
     exit_point_description, generator_missing_return_type, generator_template_param,
