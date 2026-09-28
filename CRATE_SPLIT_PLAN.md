@@ -6882,7 +6882,7 @@ the whole registry (§1), which C4's memo already removes.
   directory it created, marked by a `CACHEDIR.TAG`, and never replaces a file it
   didn't write, so `result_cache_path = "~/.bashrc"` fails the run instead of
   overwriting the file. `clear-result-cache` deletes only such a marked
-  directory. A run whose output needs every file walked (`--dump-types`,
+  directory. A run whose output needs every file walked (the type dump,
   `--emission-order`, `--debug`) reads no cached result but still writes the
   cache, and the fixture harness never uses one.
 - **Incremental collectors.** Collected data is cached per file; a run
@@ -6972,11 +6972,12 @@ on.
   `--no-composer`, `--scan-dir`, `--stub-path`, `--format`, `--baseline`,
   `--baseline-match-identifier`, `--baseline-per-identifier`,
   `--generate-baseline`, `--fix`, `--no-result-cache`, `--no-progress`, and the
-  hidden `--dump-types` and `--emission-order`) are parsed in the bin and passed
-  to `app::run(args, extra)`, which returns the exit code; `main` returns an
-  `ExitCode`, and nothing calls `process::exit` outside the crash reporter's own
-  roles (`CRASH_REPORTING_PLAN.md` §4.1: the reporter and the finisher exit
-  through `crash_report::exit`, which flushes first).
+  hidden `--emission-order`, which the determinism check runs on the shipped
+  binary) are parsed in the bin and passed to `app::run(args, extra)`, which
+  returns the exit code; `main` returns an `ExitCode`, and nothing calls
+  `process::exit` outside the crash reporter's own roles
+  (`CRASH_REPORTING_PLAN.md` §4.1: the reporter and the finisher exit through
+  `crash_report::exit`, which flushes first).
 - A progress line (files analysed of total) goes to stderr when it's a
   terminal, off with `--no-progress` and when stderr isn't one; today a run
   prints nothing until it finishes.
@@ -7001,6 +7002,11 @@ on.
   process) names its file; `--memory-limit` and `--xdebug` are accepted and
   reported once as ignored. `-c` naming a `.neon` file fails, pointing at `init`
   (ROADMAP Phase 183).
+- The shipped binary carries no gate-only flag (`GATE_SPEED_PLAN.md` S9c): the
+  type dump is a Session option the gate runner sets through the library (and
+  ROADMAP Phase 181's export after it), so the binary's hidden `--dump-types`
+  and its `tests/cli.rs` case go; xtask already passes `--dump-types` to the
+  runner, not the binary.
 - Flags that contradict each other are rejected: `--fix` with
   `--generate-baseline` (today the baseline is written and `--fix` silently does
   nothing), and `--generate-baseline` with `--baseline`.
@@ -7469,7 +7475,7 @@ its owner. Non-Registry keys follow the table.
 | static_var_names | scope state (static-variable status) |
 | rebind_target_classes, rebind_escape_all | reference-site collector (escape analysis) |
 | call_candidate_cache | pure memo cache (allowed) |
-| type_dump | `--dump-types` observer |
+| type_dump | the type-dump observer (a Session option the gate runner sets) |
 
 ## Appendix D: `Locals` and its merge policies
 
