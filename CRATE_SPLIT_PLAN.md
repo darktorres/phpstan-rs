@@ -4449,9 +4449,25 @@ the rest), which the gate excludes and lists.
     rules oracle's `bug-5333.php`); on an array it gives `callable-array`,
     a two-element list with `0|1` keys, `class-string|object` at `[0]`
     and `non-falsy-string` at `[1]`, which a `callable-array` parameter
-    reads as too (`bug-14549.php`). `is_a` on an object,
-    `str_contains`, `defined`/`define` and the rest of the `is_*` family
-    already match.
+    reads as too (`bug-14549.php`). `is_a($s, A::class, true)` on a
+    string narrows to `class-string<A>`: today it gives the object `A`,
+    a wrong value (on `class-string<Bar>` against `Foo` it gives `Foo`;
+    `is-a.php`, `bug-6404.php`). On an object with a `class-string<A>`
+    variable it gives `A` (`object` today), with a plain string
+    `class-string`, and between class-strings that can't relate it is
+    `false` (`bug-4371.php`); `!is_a($a, B::class, true)` removes
+    `class-string<B>` from a union (`bug-6704.php`). An `is_a` on an
+    unknown class, repeated, isn't deduplicated: `$b` shows as
+    `Bar|Bar|Bar|Bar|Bar|Bar&Foo&Foo&Foo&Foo&Foo&Foo` (`is-a.php:38`, B4).
+    `str_contains`, `str_starts_with` and `str_ends_with` with a
+    non-empty needle make the haystack non-empty, and non-falsy when the
+    needle is non-falsy, keeping its numeric and case accessories; today
+    they leave `string` (29 mismatches,
+    `non-empty-string-str-containing-fns.php`).
+    `is_real` is `is_float`'s alias, `is_array` on `mixed` prints
+    `array<mixed, mixed>` and `is_callable` `callable(): mixed`
+    (`specifiedTypesUsingIsFunctions.php`, 24). `defined`/`define` and
+    the rest of the `is_*` family already match.
 
   Then the functions `gates/nsrt/owners.toml` assigns to E2 (3,399 nsrt
   mismatches on calls to functions PHPStan types through an extension),
