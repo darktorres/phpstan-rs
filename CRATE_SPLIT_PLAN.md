@@ -4550,6 +4550,13 @@ fixture:
     `impossible-method-exists-on-generic-class-string.php`, 6), and a
     `global $pdo` variable, `mixed` at level 10 (`bug-14318.php`, 4); all
     unreported today;
+  - invoking a value that isn't callable is `callable.nonCallable`: a
+    constant string naming no function (`$n = 'nonexistent'; $n();`,
+    `''`), `$i(...)` on `1`, `5 |> 'doFoo'` with no function `doFoo`, and
+    a constant array whose class or method union has a member that can't
+    be called (`[CU::class, 'doFoo'|'doBaz']`, `callables.php:188`-`:229`,
+    `maybe-not-callable.php`), all unreported today (with (b)'s
+    might-not-be and `mixed` rows, the rules oracle's 25 PHPStan-only);
   - a by-reference argument PHP creates on the call is not type-checked
     against the parameter;
   - flag parameters are checked against PHPStan's
