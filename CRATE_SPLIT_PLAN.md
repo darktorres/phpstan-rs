@@ -4354,6 +4354,19 @@ fixture:
     `method.notFound`/`property.notFound` (it declares no members):
     `$o->getItem()` and `$o->x` on `object $o` are unreported today (the
     oracle finds 59 "undefined method/property object::");
+  - a missing property is `property.notFound` inside `isset()`, `empty()`
+    and `??` too where nothing can declare it: on a final class or an
+    object known exactly from `new` (`isset($final->dyn)`, `(new
+    Bar())->zz ?? 'no'`; `dynamic-properties.php`, 9,
+    `null-coalesce-new-is-always-final.php`); an object shape's optional
+    property is `property.notFound` read or written outside `isset()`,
+    and a missing one anywhere (`echo $o->bar` on `object{foo: int, bar?:
+    string}`; `properties-object-shapes.php`, `bug-11609.php`,
+    `bug-11424.php`, `isset-object-shapes.php`, 8); and `$o->{$name}` with
+    a constant-string name resolves the property: over `foreach ($data as
+    $property => $value)` on `array{a: int, noop: int}`, `$self->{$property}
+    = $value` writes the undeclared `$noop`
+    (`properties-from-*-into-*object.php`, 6); all unreported today;
   - a protected method declared in a common ancestor is accessible from a
     sibling class (PHP checks the prototype's declaring class): `$other->foo()`
     from a class sharing `Base` with `Other` is `method.protected` today
