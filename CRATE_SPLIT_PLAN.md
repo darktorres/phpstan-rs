@@ -2107,7 +2107,10 @@ Follow-ups:
   - trait composition: `insteadof`, visibility-changing `as`, a trait's
     `final` methods, an abstract method implemented by another trait,
     `@use Trait<T>` template bindings, and a trait member's aliases
-    resolved in the trait's scope (`self` still the host): under `@use
+    resolved in the trait's scope (`self` still the host); a trait method
+    the host declares itself is not the host's and isn't analysed there
+    (`$this->doBar()` in a shadowed trait `doFoo()` is `method.notFound`
+    today, the rules oracle's `shadowed-trait-method.php`); under `@use
     TA<B>` with `a as renamed`, both `$this->a()` and `$this->renamed()`
     for `@return T` are `mixed` today (the rules oracle's `bug-6856.php`);
   - each `@extends`/`@implements` tag binds only the parent it names: with
@@ -2174,6 +2177,13 @@ the LSP's per-edit invalidation.
   before the analysed range is unknown: `mysql_connect()` under PHP 8.5
   resolves today where PHPStan reports `function.notFound` (the corpus
   oracle finds 42 such calls, all `mysql_*` or `ldap_control_paged_*`);
+- phpstorm-stubs' `PS_UNRESERVE_PREFIX_` names are the reserved words
+  they spell: `Generator::throw()` and `IntlCalendar::isSet()` are
+  `method.notFound` today (the rules oracle's `bug-3683.php`), and the
+  prefixed functions (`array`, `list`, `die`, `exit`, `empty`, `isset`,
+  `unset`, `eval`, `__halt_compiler`) and the `___PHPSTORM_HELPERS`
+  classes, which are language constructs, leave the index (it lists
+  them today);
 - `stub_attributes` fixes: a property's or class constant's
   `LanguageLevelTypeAware` type becomes `@var`, not `@return`;
   `newest_type` reads every entry; a function deprecated in one
@@ -2668,7 +2678,10 @@ deleted; the file-size gate.
   `$v !== null` already narrows; `isset($m->foo)` on `mixed` gives
   `object&hasProperty(foo)` (`echo $m->foo` after it is
   `property.nonObject` "on mixed" today, `access-properties.php:437`,
-  `bug-13539.php`), and `isset($o->foo)` on `self|false` leaves
+  `bug-13539.php`) and on an object of a class without that property
+  `C&hasProperty(foo)` (inside `if (isset($foo->baz))` and `while
+  (isset($this->foo))`, the read is `property.notFound` today,
+  `access-properties.php:47`, `:286`), and `isset($o->foo)` on `self|false` leaves
   `self` (`echo $o->foo` after it is `property.nonObject` "non-object
   type …|false" today, the rules oracle's `access-properties.php:320`).
   `isset($t['foo'])` with a non-numeric
@@ -2937,6 +2950,10 @@ deleted; the file-size gate.
       them under `: string` is `return.type` and the private members they
       reach are `classConstant.unused`/`property.onlyWritten`/
       `method.unused` (the rules oracle's `bug-14880*.php`).
+    - **`static` in a return type** is the whole receiver type: `bat()`
+      with `@return I2&static` called on `I1&Foo` is `I2&I1&Foo`, where
+      today it is `I2&Foo` and a following `->someMethod()` from `I1` is
+      `method.notFound` (the rules oracle's `bug-1661.php`).
     - **A template-typed receiver** reads members through its bound, and
       a `$this`/`static` return on it is the template: on `B of BA`,
       `$t->n()` and `$t->p` are `mixed` today where they are `BA`'s
@@ -3815,6 +3832,10 @@ rules-oracle findings).
     `bug-12790.php`).
     `is_numeric()` drops non-numeric constant strings: on `1|'a'` it keeps
     `1|'a'` today (the rules oracle's `bug-2550.php`).
+    `is_callable([$this, 'm'])` guards `$this->m()` as `method_exists($this,
+    'm')` does, and both guard a ternary's true branch and a first-class
+    callable (`method_exists($this, 'm') ? $this->m(...) : null`); each is
+    `method.notFound` today (the rules oracle's `bug-13596.php`).
     `is_callable()` keeps a non-final class as `Class&callable(): mixed`:
     on `Route|callable(): Route` it leaves `callable(): Route` today (the
     rules oracle's `bug-5333.php`); on an array it gives `callable-array`,
