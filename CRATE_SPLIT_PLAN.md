@@ -3379,7 +3379,13 @@ deleted; the file-size gate.
       on `list<int>` (`array-push-preserves-list.php`, 6), and a spread
       that may be empty leaves the array possibly empty (`empty($a)` after
       `array_push($a, ...$b)` on `$a = []` is `empty.variable` "not
-      falsy" today, `bug-6974.php`).
+      falsy" today, `bug-6974.php`). Appendix H's `byref-array-fns` is
+      the rest of it (205 nsrt mismatches, 22 files): `array_pop` and
+      `array_shift` move `hasOffset` facts down and keep non-emptiness
+      (`array-pop-shift-has-offset.php`), `array_splice` keeps the list
+      (`array_splice.php`, 104), the sort family and `array_pop` keep a
+      template's `T&list<int>` (`bug-14631.php`, `bug-14633.php`), and a
+      nested `array_push($a['k'], …)` keeps the shape (`bug-11846.php`).
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
       is `Closure(): mixed` today instead of returning a `Generator`. A
       closure or arrow function whose body never returns returns `never`
@@ -3465,7 +3471,11 @@ deleted; the file-size gate.
       `$x == false` on `0|1|''|'x'|null|bool` leaves the whole union today
       instead of `0|''|false|null`, and `($foo[$k] ?? null) == true` (or
       `!= false`) proves `$foo[$k]` exists while `== false` doesn't (the
-      rules oracle's `bug-13488-loose.php`, 4);
+      rules oracle's `bug-13488-loose.php`, 4); `$s != ''` makes a
+      `lowercase-string` non-empty and `$s == 'one'` narrows a string or a
+      union to the literal (Appendix H's `loose-eq-narrow`, 83 nsrt
+      mismatches: `equal-narrow.php`, `equal.php`, `bug-12312.php`,
+      `bug-14047.php`);
     - a `list` offset implies the lower ones: after `isset($list[3])`,
       `isset($list[2])` is always true (`isset-constant-array.php`), and a
       decimal-integer string can't be a key of `array<string, …>` (it is
@@ -3501,21 +3511,26 @@ deleted; the file-size gate.
         string}|array{long: string, details: string}` makes
         `isset($a['short'])` `isset.offset` "does not exist", the rules
         oracle's `bug-11494.php`);
-      - `count($a) === count($b)` → shared non-emptiness;
+      - `count($a) === count($b)` → shared non-emptiness (Appendix H's
+        `count-narrow` has these and the other `count()` narrowings: 192
+        nsrt mismatches, 19 files, `list-count.php` 87);
       - `count($l) > 2` on a list → the offsets it proves
         (`specifyTypesForCountFuncCall`): today `$l` stays `list<int>`
         instead of `non-empty-list<int>&hasOffsetValue(1, int)&
         hasOffsetValue(2, int)`, and `array_key_exists(1, $l)` stays
         `bool` (nsrt `bug-13747.php`);
       - `strlen($s) === 0` → `''`, and `strlen($s) > 0` → non-empty
-        (nsrt `non-empty-string.php`);
+        (nsrt `non-empty-string.php`), through a stored `$len`, against a
+        range and against another `strlen()` (`strlen-narrow`, 63);
       - `array_key_first($a) !== null` (and `array_key_last`,
         `array_find_key`) → non-empty;
       - `preg_match(…) === 1` → the matches shape;
       - `get_class($o) === Bar::class`, `get_debug_type()` and
         `$o::class === Bar::class` → `Bar`;
       - `substr($s, 0, 1) === 'x'` and the other string functions compared
-        with a non-empty literal → `$s` non-empty or non-falsy;
+        with a non-empty literal → `$s` non-empty or non-falsy
+        (`string-fn-narrow`, 52: `strstr`, `strrchr`, `strtolower`,
+        `trim($s) !== ''`);
       - `strtolower($s) === 'abc'` → additionally lowercase on the other
         side.
   - **Deep expressions** don't overflow the stack: the handlers iterate
