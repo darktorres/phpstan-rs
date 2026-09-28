@@ -384,7 +384,7 @@ through `check-project`.
   `checkUnionTypes`' level a union given is accepted when some member is,
   which needs a trinary `accepts` (Yes/Maybe/No) rather than the boolean
   one the doc admits to. (`91bc9e49`; accepts.rs final state)
-- [ ] **F54. `new $obj->prop(...)` is parsed as `(new $obj)->prop(...)`.**
+- [x] **F54. `new $obj->prop(...)` is parsed as `(new $obj)->prop(...)`.** (`3f04ac3f`)
   The `new` arm (`parser/primary.rs`) takes a bare `$var` as the whole class
   reference, but PHP's class reference is a full variable: `$a->b`,
   `$a::$b`, `$a['k']` and chains of them. `return new $this->model($v);`
