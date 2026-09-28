@@ -4388,8 +4388,10 @@ fixture:
 - (f) control flow, returns, throws and generators:
   - an empty body is checked like any other: a function or method with a
     non-`void` return type and an empty body (or only a comment) throws a
-    `TypeError` ("none returned") and isn't `return.missing` today; 500 of
-    the rules oracle's 553 PHPStan-only `return.missing` are this. The
+    `TypeError` ("none returned") and isn't `return.missing` today, and
+    neither is a get hook with an empty body (`get {}`); 507 of the rules
+    oracle's 517 PHPStan-only `return.missing` are this (matched per
+    declaration). The
     same exemption skips the `@param-out` end-of-execution check: `/**
     @param-out positive-int $i */ function a(int &$i): void {}` isn't
     reported, while a non-empty body that never assigns `$i` is
@@ -4400,7 +4402,9 @@ fixture:
   - `return.missing` is reported where execution falls off, the body's
     last statement (PHPStan's `ExecutionEndNode`), not on the declaration:
     36 of the rules oracle's 53 phpstan-rs-only `return.missing` are the
-    same finding on the declaration's line;
+    same finding on the declaration's line, and each end that falls off
+    is reported (an `if` without `else` before the end falls off twice, 7
+    more lines in the oracle);
   - `return.unusedType` isn't reported for a union of constants when every
     return is a constant: `@return 1|2|3` returning `1`, or a
     `'Test'|'Projekt in Umsetzung'` domain, stays (`TooWideTypeCheck::
