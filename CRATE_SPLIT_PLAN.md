@@ -2067,7 +2067,11 @@ Follow-ups:
     `r(): Bar` returns `Bar` today, and a parent's `@param Baz $o` leaves
     `$o` as `Bar` in the child's body (an inherited `@return array<int>` on
     `: array` already applies; nsrt `method-phpDocs-inheritdoc.php`,
-    `methodPhpDocs-implicitInheritance.php`). The combination reads the
+    `methodPhpDocs-implicitInheritance.php`; Appendix H's C4 causes are
+    the rest: `@inheritdoc` without braces and from a trait's abstract
+    method, 21 mismatches; `iterable<T>&Collection` returns kept whole, 38;
+    a child's templates substituted into the parent's methods, 16; trait
+    templates through `@use`, 11). The combination reads the
     PHPDoc with its aliases resolved: `@param OwnerBackup|null` for a
     `@phpstan-type OwnerBackup array{name: string}` on `?array` is
     `array{name: string}|null|array` today, the native `array` added back
