@@ -229,6 +229,9 @@ pub struct FunctionDecl {
     // `Token`-only conversion that still re-allocates here would gain
     // nothing).
     pub name: Arc<str>,
+    // The name with the file's namespace, for a function declared as a
+    // statement; `None` for a method. Filled in by name resolution.
+    pub namespaced_name: Option<Arc<str>>,
     // This function/method's own name token's span - `span`
     // below covers the *whole* declaration (from `function`/its
     // modifiers through the closing brace), which is where the LSP's own
@@ -402,6 +405,9 @@ pub struct ClassConst {
     // See `FunctionDecl::name`'s own doc comment - always taken via
     // `Parser::expect_ident`.
     pub name: Arc<str>,
+    // The name with the file's namespace, for a global `const`; `None` in
+    // a class. Filled in by name resolution.
+    pub namespaced_name: Option<Arc<str>>,
     // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     pub value: Expr,
@@ -463,6 +469,9 @@ pub struct ClassDecl {
     // real corpora declare many, so it dedups the same way a repeated
     // real class name would).
     pub name: Arc<str>,
+    // The name with the file's namespace; `None` for an anonymous class.
+    // Filled in by name resolution.
+    pub namespaced_name: Option<Arc<str>>,
     // See `FunctionDecl::name_span`'s own doc comment. For an
     // anonymous class (which has no real name to navigate to at all -
     // `name` is the synthetic placeholder `"class@anonymous"`) this is
@@ -532,6 +541,8 @@ pub struct EnumCase {
 pub struct EnumDecl {
     // See `FunctionDecl::name`'s own doc comment.
     pub name: Arc<str>,
+    // The name with the file's namespace. Filled in by name resolution.
+    pub namespaced_name: Option<Arc<str>>,
     pub name_span: Span,
     // "int" | "string" for a backed enum, None for a pure one. Enums can't
     // extend anything or declare instance properties, unlike ClassDecl.

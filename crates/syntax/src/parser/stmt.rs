@@ -284,6 +284,7 @@ impl Parser {
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
+                        namespaced_name: None,
                         removal_span: None,
                         name,
                         name_span,

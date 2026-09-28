@@ -1,6 +1,7 @@
 use super::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
+use crate::token::Position;
 use crate::visit::{Visitor, walk_expr, walk_stmts};
 
 fn parse(src: &str) -> Vec<Stmt> {
@@ -135,4 +136,43 @@ fn a_later_namespace_resolves_what_follows_it_and_imports_do_not_leak() {
 fn outside_any_namespace_a_function_has_no_fallback() {
     let all = resolutions("<?php strlen('x');");
     assert_eq!(find(&all, "strlen"), &exact("strlen"));
+}
+
+#[test]
+fn declarations_carry_the_namespace_they_are_declared_in() {
+    let program = parse(
+        "<?php\nnamespace A;\nclass C {}\nconst K = 1;\nnamespace B {\n    enum E {}\n    if (true) {\n        function f() {}\n    }\n}\n",
+    );
+    let mut names = Vec::new();
+    for_each_in_context(&program, |stmt, _| match &stmt.kind {
+        StmtKind::ClassDecl(c) => names.push(c.namespaced_name.clone()),
+        StmtKind::EnumDecl(e) => names.push(e.namespaced_name.clone()),
+        StmtKind::GlobalConst(consts) => {
+            names.extend(consts.iter().map(|c| c.namespaced_name.clone()))
+        }
+        StmtKind::If { then_branch, .. } => {
+            let StmtKind::Block(body) = &then_branch.kind else {
+                panic!("expected a block, got {:?}", then_branch.kind);
+            };
+            let StmtKind::FunctionDecl(f) = &body[0].kind else {
+                panic!("expected a function, got {:?}", body[0].kind);
+            };
+            names.push(f.namespaced_name.clone());
+        }
+        _ => {}
+    });
+    let names: Vec<Option<&str>> = names.iter().map(Option::as_deref).collect();
+    assert_eq!(
+        names,
+        [Some("A\\C"), Some("A\\K"), Some("B\\E"), Some("B\\f")]
+    );
+}
+
+#[test]
+fn the_context_at_a_position_has_only_what_precedes_it() {
+    let program = parse("<?php\nnamespace A;\nuse X\\Y;\nnamespace B;\nuse Z\\Y;\n");
+    let at = |line| context_at(&program, Position { line, col: 1 });
+    assert_eq!(at(3).resolve("Y"), "A\\Y");
+    assert_eq!(at(4).resolve("Y"), "X\\Y");
+    assert_eq!(at(6).resolve("Y"), "Z\\Y");
 }

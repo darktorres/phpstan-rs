@@ -268,7 +268,8 @@ fn use_map_key(kind: UseKind, name: &str) -> String {
 
 /// Fills in [`QualifiedName::resolved`] for every name in a parsed file,
 /// tracking `namespace` and `use` statements in order: a braced namespace
-/// body shares the context of its `namespace` statement.
+/// body shares the context of its `namespace` statement. Declarations get
+/// their namespaced name.
 pub fn resolve_names(stmts: &mut [Stmt]) {
     let mut resolver = Resolver {
         ctx: NameContext::default(),
@@ -393,7 +394,26 @@ impl VisitorMut for Resolver {
         match &mut stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => self.ctx.add_uses(imports),
-            _ => walk_stmt_mut(self, stmt),
+            _ => {
+                match &mut stmt.kind {
+                    StmtKind::FunctionDecl(f) => {
+                        f.namespaced_name = Some(self.ctx.declared_name(&f.name).into());
+                    }
+                    StmtKind::ClassDecl(c) => {
+                        c.namespaced_name = Some(self.ctx.declared_name(&c.name).into());
+                    }
+                    StmtKind::EnumDecl(e) => {
+                        e.namespaced_name = Some(self.ctx.declared_name(&e.name).into());
+                    }
+                    StmtKind::GlobalConst(consts) => {
+                        for c in consts {
+                            c.namespaced_name = Some(self.ctx.declared_name(&c.name).into());
+                        }
+                    }
+                    _ => {}
+                }
+                walk_stmt_mut(self, stmt);
+            }
         }
     }
 

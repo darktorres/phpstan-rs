@@ -121,6 +121,7 @@ impl Parser {
             end: self.previous_end(),
         };
         let decl = ClassDecl {
+            namespaced_name: None,
             // No name multiple anonymous classes in the same file could
             // share safely - never indexed into the registry by this name,
             // only used structurally within this one expression. Interned
@@ -326,6 +327,7 @@ impl Parser {
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
+                        namespaced_name: None,
                         removal_span: None,
                         name: cname,
                         name_span: cname_span,
@@ -631,6 +633,7 @@ impl Parser {
         } = self.parse_class_body(class_is_readonly)?;
 
         Ok(ClassDecl {
+            namespaced_name: None,
             name,
             name_span,
             kind,

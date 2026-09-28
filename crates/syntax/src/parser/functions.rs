@@ -158,6 +158,7 @@ impl Parser {
             unreachable!()
         };
         Ok(FunctionDecl {
+            namespaced_name: None,
             name,
             name_span,
             params,

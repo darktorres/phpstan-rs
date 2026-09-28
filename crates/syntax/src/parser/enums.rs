@@ -186,6 +186,7 @@ impl Parser {
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
+                        namespaced_name: None,
                         removal_span: None,
                         name: cname,
                         name_span: cname_span,
@@ -238,6 +239,7 @@ impl Parser {
         self.expect(&Token::RBrace)?;
 
         Ok(EnumDecl {
+            namespaced_name: None,
             name,
             name_span,
             backing_type,

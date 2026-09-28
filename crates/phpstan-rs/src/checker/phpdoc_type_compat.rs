@@ -309,6 +309,7 @@ impl<'a> Checker<'a> {
             None => ("get", Vec::new(), property_type_hint.cloned()),
         };
         let decl = FunctionDecl {
+            namespaced_name: None,
             name: name.into(),
             name_span: span,
             params,
