@@ -7713,7 +7713,7 @@ paths is rewritten against the crates:
 
 - the README: the build, test and profiling commands (the fixture command per
   crate, `--lib` for white-box tests, the bin forwarding the profiling
-  features), and an architecture section from §2's crate map;
+  features), and an architecture section pointing at `ARCHITECTURE.md` (G5);
 - ROADMAP: 61 lines cite `src/` paths today, and its current-state text
   describes one package;
 - the fuzz guide (`fuzz/GUIDING_THE_FUZZER.md`);
@@ -7773,14 +7773,20 @@ measurement.
 - `crates/phpstan-rs` holds the binary alone, with no library target;
 - the module-graph spec holds `crate` rows only, and every crate's
   dependencies are within its row;
-- every Appendix A row names an existing crate, and no row's module remains
-  in the package;
+- every Appendix A row's destination exists (or its module is deleted), and
+  no row's module remains in the package;
 - `cargo xtask gates --full` passes, with no approved delta pending, gate 14
   holds a snapshot for every library crate, and CI's run on the final commit
   is green;
 - G4's build-time targets hold.
 
-The plan then folds into ROADMAP's Done section, its open items moved into
+What the plan holds that stays in force moves first, since a Done section is
+history and these are rules every later commit runs under: §2's crate map,
+layer rules and workspace conventions and Appendix F's decisions to
+`ARCHITECTURE.md`; each crate's §3 design to its crate-level `//!` docs, which
+`missing_docs` asks of the API crates anyway; and §4's gates with the
+approved-delta rule to `gates/README.md`, beside the data they read. The plan
+then folds into ROADMAP's Done section, its open items moved into
 ROADMAP's phases first, and its working documents go with it once each open
 item in them has a ROADMAP phase: `CRATE_SPLIT_EVIDENCE.md` (the
 frozen copy kept to check that condensing dropped nothing),
