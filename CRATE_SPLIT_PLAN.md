@@ -4671,9 +4671,13 @@ fixture:
     \DatePeriod(isostr: …)`; 5);
   - a private property read from outside is `property.private` under
     `??` too (`$foo->id ?? 2` always gives `2`, PHP reading it as unset;
-    `bug-12645.php`), and so is PHP 8.5's `clone($foo, ['priv' => …])`
-    from outside (`clone-with.php`, `*-clone-with.php`, 4); both
-    unreported today;
+    `bug-12645.php`), and PHP 8.5's `clone($foo, ['priv' => …, 'prot' =>
+    …])` from outside is `property.private`/`property.protected`
+    (`clone-with.php`, `*-clone-with.php`, 4 each); both unreported today;
+  - a dynamic class constant name must be a string: `self::{$mixed}`,
+    `parent::{$mixed}` and `$obj::{$mixed}` are `classConstant.nameType`
+    at level 10, unreported today (`dynamic-constant-stringable-access.php`,
+    5);
   - invoking a value that isn't callable is `callable.nonCallable`: a
     constant string naming no function (`$n = 'nonexistent'; $n();`,
     `''`), `$i(...)` on `1`, `5 |> 'doFoo'` with no function `doFoo`, and
@@ -4990,7 +4994,10 @@ fixture:
   - a conditional return whose subject is a template isn't
     `conditionalType.alwaysTrue` from the bound alone: `(T is object ? … :
     …)` under `T of object` (`bug-10622b.php`), nor `(int is int ? …)`
-    shadowing a parameter (`callable-type-predicate-rule.php`);
+    shadowing a parameter (`callable-type-predicate-rule.php`), but a bound
+    disjoint from the tested type decides it: `(T is string ? … : …)`
+    under `T of int` is `conditionalType.alwaysFalse`, unreported today
+    (`*-conditional-return-type.php`, 4);
   - `@var` above `global $x;` and `static $x = 1;` sets the variable's
     type; it is `varTag.nativeType` against the default today
     (`bug-4500.php`, `invalid-var-tag-type.php`). A `@var` is checked
@@ -5079,7 +5086,8 @@ fixture:
     alias doesn't shadow a class (`typeAlias.duplicate`), and
     `@phpstan-require-extends`/`-implements` sit only where PHPStan allows
     them (`requireExtends.onClass`, `requireImplements.onEnum`, …); all
-    unreported today;
+    unreported today; an enum using a trait that requires an interface is
+    `class.missingImplements` (`incompatible-require-implements.php:52`);
   - `@phpstan-consistent-constructor` on a class with a private
     constructor is `consistentConstructor.private`, unreported today;
   - an override's return type is checked in every form (PHPStan's
