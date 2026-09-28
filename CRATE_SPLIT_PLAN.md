@@ -945,8 +945,7 @@ corpus, type, baseline, performance and build-time gates run locally
       takes 2 s).
 
     All three record under `.corpus-runs/gate/{nsrt,oracle,rules}/<hash>`. A
-    count
-    rises only through an approved delta that names the cause.
+    count rises only through an approved delta that names the cause.
 13. **No repeated findings** (from E1). No result of the corpus runs, the
     fixtures or the rules oracle's phpstan-rs side holds two findings with the
     same file, span (start and end), identifier and message. A rule that reports
