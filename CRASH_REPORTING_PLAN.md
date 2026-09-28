@@ -228,6 +228,33 @@ Status: design. Nothing here is implemented.
   `sentry::Transport` and is installed through `ClientOptions::transport`.
 - **Defaults:** `shutdown_timeout` 2 s, `max_breadcrumbs` 100, a transport
   queue of 30 envelopes.
+- **The server side** (read from getsentry/relay, getsentry/sentry and
+  getsentry/self-hosted `master` on 2026-09-28):
+  - Relay's default limits (`relay-config/src/config.rs`): 1 MiB per event,
+    200 MiB per attachment, for all attachments together and per envelope.
+    Self-hosted's nginx caps every request body at 100 MB
+    (`client_max_body_size 100m`).
+  - Relay rejects no event for its age: a timestamp older than the project's
+    event retention (`DEFAULT_EVENT_RETENTION`, 90 days) is replaced by the
+    time the event arrived, with a `past_timestamp` error recorded
+    (`relay-event-normalization/src/validation.rs`).
+  - `sentry:store_crash_reports` defaults to 0 (`lang/native/utils.py`):
+    minidumps are symbolicated and then dropped. -1 keeps all, a number keeps
+    that many per issue, at most 100. Attachments that aren't crash reports
+    are stored regardless (`event_manager.py`).
+  - Downloading an attachment
+    (`api/endpoints/event_attachment_details.py`) needs an authenticated
+    *user* whose organization role reaches `sentry:attachments_role`
+    (default `member`, `SENTRY_DEFAULT_ROLE`); an organization auth token has
+    no user and is refused. `?download` with any value returns the file,
+    possibly as a redirect to the object store, and possibly content-encoded
+    as stored when the client accepts that encoding.
+  - Organization auth tokens carry `org:ci`, which `ProjectReleasePermission`
+    accepts for debug-file uploads (`DifAssembleEndpoint`, `DebugFilesEndpoint`)
+    and releases (`api/bases/project.py`).
+  - Self-hosted's `sentry.conf.example.py` sets
+    `SENTRY_QUOTAS = "sentry.quotas.redis.RedisQuota"`, so client-key rate
+    limits are enforced.
 - **Dependency policy:** every crate the probe build adds has a license
   `deny.toml` allows (`aws-lc-sys`'s compound expression is already in the
   lock and passes today). `minidump-writer` depends on `nix` 0.30, so the
@@ -600,9 +627,10 @@ external/<n>/<name>      files outside the root, mapped in the manifest
   `composer.lock` from each discovered root (they set the PHP version range).
   The walk fills the bundle up to the cap rather than stopping at a depth.
 - **Cap:** 10 MiB compressed or 64 MiB uncompressed, whichever comes first.
-  Self-hosted Relay accepts envelopes and attachments up to 100 MiB by default,
-  but a CLI run waits for the upload; 10 MiB of gzipped PHP is roughly 60 MiB
-  of source. A crashing file larger than the cap alone is sent as the manifest
+  A self-hosted instance accepts request bodies up to 100 MB (its nginx
+  `client_max_body_size`, in front of Relay's own 200 MiB limits, §3), but a
+  CLI run waits for the upload; 10 MiB of gzipped PHP is roughly 60 MiB of
+  source. A crashing file larger than the cap alone is sent as the manifest
   only, tagged `too_large`.
 - **Config:** the effective `ConfigFile` table (old keys moved, `--set`
   applied) serialised back to TOML. `config::Schema` gains two key
@@ -776,9 +804,11 @@ format change keeps. At start, the app and the LSP drain it on a background
 thread: `ready/` entries are sent, `pending/` entries whose lock is free are
 handed to a finisher, stale crash-state directories are removed, and dumps older
 than a day in `<cache>/crashes` (left by a reporter killed mid-upload) are
-deleted. Entries older than 30 days are deleted, which is also as far back as
-Relay accepts an event's timestamp by default (`max_secs_in_past`), and the
-oldest go first once the outbox passes 100 MiB.
+deleted. Entries older than 30 days are deleted, and the oldest go first once
+the outbox passes 100 MiB. Relay rejects no event for its age: one older than
+the project's event retention (90 days by default) has its timestamp replaced
+by the time it arrived (§3), so within 30 days a retried event keeps the time
+of its crash.
 
 ### 4.13 Failures in the reporting itself
 
@@ -876,19 +906,32 @@ instance:
 - a project `phpstan-rs`, platform Rust, with its own client key; the key's
   rate limit set to 60 events a minute, so a crash on every file of a large
   run can't flood the server (the client's grouping (§4.6) already sends one
-  event per location per run);
-- **Security & Privacy:** "Store Native Crash Reports" on, so minidumps stay
-  downloadable; the data scrubber and default scrubbers left on. They match
-  sensitive key names and value patterns, and none of our keys match; they
-  don't read attachments. "Prevent storing of IP addresses" on;
-- **attachments access** limited to the maintainers' role;
+  event per location per run). Self-hosted enforces key rate limits through
+  its Redis quota backend (§3);
+- **storing minidumps:** the project's `sentry:store_crash_reports` ("Store
+  Minidumps As Attachments") set to 10 per issue. Its default, 0, symbolicates
+  a dump and then discards it, which would leave nothing to open in a
+  debugger. The bundle is an ordinary attachment and is stored whatever the
+  setting;
+- **Security & Privacy:** the data scrubber and default scrubbers left on.
+  They match sensitive key names and value patterns in the event, none of our
+  keys match, and they don't read plain attachments. "Prevent storing of IP
+  addresses" on;
+- **attachments access:** the organization's `sentry:attachments_role`
+  raised from its default, `member`, to `manager`, so only maintainers can
+  download bundles and dumps;
 - **grouping:** the default, plus the client's `["panic", location]`
   fingerprint for panics; native crashes group by their symbolicated stacks;
 - **alerts:** a new issue and a regressed issue each notify by email;
 - **retention:** the instance's `SENTRY_EVENT_RETENTION_DAYS` (90 by
   default) also bounds how long bundles are kept;
 - **an organization auth token** for the release workflow, stored as
-  `SENTRY_AUTH_TOKEN`.
+  `SENTRY_AUTH_TOKEN`: its `org:ci` scope is accepted by the debug-file
+  upload and release endpoints (`ProjectReleasePermission`, §3);
+- **a personal auth token** for each maintainer who runs `crash-repro fetch`
+  (§4.18): downloading an attachment checks the requesting *user's*
+  organization role against `sentry:attachments_role`, and an organization
+  token has no user, so it is refused.
 
 ### 4.18 Developer tools
 
@@ -913,15 +956,22 @@ so the user's binary doesn't carry it:
   debug info, sends frames with function, file and line. Its minidumps are
   symbolicated on the server, which has no debug files for a local build:
   `cargo xtask crash-debug-files [debug|release]` uploads the local binary
-  with `sentry-cli debug-files upload --include-sources`, using the same
-  `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` and `SENTRY_AUTH_TOKEN` as
-  `fetch`, for a maintainer running development builds with a DSN.
+  with `sentry-cli debug-files upload --include-sources`, reading
+  `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` and `SENTRY_AUTH_TOKEN` (an
+  organization token, or a personal one with `project:releases`), for a
+  maintainer running development builds with a DSN.
 - **`fetch <issue>`** downloads an issue's latest bundle through the Sentry
-  API with `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` and a
-  `SENTRY_AUTH_TOKEN` with `event:read`: `GET /api/0/issues/<id>/events/latest/`
-  for the event id, then the event's attachments list
-  (`/api/0/projects/<org>/<project>/events/<event>/attachments/`) and the
-  `repro.tar.gz` entry with `?download=1`.
+  API with `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` and
+  `SENTRY_FETCH_TOKEN`, a personal auth token with `event:read` and
+  `project:read` whose user holds the attachments role (§4.17):
+  `GET /api/0/organizations/<org>/issues/<id>/events/latest/` for the event
+  id, `GET /api/0/projects/<org>/<project>/events/<event>/attachments/` for
+  the list, then the `repro.tar.gz` entry's
+  `.../attachments/<attachment id>/?download=1`. The download may redirect to
+  the instance's object store, so redirects are followed (the token isn't
+  sent across hosts), and the request sends `Accept-Encoding: identity`, since
+  the server otherwise may answer with the stored blob's own content
+  encoding.
 - **Bundles are untrusted input**, since anyone with the DSN can send one.
   Extraction rejects absolute paths, `..` components, links and device
   entries, and stops past 256 MiB extracted; a bundle is only ever extracted
