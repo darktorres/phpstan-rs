@@ -6646,7 +6646,8 @@ run (gate 7 in miniature). Gate: nothing outside `project` constructs a
 `Checker` or a `Project` (gate 10's engine-construction rule, over `lsp`, whose
 hover, inlay and completion probes build `Checker`s until E6's observers).
 
-Behaviour commits, one each with its fixture:
+Behaviour commits, one each with its fixture and, where the output changes, its
+approved deltas for the corpus, type-snapshot and baseline gates (§4):
 
 - **Parse errors are reported.** A file that fails to parse gets a
   non-ignorable `phpstan.parse` error at the parser's position, in every format
@@ -6669,7 +6670,12 @@ Behaviour commits, one each with its fixture:
   baseline paths are. Today an entry holds the run's own spelling of the path,
   normalized lexically only, so a baseline generated at the project root matches
   nothing in a run from a subdirectory with `--config ../phpstan-rs.toml`, whose
-  paths are `../src/…`.
+  paths are `../src/…`. The format becomes version 3; a version 1 or 2 file,
+  which doesn't record the directory it was generated from, loads with its paths
+  read against the working directory as today, and `convert-baseline` rewrites
+  it as version 3 relative to itself. Gate 6's Stage A baselines are version 2
+  and keep matching unchanged; their version 3 conversions join the gate beside
+  them.
 - **Non-ignorable errors bypass the baseline**: `entries_for` writes them into
   a generated baseline, and `baseline::filter` suppresses them (it has no
   `non_ignorable` check; `ignore_errors::filter` has one). Generation reports
