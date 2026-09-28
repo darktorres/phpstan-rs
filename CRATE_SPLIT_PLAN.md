@@ -5424,8 +5424,8 @@ fixture:
     `dead-catch-first-class-callables.php`, `bug-5650.php`); property
     hooks are throw points only through their own `@throws` when
     `exceptions.implicitThrows` is off
-    (`unthrown-exception-property-hooks*.php`); each member of a multi-
-    catch is judged alone (`unthrown-exception-multi.php`); and a caught
+    (`unthrown-exception-property-hooks*.php`); each member of a
+    multi-catch is judged alone (`unthrown-exception-multi.php`); and a caught
     class that isn't an exception, or is guarded by `class_exists()`, is
     judged as well (`catch.php`, `class-exists.php`);
 - (g) the restricted-usage framework: `@internal` core, deprecation
