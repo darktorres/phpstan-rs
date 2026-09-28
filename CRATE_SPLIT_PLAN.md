@@ -1378,8 +1378,13 @@ Follow-ups:
 - **Callability and class-strings in `accepts`** (behaviour fix): a string
   literal is callable only when it names an existing function or
   `Class::method`, an array only as `[object|class-string, method]` with the
-  method existing, and a class-string literal must name a class within the
-  bound. Today `'no_such_function'`, `[1, 2]` and `'stdClass'` for
+  method existing (and static when the first element is a class-string:
+  `Closure::fromCallable([self::class, 'sayHello'])` for an instance
+  method is accepted today, `bug-1971.php`), and a class-string literal
+  must name a class within the bound. A `static` parameter type is the
+  called class and its subclasses: `B::staticTest($b)` with `B|string`
+  for `@param static|string` passes today (`bug-2164.php`). Today
+  `'no_such_function'`, `[1, 2]` and `'stdClass'` for
   `class-string<DateTimeInterface>` are accepted. A plain `string` isn't a
   `class-string` either: `make($s)` for `@param class-string<T> $c` is
   `argument.type` in PHPStan and accepted today. A closure is accepted by a
@@ -3928,6 +3933,11 @@ the rest), which the gate excludes and lists.
     `argument.sscanf` today, reported twice by two rules with different
     messages ("contains 4 placeholders" and "contains 4 placeholder(s)"),
     which become one (`bug-14567.php`, `printf.php`);
+  - `Closure::bind()`/`bindTo()` check the new `$this` against the
+    closure's `@param-closure-this` type (`Closure::bind($c, new self())`
+    for a `stdClass` closure-this is unreported today,
+    `closure-bind-param-closure-this.php`,
+    `closure-bind-to-param-closure-this.php`);
   - `XMLReader::open()` is `XMLReader|false` called statically and `bool`
     on an instance (`XMLReaderOpenReturnTypeExtension`); it is
     `XMLReader|bool` today, so `->read()` after `!== false` is
