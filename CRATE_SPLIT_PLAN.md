@@ -4452,8 +4452,8 @@ the rest), which the gate excludes and lists.
 
 **E1. Collectors and project-level rules**, one commit each:
 
-- the reference-site collector (a built-in collector, consumed by the dead
-  code rules and, later, the LSP);
+- the reference-site collector (a built-in collector, consumed by the dead code,
+  architecture and circular-namespace rules and, later, the LSP);
 - dead code / members / enum cases / abstract classes, with every use
   site the reference-site collector sees: a private constant read in an
   enum case value (`case One = self::MY_CONST`), an attribute argument
@@ -4487,10 +4487,46 @@ the rest), which the gate excludes and lists.
   counts only for the names `$y` can be (after `$y !== 'doBar'` it
   doesn't use `doBar()`); both unreported today (`unused-private-method.php`,
   `bug-11802b.php`);
-- duplicates;
-- circular namespaces;
-- architecture;
-- banned;
+- duplicate declarations across the project (`project::duplicate_classes` and
+  `duplicate_functions`; a class body's repeated members are E3(e)'s
+  `checker/duplicates.rs`): a collector over C4's per-file declaration sets and
+  a rule reporting `function.duplicate` and
+  `class.duplicate`/`interface.duplicate`/`trait.duplicate`/`enum.duplicate` on
+  every site, the message listing all sites with paths relative to the project
+  root, as PHPStan's `RelativePathHelper` prints them (absolute today). A
+  declaration counts when it is unconditional (under `if (!function_exists(…))`
+  or `class_exists()` it is a polyfill) and is project code: a file phpstan-rs
+  reads as a stub (its phpstorm-stubs, `stub_paths`) never counts. That replaces
+  the function check's signature-difference grouping, a workaround for
+  phpstorm-stubs declaring `strtr()` twice that also hides two project functions
+  with different signatures, which PHP rejects all the same ("Cannot
+  redeclare"). Names compare case-folded (C4's duplicate query). Both stay
+  opt-in: helpers of two test suites that never load into one process can't be
+  told from a real duplicate;
+- `namespace.circularDependency` over the reference-site collector's class
+  dependencies, the set the architecture rules read: today only `extends`,
+  `implements` and `use` edges count, so a cycle through type hints, `new`,
+  static calls, constants or PHPDoc types is unreported. The finding names the
+  namespaces and, for each edge of the cycle, the class and dependency that make
+  it (today one representative class), and only analysed files' namespaces form
+  cycles;
+- `[[rules.architecture]]` as a collector rule: a class's dependencies are the
+  reference-site collector's class references inside it (native hints, `new`,
+  static access, `instanceof`, `catch`, attributes, parameter defaults, hooks
+  and constants) and every class its resolved PHPDoc names, inline `@var`,
+  `@throws`, `@extends`/`@implements`/`@use` arguments, template bounds,
+  `@method`, `@property` and `@mixin` included. Today
+  `Project::check_architecture` walks each file again with its own reference
+  walker and reads PHPDoc only through method and property signatures, so `/**
+  @var Infra\Repo $r */` in a domain method is no dependency. It runs in the LSP
+  too (CLI-only today, §1);
+- `[rules.banned]`'s constructs and types as per-node rules in the rules walk,
+  each reporting `banned.<construct>` or `banned.type` where the node is: they
+  are per-file checks, not project-level, though `Project::check_banned` walks
+  each file again today and runs in the CLI only. `compact()` and `extract()`
+  are matched by the resolved function name (a raw-name match today, so a
+  namespace's own `compact()` is banned too), and `banned.type` reads the rules'
+  resolved types;
 - class_shape with the parent-call registration API and the Doctrine
   exemption hook;
 - composer hygiene (package context, no I/O);
