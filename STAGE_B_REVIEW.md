@@ -498,10 +498,10 @@ through `check-project`.
   `mod_int_range`'s range fallback uses the divisor's signed maximum
   (`r_max - 1`) where it needs its magnitude over both bounds.
   (`b62a1131`) Done in `ff36a896`.
-- [ ] **F31. Bitwise operators on strings are typed `int`.** `$a ^ $b`,
+- [x] **F31. Bitwise operators on strings are typed `int`.** `$a ^ $b`,
   `$a | $b` and `$a & $b` over strings give a string in PHP (bytewise;
   `'a' ^ "\x02"` is `'c'`). `binary_operation_type`'s bitwise arm returns
-  `int`. (`615ad35d`)
+  `int`. (`615ad35d`) Done in `48b1f80f`, with `~` alongside.
 - [ ] **F32. `++` on a string keeps its value.** `$s = 'a'; $s++;` stays
   `'a'` where PHP gives `'b'`: `step` leaves a string unchanged instead of
   applying PHP's string increment (alphanumeric carry; a numeric string
