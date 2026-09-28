@@ -513,11 +513,7 @@ pub(crate) fn loose_compare_literals(
         }
         (Type::FloatLiteral(n), Type::StringLiteral(s))
         | (Type::StringLiteral(s), Type::FloatLiteral(n)) => {
-            if let Some(x) = numeric_string_value(s) {
-                Some(*n == x)
-            } else {
-                None
-            }
+            numeric_string_value(s).map(|x| *n == x)
         }
         _ => None,
     }
