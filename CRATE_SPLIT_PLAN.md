@@ -4116,6 +4116,13 @@ the rest), which the gate excludes and lists.
     string, 1?: string}` it is `array<string>` today (the rules oracle's
     `bug-11549.php`); `array_sum()` of ints is `int`, not `int|float`
     (`bug-9699.php`);
+  - a pattern built from parts is validated as `RegularExpressionPatternRule`
+    does: each constant alternative of the concatenation, with a
+    non-constant part standing in as `(?:.*)` (`'/' . preg_quote($s, '/')
+    . '}'` has no ending delimiter), and the empty pattern (`preg_replace('',
+    …)`) is invalid; only a whole constant pattern is checked today (the
+    rules oracle's 16 PHPStan-only `regexp.pattern`, `preg-quote.php`,
+    `valid-regex-pattern.php`, `null-coalesce.php:83`);
   - `json_decode()` of a constant string folds to its value
     (`JsonThrowOnErrorDynamicReturnTypeExtension`): `json_decode('{"class":
     "x"}')->class` is `property.nonObject` "on mixed" today (the rules
@@ -4359,7 +4366,9 @@ fixture:
     `echo $a?->foo` on `Foo|null`, `foreach` over `array<int>|null`,
     `(string)` of `stdClass|null`, `object|string` or a plain `object`,
     `[$a] = $arrayOrNull`,
-    `...$integersOrNull`, `new stdClass instanceof $class` with
+    `...$integersOrNull`, destructuring an `int|list<int>` `foreach` value
+    or a nested `stdClass` (`[[$a]] = [new \stdClass()]`, also definite),
+    `new stdClass instanceof $class` with
     `string|null`, `$ob < $n` for `stdClass` and `float|null`, `$string()`
     and `$o(...)` for a `string` or `object` that may not be callable, an
     array key of `int|null`, `string|null` or `int|object`, and `.` on
@@ -4973,8 +4982,10 @@ fixture:
     (`set (int|array $v)` on `int`); and the native type where the PHPDoc
     doesn't apply (`@param Foo|Bar[]` on `array`, an unresolvable
     `array<int, int, int>` or `array{foo: int}&array{bar: string}`).
-    `missingType.generics` walks the same sites, `@param-closure-this`
-    included (the rules oracle's 18 PHPStan-only: class tags,
+    `missingType.generics` and `generics.notGeneric` walk the same sites,
+    `@param-closure-this`, `@use` and a template bound included
+    (`Exception<int>` in an inline `@var` is unreported today; the rules
+    oracle's 18 and 15 PHPStan-only: class tags,
     `@param-out`, `@phpstan-self-out`, an inline `@var`, a conditional
     return, a set hook's parameter).
 - (f) control flow, returns, throws and generators:
