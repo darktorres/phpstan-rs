@@ -1489,7 +1489,15 @@ Follow-ups:
 - **Conditional parameter types** resolve per call: `@param ($flags is 256
   ? string : bool) $demoArg` takes a `string` only when `$flags` is `256`;
   `cond('s')` and `cond(true, 256)` are unreported today
-  (`conditional-param.php`, 3).
+  (`conditional-param.php`, 3). A conditional parameter type narrows with
+  the parameter it names (`$k is 'a' ? int<0, 1> : non-falsy-string` is
+  `int<0, 1>` under `$k === 'a'`, `bug-7915.php`), and conditional returns
+  and `@param-out` types resolve the same way: on an array's emptiness, a
+  template, `$this`, nested conditions picking the first match, and the
+  argument's type before the call reassigns it (`$items =
+  iteratorToList($items)`, `bug-11565.php`); Appendix H's
+  `conditional-return`, `conditional-param` and `conditional-param-out`
+  are 82 nsrt mismatches.
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
   member covers (`A|B` for `B extends A` stays two members). Identical
   members collapse too: a closure parameter today reaches
@@ -1503,7 +1511,10 @@ Follow-ups:
   `callable(): void|null`). A string with control characters displays
   escaped in double quotes: `PHP_EOL` is `' '|' '` today, with the raw
   line breaks between the quotes. A float literal keeps its decimal point:
-  `@param 0|0.0|1.5 $x` displays as `0|0|1.5` today.
+  `@param 0|0.0|1.5 $x` displays as `0|0|1.5` today. Appendix H's
+  `type-print` (112 nsrt mismatches, 38 files) are the display forms left:
+  each becomes this printer's form or a documented normalization in the
+  nsrt gate.
 - **Callable parameters** carry their names, and a callable its purity.
   `CallableParam` has no name today, so `$f(valu: 1)` on `fn (int $value)`
   isn't reported and a conditional return `($value is int ? …)` can't bind
@@ -6617,7 +6628,7 @@ values that flow on from them.
 - `case-insensitive-names` (4, 1 file): `PARENT::` is `parent::`;
   `case-insensitive-parent.php`.
 
-**B4** (863 mismatches, 219 files, 55 causes):
+**B4** (945 mismatches, 236 files, 58 causes):
 
 - `type-print` (112, 38 files): display forms the nsrt normalization doesn't
   cover yet (`callable` as `callable(): mixed`, a template with its bound,
@@ -6657,6 +6668,13 @@ values that flow on from them.
   `bug-12473-types.php`, `bug-13144.php`, `sensitive-parameter-value.php`,
   `bug-13783.php`, `bug-6505.php`, `native-reflection-default-values.php`,
   `bug-4725.php`, `bug-9084.php`, `bug-6993.php`, `bug-7078.php`.
+- `conditional-return` (58, 12 files): a conditional return type resolves on the
+  argument's type: arrays by emptiness, templates, nested conditions, `$this`,
+  class types, and against the argument's value before a reassignment;
+  `conditional-types.php`, `conditional-type-for-parameter-template.php`,
+  `bug-7279.php`, `bug-11565.php`, `bug-15296.php`, `bug-11894.php`,
+  `bug-9000.php`, `conditional-type-for-parameter-template-bound.php`,
+  `bug-12562.php`, `bug-3853.php`, `bug-9360.php`, `fizz-buzz.php`.
 - `shape-union` (36, 4 files): branches with different shapes stay a union of
   shapes rather than one optional-key shape; `bug11480.php`, `bug-13561.php`,
   `bug-9908.php`, `bug-10834.php`.
@@ -6688,6 +6706,9 @@ values that flow on from them.
   nullable; `generics-do-not-generalize.php`, `bug-3226.php`,
   `generic-generalization.php`, `assert-class-type.php`, `bug-11430.php`,
   `bug-7423.php`, `template-null-bound.php`.
+- `conditional-param` (17, 3 files): a conditional parameter type (`$k is 'a' ?
+  A : B`) resolves when the other parameter narrows; `bug-7915.php`,
+  `bug-10055.php`, `pr-5108.php`.
 - `decimal-int-string` (16, 1 file): `decimal-int-string` and
   `non-decimal-int-string` types, and `[$s => 1]` keyed by them;
   `decimal-int-string.php`.
@@ -6734,6 +6755,9 @@ values that flow on from them.
   `$this(Foo<T>)&static`; `bug-12575.php`, `new-in-initializers.php`.
 - `class-constant-keys` (7, 1 file): `self::class` as an array key builds a
   shape; `array-shape-class-constant-key.php`.
+- `conditional-param-out` (7, 2 files): a conditional `@param-out` type
+  resolves, defaulted parameters included; `bug-10699.php`,
+  `param-out-default.php`.
 - `enum-name-value` (7, 2 files): `->name` and `->value` of an enum union or
   subtracted enum are the remaining cases' literals; `bug-14839.php`,
   `array-key-exists-on-subtracted.php`.
@@ -6922,7 +6946,7 @@ values that flow on from them.
   without a variable name above a `foreach`;
   `foreach/type-in-comment-no-variable-2.php`, `var-above-use.php`.
 
-**D3** (1,745 mismatches, 318 files, 85 causes):
+**D3** (1,663 mismatches, 301 files, 82 causes):
 
 - `count-narrow` (192, 19 files): `count()` compared with a constant, a range or
   another `count()` narrows the array: a list to an N-element shape, a union of
@@ -6983,13 +7007,6 @@ values that flow on from them.
   matched against another `strlen()` narrow the string; `strlen-int-range.php`,
   `bug-13688.php`, `bug-13749.php`, `bug-10952b.php`, `non-falsy-string.php`,
   `bug-11035.php`, `bug-7949.php`.
-- `conditional-return` (58, 12 files): a conditional return type resolves on the
-  argument's type: arrays by emptiness, templates, nested conditions, `$this`,
-  class types, and against the argument's value before a reassignment;
-  `conditional-types.php`, `conditional-type-for-parameter-template.php`,
-  `bug-7279.php`, `bug-11565.php`, `bug-15296.php`, `bug-11894.php`,
-  `bug-9000.php`, `conditional-type-for-parameter-template-bound.php`,
-  `bug-12562.php`, `bug-3853.php`, `bug-9360.php`, `fizz-buzz.php`.
 - `string-fn-narrow` (52, 7 files): a string function's result compared with a
   constant narrows its argument (`strtolower($s) === 'x'`, `substr`, `strstr`,
   `strrchr`, `trim($s) !== ''`); `non-empty-string-strcasing-specifying.php`,
@@ -7050,9 +7067,6 @@ values that flow on from them.
   `bug-7492.php`.
 - `increment-types` (18, 3 files): `++`/`--` on `null`, strings and floats give
   PHP's result types; `bug-10122.php`, `constantTypes.php`, `bug-1870.php`.
-- `conditional-param` (17, 3 files): a conditional parameter type (`$k is 'a' ?
-  A : B`) resolves when the other parameter narrows; `bug-7915.php`,
-  `bug-10055.php`, `pr-5108.php`.
 - `arrayaccess-offset` (16, 3 files): an `ArrayAccess` offset reads
   `offsetGet()`'s return, and `isset` on it adds `hasOffset`; `bug-15021.php`,
   `bug-6399.php`, `bug-13204.php`.
@@ -7125,9 +7139,6 @@ values that flow on from them.
   when it always throws, `void` without a `return`, and its return type when a
   variable holding it is called; `bug-15167.php`, `bug-10283.php`,
   `mixed-typehint.php`.
-- `conditional-param-out` (7, 2 files): a conditional `@param-out` type
-  resolves, defaulted parameters included; `bug-10699.php`,
-  `param-out-default.php`.
 - `property-fetch-dynamic-name` (7, 1 file): `$obj->{'n'}` is the same
   expression as `$obj->n`; `bug-14847.php`.
 - `else-narrow` (6, 3 files): the else branch of a check removes the matched
