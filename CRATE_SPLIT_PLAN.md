@@ -3200,10 +3200,12 @@ fixture:
     `staticMethod.void`, `function.void`): `$x = $o->v();` for `v(): void`
     isn't reported today (49 oracle findings, e.g. PSR-3
     `LoggerInterface::debug()` results);
-  - a pure call whose result is discarded is reported
-    (`function.resultUnused`, `method.resultUnused`,
-    `staticMethod.resultUnused`): `strlen($s);` and `E::tryFrom($v);` on
-    their own line aren't reported today;
+  - a discarded pure call is reported for built-ins too
+    (`function.resultUnused`, `staticMethod.resultUnused`): the rule
+    exists (`noop.rs`) but reads purity, and a built-in has none until C5
+    embeds `functionMetadata.php`, so `strlen($s);` and `E::tryFrom($v);`
+    on their own line are unreported today (a `@phpstan-pure` user method
+    already is);
   - a template the call can't resolve is `argument.templateType`:
     `make($s)` for `@param class-string<T> $c` with a plain `string` is
     unreported today (17 oracle findings).
