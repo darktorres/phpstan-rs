@@ -7425,7 +7425,7 @@ held to the previous commit's:
 ### Stage G: extraction wave and tidy
 
 Stage G starts when F is done. The lower layers are crates already: `syntax`,
-`types`, `phpdoc`, `stub-sources`, `sql`, `diagnostics`, `composer`, `config`
+`types`, `phpdoc`, `stub-sources`, `sql`, `diagnostics`, `composer`, `config`,
 `reflection` and `php-regex` (B, C10, E2), with the sibling plans'
 `crash-context`, `pcre` and `crash-sys`, and `neon` once Phase 183 lands.
 Everything from `analyser` up is still modules of the one `phpstan-rs` package
