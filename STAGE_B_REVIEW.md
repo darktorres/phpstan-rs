@@ -110,6 +110,30 @@ Each fix needs a fixture.
   literals to their base type (and ranges to `int`) before giving up; `mixed`
   only when that still exceeds the cap.
 
+- [ ] **P2. Nested expressions are inferred again at every level.** Deep
+  input is slow far beyond its size (debug build, probed): 3,000 nested
+  array literals take about 7 minutes, and nested calls `g(g(…))` take
+  7 s at 800 levels but 183 s at 1,600. The profile is
+  `infer_builtin_call_return_type` and `infer_expr` re-inferring the same
+  subtrees: `check_expr` returns each node's type, yet every consumer walks
+  the children again, and so on down. The work, each its own commit:
+  - **Inference cache.** `Locals` gets a version, fresh on creation, clone
+    and every write (its fields private, writes through methods); an
+    expression's type is cached by node and scope version, `check_expr`
+    storing what it computes, reset per function body. The crate-split
+    plan's D3 ("Each expression is inferred once") replaces it with the
+    per-snapshot memo.
+  - **Shared nested types.** A type's children are shared (`Arc`), so a
+    clone costs the same at any depth (1.4 GB at 20,000 nested arrays
+    today).
+  - **Interned types, memoized algebra** (ROADMAP Phase 95 C1): equality by
+    pointer, union/intersect/remove computed once per argument tuple, and
+    the `MAX_UNION_MEMBERS` collapse to `mixed` revisited once unions are
+    cheap.
+  - **Constant factors.** Builtin return types dispatch by resolved name
+    from a table rather than a string match run for every call, user
+    functions included; long `.`/`+` chains are walked iteratively.
+
 ## Review 2: structure, types crate
 
 - [ ] **T1. One absorption rule for unions.** `union_types_impl` in
