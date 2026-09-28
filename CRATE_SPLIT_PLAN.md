@@ -2869,7 +2869,7 @@ deleted; the file-size gate.
   `isset-after-remembered-constructor.php`); `isset()` and `empty()`
   alike (`isset.expr`, `empty.expr`, `isset.initializedProperty`,
   `empty.initializedProperty`, and `empty.property` for a property that
-  can't be falsy, `int<1, max>`; `empty(X)` of a constant `null` is
+  can't be falsy, `int<1, max>`; `empty(X)` of `const X = []` is
   "always falsy"; 11 in all); all unreported today.
   `nullCoalesce.offset` covers a literal or `null` container (`[0][0] ??
   'ok'` always exists, `(null)[0] ?? 'ok'` doesn't; `offset-access-legal.php`),
@@ -4609,10 +4609,12 @@ fixture:
     findings); `static::$p;` stays reported, stricter than PHPStan;
   - `yield` outside a function is a compile error
     (`generator.outOfFunction`), unreported today;
-  - a discarded pure call is reported inside PHP 8.5's `(void)` cast
-    (`function.inVoidCast`, `method.inVoidCast`, `callable.inVoidCast`) and
-    as a bare closure call (`$c();`, `expr.resultUnused`), both unreported
-    today;
+  - PHP 8.5's `(void)` cast on a call without `#[\NoDiscard]` is
+    pointless ("in (void) cast but function allows discarding return
+    value"; `function.inVoidCast`, `method.inVoidCast`,
+    `staticMethod.inVoidCast`, `callable.inVoidCast`, 10 in the rules
+    oracle), and a discarded pure call as a bare closure call (`$c();`) is
+    `expr.resultUnused`; both unreported today;
   - `self`/`static`/`parent` outside a class throw an `Error`:
     `self::class` in a function isn't `outOfClass.self` today
     (`outOfClass.static` is already reported);
