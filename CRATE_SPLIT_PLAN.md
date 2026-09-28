@@ -4633,7 +4633,10 @@ the rest), which the gate excludes and lists.
 - composer hygiene as a collector rule over the reference-site collector and the
   package context (the manifests B8 loads, read as `AnalysisContext`'s
   `composer` service, §3.8; the rule does no I/O, and the module-graph spec's
-  `rules` row gains `composer`, which it lacks today), run in the LSP
+  `rules` row gains `composer`, which it lacks today, in one commit with the
+  removal of the two `allow` lines it makes permitted edges,
+  `project::composer_hygiene @composer` and `checker::phpstan_api @composer`,
+  since the gate fails on a listed edge that no longer crosses), run in the LSP
   too (CLI-only today, §1): `undeclared.`, `misplaced.`, `devOnly.` and
   `unused.composerDependency`, `misplaced.autoloadDevSymbol`,
   `psr4.pathMismatch`/`psr4.caseMismatch`, `provide.unimplemented`,
