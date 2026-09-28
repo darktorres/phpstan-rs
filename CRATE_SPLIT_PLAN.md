@@ -4372,6 +4372,15 @@ fixture:
     `method.notFound`/`property.notFound` (it declares no members):
     `$o->getItem()` and `$o->x` on `object $o` are unreported today (the
     oracle finds 59 "undefined method/property object::");
+  - a property fetch inside `isset()`, `empty()` and `??` checks its
+    receiver as the offset checks do: on a `string` it is
+    `property.nonObject`, the fetch never finding anything (`isset($s->p)`,
+    `$s?->bar ?? 4`; `bug-6899.php`, `nullsafe-property-fetch.php`,
+    `*-nullsafe-isset.php`, 10), and so it is on `mixed` at level 10
+    (`isset($m->c->d)`; `bug-13539.php`, `bug-4559.php`, `bug-14393.php`,
+    `isset.php`, 10), as is a property write on `mixed` (`$m->w = 1`, an
+    `Error` on a non-object; `bug-9765.php`, `bug-2748.php`); all
+    unreported today;
   - a missing property is `property.notFound` inside `isset()`, `empty()`
     and `??` too where nothing can declare it: on a final class or an
     object known exactly from `new` (`isset($final->dyn)`, `(new
