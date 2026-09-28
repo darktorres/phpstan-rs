@@ -148,7 +148,7 @@ impl Registry {
     /// class-level template through `$parentClass->getActiveTemplateType
     /// Map()` immediately, at docblock-merge time - not deferred to each
     /// later call site the way this project's own method-scoped templates
-    /// correctly are (`Type::infer_template_bindings`/`Type::substitute_templates`'s
+    /// correctly are (`Relation::infer_template_bindings`/`Type::substitute_templates`'s
     /// own call-site binding, purely name-keyed and blind to which
     /// class's `FunctionReflection` a signature came from). Doing this
     /// immediately, rather than leaving the raw class-scoped `TemplateParam`

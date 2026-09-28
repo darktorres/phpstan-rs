@@ -866,7 +866,7 @@ impl Registry {
     /// vs. `class_info.rs`'s `class_scope = ctx.declared_name(&c.name)`
     /// for a class-level one - an FQN vs. a bare method name,
     /// structurally distinguishable). A method-scoped template is safe
-    /// to copy through verbatim: `Type::infer_template_bindings`/
+    /// to copy through verbatim: `Relation::infer_template_bindings`/
     /// `Type::substitute_templates`'s call-site binding is purely name-keyed
     /// and blind to which class's `FunctionReflection` a signature came from.
     /// Real PHPStan draws the identical line:

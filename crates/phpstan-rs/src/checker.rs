@@ -551,7 +551,7 @@ impl PartialEq for Locals {
 /// A generic `@template` name -> concrete `Type` substitution map (class-
 /// hierarchy template binding, function-call argument-to-template
 /// binding) - built once per call/hierarchy-walk and consumed immediately
-/// by `Type::substitute_templates`/`Type::infer_template_bindings`, never cloned
+/// by `Type::substitute_templates`/`Relation::infer_template_bindings`, never cloned
 /// per-branch the way `Locals` is. A plain `std::collections::HashMap`,
 /// since this use case has none of the "cloned once per branch" cost
 /// profile that motivates `Locals`'s persistent-map backing.

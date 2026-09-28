@@ -4382,7 +4382,7 @@ impl<'a> Checker<'a> {
                     }
                     // `new ReflectionClass($view)`-shaped constructor-
                     // argument-driven class-level generic inference - the
-                    // same `Type::infer_template_bindings`/`TemplateBindings`
+                    // same `Relation::infer_template_bindings`/`TemplateBindings`
                     // primitive `infer_call_return_type` uses for
                     // ordinary call-site inference, just binding against
                     // a constructor's params instead of a function's.
@@ -4426,7 +4426,11 @@ impl<'a> Checker<'a> {
                                                 .lookup_class(s)
                                                 .map(|(c, _)| c.to_string())
                                         });
-                                    param.ty().infer_template_bindings(&promoted, &mut bindings);
+                                    self.relation().infer_template_bindings(
+                                        param.ty(),
+                                        &promoted,
+                                        &mut bindings,
+                                    );
                                 }
                             }
                             // A template the constructor's arguments
@@ -4922,7 +4926,11 @@ impl<'a> Checker<'a> {
                         let promoted = param.ty().promote_class_string_literals(ty, &|s| {
                             self.registry.lookup_class(s).map(|(c, _)| c.to_string())
                         });
-                        param.ty().infer_template_bindings(&promoted, &mut bindings);
+                        self.relation().infer_template_bindings(
+                            param.ty(),
+                            &promoted,
+                            &mut bindings,
+                        );
                     }
                     let substituted = s.return_type().substitute_templates(&bindings);
                     match &class {
@@ -5369,7 +5377,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|a| self.infer_expr(&a.value, locals))
                     .collect();
-                sig.instantiated_return(&arg_types)
+                sig.instantiated_return(&arg_types, &self.relation())
             })
     }
 

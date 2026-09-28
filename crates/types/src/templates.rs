@@ -1,131 +1,198 @@
 use rustc_hash::FxHashMap;
 
-use crate::{CallableSig, Repr, TemplateParam, Type};
+use crate::{CallableSig, Relation, Repr, TemplateParam, Type};
 
-impl Type {
-    /// Unifies a template-bearing param type against an actual argument type,
-    /// recording the binding it implies. Only the two shapes that come up in
-    /// practice are handled: a bare `T` param, and `T[]`/`array<T>` unifying
-    /// against an array argument's element type. Anything else (a template
-    /// buried in a union, an array shape, etc) just isn't bound, which is safe
-    /// since `Type::substitute_templates` falls back to `Mixed` for anything left
-    /// unbound. First binding for a given name wins; conflicting uses of the
-    /// same `T` across multiple params aren't reconciled (no union-widening).
-    pub fn infer_template_bindings(&self, arg_ty: &Type, bindings: &mut FxHashMap<String, Type>) {
+impl Relation<'_> {
+    /// PHPStan's `inferTemplateTypes`: the bindings a parameter of type
+    /// `param` implies for its templates when given an argument of type
+    /// `arg`, added to `bindings`. Every position is read structurally: a
+    /// bare `T`, an array's key and value, a shape's fields, a generic
+    /// object's arguments (through the argument's ancestors), a
+    /// `class-string<T>`, a callable's parameters and return. A template
+    /// binds only an argument its bound surely holds, and bindings of one
+    /// template from several positions join (`pick(1, 'a')` binds `1|'a'`).
+    /// A callable type's own templates bind when it is called
+    /// (`CallableSig::instantiated_return`), not here.
+    pub fn infer_template_bindings(
+        &self,
+        param: &Type,
+        arg: &Type,
+        bindings: &mut FxHashMap<String, Type>,
+    ) {
         syntax::stack::guard(|| {
-            match self {
+            if matches!(arg, Type(Repr::Never)) {
+                return;
+            }
+            // A union argument binds member by member, unless the parameter
+            // itself is a union or a bare template to match it whole.
+            if let Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) = arg
+                && !matches!(param, Type(Repr::Union(_)) | Type(Repr::TemplateParam(_)))
+            {
+                for member in members {
+                    self.infer_template_bindings(param, member, bindings);
+                }
+                return;
+            }
+            match param {
                 Type(Repr::TemplateParam(tp))
                     if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {}
                 Type(Repr::TemplateParam(tp)) => {
-                    // Reject a bare `T` binding to a *definite scalar* when `T`'s
-                    // own declared bound requires an object (`@template T of
-                    // object`) - e.g. `new ReflectionClass($className)` with a
-                    // plain `string`-typed variable, not a `Foo::class`/
-                    // object-instance `T`-carrying argument: without this, the
-                    // bare-`T` union member of `class-string<T>|T` would happily
-                    // bind `T` to the raw `string` itself once the `ClassString`
-                    // member's own, stricter arm declined to match - producing a
-                    // bound-violating `ReflectionClass<string>` that then breaks
-                    // real downstream `ReflectionClass<object>` call sites.
-                    // Deliberately narrower than a full `is_super_type_of`/bound check:
-                    // this module has no registry access, so it can't tell a
-                    // real subclass (`T of Base` satisfied by a `Derived`
-                    // argument, the common case) from an unrelated class - only
-                    // a scalar-vs-object mismatch is structurally unambiguous
-                    // without one.
-                    let bound_requires_object =
-                        matches!(&*tp.bound, Type(Repr::ObjectWithoutClass));
-                    let arg_is_definite_scalar = matches!(
-                        arg_ty,
-                        Type(Repr::String)
-                            | Type(Repr::StringLiteral(_))
-                            | Type(Repr::Int)
-                            | Type(Repr::IntLiteral(_))
-                            | Type(Repr::IntRange(_, _))
-                            | Type(Repr::Float)
-                            | Type(Repr::FloatLiteral(_))
-                            | Type(Repr::Bool)
-                            | Type(Repr::True)
-                            | Type(Repr::False)
-                            | Type(Repr::Null)
-                    );
-                    if *arg_ty != Type::mixed()
-                        && !(bound_requires_object && arg_is_definite_scalar)
+                    // An argument without type information binds nothing.
+                    if arg.is_mixed() {
+                        return;
+                    }
+                    // `T of array<K, V>` binds `K` and `V` too.
+                    self.infer_template_bindings(&tp.bound, arg, bindings);
+                    if matches!(*tp.bound, Type(Repr::Mixed(_)))
+                        || self.is_super_type_of(&tp.bound, arg).yes()
                     {
-                        bindings
-                            .entry(tp.name.clone())
-                            .or_insert_with(|| arg_ty.clone());
+                        bind(bindings, &tp.name, arg.clone());
                     }
                 }
-                Type(Repr::Array(_, inner)) => match arg_ty {
-                    Type(Repr::Array(_, arg_inner)) => {
-                        inner.infer_template_bindings(arg_inner, bindings)
+                // `T|null` given `int|null` binds `T` to `int`: an argument
+                // member a parameter member without templates surely holds
+                // is that member's, and the rest binds the templates.
+                Type(Repr::Union(param_members)) => {
+                    let mut remaining: Vec<Type> = Vec::new();
+                    'members: for arg_member in arg.union_members() {
+                        for param_member in param_members {
+                            if self.is_super_type_of(param_member, arg_member).yes() {
+                                self.infer_template_bindings(param_member, arg_member, bindings);
+                                continue 'members;
+                            }
+                        }
+                        remaining.push(arg_member.clone());
                     }
-                    // `list<V>`/`non-empty-array<V>`/`non-empty-list<V>` - an
-                    // `Array` member alongside accessory markers.
-                    Type(Repr::Intersection(members)) => {
-                        if let Some(Type(Repr::Array(_, arg_inner))) =
-                            members.iter().find(|m| matches!(m, Type(Repr::Array(..))))
-                        {
-                            inner.infer_template_bindings(arg_inner, bindings);
+                    remaining.retain(|arg_member| {
+                        !param_members.iter().any(|param_member| {
+                            !param_member.references_template()
+                                && self.is_super_type_of(param_member, arg_member).yes()
+                        })
+                    });
+                    if remaining.is_empty() {
+                        return;
+                    }
+                    let rest = Type::union_of(remaining);
+                    for param_member in param_members {
+                        self.infer_template_bindings(param_member, &rest, bindings);
+                    }
+                }
+                Type(Repr::Intersection(members)) => {
+                    for member in members {
+                        self.infer_template_bindings(member, arg, bindings);
+                    }
+                }
+                Type(Repr::Array(key, value)) => {
+                    if let Some(arg_key) = arg.array_key_type() {
+                        self.infer_template_bindings(key, &arg_key, bindings);
+                    }
+                    if let Some(arg_value) = arg.array_value_type() {
+                        self.infer_template_bindings(value, &arg_value, bindings);
+                    }
+                }
+                Type(Repr::ArrayShape(shape)) => {
+                    for field in &shape.fields {
+                        if let Some(arg_value) = arg.offset_value_type(Some(&field.key)) {
+                            self.infer_template_bindings(&field.ty, &arg_value, bindings);
                         }
                     }
-                    // An array shape's element type is the union of its fields'
-                    // value types (an unsealed tail's excluded).
-                    Type(Repr::ArrayShape(shape)) => {
-                        let values: Vec<Type> = shape.fields.iter().map(|f| f.ty.clone()).collect();
-                        let element = match values.len() {
-                            0 => return,
-                            1 => values.into_iter().next().expect("len checked"),
-                            _ => Type(Repr::Union(values)),
-                        };
-                        inner.infer_template_bindings(&element, bindings);
-                    }
-                    _ => {}
-                },
-                Type(Repr::ClassString(inner)) => {
-                    if let Type(Repr::ClassString(arg_inner)) = arg_ty {
-                        inner.infer_template_bindings(arg_inner, bindings);
+                    if let Some((key, value)) = shape.unsealed.as_deref() {
+                        if let Some(arg_key) = arg.array_key_type() {
+                            self.infer_template_bindings(key, &arg_key, bindings);
+                        }
+                        if let Some(arg_value) = arg.array_value_type() {
+                            self.infer_template_bindings(value, &arg_value, bindings);
+                        }
                     }
                 }
-                // Handles phpstorm-stubs' pervasive `@param class-string<T>|null
-                // $name` idiom (and any other nullable/union-wrapped templated
-                // parameter). Each member is tried against the same, whole
-                // `arg_ty` (not a decomposed one) - a member that isn't itself
-                // `TemplateParam`/`Array`/`ClassString`/`Union` (e.g. the `Null`
-                // half of `class-string<T>|null`) is simply a no-op here, exactly
-                // as it already is at the top level for any other type that
-                // isn't one of those shapes.
-                Type(Repr::Union(members)) => {
-                    for m in members {
-                        m.infer_template_bindings(arg_ty, bindings);
+                Type(Repr::ClassString(inner)) => {
+                    if let Type(Repr::ClassString(arg_inner)) = arg {
+                        self.infer_template_bindings(inner, arg_inner, bindings);
                     }
+                }
+                Type(Repr::Object(class, params)) if !params.is_empty() => {
+                    let Some(args) = self.object_arguments_as(arg, class) else {
+                        return;
+                    };
+                    for (param, arg) in params.iter().zip(&args) {
+                        let param = param.without_call_site_variance().unwrap_or(param);
+                        self.infer_template_bindings(param, arg, bindings);
+                    }
+                }
+                Type(Repr::Callable(Some(sig))) => {
+                    if let Some(arg_sig) = arg.callable_sig() {
+                        for (param, arg_param) in sig.params.iter().zip(&arg_sig.params) {
+                            self.infer_template_bindings(&param.ty, &arg_param.ty, bindings);
+                        }
+                        self.infer_template_bindings(
+                            &sig.return_type,
+                            &arg_sig.return_type,
+                            bindings,
+                        );
+                    } else if let Some((class, _)) = arg.as_object()
+                        && let Some(return_type) =
+                            self.hierarchy.method_return_type(class, "__invoke")
+                    {
+                        self.infer_template_bindings(&sig.return_type, &return_type, bindings);
+                    }
+                }
+                Type(Repr::VarianceArg(_, inner)) => {
+                    self.infer_template_bindings(inner, arg, bindings)
                 }
                 _ => {}
             }
         })
     }
+
+    /// `arg`'s generic arguments as seen from `class` (itself, or an
+    /// ancestor of `arg`'s class): `Box<int>` read as its interface
+    /// `Container<int>` through its `@implements`. `None` when `arg` isn't
+    /// an object of `class`.
+    fn object_arguments_as(&self, arg: &Type, class: &str) -> Option<Vec<Type>> {
+        match arg {
+            Type(Repr::Object(arg_class, args)) if arg_class.eq_ignore_ascii_case(class) => {
+                Some(args.clone())
+            }
+            Type(Repr::Object(arg_class, args))
+                if self.hierarchy.is_subclass_of(arg_class, class) =>
+            {
+                let bound = self
+                    .hierarchy
+                    .ancestor_template_bindings(arg_class, args, class);
+                let templates = self.hierarchy.find_class(class)?.templates;
+                Some(
+                    templates
+                        .iter()
+                        .map(|name| bound.get(name.as_ref()).cloned().unwrap_or(Type::mixed()))
+                        .collect(),
+                )
+            }
+            Type(Repr::Intersection(members)) => members
+                .iter()
+                .find_map(|member| self.object_arguments_as(member, class)),
+            Type(Repr::TemplateParam(tp)) => self.object_arguments_as(&tp.bound, class),
+            _ => None,
+        }
+    }
+}
+
+/// Adds `ty` to `name`'s binding: a template bound twice is bound to both.
+fn bind(bindings: &mut FxHashMap<String, Type>, name: &str, ty: Type) {
+    match bindings.get_mut(name) {
+        Some(existing) => *existing = Type::union(existing.clone(), ty),
+        None => {
+            bindings.insert(name.to_string(), ty);
+        }
+    }
 }
 
 impl Type {
-    /// Rewrites `arg_ty` so a string-literal argument occupying a
-    /// `class-string<T>`-shaped position in this parameter type is treated the way real
-    /// PHPStan's own `ConstantStringType::isClassString()`/
-    /// `getClassStringObjectType()` treats it: a literal naming a real,
-    /// existing class binds a template exactly as well as an explicit
-    /// `Foo::class` would. Mirrors `bind_template_
-    /// param`'s own structural recursion (`Array`/`ClassString`/`Union`) so a
-    /// literal nested inside e.g. `class-string<T>[]` or `class-string<T>|null`
-    /// is reached too. Kept as a separate preprocessing pass rather than
-    /// folded into `Type::infer_template_bindings` itself since only a caller with
-    /// registry access can answer "is this string a real class name" - this
-    /// module deliberately has none (see the module doc above). Deliberately
-    /// does NOT touch a bare `TemplateParam` position (`T $x` with no
-    /// `class-string<>` wrapper) - real PHPStan's own `isClassString()` check
-    /// only ever fires where the declared type is actually class-string-
-    /// shaped, so a bare-`T` param taking a plain string argument must keep
-    /// binding `T` to the string itself, not silently reinterpret it as an
-    /// object.
+    /// `arg_ty` with each string literal in a `class-string<T>` position of
+    /// this parameter type read as the class it names, when
+    /// `resolve_class` finds one (PHPStan's
+    /// `ConstantStringType::isClassString()`): `'Foo'` binds `T` as
+    /// `Foo::class` does, through arrays and unions too. A bare `T`
+    /// position keeps a string a string.
     pub fn promote_class_string_literals(
         &self,
         arg_ty: &Type,
@@ -170,7 +237,7 @@ impl CallableSig {
     /// The return type of calling a value of this callable type with
     /// arguments of `arg_types`: its own templates bound from them, an
     /// unbound one falling back to its bound.
-    pub fn instantiated_return(&self, arg_types: &[Type]) -> Type {
+    pub fn instantiated_return(&self, arg_types: &[Type], relation: &Relation) -> Type {
         if self.templates.is_empty() {
             return (*self.return_type).clone();
         }
@@ -194,7 +261,7 @@ impl CallableSig {
                 .get(i)
                 .or_else(|| self.params.last().filter(|p| p.variadic));
             if let Some(param) = param {
-                open(&param.ty).infer_template_bindings(arg, &mut bindings);
+                relation.infer_template_bindings(&open(&param.ty), arg, &mut bindings);
             }
         }
         substitute(

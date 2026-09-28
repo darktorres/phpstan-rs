@@ -399,19 +399,11 @@ pub fn generated_stubs() -> Vec<(Arc<str>, FunctionReflection)> {
 /// not identity-sensitive, so building one from those exact field values
 /// is equivalent to "reusing" any other node that would carry them.
 ///
-/// Union member order matters: `ClassString<T>` must come first, since
-/// `Type::infer_template_bindings`'s own `Union` handling is first-`or_insert`-wins -
-/// `new ReflectionClass(Foo::class)` needs the `ClassString` arm to bind
-/// `T=Foo` before the bare `T` arm would otherwise wrongly bind `T` to the
-/// `ClassString<Foo>` value itself.
-///
-/// Disclosed residual limitation, not attempted here: `new
-/// ReflectionClass('Foo')` - a bare string literal, not `Foo::class` -
-/// still won't bind `T` correctly (`Type::infer_template_bindings` has no arm
-/// treating a string literal's own *value* as a class-name reference, only
-/// a real class-string construction via `::class`/`get_class()`
-/// triggers that arm) - the `Foo::class`/object-instance shapes this fixes
-/// are the idiomatic PHP 8+ styles anyway.
+/// `new ReflectionClass(Foo::class)`, `new ReflectionClass('Foo')` and
+/// `new ReflectionClass($foo)` all bind `T` to `Foo`: the class-string
+/// member binds from a class string (a literal naming a class included),
+/// and the bare `T` member only from an object, `T` being bound by
+/// `object`.
 fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassReflection)]) {
     let Some((_, info)) = classes
         .iter_mut()

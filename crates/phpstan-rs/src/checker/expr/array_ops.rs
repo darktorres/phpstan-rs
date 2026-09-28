@@ -525,7 +525,8 @@ impl<'a> Checker<'a> {
             let promoted = param.ty().promote_class_string_literals(&arg_ty, &|s| {
                 self.registry.lookup_class(s).map(|(c, _)| c.to_string())
             });
-            param.ty().infer_template_bindings(&promoted, &mut bindings);
+            self.relation()
+                .infer_template_bindings(param.ty(), &promoted, &mut bindings);
             param_bindings.insert(param.name().to_string(), arg_ty);
         }
         // The call's own templates (scoped to this function or method,
