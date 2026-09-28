@@ -6526,7 +6526,10 @@ stdio.
 - **One Session per root.** Each workspace folder has its own Session and
   config, and a file belongs to the innermost root containing it; the Sessions
   share the worker pool and C5's version-keyed stub layer, so a second root
-  costs its own files, not another copy of the stubs. Today `root`, `baseline`,
+  costs its own files, not another copy of the stubs. The client settings are
+  pulled per folder (`workspace/configuration` with each folder's `scopeUri`),
+  so `phpstan-rs.configPath` and `phpstan-rs.enable` can differ between folders;
+  today one unscoped pull serves every folder. Today `root`, `baseline`,
   `ignore_error_entries`, `level_cutoff` and the project's settings are
   last-root-wins across folders. A file opened outside every workspace folder
   gets a Session rooted at its nearest ancestor holding a config file or
@@ -6659,7 +6662,14 @@ Behaviour commits, one each with its fixture:
   `serde_json::from_value(…).ok()` turns it into a `null` result,
   indistinguishable from "nothing here"). `lsp` accepts `--stdio`, which generic
   clients (a `vscode-languageclient` using `TransportKind.stdio`) append; the VS
-  Code extension omits it today to avoid clap's rejection.
+  Code extension omits it today to avoid clap's rejection. Every
+  capability-dependent reply checks what the client declared and falls back:
+  `documentChanges` and resource operations, diagnostic `relatedInformation`,
+  `codeDescription` and `tags`, pull diagnostics, work-done progress,
+  `window/showMessageRequest`, snippet completion text. The server's own log
+  goes through `window/logMessage` and `$/logTrace` at the level `$/setTrace`
+  asks for, where today most of it is `eprintln!` to stderr, which a client
+  shows, if at all, in a raw output channel.
 - **Untrusted workspaces.** The VS Code extension declares
   `untrustedWorkspaces: limited` and passes the trust state as an initialization
   option; in an untrusted workspace the server doesn't connect to a database the
@@ -6817,9 +6827,11 @@ the whole registry (§1), which C4's memo already removes.
   readers instead of discarding the cache; the rest come from the cache, and
   their declarations are read lazily through the locator (C5) from a cached
   per-file name index, not parsed. The cache is keyed by a meta hash of:
-  - the binary's identity (its version, and its executable's size and
-    modification time, so a rebuilt development binary never reads a stale
-    cache) and a cache format version;
+  - the binary's identity, as `CRASH_REPORTING_PLAN.md` §4.2 defines it (the
+    version, the release commit from `PHPSTAN_RS_BUILD_COMMIT` when the
+    release workflow set it, the GNU build ID, and the executable's size and
+    modification time), so a rebuilt development binary never reads a stale
+    cache, and a cache format version;
   - the stub index (stub-sources) and the user stub files;
   - the config, minus the keys only the finalizer or the formatters read
     (`ignore_errors`, the baseline, `report_unmatched_ignored_errors`, the
@@ -6839,14 +6851,17 @@ the whole registry (§1), which C4's memo already removes.
   cached errors quote source; the directory comes from
   `CRASH_REPORTING_PLAN.md`'s `crash_report::cache_dir()`, which F2 moves down
   into `project`, where the result cache can reach it, the crash reporter's
-  outbox calling it there), at `result_cache_path` when set; entries hold
-  project-relative paths, so a cache restored into another checkout location (a
-  CI cache) still applies (C1's shim stops reporting PHPStan's `tmpDir` and
-  `resultCachePath` as ignored), and is written atomically (a temporary file
-  renamed over it) under a lock (`std::fs::File::lock`), so concurrent runs
-  can't corrupt it; an unreadable or version-mismatched cache is discarded with
-  a warning. A file with an internal error isn't cached. `--no-result-cache`
-  skips it, and the `clear-result-cache` command deletes it.
+  outbox calling it there, with its fallback to a per-user `0700` temporary
+  directory when no cache directory is writable and its `_PHPSTAN_RS_CACHE_DIR`
+  override for parallel tests; with neither writable the run goes uncached, with
+  a warning), at `result_cache_path` when set; entries hold project-relative
+  paths, so a cache restored into another checkout location (a CI cache) still
+  applies (C1's shim stops reporting PHPStan's `tmpDir` and `resultCachePath` as
+  ignored), and is written atomically (a temporary file renamed over it) under a
+  lock (`std::fs::File::lock`), so concurrent runs can't corrupt it; an
+  unreadable or version-mismatched cache is discarded with a warning. A file
+  with an internal error isn't cached. `--no-result-cache` skips it, and the
+  `clear-result-cache` command deletes it.
 - **Incremental collectors.** Collected data is cached per file; a run
   recollects the analysed files and reruns the project-level rules over the
   merged data. A fact producer → consumer edge keyed by host class (another
@@ -6966,8 +6981,11 @@ on.
 - Ctrl-C cancels the run's token: analysis stops at the next statement
   boundary, the files finished so far are cached, and the process exits 130.
   Today an interrupted run loses everything.
-- `--version` prints the version and the build's git commit (dirty or not), the
-  same identity F2's cache key records; `completions <shell>` prints shell
+- `--version` prints the version and, for a release build, its commit
+  (`PHPSTAN_RS_BUILD_COMMIT`), else `+dev` with the build ID; no build script
+  reads `git rev-parse`, whose output changing on every commit would recompile
+  the crate and everything above it (`CRASH_REPORTING_PLAN.md` §4.2). It is the
+  identity F2's cache key records. `completions <shell>` prints shell
   completions (`clap_complete`).
 - The `format_signature` test moves to `reflection`.
 - `tests/cli.rs` covers every format's output and exit code on a fixture tree
