@@ -2,7 +2,7 @@
 //! `IntegerRangeType` operations and `InitializerExprTypeResolver`'s
 //! arithmetic, and the outcome of comparing ranges and literals.
 
-use crate::{Repr, Type};
+use crate::{AccessoryKind, PhpString, Repr, TrinaryLogic, Type};
 use syntax::ast::BinOp;
 
 /// Applies `op` to two bounds, distinguishing a genuine `i64` overflow
@@ -686,7 +686,12 @@ impl Type {
                 }
             }
             BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-                fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type::int())
+                let as_ints = || fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type::int());
+                match lt.is_string().and(rt.is_string()) {
+                    TrinaryLogic::Yes => string_bitwise(op, lt, rt),
+                    TrinaryLogic::No => as_ints(),
+                    TrinaryLogic::Maybe => Type::union(Type::int(), string_bitwise(op, lt, rt)),
+                }
             }
             BinOp::Shl | BinOp::Shr => match (lt.int_bounds(), rt.int_bounds()) {
                 (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) if amount == r_max => {
@@ -740,6 +745,62 @@ fn array_union_type(lt: &Type, rt: &Type) -> Type {
         members.push(Type::accessory(crate::AccessoryKind::NonEmptyArray));
     }
     crate::intersect_types(members)
+}
+
+/// `l & r`, `l | r` or `l ^ r` over two strings: byte by byte, as long as
+/// the shorter operand for `&` and `^`, and as the longer for `|` (whose
+/// extra bytes are copied). Folded over up to 64 pairs of literals.
+fn string_bitwise(op: &BinOp, l: &Type, r: &Type) -> Type {
+    fn literals(ty: &Type) -> Option<Vec<PhpString>> {
+        let finite = ty.finite_types();
+        if finite.is_empty() {
+            return None;
+        }
+        finite
+            .into_iter()
+            .map(|t| match &t {
+                Type(Repr::StringLiteral(s)) => Some(s.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+    let apply = |a: &[u8], b: &[u8]| -> Vec<u8> {
+        match op {
+            BinOp::BitOr => {
+                let (long, short) = if a.len() >= b.len() { (a, b) } else { (b, a) };
+                let mut out = long.to_vec();
+                for (o, s) in out.iter_mut().zip(short) {
+                    *o |= s;
+                }
+                out
+            }
+            BinOp::BitAnd => a.iter().zip(b).map(|(x, y)| x & y).collect(),
+            _ => a.iter().zip(b).map(|(x, y)| x ^ y).collect(),
+        }
+    };
+    if let (Some(ls), Some(rs)) = (literals(l), literals(r))
+        && ls.len() * rs.len() <= 64
+    {
+        return ls
+            .iter()
+            .flat_map(|a| {
+                rs.iter().map(move |b| {
+                    Type::string_literal(PhpString::from(apply(a.as_bytes(), b.as_bytes())))
+                })
+            })
+            .reduce(Type::union)
+            .unwrap_or_else(Type::never);
+    }
+    let non_empty = |t: &Type| t.is_refined_string(AccessoryKind::NonEmptyString).yes();
+    let result_non_empty = match op {
+        BinOp::BitOr => non_empty(l) || non_empty(r),
+        _ => non_empty(l) && non_empty(r),
+    };
+    if result_non_empty {
+        Type::string().with_string_accessory(AccessoryKind::NonEmptyString)
+    } else {
+        Type::string()
+    }
 }
 
 /// A bitwise `&`/`|`/`^` over int literals, folded to its exact values

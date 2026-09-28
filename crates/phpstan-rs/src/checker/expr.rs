@@ -1569,16 +1569,10 @@ impl<'a> Checker<'a> {
                     inner_ty
                 }
             }
-            // Mirrors real PHPStan's `IntegerRangeType::toBitwiseNotType()` -
-            // `~5`/`~$x` on a known int-literal/range-typed operand
-            // computes the order-reversed complement range instead of
-            // just passing the operand's type through unchanged (still
-            // correct, if imprecise, for a plain unbounded `Int`/`String` -
-            // `~"hello"` is a real, still-string byte complement).
             ExprKind::Unary(op @ UnaryOp::BitNot, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_unary_operand_validity(op, &inner_ty, inner.span);
-                inner_ty.to_bitwise_not().unwrap_or(inner_ty)
+                self.bitwise_not_type(&inner_ty)
             }
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
                 self.check_expr(inner, locals, label)
@@ -4370,7 +4364,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Unary(UnaryOp::BitNot, inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
-                inner_ty.to_bitwise_not().unwrap_or(inner_ty)
+                self.bitwise_not_type(&inner_ty)
             }
             ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
             ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),

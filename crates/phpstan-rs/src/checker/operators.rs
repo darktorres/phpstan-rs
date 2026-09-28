@@ -86,6 +86,22 @@ impl<'a> Checker<'a> {
             .any(|m| self.instance_of_any(m, &[class]))
     }
 
+    /// `~$x`: a `GMP` stays a `GMP` (it overloads `~`, `BcMath\Number`
+    /// doesn't); anything else is PHP's own complement.
+    pub(crate) fn bitwise_not_type(&self, ty: &Type) -> Type {
+        ty.union_members()
+            .iter()
+            .map(|m| {
+                if self.instance_of_any(m, &["GMP"]) {
+                    m.clone()
+                } else {
+                    m.to_bitwise_not()
+                }
+            })
+            .reduce(Type::union)
+            .unwrap_or_else(Type::never)
+    }
+
     /// The "other side" legality gate real PHPStan's own
     /// `GmpOperatorTypeSpecifyingExtension`/
     /// `BcMathNumberOperatorTypeSpecifyingExtension` share for their
@@ -110,12 +126,11 @@ impl<'a> Checker<'a> {
     /// established, mirroring real PHPStan's own
     /// `GmpOperatorTypeSpecifyingExtension`/
     /// `BcMathNumberOperatorTypeSpecifyingExtension` (comparison operators
-    /// and unary `-`/`+`/`~` are deliberately not covered here - the
+    /// and unary `-`/`+` are deliberately not covered here - the
     /// comparisons already produce `bool` regardless of operand via
-    /// `infer_binary`'s own existing catch-all, and unary `-`/`+`/`~`
-    /// already pass a non-string-shaped operand's type straight through
-    /// unchanged, both already matching real PHP's actual behavior with
-    /// no override needed). `None` when neither side is one of these two
+    /// `infer_binary`'s own existing catch-all, and unary `-`/`+` already
+    /// pass an object operand's type straight through unchanged; `~` is
+    /// `bitwise_not_type`). `None` when neither side is one of these two
     /// classes at all (the overwhelming common case, cheap to rule out
     /// first), when the class's own operator set doesn't include `op`
     /// (`BcMath\Number` doesn't overload the bitwise/shift operators at

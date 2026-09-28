@@ -184,7 +184,7 @@ impl Type {
     /// key type as it is.
     pub fn to_array_key(&self) -> Type {
         match self {
-            Type(Repr::FloatLiteral(f)) => Type::int_literal(*f as i64),
+            Type(Repr::FloatLiteral(f)) => Type::int_literal(php_float_to_int(*f)),
             Type(Repr::Float) => Type::int(),
             Type(Repr::True) => Type::int_literal(1),
             Type(Repr::False) => Type::int_literal(0),
@@ -248,16 +248,34 @@ impl Type {
         }
     }
 
-    /// `~$x` on an int: PHPStan's `IntegerRangeType::toBitwiseNotType()`.
-    /// Bitwise NOT reverses ordering (`~min` is the new max).
-    pub fn to_bitwise_not(&self) -> Option<Type> {
-        match self {
-            Type(Repr::IntRange(min, max)) => {
-                Some(Type::int_range(max.map(|m| !m), min.map(|m| !m)))
+    /// `~$x`: an int's, or a float's truncated, complement as an int, and
+    /// a string's byte-wise complement as a string of the same length (so
+    /// a non-empty one stays non-empty). Any other operand throws.
+    pub fn to_bitwise_not(&self) -> Type {
+        syntax::stack::guard(|| match self {
+            Type(Repr::IntRange(min, max)) => Type::int_range(max.map(|m| !m), min.map(|m| !m)),
+            Type(Repr::IntLiteral(n)) => Type::int_literal(!n),
+            Type(Repr::Int) | Type(Repr::Float) => Type::int(),
+            Type(Repr::FloatLiteral(f)) => Type::int_literal(!php_float_to_int(*f)),
+            Type(Repr::StringLiteral(s)) => Type::string_literal(PhpString::from(
+                s.as_bytes().iter().map(|b| !b).collect::<Vec<u8>>(),
+            )),
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
+                .iter()
+                .map(Type::to_bitwise_not)
+                .reduce(Type::union)
+                .unwrap_or_else(Type::never),
+            Type(Repr::TemplateParam(param)) => param.bound.to_bitwise_not(),
+            Type(Repr::Mixed(_)) => Type::union(Type::int(), Type::string()),
+            _ if self.is_string().yes() => {
+                if self.is_refined_string(AccessoryKind::NonEmptyString).yes() {
+                    Type::string().with_string_accessory(AccessoryKind::NonEmptyString)
+                } else {
+                    Type::string()
+                }
             }
-            Type(Repr::IntLiteral(n)) => Some(Type::int_literal(!n)),
-            _ => None,
-        }
+            _ => Type::error(),
+        })
     }
 }
 
