@@ -2824,14 +2824,15 @@ deleted; the file-size gate.
   certainty: `isset($bar)`, `empty($foo)` and `$baz ?? 1` on a variable
   that is never defined are `isset.variable`/`empty.variable`/
   `nullCoalesce.variable` "is never defined", unreported today.
-  `nullCoalesce.property` covers static properties and always-`null`
-  ones (`FooCoalesce::$staticString ?? ''`, `self::$date ?? …`,
-  `$foo->alwaysNull ?? ''` for `@var null`; `null-coalesce*.php`,
-  `bug-3636.php`,
-  `bug-14393.php`), unreported today; an untyped property without a
-  default starts as `null` whatever its `@var`, so `??` on it stays
-  unreported where PHPStan reports "not nullable" (approved;
-  `bug-3636.php:13`, `bug-14393.php:36`). The
+  `nullCoalesce.property`, and `isset.property` alike (14), cover static
+  properties, always-`null` ones and a virtual hooked property
+  (`FooCoalesce::$staticString ?? ''`, `self::$date ?? …`,
+  `$foo->alwaysNull ?? ''` for `@var null`, `isset($this->noon)` for a
+  get-only `DateTimeImmutable`; `null-coalesce*.php`, `isset*.php`,
+  `bug-3636.php`, `bug-14393.php`), unreported today; an untyped
+  property without a default starts as `null` whatever its `@var`, so
+  `??` and `isset()` on it stay unreported where PHPStan reports "not
+  nullable" (approved; `bug-3636.php:13`, `bug-14393.php:36`). The
   descriptor covers a nullsafe chain: `$f?->bar() ?? 0` and
   `empty($i?->bar())` on an undefined `$f`/`$i` are `variable.undefined`
   and `method.nonObject` today (the rules oracle's `bug-7291.php`), and
@@ -4982,10 +4983,13 @@ fixture:
     (`set (int|array $v)` on `int`); and the native type where the PHPDoc
     doesn't apply (`@param Foo|Bar[]` on `array`, an unresolvable
     `array<int, int, int>` or `array{foo: int}&array{bar: string}`).
-    `missingType.generics` and `generics.notGeneric` walk the same sites,
+    `missingType.generics`, `generics.notGeneric` and
+    `generics.notSubtype` (a `mixed` or `string` argument outside the
+    template's bound, as in `@extends FooGeneric<int, mixed>`) walk the
+    same sites,
     `@param-closure-this`, `@use` and a template bound included
     (`Exception<int>` in an inline `@var` is unreported today; the rules
-    oracle's 18 and 15 PHPStan-only: class tags,
+    oracle's 18, 15 and 15 PHPStan-only: class tags,
     `@param-out`, `@phpstan-self-out`, an inline `@var`, a conditional
     return, a set hook's parameter).
 - (f) control flow, returns, throws and generators:
