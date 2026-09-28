@@ -182,7 +182,10 @@ Status: design. Nothing here is implemented.
   the developer's environment. `tools/gate-runner` uses the library in-process.
   The fuzz targets call `syntax` directly and never pass through a `catch_unwind`.
 - **Terminations no handler sees:** `SIGKILL` (the OOM killer, `kill -9`, a CI
-  runner's hard stop) on every OS. On Windows, Rust's `abort` (an allocation
+  runner's hard stop) on every OS. On cgroup v2 (checked here:
+  `/sys/fs/cgroup` is `cgroup2fs`, and this shell's cgroup has
+  `memory.events` with an `oom_kill` line), the kernel counts OOM kills per
+  cgroup, which tells an OOM kill apart. On Windows, Rust's `abort` (an allocation
   failure, a panic while panicking) uses `__fastfail`, which ends the process
   without running exception handlers. On Linux and macOS an abort raises
   `SIGABRT`, which `crash-handler` catches.
@@ -623,6 +626,16 @@ made by the supervisor after the message could already hold a later edit.
 For a native crash the supervisor copies the crash-state directory, which the
 dead worker can no longer change.
 
+**For a panic the worker also writes the bundle's plan**, `plan.json`: the
+walk of §4.8 run against the live registry, every file up to the cap in
+walk order with its distance, role, size and content hash, and the text of
+every file an open buffer holds. It is lookups in a project already in
+memory, done once per new location under `reporting` (§4.13). With a plan,
+the finisher only reads the listed files; it never loads the project, so a
+finisher beside a language server costs the files' size, not a second
+workspace. Only a native crash or an OOM kill, which leaves no live registry,
+has the finisher load the project (§4.10).
+
 - **Isolated panics:** `isolated` hands each internal error to the
   `Reporter` as well as returning it, and the worker writes its pending
   report there and then and sends `PENDING` (§4.1). A run interrupted right
@@ -659,7 +672,7 @@ dead worker can no longer change.
 ### 4.7 Tags, context, breadcrumbs and focus
 
 - **Tags:** `command` (`check`, `check-project`, `lsp`), `level`, `unit`
-  (`parse`, `facts`, `check`, `pass:<name>`, `load:<step>`, `native`), `pcre_validate`,
+  (`parse`, `facts`, `check`, `pass:<name>`, `load:<step>`, `native`, `oom`), `pcre_validate`,
   `lsp.client` and `lsp.client_version` (from `initialize`'s `clientInfo`),
   `bundle` (`attached`, `already_sent`, `too_large`, `no_focus`, `failed`,
   `pending`).
@@ -718,8 +731,9 @@ external/<n>/<name>      files outside the root, mapped in the manifest
     declaration are what whole-program passes read); with no focus, the
     manifest alone, tagged `no_focus`;
   - `load:<step>`: as `pass:<name>`, from the focus;
-  - `native`: every in-progress file (the dump alone doesn't say which thread
-    caused it), each walked as `check`.
+  - `native` and `oom`: every in-progress file (the dump alone doesn't say
+    which thread caused it, and an OOM kill leaves no dump), each walked as
+    `check`.
 
   Then the user's stub files (`stub_paths`) and `composer.json` and
   `composer.lock` from each discovered root (they set the PHP version range).
@@ -826,19 +840,23 @@ external/<n>/<name>      files outside the root, mapped in the manifest
    it;
 2. increments the entry's attempt count on disk before anything that could
    crash;
-3. builds the event: the worker's `event.json` for a panic, or for a native
-   crash a fatal event carrying `meta.json`'s breadcrumbs and tags and the
-   scrubbed dump;
+3. builds the event: from the worker's `report.json` for a panic; for a
+   native crash or an OOM kill, a fatal event carrying `meta.json`'s
+   breadcrumbs and tags, and the scrubbed dump when there is one;
 4. checks `sent.json` (§4.6): a report whose bundle was already sent within
    30 days goes out without one, tagged `already_sent`, skipping 5 and 6;
-5. on the first two attempts, and when the crash state's format version is
-   the finisher's own, loads the project from the entry's `state/` (parse and
-   index only, no checking: `Session` from `state.json` for `check-project`;
-   for `lsp`, `lsp::load_workspace(folders, settings, overlays) -> Project`,
-   the load `Server::add_workspace_folders` does today moved into a function
-   the server and the finisher both call, with no transport; nothing for
-   `check`, whose bundle is the file alone) and builds the bundle (§4.8),
-   replaying it in a `__crash-replay` child;
+5. on the first two attempts, and when the crash state's format version is the
+   finisher's own, builds the bundle (§4.8) and replays it in a `__crash-replay`
+   child. With a `plan.json` (a panic, §4.6) it reads the planned files and the
+   recorded buffer texts, widening along the plan's later distances when the
+   replay doesn't reproduce; a file whose content hash no longer matches the
+   plan is marked `changed_since_crash`. Without one (a native crash, an OOM
+   kill) it loads the project from the entry's `state/` first (parse and index
+   only, no checking: `Session` from `state.json` for `check-project`; for
+   `lsp`, `lsp::load_workspace(folders, settings, overlays) -> Project`, the
+   load `Server::add_workspace_folders` does today moved into a function the
+   server and the finisher both call, with no transport; nothing for `check`,
+   whose bundle is the file alone) and walks it;
 6. on a third attempt, or when the load or build fails, attaches the crashing
    files and the effective config directly, tagged `bundle = failed`, with the
    failure as an extra;
@@ -873,17 +891,31 @@ The process the user, CI or the editor started, whenever a DSN is set:
 6. when the worker has ended: finishes the native crash's entry if a dump was
    written; after an abnormal end with no dump (on Windows a `__fastfail`
    abort, exit code `0xC0000409`; anywhere, a crash the handler missed),
-   creates an entry itself, `unit = native` with the crash state and no dump
-   or focus, "worker terminated by `<signal or exception code>`". Terminations
-   from outside (`SIGKILL`, `SIGTERM`, `SIGINT`, `SIGHUP`) are not reported:
-   a user's, a CI runner's or the OOM killer's decision, which nothing tells
-   apart;
-7. waits for its finishers, up to 60 s in all, printing
+   creates an entry itself, `unit = native` with the crash state, the threads'
+   last `FOCUS` as the in-progress files and the mirrored breadcrumbs, "worker
+   terminated by `<signal or exception code>`";
+7. after a `SIGKILL`, reports it only when it was the OOM killer. On Linux
+   the supervisor reads its cgroup's `memory.events` (cgroup v2: the path
+   from `/proc/self/cgroup`'s `0::` line under `/sys/fs/cgroup`) when it
+   starts the worker and when the worker ends; the kernel counts in
+   `oom_kill` every process of the cgroup killed by any OOM killer, the
+   system-wide one included. A worker killed by `SIGKILL` while `oom_kill`
+   rose was out of memory: that is a crash worth a report, `unit = oom`, with
+   the in-progress files, breadcrumbs and crash state as above, and the
+   cgroup's `memory.max` and `memory.peak` as context. Every other
+   termination from outside (`SIGKILL` without an OOM kill, `SIGTERM`,
+   `SIGINT`, `SIGHUP`) is a user's or a CI runner's decision and isn't
+   reported. Without cgroup v2 (macOS, Windows, cgroup v1) an OOM kill can't
+   be told from `kill -9`, so a `SIGKILL` isn't reported there. Another
+   process in the same cgroup being OOM-killed at the same moment could be
+   mistaken for the worker; the worker being the one killed by `SIGKILL` in
+   that window makes it very likely it was the one;
+8. waits for its finishers, up to 60 s in all, printing
    `phpstan-rs: sending the crash report to <host>` once it starts waiting on
    one; a `SIGINT` or `SIGTERM` during the wait ends it at once, and what is
    unfinished stays in `pending/` for the next supervisor (in the LSP, the one
    the editor starts next, straight away);
-8. deletes the crash-state directory and exits with the worker's code, or
+9. deletes the crash-state directory and exits with the worker's code, or
    after a crash with 128 + the signal number on Unix and the worker's
    exception code on Windows.
 
@@ -908,6 +940,24 @@ the worker as it would without reporting, and the supervisor reports it
 through the no-dump path (step 6 above). Only the waiting, the signal
 forwarding and relaying the exit status are essential, and they use no
 reporting code.
+
+**Container and service environments:**
+
+- **PID 1.** In a container started as `docker run <image> phpstan-rs ...`,
+  the supervisor is PID 1. The kernel gives PID 1 no default signal actions,
+  so an unhandled `SIGTERM` would do nothing; the supervisor handles and
+  forwards them (above), so `docker stop` stops the run. PID 1 also inherits
+  every orphan in the container, so as PID 1 the supervisor reaps any child
+  it didn't start (`waitpid(-1)` in its wait loop) and no zombie piles up.
+- **Process limits.** A cgroup's `pids.max` counts threads, and the worker
+  runs one per CPU; the supervisor and a finisher add two processes and a
+  replay a third. A spawn refused for the limit degrades as above.
+- **No console.** A Windows service or a detached process has no standard
+  handles; `release_std_handles` treats a missing or invalid handle as
+  already released.
+- **ptrace refused.** A sandbox that forbids `ptrace` (gVisor, a strict
+  seccomp profile) makes the dump fail; the supervisor then reports through
+  the no-dump path.
 
 ### 4.12 Outbox
 
@@ -956,6 +1006,9 @@ arrived (§3), so within 30 days a retried event keeps the time of its crash.
   stderr.
 - A run interrupted (Ctrl-C, `SIGTERM`) keeps every report written so far on
   disk; the next supervisor finishes them.
+- A report that can't be written (a full disk, a quota) is lost, with
+  `phpstan-rs: couldn't keep a crash report: <error>` on stderr; the run
+  itself carries on, since every report passes through the disk.
 
 ### 4.14 LSP specifics
 
@@ -999,6 +1052,9 @@ arrived (§3), so within 30 days a retried event keeps the time of its crash.
   over `process.env`.
 - The `onDidChangeConfiguration` handler (`extension.ts:133`) restarts the
   client when it changes, as it does for `serverPath`.
+- In a remote window (SSH, a container, WSL) the server runs on the remote
+  machine, and a `machine`-scoped setting is read from that machine's
+  settings, so reporting is turned on where the analysis runs.
 
 ### 4.16 Debug files and the release workflow
 
@@ -1186,6 +1242,18 @@ so the user's binary doesn't carry it:
   priority class is background on Windows.
 - **Snapshot race:** an overlay edited right after an isolated panic doesn't
   reach that panic's bundle, which holds the text the panic saw.
+- **Plan:** a panic's finisher builds its bundle from `plan.json` without
+  loading the project (its peak memory stays near the bundle's size), and
+  widens along the plan when the first replay doesn't reproduce.
+- **OOM:** under a cgroup with a memory limit (`systemd-run --user --scope -p
+  MemoryMax=...` where the runner delegates one; the test says so and skips
+  where none is available), `crash-injection`'s unbounded allocation ends in
+  an `oom` report with the in-progress file; a plain `kill -9` of the worker
+  produces none.
+- **PID 1:** the supervisor run as a PID namespace's init (`unshare --user
+  --map-root-user --pid --fork --mount-proc` in the test, no root and no
+  container runtime needed; skipped with a printed reason where user
+  namespaces are disabled) stops on `SIGTERM` and leaves no zombies.
 - **SQL cache:** a panic injected while the cache lock is held leaves later
   files' SQL reflection working.
 - **Formats and exit code:** an injected check panic appears in the JSON's
@@ -1376,6 +1444,8 @@ tests; the end-to-end tests run from step 6 on and again at the end.
   handlers no longer overflow at the depths that abort it today.
 - An internal error makes every output format say so and the run exit 2.
 - A report made while the server is down reaches it on the next run.
+- A worker killed by the OOM killer under cgroup v2 reaches it as an `oom`
+  report naming the files in progress; a `kill -9` doesn't.
 - With a DSN, every command runs as a supervisor and a worker, the only
   `unsafe` in the workspace is `crash-sys`'s three functions, and nothing a run
   starts outlives its supervisor.
