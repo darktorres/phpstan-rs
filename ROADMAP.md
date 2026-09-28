@@ -5241,17 +5241,18 @@ nothing else, followed by a review of each file. Measured today:
   `syntax::`-style paths unchanged;
 - the binary, and the release assets `release.yml` and
   `extension-ci.yml` name after it; README's install steps;
-- the config file `phpstan-rs.toml` and every discovery name crate-split
-  C1 lists. The old names stay readable for one release with a warning,
-  since Piwigo's corpus and the scratch probe projects use them;
+- the config file `phpstan-rs.toml` and every discovery name crate-split C1
+  lists. Nothing is released, so the old names aren't read at all: Piwigo's
+  corpus toml and the scratch probe projects that use them are renamed in the
+  same commit series;
 - the environment variables `PHPSTAN_RS_*` (`TEST_BIN`, `DUMP_TYPES`,
   `CORPUS`, `BLESS`, `TEST_PG_*`, `TEST_SQL_PW_*`);
 - the LSP server's name ("phpstan-rs Language Server") and its log
   prefixes;
-- the VS Code extension: `name`, `displayName`, `publisher`, the
-  `phpstan-rs.*` settings (`enable`, `configPath`, `serverPath`,
-  `trace.server`) and the `phpstan-rs.restartServer` command. A workspace
-  that still sets an old key gets it read once, with a notice;
+- the VS Code extension: `name`, `displayName`, `publisher`, the `phpstan-rs.*`
+  settings (`enable`, `configPath`, `serverPath`, `trace.server`) and the
+  `phpstan-rs.restartServer` command, with no fallback to the old keys, which no
+  released extension ever wrote;
 - the docs, where the token means this project: README, ROADMAP,
   CRATE_SPLIT_PLAN, GATE_SPEED_PLAN, CHANGELOG (history entries keep the
   name they were written under), `.claude/workflows`,
@@ -5267,12 +5268,11 @@ PHPStan-API rules on code in the `PHPStan\` namespace, and every reference to
 PHPStan itself in the docs. `.corpus-runs/` is keyed by commit hash and needs
 nothing.
 
-**Gates.** `cargo xtask gates --full` with snapshots matching the
-parent: analysis output doesn't carry the project name, so nothing
-changes except the old-config-name warning, which the Piwigo run shows
-until its toml is renamed. The VS Code extension's CI passes against the
-renamed binary. A grep gate finds none of the four tokens outside the
-compatibility shims and CHANGELOG history.
+**Gates.** `cargo xtask gates --full` with snapshots matching the parent:
+analysis output doesn't carry the project name, so nothing changes: the Piwigo
+toml is renamed in the same series, and no old-name warning exists to show. The
+VS Code extension's CI passes against the renamed binary. A grep gate finds none
+of the four tokens outside CHANGELOG history.
 
 **When.** Between two crate-split phases, as one commit series: every
 `Cargo.toml` changes, so it shouldn't interleave with a phase that is
