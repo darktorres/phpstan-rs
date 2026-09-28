@@ -105,3 +105,12 @@ fn a_shape_with_two_more_required_keys_stays_apart() {
         Type::Union(vec![with, bare])
     );
 }
+
+#[test]
+fn an_error_absorbs_a_union() {
+    assert_eq!(union_types(Type::Error, Type::Int), Type::Error);
+    assert_eq!(
+        union_types(Type::Union(vec![Type::Int, Type::Error]), Type::String),
+        Type::Error
+    );
+}

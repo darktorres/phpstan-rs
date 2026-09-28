@@ -92,3 +92,8 @@ fn a_refinement_never_replaces_its_base() {
         Type::Intersection(refined)
     );
 }
+
+#[test]
+fn an_error_drops_out_of_an_intersection() {
+    assert_eq!(intersect_types(vec![Type::Error, Type::Int]), Type::Int);
+}

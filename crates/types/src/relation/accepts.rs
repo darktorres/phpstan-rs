@@ -32,6 +32,7 @@ impl Relation<'_> {
     /// `Relation::is_super_type_of`, which has no notion of class context.
     pub(crate) fn accepts_type(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
+            (Type::Error, _) | (_, Type::Error) => true,
             // A `key-of<T>`/`T[K]` still over a template is what `T`'s
             // bound makes it.
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
@@ -521,6 +522,9 @@ impl Relation<'_> {
     /// switch the way `NULLABLES_CHECK_LEVEL` gets its own null-stripping
     /// switch.
     fn rule_level_accepts_type(&self, sub: &Type, sup: &Type) -> bool {
+        if matches!(sub, Type::Error) || matches!(sup, Type::Error) {
+            return true;
+        }
         // Never configured means "assume the strictest threshold for
         // `checkNullables`/`checkUnionTypes`" (`NULLABLES_CHECK_LEVEL`,
         // matching this method's own pre-existing behavior exactly - the

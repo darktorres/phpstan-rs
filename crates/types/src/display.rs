@@ -52,6 +52,7 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Mixed(_) => write!(f, "mixed"),
+            Type::Error => write!(f, "*ERROR*"),
             Type::Never => write!(f, "never"),
             Type::Void => write!(f, "void"),
             Type::Null => write!(f, "null"),

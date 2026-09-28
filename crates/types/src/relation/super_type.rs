@@ -19,6 +19,8 @@ impl Relation<'_> {
     /// registry doesn't know.
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         match (sup, sub) {
+            (Type::Error, _) => TrinaryLogic::Yes,
+            (_, Type::Error) => self.is_super_type_of(sup, &Type::Mixed(false)),
             (Type::Mixed(_), _) | (_, Type::Never) => TrinaryLogic::Yes,
             // `NAN` is itself, as `ConstantFloatType::equals()` has it.
             (Type::FloatLiteral(a), Type::FloatLiteral(b)) if a.is_nan() && b.is_nan() => {

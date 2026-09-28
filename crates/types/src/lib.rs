@@ -77,6 +77,10 @@ pub enum Type {
     // Type::Mixed(false)`-shaped comparisons keeps working unchanged regardless
     // of which flag either side carries.
     Mixed(bool),
+    // PHPStan's `ErrorType`: the value of an expression a rule reports as
+    // invalid. A `mixed` that accepts and is accepted by everything, so the
+    // reported error doesn't cascade into more.
+    Error,
     Never,
     Void,
     Null,
@@ -254,6 +258,7 @@ impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Type::Mixed(_), Type::Mixed(_)) => true,
+            (Type::Error, Type::Error) => true,
             (Type::Never, Type::Never) => true,
             (Type::Void, Type::Void) => true,
             (Type::Null, Type::Null) => true,
@@ -335,6 +340,7 @@ impl PartialEq for Type {
             }
             (
                 Type::Mixed(_)
+                | Type::Error
                 | Type::Never
                 | Type::Void
                 | Type::Null
@@ -392,6 +398,7 @@ impl Hash for Type {
         std::mem::discriminant(self).hash(state);
         match self {
             Type::Mixed(_)
+            | Type::Error
             | Type::Never
             | Type::Void
             | Type::Null

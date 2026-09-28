@@ -31,6 +31,10 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     if crate::types_equal_for_union(&a, &b) {
         return a;
     }
+    // An error absorbs everything, as a `mixed` does.
+    if matches!(a, Type::Error) || matches!(b, Type::Error) {
+        return Type::Error;
+    }
     // A `mixed` absorbs everything, and stays explicit when either side
     // wrote it.
     if let Some(explicit) = mixed_explicitness(&[&a, &b]) {
@@ -76,6 +80,9 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // (`nullsafe.neverNull` false-firing on a `T|mixed` receiver, since
     // `mixed` already includes `null` but a raw member scan for `Null`
     // specifically wouldn't find it).
+    if members.contains(&Type::Error) {
+        return Type::Error;
+    }
     if let Some(explicit) = mixed_explicitness(&members.iter().collect::<Vec<_>>()) {
         return Type::Mixed(explicit);
     }

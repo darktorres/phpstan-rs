@@ -508,3 +508,16 @@ fn property_names_keep_their_case_method_names_do_not() {
     );
     assert_eq!(Type::HasMethod("run".into()), Type::HasMethod("Run".into()));
 }
+
+#[test]
+fn an_error_accepts_and_is_accepted_by_everything() {
+    assert!(accepts(&Type::Int, &Type::Error));
+    assert!(accepts(&Type::Error, &Type::String));
+    assert!(
+        crate::Relation::structural()
+            .rule_level_accepts(&Type::Int, &Type::Error)
+            .yes()
+    );
+    assert!(is_subtype(&Type::Int, &Type::Error));
+    assert_eq!(Type::Error.to_string(), "*ERROR*");
+}
