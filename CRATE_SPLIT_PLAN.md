@@ -2661,7 +2661,12 @@ Fixes, each its own behaviour commit:
   as are calls through a `pure-callable`/`pure-Closure` parameter (`$cb()`)
   and a user function taking a pure callback; the rules oracle's 79
   `possiblyImpure.*` phpstan-rs-only findings are these and the built-ins
-  `functionMetadata` decides (`is_string`, `array_key_exists`).
+  `functionMetadata` decides (`is_string`, `array_key_exists`). A plain
+  call to a user function is judged by its body too: `pureFunction();` is
+  silent and `impureFunction();` `impure.functionCall` where both are
+  "unknown function" today (`pure-function.php:62`-`:64`), and a static
+  method calling an impure function is impure, not `staticMethod.resultUnused`
+  (`call-to-static-method-without-impure-points.php`).
 
 **C10. Extract `reflection`.** No module-graph edge remains; `cargo machete`
 checks Appendix E's rows for it.
@@ -3192,7 +3197,10 @@ deleted; the file-size gate.
       pre-increment is the new value: `$one = 1; ++$one` is `1` today, and
       `'foo'` pre-incremented stays `'foo'` where PHP gives `'fop'`
       (`''` → `'1'`, `'123'` → `124`; nsrt `pre-inc.php`, `pre-dec.php`,
-      `binary.php`).
+      `binary.php`). An array literal's keys are evaluated in order, each
+      increment seen by the next: `[$idx++ => 'a', $idx++ => 'b']` has keys
+      `0` and `1`, and is `array.duplicateKey` "duplicate key 2" today (the
+      rules oracle's `duplicate-keys.php:43`).
     - **`NAN`** is never identical or equal to itself: `NAN === NAN` is
       reported `identical.alwaysTrue` today, a wrong value (and `NAN !==
       NAN` `notIdentical.alwaysFalse`; the rules oracle's
@@ -3418,7 +3426,10 @@ deleted; the file-size gate.
       untyped), not its value: `static::KEY` is `'v'` today, so
       `sprintf('%s', static::KEY)` and `array_key_exists(static::KEY, $a)`
       pass where PHPStan checks `mixed` (`bug-6181.php`); `$this::C` and
-      `$self::C` are the same fetch (`bug-6758.php`, 3).
+      `$self::C` are the same fetch (`bug-6758.php`, 3). `self::C` isn't
+      late-bound and reads the value: `@var int` on `IPSUM = self::LOREM`
+      for `/** @var string|int */ LOREM = 1` is `classConstant.phpDocType`
+      today (`value-assigned-to-class-constant.php:20`).
     - **A template's bound** is checked at the call: `g(new
       DateTimeImmutable())` for `@template T of DateTime @param T $a` is
       unreported today (`call-generic-function.php`).
@@ -5037,8 +5048,9 @@ fixture:
     `$i::doFoo(...)`; `staticMethod.nonObject`, 6); all unreported today;
   - a constant `define()`d in a static or non-constructor method isn't
     known in another method (only the constructor's scope is remembered,
-    and with its value's type: `return REMEMBERED_FOO;` under `: string`
-    is `return.type` "got mixed" today, `remembered-constructor-scope.php:18`):
+    with the value's type; today even the constructor's is forgotten, so
+    each read of `REMEMBERED_FOO` is `constant.notFound` and `mixed`,
+    `remembered-constructor-scope.php:11`, `:18`, `:43`, `:67`):
     `echo XYZ22;` after `static function s() { define('XYZ22', 1); }` is
     `constant.notFound`, as is `__COMPILER_HALT_OFFSET__` in a file
     without `__halt_compiler()`; both unreported today
@@ -5505,7 +5517,9 @@ fixture:
     position), a closure's parameter (`\Closure(X): X`) or a `@param-out`
     type is `generics.variance`; today only a bare `X` parameter is
     reported, once per method (the rules oracle's 18 PHPStan-only,
-    `method-signature-variance-*.php`, `bug-10609.php`);
+    `method-signature-variance-*.php`, `bug-10609.php`), and on private
+    methods too, which PHPStan skips as they can't be called through the
+    parent type (`method-signature-variance-*.php:74`);
   - imports are per namespace block: repeating `use X\Y;` in a second
     `namespace N;` block, and `use \stdClass;` in the global namespace
     (a PHP warning, "no effect"), are `use.nameInUse` today (7 findings,
