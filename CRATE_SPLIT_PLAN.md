@@ -1412,7 +1412,14 @@ Follow-ups:
   `$s->first()` for `@return T` on `Sel<V>` inside a function templated on
   `V` is `mixed` today, so returning it under `@return V` is
   `return.type` "expected V, got mixed" (the rules oracle's
-  `bug-10698.php`, `bug-14638.php` among the 24).
+  `bug-10698.php`, `bug-14638.php` among the 24). Appendix H's template
+  causes are the nsrt side (294 mismatches): `new` infers the class's
+  templates from its arguments (`generic-new-infer`, 59: `new WeakMap()`,
+  `new ArrayObject([...])`, `new ReflectionClass($this)`), a callable
+  argument infers from its parameters and return
+  (`callable-template-infer`, 35), bounds that are generics or unions stay
+  `T` (`template-bound-generic`, 23; `template-bound-union`, 15), and a
+  `never` or empty-array argument infers `never` (`template-never`, 14).
 - **A template narrows by intersection**: `$b instanceof A` on a `T` gives
   `A&T` and its `else` `T~A`, merging back to `T`; today the branch is `A`
   and the merge `A|T` (the rules oracle's `bug-6635.php`).
@@ -1487,7 +1494,8 @@ Follow-ups:
   member covers (`A|B` for `B extends A` stays two members). Identical
   members collapse too: a closure parameter today reaches
   `Node|Node|Node|Node|Node|Node&Return_&Return_&Return_&Return_&Return_`
-  (D5).
+  (D5), and `is_a()` on unknown classes gives the same shape (nsrt
+  `is-a.php:38`).
 - **Display is unambiguous**: a string literal escapes its quotes (`'a\'b'`
   displays as `'a'b'`), and a callable's union return and a callable inside
   a union are parenthesized (`Closure(int): (int|string)` displays as
@@ -3308,7 +3316,10 @@ deleted; the file-size gate.
       `@param T $v` gives `$x` the unresolved `T` today where PHPStan has
       `1`. The intrinsic callback overrides (`array_map`, `array_filter`,
       `array_walk`, `array_find`, `curl_setopt`, `implode`, `Closure::bind`)
-      rewrite the callback's parameters from the sibling arguments;
+      rewrite the callback's parameters from the sibling arguments (with
+      untyped closure parameters taken from a union of callables, a
+      variadic, a constructor or an attribute, Appendix H's
+      `closure-param-infer` is 77 nsrt mismatches in 13 files);
       `array_map(fn ($x) => $x * 2, [1, 2])` is `array<int>` today where
       PHPStan keeps `array{2, 4}`. A by-reference callback parameter is
       typed from the context too: `array_walk($l, function (&$item) {…})`
@@ -3406,7 +3417,8 @@ deleted; the file-size gate.
       template's `T&list<int>` (`bug-14631.php`, `bug-14633.php`), and a
       nested `array_push($a['k'], …)` keeps the shape (`bug-11846.php`).
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
-      is `Closure(): mixed` today instead of returning a `Generator`. A
+      is `Closure(): mixed` today instead of returning a `Generator`
+      (`closure-generator`, 13 nsrt mismatches). A
       closure or arrow function whose body never returns returns `never`
       under any native return type: `fn (): null => $this->redirect('/')`
       for a `never` method is `Closure(): never|null` today, which a
@@ -4072,7 +4084,9 @@ building on the previous one:
       `(function () use (&$x) { $x = 'a'; })()`, `$x` is `0|'a'` today;
     - by-reference `use` follows `processClosureScope`: an undefined
       variable is `null` in the outer scope, and afterwards it is the
-      closure's type unioned with the previous one and generalized. Inside
+      closure's type unioned with the previous one and generalized
+      (`byref-closure-use`, 29 nsrt mismatches: the exact shape, no
+      `never`, `closure-passed-by-reference.php`, `bug-11561.php`). Inside
       the body, PHPStan gives such a variable its type where the closure is
       created, but other closures and the enclosing function may assign it
       before the call: react's `TimeoutConnector`/`TimeoutExecutor` set
