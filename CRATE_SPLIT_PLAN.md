@@ -109,7 +109,7 @@ L5  builtins      = phpstan-src/src/Type/Php: always registered, can't be
                   (over `php-regex`) and the date parser          (analyser)
     rules         phpstan-src/src/Rules equivalents + project-level
                   collector rules                                 (analyser,
-                  builtins)
+                  builtins, composer)
     ext-*         one crate per mirrored package (list below)
                                     (analyser, builtins, rules, sql)
 L6  project       Session, SessionBuilder (generic registrations, no ext-*
@@ -703,6 +703,13 @@ Visitor-based walk.
   inference reads reflection plus summaries, and never collector output.
 - **No I/O.** The package context comes from `AnalysisContext`, and file
   existence comes from the Session VFS, which records a dependency.
+- **Services in `AnalysisContext`.** A type-keyed map (`get::<T>()`) carries
+  what the analyser holds but never reads, so it depends on none of the crates
+  that define them: `composer`'s package index, which `project` builds from the
+  discovered roots and composer hygiene and `phpstan_api` read, and ext-sql's
+  `SqlContext`. A reader depends on the defining crate itself (`rules` on
+  `composer`, `ext-sql` on `sql`); a service is set per snapshot and is part
+  of its invalidation keys.
 
 ### 3.9 Levels
 
@@ -4624,7 +4631,9 @@ the rest), which the gate excludes and lists.
   register the same way, from ext-phpunit, ext-codeception and the rest, instead
   of core defaults (§1's `TEST_BASE_CLASSES`);
 - composer hygiene as a collector rule over the reference-site collector and the
-  package context (the manifests B8 loads; the rule does no I/O), run in the LSP
+  package context (the manifests B8 loads, read as `AnalysisContext`'s
+  `composer` service, §3.8; the rule does no I/O, and the module-graph spec's
+  `rules` row gains `composer`, which it lacks today), run in the LSP
   too (CLI-only today, §1): `undeclared.`, `misplaced.`, `devOnly.` and
   `unused.composerDependency`, `misplaced.autoloadDevSymbol`,
   `psr4.pathMismatch`/`psr4.caseMismatch`, `provide.unimplemented`,
