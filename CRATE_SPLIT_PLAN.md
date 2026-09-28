@@ -2805,7 +2805,13 @@ deleted; the file-size gate.
   `isset-in-trait.php`), so `isset($this->r) ||
   isset($this->i)` is `booleanOr.alwaysTrue` in PHPStan and `bool` today;
   `$a?->b ?? $c` is `nullsafe.neverNull` ("unnecessary on left side of
-  ??"). The isset rules read the same
+  ??"), and so are `isset($a?->b)` and `empty($a?->b)` ("unnecessary in
+  isset()/empty()"), nested chains included (`bug-7109.php`, 13;
+  `bug-7291.php`, `isset-nullsafe.php`, `bug-12574c.php`); a dynamic
+  name on a non-nullable receiver is "on non-nullable type" as a plain
+  name is (`$this?->{'n'}`, `$this?->{$stringable}`;
+  `dynamic-stringable-nullsafe-access.php`, 11); all unreported today
+  but the plain-name and `??` forms. The isset rules read the same
   certainty: `isset($bar)`, `empty($foo)` and `$baz ?? 1` on a variable
   that is never defined are `isset.variable`/`empty.variable`/
   `nullCoalesce.variable` "is never defined", unreported today. The
