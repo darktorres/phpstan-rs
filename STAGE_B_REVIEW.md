@@ -326,7 +326,7 @@ through `check-project`.
   otherwise. (A `foreach` over any object also iterates its visible
   properties, so even a final class's No for iterability is doubtful.)
   (`9819e786`, `3bdb7505`)
-- [ ] **F37. A shape's string keys widen to `string`.** `f(['a' => 1])`
+- [x] **F37. A shape's string keys widen to `string`.** (`0fbd42f2`) `f(['a' => 1])`
   against `@param array<'a'|'b', int>` reports `argument.type`, and so does
   `array<non-empty-string, int>`; `$y = ['a' => 1, 'b' => 2]; f($y)` too.
   `Shape::key_type` (`subtype.rs`) contributes `string` for every string
@@ -474,7 +474,11 @@ through `check-project`.
   (`write_key_type`) and `to_array_key` (a non-literal string passes
   through) disagree with it. A string key is `int|string` unless provably
   non-numeric; a decimal-int-string is `int`. The lost non-emptiness is C2.
-  (`323eeb36`, `e024c0bc`)
+  A negative literal key (`[-1 => 1]`) isn't a key to the literal's type at
+  all: `-1` parses as a negation, so the literal degrades to `array<mixed>`
+  (and fits `array<int<0, max>, int>`). The literal, the duplicate-key
+  check and the spread paths resolve keys three ways; one resolver over
+  `to_array_key`. (`323eeb36`, `e024c0bc`)
 - [ ] **F34. Unknown classes in generic arguments and callable signatures
   go unreported.** `@param Box<NoSuchA>` and `@param callable(NoSuchB):
   void` give no `class.notFound` (`array<NoSuchC>` and `NoSuchD` do).
