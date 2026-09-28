@@ -2418,6 +2418,11 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   `int<0, max>|numeric-string` (1, `int<-1, max>` today),
   `curl_share_setopt()`'s `mixed`
   value (3) and `stream_get_contents()`'s `__benevolent<string|false>` (3);
+  the nsrt suite's are Appendix H's `stub-return` (107 mismatches, 32
+  files: `RedisArray::keys()`, the SPL recursive iterators' generics,
+  `ReflectionEnum`, `Ds\Map::get()`, `ImagickPixel::getColor()`,
+  `getopt()`, SQLite3) and `stub-asserts` (39: `dir()`, `chdir()`,
+  `chroot()` and `is_readable()` narrowing the path);
 - the functionMap's and the overlay stubs' narrower parameters, which PHP
   rejects at runtime or which throw, are the rules oracle's other C6
   `argument.type` misses (about 60): `array_chunk()`/`str_split()`
@@ -2976,7 +2981,13 @@ deleted; the file-size gate.
       $values` on `check(...$values)`, `$a` stays `?string` today (the
       rules oracle's `bug-8389.php`); an equality assertion
       (`@phpstan-assert-if-true =int $x`) narrows the true branch only, and
-      today it narrows neither (`docblock-assert-equality.php`);
+      today it narrows neither (`docblock-assert-equality.php`). Appendix
+      H's `assert-tags` (65 nsrt mismatches, 20 files) are the call forms
+      that don't narrow today: a method call's `-if-true` on its argument
+      (`bug-14705.php`), a first-class or string callable of an asserting
+      function (`bug-14249.php`, `bug-11472.php`), a union receiver
+      (`bug-14108.php`), constructors, and conditional, template and
+      `empty` assertion types;
     - unary minus on a literal union is ignored: `-$c` for `1|2` is `1|2`;
     - a float result is typed as an integer literal: `(float) 5` is `5`
       and `abs(0.0)` is `0`;
@@ -3861,6 +3872,15 @@ building on the previous one:
     certainty assertions in nsrt `dependent-expression-certainty.php`; 10
     of the rules oracle's PHPStan-only `identical.alwaysFalse`, with the
     tip naming the possibly impure call, `possibly-impure-tip.php`).
+    Appendix H counts the nsrt side: remembered built-in checks
+    (`function_exists`, `is_file` until `clearstatcache()`, `ftell`; `guards`,
+    54), remembered method calls (`hasAttributes()` then `->attributes`,
+    `eof()` on `SplFileObject`; `method-call-memory`, 29), what an impure call
+    or an object passed to one invalidates (`impure-invalidate`, 42;
+    `invalidate-object-argument*.php`), readonly properties that keep their
+    constructor values in other methods and hooks (`readonly-remember`, 25),
+    and `ob_start()`/`ob_end_*()` moving `ob_get_level()` (`ob-level`, 47,
+    `output-buffering.php`).
 - **Control-flow transitions:**
   - **Loops** follow `LOOP_SCOPE_ITERATIONS = 3` with `generalizeWith` after
     the first pass, then the final walk. Today there are up to 6 passes and
