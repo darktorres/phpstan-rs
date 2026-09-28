@@ -5,14 +5,10 @@ use crate::php_string::PhpString;
 use crate::token::{Position, SimpleIndexKey, Span, StringPart};
 
 impl Parser {
-    /// `base` is the whole interpolated string literal's own starting
-    /// position - used as a reasonable anchor for the synthesized
-    /// `Literal`/`Variable` parts (which have no tokens of their own to
-    /// derive a more specific position from). A `ComplexExpr` fragment
-    /// gets a more precise treatment: it's re-lexed and re-parsed on its
-    /// own, by a lexer starting at the fragment's real position
-    /// (`StringPart::ComplexExpr`'s second field), so an error inside
-    /// `"{$obj->prop}"` points at its real position.
+    /// `base` is where the whole string starts. Each part keeps its own
+    /// span; a `ComplexExpr` fragment is re-lexed where it sits in the
+    /// file, so an error inside `"{$obj->prop}"` points at its real
+    /// position.
     pub(crate) fn build_interpolated(
         &mut self,
         parts: Vec<StringPart>,
@@ -21,12 +17,16 @@ impl Parser {
         let mut exprs = Vec::new();
         for part in parts {
             match part {
-                StringPart::Literal(s) => {
-                    exprs.push(self.expr(ExprKind::Literal(Literal::String(s)), base))
-                }
-                StringPart::SimpleVar(name) => {
-                    exprs.push(self.expr(ExprKind::Variable(name), base))
-                }
+                StringPart::Literal(s, span) => exprs.push(Expr {
+                    id: self.node_id(),
+                    kind: ExprKind::Literal(Literal::String(s)),
+                    span,
+                }),
+                StringPart::SimpleVar(name, span) => exprs.push(Expr {
+                    id: self.node_id(),
+                    kind: ExprKind::Variable(name),
+                    span,
+                }),
                 StringPart::ComplexExpr(src, frag_base) => {
                     // Lexed where it sits in the file, so every span in
                     // the fragment is already the real one.
@@ -125,10 +125,13 @@ impl Parser {
                 }
             }
         }
+        // A string with no interpolation is one literal spanning the whole
+        // string, quotes included.
         if exprs.len() == 1
             && let Some(ExprKind::Literal(Literal::String(_))) = exprs.first().map(|e| &e.kind)
         {
-            return Ok(exprs.into_iter().next().unwrap());
+            let kind = exprs.into_iter().next().unwrap().kind;
+            return Ok(self.expr(kind, base));
         }
         Ok(self.expr(ExprKind::Interpolated(exprs), base))
     }

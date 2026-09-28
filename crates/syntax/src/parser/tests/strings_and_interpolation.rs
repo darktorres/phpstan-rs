@@ -131,15 +131,8 @@ fn int_index_interpolation_including_negative_parses_as_an_index_with_an_int_lit
     }
 }
 
-/// Regression test: a bare `{$var}` (no property/index) must NOT be
-/// fast-pathed into `StringPart::SimpleVar`, which carries no position of
-/// its own (`build_interpolated` gives every `SimpleVar`/`Literal` part
-/// the whole string's own start position, not a per-occurrence one) -
-/// doing so once collapsed every bare-braced-var diagnostic in a string
-/// with more than one onto the same wrong column (found via a real
-/// corpus diff: six distinct `{$var}` interpolations on one line, e.g.
-/// `"Q: {$sniff}:{$line} ... {$tokenLine}"`, all reported the identical
-/// `undefined variable` column instead of six distinct ones).
+/// Each `{$var}` in a string keeps its own position, so diagnostics on
+/// several of them in one string land on distinct columns.
 #[test]
 fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
     let program = parse("<?php\nfunction f() {\n    return \"{$foo} and {$bar}\";\n}\n");

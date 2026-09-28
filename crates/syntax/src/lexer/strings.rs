@@ -1,7 +1,7 @@
 use crate::lexer::{Lexer, is_ident_continue, is_ident_start, skip_string_literal_bytes};
 use crate::name::Interner;
 use crate::php_string::PhpString;
-use crate::token::{SimpleIndexKey, StringPart, Token};
+use crate::token::{SimpleIndexKey, Span, StringPart, Token};
 
 /// Whether `s` is a full, well-formed PHP identifier (not just that it
 /// *starts* like one) - `$var[key]` interpolation's own bareword-string-key
@@ -209,7 +209,7 @@ impl<'a> Lexer<'a> {
             }
         }
         let raw = &self.src[start..self.pos];
-        let parts = self.scan_interpolated(raw, start, false);
+        let parts = self.scan_interpolated(raw, start, false, None);
         self.pos = (self.pos + 1).min(self.src.len()); // closing delimiter
         parts
     }
@@ -300,7 +300,7 @@ impl<'a> Lexer<'a> {
         if raw_body.last() == Some(&b'\r') {
             raw_body = &raw_body[..raw_body.len() - 1];
         }
-        let content = strip_heredoc_indent(raw_body, closing_indent);
+        let (content, offsets) = strip_heredoc_indent(raw_body, closing_indent);
 
         if nowdoc {
             Token::StringLit(PhpString::from(content))
@@ -313,7 +313,7 @@ impl<'a> Lexer<'a> {
             // start is an honest, coarser approximation for this one
             // case (still the right heredoc, not a precise per-occurrence
             // position within it).
-            Token::InterpString(self.scan_interpolated(&content, body_start, true))
+            Token::InterpString(self.scan_interpolated(&content, body_start, true, Some(&offsets)))
         }
     }
 }
@@ -333,20 +333,31 @@ impl<'a> Lexer<'a> {
         bytes: &[u8],
         abs_base: usize,
         heredoc: bool,
+        offsets: Option<&[usize]>,
     ) -> Vec<StringPart> {
         let mut parts = Vec::new();
         // Upper-bound capacity hint - avoids repeated reallocation while
         // pushing long plain-text runs (SQL, translation strings, HTML in
         // a heredoc, ...).
         let mut literal: Vec<u8> = Vec::with_capacity(bytes.len());
+        // Where `literal`'s chunk starts in `bytes`.
+        let mut literal_start = 0;
+        // A byte of `bytes` as an offset in the file: a heredoc's content
+        // has its indentation stripped, so `offsets` maps it back.
+        let off = |i: usize| abs_base + offsets.map_or(i, |m| m[i.min(m.len() - 1)]);
         let mut i = 0;
 
         macro_rules! flush {
             () => {
                 if !literal.is_empty() {
-                    parts.push(StringPart::Literal(PhpString::from(std::mem::take(
-                        &mut literal,
-                    ))));
+                    let span = Span {
+                        start: self.line_col_at(off(literal_start)),
+                        end: self.line_col_at(off(i)),
+                    };
+                    parts.push(StringPart::Literal(
+                        PhpString::from(std::mem::take(&mut literal)),
+                        span,
+                    ));
                 }
             };
         }
@@ -355,6 +366,9 @@ impl<'a> Lexer<'a> {
             let b = bytes[i];
 
             if b == b'\\' && i + 1 < bytes.len() {
+                if literal.is_empty() {
+                    literal_start = i;
+                }
                 match bytes[i + 1] {
                     b'n' => {
                         literal.push(b'\n');
@@ -484,7 +498,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 let inner_bytes = &bytes[start..i];
-                let base = self.line_col_at(abs_base + start);
+                let base = self.line_col_at(off(start));
                 let close_brace_pos = i;
                 i = (i + 1).min(bytes.len());
                 match try_parse_simple_interpolation(inner_bytes) {
@@ -498,8 +512,8 @@ impl<'a> Lexer<'a> {
                         let prop = self
                             .interner
                             .str(&String::from_utf8_lossy(&inner_bytes[prop_start..]));
-                        let var_end = self.line_col_at(abs_base + start + name_end);
-                        let end = self.line_col_at(abs_base + close_brace_pos);
+                        let var_end = self.line_col_at(off(start + name_end));
+                        let end = self.line_col_at(off(close_brace_pos));
                         parts.push(StringPart::PropertyAccess {
                             var: name,
                             var_start: base,
@@ -519,8 +533,8 @@ impl<'a> Lexer<'a> {
                                 let name = self
                                     .interner
                                     .str(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
-                                let var_end = self.line_col_at(abs_base + start + name_end);
-                                let end = self.line_col_at(abs_base + close_brace_pos);
+                                let var_end = self.line_col_at(off(start + name_end));
+                                let end = self.line_col_at(off(close_brace_pos));
                                 parts.push(StringPart::Index {
                                     var: name,
                                     var_start: base,
@@ -547,7 +561,7 @@ impl<'a> Lexer<'a> {
             // any other `${expr}` the variable `expr` names.
             if b == b'$' && bytes.get(i + 1) == Some(&b'{') {
                 flush!();
-                let base = self.line_col_at(abs_base + i);
+                let base = self.line_col_at(off(i));
                 i += 2;
                 let start = i;
                 let mut depth = 1;
@@ -570,7 +584,11 @@ impl<'a> Lexer<'a> {
                 let name_len = inner.bytes().take_while(|&c| is_ident_continue(c)).count();
                 let starts_with_name = inner.bytes().next().is_some_and(is_ident_start);
                 if starts_with_name && name_len == inner.len() {
-                    parts.push(StringPart::SimpleVar(self.interner.str(&inner)));
+                    let span = Span {
+                        start: base,
+                        end: self.line_col_at(off(i)),
+                    };
+                    parts.push(StringPart::SimpleVar(self.interner.str(&inner), span));
                 } else if starts_with_name
                     && inner[name_len..].starts_with('[')
                     && inner.ends_with(']')
@@ -597,13 +615,13 @@ impl<'a> Lexer<'a> {
                 // begins - precision within the reconstruction (distinguishing
                 // `$name` from `->prop`/`[key]`) isn't attempted, only anchoring
                 // the whole thing at its real starting position.
-                let base = self.line_col_at(abs_base + name_start - 1);
+                let base = self.line_col_at(off(name_start - 1));
 
                 if bytes.get(i) == Some(&b'-')
                     && bytes.get(i + 1) == Some(&b'>')
                     && bytes.get(i + 2).is_some_and(|&c| is_ident_start(c))
                 {
-                    let var_end = self.line_col_at(abs_base + i);
+                    let var_end = self.line_col_at(off(i));
                     i += 2;
                     let prop_start = i;
                     while i < bytes.len() && is_ident_continue(bytes[i]) {
@@ -612,7 +630,7 @@ impl<'a> Lexer<'a> {
                     let prop = self
                         .interner
                         .str(&String::from_utf8_lossy(&bytes[prop_start..i]));
-                    let end = self.line_col_at(abs_base + i);
+                    let end = self.line_col_at(off(i));
                     parts.push(StringPart::PropertyAccess {
                         var: name,
                         var_start: base,
@@ -621,7 +639,7 @@ impl<'a> Lexer<'a> {
                         end,
                     });
                 } else if bytes.get(i) == Some(&b'[') {
-                    let var_end = self.line_col_at(abs_base + i);
+                    let var_end = self.line_col_at(off(i));
                     i += 1;
                     let key_start = i;
                     while i < bytes.len() && bytes[i] != b']' {
@@ -631,7 +649,7 @@ impl<'a> Lexer<'a> {
                     i = (i + 1).min(bytes.len());
                     match classify_index_key(&key, &self.interner) {
                         Some(key) => {
-                            let end = self.line_col_at(abs_base + i);
+                            let end = self.line_col_at(off(i));
                             parts.push(StringPart::Index {
                                 var: name,
                                 var_start: base,
@@ -653,7 +671,8 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 } else {
-                    parts.push(StringPart::SimpleVar(name));
+                    let end = self.line_col_at(off(i));
+                    parts.push(StringPart::SimpleVar(name, Span { start: base, end }));
                 }
                 continue;
             }
@@ -681,12 +700,19 @@ impl<'a> Lexer<'a> {
             {
                 i += 1;
             }
+            if literal.is_empty() {
+                literal_start = run_start;
+            }
             literal.extend_from_slice(&bytes[run_start..i]);
         }
         flush!();
 
         if parts.is_empty() {
-            parts.push(StringPart::Literal(PhpString::default()));
+            let at = self.line_col_at(off(0));
+            parts.push(StringPart::Literal(
+                PhpString::default(),
+                Span { start: at, end: at },
+            ));
         }
         parts
     }
@@ -695,20 +721,26 @@ impl<'a> Lexer<'a> {
 /// Flexible heredoc (PHP 7.3+): every content line has up to `indent`
 /// leading space/tab characters stripped, matching the closing marker's
 /// own indentation.
-fn strip_heredoc_indent(text: &[u8], indent: usize) -> Vec<u8> {
-    if indent == 0 {
-        return text.to_vec();
+fn strip_heredoc_indent(text: &[u8], indent: usize) -> (Vec<u8>, Vec<usize>) {
+    let mut content = Vec::with_capacity(text.len());
+    // For each byte of `content`, and one past the end, its offset in
+    // `text`.
+    let mut offsets = Vec::with_capacity(text.len() + 1);
+    let mut line_start = 0;
+    for line in text.split(|&b| b == b'\n') {
+        let cut = line
+            .iter()
+            .take(indent)
+            .take_while(|&&b| b == b' ' || b == b'\t')
+            .count();
+        if line_start > 0 {
+            content.push(b'\n');
+            offsets.push(line_start - 1);
+        }
+        content.extend_from_slice(&line[cut..]);
+        offsets.extend((line_start + cut)..(line_start + line.len()));
+        line_start += line.len() + 1;
     }
-    let lines: Vec<&[u8]> = text
-        .split(|&b| b == b'\n')
-        .map(|line| {
-            let cut = line
-                .iter()
-                .take(indent)
-                .take_while(|&&b| b == b' ' || b == b'\t')
-                .count();
-            &line[cut..]
-        })
-        .collect();
-    lines.join(&b'\n')
+    offsets.push(text.len());
+    (content, offsets)
 }

@@ -295,8 +295,10 @@ impl Keyword {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum StringPart {
-    Literal(PhpString),
-    SimpleVar(Arc<str>),
+    // A literal chunk and the span of its source text.
+    Literal(PhpString, Span),
+    // `$var`, spanning the `$` and the name.
+    SimpleVar(Arc<str>, Span),
     // The fragment's own source text, plus the real file position it
     // starts at - `parser::build_interpolated` re-lexes the fragment on
     // its own, starting at this position, so an error inside
