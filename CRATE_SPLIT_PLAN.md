@@ -735,7 +735,9 @@ Visitor-based walk.
   The Session also provides:
   - panic isolation, and the 64 MiB worker pool, injected: one per
     process (`project::worker_pool`);
-  - context-before-analysed ordering;
+    - the file set's membership (analysed, context, excluded), with no load
+      order to keep: C4's collision policy orders declarations canonically, not
+      by arrival, and C5's locator reads context classes on demand;
   - one Session per workspace root;
   - a single engine-construction path (gate: none outside `project`).
 - **Result cache.**
@@ -6590,14 +6592,19 @@ Structural commits first, one each:
   buffer gets no diagnostics until saved); today it joins the one `Project` with
   whatever the last root configured, or with no configuration when no folder is
   open.
-- **The workspace load runs as the CLI's does**: parsed in parallel on the
-  pool, context files first, reported through `$/progress` on a token the server
-  creates (`window/workDoneProgress/create`) when the client supports it; today
-  progress shows only when the client happened to send a token with
-  `initialize`, and a recheck after `reconfigure` or a folder change reports
-  none. Today `load_workspace_files` parses each file in turn on the main thread
-  inside the `initialized` notification, then checks, and no request is answered
-  until both finish.
+- **The workspace load runs as the CLI's does**: the analysed files and the
+  context the locators load eagerly (Composer `files` entries, functions and
+  constants, C5) are parsed in parallel on the pool, in no particular order
+  (C4's collision policy doesn't depend on it), and context classes are read on
+  demand through C5's locators instead of every vendor file up front, as
+  `load_workspace_files` and `Session::load` both parse today; the load is
+  reported through `$/progress` on a token the server creates
+  (`window/workDoneProgress/create`) when the client supports it; today progress
+  shows only when the client happened to send a token with `initialize`, and a
+  recheck after `reconfigure` or a folder change reports none. Today
+  `load_workspace_files` parses each file in turn on the main thread inside the
+  `initialized` notification, then checks, and no request is answered until both
+  finish.
 - **LSP parity**, one commit per §1 divergence, each fixtured and held to gate 7:
   - the project-level rules (E1's collector rules: dead code, members, enum
     cases and abstract classes, duplicates, namespace cycles, architecture,
