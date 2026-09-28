@@ -903,9 +903,17 @@ corpus, type, baseline, performance and build-time gates run locally
       reads, runs phpstan-rs over the same files at the same level (10),
       and lists the phpstan-rs-only and PHPStan-only findings by
       identifier; files that raise PHPStan internal errors are excluded
-      and listed.
+      and listed;
+    - `cargo xtask rules-oracle` (from Stage E) runs the phar and
+      phpstan-rs over PHPStan's own rule-test data
+      (`vendor/phpstan-src/tests/PHPStan/Rules/**/data`, 2,936 files, the
+      five PHPStan can't parse excluded), level 10, PHP 8.5, and matches
+      findings by file and identifier within three lines (the two tools
+      attribute some findings to different lines of one declaration). It
+      lists, per identifier, the PHPStan-only, matched and phpstan-rs-only
+      counts (phpstan-rs takes 2 s).
 
-    Both record under `.corpus-runs/gate/{nsrt,oracle}/<hash>`. A count
+    All three record under `.corpus-runs/gate/{nsrt,oracle,rules}/<hash>`. A count
     rises only through an approved delta that names the cause.
 
 **Approved deltas.** A commit that intentionally changes output records its
@@ -3081,6 +3089,16 @@ the `mixed` those unknown classes produce feeds the phpstan-rs-only
 `argument.type`/`return.type` "mixed given" findings. E's comparisons are
 read after B8's two context fixes land.
 
+Gate 12's rules oracle is Stage E's measure: over PHPStan's rule-test data
+at `76e738b4`, PHPStan reports 15,563 findings across 633 identifiers and
+phpstan-rs 11,428; 8,776 match, 6,787 are PHPStan-only, and phpstan-rs
+never matches 152 of the identifiers. Each E3 sub-phase ends when its
+identifiers have no PHPStan-only findings left, or each remaining one is an
+approved deviation (an identifier named differently, such as
+`class.abstractMethodNotImplemented` for `method.abstract`, or a
+PHPStan-specific check: `void.pure`, `phpstan.*`, `phpParser.*`,
+`phpstanApi.*` outside a PHPStan extension's package).
+
 **E1. Collectors and project-level rules**, one commit each:
 
 - the reference-site collector (a built-in collector, consumed by the dead
@@ -3256,6 +3274,16 @@ fixture:
     trait (`classConstant.onTrait`), and a static property read through
     `->` (`$p->st`, `property.staticAccess`); `$m instanceof T` with a
     trait is always false (`instanceof.trait`);
+  - the constant-operand checks of `&&`, `||`, `and`, `or`, `xor` and
+    `?:` fire on each side and on the result: the rules oracle has 164
+    `boolean{And,Or}.*`/`logical{And,Or,Xor}.*` findings and 17
+    `ternary.always{True,False}`, of which phpstan-rs matches 2 and 0 (D3's
+    type-check folding feeds them);
+  - `--`/`++` on a non-numeric string (`$s = 'a'; $s--;`, which PHP
+    leaves unchanged), `unset()` of an undefined variable
+    (`unset.variable`), `unset()` of an offset on a non-array
+    (`unset.offset`), and a statement with no effect for `new class {};`
+    (`expr.resultUnused`) are unreported today;
   - `yield` outside a function is a compile error
     (`generator.outOfFunction`), unreported today;
   - a discarded pure call is reported inside PHP 8.5's `(void)` cast
@@ -3284,6 +3312,25 @@ fixture:
     arguments and returns are already reported);
   - a by-reference argument PHP creates on the call is not type-checked
     against the parameter;
+  - flag parameters are checked against PHPStan's
+    `constantToFunctionParameterMap.php`: a constant the parameter doesn't
+    accept (`RecursiveIteratorIterator::CHILD_FIRST` as its `$flags`,
+    `argument.invalidConstant`), constants that can't be combined
+    (`LOCK_EX | LOCK_SH`, `argument.exclusiveConstants`) and `|` where the
+    parameter takes one constant (`array_unique($a, SORT_STRING |
+    SORT_NUMERIC)`, `argument.bitmaskNotAllowed`), unreported today (33
+    rules-oracle findings);
+  - `new DateTime('2020.11.17')` and `new DateTimeImmutable('asdfasdf')`
+    with a literal PHP rejects are `new.dateTime`/`new.dateTimeImmutable`
+    (E2's date parser decides it), unreported today;
+  - a static closure passed where `@param-closure-this` needs a bindable
+    one (`argument.staticClosure`), a named argument for a parameter a
+    subtype renames (`argument.parameterRenamedInSubtype`), named arguments
+    below PHP 8.0 (`argument.namedNotSupported`), a `void` closure's result
+    used or a callable's result discarded (`callable.void`,
+    `callable.resultDiscarded`), and a call whose return or argument type
+    contains an unresolvable type (`method.unresolvableReturnType`,
+    `argument.unresolvableType`) are unreported today;
   - `@no-named-arguments` forbids named arguments and string-keyed
     unpacking: `nn(b: 1, a: 2)` for a `@no-named-arguments` function isn't
     `argument.named` today (11 oracle findings, PHPUnit's
@@ -3320,6 +3367,14 @@ fixture:
     as a read: `$that = $this; function () use ($that) { return
     $that->p; }` leaves `$p` `property.onlyWritten` today, a false
     positive;
+  - property hooks: a property overriding a writable or readable one
+    stays so (`property.notWritable`/`notReadable`), a get hook of a
+    non-virtual property reads its value and a set hook assigns it
+    (`propertyGetHook.noRead`, `propertySetHook.noAssign`); a
+    `private(set)`/`protected(set)` static property assigned from outside
+    (`assign.staticPropertyPrivateSet`/`ProtectedSet`) and a `@readonly`
+    property assigned twice (`assign.readOnlyPropertyByPhpDoc`) are
+    reported; all unreported today;
   - a readonly property, native or `@readonly`, read before its
     initialization is reported
     (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
@@ -3345,9 +3400,26 @@ fixture:
     alias name (`123bad`) and an `@phpstan-import-type` of an alias the
     class doesn't define are reported; all unreported today;
   - `@mixin int` is `mixin.nonObject`, unreported today;
+  - an enum's duplicate case value is found through constant expressions:
+    `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
+    literal duplicate already is);
+  - a set hook's parameter type is contravariant with the property's
+    (`propertySetHook.parameterType`/`nativeParameterType`), a template
+    doesn't reuse a type alias's name (`generics.existingTypeAlias`), an
+    alias doesn't shadow a class (`typeAlias.duplicate`), and
+    `@phpstan-require-extends`/`-implements` sit only where PHPStan allows
+    them (`requireExtends.onClass`, `requireImplements.onEnum`, …); all
+    unreported today;
   - `@phpstan-consistent-constructor` on a class with a private
     constructor is `consistentConstructor.private`, unreported today.
 - (f) control flow, returns, throws and generators:
+  - an empty body is checked like any other: a function or method with a
+    non-`void` return type and an empty body (or only a comment) throws a
+    `TypeError` ("none returned") and isn't `return.missing` today; 500 of
+    the rules oracle's 553 PHPStan-only `return.missing` are this;
+  - a finally block that changes a value returned by reference is
+    `return.byRefFinally` (13 rules-oracle findings), and every exit point
+    a finally block overrides is `finally.exitPoint` (25 of 42 missed);
   - a return type that includes `void` accepts falling off the end (fixed
     first): `@return void|int` on a function that returns only on some
     paths is `return.missing` today, 10 of the oracle's 38 phpstan-rs-only
