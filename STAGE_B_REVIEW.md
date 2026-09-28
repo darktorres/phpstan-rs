@@ -153,6 +153,19 @@ Each fix needs a fixture.
   the function's signature as a closure (`Closure(string): int<0, max>`),
   so a call through the value is checked and typed.
 
+- [ ] **P6. `mixed` can't lose `null`.** Inside `if (isset($x))` (and
+  after `$x !== null`) a `mixed` `$x` stays `mixed`, where it is `mixed`
+  without `null` (PHPStan's `mixed~null`), so a later `=== null` isn't
+  always false and a nullable argument check can't use it. `Mixed` carries
+  the members removed from it, as PHPStan's `MixedType` subtraction does.
+  (found fixing F2, probed)
+- [ ] **P7. A class template infers a literal.** `new Box(5)` is
+  `Box<5>` where PHPStan has `Box<int>`: a literal inferred for an
+  invariant class template generalizes (`TemplateTypeHelper::
+  generalizeInferredTemplateType`), so `Box<5>` doesn't refuse a later
+  `Box<6>`. A function's own template keeps the literal (`identity(5)` is
+  `5`). (found fixing F38, probed)
+
 ## Review 2: structure, types crate
 
 - [ ] **T1. One absorption rule for unions.** `union_types_impl` in
