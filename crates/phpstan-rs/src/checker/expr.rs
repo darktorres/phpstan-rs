@@ -5,9 +5,9 @@ use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberVisibilityCheck, TemplateBindings,
     UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
-    is_known_single_value, is_real_variable_key, literal_string_key, merge_scopes,
-    narrow_type_excluding, narrowing_key, propagate_container_field_facts,
-    purge_stale_narrowing_for, resolve_call_args, superglobal_default_type,
+    is_real_variable_key, literal_string_key, merge_scopes, narrow_type_excluding, narrowing_key,
+    propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
+    superglobal_default_type,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -3198,7 +3198,7 @@ impl<'a> Checker<'a> {
                             // comment for why this can't just reuse
                             // `accumulated`'s value above.
                             let cond_ty = self.infer_expr(c, locals);
-                            if is_known_single_value(&cond_ty) {
+                            if cond_ty.is_single_value() {
                                 remaining_subject_ty =
                                     narrow_type_excluding(&remaining_subject_ty, &cond_ty);
                             }
@@ -3286,7 +3286,7 @@ impl<'a> Checker<'a> {
                         for (conds, _) in arms.iter().filter_map(MatchArm::conditioned) {
                             for c in conds {
                                 let cond_ty = self.infer_expr(c, locals);
-                                if is_known_single_value(&cond_ty) {
+                                if cond_ty.is_single_value() {
                                     remaining = narrow_type_excluding(&remaining, &cond_ty);
                                 }
                             }

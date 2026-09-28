@@ -53,7 +53,7 @@ pub trait ClassHierarchy {
 /// annotation written on `arg` wins; otherwise `class`'s declared
 /// variance for the slot. `None` is `*` (never checked) or an unknown
 /// slot.
-pub fn effective_slot_variance(
+pub(crate) fn effective_slot_variance(
     hierarchy: &dyn ClassHierarchy,
     class: &str,
     index: usize,

@@ -126,15 +126,6 @@ fn scalar_value_matches(ty: &Type, value: &ParamScalarValue, case_insensitive: b
     }
 }
 
-/// The value of each integer literal among `ty`'s union members (a
-/// `typeString: 1 | 2`); anything else contributes nothing.
-fn int_literal_members(ty: &Type) -> Vec<i64> {
-    ty.union_members()
-        .iter()
-        .filter_map(Type::int_literal_value)
-        .collect()
-}
-
 impl<'a> Checker<'a> {
     /// Best-effort literal-preserving constant fold for the `ParamFlags`
     /// family only - ordinary type inference for `BinOp::{BitOr,BitAnd,
@@ -189,7 +180,8 @@ impl<'a> Checker<'a> {
         };
         if let Some(type_string) = &cond.type_string {
             let configured = types::parse_type_string(type_string);
-            return int_literal_members(&configured)
+            return configured
+                .constant_ints()
                 .iter()
                 .any(|flag| (actual & flag) == *flag);
         }

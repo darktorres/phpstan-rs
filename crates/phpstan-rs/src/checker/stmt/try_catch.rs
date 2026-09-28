@@ -489,12 +489,9 @@ impl<'a> Checker<'a> {
                     .is_some_and(|ctor| {
                         ctor.params().iter().any(|p| {
                             p.name().eq_ignore_ascii_case("previous")
-                                || crate::registry::object_class_names(p.ty().clone())
-                                    .iter()
-                                    .any(|n| {
-                                        self.registry.is_subclass_of(n, "Throwable")
-                                            || n == "Throwable"
-                                    })
+                                || p.ty().object_class_names().into_iter().any(|n| {
+                                    self.registry.is_subclass_of(n, "Throwable") || n == "Throwable"
+                                })
                         })
                     });
                 if accepts_previous {

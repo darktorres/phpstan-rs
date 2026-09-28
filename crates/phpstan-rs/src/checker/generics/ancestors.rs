@@ -64,14 +64,6 @@ struct AncestorMessages {
     variance_context: Option<String>,
 }
 
-fn variance_word(v: types::Variance) -> &'static str {
-    match v {
-        types::Variance::Invariant => "invariant",
-        types::Variance::Covariant => "covariant",
-        types::Variance::Contravariant => "contravariant",
-    }
-}
-
 /// `TypeProjectionHelper::describe` for a call-site variance
 /// annotation; `None` for an ordinary (invariant) argument.
 fn call_site_projection(arg: &Type) -> Option<String> {
@@ -339,8 +331,11 @@ impl<'a> Checker<'a> {
                     "generics.unresolvable",
                 );
             }
-            let mut referenced = Vec::new();
-            collect_class_names(ty, &mut referenced);
+            let referenced: Vec<String> = ty
+                .nested_class_names()
+                .iter()
+                .map(|n| n.to_string())
+                .collect();
             let mut seen = rustc_hash::FxHashSet::default();
             for name in referenced {
                 if !seen.insert(name.clone()) {
@@ -381,7 +376,7 @@ impl<'a> Checker<'a> {
                 for (name, declared, position) in violations {
                     self.report(format!(
                             "Template type {name} is declared as {}, but occurs in {} position {context}.",
-                            variance_word(declared),
+                            PositionVariance::from(declared).describe(),
                             position.describe()
                         ),
                         span,
@@ -484,14 +479,6 @@ fn upper_first(s: &str) -> String {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
     }
-}
-
-/// Every class name `ty` references (the ancestor itself included).
-fn collect_class_names(ty: &Type, out: &mut Vec<String>) {
-    if let Some((name, _)) = ty.object_class_and_args() {
-        out.push(name.to_string());
-    }
-    ty.for_each_child(&mut |c| collect_class_names(c, out));
 }
 
 fn class_messages(fqn: &str, tag: AncestorTag) -> AncestorMessages {

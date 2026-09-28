@@ -334,7 +334,7 @@ impl Relation<'_> {
             let Some(variance) = crate::effective_slot_variance(self.hierarchy, b, i, &b_i) else {
                 return true;
             };
-            let Some(b_i) = crate::strip_call_site_variance(&b_i) else {
+            let Some(b_i) = b_i.without_call_site_variance() else {
                 return true;
             };
             if matches!(b_i, Type(Repr::Mixed(_))) {
@@ -344,7 +344,8 @@ impl Relation<'_> {
                 .get(i)
                 .cloned()
                 .unwrap_or(Type(Repr::Mixed(false)));
-            let a_i = crate::strip_call_site_variance(&a_i)
+            let a_i = a_i
+                .without_call_site_variance()
                 .cloned()
                 .unwrap_or(Type(Repr::Mixed(false)));
             match variance {

@@ -18,10 +18,10 @@ use types::narrowing::{
     comparison_narrowed_bounds, narrow_array_to_non_list, numeric_bounds_for_narrowing,
     upgrade_array_to_list, upgrade_array_to_non_empty,
 };
-pub(crate) use types::narrowing::{is_known_single_value, narrow_type_excluding, narrow_type_to};
 pub(crate) use types::narrowing::{
     narrow_array_shape_by_key_presence, narrow_isset_container, narrow_type_excluding_falsy,
 };
+pub(crate) use types::narrowing::{narrow_type_excluding, narrow_type_to};
 
 /// `count($x)`'s own operand-order detection for the count-comparison
 /// narrowing below - same shape as `int_comparison_operands`, but keyed

@@ -85,7 +85,7 @@ impl<'a> Checker<'a> {
                         .iter()
                         .map(|s| s.to_string())
                         .zip(args.iter().map(|a| {
-                            types::strip_call_site_variance(a)
+                            a.without_call_site_variance()
                                 .cloned()
                                 .unwrap_or(Type::mixed())
                         }))
@@ -95,7 +95,7 @@ impl<'a> Checker<'a> {
                             continue;
                         };
                         let bound = types::substitute_template(bound, &bindings);
-                        let Some(checked_arg) = types::strip_call_site_variance(arg) else {
+                        let Some(checked_arg) = arg.without_call_site_variance() else {
                             continue;
                         };
                         // Same "don't know, don't guess" leniency this

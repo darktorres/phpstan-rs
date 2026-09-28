@@ -223,7 +223,7 @@ impl<'a> Checker<'a> {
     /// `OperatorRuleHelper::isValidForArithmeticOperation`/
     /// `isValidForIncrement`/`isValidForDecrement`.
     fn valid_operand(&self, ty: &Type, operand: Operand) -> bool {
-        if contains_mixed(ty) {
+        if ty.has_unknown_part() {
             return true;
         }
         let number = Type::union_of(vec![
@@ -419,7 +419,7 @@ impl<'a> Checker<'a> {
                 } else if one.is_array().yes()
                     && !other.is_mixed()
                     && other.arrays().is_empty()
-                    && !contains_mixed(other)
+                    && !other.has_unknown_part()
                 {
                     "array"
                 } else {
@@ -838,12 +838,6 @@ enum Operand {
     Arithmetic,
     Increment,
     Decrement,
-}
-
-fn contains_mixed(ty: &Type) -> bool {
-    ty.union_members()
-        .iter()
-        .any(|m| m.is_mixed() || m.is_never() || m.is_template())
 }
 
 /// A list with every key required.

@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn suggest_closure_native_params(&mut self, params: &[Param], contextual: &[Type]) {
         for (param, ty) in params.iter().zip(contextual) {
-            if param.type_hint.is_some() || contains_mixed_or_template(ty) {
+            if param.type_hint.is_some() || ty.has_unknown_part() {
                 continue;
             }
             let Some(suggested) =
@@ -158,7 +158,7 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            if sig.native_ty().is_some() || contains_mixed_or_template(sig.ty()) {
+            if sig.native_ty().is_some() || sig.ty().has_unknown_part() {
                 continue;
             }
             let Some(suggested) =
@@ -223,14 +223,4 @@ impl<'a> Checker<'a> {
                     })
         })
     }
-}
-
-fn contains_mixed_or_template(ty: &Type) -> bool {
-    ty.union_members().iter().any(|m| {
-        m.is_mixed()
-            || m.is_template()
-            || m.intersection_members()
-                .iter()
-                .any(|i| i.is_mixed() || i.is_template())
-    })
 }

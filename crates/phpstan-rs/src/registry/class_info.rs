@@ -30,7 +30,6 @@ use attributes::compute_attribute_targets;
 pub(crate) use doctrine_entity::DoctrineEntity;
 use doctrine_entity::compute_doctrine_entity;
 use tag_synthesis::method_tag_sig;
-pub(crate) use tag_synthesis::object_class_names;
 pub(crate) use virtual_property::{hook_body_calls_parent_hook, hook_body_references_property};
 use virtual_property::{hooks_reference_backing_storage, property_hook_set_type};
 
@@ -1590,9 +1589,12 @@ impl ClassReflection {
         let resolve_tag_types = |raw: &[TypeNode]| -> Vec<Arc<str>> {
             raw.iter()
                 .flat_map(|text| {
-                    object_class_names(resolve_names_in_type(parse_type_node(text), ctx))
+                    let ty = resolve_names_in_type(parse_type_node(text), ctx);
+                    ty.object_class_names()
+                        .into_iter()
+                        .map(|n| intern(n))
+                        .collect::<Vec<_>>()
                 })
-                .map(|s| intern(&s))
                 .collect()
         };
         let require_extends = class_doc

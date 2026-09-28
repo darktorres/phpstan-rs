@@ -379,10 +379,6 @@ fn build_probe_scope(
     }
 }
 
-fn type_to_class_names(ty: &Type, out: &mut Vec<String>) {
-    out.extend(ty.object_class_names().into_iter().map(|c| c.to_string()));
-}
-
 fn is_visible(
     registry: &Registry,
     owner: &str,
@@ -410,8 +406,11 @@ pub(super) fn enumerate_members(
     is_static: bool,
     current_class: Option<&str>,
 ) -> Vec<CompletionItem> {
-    let mut classes = Vec::new();
-    type_to_class_names(ty, &mut classes);
+    let classes: Vec<String> = ty
+        .object_class_names()
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
     let mut seen: FxHashSet<(u8, String)> = FxHashSet::default();
     let mut items = Vec::new();
 

@@ -2,8 +2,7 @@ use rustc_hash::FxHashMap;
 
 use crate::checker::{Checker, Locals, class_kind_identifier};
 use crate::registry::{
-    FunctionReflection, PropertyReflection, collect_class_name_case_refs, object_class_names,
-    resolve_names_in_type,
+    FunctionReflection, PropertyReflection, collect_class_name_case_refs, resolve_names_in_type,
 };
 use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
@@ -419,7 +418,11 @@ impl<'a> Checker<'a> {
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, c.span);
             let ty = resolve_names_in_type(parsed, &self.name_ctx);
-            let names = object_class_names(ty.clone());
+            let names: Vec<String> = ty
+                .object_class_names()
+                .iter()
+                .map(|n| n.to_string())
+                .collect();
             if names.is_empty() {
                 self.report(
                     format!("PHPDoc tag @phpstan-require-extends contains non-object type {ty}."),
@@ -485,7 +488,11 @@ impl<'a> Checker<'a> {
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, c.span);
             let ty = resolve_names_in_type(parsed, &self.name_ctx);
-            let names = object_class_names(ty.clone());
+            let names: Vec<String> = ty
+                .object_class_names()
+                .iter()
+                .map(|n| n.to_string())
+                .collect();
             if names.is_empty() {
                 self.report(
                     format!(
@@ -562,7 +569,11 @@ impl<'a> Checker<'a> {
             collect_class_name_case_refs(&parsed, &self.name_ctx, &mut case_refs);
             self.check_type_class_name_case(&case_refs, span);
             let ty = resolve_names_in_type(parsed, &self.name_ctx);
-            let names = object_class_names(ty.clone());
+            let names: Vec<String> = ty
+                .object_class_names()
+                .iter()
+                .map(|n| n.to_string())
+                .collect();
             if names.is_empty() {
                 self.report(
                     format!("PHPDoc tag @phpstan-sealed contains non-object type {ty}."),
@@ -949,9 +960,8 @@ impl<'a> Checker<'a> {
             return;
         }
         // A single known value's relation to another type is never "maybe".
-        let definitely = (value_ty.is_constant_value().yes()
-            && value_ty.union_members().len() == 1)
-            || self.relation().disjoint(value_ty, phpdoc_ty);
+        let definitely =
+            value_ty.is_single_value() || self.relation().disjoint(value_ty, phpdoc_ty);
         let relation = if definitely {
             "is incompatible with"
         } else {

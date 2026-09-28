@@ -163,10 +163,12 @@ impl Relation<'_> {
                     else {
                         continue;
                     };
-                    let a_i = crate::strip_call_site_variance(&a_i)
+                    let a_i = a_i
+                        .without_call_site_variance()
                         .cloned()
                         .unwrap_or(Type(Repr::Mixed(false)));
-                    let b_i = crate::strip_call_site_variance(&b_i)
+                    let b_i = b_i
+                        .without_call_site_variance()
                         .cloned()
                         .unwrap_or(Type(Repr::Mixed(false)));
                     // Either side unresolved/erased - don't know, don't

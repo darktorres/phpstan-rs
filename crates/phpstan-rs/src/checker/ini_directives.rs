@@ -7,7 +7,6 @@
 use crate::checker::{Checker, Locals};
 use syntax::ast::Arg;
 use types::PhpVersion;
-use types::Type;
 
 /// Directives removed from PHP, with the version that removed them.
 const REMOVED: &[(&str, PhpVersion)] = &[
@@ -139,13 +138,6 @@ const DEPRECATED: &[(&str, PhpVersion, Deprecation)] = &[
     ),
 ];
 
-fn directive_names(ty: &Type) -> Vec<&str> {
-    ty.union_members()
-        .iter()
-        .filter_map(|m| m.string_literal_value()?.as_str())
-        .collect()
-}
-
 impl<'a> Checker<'a> {
     /// `function` is the lowercase name of an ini-accessing builtin.
     pub(crate) fn check_ini_directive_call(
@@ -172,7 +164,7 @@ impl<'a> Checker<'a> {
         };
         let changes = matches!(function, "ini_set" | "ini_alter");
         let ty = self.infer_expr(&arg.value, locals);
-        for directive in directive_names(&ty) {
+        for directive in ty.constant_strings() {
             if let Some((_, removed)) = REMOVED
                 .iter()
                 .find(|(name, removed)| *name == directive && version >= *removed)

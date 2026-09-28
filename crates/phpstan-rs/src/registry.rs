@@ -28,7 +28,6 @@ mod type_node;
 
 pub(crate) use anonymous_class::collect_anonymous_classes;
 pub use bodies::{BodySource, FileBodies, NoBodies};
-pub(crate) use class_info::object_class_names;
 pub use class_info::{ClassReflection, ConstantReflection, PropertyReflection};
 pub(crate) use class_info::{hook_body_calls_parent_hook, hook_body_references_property};
 pub(crate) use function_sig::apply_implicit_nullable_default;

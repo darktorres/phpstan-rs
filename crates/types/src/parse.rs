@@ -1275,24 +1275,6 @@ fn parse_generic_arg(a: &str) -> Type {
     parse_type_string(trimmed)
 }
 
-/// Strips a call-site variance annotation down to the real type it
-/// wraps, for every consumer that only cares "what type is really being
-/// referenced here," not the variance override itself
-/// (existence-checking, bound-checking, substitution's own recursive
-/// rebuild, ...). `Registry::effective_slot_variance`/`accepts`
-/// are the two places that DO care about the annotation itself and read
-/// it directly rather than through this helper. `*` has no real type to
-/// unwrap to at all - `None` here means "nothing to verify," the same as
-/// this project already treats any other unresolvable/erased generic
-/// argument elsewhere.
-pub fn strip_call_site_variance(ty: &Type) -> Option<&Type> {
-    match ty {
-        Type(Repr::VarianceArg(CallSiteVariance::Bivariant, _)) => None,
-        Type(Repr::VarianceArg(_, inner)) => Some(inner),
-        other => Some(other),
-    }
-}
-
 /// True when `text` mentions the word `mixed` (case-insensitively, as a
 /// whole word rather than a substring of some longer identifier like
 /// `MixedTypeHelper`) anywhere at all - used to recover real PHPStan's

@@ -3,7 +3,7 @@ use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_ke
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use types::Type;
-use types::narrowing::{is_known_single_value, narrow_type_excluding, narrow_type_to};
+use types::narrowing::{narrow_type_excluding, narrow_type_to};
 
 impl<'a> Checker<'a> {
     /// The type to narrow *from* for a synthetic `narrowing_key` (a
@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
         let haystack_ty = self.infer_expr(haystack, locals);
         if let [shape] = haystack_ty.constant_arrays()[..]
             && !shape.fields.is_empty()
-            && shape.fields.iter().all(|f| is_known_single_value(&f.ty))
+            && shape.fields.iter().all(|f| f.ty.is_single_value())
         {
             let mut values: Vec<Type> = Vec::new();
             for f in &shape.fields {
@@ -198,7 +198,7 @@ impl<'a> Checker<'a> {
         // type, so only the exclusion branch needs gating here.
         let narrowed = if matches_when_true {
             narrow_type_to(&self.relation(), &current, &target_ty)
-        } else if is_known_single_value(&target_ty) {
+        } else if target_ty.is_single_value() {
             narrow_type_excluding(&current, &target_ty)
         } else {
             current.into_owned()
@@ -464,7 +464,7 @@ fn single_values_of(target: &Type) -> Option<Type> {
     let members: Vec<Type> = target
         .union_members()
         .iter()
-        .filter(|m| is_known_single_value(m))
+        .filter(|m| m.is_single_value())
         .cloned()
         .collect();
     match members.len() {

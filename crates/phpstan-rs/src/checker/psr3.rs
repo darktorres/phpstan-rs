@@ -98,11 +98,6 @@ fn may_be_non_literal_string(ty: &Type) -> bool {
         .any(|m| m.is_string().yes() && !m.is_refined_string(AccessoryKind::LiteralString).yes())
 }
 
-fn string_literals(ty: &Type) -> Option<Vec<&str>> {
-    let strings = ty.constant_strings();
-    (!strings.is_empty()).then_some(strings)
-}
-
 impl<'a> Checker<'a> {
     fn is_psr3_logger(&self, ty: &Type) -> bool {
         let logger = Type::object(("Psr\\Log\\LoggerInterface".to_string()).into(), Vec::new());
@@ -138,9 +133,11 @@ impl<'a> Checker<'a> {
             if self.settings.psr3.check_psr3_logging {
                 self.check_psr3_level(&level_ty, args[0].value.span);
             }
-            let levels = string_literals(&level_ty)
-                .map(|ls| ls.iter().map(|l| l.to_ascii_lowercase()).collect())
-                .unwrap_or_default();
+            let levels = level_ty
+                .constant_strings()
+                .iter()
+                .map(|l| l.to_ascii_lowercase())
+                .collect();
             (levels, 1)
         } else if LEVELS.contains(&method.as_str()) {
             (vec![method.clone()], 0)
@@ -190,7 +187,8 @@ impl<'a> Checker<'a> {
         if level.is_mixed() {
             return;
         }
-        let valid = string_literals(level).is_some_and(|ls| ls.iter().all(|l| LEVELS.contains(l)));
+        let levels = level.constant_strings();
+        let valid = !levels.is_empty() && levels.iter().all(|l| LEVELS.contains(l));
         if !valid {
             self.report(format!("Parameter #1 $level of method Psr\\Log\\LoggerInterface::log() expects a PSR-3 log level, {level} given."),
                 span,
@@ -216,7 +214,8 @@ impl<'a> Checker<'a> {
             );
         }
         let message_ty = self.infer_expr(message, locals);
-        let Some(texts) = string_literals(&message_ty) else {
+        let texts = message_ty.constant_strings();
+        if texts.is_empty() {
             if may_be_non_literal_string(&message_ty) {
                 self.report_builder(
                     DiagnosticBuilder::new(
@@ -231,7 +230,7 @@ impl<'a> Checker<'a> {
                 );
             }
             return;
-        };
+        }
         let texts: Vec<String> = texts.into_iter().map(str::to_string).collect();
         for text in &texts {
             let (double, invalid) = invalid_braces(text);

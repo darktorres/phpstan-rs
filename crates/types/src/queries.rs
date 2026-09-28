@@ -136,6 +136,16 @@ impl Type {
         }
     }
 
+    /// The type a generic argument names under its call-site variance
+    /// (`covariant Foo` is `Foo`); `None` for `*`, which names no type.
+    pub fn without_call_site_variance(&self) -> Option<&Type> {
+        match self {
+            Type(Repr::VarianceArg(CallSiteVariance::Bivariant, _)) => None,
+            Type(Repr::VarianceArg(_, inner)) => Some(inner),
+            other => Some(other),
+        }
+    }
+
     /// Whether `@template T of <this>` declares a bound a template can
     /// take (PHPStan's `TemplateTypeFactory`): `mixed`, `null`, a
     /// scalar, integer range or literal, an array or array shape, an
@@ -232,33 +242,58 @@ impl Type {
         }
     }
 
-    /// Whether every value is a single, known value: a literal, `null`,
-    /// an enum case, or a sealed array shape of required fields that are
-    /// (PHPStan's `isConstantValue()`, with enum cases counted).
-    pub fn is_constant_value(&self) -> TrinaryLogic {
+    /// Whether this type has exactly one value: a literal (a float one
+    /// but `NAN`, never identical to itself), `null`, an enum case, or a
+    /// sealed array shape of required single-valued fields.
+    pub fn is_single_value(&self) -> bool {
         match self {
             Type(Repr::IntLiteral(_))
             | Type(Repr::StringLiteral(_))
-            | Type(Repr::FloatLiteral(_))
             | Type(Repr::True)
             | Type(Repr::False)
             | Type(Repr::Null)
-            | Type(Repr::EnumCase(..)) => TrinaryLogic::Yes,
-            Type(Repr::ArrayShape(shape)) => TrinaryLogic::from_bool(
+            | Type(Repr::EnumCase(..)) => true,
+            Type(Repr::FloatLiteral(f)) => !f.is_nan(),
+            Type(Repr::ArrayShape(shape)) => {
                 shape.is_sealed()
                     && shape
                         .fields
                         .iter()
-                        .all(|f| !f.optional && f.ty.is_constant_value().yes()),
-            ),
-            Type(Repr::Union(members)) => members
-                .iter()
-                .map(Type::is_constant_value)
-                .reduce(TrinaryLogic::and)
-                .unwrap_or(TrinaryLogic::No),
-            Type(Repr::Mixed(_)) | Type(Repr::TemplateParam(_)) => TrinaryLogic::Maybe,
-            _ => TrinaryLogic::No,
+                        .all(|f| !f.optional && f.ty.is_single_value())
+            }
+            _ => false,
         }
+    }
+
+    /// PHPStan's `isConstantValue()`, with enum cases counted: whether
+    /// every value is one known value, each member single-valued.
+    pub fn is_constant_value(&self) -> TrinaryLogic {
+        if self.is_mixed() || self.is_template() {
+            return TrinaryLogic::Maybe;
+        }
+        TrinaryLogic::from_bool(self.union_members().iter().all(Type::is_single_value))
+    }
+
+    /// Every integer value this type can only be: an integer literal's,
+    /// and a union's only when every member has one. Empty for anything
+    /// else - `constant_strings`' integer counterpart.
+    pub fn constant_ints(&self) -> Vec<i64> {
+        self.union_members()
+            .iter()
+            .map(Type::int_literal_value)
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default()
+    }
+
+    /// Whether some part of this type - a union member, or a member of
+    /// an intersection among them - is `mixed`, `never` or a template:
+    /// a part that says nothing checkable about a value.
+    pub fn has_unknown_part(&self) -> bool {
+        self.union_members().iter().any(|m| {
+            m.intersection_members()
+                .iter()
+                .any(|p| p.is_mixed() || p.is_never() || p.is_template())
+        })
     }
 
     /// A conditional type's condition: its subject (a parameter or

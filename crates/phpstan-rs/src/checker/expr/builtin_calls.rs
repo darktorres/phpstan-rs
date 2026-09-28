@@ -1347,7 +1347,7 @@ impl<'a> Checker<'a> {
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return strip_array_member(generic);
+                return narrow_type_excluding(&generic, &Type::array(Type::mixed(), Type::mixed()));
             }
             // Same subject-dependent-return-type family as the two arms
             // above - the real stub is `substr_replace(array|string
@@ -1535,7 +1535,7 @@ impl<'a> Checker<'a> {
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return strip_array_member(generic);
+                return narrow_type_excluding(&generic, &Type::array(Type::mixed(), Type::mixed()));
             }
             // `mb_convert_encoding()`'s real dynamic extension is
             // considerably more involved (it also reasons about
@@ -1549,7 +1549,7 @@ impl<'a> Checker<'a> {
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return strip_array_member(generic);
+                return narrow_type_excluding(&generic, &Type::array(Type::mixed(), Type::mixed()));
             }
             // `json_encode(...): string|false` - passing
             // `JSON_THROW_ON_ERROR` makes a real failure throw instead of
@@ -1559,7 +1559,7 @@ impl<'a> Checker<'a> {
             "json_encode" if args.len() >= 2 && contains_json_throw_on_error(&args[1].value) => {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return strip_type_member(generic, &Type::bool_literal(false));
+                return narrow_type_excluding(&generic, &Type::bool_literal(false));
             }
             // The real stub declares `curl_getinfo` unconditionally
             // `mixed` - maps a literal `CURLINFO_*` option constant to a
@@ -1970,7 +1970,7 @@ impl<'a> Checker<'a> {
 /// `MB_CASE_FOLD`/`MB_CASE_FOLD_SIMPLE` (`3`/`7`) count toward `keep_*`
 /// but not `force_*`.
 fn mb_convert_case_flags(mode_ty: &Type) -> (bool, bool, bool, bool) {
-    let modes = collect_int_literals(mode_ty);
+    let modes = mode_ty.constant_ints();
     if modes.is_empty() {
         return (false, false, false, false);
     }
@@ -1980,13 +1980,6 @@ fn mb_convert_case_flags(mode_ty: &Type) -> (bool, bool, bool, bool) {
     let force_upper = is_subset_of(&[0, 4]); // MB_CASE_UPPER, MB_CASE_UPPER_SIMPLE
     let keep_upper = is_subset_of(&[0, 4, 3, 7]);
     (force_lower, keep_lower, force_upper, keep_upper)
-}
-
-fn collect_int_literals(ty: &Type) -> Vec<i64> {
-    ty.union_members()
-        .iter()
-        .filter_map(Type::int_literal_value)
-        .collect()
 }
 
 fn is_var_named(e: &Expr, name: &str) -> bool {
@@ -2323,44 +2316,6 @@ fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) ->
             narrow_type_to(relation, elem, target)
         }
     })
-}
-
-/// Removes any `Array`/`ArrayShape` member from `ty` - the array-ish
-/// counterpart of `narrow_type_excluding`, which matches a specific value
-/// rather than a whole type *kind*. Used for the `preg_replace` family,
-/// where the real return type includes `array` only when `$subject` is
-/// itself an array - once that's confirmed not the case, this drops the
-/// always-possible-per-the-stub `array` member while leaving everything
-/// else (a real declared `null`, say) untouched.
-fn strip_array_member(ty: Type) -> Type {
-    let kept: Vec<Type> = ty
-        .union_members()
-        .iter()
-        .filter(|m| !m.is_array().yes())
-        .cloned()
-        .collect();
-    kept.into_iter()
-        .reduce(union_types)
-        .unwrap_or(Type::mixed())
-}
-
-/// The counterpart of `strip_array_member` above, for an arbitrary
-/// `target` member instead of `Array`/`ArrayShape` - removes every
-/// occurrence of `target` from `ty`, collapsing an emptied/singleton
-/// union the same way. Used by both `json_encode`'s `JSON_THROW_ON_ERROR`
-/// narrowing and `filter_var`'s/`filter_input`'s `FILTER_THROW_ON_FAILURE`
-/// narrowing: the failure-fallback member is definitely gone once the
-/// call is guaranteed to throw instead.
-fn strip_type_member(ty: Type, target: &Type) -> Type {
-    let kept: Vec<Type> = ty
-        .union_members()
-        .iter()
-        .filter(|m| *m != target)
-        .cloned()
-        .collect();
-    kept.into_iter()
-        .reduce(union_types)
-        .unwrap_or(Type::mixed())
 }
 
 /// Whether `e` is (or bitwise-ORs together, to any depth) a `Name`

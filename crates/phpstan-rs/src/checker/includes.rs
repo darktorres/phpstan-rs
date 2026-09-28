@@ -247,12 +247,15 @@ impl<'a> Checker<'a> {
                         .collect(),
                 )
             }
-            _ => self
-                .infer_expr(e, locals)
-                .union_members()
-                .iter()
-                .map(|m| m.string_literal_value().map(|s| s.to_string()))
-                .collect(),
+            _ => {
+                let strings: Vec<String> = self
+                    .infer_expr(e, locals)
+                    .constant_strings()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect();
+                (!strings.is_empty()).then_some(strings)
+            }
         }
     }
 

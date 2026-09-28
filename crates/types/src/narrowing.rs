@@ -199,35 +199,6 @@ pub fn narrow_type_to(relation: &Relation, original: &Type, target: &Type) -> Ty
 /// (`isset`'s `Null` exclusion, and similar plain-`Null` exclusions
 /// elsewhere) is unaffected either way, since no other `Type` variant is
 /// ever a subtype of `Null`.
-/// Whether `ty` is proven to hold exactly one possible value - the only
-/// kind of type it's sound to *exclude* from another type based on a
-/// runtime `===`/`!==` comparison (`apply_equality_narrowing`'s own use).
-/// `Null`/`True`/`False` and a literal are each their own single value;
-/// everything else (`Bool`, `Int`, `String`, any other general/composite
-/// type) covers multiple possible values, so knowing only "the other side
-/// has this general type" - not which of its values it actually holds -
-/// proves nothing about which value to rule out.
-pub fn is_known_single_value(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type(Repr::Null)
-            | Type(Repr::True)
-            | Type(Repr::False)
-            | Type(Repr::IntLiteral(_))
-            | Type(Repr::StringLiteral(_))
-            // `Suit::Hearts` is exactly as single-valued as any
-            // other literal - `$case !== Suit::Hearts` should exclude
-            // that one case, the same way `$x !== 'a'` already excludes
-            // that one string.
-            | Type(Repr::EnumCase(_, _))
-    ) ||
-    // `$x !== []` (the same idiom `$x !== ''` already gets) also
-    // excludes the empty shape - an empty array literal is exactly as
-    // exhaustively single-valued as `''`/a literal int, just structural
-    // rather than a scalar `Type` variant.
-    matches!(ty, Type(Repr::ArrayShape(shape)) if shape.is_empty_array())
-}
-
 pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
     match original {
         // Recurses into `narrow_type_excluding` for each kept member,
@@ -304,7 +275,7 @@ pub fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // proves nothing when excluded" caution this function's own
         // callers already apply (`apply_equality_narrowing`'s doc
         // comment), excluding *from* `Bool` is always sound: `True`/
-        // `False` are each already `is_known_single_value`, so knowing
+        // `False` are each single values, so knowing
         // one is ruled out leaves exactly the other, unconditionally -
         // no case this could ever get wrong. Without this, `match ($b)
         // { true => ..., false => ... }` (or a bare `if ($b !== true)`)

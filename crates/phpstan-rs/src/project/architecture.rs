@@ -86,10 +86,6 @@ fn new_class_spans(stmts: &[Stmt], out: &mut FxHashSet<Span>) {
     walk_stmts(&mut News(out), stmts);
 }
 
-fn type_class_names(ty: &Type, out: &mut Vec<String>) {
-    out.extend(ty.nested_class_names().into_iter().map(|n| n.to_string()));
-}
-
 /// `(selectors, the class's related classes, whether one must match,
 /// verb, identifier)`.
 type RelationCheck<'a> = (&'a [Selector], &'a [String], bool, &'a str, &'static str);
@@ -363,15 +359,18 @@ impl Project {
             }
         }
         if let Some((_, info)) = self.registry.lookup_class(fqn) {
-            let mut names = Vec::new();
+            let mut names: Vec<String> = Vec::new();
+            let mut add = |ty: &Type| {
+                names.extend(ty.nested_class_names().iter().map(|n| n.to_string()));
+            };
             for sig in info.methods().values() {
                 for p in sig.params() {
-                    type_class_names(p.ty(), &mut names);
+                    add(p.ty());
                 }
-                type_class_names(sig.return_type(), &mut names);
+                add(sig.return_type());
             }
             for prop in info.properties().values() {
-                type_class_names(prop.ty(), &mut names);
+                add(prop.ty());
             }
             for name in names {
                 if self.registry.lookup_class(&name).is_some() {

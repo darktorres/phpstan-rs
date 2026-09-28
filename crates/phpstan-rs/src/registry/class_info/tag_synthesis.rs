@@ -13,22 +13,6 @@ use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use types::{self, TemplateParam, Type};
 
-/// Mirrors real PHPStan's own `Type::getObjectClassNames()` for exactly
-/// the shapes `@phpstan-require-extends`/`-implements`/`@phpstan-sealed`
-/// ever need it for: a bare class reference, or a union of several (a
-/// real, common `@phpstan-sealed A|B|C` shape). Any other member (an
-/// unresolvable name still sitting as a plain `Object`-with-an-unknown-
-/// name, a scalar, `self`/`static`, ...) contributes nothing - the same
-/// "don't guess" leniency this project already applies to every other
-/// type-bearing tag, not a new gap.
-pub(crate) fn object_class_names(ty: Type) -> Vec<String> {
-    ty.union_members()
-        .iter()
-        .filter_map(|m| m.object_class_and_args())
-        .map(|(name, _)| name.to_string())
-        .collect()
-}
-
 /// `@method`'s own tag-to-`FunctionReflection` synthesis - mirrors the plain
 /// `@property`-to-`PropertyReflection` synthesis right above it as closely as
 /// the two grammars allow. `ty`/`ty_native` deliberately both end up the

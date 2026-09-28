@@ -74,17 +74,6 @@ use protocol::{
     to_lsp_range, to_request_id, uri_to_path, write_message,
 };
 
-/// Every `Object` class name reachable from a `Checker::probe_hit`
-/// result, in order - a bare `Object`, or (a receiver built from more
-/// than one code path) every `Object` member of a `Union`/`Intersection`,
-/// not just the first - `resolve_member_owners` below decides which of
-/// these candidates actually has the member being navigated to. Empty
-/// for anything else (`Mixed`, a scalar, ...) - an un-inferrable
-/// receiver resolves to nothing, never a guess.
-fn type_to_classes(ty: &Type, out: &mut Vec<String>) {
-    out.extend(ty.object_class_names().into_iter().map(|c| c.to_string()));
-}
-
 /// Resolves a receiver's own (possibly multi-class) type down to every
 /// class that actually declares `member` - a `Union`/`Intersection`
 /// receiver can have more than one real answer (`(Foo&Bar) $x` where
@@ -98,8 +87,11 @@ fn resolve_member_owners(
     ty: &Type,
     member: &str,
 ) -> Vec<String> {
-    let mut candidates = Vec::new();
-    type_to_classes(ty, &mut candidates);
+    let candidates: Vec<String> = ty
+        .object_class_names()
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
     let mut owners: Vec<String> = Vec::new();
     for class in candidates {
         let owner = registry
@@ -1210,8 +1202,11 @@ impl Server {
             | navigation::Resolved::Function(_)
             | navigation::Resolved::Member(_, _) => return None,
         };
-        let mut classes = Vec::new();
-        type_to_classes(&ty, &mut classes);
+        let classes: Vec<String> = ty
+            .object_class_names()
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
         let registry = self.project.registry();
         let mut locs: Vec<Location> = Vec::new();
         for class in &classes {
