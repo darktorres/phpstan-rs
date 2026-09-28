@@ -6873,15 +6873,21 @@ the whole registry (§1), which C4's memo already removes.
   `resultCachePath` to them), and is written atomically (a temporary file
   renamed over it) under a lock (`std::fs::File::lock`), so concurrent runs
   can't corrupt it; an unreadable or version-mismatched cache is discarded with
-  a warning. A file with an internal error isn't cached. `--no-result-cache`
-  skips it, and the `clear-result-cache` command deletes it. A config file
-  travels with its repository, so a cloned repository's `phpstan-rs.toml` must
-  not choose where its reader's machine writes: a `tmp_dir` or
-  `result_cache_path` from a config file resolves inside the project root or the
-  user cache directory and is refused otherwise, while the same keys from
-  `--set` or the environment may point anywhere; the cache writes only inside a
-  directory it created, marked by a `CACHEDIR.TAG`, and never replaces a file it
-  didn't write, so `result_cache_path = "~/.bashrc"` fails the run instead of
+  a warning. The project's cache directory holds one entry set per meta hash,
+  not one overall, so configurations that alternate on one machine (the editor
+  at the config's level beside `analyse --set level=9`, a PHP-version matrix run
+  locally) each keep theirs instead of evicting one another; the four most
+  recently used sets are kept, an older one is deleted when a fifth is written,
+  and a set's entries for files that no longer exist are dropped when it is
+  written. A file with an internal error isn't cached. `--no-result-cache` skips
+  it, and the `clear-result-cache` command deletes it. A config file travels
+  with its repository, so a cloned repository's `phpstan-rs.toml` must not
+  choose where its reader's machine writes: a `tmp_dir` or `result_cache_path`
+  from a config file resolves inside the project root or the user cache
+  directory and is refused otherwise, while the same keys from `--set` or the
+  environment may point anywhere; the cache writes only inside a directory it
+  created, marked by a `CACHEDIR.TAG`, and never replaces a file it didn't
+  write, so `result_cache_path = "~/.bashrc"` fails the run instead of
   overwriting the file. `clear-result-cache` deletes only such a marked
   directory. A run whose output needs every file walked (the type dump,
   `--emission-order`, `--debug`) reads no cached result but still writes the
