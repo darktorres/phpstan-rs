@@ -92,15 +92,15 @@ pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, 
         .collect()
 }
 
-/// `(construct as written, identifier prefix)` for an include keyword.
-pub(crate) fn include_kind(name: &str) -> Option<(&'static str, &'static str)> {
-    match name.to_ascii_lowercase().as_str() {
-        "require" => Some(("require", "require")),
-        "require_once" => Some(("require_once", "requireOnce")),
-        "include" => Some(("include", "include")),
-        "include_once" => Some(("include_once", "includeOnce")),
-        _ => None,
-    }
+/// `(construct as written, identifier prefix)` for an include kind.
+pub(crate) fn include_construct(kind: IncludeKind) -> (&'static str, &'static str) {
+    let prefix = match kind {
+        IncludeKind::Require => "require",
+        IncludeKind::RequireOnce => "requireOnce",
+        IncludeKind::Include => "include",
+        IncludeKind::IncludeOnce => "includeOnce",
+    };
+    (kind.as_str(), prefix)
 }
 
 fn callee_name(e: &Expr) -> Option<&str> {

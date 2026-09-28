@@ -383,6 +383,7 @@ fn expr_disqualifies(
         ExprKind::Yield(..) | ExprKind::YieldFrom(_) => true,
         // Runs a shell command.
         ExprKind::ShellExec(_) => true,
+        ExprKind::Print(_) | ExprKind::Exit(..) | ExprKind::Eval(_) | ExprKind::Include(..) => true,
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
             property_write_target(lhs)
                 || expr_disqualifies(lhs, declaring_class, registry, deps)
@@ -412,8 +413,6 @@ fn expr_disqualifies(
                                 || expr_disqualifies(&a.value, declaring_class, registry, deps)
                         });
                     }
-                    "die" | "exit" | "print" | "eval" | "include" | "include_once" | "require"
-                    | "require_once" => return true,
                     _ => {}
                 }
                 if args
@@ -840,6 +839,23 @@ fn collect_expr_impure_points(
             description: "yield from",
             certain: true,
         }),
+        ExprKind::Exit(..) | ExprKind::Print(_) | ExprKind::Eval(_) | ExprKind::Include(..) => {
+            let construct = match &e.kind {
+                ExprKind::Exit(..) => "exit",
+                ExprKind::Print(_) => "print",
+                ExprKind::Eval(_) => "eval",
+                _ => "include",
+            };
+            out.push(ImpurePointOccurrence {
+                span: e.span,
+                identifier: construct,
+                description: construct,
+                certain: true,
+            });
+            for child in child_exprs(e) {
+                collect_expr_impure_points(child, declaring_class, registry, out);
+            }
+        }
         ExprKind::Assign(lhs, rhs) | ExprKind::CompoundAssign(_, lhs, rhs) => {
             if property_write_target(lhs) {
                 out.push(ImpurePointOccurrence {
@@ -868,32 +884,6 @@ fn collect_expr_impure_points(
                                 });
                             }
                         }
-                    }
-                    "die" | "exit" => out.push(ImpurePointOccurrence {
-                        span: e.span,
-                        identifier: "exit",
-                        description: "exit",
-                        certain: true,
-                    }),
-                    "print" => out.push(ImpurePointOccurrence {
-                        span: e.span,
-                        identifier: "print",
-                        description: "print",
-                        certain: true,
-                    }),
-                    "eval" => out.push(ImpurePointOccurrence {
-                        span: e.span,
-                        identifier: "eval",
-                        description: "eval",
-                        certain: true,
-                    }),
-                    "include" | "include_once" | "require" | "require_once" => {
-                        out.push(ImpurePointOccurrence {
-                            span: e.span,
-                            identifier: "include",
-                            description: "include",
-                            certain: true,
-                        });
                     }
                     _ => {
                         if registry.lookup_function(name).is_none() {

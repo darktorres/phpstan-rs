@@ -262,26 +262,32 @@ impl<'a> Walker<'a> {
                 if let ExprKind::Name(name) = &callee.kind {
                     let lower = name.trim_start_matches('\\').to_ascii_lowercase();
                     let construct = match lower.as_str() {
-                        "eval" => Some(BannedConstruct::Eval),
                         "isset" => Some(BannedConstruct::Isset),
                         "empty" => Some(BannedConstruct::Empty),
                         "compact" => Some(BannedConstruct::Compact),
                         "extract" => Some(BannedConstruct::Extract),
-                        "exit" | "die" => Some(BannedConstruct::Exit),
                         _ => None,
                     };
                     if let Some(construct) = construct {
-                        // A bare `exit;` parses as a call whose span is
-                        // just the name - reported as written.
-                        let shown = if callee.span == e.span {
-                            lower
-                        } else {
-                            format!("{lower}()")
-                        };
-                        self.ban(construct, e.span, shown);
+                        self.ban(construct, e.span, format!("{lower}()"));
                     }
                 }
                 self.arguments(args, e.span);
+            }
+            ExprKind::Eval(_) => self.ban(BannedConstruct::Eval, e.span, "eval()".to_string()),
+            ExprKind::Exit(kind, arg) => {
+                // A bare `exit;` spans just the keyword, and is reported as
+                // written.
+                let keyword = kind.as_str();
+                let bare = arg.is_none()
+                    && e.span.start.line == e.span.end.line
+                    && (e.span.end.col - e.span.start.col) as usize == keyword.len();
+                let shown = if bare {
+                    keyword.to_string()
+                } else {
+                    format!("{keyword}()")
+                };
+                self.ban(BannedConstruct::Exit, e.span, shown);
             }
             ExprKind::New(_, args)
             | ExprKind::MethodCall(_, _, args, _)

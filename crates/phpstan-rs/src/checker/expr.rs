@@ -353,12 +353,6 @@ impl<'a> Checker<'a> {
         }
         match &e.kind {
             ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(name) = &callee.kind
-                    && let Some(kind) = crate::checker::includes::include_kind(name)
-                    && let [arg] = args.as_slice()
-                {
-                    self.check_include_path(kind, &arg.value, locals, e.span);
-                }
                 // `unset($x)` genuinely removes `$x` from scope in real
                 // PHP - a real bug if it's used afterward. Checked before
                 // anything else below: `predefine_byref_or_unknown_args`
@@ -409,42 +403,16 @@ impl<'a> Checker<'a> {
                     return Type::Mixed(false);
                 }
                 if let ExprKind::Name(name) = &callee.kind
-                    && (name == "extract" || name == "eval")
+                    && name == "extract"
                 {
                     self.saw_dynamic_var_construct = true;
                 }
                 if let ExprKind::Name(name) = &callee.kind
-                    && matches!(
-                        name.trim_start_matches('\\').to_ascii_lowercase().as_str(),
-                        "extract"
-                            | "eval"
-                            | "include"
-                            | "include_once"
-                            | "require"
-                            | "require_once"
-                    )
+                    && name
+                        .trim_start_matches('\\')
+                        .eq_ignore_ascii_case("extract")
                 {
                     locals.any_variable_may_exist = true;
-                }
-                // `print $x` desugars to this same synthetic `Call(Name
-                // ("print"), [$x])` node - checked here, since
-                // `is_language_construct` below routes it away from
-                // ordinary signature-based argument checking entirely
-                // (`print` has no real signature to check against). The
-                // operand must be string-coercible (`print.nonString`,
-                // distinct wording from `echo.nonString` - see
-                // `check_print_validity`'s doc comment), it triggers the
-                // same implicit `__toString()` call `echo`/`(string)` do,
-                // and `print` itself always evaluates to the literal
-                // `int(1)`.
-                if let ExprKind::Name(name) = &callee.kind
-                    && name == "print"
-                    && let [arg] = args.as_slice()
-                {
-                    let arg_ty = self.check_expr(&arg.value, locals, label);
-                    self.check_print_validity(&arg_ty, arg.value.span);
-                    self.check_implicit_tostring_usage(&arg_ty, arg.value.span);
-                    return Type::IntLiteral(1);
                 }
                 // Resolved once up front (namespace/`use`-import rules
                 // applied, with the same global-namespace fallback real
@@ -1828,6 +1796,39 @@ impl<'a> Checker<'a> {
                     self.check_useless_cast(&cast_result_type(cast.kind()), &inner_ty, e.span);
                 }
                 self.cast_type(cast.kind(), &inner_ty)
+            }
+            // The operand must be string-coercible (`print.nonString`) and
+            // triggers the implicit `__toString()` call `echo` does.
+            ExprKind::Print(inner) => {
+                let ty = self.check_expr(inner, locals, label);
+                self.check_print_validity(&ty, inner.span);
+                self.check_implicit_tostring_usage(&ty, inner.span);
+                Type::IntLiteral(1)
+            }
+            ExprKind::Exit(_, arg) => {
+                if let Some(arg) = arg {
+                    self.check_expr(arg, locals, label);
+                }
+                Type::Never
+            }
+            // The evaluated code can define any variable.
+            ExprKind::Eval(code) => {
+                self.check_expr(code, locals, label);
+                self.saw_dynamic_var_construct = true;
+                locals.any_variable_may_exist = true;
+                Type::Mixed(false)
+            }
+            // The included file can define any variable.
+            ExprKind::Include(kind, path) => {
+                self.check_expr(path, locals, label);
+                self.check_include_path(
+                    crate::checker::includes::include_construct(*kind),
+                    path,
+                    locals,
+                    e.span,
+                );
+                locals.any_variable_may_exist = true;
+                Type::Mixed(false)
             }
             ExprKind::ShellExec(cmd) => {
                 self.check_backtick_deprecation(e.span);
@@ -4492,6 +4493,9 @@ impl<'a> Checker<'a> {
             ExprKind::Throw(_) => Type::Never,
             ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
             ExprKind::ShellExec(_) => self.shell_exec_type(),
+            ExprKind::Print(_) => Type::IntLiteral(1),
+            ExprKind::Exit(..) => Type::Never,
+            ExprKind::Eval(_) | ExprKind::Include(..) => Type::Mixed(false),
             ExprKind::Cast(cast, inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
                 self.cast_type(cast.kind(), &inner_ty)
@@ -5897,17 +5901,7 @@ pub(crate) fn invalid_array_key_description(
 }
 
 impl<'a> Checker<'a> {
-    /// The type of a call this project can't look up a real signature for -
-    /// `exit`/`die` are real PHP language constructs (`is_language_construct`)
-    /// with no stub of their own, but unlike the others in that list
-    /// (`isset`/`empty`/`unset`/`eval`/`include*`/`print`), PHP itself declares
-    /// them `never`: control flow can't continue past one. `always_terminates`
-    /// (`checker/control_flow.rs`) recognizes a terminating expression
-    /// statement via exactly `infer_expr(e, locals) == Type::Never` - without
-    /// this, a guard clause built on `exit()`/`die()` instead of `return`/
-    /// `throw` (common in this codebase's CLI tools and test fixtures) would
-    /// never be recognized as terminating, leaking its never-actually-
-    /// reached branch's narrowing into the surrounding scope.
+    /// The type of a call this project can't look up a real signature for.
     ///
     /// Takes `&self`/`locals` so a callee whose inferred type is a shaped
     /// `Closure(...)` (`Type::Callable(Some(sig))`) can fall back to that
@@ -5916,15 +5910,6 @@ impl<'a> Checker<'a> {
     /// side.
     fn call_fallback_return_type(&self, callee: &Expr, args: &[Arg], locals: &Locals) -> Type {
         match &callee.kind {
-            ExprKind::Name(name)
-                if matches!(name.to_ascii_lowercase().as_str(), "exit" | "die") =>
-            {
-                Type::Never
-            }
-            // `print` always evaluates to the literal `int(1)` in real
-            // PHP, mirroring `PrintHandler::resolveType`, which returns
-            // `ConstantIntegerType(1)` unconditionally.
-            ExprKind::Name(name) if name == "print" => Type::IntLiteral(1),
             // `isset(...)`/`empty(...)` are real PHP language constructs
             // that always evaluate to a real `bool` when read as a value,
             // not just narrowed as a condition - `is_language_construct`

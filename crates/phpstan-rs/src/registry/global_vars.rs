@@ -307,13 +307,6 @@ fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
     }
 }
 
-fn is_include_like_name(name: &str) -> bool {
-    matches!(
-        name,
-        "include" | "include_once" | "require" | "require_once"
-    )
-}
-
 /// Walks a file's own top-level statements - every assignment found here
 /// is staged as a top-level site (gated by the include-graph result
 /// applied later), regardless of any `global $x;` (file top level is
@@ -629,17 +622,12 @@ fn walk_expr_for_includes_and_scopes<'a>(
             }
             return;
         }
-        ExprKind::Call(callee, args) => {
-            if let ExprKind::Name(name) = &unwrap_grouping(callee).kind
-                && is_include_like_name(name)
-                && let Some(target) = args.first()
-            {
-                out.include_sites.push(IncludeSite {
-                    source: file_ctx.path,
-                    top_level,
-                    target: &target.value,
-                });
-            }
+        ExprKind::Include(_, target) => {
+            out.include_sites.push(IncludeSite {
+                source: file_ctx.path,
+                top_level,
+                target,
+            });
         }
         _ => {}
     }

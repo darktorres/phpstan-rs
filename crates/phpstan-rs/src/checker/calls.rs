@@ -808,7 +808,7 @@ impl<'a> Checker<'a> {
 /// never flag these.
 /// Real PHP language constructs that are syntactically indistinguishable
 /// from an ordinary function call in this parser (none of `isset`,
-/// `empty`, `unset`, `eval`, `exit`, `die` are lexed as keywords - see
+/// `empty`, `unset` are lexed as keywords - see
 /// `token.rs` - so `isset($x)` parses as `ExprKind::Call(Name("isset"), ...)`
 /// exactly like a real call). None of them are declared in any stub
 /// source (they're compiler intrinsics, not functions - a real PHP
@@ -820,23 +820,7 @@ impl<'a> Checker<'a> {
 pub(crate) fn is_language_construct(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "isset"
-            | "empty"
-            | "unset"
-            | "eval"
-            | "exit"
-            | "die"
-            // The parser deliberately models these four as a call to a
-            // synthetic name (see parser.rs's own comment on that
-            // decision) rather than a dedicated AST node - real language
-            // constructs, not functions, so they belong on this list for
-            // exactly the same reason as isset/empty/unset above.
-            | "include"
-            | "include_once"
-            | "require"
-            | "require_once"
-            // Same synthetic-call modeling, for the same reason.
-            | "print"
+        "isset" | "empty" | "unset"
     )
 }
 

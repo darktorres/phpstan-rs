@@ -129,15 +129,10 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
                 *escaped = true;
             }
         }
+        // The included file or evaluated code can read any variable.
+        ExprKind::Include(..) | ExprKind::Eval(_) => *escaped = true,
         ExprKind::Call(callee, args) => {
-            if is_call_to(callee, "func_get_args")
-                || is_call_to(callee, "get_defined_vars")
-                || is_call_to(callee, "include")
-                || is_call_to(callee, "include_once")
-                || is_call_to(callee, "require")
-                || is_call_to(callee, "require_once")
-                || is_call_to(callee, "eval")
-            {
+            if is_call_to(callee, "func_get_args") || is_call_to(callee, "get_defined_vars") {
                 *escaped = true;
             } else if is_call_to(callee, "compact") {
                 for arg in args {

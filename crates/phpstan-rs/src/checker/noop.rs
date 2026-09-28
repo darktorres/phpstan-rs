@@ -83,6 +83,10 @@ fn expr_side_effects(e: &Expr) -> Effects {
         | ExprKind::Yield(..)
         | ExprKind::YieldFrom(..)
         | ExprKind::ShellExec(..)
+        | ExprKind::Print(_)
+        | ExprKind::Exit(..)
+        | ExprKind::Eval(_)
+        | ExprKind::Include(..)
         | ExprKind::DynamicVariable(..)
         | ExprKind::Unary(
             UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,

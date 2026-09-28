@@ -957,6 +957,49 @@ impl GlobalVar {
     }
 }
 
+/// How an `ExprKind::Exit` is spelled; the two are the same construct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitKind {
+    Exit,
+    Die,
+}
+
+impl ExitKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExitKind::Exit => "exit",
+            ExitKind::Die => "die",
+        }
+    }
+}
+
+/// Which of the four file-inclusion constructs an `ExprKind::Include` is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncludeKind {
+    Include,
+    IncludeOnce,
+    Require,
+    RequireOnce,
+}
+
+impl IncludeKind {
+    /// The keyword, as written in lowercase.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IncludeKind::Include => "include",
+            IncludeKind::IncludeOnce => "include_once",
+            IncludeKind::Require => "require",
+            IncludeKind::RequireOnce => "require_once",
+        }
+    }
+
+    /// `require`/`require_once`: a missing file is a fatal error, not a
+    /// warning.
+    pub fn is_require(self) -> bool {
+        matches!(self, IncludeKind::Require | IncludeKind::RequireOnce)
+    }
+}
+
 /// A cast's target, as the type it converts to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CastKind {
@@ -1153,6 +1196,14 @@ pub enum ExprKind {
     // `` `cmd $interpolated` ``: runs the command, as `shell_exec()` does.
     // Holds the command string.
     ShellExec(Box<Expr>),
+    // `print expr`, which evaluates to `1`.
+    Print(Box<Expr>),
+    // `exit`/`die`, with its status or message when one is given.
+    Exit(ExitKind, Option<Box<Expr>>),
+    // `eval(code)`.
+    Eval(Box<Expr>),
+    // `include`/`include_once`/`require`/`require_once path`.
+    Include(IncludeKind, Box<Expr>),
     // `throw` as an expression (PHP 8.0+): valid in match arms, ternary
     // branches, ??'s right side, arrow function bodies, etc - as opposed
     // to StmtKind::Throw, a bare `throw expr;` statement, which is still

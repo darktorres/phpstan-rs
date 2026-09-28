@@ -237,18 +237,7 @@ impl Parser {
             Token::Keyword(Keyword::Print) => {
                 self.skip();
                 let e = self.parse_assignment()?;
-                let name = self.expr(ExprKind::Name(self.qualified_name("print")), start);
-                self.expr(
-                    ExprKind::Call(
-                        Box::new(name),
-                        vec![Arg {
-                            name: None,
-                            spread: false,
-                            value: e,
-                        }],
-                    ),
-                    start,
-                )
+                self.expr(ExprKind::Print(Box::new(e)), start)
             }
             // `throw` as an expression (`default => throw new X()`, `$x ??
             // throw new X()`, an arrow function body, ...) - a bare `throw
@@ -306,32 +295,21 @@ impl Parser {
                     self.expr(ExprKind::Yield(None, Some(Box::new(first))), start)
                 }
             }
-            // include/require/*_once are language constructs, not function
-            // calls (no parens required: `include $file;`), but modeling
-            // them as a call to a synthetic name works fine here - an
-            // unregistered function name is already just unchecked, not a
-            // parse failure.
             Token::Keyword(
                 kw @ (Keyword::Include
                 | Keyword::IncludeOnce
                 | Keyword::Require
                 | Keyword::RequireOnce),
             ) => {
-                let kw = kw.clone();
+                let kind = match kw {
+                    Keyword::Include => IncludeKind::Include,
+                    Keyword::IncludeOnce => IncludeKind::IncludeOnce,
+                    Keyword::Require => IncludeKind::Require,
+                    _ => IncludeKind::RequireOnce,
+                };
                 self.skip();
                 let e = self.parse_assignment()?;
-                let name = self.expr(ExprKind::Name(self.qualified_name(kw.as_str())), start);
-                self.expr(
-                    ExprKind::Call(
-                        Box::new(name),
-                        vec![Arg {
-                            name: None,
-                            spread: false,
-                            value: e,
-                        }],
-                    ),
-                    start,
-                )
+                self.expr(ExprKind::Include(kind, Box::new(e)), start)
             }
             Token::Keyword(Keyword::Static)
                 if matches!(
@@ -426,15 +404,34 @@ impl Parser {
                 | Keyword::Enum,
             ) => {
                 let name = self.parse_qualified_name();
-                let is_bare_exit = (name.eq_ignore_ascii_case("exit")
-                    || name.eq_ignore_ascii_case("die"))
-                    && !self.check(&Token::LParen);
-                let name_expr = self.expr(ExprKind::Name(self.qualified_name(&name)), start);
-                if is_bare_exit {
-                    // `exit;` is the same construct as `exit()`.
-                    self.expr(ExprKind::Call(Box::new(name_expr), Vec::new()), start)
+                let exit_kind = if name.eq_ignore_ascii_case("exit") {
+                    Some(ExitKind::Exit)
+                } else if name.eq_ignore_ascii_case("die") {
+                    Some(ExitKind::Die)
                 } else {
-                    name_expr
+                    None
+                };
+                if let Some(kind) = exit_kind {
+                    // `exit`, `exit()` and `exit($status)`.
+                    let arg = if self.check(&Token::LParen) {
+                        let (args, _) = self.parse_args()?;
+                        args.into_iter().next().map(|a| Box::new(a.value))
+                    } else {
+                        None
+                    };
+                    self.expr(ExprKind::Exit(kind, arg), start)
+                } else if name.eq_ignore_ascii_case("eval") && self.check(&Token::LParen) {
+                    let paren = self.spans.get(self.pos).copied().unwrap_or_default();
+                    let (args, _) = self.parse_args()?;
+                    let Some(code) = args.into_iter().next() else {
+                        return Err(ParseError {
+                            message: "parse error: eval() needs the code to evaluate".to_string(),
+                            span: paren,
+                        });
+                    };
+                    self.expr(ExprKind::Eval(Box::new(code.value)), start)
+                } else {
+                    self.expr(ExprKind::Name(self.qualified_name(&name)), start)
                 }
             }
             other => {

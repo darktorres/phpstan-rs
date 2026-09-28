@@ -285,32 +285,30 @@ fn write_expr(out: &mut String, e: &Expr) {
             write_expr(out, otherwise);
         }
         ExprKind::Call(callee, args) => {
-            let keyword = match &callee.kind {
-                ExprKind::Name(n) => {
-                    let lower = n.to_ascii_lowercase();
-                    [
-                        "print",
-                        "include",
-                        "include_once",
-                        "require",
-                        "require_once",
-                    ]
-                    .contains(&lower.as_str())
-                    .then_some(lower)
-                }
-                _ => None,
-            };
-            match (keyword, args.as_slice()) {
-                (Some(keyword), [arg]) => {
-                    out.push_str(&keyword);
-                    out.push(' ');
-                    write_expr(out, &arg.value);
-                }
-                _ => {
-                    write_expr(out, callee);
-                    write_args(out, args);
-                }
+            write_expr(out, callee);
+            write_args(out, args);
+        }
+        ExprKind::Print(inner) => {
+            out.push_str("print ");
+            write_expr(out, inner);
+        }
+        ExprKind::Include(kind, path) => {
+            out.push_str(kind.as_str());
+            out.push(' ');
+            write_expr(out, path);
+        }
+        ExprKind::Exit(kind, arg) => {
+            out.push_str(kind.as_str());
+            if let Some(arg) = arg {
+                out.push('(');
+                write_expr(out, arg);
+                out.push(')');
             }
+        }
+        ExprKind::Eval(code) => {
+            out.push_str("eval(");
+            write_expr(out, code);
+            out.push(')');
         }
         ExprKind::New(class, args) => {
             out.push_str("new ");

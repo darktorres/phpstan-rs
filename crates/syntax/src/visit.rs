@@ -221,12 +221,20 @@ fn walk_args<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, args: &'ast [Arg]) {
 pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
     match &expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => {}
+        ExprKind::Exit(_, arg) => {
+            if let Some(arg) = arg {
+                v.visit_expr(arg);
+            }
+        }
         ExprKind::DynamicVariable(inner)
         | ExprKind::Unary(_, inner)
         | ExprKind::Cast(_, inner)
         | ExprKind::Grouping(inner)
         | ExprKind::FirstClassCallable(inner)
         | ExprKind::ShellExec(inner)
+        | ExprKind::Print(inner)
+        | ExprKind::Eval(inner)
+        | ExprKind::Include(_, inner)
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
         | ExprKind::PropertyAccess(inner, _, _) => v.visit_expr(inner),
@@ -916,12 +924,20 @@ fn walk_args_mut<V: VisitorMut + ?Sized>(v: &mut V, args: &mut [Arg]) {
 pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
     match &mut expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => {}
+        ExprKind::Exit(_, arg) => {
+            if let Some(arg) = arg {
+                v.visit_expr(arg);
+            }
+        }
         ExprKind::DynamicVariable(inner)
         | ExprKind::Unary(_, inner)
         | ExprKind::Cast(_, inner)
         | ExprKind::Grouping(inner)
         | ExprKind::FirstClassCallable(inner)
         | ExprKind::ShellExec(inner)
+        | ExprKind::Print(inner)
+        | ExprKind::Eval(inner)
+        | ExprKind::Include(_, inner)
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
         | ExprKind::PropertyAccess(inner, _, _) => v.visit_expr(inner),
