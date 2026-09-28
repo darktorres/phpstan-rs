@@ -223,13 +223,25 @@ impl Relation<'_> {
                         TrinaryLogic::Maybe
                     }
                 }
+                // `proves_super_type` has already answered the generic-aware
+                // `Yes`; the classes being related is only a `Maybe` here.
                 (Type(Repr::Object(a, _)), Type(Repr::Object(b, _))) => {
-                    self.object_super_type_of(a, b)
+                    match self.object_super_type_of(a, b) {
+                        TrinaryLogic::No => TrinaryLogic::No,
+                        _ => TrinaryLogic::Maybe,
+                    }
                 }
-                // A case is an instance of its enum, so it relates to a class as
-                // its enum does.
-                (Type(Repr::Object(a, _)), Type(Repr::EnumCase(b, _)))
-                | (Type(Repr::EnumCase(b, _)), Type(Repr::Object(a, _))) => {
+                // A case is an instance of its enum: within a class its enum
+                // is within, when the class takes no type arguments.
+                (Type(Repr::Object(a, args)), Type(Repr::EnumCase(b, _))) => {
+                    match self.object_super_type_of(a, b) {
+                        TrinaryLogic::Yes if args.is_empty() => TrinaryLogic::Yes,
+                        TrinaryLogic::No => TrinaryLogic::No,
+                        _ => TrinaryLogic::Maybe,
+                    }
+                }
+                // An object of `a` may be the case when the classes overlap.
+                (Type(Repr::EnumCase(b, _)), Type(Repr::Object(a, _))) => {
                     match self.object_super_type_of(a, b) {
                         TrinaryLogic::No => TrinaryLogic::No,
                         _ => TrinaryLogic::Maybe,
@@ -294,8 +306,6 @@ impl Relation<'_> {
         }
     }
 
-    /// `ObjectType::isSuperTypeOf` between two named classes, once the
-    /// `sub`-extends-`sup` case has already answered `Yes`.
     /// `TypeCombinator::union`'s absorption for display: a member some
     /// other member strictly contains is dropped (`object|Foo` is
     /// `object`, `int|1` is `int`).
@@ -319,9 +329,13 @@ impl Relation<'_> {
         }
     }
 
+    /// How the class `sup` relates to the class `sub`, generic arguments
+    /// aside: `Yes` when `sub` is `sup` or extends or implements it, `No`
+    /// when no class can be both, `Maybe` otherwise (an unknown class, a
+    /// subclass of `sub` that could extend `sup`).
     fn object_super_type_of(&self, sup: &str, sub: &str) -> TrinaryLogic {
-        if sup == sub {
-            return TrinaryLogic::Maybe;
+        if sup.eq_ignore_ascii_case(sub) || self.hierarchy.is_subclass_of(sub, sup) {
+            return TrinaryLogic::Yes;
         }
         let (Some(sup_info), Some(sub_info)) = (
             self.hierarchy.find_class(sup),
