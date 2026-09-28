@@ -522,6 +522,7 @@ impl<'a> Checker<'a> {
                 let ty = registry::mark_template_params(ty, class_templates);
                 let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
                 let ty = registry::substitute_type_aliases(ty, &aliases);
+                let ty = self.registry.resolve_deferred_value_of_now(ty);
                 let key = match &ty {
                     Type::Object(class, _) => class.to_ascii_lowercase(),
                     other => other.to_string(),

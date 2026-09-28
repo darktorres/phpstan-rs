@@ -1,0 +1,1 @@
+18:1-18:38 generics.notSubtype L6 | Type Other::X in generic type Builtin<Other::X> in PHPDoc tag @extends is not subtype of template type T of class Builtin.
