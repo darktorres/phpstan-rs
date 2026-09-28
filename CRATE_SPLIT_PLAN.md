@@ -4925,7 +4925,10 @@ fixture:
     branches, generic arguments of a property type (`Foo<Barrrr>` and
     `WeakMap<stdClass, …>` in a namespace; each class named, not only the
     first), a `@var` naming `$this`, and both the parameter and the
-    property of a promoted parameter; each is unreported today (a
+    property of a promoted parameter, and a trait named as a type in
+    `@param-out` or `@param-closure-this` (`parameter.trait`,
+    `param-out-classes.php`, `param-closure-this-classes.php`, 4); each is
+    unreported today (a
     property hook's types and a doc block's several `@var` tags already
     are); a known class named with the wrong case is `class.nameCase` at
     the same sites (`FOO::class`, a native `POST` parameter and return,
@@ -5040,14 +5043,20 @@ fixture:
     bound makes it empty) is `return.unresolvableType`/
     `parameter.unresolvableType`/`assert.unresolvableType`, unreported
     today (32 oracle findings), and so is one that can't intersect
-    (`array{foo: int}&array{bar: string}`), a set hook's `@param`, and a
+    (`array{foo: int}&array{bar: string}`), a set hook's `@param`, a
     `@param-closure-this` of a non-object (the rules oracle's 7
     PHPStan-only, `bug-3753.php`, `explain-unresolvable-method-parameter.php`,
-    `param-closure-this.php`, `incompatible-types.php:126`); a parameter
-    whose PHPDoc type doesn't
-    resolve still has one, so `@param value-of<T> $v` on an untyped `$v`
-    is not also `missingType.parameter` (the rules oracle's
-    `unresolvable-parameter.php`);
+    `param-closure-this.php`, `incompatible-types.php:126`), and a
+    property's `@var never` or `class-string<int>`
+    (`property.unresolvableType`, promoted ones included, 4); a parameter
+    whose PHPDoc type doesn't resolve still has one, so `@param
+    value-of<T> $v` on an untyped `$v` is not also `missingType.parameter`
+    (the rules oracle's `unresolvable-parameter.php`);
+  - a constant's `@var` is checked against its native type (`@var string`
+    on `const int BAZ` is `classConstant.phpDocType`), where today the
+    value is checked against the `@var` instead (`classConstant.value`;
+    `incompatible-class-constant-phpdoc-native-type.php`,
+    `value-assigned-to-class-constant*.php`, 4);
   - the type-alias checks: a cycle (`@phpstan-type A = B`, `B = A`) is
     `typeAlias.circular`, and `class.notFound` today; an alias resolving
     to `never` (`int&string`) is `typeAlias.unresolvableType`; an invalid
