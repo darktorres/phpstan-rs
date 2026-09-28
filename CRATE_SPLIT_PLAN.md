@@ -487,7 +487,11 @@ Visitor-based walk.
     - `function_exists` is a FuncCall holder with a specified name
       normalization;
     - `class_exists` is an always-remembered call;
-    - `defined('X')` is a ConstFetch holder;
+    - `defined('X')` is a ConstFetch holder, and a compared constant
+      narrows like a variable: after `DIRECTORY_SEPARATOR === '/'` fails,
+      `DIRECTORY_SEPARATOR` is `'\\'`, so `|| DIRECTORY_SEPARATOR ===
+      '\\'` is `identical.alwaysTrue` (the rules oracle's `boolean-or.php`,
+      `boolean-logical-or.php`, 4);
     - `method_exists`/`property_exists` narrow the receiver with
       `HasMethod`/`HasProperty`, falling back to a call holder for magic
       members.
@@ -3502,7 +3506,10 @@ building on the previous one:
     flag-correlation cases). A variable defined under one
     condition and read under a correlated one is `variable.undefined` today:
     `symfony/filesystem/Filesystem.php:190` reads `$origFile`, which only the
-    `$isRecursive`-dependent branch defines;
+    `$isRecursive`-dependent branch defines (and `$sb` in `if ($foo !==
+    null && $sb === false)` after `if ($foo !== null) { $sb = false; }`,
+    the rules oracle's `bug-1306.php`, where PHPStan finds the comparison
+    always true);
   - conditional holders created by `&&`/`||` conditions
     (`TypeSpecifier::processBooleanSureConditionalTypes`/
     `processBooleanNotSureConditionalTypes`): after `if (!$a && !$b) {
@@ -4200,7 +4207,7 @@ the rest), which the gate excludes and lists.
     `strlen()` of a union of
     constant shapes or strings are the union of their lengths (`count($r)`
     on `array{'a'}|array{'a', 'b'}` is `1|2`, `int<0, max>` today,
-    `bug-12790.php`).
+    `bug-12790.php`; `strlen('ab')` is `2`, `bug-7555.php`).
     `is_numeric()` drops non-numeric constant strings: on `1|'a'` it keeps
     `1|'a'` today (the rules oracle's `bug-2550.php`).
     `is_callable([$this, 'm'])` guards `$this->m()` as `method_exists($this,
