@@ -3840,6 +3840,17 @@ deleted; the file-size gate.
     `check-project` with a stack overflow today, though the parser handles
     it; 8,000 terms take 29 s with literals and 58 s with variables
     (quadratic).
+  - **Each expression is inferred once.** Today `check_expr` returns a
+    node's type, yet it and `infer_expr` re-infer every child on each use
+    (argument checks, return-type inference, callback contexts, throw
+    types), and each of those re-infers the whole subtree, so nesting
+    costs far more than its size (debug build): nested calls `g(g(…))` take
+    7 s at 800 levels and 183 s at 1,600, 3,000 nested array literals about
+    7 minutes (`STAGE_B_REVIEW.md` P2). With per-`NodeId` results and a
+    memoized pure `type_of` per scope snapshot, a node's type is computed
+    once and every consumer reads it: deep nesting of any kind is linear.
+    Stage B's P2 bridges this with a cache keyed by node and scope version,
+    which the snapshot memo replaces.
 
 **D4. NodeCallback sink, observers and result storage** (approved deltas
 for `return.unusedType`, `throws.*` and `property.unusedType`).
