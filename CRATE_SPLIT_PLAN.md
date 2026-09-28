@@ -580,7 +580,16 @@ Visitor-based walk.
   ctx) -> SpecifiedTypes` (sure / sure-not). It is passed to rules and to
   type-specifying extensions (TypeSpecifierAware). The impossible-check
   family is ported generically on it (ImpossibleCheckTypeHelper), replacing
-  the hard-coded predicate table.
+  the hard-coded predicate table. That table knows only the `is_*`
+  functions: of the rules oracle's 176 PHPStan-only
+  `function.impossibleType`/`function.alreadyNarrowedType`, `in_array` is
+  59 (strict and loose, enum subjects and haystacks included), `method_exists`
+  35, `assert` 15 (`assert(false)`, `assert($int instanceof \stdClass)`),
+  `is_subclass_of`/`is_a` 13, `is_numeric` 8, `property_exists` 7 (object
+  shapes), `is_callable` 7, `class_exists`/`interface_exists`/
+  `trait_exists`/`enum_exists` 11 (a name of another kind of structure),
+  `array_is_list` 3, `array_key_exists` 2, `str_contains`/`str_ends_with`
+  2, and user functions with `@phpstan-assert` 3.
 - **Rules.**
   - `Rule` callbacks return `Vec<RuleError>`; there is no `Scope::report`.
   - The dispatcher turns each `RuleError` into a `Diagnostic`, attaching
@@ -993,7 +1002,10 @@ commit); the unsorted corpus comparison starts here.
   today where they are `array{true}` and `list<string>`, and passing them
   to a `list` parameter is `argument.type` (the rules oracle's
   `array-cast-list-types.php`, `bug-8280.php`); `(object)` of an array is
-  `stdClass`, `object` today (`bug-12755.php`);
+  `stdClass`, `object` today (`bug-12755.php`); `(array)` of an object is
+  its properties' values: `(array) $this` in a final class with a `string`
+  and an `int` property is `mixed` today, so `is_object($v)` after
+  `is_string($v)` fails isn't `function.impossibleType` (`bug-2730.php`);
 - the `array_udiff()` family's trailing callbacks are accepted;
 - `list<int>&non-empty-array` is one intersected type;
 - a method called on an intersection uses its most visible declaration,
@@ -3173,8 +3185,11 @@ deleted; the file-size gate.
       signature's out type (`array<string>` for `$out`), and at level 9+
       the call itself is reported `argument.type` "mixed given" for the
       variable PHP creates (E3c). A user function's `@param-out` already
-      applies. 25 of the 26 lines of `composer/semver`'s `VersionParser.php`
-      with level-10 `offsetAccess.nonOffsetAccessible` read such a
+      applies; without one, the by-reference parameter's own type is the
+      out type: after `byRefParam($v)` for `@param int $x` on `&$x`, `$v`
+      is `mixed` today where it is `int` (`bug-15250.php`). 25 of the 26
+      lines of `composer/semver`'s `VersionParser.php` with level-10
+      `offsetAccess.nonOffsetAccessible` read such a
       `$matches` (41 findings, in each of its three copies). The array
       functions that modify their argument give it the new array
       (`array_push`, `array_unshift`, `array_pop`, `array_shift`,
@@ -3954,6 +3969,11 @@ the rest), which the gate excludes and lists.
     (`JsonThrowOnErrorDynamicReturnTypeExtension`): `json_decode('{"class":
     "x"}')->class` is `property.nonObject` "on mixed" today (the rules
     oracle's `bug-12273.php`);
+  - `E::from()`/`E::tryFrom()` of a constant resolve to its case or `null`
+    (`BackedEnumFromMethodDynamicReturnTypeExtension`): `Button::tryFrom(10)`
+    over the cases `0` and `1` is `Button|null` today, so `is_null($v =
+    Button::tryFrom(10))` isn't `function.alreadyNarrowedType` (the rules
+    oracle's `bug-12087*.php`, 4);
   - the printf format parser follows PHP's: `%5%` and `%1$%` are a
     literal `%`, `%ls` ignores the length modifier, `%'%5d` pads with
     `%`, flags combine (`%-+5d`), and `*` takes a positional width or
@@ -4063,7 +4083,11 @@ the rest), which the gate excludes and lists.
     [Suit::S], true)` returning leaves `Suit`, `bug-7176.php`) and, loose,
     an integer subject over an integer haystack (after `if
     (!in_array($foo, [0, 1, 2])) { exit(); }` on `int<0, 100>`, `$foo` is
-    `0|1|2`, `bug-9436.php`). `count()` and `strlen()` of a union of
+    `0|1|2`, `bug-9436.php`). A strict `in_array()` intersects the subject
+    with the haystack's value type instead of replacing it: on `int $i`
+    against `array<string>` the true branch is `string` today where it is
+    `*NEVER*`, and `$i` is `string|int` after an empty `if`. `count()` and
+    `strlen()` of a union of
     constant shapes or strings are the union of their lengths (`count($r)`
     on `array{'a'}|array{'a', 'b'}` is `1|2`, `int<0, max>` today,
     `bug-12790.php`).
