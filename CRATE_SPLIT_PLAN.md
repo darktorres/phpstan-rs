@@ -7669,8 +7669,7 @@ paths is rewritten against the crates:
 - ROADMAP: 61 lines cite `src/` paths today, and its current-state text
   describes one package;
 - the fuzz guide (`fuzz/GUIDING_THE_FUZZER.md`);
-- the five `.claude/workflows/*.js` files, which cite package paths and cargo
-  commands;
+
 - `.corpus-runs/README.md`;
 - `editors/vscode/README.md`;
 - the `.cargo/config.toml` comment, which justifies mold and `-Z threads` by "a
@@ -7681,10 +7680,12 @@ paths is rewritten against the crates:
   command becomes `cargo test -p <crate> --test fixtures -- <filter>`, or
   `--lib` for white-box tests.
 
-A report named by the commit it describes (`PIWIGO_CORPUS_TRIAGE_ab4c2b5.md`)
-keeps the paths of that commit. A check joins gate 1's quick tier: every
-repository path the living Markdown docs cite exists, so a later move can't
-leave them stale; the commit-named reports are exempt.
+Records of past work keep the paths they were written against: a report named by
+the commit it describes (`PIWIGO_CORPUS_TRIAGE_ab4c2b5.md`), and the five
+`.claude/workflows/*.js` scripts, each committed once on 2026-09-03 with that
+day's ROADMAP text embedded, which rewriting would make misstate what ran. A
+check joins gate 1's quick tier: every repository path the living Markdown docs
+cite exists, so a later move can't leave them stale; those records are exempt.
 
 **G4. Build time.** Gate 9's scenarios now stand for crates, and each records
 its `cargo build -p phpstan-rs` and `cargo test --workspace --no-run` times
