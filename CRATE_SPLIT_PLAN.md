@@ -6721,6 +6721,15 @@ Behaviour commits, one each with its fixture:
 - **Hover at a write shows the written value's type**: on `$x` in
   `$x = make(2.0, true);` it answers `mixed` today, while the inlay hint on the
   same `$x` says `App\Circle`.
+- **Semantic tokens classify every resolved name**: namespaces, classes,
+  interfaces, enums and enum cases, traits, templates as type parameters,
+  functions, methods, properties, constants, parameters and variables, with the
+  `declaration`, `static`, `readonly`, `abstract`, `deprecated`, `internal` and
+  `defaultLibrary` (a built-in) modifiers, served for a range and as deltas too.
+  Today a token exists only for a deprecated or internal usage (E's shared
+  predicate widens which), so a file using neither answers `{"data": []}` and
+  the editor keeps its grammar's guesses (a constant and a class look alike
+  after `::`).
 - **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
   the document at once, which editors can run on save; today each quick fix is
   offered alone.
