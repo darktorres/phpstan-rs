@@ -4939,7 +4939,18 @@ fixture:
     initialization is reported
     (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
     $this->x; $this->x = 1;` in a constructor isn't reported today (12
-    oracle findings in revolt's event loop drivers);
+    oracle findings in revolt's event loop drivers). A readonly property
+    the constructor doesn't assign on every path is reported on the class
+    ("Class A has an uninitialized readonly property $x. Assign it in the
+    constructor."; `property.uninitializedReadonly`, and
+    `property.uninitializedReadonlyByPhpDoc` for `@readonly`): a class
+    without a constructor, one that assigns it on some paths only, and the
+    properties of an anonymous class, a readonly class, a trait's host and
+    a child whose parent constructor isn't called are unreported today;
+    the rule doesn't exist (all 84 and 30 of the rules oracle's
+    findings, `property-variance-readonly.php`,
+    `missing-readonly-property-assign*.php`, `readonly-assign*.php`,
+    `readonly-property-hooks.php`, `clone-with.php`, `bug-9863.php`);
   - an offset write into an `ArrayAccess` object checks the key against
     `offsetSet`'s key type: `$w['str'] = 1` on `WeakMap<stdClass, int>`
     and `$s[5] = 1` on `SplObjectStorage` are unreported today
