@@ -4561,8 +4561,30 @@ the rest), which the gate excludes and lists.
   property with no assignment is skipped (all 42 of the rules oracle's
   PHPStan-only `property.unusedType`, e.g. `bug-6486.php`,
   `bug-9155.php`, `call-methods.php`, `access-properties.php`);
-- renamed named arguments;
-- the trait-host constant-condition verdict as a collector plus rule;
+- `argument.parameterRenamedInSubtype`, on by default (behind
+  `check_renamed_named_arguments`, off, today): a named argument naming a
+  parameter an override renames throws "Unknown named parameter" once the call
+  dispatches to that override. A collector records each named argument against
+  an overridable method (public or protected, neither it nor its class final),
+  keyed by the declaring class, and the rule reports the sites whose name an
+  override anywhere renames. Late-bound `static::m(old: 1)` and `new static(old:
+  1)` dispatch the same way (both throw in php 8.5) and are recorded too, where
+  only instance method calls are today, and the renaming overrides come from
+  reflection's declarations instead of `renamed_parameter_overrides`' second
+  walk over every file's AST;
+- the trait-host verdict as a collector plus rule: a trait method is analysed
+  once per host (PHPStan's "in context of class …"), and the constant-condition
+  and type-check rules (`if.alwaysTrue`, `function.alreadyNarrowedType` and
+  their families) report a trait's finding only when every host gives it the
+  same verdict, as `ConstantConditionInTraitRule`'s collector does, since the
+  trait's code is shared: `is_int($this->g())` in a trait used by hosts whose
+  `g()` returns `int` and `?int` is `function.alreadyNarrowedType` today, a
+  false positive (`impossible-function-call-in-trait.php`), and a condition true
+  in every host is unreported (the rules oracle's `*-in-trait.php`, 16 beside
+  their empty-body `return.missing`). Today `check_trait_methods` applies the
+  every-host rule only to identifiers named `*.always{True,False}`, so the
+  type-check family (`function.alreadyNarrowedType`, `function.impossibleType`
+  and the method and static-method forms) escapes it;
 - the trait-host merge: a trait method's findings carry the host class they were
   found in, and the same finding (span, identifier and message) from several
   hosts is reported once, naming its hosts as PHPStan's "in context of class …"
@@ -5020,15 +5042,6 @@ The prologue, one commit each, before any rule moves:
   7 / 3; a maybe-missing constant-array offset 7 / never; a PHPDoc-only child
   parameter type conflict 3 / never; `@var array` without a value type
   6 / never. The approved deltas are these rows.
-- a trait method is analysed once per host (PHPStan's "in context of
-  class …"), and the constant-condition and type-check rules report its
-  findings once, only when they hold in every host
-  (`ConstantConditionInTraitRule`'s collector): `is_int($this->g())` in a
-  trait used by hosts whose `g()` returns `int` and `?int` is
-  `function.alreadyNarrowedType` today, a false positive
-  (`impossible-function-call-in-trait.php`), and a condition true in every
-  host is unreported (the rules oracle's `*-in-trait.php`, 16 beside their
-  empty-body `return.missing`);
 - the rest of the diagnostic model (§3.7): AST-node fixes beside text
   fixes, rendered to diffs through `syntax::printer`, which gains
   statements and declarations, keeps the surrounding formatting
@@ -5087,9 +5100,10 @@ fixture:
     `print.nonString` 8 among them, `print` of a closure included);
     an `object` operand of `+`, `-` or `%` is invalid too (`+$o`, `$o % 3`);
   - `++`/`--` on `bool`, `null`, a `resource` or a non-numeric string is
-    `postInc.type`/`preDec.type` and the rest (PHP leaves `true`, `false`
-    and `null` for `--` unchanged and throws for a resource), unreported
-    today (`invalid-inc-dec.php`, `inc-non-numeric-string.php`,
+    `postInc.type`/`preDec.type` and the rest (PHP leaves `true` and `false`
+    unchanged, `null` for `--` and a non-numeric string for `--` (`$s = 'a';
+    $s--;`), and throws for a resource), unreported today
+    (`invalid-inc-dec.php`, `inc-non-numeric-string.php`,
     `dec-non-numeric-string.php`); `[]` for reading inside `isset()`,
     `empty()` and `??` is `offsetAccess.noDim`, a compile error, unreported
     today (`offset-access-without-dim-for-reading.php`);
@@ -5114,8 +5128,6 @@ fixture:
     `binaryOp.invalid` (PHP 8 throws a `TypeError` for a non-numeric
     string): `$s / 2`, `$s * 2`, `2 / $s` on `string $s` are unreported
     today (B4's `ErrorType` gives the result);
-  - `++`/`--` check their operand (`postInc.type` and the rest): `$b++` on
-    a `bool` does nothing at runtime and isn't reported today;
   - a non-numeric string offset on a string throws a `TypeError`:
     `$s['x']` on a `string` isn't reported today, nor `$d['priority']` on
     `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
@@ -5132,10 +5144,13 @@ fixture:
     instance property", `staticProperty.notFound` today (the rules
     oracle's 16);
   - the constant-operand checks of `&&`, `||`, `and`, `or`, `xor` and
-    `?:` fire on each side and on the result: the rules oracle has 164
+    `?:` fire on each side and on the result (`$b && true` isn't
+    `booleanAnd.rightAlwaysTrue` today): the rules oracle has 164
     `boolean{And,Or}.*`/`logical{And,Or,Xor}.*` findings and 17
-    `ternary.always{True,False}`, of which phpstan-rs matches 2 and 0 (D3's
-    type-check folding feeds them); and a condition is decided by its
+    `ternary.always{True,False}`, of which phpstan-rs matches 2 and 0, and
+    the corpus oracle 21 `booleanAnd.leftAlwaysTrue` and 23
+    `booleanOr.alwaysFalse` phpstan-rs misses (D3's type-check folding
+    feeds them); and a condition is decided by its
     truthiness, not only by a `true` type: `if ($std)` on an object, `if
     (retObj())`, `if ($arr)` after `$arr = [1]`, `if ($one or $i)` on `1`,
     `if (1 xor 0)` and `if (function_exists('strlen'))` are
@@ -5163,8 +5178,7 @@ fixture:
     instanceof Lorem` is reported `instanceof.alwaysTrue` on
     `Lorem&Ipsum` today, a wrong verdict (`boolean-and.php:66`,
     `boolean-logical-and.php:66`, `if-condition.php:61`);
-  - `--`/`++` on a non-numeric string (`$s = 'a'; $s--;`, which PHP
-    leaves unchanged), `unset()` of an undefined variable
+  - `unset()` of an undefined variable
     (`unset.variable`), `unset()` of an offset on a non-array
     (`unset.offset`), and a statement with no effect for `new class {};`
     (`expr.resultUnused`) are unreported today;
@@ -5233,10 +5247,6 @@ fixture:
     `parent::LOREM`, `$foo instanceof parent` and `parent::$p` outside a
     class `outOfClass.parent` (3); `outOfClass.static` is reported, but
     not for `static::LOREM` and `static::$p` (2);
-  - a constant operand of `&&`/`||` is reported on either side: `$b &&
-    true` isn't `booleanAnd.rightAlwaysTrue` today (the left side already
-    is), and the oracle finds 21 `booleanAnd.leftAlwaysTrue` and 23
-    `booleanOr.alwaysFalse` phpstan-rs misses.
 - (c) calls and member access:
   - a method call or property read on a plain `object` is
     `method.notFound`/`property.notFound` (it declares no members):
@@ -5406,9 +5416,6 @@ fixture:
     with a literal PHP rejects are `new.dateTime`/`new.dateTimeImmutable`:
     the rule exists (`date_time.rs`, E2's date parser) and misses both
     today;
-  - a named argument for a parameter a subtype renames
-    (`argument.parameterRenamedInSubtype`) is on by default as in PHPStan;
-    the check exists behind `check_renamed_named_arguments`, which is off;
   - named arguments inside a `PHP_VERSION_ID < 80000` branch are
     `argument.namedNotSupported` once D5 narrows the version there;
   - a static closure passed where `@param-closure-this` needs a bindable
