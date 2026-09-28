@@ -1311,11 +1311,22 @@ Follow-ups:
   's']` is `array{t: 'a'|'b', v: 1|'s'}`, so `$a['t'] === 'a'` leaves
   `$a['v']` as `1|'s'`, and `if ($c) { $l = ['x']; }` gives `array{0?:
   'x'}` instead of `array{}|array{'x'}` (163 nsrt mismatches);
-  `union_types_keep_shapes_distinct` is deleted.
+  `union_types_keep_shapes_distinct` is deleted. Members are
+  deduplicated, generic arguments included (`Collection<Dog|Dog>`,
+  `Collection<int|int|string, …>` and `Map<string|int|string, …>` today,
+  `bug-2735.php`, `bug-13192.php`, `bug-10871.php`), and `bool` absorbs
+  `true` and `false` (`bool|int|false` is `bool|int`, `bug-15268.php`;
+  `false|bool` and `true|bool` are `bool`, `bug-9634.php`,
+  `bug-10938.php`).
 - **Intersections reduce** by the class hierarchy (`TypeCombinator::intersect`):
   an intersection of a class and its subclass is the subclass. In
   `while ($foo instanceof Dim) { …; $foo = $bar; }` with `Dim extends Expr`,
-  the second pass sees `$foo` as `Expr&Dim` today. A shape intersected
+  the second pass sees `$foo` as `Expr&Dim` today (and `$node instanceof
+  MethodCall` on a `CallLike` leaves `CallLike&MethodCall`, nsrt
+  `pr-5596.php`). Two shapes, or an array and a shape, intersect into one
+  shape: `array{0: 0|1|2|3, 1: …}&array{0: int, 1: Payload}` is
+  `array{0|1|2|3, Payload}` (`bug-11234.php`, `constant-array-intersect.php`).
+  A shape intersected
   with `non-empty-array` stays a shape that can't be empty: `array{foo?:
   string, bar?: string}&non-empty-array` is plain `non-empty-array` today,
   its keys lost, and `missingType.iterableValue` (the rules oracle's
