@@ -615,12 +615,14 @@ impl<'a> Checker<'a> {
                     // body is still checked against `Mixed`/`Mixed`,
                     // matching `check_dim_fetch_key_type`'s "report and
                     // continue" precedent.
-                    if self.relation().is_iterable(&subject_ty).no() {
+                    if let Some(level) =
+                        self.failing_level(&subject_ty, 3, |m| self.relation().is_iterable(m).no())
+                    {
                         self.report(format!(
                                 "Argument of an invalid type {subject_ty} supplied for foreach, only iterables are supported."
                             ),
                             subject.span,
-                            3,
+                            level,
                             "foreach.nonIterable",
                         );
                     }

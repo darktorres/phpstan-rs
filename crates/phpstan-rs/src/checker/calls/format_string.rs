@@ -547,14 +547,14 @@ impl<'a> Checker<'a> {
             }
             let value_index = i64::try_from(i - function.format - 1).unwrap_or(i64::MAX);
             for placeholder in by_index.get(&value_index).into_iter().flatten() {
-                let Some(checked) = self.type_to_check(&arg_ty, |t, checker| {
-                    checker.matches_placeholder(t, placeholder.accepting, strict)
+                if arg_ty.is_mixed() {
+                    continue;
+                }
+                let Some(level) = self.failing_level(&arg_ty, 5, |t| {
+                    !self.matches_placeholder(t, placeholder.accepting, strict)
                 }) else {
                     continue;
                 };
-                if self.matches_placeholder(&checked, placeholder.accepting, strict) {
-                    continue;
-                }
                 let expected = match (placeholder.accepting, strict) {
                     (Accepting::StrictInt, _) | (Accepting::Int, true) => "int",
                     (Accepting::Float, true) => "float",
@@ -568,47 +568,14 @@ impl<'a> Checker<'a> {
                         i + 1,
                         placeholder.number,
                         placeholder.label,
-                        checked.describe_type_only()
+                        arg_ty.describe_type_only()
                     ),
                     span,
-                    5,
+                    level,
                     "argument.type",
                 );
             }
         }
-    }
-
-    /// `RuleLevelHelper::findTypeToCheck` for a value argument: `None`
-    /// for `mixed` (never checked), `null` dropped from a union below
-    /// level 8 (`checkNullables`), and below level 7 (`checkUnionTypes`)
-    /// only the members `matches` accepts kept when any does. An
-    /// unconfigured level checks everything.
-    fn type_to_check(&self, ty: &Type, matches: impl Fn(&Type, &Self) -> bool) -> Option<Type> {
-        if ty.is_mixed() {
-            return None;
-        }
-        let level = self.settings.rule_levels.configured_level;
-        if ty.is_benevolent_union() || ty.union_members().len() < 2 {
-            return Some(ty.clone());
-        }
-        let mut members: Vec<Type> = ty.union_members().to_vec();
-        if level.is_some_and(|l| l < 8) {
-            members.retain(|m| !m.is_null().yes());
-        }
-        if level.is_some_and(|l| l < 7) {
-            let accepted: Vec<Type> = members
-                .iter()
-                .filter(|m| matches(m, self))
-                .cloned()
-                .collect();
-            if !accepted.is_empty() {
-                members = accepted;
-            }
-        }
-        Some(match members.len() {
-            1 => members.remove(0),
-            _ => Type::union_of(members),
-        })
     }
 
     /// `PrintfPlaceholder::doesArgumentTypeMatchPlaceholder`.

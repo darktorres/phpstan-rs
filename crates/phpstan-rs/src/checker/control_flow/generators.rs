@@ -81,10 +81,12 @@ impl<'a> Checker<'a> {
         span: Span,
         is_bare_statement: bool,
     ) {
-        if yield_from_arg_not_iterable(inner_ty, self.registry) {
+        if let Some(level) =
+            self.failing_level(inner_ty, 0, |m| self.relation().is_iterable(m).no())
+        {
             self.report(format!("Argument of an invalid type {inner_ty} supplied for yield from, only iterables are supported."),
                 span,
-                0,
+                level,
                 "generator.nonIterable",
             );
         }
@@ -173,16 +175,4 @@ impl<'a> Checker<'a> {
             );
         }
     }
-}
-
-/// Whether `ty` is definitely not iterable (`array|
-/// Traversable`) - mirrors `thrown_value_not_throwable`'s own recursive
-/// shape (`checker/expr/member_resolution.rs`), but with `Union`
-/// deliberately flipped to "every member must fail" (not first-match) to
-/// stay on the false-negative side: `int|Generator` really is iterable
-/// half the time, so only report when *no* member could possibly be.
-fn yield_from_arg_not_iterable(ty: &Type, registry: &Registry) -> bool {
-    ty.union_members()
-        .iter()
-        .all(|m| registry.relation().is_iterable(m).no())
 }

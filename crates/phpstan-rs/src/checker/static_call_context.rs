@@ -54,18 +54,15 @@ impl<'a> Checker<'a> {
             }
             StaticTarget::Expr(receiver) => {
                 let ty = self.infer_expr(receiver, locals);
-                if !self.relation().can_name_a_class(&ty).no() {
+                let Some(level) =
+                    self.failing_level(&ty, 0, |m| self.relation().can_name_a_class(m).no())
+                else {
                     return;
-                }
-                let every_member = ty
-                    .union_members()
-                    .iter()
-                    .filter(|m| !m.is_null().yes())
-                    .all(|m| self.relation().can_name_a_class(m).no());
+                };
                 self.report(
                     format!("cannot call static method {method}() on {ty}"),
                     span,
-                    if every_member { 0 } else { 7 },
+                    level,
                     "staticMethod.nonObject",
                 );
             }

@@ -467,11 +467,13 @@ impl<'a> Checker<'a> {
                     // shapes, none of which uniformly produce one.
                     if a.spread {
                         let spread_ty = self.infer_expr(&a.value, locals);
-                        if self.relation().is_iterable(&spread_ty).no() {
+                        if let Some(level) = self
+                            .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
+                        {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
-                                3,
+                                level,
                                 "argument.unpackNonIterable",
                             );
                         }
@@ -772,11 +774,13 @@ impl<'a> Checker<'a> {
                     // reference, before the `if let` below consumes
                     // `callee_ty` by value) for every dynamic-callee
                     // shape this branch covers.
-                    if self.relation().is_callable(&callee_ty).no() {
+                    if let Some(level) =
+                        self.failing_level(&callee_ty, 2, |m| self.relation().is_callable(m).no())
+                    {
                         self.report(
                             format!("Trying to invoke {callee_ty} but it's not a callable."),
                             callee.span,
-                            2,
+                            level,
                             "callable.nonCallable",
                         );
                     }
@@ -1030,17 +1034,23 @@ impl<'a> Checker<'a> {
                 } else {
                     recv_ty.clone()
                 };
-                if self.relation().can_call_methods(&nonobject_ty).no() {
+                if let Some(level) = self.failing_level(&nonobject_ty, 0, |m| {
+                    self.relation().can_call_methods(m).no()
+                }) {
                     self.report(
                         format!("call to method {method}() on a non-object type {recv_ty}"),
                         e.span,
-                        0,
+                        level,
                         "method.nonObject",
                     );
-                    for a in args {
-                        self.check_expr(&a.value, locals, label);
+                    // Only a receiver no part of which has methods ends
+                    // the call here; a partly failing one is still read.
+                    if level == 0 {
+                        for a in args {
+                            self.check_expr(&a.value, locals, label);
+                        }
+                        return Type::mixed();
                     }
-                    return Type::mixed();
                 }
                 if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
                     self.report(
@@ -1108,11 +1118,13 @@ impl<'a> Checker<'a> {
                     // identical check above.
                     if a.spread {
                         let spread_ty = self.infer_expr(&a.value, locals);
-                        if self.relation().is_iterable(&spread_ty).no() {
+                        if let Some(level) = self
+                            .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
+                        {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
-                                3,
+                                level,
                                 "argument.unpackNonIterable",
                             );
                         }
@@ -1709,11 +1721,13 @@ impl<'a> Checker<'a> {
                 // `stdClass`-unaware classifier, not `method.nonObject`'s:
                 // real PHPStan's `ObjectType::isCloneable()` (unlike
                 // `canCallMethods()`) has no `stdClass` exception.
-                if self.relation().can_access_properties(&inner_ty).no() {
+                if let Some(level) = self.failing_level(&inner_ty, 3, |m| {
+                    self.relation().can_access_properties(m).no()
+                }) {
                     self.report(
                         format!("Cannot clone non-object variable of type {inner_ty}."),
                         inner.span,
-                        3,
+                        level,
                         "clone.nonObject",
                     );
                 }
@@ -1811,12 +1825,13 @@ impl<'a> Checker<'a> {
                 }
                 self.check_offset_assignment(lhs, &rhs_ty, false, locals);
                 if matches!(&lhs.kind, ExprKind::ArrayLiteral(_) | ExprKind::List(_))
-                    && self.relation().is_destructurable(&rhs_ty).no()
+                    && let Some(level) = self
+                        .failing_level(&rhs_ty, 3, |m| self.relation().is_destructurable(m).no())
                 {
                     self.report(
                         format!("Cannot use array destructuring on {rhs_ty}."),
                         rhs.span,
-                        3,
+                        level,
                         "offsetAccess.nonArray",
                     );
                 }
@@ -2039,11 +2054,14 @@ impl<'a> Checker<'a> {
                     // `arrayUnpacking.nonIterable` - `[...$x]` where
                     // `$x` is confirmed to never be iterable at all.
                     // Shares `foreach.nonIterable`'s own classifier.
-                    if item.spread && self.relation().is_iterable(&value_ty).no() {
+                    if item.spread
+                        && let Some(level) = self
+                            .failing_level(&value_ty, 3, |m| self.relation().is_iterable(m).no())
+                    {
                         self.report(
                             format!("Only iterables can be unpacked, {value_ty} given."),
                             item.value.span,
-                            3,
+                            level,
                             "arrayUnpacking.nonIterable",
                         );
                     }
@@ -2157,11 +2175,13 @@ impl<'a> Checker<'a> {
                     // identical check above.
                     if a.spread {
                         let spread_ty = self.infer_expr(&a.value, locals);
-                        if self.relation().is_iterable(&spread_ty).no() {
+                        if let Some(level) = self
+                            .failing_level(&spread_ty, 3, |m| self.relation().is_iterable(m).no())
+                        {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
-                                3,
+                                level,
                                 "argument.unpackNonIterable",
                             );
                         }
@@ -2463,11 +2483,13 @@ impl<'a> Checker<'a> {
                         // `ExprKind::Call`'s identical check above.
                         if a.spread {
                             let spread_ty = self.infer_expr(&a.value, locals);
-                            if self.relation().is_iterable(&spread_ty).no() {
+                            if let Some(level) = self.failing_level(&spread_ty, 3, |m| {
+                                self.relation().is_iterable(m).no()
+                            }) {
                                 self.report(
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
                                     a.value.span,
-                                    3,
+                                    level,
                                     "argument.unpackNonIterable",
                                 );
                             }
@@ -2479,11 +2501,13 @@ impl<'a> Checker<'a> {
                         // `ExprKind::Call`'s identical check above.
                         if a.spread {
                             let spread_ty = self.infer_expr(&a.value, locals);
-                            if self.relation().is_iterable(&spread_ty).no() {
+                            if let Some(level) = self.failing_level(&spread_ty, 3, |m| {
+                                self.relation().is_iterable(m).no()
+                            }) {
                                 self.report(
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
                                     a.value.span,
-                                    3,
+                                    level,
                                     "argument.unpackNonIterable",
                                 );
                             }
@@ -2798,13 +2822,18 @@ impl<'a> Checker<'a> {
                 } else {
                     base_ty.clone()
                 };
-                if self.relation().can_access_properties(&nonobject_ty).no() {
+                let non_object_level = self.failing_level(&nonobject_ty, 0, |m| {
+                    self.relation().can_access_properties(m).no()
+                });
+                if let Some(level) = non_object_level {
                     self.report(
                         format!("access to property ${prop} on a non-object type {base_ty}"),
                         e.span,
-                        0,
+                        level,
                         "property.nonObject",
                     );
+                }
+                if non_object_level == Some(0) {
                 } else if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
                     self.report(
                         format!("Cannot access property ${prop} on mixed."),

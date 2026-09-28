@@ -233,18 +233,16 @@ impl<'a> Checker<'a> {
         let Some(key_ty) = value_ty.array_key_type() else {
             return;
         };
-        let definitely = key_ty.is_string().yes();
-        let possibly = key_ty.union_members().iter().any(|m| m.is_string().yes());
-        if !possibly {
+        let Some(level) = self.failing_level(&key_ty, 3, |m| m.is_string().yes()) else {
             return;
-        }
+        };
         self.report(
             format!(
                 "Array unpacking cannot be used on an array with {}string keys: {value_ty}",
-                if definitely { "" } else { "potential " }
+                if level == 3 { "" } else { "potential " }
             ),
             span,
-            if definitely { 3 } else { 7 },
+            level,
             "arrayUnpacking.stringOffset",
         );
     }

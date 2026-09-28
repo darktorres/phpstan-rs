@@ -1289,6 +1289,17 @@ impl<'a> Checker<'a> {
         self.settings.rule_levels.relation(self.registry)
     }
 
+    /// The level a rule reports `ty` at for the parts `fails` holds for
+    /// (`RuleLevelHelper::failing_level`).
+    pub(crate) fn failing_level(
+        &self,
+        ty: &Type,
+        base: u8,
+        fails: impl Fn(&Type) -> bool,
+    ) -> Option<u8> {
+        self.settings.rule_levels.failing_level(ty, base, fails)
+    }
+
     pub(crate) fn accepts(&self, accepting: &Type, accepted: &Type) -> types::AcceptsResult {
         self.relation().accepts(accepting, accepted)
     }

@@ -670,11 +670,13 @@ impl<'a> Checker<'a> {
     /// into an array on write, so this is only ever wired into a read
     /// site, never `check_assignment_target`'s.
     pub(crate) fn check_offset_accessibility(&mut self, base_ty: &Type, idx: &Expr) {
-        if self.relation().is_offset_accessible(base_ty).no() {
+        if let Some(level) = self.failing_level(base_ty, 3, |m| {
+            self.relation().is_offset_accessible(m).no()
+        }) {
             self.report(
                 format!("Cannot access offset on {base_ty}."),
                 idx.span,
-                3,
+                level,
                 "offsetAccess.nonOffsetAccessible",
             );
         } else if let Some(level) = self.strict_mixed_receiver_level(base_ty) {

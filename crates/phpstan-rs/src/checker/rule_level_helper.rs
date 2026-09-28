@@ -1,7 +1,7 @@
 //! PHPStan's `RuleLevelHelper`: the settings that make type acceptance
 //! more or less lenient, applied over a class hierarchy's relations.
 
-use types::{ClassHierarchy, Relation};
+use types::{ClassHierarchy, Relation, Type};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RuleLevelHelper {
@@ -22,6 +22,28 @@ impl RuleLevelHelper {
             configured_level: self.configured_level,
             check_benevolent_union_types: self.check_benevolent_union_types,
         }
+    }
+
+    /// PHPStan's `findTypeToCheck`, as the level a rule reports `ty` at
+    /// for the members `fails` holds for: the rule's `base` level when it
+    /// holds for every member but `null`, level 7 when only for some of
+    /// them (`checkUnionTypes`; a benevolent union's members only with
+    /// `checkBenevolentUnionTypes`), level 8 when only for `null`
+    /// (`checkNullables`). `None` when it holds for none.
+    pub fn failing_level(&self, ty: &Type, base: u8, fails: impl Fn(&Type) -> bool) -> Option<u8> {
+        let (nulls, others): (Vec<&Type>, Vec<&Type>) =
+            ty.union_members().iter().partition(|m| m.is_null().yes());
+        if others.is_empty() {
+            return fails(ty).then_some(base);
+        }
+        if others.iter().all(|m| fails(m)) {
+            return Some(base);
+        }
+        let by_member = !ty.is_benevolent_union() || self.check_benevolent_union_types;
+        if by_member && others.iter().any(|m| fails(m)) {
+            return Some(base.max(7));
+        }
+        nulls.iter().any(|m| fails(m)).then_some(base.max(8))
     }
 }
 

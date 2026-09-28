@@ -160,24 +160,16 @@ impl Relation<'_> {
         }
     }
 
-    /// A question asked of each leaf of `ty`: a union's members all (its
-    /// `null` set aside while anything else is left), an intersection's
-    /// any, a template's bound, a conditional's branches all.
+    /// A question asked of each leaf of `ty`, answered for the whole as
+    /// PHPStan does: a union's (and a conditional's branches') answers
+    /// agree or give `Maybe`, an intersection needs one member's `Yes`,
+    /// a template answers for its bound.
     fn answer(&self, ty: &Type, leaf: &mut dyn FnMut(&Type) -> TrinaryLogic) -> TrinaryLogic {
         match ty {
             Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
-                let non_null: Vec<&Type> =
-                    members.iter().filter(|m| **m != Type(Repr::Null)).collect();
-                let considered: Vec<&Type> = if non_null.is_empty() {
-                    members.iter().collect()
-                } else {
-                    non_null
-                };
-                considered
-                    .into_iter()
-                    .map(|m| self.answer(m, leaf))
-                    .reduce(TrinaryLogic::and)
-                    .unwrap_or(TrinaryLogic::Maybe)
+                let answers: Vec<TrinaryLogic> =
+                    members.iter().map(|m| self.answer(m, leaf)).collect();
+                TrinaryLogic::extreme_identity(answers.into_iter())
             }
             Type(Repr::Intersection(members)) => members
                 .iter()
@@ -187,7 +179,10 @@ impl Relation<'_> {
             Type(Repr::TemplateParam(param)) => self.answer(&param.bound, leaf),
             Type(Repr::Conditional {
                 if_true, if_false, ..
-            }) => self.answer(if_true, leaf).and(self.answer(if_false, leaf)),
+            }) => {
+                let answers = [self.answer(if_true, leaf), self.answer(if_false, leaf)];
+                TrinaryLogic::extreme_identity(answers.into_iter())
+            }
             other => leaf(other),
         }
     }

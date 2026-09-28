@@ -11,22 +11,17 @@ use syntax::token::Span;
 use types::Type;
 
 impl<'a> Checker<'a> {
-    /// `new $expr()` where `$expr`'s type can never be a class name or
-    /// an object (`new.nonObject`). Level 0 when every member is
-    /// unusable, level 7 when only some members of a union are.
+    /// `new $expr()` where `$expr`'s type can't be a class name or an
+    /// object (`new.nonObject`).
     pub(crate) fn check_new_on_non_class_name(&mut self, ty: &Type, span: Span) {
-        if !self.relation().can_name_a_class(ty).no() {
+        let Some(level) = self.failing_level(ty, 0, |m| self.relation().can_name_a_class(m).no())
+        else {
             return;
-        }
-        let every_member = ty
-            .union_members()
-            .iter()
-            .filter(|m| !m.is_null().yes())
-            .all(|m| self.relation().can_name_a_class(m).no());
+        };
         self.report(
             format!("cannot instantiate class using {ty}"),
             span,
-            if every_member { 0 } else { 7 },
+            level,
             "new.nonObject",
         );
     }

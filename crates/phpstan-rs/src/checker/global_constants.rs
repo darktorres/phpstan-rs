@@ -254,15 +254,12 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let is_string = |t: &Type| t.is_string().yes();
         let is_unknown = |t: &Type| t.is_mixed() || (t.is_never() || t.is_template());
-        let members = name_ty.union_members();
-        let level = if is_string(name_ty) || members.iter().any(is_unknown) {
+        if name_ty.union_members().iter().any(is_unknown) {
             return;
-        } else if members.iter().any(is_string) {
-            7
-        } else {
-            0
+        }
+        let Some(level) = self.failing_level(name_ty, 0, |m| !m.is_string().yes()) else {
+            return;
         };
         self.report(
             format!("Class constant name in dynamic fetch can only be a string, {name_ty} given."),
