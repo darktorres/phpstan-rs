@@ -4107,7 +4107,11 @@ for a self-referencing `@extends`/`@implements`/`@use`'s
 `generics.notCompatible`, `requireExtends.nonObject` for
 `requireExtends.interface`, `intersectionType.int` for
 `property.unresolvableNativeType`, and `enum.duplicateConstant` on the
-constant for `enum.duplicateEnumCase` on the case, or a
+constant for `enum.duplicateEnumCase` on the case, `property.private`
+for `property.writeOnly` on a private native property a `@property-write`
+tag shadows (PHP throws on the private read; `private-property-tag-write.php`),
+and a trait's `@use` tag errors on the trait's line rather than the `use`
+statement's (`used-traits.php`), or a
 PHPStan-specific check: the assert mismatches of `phpstan.*` (E3h),
 `phpParser.*`,
 `phpstanApi.*` outside a PHPStan extension's package, `function.inner`,
