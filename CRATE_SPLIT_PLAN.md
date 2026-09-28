@@ -3688,7 +3688,7 @@ rules-oracle findings).
     `bug-11549.php`); `array_sum()` of ints is `int`, not `int|float`
     (`bug-9699.php`);
   - `json_decode()` of a constant string folds to its value
-    (`JsonDecodeFunctionReturnTypeExtension`): `json_decode('{"class":
+    (`JsonThrowOnErrorDynamicReturnTypeExtension`): `json_decode('{"class":
     "x"}')->class` is `property.nonObject` "on mixed" today (the rules
     oracle's `bug-12273.php`);
   - `XMLReader::open()` is `XMLReader|false` called statically and `bool`
