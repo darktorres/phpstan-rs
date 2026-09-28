@@ -53,39 +53,17 @@ pub fn resolve_conditional(ty: &Type, param_bindings: &FxHashMap<String, Type>) 
                 match conditional_branch(bound, target, *negated) {
                     Some(true) => resolve_conditional(if_true, param_bindings),
                     Some(false) => resolve_conditional(if_false, param_bindings),
-                    None => union_of_branches(
+                    None => crate::union_types(
                         resolve_conditional(if_true, param_bindings),
                         resolve_conditional(if_false, param_bindings),
                     ),
                 }
             }
-            _ => union_of_branches(
+            _ => crate::union_types(
                 resolve_conditional(if_true, param_bindings),
                 resolve_conditional(if_false, param_bindings),
             ),
         },
         _ => ty.map_children(&mut |t| resolve_conditional(t, param_bindings)),
-    }
-}
-
-/// Both branches of an undecided conditional, flattened and deduplicated
-/// (`T` and `T|null` give `T|null`, not `T|T|null`), collapsing to the
-/// single member when both branches agree.
-pub fn union_of_branches(a: Type, b: Type) -> Type {
-    let mut members: Vec<Type> = Vec::new();
-    for ty in [a, b] {
-        let parts = match ty {
-            Type::Union(inner) => inner,
-            other => vec![other],
-        };
-        for p in parts {
-            if !members.iter().any(|m| crate::types_equal_for_union(m, &p)) {
-                members.push(p);
-            }
-        }
-    }
-    match members.len() {
-        1 => members.pop().expect("len checked"),
-        _ => Type::Union(members),
     }
 }

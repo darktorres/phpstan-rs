@@ -255,7 +255,7 @@ fn substitute(
             match super::conditional::conditional_branch(&bindings[subject], &target, *negated) {
                 Some(true) => substitute(if_true, bindings, to_bound),
                 Some(false) => substitute(if_false, bindings, to_bound),
-                None => super::conditional::union_of_branches(
+                None => crate::union_types(
                     substitute(if_true, bindings, to_bound),
                     substitute(if_false, bindings, to_bound),
                 ),

@@ -229,7 +229,7 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
             match types::conditional_branch(&bindings[subject], &target, *negated) {
                 Some(true) => substitute_scoped(if_true, bindings, scope),
                 Some(false) => substitute_scoped(if_false, bindings, scope),
-                None => types::union_of_branches(
+                None => types::union_types(
                     substitute_scoped(if_true, bindings, scope),
                     substitute_scoped(if_false, bindings, scope),
                 ),

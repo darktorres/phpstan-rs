@@ -129,23 +129,10 @@ fn resolve_node(ty: &Type, operand: &dyn Fn(&Type) -> Type) -> Option<Type> {
     }
 }
 
-/// The union of `members`, flattened and deduplicated; `Never` for none.
+/// The union of `members`; `Never` for none.
 fn join(members: Vec<Type>) -> Type {
-    let mut out: Vec<Type> = Vec::new();
-    for m in members {
-        let parts = match m {
-            Type::Union(inner) => inner,
-            other => vec![other],
-        };
-        for p in parts {
-            if !out.contains(&p) {
-                out.push(p);
-            }
-        }
-    }
-    match out.len() {
-        0 => Type::Never,
-        1 => out.pop().expect("len checked"),
-        _ => Type::Union(out),
-    }
+    members
+        .into_iter()
+        .reduce(crate::union_types)
+        .unwrap_or(Type::Never)
 }

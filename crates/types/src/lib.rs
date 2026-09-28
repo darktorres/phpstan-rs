@@ -27,8 +27,8 @@ mod templates;
 mod trinary;
 mod union;
 
+pub use conditional::conditional_branch;
 pub use conditional::resolve_conditional;
-pub use conditional::{conditional_branch, union_of_branches};
 pub use extension::ExtensionTypeData;
 pub use hierarchy::{ClassFacts, ClassHierarchy, NoClasses, effective_slot_variance};
 pub use intersection::intersect_types;
