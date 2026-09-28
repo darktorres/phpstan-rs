@@ -7414,7 +7414,8 @@ G makes a crate of each remaining layer, moves the tests, benches and fuzz
 targets to the crates they test, retargets the gates from the package's paths
 to the crates', rewrites the docs, and asserts the build-time targets. G
 changes no behaviour: the corpus, type-snapshot and baseline gates (4–6) and
-every fixture's expectations are byte-identical through every G commit, and a
+every fixture's expectations are identical through every G commit, the fixture
+type snapshot compared through the rename map (G2), and a
 fixture's or test's name changes only through gate 3's rename manifest. Nothing
 reads a path-dependent intrinsic (`type_name`, `module_path!`, `TypeId`) into
 output. The one output a move does change is an internal error's location in
@@ -7633,7 +7634,14 @@ crates, in one commit:
   `CARGO_MANIFEST_DIR`; tests are named `<crate>::<path>` and run with
   `cargo test -p <crate> --test fixtures -- <filter>` (§3.11). Gate 3's
   manifest maps every old fixture name to its new one, and the fixtures' own
-  expectations don't change.
+  expectations don't change. The fixture type snapshot (`types-fixtures`) is
+  keyed by fixture name, each line led by it
+  (`checker/access_attributes/friends_are_the_only_other_callers: …`) and the
+  dumps sorted by it, so the move rewrites every key and the order while no
+  type changes: its comparison maps the parent snapshot's names through the
+  same manifest and reorders before comparing, and `xtask`'s recorder runs
+  `cargo test --profile gate --workspace --test fixtures` with the dump on,
+  where it runs the package's target alone today.
 - **Fixtures in plain `cargo test`.** The package's fixtures target is
   `test = false` today and runs in the `gate` profile, because each fixture
   builds a whole `Project`, stubs included (about 210 ms of its setup clones the
