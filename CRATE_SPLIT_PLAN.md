@@ -1230,6 +1230,12 @@ Follow-ups:
   what was removed. Today `$m !== null`, `isset($m)` and `!is_int($m)` on a
   `mixed` all leave plain `mixed`, so a level-9/10 check can't see that
   `null` is gone.
+- **Truthiness removes whole members**: the falsey side of a union drops
+  its always-truthy members and the truthy side its always-falsy ones.
+  After `$a = $c ? [] : true`, `if ($a) {…} else {…}` leaves `array{}|true`
+  in the `else`, and `$b = $c ? ['foo'] : false` keeps `array{'foo'}|false`
+  there, so passing either on is `argument.type` (the rules oracle's
+  `call-methods.php:1414`, `:1425`).
 - **Template inference** is PHPStan's structural `inferTemplateTypes`:
   through generic arguments (by ancestor bindings), callables, shapes, array
   keys and iterables, unioning every binding (behaviour fix, each case
@@ -1246,11 +1252,19 @@ Follow-ups:
   only from what its other members don't cover: `@param T|null $x` called
   with `null` or nothing, and `@param T|int|float $p` called with `1`,
   leave `T` unbound (`mixed`); today they bind `null` and `1` (nsrt
-  `bug-8441.php`, `generic-unions.php`).
+  `bug-8441.php`, `generic-unions.php`). A `mixed` argument binds `T` to
+  `mixed`: `$this->doFoo($mixed)` for `@param T $t` is `argument.type`
+  "expects T, mixed given" today (the rules oracle's
+  `check-explicit-mixed.php`, `check-implicit-mixed.php`).
 - **Late types.** `new<T>` and `template-type<...>` get variants (PHPStan's
   `NewObjectType` and `GetTemplateTypeType`); `int-mask<>`/`int-mask-of<>`
   resolve in C7's resolver instead of reading as `int`; `key-of<C::ARR>`
-  resolves like `value-of<C::ARR>` (it reads as `mixed`).
+  resolves like `value-of<C::ARR>` (it reads as `mixed`). `key-of<T>` and
+  `value-of<T>` of a template stay late (`KeyOfType`/`ValueOfType`) and
+  answer through the template's bound: a template `Offset of
+  key-of<DataArray>` with `DataArray of array<string, mixed>` passed to
+  `array_key_exists()` is `argument.type` "Offset given" today (the rules
+  oracle's `overriden-abstract-trait-method-phpdoc.php`).
 - **Callability and class-strings in `accepts`** (behaviour fix): a string
   literal is callable only when it names an existing function or
   `Class::method`, an array only as `[object|class-string, method]` with the
@@ -1262,7 +1276,16 @@ Follow-ups:
   callable type only when its signature fits (parameters contravariant,
   the return covariant): `set_error_handler(function (int $no, string
   $str): void {})` against `(callable(int, string, string, int): bool)|null`
-  is accepted today (32 corpus oracle findings).
+  is accepted today (32 corpus oracle findings). Without
+  `strict_types=1`, a `string` parameter accepts an object with
+  `__toString()`, as PHP converts it: `strnatcasecmp($foo, $bar)` on
+  `Stringable` objects is `argument.type` today (the rules oracle's
+  `bug-11619.php`). A union covering every class that can implement an
+  interface userland can't accepts that interface
+  (`UnionType::EQUAL_UNION_CLASSES`): `DateTime|DateTimeImmutable` accepts a
+  `DateTimeInterface` and `Error|Exception` a `Throwable`, both
+  `argument.type` today (the rules oracle's `call-methods.php:1696`,
+  `:1714`).
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
   member covers (`A|B` for `B extends A` stays two members). Identical
   members collapse too: a closure parameter today reaches
@@ -1283,7 +1306,12 @@ Follow-ups:
 - **`iterable<K, V>`** keeps its arguments (behaviour fix). It is
   `array<V>|Traversable` today, the key and `Traversable`'s arguments lost,
   so a `foreach` over `iterable<int, string>` yields `mixed` key and value,
-  and a generator declared `iterable<int>` may yield `'x'` unreported.
+  and a generator declared `iterable<int>` may yield `'x'` unreported. A
+  `T[]` in a PHPDoc union with an iterable type gives that type `T` values
+  (`TypeNodeResolver::resolveUnionTypeNode`): `int[]|\Traversable` is
+  `Traversable&iterable<int>`, where today unpacking it into `int
+  ...$foo` is `argument.type` "mixed given" (the rules oracle's
+  `function-with-variadic-parameters-7.1.php`).
 - **Typed templates.** `TemplateParam`'s name is a `Name` and its scope an
   enum (class, function, method, callable) instead of `Option<String>` with
   a `"callable"` sentinel; a `Conditional`'s subject is an enum (parameter
@@ -1617,7 +1645,8 @@ Follow-ups:
 - **Attribute arguments** evaluate to types: constants and class constants
   through the ConstantResolver, bare constant names namespace-resolved,
   `self`/`parent`/`static` bound to the class, `new` and constant
-  expressions included (C8).
+  expressions included (C8). `#[Table(self::TABLE_NAME)]` on a class is
+  `argument.type` "mixed given" today (the rules oracle's `bug-12011.php`).
 - The rest of C3's data model lands in C4: class and method keys, per-member
   flags and `Vec<TemplateParam>`, build scratch in the builder, provenance
   as the only location record, query accessors, parse-time resolved names,
@@ -2051,7 +2080,13 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   the PHP version; `ExtDs`, which took `ext-ds.stub` out of
   `config.neon` in 2.2.16, on the `ds` extension's major version),
   which port as built-in implementors. All 146 functions and all method
-  PHPDoc apply, not only class templates and property types;
+  PHPDoc apply, not only class templates and property types, and reach an
+  implementation's untyped parameters through PHPDoc inheritance: in a
+  class with `@implements ArrayAccess<string, int>`, `offsetExists($offset)`
+  and `offsetSet($offset, $value)` read `$offset`/`$value` as `mixed`
+  today where the stub's `TKey`/`TValue` give `string`/`int`, so
+  `key_exists($offset, $this->args)` is `argument.type` (the rules
+  oracle's `bug-12984.php`);
 - declarative patch entries replacing the Rust patch functions;
 - the `functionMap.php` layer: `stub-sources` embeds
   `resources/functionMap.php` and the seven
@@ -2070,7 +2105,8 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   given"), the `__stringAndStringable` values of `printf`/`sprintf`/
   `vsprintf` (32, a `Stringable` object given), `round()`'s `RoundingMode`
   from PHP 8.4 (9), `time_nanosleep()`'s `int` parameters where the stub
-  says `positive-int` (3, `0` given), `curl_share_setopt()`'s `mixed`
+  says `positive-int` (3, `0` given), `strpos()`'s `int` offset (1),
+  `curl_share_setopt()`'s `mixed`
   value (3) and `stream_get_contents()`'s `__benevolent<string|false>` (3);
 - a function or method with several signatures (a phpstorm-stubs overload,
   a functionMap `'1` variant) keeps them all, and a call takes the variant
@@ -2098,7 +2134,10 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
 
 - one name scope - namespace and `use` imports, active templates, class
   aliases, the current class for `self` - used by both the registry and the
-  checker (`resolve_written_type`);
+  checker (`resolve_written_type`). An inline `@var self::COLUMN_A` or
+  `@var self::COLUMN_*` reads as `mixed` today while `K::COLUMN_*` and a
+  `@param self::COLUMN_*` resolve, so `sprintf('%s', $value)` after one is
+  `argument.type` (the rules oracle's `bug-8074.php`);
 - native `TypeHint` nodes are resolved directly, not printed and re-parsed
   (about 85 sites);
 - a template name is a template wherever a type is expected, shape keys
@@ -2144,7 +2183,12 @@ The boolean `is_subclass_of` is deleted for the tri-state relation, and an
 ancestor reached through an unresolved edge (C4's ancestor level) answers
 `Maybe` (approved delta, fixture first): `instanceof`, override, `final`
 and `#[\Override]` checks through an unvendored parent stop treating it as
-known. Consumers needing certainty treat `Maybe` as unknown.
+known. Consumers needing certainty treat `Maybe` as unknown. A class that
+doesn't exist relates `Maybe` to everything too, so an argument check
+against a parameter typed with it stays silent (the PHPDoc rule reports
+the name): `@param SplObjectStorage<Cat, null>` in a namespace names the
+missing `Bug10884\SplObjectStorage`, and passing a `\SplObjectStorage` is
+`argument.type` today (the rules oracle's `bug-10884.php`).
 `removing_a_files_direct_ancestor_does_not_unstick_the_subclass_relationship_either`
 and the `Grandchild`/`Child` assertion of
 `removing_a_files_class_does_stop_a_transitive_ancestor_relationship_through_it`
@@ -2179,7 +2223,10 @@ structural one, each fixtured:
 - enums read `@method` and `@mixin`;
 - `@phpstan-require-extends Base` on an interface makes `Base`'s members
   visible through the interface: `$i->x` for an `I $i` is
-  `property.notFound` today (nsrt `bug-10302-interface-extends.php`).
+  `property.notFound` today (nsrt `bug-10302-interface-extends.php`), and
+  makes the interface a subtype of `Base`: `@throws I` for an interface
+  requiring `\Exception` is `throws.notThrowable` today (the rules
+  oracle's `throws-with-require.php`).
 
 The class-reflection data extensions take `registry::access_attributes`
 (ext-language-extensions) and `registry::class_info::doctrine_entity`
@@ -2391,6 +2438,10 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
     or the native type when `treatPhpDocTypesAsCertain` is off. After
     `$flag = true; if ($flag) { $x = 1; }`, `echo $x` is `variable.undefined`
     today.
+  - **A nameless `@var`** above `throw` applies to the thrown expression as
+    it does above `return`: `/** @var \Exception */ throw $foo;` on a
+    `stdClass $foo` is `throw.notThrowable` today (the rules oracle's
+    `throw-values.php`).
 
 **D3. One inference path.** ExprHandlers, per-`NodeId` results, `infer_expr`
 deleted; the file-size gate.
@@ -2423,7 +2474,12 @@ deleted; the file-size gate.
   ??"). The isset rules read the same
   certainty: `isset($bar)`, `empty($foo)` and `$baz ?? 1` on a variable
   that is never defined are `isset.variable`/`empty.variable`/
-  `nullCoalesce.variable` "is never defined", unreported today.
+  `nullCoalesce.variable` "is never defined", unreported today. A falsey
+  `isset($v)` on a defined variable narrows it to `null`: after `if
+  (isset($v)) { return; }` or inside `if (!isset($v))` on
+  `int|string|float|null` (or `?int`), `$v` keeps its type today, so
+  `onlyNull($v)` is `argument.type` (the rules oracle's `bug-9580.php`);
+  `$v !== null` already narrows.
 - AST names read their parse-time resolution; `name_ctx` is deleted.
 - **Disagreements.** `check_expr` and `infer_expr` compute the same
   expression twice. Before the merge, a commit instruments both paths to
@@ -2499,6 +2555,18 @@ deleted; the file-size gate.
       `test($array['key'])` for `test(array &$a)`, `$array['key']` is still
       `array{}` (nsrt `bug-5077.php`; a plain variable argument gets the
       parameter's type);
+    - a by-reference argument is checked with its value before the call:
+      `predefine_byref_or_unknown_args` widens the variable to `mixed` (or
+      an array-like parameter type) first, so at level 10 `$e = '';
+      r($e)` for `r(string &$x)` is `argument.type` "mixed given", as is
+      every defined variable passed to a non-array by-reference parameter
+      (`openssl_public_encrypt($d, $encrypted, …)`, `pam_auth`, `getmxrr`
+      in the rules oracle's `bug-4004.php`, `bug-10499.php`,
+      `bug-10704.php`); the widening moves after the check and after the
+      call's return type, which reads the widened argument today where the
+      assigned value is a separate path: `$this->p = array_pop($objs)` on a
+      `non-empty-list<O>` is `O|null` and `assign.propertyType` (the rules
+      oracle's `bug-7844b.php`), while a bare `array_pop($objs)` is `O`;
     - an argument to a by-reference variadic parameter is read with its
       type: `$b = 2; $o->bar(1, $b)` for `bar(int $a, int &...$rest)` is
       `argument.type` "mixed given" today (the rules oracle's
@@ -2530,7 +2598,10 @@ deleted; the file-size gate.
       `int ** int` is `int` today, where a negative exponent or an overflow
       gives a float (nsrt `pow.php`). A bitwise operator on two strings
       works bytewise and gives a string: `$s & $s` is `int` today (nsrt
-      `bitwise.php`); a string with an int is `*ERROR*` (B4).
+      `bitwise.php`), and so does `mixed ^ string`, so after `$d ^= $mask`
+      on an untyped `$d`, `base64_encode($d)` is `argument.type` "int
+      given" (the rules oracle's `bug-8094.php`); a string with an int is
+      `*ERROR*` (B4).
     - **Increments** follow PHP: `$k = 'a'; $k++` leaves `'a'` today, and
       `$n = null; $n++` leaves `int` where PHP gives `1`. The value of a
       pre-increment is the new value: `$one = 1; ++$one` is `1` today, and
@@ -2547,7 +2618,11 @@ deleted; the file-size gate.
     - **Integer ranges** narrow at their ends: `$i !== 3` on `int<3, 5>`
       leaves `int<3, 5>` today instead of `int<4, 5>` (nsrt
       `integer-range-types.php`, whose other mismatches are B4's range
-      union).
+      union) A comparison narrows each member of a union by PHP's
+      comparison table: `$foo > 1` on `?int` leaves `int|null` today where
+      it is `int<2, max>` (`null > 1` is false), `$foo >= 0` gives
+      `int<0, max>|null`, and `$f > 1` on `?float` drops `null`; on a
+      plain `int` it already narrows (the rules oracle's `bug-577.php`).
     - **Short ternary** follows `TernaryHandler`: `$a ?: $b` is `mixed` today
       for every left operand (`int`, `string`, `?array`, `bool`, objects).
     - **Compound assignments** have the assigned value as their type
@@ -2555,6 +2630,11 @@ deleted; the file-size gate.
       `$n ??= 1` are all `mixed` today where PHPStan has `2`, `(float|int)`
       and `1|string` (nsrt `binary.php`, `coalesce-assign.php`).
     - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
+      The right side is called with the left side as its argument, so an
+      arrow function's parameter takes its type and the statement is a
+      call: `5 |> (fn ($x) => $foo->m($x))` gives `$x` `mixed` (an
+      `argument.type` at level 10) and is `expr.resultUnused` today (the
+      rules oracle's `call-to-method-without-impure-points-pipe.php`).
     - **Magic constants** type as their values: `__DIR__`, `__FILE__`,
       `__LINE__`, `__CLASS__`, `__FUNCTION__`, `__METHOD__`,
       `__NAMESPACE__`, `__TRAIT__` and `__PROPERTY__` are all `mixed` today
@@ -2608,6 +2688,19 @@ deleted; the file-size gate.
     - `$this`/`static` inside a class body carry their bound class
       (`Type::This`/`StaticRef` bound), displayed `$this(Base)`/
       `static(Base)`, and `@return $this` rejects a returned `new static()`.
+      In a generic class `$this` carries the class's own templates as its
+      arguments (`D<T>`, where it is plain `D` today), so a property typed
+      `T` reads as `T`: `return $this->value;` under `@return T` is
+      `return.type` "expected T, got mixed" today, whether the property is
+      promoted with `@param T` or declared with `@var T` (the rules
+      oracle's 24 "expected T"/`TValue` and 3 "expected T|null" findings,
+      most of them this shape).
+    - **A call on a union receiver** combines its members' methods
+      (`UnionTypeMethodReflection`, `ParametersAcceptorSelector::
+      combineAcceptors`): each parameter takes the union of the members'
+      parameter types. `$u->apply($i)` on `Bar|Baz` with `apply(B)` and
+      `apply(C)` checks against the first member only today, so `B|C` is
+      `argument.type` (the rules oracle's `bug-6946.php`).
     - **Type-check calls** type as the constant the impossible-check logic
       decides: `is_string($s)` with a `string` is `true`, `is_string($i)` with
       an `int` is `false`, and `!`/`method_exists`/`instanceof` follow (an
@@ -2642,7 +2735,23 @@ deleted; the file-size gate.
       `array_walk`, `array_find`, `curl_setopt`, `implode`, `Closure::bind`)
       rewrite the callback's parameters from the sibling arguments;
       `array_map(fn ($x) => $x * 2, [1, 2])` is `array<int>` today where
-      PHPStan keeps `array{2, 4}`.
+      PHPStan keeps `array{2, 4}`. A by-reference callback parameter is
+      typed from the context too: `array_walk($l, function (&$item) {…})`
+      over `list<string>` gives `$item` `mixed` today (a by-value one is
+      `string`), so `trim($item)` is `argument.type` (the rules oracle's
+      `bug-7469.php`), and the key parameter is `int` where it is
+      `int<0, max>`. `array_filter`'s callback parameters follow its mode:
+      under `ARRAY_FILTER_USE_KEY` and `ARRAY_FILTER_USE_BOTH` the key and
+      value parameters are `mixed` today (`stripos($key, …)` is
+      `argument.type`, the rules oracle's `bug-10903.php`), and
+      `preg_replace_callback`'s callback gets the pattern's matches shape
+      where it gets `array` today (`bug-14177.php`). `self` and `static` in
+      the callable type resolve
+      against the called method's class: for `@param callable(static):
+      array $s` on `A::c()`, `$a->c(function ($who) { return []; })` gives
+      `$who` `mixed` and is `argument.type` "expects callable(A): array,
+      Closure(static): array{} given" today (the rules oracle's
+      `bug-11591.php`, `bug-14893.php`).
     - **By-reference out types of built-in functions** apply to the
       argument: after `exec($c, $out)`, `parse_str($s, $ps)`,
       `preg_match_all($p, $s, $mm)` or `preg_match` with a non-constant
@@ -2652,9 +2761,28 @@ deleted; the file-size gate.
       variable PHP creates (E3c). A user function's `@param-out` already
       applies. 25 of the 26 lines of `composer/semver`'s `VersionParser.php`
       with level-10 `offsetAccess.nonOffsetAccessible` read such a
-      `$matches` (41 findings, in each of its three copies).
+      `$matches` (41 findings, in each of its three copies). The array
+      functions that modify their argument give it the new array
+      (`array_push`, `array_unshift`, `array_pop`, `array_shift`,
+      `array_splice`, `sort` and its family): after `array_push($k, [$a])`
+      on `array<A[]>`, `$k` is `array` today, so `array_push($k[0], …)`
+      is `argument.type` "mixed given" (the rules oracle's
+      `bug-8430b.php`).
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
-      is `Closure(): mixed` today instead of returning a `Generator`.
+      is `Closure(): mixed` today instead of returning a `Generator`. A
+      closure or arrow function whose body never returns returns `never`
+      under any native return type: `fn (): null => $this->redirect('/')`
+      for a `never` method is `Closure(): never|null` today, which a
+      `(Closure(): never)|null` parameter rejects (the rules oracle's
+      `bug-15285.php`). A closure parameter `string $t = null` is
+      implicitly `?string`, as a function's already is: in the body `$t`
+      is `string` today, so `$t ?? ''` is `nullCoalesce.variable` and
+      `$a(null)` is `argument.type` (`bug-6701.php`), and the closure isn't
+      `parameter.implicitlyNullable`.
+    - **A call's value** has `void` as `null` (`getType`; the keep-void
+      type is only for the void-result rules): `$a = a()` for `@return
+      string|void` is `string|void` today, so `b($a)` into `?string` is
+      `argument.type` (the rules oracle's `bug-6720.php`).
     - **Dynamic class constant names** (PHP 8.3): `K::{'X'}` with a literal
       name is `K::X`'s type; it is `mixed` today.
     - **`new $c()`** for a `class-string<T> $c` is `T` (`NewHandler`); it is
@@ -2829,6 +2957,12 @@ building on the previous one:
     condition and read under a correlated one is `variable.undefined` today:
     `symfony/filesystem/Filesystem.php:190` reads `$origFile`, which only the
     `$isRecursive`-dependent branch defines;
+  - conditional holders created by `&&`/`||` conditions
+    (`TypeSpecifier::processBooleanSureConditionalTypes`/
+    `processBooleanNotSureConditionalTypes`): after `if (!$a && !$b) {
+    throw …; }` on `?DateTimeImmutable $a, ?string $b`, `if (!$a)` leaves
+    `$b` as `string|null` today, so `new DateTimeImmutable($b)` is
+    `argument.type` (the rules oracle's `bug-9946.php`);
   - conditional holders created at assignment (`AssignHandler`), replacing
     `condition_aliases`, its lazy AST replay and `record_if_body_flag_alias`:
     - the assigned expression's sure and sure-not types, guarded by the
@@ -2881,6 +3015,11 @@ building on the previous one:
       `non-empty-list<int>` and `foreach ($l as $i => $v) { $l[$i] = $v + 1; }`
       leave `array<int, int>`, and passing `$l` on to a `list<int>`
       parameter is `argument.type`.
+    - An offset write keeps only the members that can take it (a scalar
+      other than `null`, `false` and `''` throws): after `$r['bsw'] = 1` on
+      `array<string>|true`, `$r` still has `true` today, so
+      `array_key_exists($f, $r)` is `argument.type` (the rules oracle's
+      `bug-4708.php`).
     - Narrowing an offset narrows its container
       (`specifyExpressionTypeInPlace`): the container gains
       `HasOffsetValue` for a constant key and becomes offset-accessible
@@ -2969,6 +3108,8 @@ building on the previous one:
       `$key === 'classmap'` leaves `$value` as the union and `$data[$key]`
       as `mixed` today, so `implode(', ', $data[$key])` is `argument.type`
       (the rules oracle's `bug-6000.php`, `bug-8467a.php`);
+    - the key variable over a constant array is the union of its keys:
+      over `['ENABLED' => 1, 'DISABLED' => 2]`, `$key` is `string` today;
     - `foreach (array_keys($a) as $k)` knows `$a[$k]`;
     - destructuring a tagged union of shapes adds cross-variable
       conditional holders;
@@ -3010,7 +3151,10 @@ building on the previous one:
       the previous case's fall-through;
     - after a terminating case, later cases and the post-switch scope see
       the subject with that case excluded: after `case 1: return;`, `$k`
-      is `int` today;
+      is `int` today; in `switch (true)` the case condition's falsey
+      narrowing applies instead, so after `case $v === null: throw …;`
+      `default` sees `$v` as `string|null` today (the rules oracle's
+      `call-methods.php:1106`);
     - `default` excludes the handled cases, and a switch without one
       whose cases leave the subject `never` has no fall-through exit: a
       variable every case assigns is defined after it (`$method` after a
@@ -3033,10 +3177,20 @@ building on the previous one:
     `amphp/http-client/src/Response.php:218`. Each arm's condition is
     evaluated on the scope the earlier arms' falsey narrowing leaves, so a
     repeated condition is `match.alwaysFalse`: `match ($i) { 1 => 'a', 1 =>
-    'b', default => 'c' }` isn't reported today.
+    'b', default => 'c' }` isn't reported today. `default` sees the subject
+    with every arm excluded: in `match ($this) { self::TWO => …, default =>
+    $this->requireOne($this) }` on a two-case enum, `$this` is the whole
+    enum today where it is `E::ONE` (the rules oracle's
+    `call-method-in-enum.php`).
   - **Try/catch/finally** follows `TryCatchHandler`:
     - a catch is entered from the merge of the throw points it catches;
-    - its variable is the catch type minus the earlier catches;
+    - its variable is the catch type minus the earlier catches, and an
+      interface that doesn't extend `Throwable` is intersected with it:
+      `catch (SomeInterface $e)` gives `SomeInterface&Throwable`. Today
+      `$e` is `SomeInterface`, so passing it to a `Throwable` parameter is
+      `argument.type`, and the catch is `catch.notThrowable`, which only a
+      class that can't be `Throwable` is (the rules oracle's
+      `accept-throwable.php`);
     - the finally scope merges the try end, the catch ends, their exit
       points and the remaining throw points, so a variable the try assigns
       before any throw point is defined there: `try { $bar = 1; } finally
@@ -3080,7 +3234,11 @@ building on the previous one:
       `if.alwaysFalse` (8 corpus findings). The deviation: inside the body
       it is the union of its type at creation and every value the
       enclosing function or its closures assign to it (today `null|never`,
-      and unreported);
+      and unreported). A later argument of the call the closure is passed
+      to reads the variable before the closure can run:
+      `$this->foo(function () use (&$x): void { $x = 42; }, $x)` after
+      `$x = 'hello'` passes `'hello'|42` to a `string` parameter today (the
+      rules oracle's `discussion-14038.php`);
     - a closure with by-reference uses converges like a loop; any other
       closure's body is entered once, from its declared parameter types.
       Today a closure whose body returns after `if (!$node instanceof
@@ -3217,6 +3375,14 @@ rules-oracle findings).
   - `array_combine([true, 'red', 'yellow'], …)` has the keys `0`, `1`, `2`,
     where PHP gives `1`, `'red'`, `'yellow'`;
   - `array_intersect_key($a, [])` is `$a` instead of `array{}`;
+  - `array_rand($a, $n)` is `int` instead of `int<0, max>|list<int<0,
+    max>>` (a list's keys; a list of them for a count other than 1), so
+    `array_keys()` of the result is `argument.type` (the rules oracle's
+    `bug-9803.php`);
+  - `array_map($cb, $l)` with a `callable(V): M` callback over `list<V>` is
+    `array` instead of `list<M>`, so `new self(array_map($callback,
+    $this->items))` into a `list<TValue>` parameter is `argument.type`
+    (the rules oracle's `bug-10732.php`);
   - `array_slice($nonEmptyList, 1)` is `non-empty-list` where a
     one-element list slices to `[]` (nsrt `bug-10721.php`);
   - `array_change_key_case` of a shape keeps its keys:
@@ -3239,6 +3405,16 @@ rules-oracle findings).
     (`never`), so the code after it is reachable; before PHP 8.0 a level
     other than `E_USER_*` returns `false` (nsrt `trigger-error-php8.php`,
     `trigger-error-php7.php`);
+  - `strtr()` of literals folds to the result, and of a non-empty string
+    with a pair array is non-empty: `strtr('change {me}', ['{me}' =>
+    'me'])` is `string` today, so passing it to a `non-empty-string`
+    parameter is `argument.type` (the rules oracle's `bug-13708.php`);
+  - `strtolower`, `strtoupper`, `ucfirst` and the other case functions fold
+    each member of a constant-string union: `strtolower($u)` on `'A'|'B'`
+    is `non-falsy-lowercase-string` today where it is `'a'|'b'`, so passing
+    `strtolower($key)` to an `'enabled'|'disabled'` parameter is
+    `argument.type` (the rules oracle's `bug-6987.php`, with the foreach
+    key above);
   - `mb_strtolower`, `mb_strtoupper` and `mb_convert_case` fold only ASCII in
     a literal: `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` and
     `mb_convert_case('Česká republika', MB_CASE_UPPER)` is
@@ -3258,9 +3434,12 @@ rules-oracle findings).
     and `is_subclass_of($c, A::class)` on a string don't give
     `class-string`/`class-string<A>`, `array_search($v, $a, true) !== false`
     doesn't make `$a` non-empty, and `ReflectionClass::isSubclassOf(A::class)`
-    leaves `ReflectionClass<A|object>`. `in_array`, `is_a` on an object,
-    `str_contains`, `count`, `defined`/`define` and the `is_*` family already
-    match.
+    leaves `ReflectionClass<A|object>`. `count($a)` compared by `===`, `==`
+    or `!==` doesn't make `$a` non-empty (`count($a) === 1`, `!== 0`, and
+    `match (count($a))`'s arms; `>` and `>=` already do), so `reset($a)` in
+    the `1` arm is `string|false` (the rules oracle's `bug-10974.php`).
+    `in_array`, `is_a` on an object, `str_contains`, `defined`/`define` and
+    the `is_*` family already match.
 
   Then the functions `gates/nsrt/owners.toml` assigns to E2 (3,399 nsrt
   mismatches on calls to functions PHPStan types through an extension),
