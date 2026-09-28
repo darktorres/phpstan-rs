@@ -141,10 +141,18 @@ Each fix needs a fixture.
   (`offsets.rs`) handles a missing offset like a dynamic one. An unsealed
   shape's next key isn't known, and stays the widened form.
 
+- [ ] **P4. Removing an enum case doesn't enumerate the rest.** After
+  `if ($x === Suit::Hearts) { return; }`, `$x: Suit` stays `Suit` where it
+  is `Suit::Clubs|Suit::Spades`. Removing a case (and `!==`, `match` arms,
+  `instanceof`) from an enum's object type expands the enum to its cases
+  first, as PHPStan's `EnumCaseObjectType` subtraction does.
+
 ## Review 2: structure, types crate
 
 - [ ] **T1. One absorption rule for unions.** `union_types_impl` in
-  `crates/types/src/union.rs` is a set of special cases:
+  `crates/types/src/union.rs` is a set of special cases (so `@param
+  Suit::Hearts|Suit` stays `Suit::Hearts|Suit`, the case not absorbed into
+  its enum):
   - `true|false` becomes `bool`;
   - a literal is absorbed into its base type;
   - the empty shape is absorbed into an array;
@@ -290,8 +298,8 @@ through `check-project`.
   Audit every i64 operation in `arithmetic.rs` and `transform.rs` (negation,
   remainder, `MIN / -1`, `m - 1` at `MIN`); an overflowing result is a
   float, as PHP makes it. (`d0d331dd`, `b62a1131`, `fd5c800e`)
-- [ ] **F22. `=== SomeEnum::Case` against an interface is "always
-  false".** With `Suit implements HasColor`, `$x === Suit::Hearts` for `$x:
+- [x] **F22. `=== SomeEnum::Case` against an interface is "always
+  false".** (`d816c5f7`) With `Suit implements HasColor`, `$x === Suit::Hearts` for `$x:
   HasColor`, `UnitEnum` or `HasColor|int` reports `identical.alwaysFalse`.
   The `(Object, EnumCase)` arm in `relation/super_type.rs` calls
   `object_super_type_of`, which only answers the not-a-subclass cases (it
