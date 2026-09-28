@@ -2733,6 +2733,15 @@ Fixes, each its own behaviour commit:
   `a_bare_top_level_append_contributes_nothing` flips); expression typing
   keeps unkeyed array items, resolves call returns (templates, `static`,
   dynamic return types) and binds `self::`;
+- a global's summary holds every value it can have when a function reads it:
+  `null` too, since a function can run before the top-level assignment (`f(); $g
+  = 'foo'; f();` reads `null`, then `'foo'`), and `mixed` once a write the fold
+  can't see may reach the name: a `$GLOBALS` write with a key that isn't
+  constant, `extract()`, `parse_str()` without a result argument, a variable
+  variable or `global ${…}` at file scope, or an include the resolver can't
+  follow. `global $global;` after a file-scope `$global = "foo"` is `'foo'`
+  today (nsrt `get-defined-vars.php:20`, where PHPStan has `mixed`), and
+  `$GLOBALS['g'] = 42` elsewhere doesn't widen it;
 - purity: shell-exec and `throw` expressions are impure, a class-constant
   read is pure, calls and `new` resolve through parse-time names, and
   method dependencies follow inheritance. A static call's purity is its
@@ -6782,14 +6791,14 @@ right about what reaches it: Appendix H's `float-literal` (7, `abs.php`),
 (`filter-var.php`); D3's nested-write (2, `bug-5316.php`), first-class callable
 (`first-class-callables.php`) and `gettype()` comparison (`bug-9404.php`) items;
 E2's spread-argument item (2, `array-intersect-key.php`); Appendix I's
-`constant-condition-certainty` (`get-defined-vars.php`); and one no item
-describes, a D3 item: `global $global;` in a function binds `mixed`, since the
-file-scope assignment says nothing of the global when the function runs (`'foo'`
-today, `get-defined-vars.php`). Three are phpstan-rs right, approved deviations:
-`vsprintf('foo', [])` is always `'foo'`, so its `non-falsy-string` stands where
-PHPStan has `string` (`non-falsy-string.php`); `array_flip()` of an array
-holding `'foo' => 17` and `'bar' => 17` is `array<int, string>` where PHPStan
-has `*NEVER*`, PHP returning `[17 => 'bar']` (`array-flip.php:93`); and
+`constant-condition-certainty` (`get-defined-vars.php`); and C9's
+global-variable item: `global $global;` in a function is `'foo'` from a
+file-scope assignment, where the function can run before it or after a
+`$GLOBALS` write (`get-defined-vars.php`). Three are phpstan-rs right, approved
+deviations: `vsprintf('foo', [])` is always `'foo'`, so its `non-falsy-string`
+stands where PHPStan has `string` (`non-falsy-string.php`); `array_flip()` of an
+array holding `'foo' => 17` and `'bar' => 17` is `array<int, string>` where
+PHPStan has `*NEVER*`, PHP returning `[17 => 'bar']` (`array-flip.php:93`); and
 `get_class($mixed)` is `string` where PHPStan adds `false`, which PHP 8 never
 returns (`generics.php:1344`). The other 3,022, over 93 extensions, are the
 extensions' own, each read against its fixture and, where the two tools
