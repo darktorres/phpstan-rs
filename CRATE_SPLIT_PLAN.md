@@ -4511,10 +4511,10 @@ fixture:
     `$s['x']` on a `string` isn't reported today, nor `$d['priority']` on
     `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
   - the class-access checks cover every receiver and target, each a
-    runtime `Error` unreported today: `$i::X` and `$i::$y` on an `int`
-    (and, possibly, on `stdClass|null`, `string|null` or `int|string`:
-    `$stdOrNull::class`, `$stringOrInt::FOO`)
-    (`classConstant.nonObject`, `staticProperty.nonObject`), `T::C` on a
+    runtime `Error` unreported today: `$i::X` and `$i::$y` on an `int`,
+    and possibly on `stdClass|null`, `string|null` or `int|string`
+    (`$stdOrNull::class`, `$stringOrInt::FOO`; `classConstant.nonObject`,
+    `staticProperty.nonObject`, 7 each), `T::C` on a
     trait (`classConstant.onTrait`), and a static property read through
     `->` (`$p->st`, `staticProperty.nonStaticAccess`, the rules oracle's
     7); `$m instanceof T` with a trait is always false (`instanceof.trait`);
