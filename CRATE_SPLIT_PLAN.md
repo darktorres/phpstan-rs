@@ -2858,6 +2858,15 @@ deleted; the file-size gate.
   property without a default starts as `null` whatever its `@var`, so
   `??` and `isset()` on it stay unreported where PHPStan reports "not
   nullable" (approved; `bug-3636.php:13`, `bug-14393.php:36`).
+  `nullCoalesce.expr` covers any other left side: `rand() ?? 0`, `(new
+  Foo()) ?? 'foo'` and `array_shift()` of a non-empty list are "not
+  nullable", `null ?? 'foo'` "always null" (the rules oracle's 8,
+  `null-coalesce.php`, `bug-13438*.php`); and `nullCoalesce.initializedProperty`
+  a non-nullable property the constructor always assigns ("not nullable
+  nor uninitialized"), unless custom serialization (`__unserialize()`,
+  `__wakeup()`) may skip the constructor (the rules oracle's 6,
+  `property-initialization-custom-serialization.php`,
+  `isset-after-remembered-constructor.php`); both unreported today.
   `nullCoalesce.offset` covers a literal or `null` container (`[0][0] ??
   'ok'` always exists, `(null)[0] ?? 'ok'` doesn't; `offset-access-legal.php`),
   unreported today. The
