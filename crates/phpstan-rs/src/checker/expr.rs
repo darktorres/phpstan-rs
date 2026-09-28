@@ -28,10 +28,7 @@ mod probe_checks;
 pub(crate) mod ranges;
 
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
-use types::arithmetic::{
-    checked_bound_op, compare_range_outcome, div_int_range, loose_compare_literals, mod_int_range,
-    mul_int_range, numeric_comparison_bounds, pow_int_range, shift_int_range, sub_int_range_full,
-};
+use types::arithmetic::{compare_range_outcome, loose_compare_literals, numeric_comparison_bounds};
 use types::union_types;
 
 // `checker::throws::dynamic` reuses this bitwise-or-flag-chain scan for
@@ -5144,15 +5141,15 @@ impl<'a> Checker<'a> {
             // the right side is ever actually reached in.
             BinOp::And | BinOp::LogicalAnd => {
                 let l_ty = self.infer_expr(l, locals);
-                if matches!(l_ty, Type::False) {
+                if l_ty.is_false().yes() {
                     return Type::bool_literal(false);
                 }
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
                 let r_ty = self.infer_expr(r, &narrowed);
-                if matches!(r_ty, Type::False) {
+                if r_ty.is_false().yes() {
                     Type::bool_literal(false)
-                } else if matches!(l_ty, Type::True) && matches!(r_ty, Type::True) {
+                } else if l_ty.is_true().yes() && r_ty.is_true().yes() {
                     Type::bool_literal(true)
                 } else {
                     Type::bool()
@@ -5160,15 +5157,15 @@ impl<'a> Checker<'a> {
             }
             BinOp::Or | BinOp::LogicalOr => {
                 let l_ty = self.infer_expr(l, locals);
-                if matches!(l_ty, Type::True) {
+                if l_ty.is_true().yes() {
                     return Type::bool_literal(true);
                 }
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
                 let r_ty = self.infer_expr(r, &narrowed);
-                if matches!(r_ty, Type::True) {
+                if r_ty.is_true().yes() {
                     Type::bool_literal(true)
-                } else if matches!(l_ty, Type::False) && matches!(r_ty, Type::False) {
+                } else if l_ty.is_false().yes() && r_ty.is_false().yes() {
                     Type::bool_literal(false)
                 } else {
                     Type::bool()
@@ -5178,11 +5175,14 @@ impl<'a> Checker<'a> {
             // inferred against the same, un-narrowed scope - confirmed
             // against `BinaryOpHandler::resolveType`'s own
             // `BinaryOp\LogicalXor` arm.
-            BinOp::LogicalXor => match (self.infer_expr(l, locals), self.infer_expr(r, locals)) {
-                (Type::True, Type::True) | (Type::False, Type::False) => Type::bool_literal(false),
-                (Type::True, Type::False) | (Type::False, Type::True) => Type::bool_literal(true),
-                _ => Type::bool(),
-            },
+            BinOp::LogicalXor => {
+                let l_ty = self.infer_expr(l, locals).to_boolean();
+                let r_ty = self.infer_expr(r, locals).to_boolean();
+                match (l_ty.bool_literal_value(), r_ty.bool_literal_value()) {
+                    (Some(a), Some(b)) => Type::bool_literal(a != b),
+                    _ => Type::bool(),
+                }
+            }
             BinOp::Identical | BinOp::NotIdentical => Type::bool(),
             // Mirrors real PHPStan's `ConstantLooseComparisonRule` -
             // `loose_compare_literals`'s doc comment has the full
@@ -5249,266 +5249,24 @@ impl<'a> Checker<'a> {
             // `binary_operator_overload_result` produces the identical
             // `IntRange(-1, 1)` either way, so this also refines how
             // precisely non-overloaded spaceship is typed.
-            BinOp::Spaceship => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                self.binary_operator_overload_result(op, &lt, &rt)
-                    .unwrap_or(Type::int())
-            }
-            BinOp::Add => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
-                    return ty;
-                }
-                // `+` on two arrays is PHP's array-union operator, not
-                // arithmetic - it keeps every key from the left operand,
-                // filling in any key only present on the right. Computes
-                // the key type as the union of both operands' iterable
-                // key types (collapsing back to the shared type when they
-                // already agree, mirroring real PHPStan's
-                // `InitializerExprTypeResolver::getPlusType`'s general
-                // non-constant-array case) and the value type as the
-                // union of both operands' iterable value types, via the
-                // same `array_key_type`/`array_element_type` helpers this
-                // file's other array-consuming call sites use.
-                // Deliberately doesn't port real PHPStan's constant-array
-                // branch (a full `ConstantArrayTypeBuilder`-style
-                // per-offset merge that preserves an exact literal
-                // `array{...}` shape when both operands are literal
-                // shapes) - a precision gap for `array{a: int} +
-                // array{b: string}`-shaped operands, not a soundness gap:
-                // the result is still a real, provably-correct supertype.
-                // `Type::is_array` sees through a `list<T>`/
-                // `non-empty-array<T>`-typed operand too - without it, a
-                // `list<T> + list<T>` would fall through to numeric
-                // addition instead of array union.
-                // One array operand is enough: any other operand than an
-                // array is a `TypeError`, so the value is still an array.
-                if lt.is_array().yes() || rt.is_array().yes() {
-                    // A non-array operand's keys and values are unknown.
-                    let both_arrays = lt.is_array().yes() && rt.is_array().yes();
-                    let key_of = |t: &Type| both_arrays.then(|| t.array_key_type()).flatten();
-                    let key_ty = match (key_of(&lt), key_of(&rt)) {
-                        _ if !both_arrays => Type::benevolent_array_key(),
-                        (Some(lk), Some(rk)) if lk == rk => lk,
-                        (Some(lk), Some(rk)) => union_types(lk, rk),
-                        (Some(k), None) | (None, Some(k)) => k,
-                        // Real PHPStan's own `+` implementation
-                        // (`InitializerExprTypeResolver::getPlusType`)
-                        // falls back to a real `BenevolentUnionType`
-                        // here too, not a plain strict union - confirmed
-                        // reading it directly.
-                        (None, None) => Type::benevolent_array_key(),
-                    };
-                    let val_ty = union_types(
-                        lt.array_value_type().unwrap_or(Type::mixed()),
-                        rt.array_value_type().unwrap_or(Type::mixed()),
-                    );
-                    let mut result = Type::array(key_ty, val_ty);
-                    let has_accessory = |ty: &Type, kind: AccessoryKind| matches!(ty, Type::Intersection(members) if members.contains(&Type::Accessory(kind)));
-                    let mut accessories = Vec::new();
-                    if has_accessory(&lt, AccessoryKind::ArrayList)
-                        && has_accessory(&rt, AccessoryKind::ArrayList)
-                    {
-                        accessories.push(Type::accessory(AccessoryKind::ArrayList));
-                    }
-                    if has_accessory(&lt, AccessoryKind::NonEmptyArray)
-                        || has_accessory(&rt, AccessoryKind::NonEmptyArray)
-                    {
-                        accessories.push(Type::accessory(AccessoryKind::NonEmptyArray));
-                    }
-                    if !accessories.is_empty() {
-                        let mut members = vec![result];
-                        members.extend(accessories);
-                        result = Type::intersection_of(members);
-                    }
-                    return result;
-                }
-                if lt == Type::Float || rt == Type::Float {
-                    return Type::float();
-                }
-                // Real, if narrow, `int<min,max>` arithmetic, mirroring
-                // real PHPStan's `InitializerExprTypeResolver::
-                // getPlusType`/`integerRangeMath`'s `BinaryOp\Plus` arm:
-                // an unbounded end propagates as unbounded; a bounded one
-                // shifts by the same amount. Deliberately narrower than
-                // real PHPStan's full range-arithmetic surface (`Mul`/
-                // `Div`'s negative/positive-interval splitting isn't
-                // replicated) - falls through to the plain `Int` answer
-                // whenever either side isn't range-representable.
-                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (lt.int_range_bounds(), rt.int_range_bounds())
-                {
-                    // `checked_add` via `checked_bound_op`, not plain `+`:
-                    // real PHP silently promotes an overflowing int
-                    // addition to `float` - plain `i64::+` here would
-                    // instead panic/wrap on adversarial input like
-                    // `int<1, PHP_INT_MAX> + int<1, 10>`.
-                    let (min, min_overflow) = checked_bound_op(l_min, r_min, i64::checked_add);
-                    let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
-                    let result = Type::int_interval(min, max);
-                    return if min_overflow || max_overflow {
-                        union_types(result, Type::float())
-                    } else {
-                        result
-                    };
-                }
-                Type::int()
-            }
-            BinOp::Sub => {
+            BinOp::Spaceship
+            | BinOp::Add
+            | BinOp::Sub
+            | BinOp::Mul
+            | BinOp::Pow
+            | BinOp::BitAnd
+            | BinOp::BitOr
+            | BinOp::BitXor
+            | BinOp::Shl
+            | BinOp::Shr
+            | BinOp::Mod
+            | BinOp::Div => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
                 if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
                     return ty;
                 }
-                if lt == Type::Float || rt == Type::Float {
-                    return Type::float();
-                }
-                // A *constant* right operand (`$x - 1`) shifts both bounds
-                // by the same amount with no swap ever needed - kept as
-                // its own fast path (matching this project's pre-existing
-                // shape) rather than routed through `sub_int_range_full`
-                // below, which computes the identical answer for this
-                // case but far less directly.
-                if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
-                    (lt.int_range_bounds(), rt.int_range_bounds())
-                    && c == rc
-                {
-                    // `checked_sub` via `checked_bound_op` - see the `Add`
-                    // arm's own doc comment just above.
-                    let (min, min_overflow) = checked_bound_op(l_min, Some(c), i64::checked_sub);
-                    let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
-                    let result = Type::int_interval(min, max);
-                    return if min_overflow || max_overflow {
-                        union_types(result, Type::float())
-                    } else {
-                        result
-                    };
-                }
-                // The full range-minus-range case (`$x - $y`, both sides
-                // genuinely range-representable, right side not a single
-                // constant) - `sub_int_range_full`'s own doc comment has
-                // the transcription details.
-                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (lt.int_range_bounds(), rt.int_range_bounds())
-                {
-                    return sub_int_range_full(l_min, l_max, r_min, r_max);
-                }
-                Type::int()
-            }
-            BinOp::Mul => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
-                    return ty;
-                }
-                if lt == Type::Float || rt == Type::Float {
-                    return Type::float();
-                }
-                // Real, narrow range-arithmetic, the `Add`/`Sub` arms'
-                // own family - `mul_int_range`'s own doc comment has the
-                // transcription details. Falls through to plain `Int`
-                // whenever either side isn't range-representable at all.
-                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (lt.int_range_bounds(), rt.int_range_bounds())
-                {
-                    return mul_int_range(l_min, l_max, r_min, r_max);
-                }
-                Type::int()
-            }
-            BinOp::Pow => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
-                    return ty;
-                }
-                if lt == Type::Float || rt == Type::Float {
-                    Type::float()
-                } else if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (lt.int_range_bounds(), rt.int_range_bounds())
-                {
-                    pow_int_range(l_min, l_max, r_min, r_max)
-                } else {
-                    Type::int()
-                }
-            }
-            // `%` and the bitwise/shift operators always cast both
-            // operands to int before operating, regardless of whether
-            // either side was a float - unlike Add/Sub/Mul/Pow, there is
-            // no float-promotion rule for these.
-            //
-            // Except when GMP (all five) or `BcMath\Number` (`%` only -
-            // it doesn't overload the bitwise/shift operators at all, per
-            // `binary_operator_overload_result`'s own gate) is genuinely
-            // involved, which yields the object type back instead of a
-            // plain `int`.
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
-                    return ty;
-                }
-                fold_bitwise_int_literals(op, &lt, &rt).unwrap_or(Type::int())
-            }
-            BinOp::Shl | BinOp::Shr => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
-                    return ty;
-                }
-                // `shift_int_range`'s own doc comment has the transcription
-                // details - only a single constant right operand (`r_min ==
-                // r_max`) is range-preserving at all, matching real
-                // PHPStan's identical restriction.
-                if let (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) =
-                    (lt.int_range_bounds(), rt.int_range_bounds())
-                    && amount == r_max
-                {
-                    return shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl));
-                }
-                Type::int()
-            }
-            BinOp::Mod => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
-                    return ty;
-                }
-                // Real, narrow range-arithmetic, the `Add`/`Sub`/`Mul`
-                // family - `mod_int_range`'s own doc comment has the
-                // transcription details. Falls through to plain `Int`
-                // whenever either side isn't range-representable at all.
-                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (lt.int_range_bounds(), rt.int_range_bounds())
-                {
-                    mod_int_range(l_min, l_max, r_min, r_max)
-                } else {
-                    Type::int()
-                }
-            }
-            // `/` gives `int|float` unconditionally whenever it can't
-            // prove `float` is involved, even for two fully unknown
-            // operands (not only when both are provably `int`), and
-            // `float` whenever either operand is - the same
-            // Add/Sub/Mul/Pow float-promotion shape above, with
-            // `Union([Int, Float])` in place of a bare `Int` as the
-            // "float not proven" answer.
-            BinOp::Div => {
-                let lt = self.infer_expr(l, locals);
-                let rt = self.infer_expr(r, locals);
-                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
-                    return ty;
-                }
-                if lt == Type::Float || rt == Type::Float {
-                    Type::float()
-                } else if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                    (lt.int_range_bounds(), rt.int_range_bounds())
-                {
-                    div_int_range(l_min, l_max, r_min, r_max)
-                } else {
-                    Type::union_of(vec![Type::int(), Type::float()])
-                }
+                types::arithmetic::binary_operation_type(op, &lt, &rt)
             }
             BinOp::Coalesce => {
                 let r_ty = self.infer_expr(r, locals);
@@ -6549,49 +6307,6 @@ fn closure_inferred_return_type(
         .into_iter()
         .reduce(union_types)
         .unwrap_or(Type::void())
-}
-
-/// A bitwise `&`/`|`/`^` over int literals, folded to its exact values
-/// (`PREG_SPLIT_NO_EMPTY | PREG_SPLIT_DELIM_CAPTURE` is `3`), at most 64
-/// combinations. `$x & k` with a non-negative literal `k` is `int<0, k>`
-/// whatever `$x` is.
-fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
-    fn literals(ty: &Type) -> Option<Vec<i64>> {
-        match ty {
-            Type::IntLiteral(n) => Some(vec![*n]),
-            Type::True => Some(vec![1]),
-            Type::False | Type::Null => Some(vec![0]),
-            Type::Union(members) => members.iter().try_fold(Vec::new(), |mut acc, m| {
-                acc.extend(literals(m)?);
-                Some(acc)
-            }),
-            _ => None,
-        }
-    }
-    let apply = |a: i64, b: i64| match op {
-        BinOp::BitAnd => a & b,
-        BinOp::BitOr => a | b,
-        _ => a ^ b,
-    };
-    match (literals(l), literals(r)) {
-        (Some(ls), Some(rs)) if ls.len() * rs.len() <= 64 => {
-            let mut values: Vec<i64> = ls
-                .iter()
-                .flat_map(|a| rs.iter().map(move |b| apply(*a, *b)))
-                .collect();
-            values.sort_unstable();
-            values.dedup();
-            let mut members = values.into_iter().map(Type::int_literal);
-            let first = members.next()?;
-            Some(members.fold(first, union_types))
-        }
-        (_, Some(ks)) | (Some(ks), _)
-            if matches!(op, BinOp::BitAnd) && ks.len() == 1 && ks[0] >= 0 =>
-        {
-            Some(Type::int_range(Some(0), Some(ks[0])))
-        }
-        _ => None,
-    }
 }
 
 /// `static` as `class`, everywhere in `ty`.

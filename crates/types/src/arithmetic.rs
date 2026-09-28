@@ -573,3 +573,180 @@ pub fn negate_numeric_literal(ty: Type) -> Type {
         other => other,
     }
 }
+
+/// The result of `l op r` for an arithmetic, bitwise or shift operator
+/// or `<=>` over operands of these types, operator overloading aside
+/// (PHPStan's `InitializerExprTypeResolver`).
+pub fn binary_operation_type(op: &BinOp, lt: &Type, rt: &Type) -> Type {
+    let either_float = lt.is_float().yes() || rt.is_float().yes();
+    match op {
+        BinOp::Spaceship => Type::IntRange(Some(-1), Some(1)),
+        BinOp::Add => {
+            if lt.is_array().yes() || rt.is_array().yes() {
+                return array_union_type(lt, rt);
+            }
+            if either_float {
+                return Type::Float;
+            }
+            if let (Some((l_min, l_max)), Some((r_min, r_max))) =
+                (lt.int_range_bounds(), rt.int_range_bounds())
+            {
+                let (min, min_overflow) = checked_bound_op(l_min, r_min, i64::checked_add);
+                let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
+                let result = Type::int_interval(min, max);
+                return if min_overflow || max_overflow {
+                    union_types(result, Type::Float)
+                } else {
+                    result
+                };
+            }
+            Type::Int
+        }
+        BinOp::Sub => {
+            if either_float {
+                return Type::Float;
+            }
+            if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
+                (lt.int_range_bounds(), rt.int_range_bounds())
+                && c == rc
+            {
+                let (min, min_overflow) = checked_bound_op(l_min, Some(c), i64::checked_sub);
+                let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
+                let result = Type::int_interval(min, max);
+                return if min_overflow || max_overflow {
+                    union_types(result, Type::Float)
+                } else {
+                    result
+                };
+            }
+            match (lt.int_range_bounds(), rt.int_range_bounds()) {
+                (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                    sub_int_range_full(l_min, l_max, r_min, r_max)
+                }
+                _ => Type::Int,
+            }
+        }
+        BinOp::Mul => {
+            if either_float {
+                return Type::Float;
+            }
+            match (lt.int_range_bounds(), rt.int_range_bounds()) {
+                (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                    mul_int_range(l_min, l_max, r_min, r_max)
+                }
+                _ => Type::Int,
+            }
+        }
+        BinOp::Pow => {
+            if either_float {
+                return Type::Float;
+            }
+            match (lt.int_range_bounds(), rt.int_range_bounds()) {
+                (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                    pow_int_range(l_min, l_max, r_min, r_max)
+                }
+                _ => Type::Int,
+            }
+        }
+        BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+            fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type::Int)
+        }
+        BinOp::Shl | BinOp::Shr => match (lt.int_range_bounds(), rt.int_range_bounds()) {
+            (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) if amount == r_max => {
+                shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl))
+            }
+            _ => Type::Int,
+        },
+        BinOp::Mod => match (lt.int_range_bounds(), rt.int_range_bounds()) {
+            (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                mod_int_range(l_min, l_max, r_min, r_max)
+            }
+            _ => Type::Int,
+        },
+        BinOp::Div => {
+            if either_float {
+                return Type::Float;
+            }
+            match (lt.int_range_bounds(), rt.int_range_bounds()) {
+                (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                    div_int_range(l_min, l_max, r_min, r_max)
+                }
+                _ => Type::Union(vec![Type::Int, Type::Float]),
+            }
+        }
+        _ => Type::Mixed(false),
+    }
+}
+
+/// `$a + $b` over arrays: the keys and values of both, a list when both
+/// are, non-empty when either is.
+fn array_union_type(lt: &Type, rt: &Type) -> Type {
+    let both_arrays = lt.is_array().yes() && rt.is_array().yes();
+    let key_of = |t: &Type| both_arrays.then(|| t.array_key_type()).flatten();
+    let key_ty = match (key_of(lt), key_of(rt)) {
+        _ if !both_arrays => Type::benevolent_array_key(),
+        (Some(lk), Some(rk)) if lk == rk => lk,
+        (Some(lk), Some(rk)) => union_types(lk, rk),
+        (Some(k), None) | (None, Some(k)) => k,
+        (None, None) => Type::benevolent_array_key(),
+    };
+    let val_ty = union_types(
+        lt.array_value_type().unwrap_or(Type::Mixed(false)),
+        rt.array_value_type().unwrap_or(Type::Mixed(false)),
+    );
+    let mut members = vec![Type::Array(Box::new(key_ty), Box::new(val_ty))];
+    if lt.is_list().yes() && rt.is_list().yes() {
+        members.push(Type::Accessory(crate::AccessoryKind::ArrayList));
+    }
+    if lt.is_non_empty_array().yes() || rt.is_non_empty_array().yes() {
+        members.push(Type::Accessory(crate::AccessoryKind::NonEmptyArray));
+    }
+    if members.len() == 1 {
+        members.pop().expect("one member")
+    } else {
+        Type::Intersection(members)
+    }
+}
+
+/// A bitwise `&`/`|`/`^` over int literals, folded to its exact values
+/// (`PREG_SPLIT_NO_EMPTY | PREG_SPLIT_DELIM_CAPTURE` is `3`), at most 64
+/// combinations. `$x & k` with a non-negative literal `k` is `int<0, k>`
+/// whatever `$x` is.
+fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
+    fn literals(ty: &Type) -> Option<Vec<i64>> {
+        match ty {
+            Type::IntLiteral(n) => Some(vec![*n]),
+            Type::True => Some(vec![1]),
+            Type::False | Type::Null => Some(vec![0]),
+            Type::Union(members) => members.iter().try_fold(Vec::new(), |mut acc, m| {
+                acc.extend(literals(m)?);
+                Some(acc)
+            }),
+            _ => None,
+        }
+    }
+    let apply = |a: i64, b: i64| match op {
+        BinOp::BitAnd => a & b,
+        BinOp::BitOr => a | b,
+        _ => a ^ b,
+    };
+    match (literals(l), literals(r)) {
+        (Some(ls), Some(rs)) if ls.len() * rs.len() <= 64 => {
+            let mut values: Vec<i64> = ls
+                .iter()
+                .flat_map(|a| rs.iter().map(move |b| apply(*a, *b)))
+                .collect();
+            values.sort_unstable();
+            values.dedup();
+            let mut members = values.into_iter().map(Type::IntLiteral);
+            let first = members.next()?;
+            Some(members.fold(first, union_types))
+        }
+        (_, Some(ks)) | (Some(ks), _)
+            if matches!(op, BinOp::BitAnd) && ks.len() == 1 && ks[0] >= 0 =>
+        {
+            Some(Type::int_range(Some(0), Some(ks[0])))
+        }
+        _ => None,
+    }
+}

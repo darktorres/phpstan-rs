@@ -8,6 +8,6 @@
                 // loss this test pins) - but the *value* union still keeps
                 // each side's own literal type rather than widening it,
                 // since nothing here forces a wider value type.
-                assertType("array<string, 1|'x'>", $a + $b);
+                assertType("non-empty-array<string, 1|'x'>", $a + $b);
             }
         
