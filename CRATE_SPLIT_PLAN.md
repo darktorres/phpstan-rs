@@ -3455,10 +3455,11 @@ for the analyser.
     (`EnforceEnumMatch`, `ForbidMatchDefaultArmForEnums`); ext-extras and
     `restricted_symbols` cover `ForbidUnusedException`,
     `RequirePreviousExceptionPass` and `EnforceNativeReturnTypehint`
-    (partly) and `ForbidCustomFunctions`. Missing: `BackedEnumGenerics`,
+    (partly) and `ForbidCustomFunctions`, and ext-strict-rules' strict
+    function calls require `iterator_to_array()`'s `$preserve_keys` as
+    `EnforceIteratorToArrayPreserveKeys` does. Missing: `BackedEnumGenerics`,
     `ClassSuffixNaming`,
-    `EnforceClosureParamNativeTypehint`,
-    `EnforceIteratorToArrayPreserveKeys`, `EnforceListReturn`,
+    `EnforceClosureParamNativeTypehint`, `EnforceListReturn`,
     `EnforceReadonlyPublicProperty`, `ForbidArithmeticOperationOnNonNumber`,
     `ForbidCast`, `ForbidCheckedExceptionInCallable`,
     `ForbidCheckedExceptionInYieldingMethod`, `ForbidEnumInFunctionArguments`,
