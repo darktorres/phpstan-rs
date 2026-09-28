@@ -3339,6 +3339,13 @@ deleted; the file-size gate.
     - **`new` into a generic property**: `$this->c = new Coll();` for a
       `@var Coll<int>` property types the `new` as `Coll<int>`
       (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
+    - **`array.duplicateKey`** sees keys as PHP casts them (`false` beside
+      `0`, `'1'` beside `true`), keys after a spread (`['a' => 1, ...$rest,
+      'a' => 2]`, `['a', ...$b, 0 => 'x']`) and a variable key whose
+      constant values collide (`$key` of `'foo'|'bar'` beside `'foo'`);
+      unreported today (the rules oracle's 13 PHPStan-only,
+      `duplicate-keys.php`, `bug-15244.php`, `bug-15247.php`,
+      `bug-15248.php`, `literal-array-key-cast.php`).
     - **Array keys are cast as PHP casts them** on every write, read and
       `unset()`: `true`/`false` to `1`/`0`, a decimal-integer string to an
       `int`, a float truncated, `null` to `''`. After `$a[true] = 'x';
@@ -4429,7 +4436,10 @@ fixture:
     `if.alwaysTrue`, `!$std` on an object is `booleanNot.alwaysFalse`
     (in `if`, `elseif` and `?:`; `boolean-not*.php`, `ternary.php`,
     `elseif-condition.php`), and `!$b` after `if ($b) { return; }` is
-    `booleanNot.alwaysTrue`, all unreported today (the rules oracle's 37
+    `booleanNot.alwaysTrue`, and on the falsy side `if ($zero)`, `if ($i
+    and $zero)`, `if ($a xor $b)` on equal constants and `if
+    ($this->returnsVoid())` are `if.alwaysFalse` (13), all unreported
+    today (the rules oracle's 37
     PHPStan-only `if.alwaysTrue`: `if-condition.php`,
     `if-condition-not-phpdoc.php`, `boolean-logical-*.php`,
     `logical-xor.php`, `foreach.php`, `bug-6211.php`, `bug-8980.php`);
@@ -4800,7 +4810,10 @@ fixture:
     first), a `@var` naming `$this`, and both the parameter and the
     property of a promoted parameter; each is unreported today (a
     property hook's types and a doc block's several `@var` tags already
-    are);
+    are); a known class named with the wrong case is `class.nameCase` at
+    the same sites (`FOO::class`, a native `POST` parameter and return,
+    `@param-out fOO`, `@param-closure-this fOO`, `@phpstan-self-out fOO`,
+    a template bound `baz`; the rules oracle's 13 PHPStan-only);
   - `by-ref parameter's declared type is never narrower than 'foo'`
     (`parameterByRef.tooWide`) becomes PHPStan's
     `TooWideParameterOutTypeCheck`: a union member the function never
