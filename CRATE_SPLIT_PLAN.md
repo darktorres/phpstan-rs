@@ -2976,7 +2976,15 @@ deleted; the file-size gate.
   expression twice. Before the merge, a commit instruments both paths to
   record every node where they disagree, over the fixtures and the
   Piwigo corpus. The inventory is checked in. The merge then lands as one
-  approved delta per class of disagreement, each with a fixture.
+  approved delta per class of disagreement, each with a fixture. Known
+  before it: `infer_expr` has no arm for `instanceof`, a compound
+  assignment, a dynamic variable, property fetch or method call, or
+  `list()`, and gives `mixed` for a short ternary, so `return $o
+  instanceof X` is `return.type` "got mixed", `match ($a instanceof B)`
+  isn't exhaustive over `true`/`false`, and `$s ?: ''` on `string|false`
+  is `mixed` (Appendix I's `infer-expr-gaps`: `bug-12827-instanceof.php`,
+  `bug-10214.php`, `bug-6910.php`, `bug-4188.php`, `bug-5164.php`,
+  `bug-9991.php`, `bug-5382.php`).
 - Behaviour commits, each with its fixture, soundness first (a wrong
   type is worse than an imprecise one), then by handler family:
   - **Soundness.** Each is a wrong value, not a lost precision:
@@ -4325,9 +4333,13 @@ the rest), which the gate excludes and lists.
   assigned a string only under `PHP_SAPI === 'cli'` is "never assigned
   null" today (composer/xdebug-handler's `XdebugHandler.php:57`, one of 46
   phpstan-rs-only `property.unusedType` on the corpus oracle's files, and
-  11 of the rules oracle's 16). A default counts as an assignment, a
-  constant-expression one included (`= self::NUMBER_TYPE_OFF`), and an
-  assigned range covers each constant it spans: `@var 0|1|2|3` with `=
+  11 of the rules oracle's 16: `too-wide-property-type.php`,
+  `bug-4526.php`, `bug-4680.php`, `bug-6230.php`). A by-reference get
+  hook (`&get`) lets callers write any type, so the backing property
+  isn't too wide (`return-type-after-finally-property-hooks.php`). A
+  default counts as an assignment, a constant-expression one included
+  (`= self::NUMBER_TYPE_OFF`), and an assigned range covers each constant it
+  spans: `@var 0|1|2|3` with `=
   0` and `$this->c = random_int(0, 3)` is "never assigned 0/1/2/3" today
   (the rules oracle's `bug-4174.php`). A property no code assigns is
   checked too, from its default alone: `private ?string $s = null` read
@@ -4376,7 +4388,14 @@ the rest), which the gate excludes and lists.
   first:
   - `get_parent_class($this)` is `false` in a class with subclasses, so
     `get_parent_class($this) === false` is `identical.alwaysTrue`; PHPStan
-    has `class-string<A>|false` (nsrt `bug-14951.php`);
+    has `class-string<A>|false` (nsrt `bug-14951.php`), and on an
+    interface-typed object it is `false` too, so `if
+    (get_parent_class($object))` is `if.alwaysFalse` (the rules oracle's
+    `bug-4302.php`);
+  - `filter_var()` with a flags argument that isn't constant but may hold
+    `FILTER_NULL_ON_FAILURE` (`$strict ? FILTER_NULL_ON_FAILURE : 0`)
+    returns `bool|null`; it is `bool` today, so the `=== null` check is
+    `identical.alwaysFalse` (the rules oracle's `bug-11485.php`);
   - `array_filter` keeps a shape's keys required: with a callback,
     `array_filter([1, 2, 3], fn ($x) => $x > rand(0, 3))` is
     `array{0: 1, 1: 2, 2: 3}`, and without one `array{a: int}|array{b:
@@ -5554,7 +5573,15 @@ fixture:
     `possiblyImpure.propertyAssignByRef` (`impure-assign-ref.php`); a
     closure passed to a `@param-immediately-invoked-callable` parameter
     (or a maybe-callable one) runs there, so its `exit` is `impure.exit`
-    in the pure caller (`pure-function.php`, `bug13288*`, 3);
+    in the pure caller (`pure-function.php`, `bug13288*`, 3); creating a
+    first-class callable (`$foo->pure(...)`, `pureFunction(...)`) is pure
+    and calling it takes the callee's purity, where today both are
+    `possiblyImpure.*` "unknown" (19 rules-oracle findings,
+    `first-class-callable-pure-function.php`); a string literal argument
+    that names a function (`$this->m('random_int')`) isn't a call
+    (`bug-12119.php`); and `impureMethod.pure` needs the method or its
+    class final, since a child may add the side effect
+    (`FunctionPurityCheck`; `bug-12382.php`, `noop-impure-points.php`);
   - an enum's duplicate case value is found through constant expressions:
     `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
     literal duplicate already is);
@@ -5608,7 +5635,12 @@ fixture:
     unreported on functions and methods, 6) cover closures and arrow
     functions as they do functions and methods, `requiredAfterOptional`
     with the same per-version wording
-    (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`);
+    (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`),
+    and none for an implicitly nullable `int $foo = null`, which is
+    `parameter.requiredAfterOptional` "Deprecated in PHP 8.0" today (the
+    rules oracle's two `required-parameter-after-optional.php` files);
+    an untyped parameter whose `@param` excludes `null` may default to
+    `null` (`incompatible-default-parameter-type-methods.php:54`);
     unreported today (all 25 of the rules oracle's PHPStan-only,
     `required-parameter-after-optional-closures.php`,
     `required-parameter-after-optional-arrow.php`, `callables.php:151`);
@@ -5748,9 +5780,12 @@ fixture:
     a template key `K of int|string` against `(K of int)|string`,
     `bug-7484.php`);
     only `yield from` delegation is checked (28 oracle
-    `generator.valueType` findings); a `yield` under a return type that
-    isn't a generator is `generator.returnType` at each `yield` and `yield
-    from`, as PHPStan reports it, not once on the declaration (the rules
+    `generator.valueType` findings), and a delegated value mismatch is
+    `generator.valueType`, where phpstan-rs reports it as
+    `generator.keyType` today (`yield-from.php:74`); a `yield` under a
+    return type that isn't a generator is `generator.returnType` at each
+    `yield` and `yield from`, as PHPStan reports it, not once on the declaration
+    (the rules
     oracle's 10 PHPStan-only, `yield-in-generator.php`, `returnTypes.php`);
   - a returned value is checked against a template return type:
     `return 5;` under `@template T @param T $x @return T`, and `return new
