@@ -273,7 +273,7 @@ impl<'a> Checker<'a> {
         if !self.settings.strict_rules.check_boolean_conditions {
             return;
         }
-        if ty.is_mixed() || is_definitely_bool(ty) {
+        if ty.is_mixed() || ty.is_bool().yes() {
             return;
         }
         self.report(
@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
         if !self.settings.strict_rules.check_boolean_conditions {
             return;
         }
-        if ty.is_mixed() || is_definitely_bool(ty) {
+        if ty.is_mixed() || ty.is_bool().yes() {
             return;
         }
         self.report(
@@ -478,9 +478,17 @@ impl<'a> Checker<'a> {
         if l_num == r_num {
             return;
         }
-        let invalid = (l_num
-            && (is_possibly_nullable_object(r_ty) || is_possibly_nullable_array(r_ty)))
-            || (r_num && (is_possibly_nullable_object(l_ty) || is_possibly_nullable_array(l_ty)));
+        // An object or array, perhaps `null`, but not only `null`.
+        let nullable_object_or_array = |ty: &Type| {
+            let or_null = |kind: Type| Type::union_of(vec![kind, Type::null()]);
+            !ty.is_null().yes()
+                && (ty.is_within(&or_null(Type::object_without_class())).yes()
+                    || ty
+                        .is_within(&or_null(Type::array(Type::mixed(), Type::mixed())))
+                        .yes())
+        };
+        let invalid =
+            (l_num && nullable_object_or_array(r_ty)) || (r_num && nullable_object_or_array(l_ty));
         if !invalid {
             return;
         }
@@ -495,15 +503,12 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// `~$gmp` is real, valid, GMP-overloaded syntax
-    /// (`GmpUnaryOperatorTypeSpecifyingExtension`'s own operator set
-    /// includes `~`, unlike `BcMath\Number`'s equivalent extension, which
-    /// doesn't overload `~` at all) - the free `is_bitwise_not_operand`
-    /// below has no registry access to special-case it (it unconditionally
-    /// rejects every `Type::Object`), so this thin wrapper adds the one
-    /// exception.
+    /// `~` takes an `int`, a `float` or a `string`, and a `GMP`, which
+    /// overloads it (`BcMath\Number` doesn't); a type some value of which
+    /// is one of those passes.
     fn bitnot_operand_is_valid(&self, ty: &Type) -> bool {
-        is_bitwise_not_operand(ty) || self.type_is_instance_of(ty, "GMP")
+        let operand = Type::union_of(vec![Type::int(), Type::float(), Type::string()]);
+        !ty.is_within(&operand).no() || self.type_is_instance_of(ty, "GMP")
     }
 
     /// Real PHPStan's `InvalidUnaryOperationRule` (`unaryOp.invalid`).
@@ -637,33 +642,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Real PHPStan's own `isString()->yes() || isInteger()->yes() ||
-/// isFloat()->yes()` check for `~` - unlike `is_number_operand`, `bool`,
-/// `null`, and any object (including `SimpleXMLElement`/`GMP` - real
-/// `ObjectType` has no `toBitwiseNotType()` override of its own, unlike
-/// its `toNumber()`/`toInteger()`/`toFloat()`) are NOT legal here.
-/// Everything else - `Mixed` included - falls through to `true`, the
-/// same "don't guess" leniency this file applies everywhere else.
-fn is_bitwise_not_operand(ty: &Type) -> bool {
-    match ty {
-        Type::Bool | Type::True | Type::False | Type::Null => false,
-        Type::Array(..)
-        | Type::ArrayShape(_)
-        | Type::Object(..)
-        | Type::ObjectWithoutClass
-        | Type::Resource { .. }
-        | Type::ClassString(_)
-        | Type::ClassKindString(_) => false,
-        Type::Intersection(members) => members
-            .iter()
-            .any(|m| matches!(m, Type::String | Type::Int | Type::Float)),
-        Type::Union(members) | Type::BenevolentUnion(members) => {
-            members.iter().any(is_bitwise_not_operand)
-        }
-        _ => true,
-    }
-}
-
 fn comparison_identifier(op: &BinOp) -> Option<&'static str> {
     Some(match op {
         BinOp::Eq => "equal.invalid",
@@ -675,47 +653,6 @@ fn comparison_identifier(op: &BinOp) -> Option<&'static str> {
         BinOp::Spaceship => "spaceship.invalid",
         _ => return None,
     })
-}
-
-fn is_object_or_null(ty: &Type) -> bool {
-    match ty {
-        Type::Null => true,
-        Type::Object(..) | Type::ObjectWithoutClass => true,
-        // A `Union` is definitely object-or-null only when every
-        // member is (any other member could be the runtime value
-        // instead); an `Intersection` value genuinely is every member at
-        // once, so any single member proving it is object-shaped is
-        // enough - the opposite quantifier from `Union`, not the same
-        // "any member" shape `type_is_instance_of`/
-        // `is_valid_overload_operand` just above needed.
-        Type::Union(members) => members.iter().all(is_object_or_null),
-        Type::Intersection(members) => members.iter().any(is_object_or_null),
-        _ => false,
-    }
-}
-
-fn is_possibly_nullable_object(ty: &Type) -> bool {
-    !matches!(ty, Type::Null) && is_object_or_null(ty)
-}
-
-fn is_array_or_null(ty: &Type) -> bool {
-    match ty {
-        Type::Null => true,
-        Type::Array(..) | Type::ArrayShape(_) => true,
-        Type::Union(members) => members.iter().all(is_array_or_null),
-        // A common shape (`list<T>`/`non-empty-array<T>`, both
-        // `Intersection([Array(_), Accessory(_)])`) must not fall to
-        // the `_ => false` catch-all below, or `$list < 5`-style
-        // comparisons against a `list<T>`-typed value would never be
-        // flagged - the identical "any member proves it" reasoning
-        // `is_object_or_null` just above uses.
-        Type::Intersection(members) => members.iter().any(is_array_or_null),
-        _ => false,
-    }
-}
-
-fn is_possibly_nullable_array(ty: &Type) -> bool {
-    !matches!(ty, Type::Null) && is_array_or_null(ty)
 }
 
 pub(crate) fn binop_sigil(op: &BinOp) -> &'static str {
@@ -748,15 +685,6 @@ pub(crate) fn binop_sigil(op: &BinOp) -> &'static str {
         BinOp::Shr => ">>",
         BinOp::Coalesce => "??",
         BinOp::Pipe => "|>",
-    }
-}
-
-fn is_definitely_bool(ty: &Type) -> bool {
-    match ty {
-        Type::Bool | Type::True | Type::False => true,
-        Type::Union(members) => members.iter().all(is_definitely_bool),
-        Type::Intersection(members) => members.iter().any(is_definitely_bool),
-        _ => false,
     }
 }
 

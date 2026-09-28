@@ -112,6 +112,11 @@ impl Relation<'_> {
 
             (Type::IntLiteral(_), Type::Int) => true,
             (Type::StringLiteral(_), Type::String) => true,
+            // `$this`, `static`, `self` and `parent` are always objects.
+            (
+                Type::This | Type::StaticRef(_) | Type::SelfRef(_) | Type::ParentRef,
+                Type::ObjectWithoutClass,
+            ) => true,
             (Type::True, Type::Bool) | (Type::False, Type::Bool) => true,
             // PHP's one documented exception to its own scalar type
             // declarations, even under strict_types=1: an int value is
