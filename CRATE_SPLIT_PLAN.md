@@ -4665,7 +4665,15 @@ fixture:
     and `new \DatePeriod(…)` without `start` are unreported today (the
     rules oracle's 10 PHPStan-only with the `call_user_func` ones,
     `callables-named-arguments.php`, `implode-named-parameters.php`,
-    `bug-7048.php`);
+    `bug-7048.php`), and a name the callee lacks is `argument.unknown`
+    (`$cb(i: 1)` on a `callable(int, int)`, whose parameters have no
+    names, `$cb2(i: 1, j: 2, z: 3)`, `call_user_func($f, j: 1)`, `new
+    \DatePeriod(isostr: …)`; 5);
+  - a private property read from outside is `property.private` under
+    `??` too (`$foo->id ?? 2` always gives `2`, PHP reading it as unset;
+    `bug-12645.php`), and so is PHP 8.5's `clone($foo, ['priv' => …])`
+    from outside (`clone-with.php`, `*-clone-with.php`, 4); both
+    unreported today;
   - invoking a value that isn't callable is `callable.nonCallable`: a
     constant string naming no function (`$n = 'nonexistent'; $n();`,
     `''`), `$i(...)` on `1`, `5 |> 'doFoo'` with no function `doFoo`, and
