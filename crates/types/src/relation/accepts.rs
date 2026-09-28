@@ -1,12 +1,8 @@
 use crate::relation::{AcceptsResult, Relation};
 use crate::{Repr, ShapeKey, Type, Variance};
 
-// Real PHPStan's own level-gated `RuleLevelHelper` behaviors
-// (`rule_level_accepts`/`rule_level_accepts`/
-// `accepts_at_level`, below) - named here, at module scope, so
-// `rule_level_accepts`'s own unconfigured-level fallback can
-// reference `NULLABLES_CHECK_LEVEL` directly rather than duplicating the
-// literal `8`.
+// The levels at which PHPStan's `RuleLevelHelper` checks turn on
+// (`rule_level_accepts`, `accepts_at_level`).
 const UNION_TYPES_CHECK_LEVEL: u8 = 7;
 const NULLABLES_CHECK_LEVEL: u8 = 8;
 const EXPLICIT_MIXED_CHECK_LEVEL: u8 = 9;
@@ -525,18 +521,9 @@ impl Relation<'_> {
     /// answer exactly, the safe default for every existing caller/test
     /// that never opts into this.
     ///
-    /// Deliberately not a full tri-state (`Yes`/`No`/`Maybe`) rewrite of
-    /// `accepts`'s own boolean API: real PHPStan's `checkUnionTypes`
-    /// distinguishes "definitely accepts" from "maybe accepts" via
-    /// `TrinaryLogic`, a distinction this project's plain boolean
-    /// `.all()`/`.any()` combinators (already used, unconditionally, by
-    /// `accepts` itself) have no way to represent without that
-    /// larger rewrite - `UNION_TYPES_CHECK_LEVEL` is still named and
-    /// folded into the fast-path guard below (both real gates must be at
-    /// their strict threshold before this collapses to `accepts`
-    /// unchanged), but doesn't get its own separate `.all()`-vs-`.any()`
-    /// switch the way `NULLABLES_CHECK_LEVEL` gets its own null-stripping
-    /// switch.
+    /// Below `checkUnionTypes`' level a union given is accepted when some
+    /// member is (PHPStan accepts its `Maybe`); from it on, every member
+    /// must be.
     fn rule_level_accepts_type(&self, sub: &Type, sup: &Type) -> bool {
         if matches!(sub, Type(Repr::Error)) || matches!(sup, Type(Repr::Error)) {
             return true;
@@ -640,21 +627,13 @@ impl Relation<'_> {
             };
             let sub = stripped_sub.as_ref().unwrap_or(sub);
 
-            // A naive version of this method would bail straight to plain
-            // `accepts` whenever `sup` was also a Union, on the theory
-            // that a nested Union-vs-Union pair is rare - but this project
-            // represents every nullable declared type (`?string`, `?int`,
-            // `?Foo`, the single most common PHP nullability idiom) as
-            // `Repr::Union([X, Repr::Null])` (`types/parse.rs`), so `sup` is
-            // a Union at every one of this method's real call sites checking
-            // a nullable-declared parameter/property/return type - exactly
-            // the scenario `checkNullables` exists for. Recursing into
-            // `self.rule_level_accepts` (not plain
-            // `accepts`) on both sides whenever either is a Union,
-            // symmetric to `accepts`'s own existing `282`/`283` arms,
-            // is what keeps that leniency reaching its single most common
-            // trigger.
+            // Both sides recurse here rather than through plain `accepts`, so
+            // the level-gated leniencies reach every member: a nullable
+            // declared type (`?string`) is itself a union.
             match (sub, sup) {
+                (Type(Repr::Union(members)), _) if level < UNION_TYPES_CHECK_LEVEL => members
+                    .iter()
+                    .any(|m| self.rule_level_accepts_rec(m, sup, level)),
                 (Type(Repr::Union(members)), _) => members
                     .iter()
                     .all(|m| self.rule_level_accepts_rec(m, sup, level)),
