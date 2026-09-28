@@ -7426,21 +7426,25 @@ all through `phpstan_rs::…` paths.
 
 G makes a crate of each remaining layer, moves the tests, benches and fuzz
 targets to the crates they test, retargets the gates from the package's paths
-to the crates', rewrites the docs, and asserts the build-time targets. G
-changes no behaviour: the corpus, type-snapshot and baseline gates (4–6) and
-every fixture's expectations are identical through every G commit, the fixture
-type snapshot compared through the rename map (G2), and a
-fixture's or test's name changes only through gate 3's rename manifest. Nothing
-reads a path-dependent intrinsic (`type_name`, `module_path!`, `TypeId`) into
-output. The one output a move does change is an internal error's location in
-phpstan-rs's source (`file:line:col`, `CRASH_REPORTING_PLAN.md` §6.1.2), which no
-gate holds, since the corpus and fixtures have none: every moved file's panics
-print a new path, and the crash reporter, fingerprinting an event as
-`["panic", <location>]`, groups them as new issues from the first release after
-G. The
-performance gate (8) holds each extraction to the previous commit; a function
-it shows losing its inlining across the new boundary gets `#[inline]` in the
-extraction's commit (the thin-LTO profile, decided in A0, covers the rest).
+to the crates', rewrites the docs, and asserts the build-time targets. It
+changes no behaviour:
+
+- the corpus, type-snapshot and baseline gates (4–6) and every fixture's
+  expectations are identical through every G commit, the fixture type snapshot
+  compared through the rename map (G2), and a fixture's or test's name changes
+  only through gate 3's rename manifest;
+- nothing reads a path-dependent intrinsic (`type_name`, `module_path!`,
+  `TypeId`) into output;
+- the one output a move does change is an internal error's location in
+  phpstan-rs's source (`file:line:col`, `CRASH_REPORTING_PLAN.md` §6.1.2),
+  which no gate holds, since the corpus and fixtures have none: every moved
+  file's panics print a new path, and the crash reporter, fingerprinting an
+  event as `["panic", <location>]`, groups them as new issues from the first
+  release after G;
+- the performance gate (8) holds each extraction to the previous commit; a
+  function it shows losing its inlining across the new boundary gets
+  `#[inline]` in the extraction's commit (the thin-LTO profile, decided in A0,
+  covers the rest).
 
 **G1. Extraction**, one crate at a time in dependency order: `analyser`,
 `builtins`, `rules`, the nineteen `ext-*` (one each, in E4's order), `project`,
@@ -7717,7 +7721,6 @@ paths is rewritten against the crates:
 - ROADMAP: 61 lines cite `src/` paths today, and its current-state text
   describes one package;
 - the fuzz guide (`fuzz/GUIDING_THE_FUZZER.md`);
-
 - `.corpus-runs/README.md`;
 - `editors/vscode/README.md`;
 - the `.cargo/config.toml` comment, which justifies mold and `-Z threads` by "a
@@ -7764,6 +7767,7 @@ an engine edit, which is what the split is for: today all three rebuild the
 one package, and at `1b20b638` the rule edit's build (8.5 s) is slower than
 the engine edit's (7.3 s). No scenario is slower than its last record before
 G.
+
 `-Z threads` and mold are measured again, clean and incremental, with and
 without, and `.cargo/config.toml` keeps what is faster, its comment stating the
 measurement.
@@ -7780,28 +7784,31 @@ measurement.
   is green;
 - G4's build-time targets hold.
 
-What the plan holds that stays in force moves first, since a Done section is
-history and these are rules every later commit runs under: §2's crate map,
-layer rules and workspace conventions and Appendix F's decisions to
-`ARCHITECTURE.md`; each crate's §3 design to its crate-level `//!` docs, which
-`missing_docs` asks of the API crates anyway; and §4's gates with the
-approved-delta rule to `gates/README.md`, beside the approved deltas and
-manifests they read, together with the gate section of `.corpus-runs/README.md`
-(the `xtask` commands, the artifact formats, the approved-delta files), which
-cites `CRATE_SPLIT_PLAN.md` §4 today; one document then says what each gate
-checks and how it records, and `.corpus-runs/README.md` keeps its older runs
-and known snapshots with a pointer to it. The references to the plan outside it
-repoint in the same commit, to where their section went: the module-graph spec's
-header (Appendix A), `.corpus-runs/README.md` (§4), ROADMAP's two (A2's known
-bugs, the documents list) and the sibling plans' (`CRASH_REPORTING_PLAN.md`'s
-two, `GATE_SPEED_PLAN.md`'s two, `UNSAFE_PLAN.md`'s one) where they are still
-open. The plan
-then folds into ROADMAP's Done section, its open items moved into
-ROADMAP's phases first, and its working documents go with it once each open
-item in them has a ROADMAP phase: `CRATE_SPLIT_EVIDENCE.md` (the
-frozen copy kept to check that condensing dropped nothing),
-`CRATE_SPLIT_CAUSES.md` (Appendices G–J's generated cause lists),
-`CRATE_SPLIT_AUDIT.md` and `STAGE_B_REVIEW.md`.
+Then the plan closes, in one commit:
+
+- **What stays in force moves out first**, since a Done section is history and
+  these are rules every later commit runs under: §2's crate map, layer rules and
+  workspace conventions and Appendix F's decisions to `ARCHITECTURE.md`; each
+  crate's §3 design to its crate-level `//!` docs, which `missing_docs` asks of
+  the API crates anyway; §4's gates with the approved-delta rule to
+  `gates/README.md`, beside the approved deltas and manifests they read.
+- **One gate document.** `gates/README.md` also takes the gate section of
+  `.corpus-runs/README.md` (the `xtask` commands, the artifact formats, the
+  approved-delta files), which cites `CRATE_SPLIT_PLAN.md` §4 today, so one
+  document says what each gate checks and how it records;
+  `.corpus-runs/README.md` keeps its older runs and known snapshots with a
+  pointer to it.
+- **References repoint** to where their section went: the module-graph spec's
+  header (Appendix A), `.corpus-runs/README.md` (§4), ROADMAP's two (A2's known
+  bugs, the documents list) and the sibling plans' (`CRASH_REPORTING_PLAN.md`'s
+  two, `GATE_SPEED_PLAN.md`'s two, `UNSAFE_PLAN.md`'s one) where they are still
+  open. The cited-path check (G3) sees a file name, not a section.
+- **The plan folds into ROADMAP's Done section**, its open items moved into
+  ROADMAP's phases first, and its working documents go with it once each open
+  item in them has a ROADMAP phase: `CRATE_SPLIT_EVIDENCE.md` (the frozen copy
+  kept to check that condensing dropped nothing), `CRATE_SPLIT_CAUSES.md`
+  (Appendices G–J's generated cause lists), `CRATE_SPLIT_AUDIT.md` and
+  `STAGE_B_REVIEW.md`.
 
 ## 6. Risks
 
