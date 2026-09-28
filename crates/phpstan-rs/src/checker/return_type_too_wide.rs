@@ -108,11 +108,15 @@ impl<'a> Checker<'a> {
         // Each return point's own members - not their union, whose shape
         // merging (`array{0: 'a', 1: X}|array{0: 'b', 1: Y, 2: Z}` into one
         // `array{0: 'a'|'b', ...}`) would stop matching either member.
+        // A bare `return;` hands the caller `null`.
         let actual_members: Vec<Type> = self
             .current_function_return_points
             .iter()
             .flat_map(flatten_union)
-            .cloned()
+            .map(|t| match t {
+                Type::Void => Type::Null,
+                other => other.clone(),
+            })
             .collect();
         for member in declared_members {
             // "Unused" is decided via trinary logic: only a definite No

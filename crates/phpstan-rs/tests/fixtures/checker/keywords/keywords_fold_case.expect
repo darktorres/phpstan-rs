@@ -1,1 +1,2 @@
-PENDING
+6:9-6:15 missingType.property L6 | Property C::$x has no type specified.
+11:3-11:6 argument.type L5 | Parameter #1 $i of function f expects int, '1' given.

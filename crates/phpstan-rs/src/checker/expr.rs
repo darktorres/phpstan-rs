@@ -3144,8 +3144,14 @@ impl<'a> Checker<'a> {
                 // its own `ExprPrinter`; this project has no general
                 // expression-to-source printer, so the message here names
                 // only the type, not the source snippet.
+                let mut part_types = Vec::with_capacity(parts.len());
                 for p in parts {
                     let part_ty = self.check_expr(p, locals, label);
+                    part_types.push(
+                        part_ty
+                            .to_string_type(self.registry)
+                            .unwrap_or(Type::String),
+                    );
                     if matches!(&p.kind, ExprKind::Literal(Literal::String(_))) {
                         continue;
                     }
@@ -3161,7 +3167,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                Type::String
+                concat_string_parts(part_types)
             }
             ExprKind::Match { subject, arms } => {
                 let default = match_default(arms);
@@ -4819,11 +4825,16 @@ impl<'a> Checker<'a> {
             // return a refined type. An empty `parts` list can't occur in
             // practice, but folds to plain `Type::String` rather than
             // panicking if it somehow did.
-            ExprKind::Interpolated(parts) => parts
-                .iter()
-                .map(|p| self.infer_expr(p, locals))
-                .reduce(|acc, part_ty| resolve_concat_type(&acc, &part_ty))
-                .unwrap_or(Type::String),
+            ExprKind::Interpolated(parts) => concat_string_parts(
+                parts
+                    .iter()
+                    .map(|p| {
+                        self.infer_expr(p, locals)
+                            .to_string_type(self.registry)
+                            .unwrap_or(Type::String)
+                    })
+                    .collect(),
+            ),
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 if locals.may_have_member_narrowing()
                     && let Some(base_key) = narrowing_key(base)
@@ -6905,4 +6916,13 @@ fn static_target_end(target: &StaticTarget) -> syntax::token::Position {
         StaticTarget::Name(_, span) => span.end,
         StaticTarget::Expr(expr) => expr.span.end,
     }
+}
+
+/// An interpolated string's type: its parts, each as a string,
+/// concatenated.
+fn concat_string_parts(parts: Vec<Type>) -> Type {
+    parts
+        .into_iter()
+        .reduce(|acc, part| resolve_concat_type(&acc, &part))
+        .unwrap_or(Type::String)
 }

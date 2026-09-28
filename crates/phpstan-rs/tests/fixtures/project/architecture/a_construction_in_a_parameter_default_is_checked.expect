@@ -1,1 +1,1 @@
-PENDING
+domain.php:5:62-5:64 architecture.construction L0 | Class App\\Domain\\User constructs App\\Infra\\Db, which architecture rule "#1" forbids.

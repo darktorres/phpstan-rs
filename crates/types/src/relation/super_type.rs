@@ -209,6 +209,16 @@ impl Relation<'_> {
                 }
             }
             (Type::Object(a, _), Type::Object(b, _)) => self.object_super_type_of(a, b),
+            // A case is an instance of its enum, so it relates to a class as
+            // its enum does.
+            (Type::Object(a, _), Type::EnumCase(b, _))
+            | (Type::EnumCase(b, _), Type::Object(a, _)) => match self.object_super_type_of(a, b) {
+                TrinaryLogic::No => TrinaryLogic::No,
+                _ => TrinaryLogic::Maybe,
+            },
+            (Type::EnumCase(a, _), Type::EnumCase(b, _)) if !a.eq_ignore_ascii_case(b) => {
+                TrinaryLogic::No
+            }
             _ if scalars_disjoint(sup, sub) => TrinaryLogic::No,
             (Type::Accessory(kind), _) if accessory_refuses(kind, sub) => TrinaryLogic::No,
             _ => TrinaryLogic::Maybe,
