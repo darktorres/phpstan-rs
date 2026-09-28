@@ -8,11 +8,11 @@
 //! and unknown directives).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::Arc;
 
 use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
+use syntax::name::Name;
 use syntax::token::Span;
 use syntax::visit::child_stmts;
 
@@ -33,9 +33,9 @@ struct Scope {
     frames: Vec<(FrameKind, usize)>,
     finallies: Vec<usize>,
     next_id: usize,
-    labels: FxHashMap<Arc<str>, Placement>,
-    duplicate_labels: Vec<(Arc<str>, Span)>,
-    gotos: Vec<(Arc<str>, Placement)>,
+    labels: FxHashMap<Name, Placement>,
+    duplicate_labels: Vec<(Name, Span)>,
+    gotos: Vec<(Name, Placement)>,
     jumps: Vec<(&'static str, Span, String)>,
 }
 
@@ -125,16 +125,16 @@ impl Scope {
                 }
             }
             StmtKind::Label(name) => {
-                if self.labels.contains_key(name) {
-                    self.duplicate_labels.push((name.clone(), stmt.span));
+                if self.labels.contains_key(&name.name) {
+                    self.duplicate_labels.push((name.name.clone(), stmt.span));
                 } else {
                     let placement = self.placement(stmt.span);
-                    self.labels.insert(name.clone(), placement);
+                    self.labels.insert(name.name.clone(), placement);
                 }
             }
             StmtKind::Goto(name) => {
                 let placement = self.placement(stmt.span);
-                self.gotos.push((name.clone(), placement));
+                self.gotos.push((name.name.clone(), placement));
             }
             _ => {
                 for child in child_stmts(stmt) {
@@ -175,7 +175,7 @@ impl<'a> Checker<'a> {
                 "label.duplicate",
             );
         }
-        let mut used: FxHashSet<Arc<str>> = FxHashSet::default();
+        let mut used: FxHashSet<Name> = FxHashSet::default();
         for (name, goto) in &scope.gotos {
             let Some(target) = scope.labels.get(name) else {
                 self.report_keyword(

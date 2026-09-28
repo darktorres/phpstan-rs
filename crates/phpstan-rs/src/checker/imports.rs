@@ -81,7 +81,7 @@ impl<'a> Checker<'a> {
                             "function.nameCase",
                         );
                         if let Some((span, replacement, description)) =
-                            Self::name_case_fix(&import.written, real_name, import.written_span)
+                            Self::name_case_fix(&import.written, real_name, import.written.span)
                         {
                             builder = builder.fix(span, replacement, description);
                         }

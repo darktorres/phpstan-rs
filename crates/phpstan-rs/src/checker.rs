@@ -806,7 +806,7 @@ pub struct Checker<'a> {
     // `deadCode.unreachable` check, which has no direct access to the
     // enclosing function's body to answer "could a `goto` reach this
     // labeled statement" itself.
-    pub(crate) current_function_goto_targets: rustc_hash::FxHashSet<Arc<str>>,
+    pub(crate) current_function_goto_targets: rustc_hash::FxHashSet<syntax::name::Name>,
     // Every variable assignment site in the current function body, for
     // `variable.implicitArray`; empty unless that check is enabled.
     pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,

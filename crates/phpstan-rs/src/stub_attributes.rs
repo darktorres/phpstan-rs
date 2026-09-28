@@ -35,7 +35,7 @@ enum StubAttribute {
 
 /// The file's aliases for the two attributes (`use
 /// JetBrains\PhpStorm\Internal\LanguageLevelTypeAware as Alias;`).
-type Aliases = Vec<(Arc<str>, StubAttribute)>;
+type Aliases = Vec<(syntax::name::Name, StubAttribute)>;
 
 fn aliases(stmts: &[Stmt]) -> Aliases {
     let mut out = Vec::new();
@@ -51,7 +51,7 @@ fn aliases(stmts: &[Stmt]) -> Aliases {
                         Some("LanguageLevelTypeAware") => StubAttribute::TypeAware,
                         _ => continue,
                     };
-                    out.push((alias.clone(), kind));
+                    out.push((alias.name.clone(), kind));
                 }
             }
             StmtKind::Block(inner) => out.extend(aliases(inner)),

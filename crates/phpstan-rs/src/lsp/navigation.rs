@@ -491,7 +491,12 @@ impl<'a> Walker<'a> {
                 for var in vars {
                     match var {
                         GlobalVar::Name(name) => {
-                            self.record_var_self(out, stmt.span, current_class, name);
+                            self.record_var_self(
+                                out,
+                                name.span,
+                                current_class,
+                                &syntax::intern::intern(name),
+                            );
                         }
                         GlobalVar::Dynamic(e) => self.expr(e, ctx, current_class, out),
                     }
@@ -502,7 +507,12 @@ impl<'a> Walker<'a> {
                     if let Some(e) = d {
                         self.expr(e, ctx, current_class, out);
                     }
-                    self.record_var_self(out, stmt.span, current_class, name);
+                    self.record_var_self(
+                        out,
+                        name.span,
+                        current_class,
+                        &syntax::intern::intern(name),
+                    );
                 }
             }
             StmtKind::Switch { subject, cases } => {

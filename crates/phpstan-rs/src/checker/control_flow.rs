@@ -824,12 +824,12 @@ pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
 /// labeled statement immediately following one that "always terminates"
 /// isn't unreachable at all if some earlier `goto` in the same function
 /// can jump straight to it.
-pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> rustc_hash::FxHashSet<std::sync::Arc<str>> {
+pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> rustc_hash::FxHashSet<syntax::name::Name> {
     let mut targets = rustc_hash::FxHashSet::default();
     for stmt in stmts {
         any_stmt_in_body(stmt, |s| {
             if let StmtKind::Goto(name) = &s.kind {
-                targets.insert(name.clone());
+                targets.insert(name.name.clone());
             }
             false
         });

@@ -147,11 +147,15 @@ impl NameContext {
     /// constant names are case-sensitive and stored as written.
     pub fn add_uses(&mut self, imports: &[UseImport]) {
         for import in imports {
-            let path = strip_leading_backslash(&import.path);
-            let bare = path.rsplit('\\').next().unwrap_or(&path).to_string();
-            let short_name = import.alias.clone().unwrap_or_else(|| bare.clone().into());
-            self.use_map
-                .insert((import.kind, use_map_key(import.kind, &short_name)), path);
+            let path: &str = &import.path;
+            let short_name = match &import.alias {
+                Some(alias) => &alias.name,
+                None => path.rsplit('\\').next().unwrap_or(path),
+            };
+            self.use_map.insert(
+                (import.kind, use_map_key(import.kind, short_name)),
+                path.to_string(),
+            );
         }
     }
 

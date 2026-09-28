@@ -1055,7 +1055,7 @@ fn walk_stmt(stmt: &Stmt, loops: &mut Vec<syntax::token::Span>, out: &mut Vec<As
         StmtKind::StaticVar(vars) => {
             for (name, _) in vars {
                 out.push(AssignedVariable {
-                    name: name.clone(),
+                    name: syntax::intern::intern(name),
                     span: stmt.span,
                     loops: loops.clone(),
                 });

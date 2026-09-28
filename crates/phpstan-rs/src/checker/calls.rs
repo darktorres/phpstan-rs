@@ -885,10 +885,7 @@ pub(crate) fn resolve_call_args<'a>(
             continue;
         }
         if let Some(name) = &arg.name {
-            if let Some(pos) = params
-                .iter()
-                .position(|p| p.name().as_ref() == name.as_str())
-            {
+            if let Some(pos) = params.iter().position(|p| p.name().as_ref() == &*name.name) {
                 resolved[pos] = Some(&arg.value);
             }
             continue;

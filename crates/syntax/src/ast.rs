@@ -125,9 +125,8 @@ pub enum StmtKind {
     // (name, optional initializer). Persistence across calls isn't
     // modeled - only its scoping (the variable is defined from here on)
     // matters for a single-call static analysis pass. The name is
-    // `Arc<str>`, moved straight out of the lexer's own interned
-    // `Token::Variable`, same as `ExprKind::Variable`.
-    StaticVar(Vec<(Arc<str>, Option<Expr>)>),
+    // without its `$`.
+    StaticVar(Vec<(Ident, Option<Expr>)>),
     EnumDecl(EnumDecl),
     Switch {
         subject: Expr,
@@ -139,13 +138,11 @@ pub enum StmtKind {
         finally: Option<Vec<Stmt>>,
     },
     Throw(Expr),
-    // `Arc<str>`, moved straight out of the lexer's own interned
-    // `Token::Identifier` - see `FunctionDecl::name`'s own doc comment.
-    Goto(Arc<str>),
+    Goto(Ident),
     // `label:` - a goto target. Control flow through goto/labels isn't
     // modeled (no effect on narrowing, terminal-statement detection,
     // etc.) - only enough structure to parse past them.
-    Label(Arc<str>),
+    Label(Ident),
 }
 
 #[derive(Debug, Clone)]
@@ -362,14 +359,12 @@ pub struct MethodDecl {
 
 #[derive(Debug, Clone)]
 pub struct UseImport {
-    pub path: String,
-    // The name as written in source (a group member's own part only) and
-    // its span.
-    pub written: String,
-    pub written_span: Span,
-    // Always taken via `Parser::expect_ident` (a single-token name, never
-    // namespace-qualified) - see `FunctionDecl::name`'s own doc comment.
-    pub alias: Option<Arc<str>>,
+    // The fully-qualified name imported, without a leading `\`.
+    pub path: Name,
+    // The name as written in source (a group member's own part only).
+    pub written: Ident,
+    // `as Alias`.
+    pub alias: Option<Ident>,
     // Which of PHP's three `use`-import namespaces this member belongs
     // to (`use Foo;` vs `use function foo;` vs `use const FOO;`) - a
     // plain `use Foo;` isn't checked for existence at all, matching real
@@ -582,7 +577,8 @@ pub struct TraitAdaptations {
 /// parameter (the unpacked array's contents aren't known statically).
 #[derive(Debug, Clone)]
 pub struct Arg {
-    pub name: Option<String>,
+    // `name:` for a named argument.
+    pub name: Option<Ident>,
     pub spread: bool,
     pub value: Expr,
 }
@@ -947,7 +943,7 @@ impl std::fmt::Display for TypeHint {
 #[derive(Debug, Clone)]
 pub enum GlobalVar {
     /// `global $name;` (the name is without its `$`).
-    Name(Arc<str>),
+    Name(Ident),
     /// `global ${expr};` / `global $$name;`: the name is computed.
     Dynamic(Expr),
 }

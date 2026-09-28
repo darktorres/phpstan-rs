@@ -62,7 +62,7 @@ impl<'a> Checker<'a> {
                 // this same function is a real jump target, not dead
                 // code, whatever the statement immediately before it
                 // does - see `collect_goto_targets`'s own doc comment.
-                && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.contains(name.as_ref()))
+                && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.contains(&name.name))
             {
                 self.report(
                     "Unreachable statement - code above always terminates.".to_string(),
@@ -818,7 +818,7 @@ impl<'a> Checker<'a> {
                             .cloned()
                             .unwrap_or(Type::Mixed(false));
                         self.probe_hit_at(stmt.span, &ty);
-                        locals.declare(name.to_string(), ty, stmt.span);
+                        locals.declare(name.to_string(), ty, name.span);
                     }
                 }
             }
@@ -843,12 +843,9 @@ impl<'a> Checker<'a> {
                         .map(|e| static_variable_type(&self.check_expr(e, locals, label)))
                         .unwrap_or(Type::Mixed(false));
                     purge_stale_narrowing_for(locals, name);
-                    // Real declaration - no per-name span exists on
-                    // `StaticVar` (only the whole statement's), same as
-                    // `Global` just above.
                     self.probe_hit_at(stmt.span, &ty);
-                    locals.declare(name.to_string(), ty, stmt.span);
-                    self.static_var_names.insert(name.clone());
+                    locals.declare(name.to_string(), ty, name.span);
+                    self.static_var_names.insert(syntax::intern::intern(name));
                 }
             }
             // `check_program`'s own top-level loop already handles a

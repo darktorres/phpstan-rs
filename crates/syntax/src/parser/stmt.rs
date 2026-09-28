@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::name::Name;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Span, Token};
 
@@ -94,7 +95,7 @@ impl Parser {
                 self.skip();
                 let mut vars = Vec::new();
                 loop {
-                    let name = self.expect_variable()?;
+                    let name = self.expect_variable_spanned()?;
                     let default = if self.eat(&Token::Equals) {
                         Some(self.parse_expression()?)
                     } else {
@@ -217,14 +218,16 @@ impl Parser {
                         };
                         let (member, member_span) = self.parse_qualified_name_spanned();
                         let alias = if self.eat(&Token::Keyword(Keyword::As)) {
-                            Some(self.expect_ident()?)
+                            Some(self.expect_ident_spanned()?)
                         } else {
                             None
                         };
                         imports.push(UseImport {
-                            path: format!("{group_prefix}\\{member}"),
-                            written: member,
-                            written_span: member_span,
+                            path: self.use_path(&format!("{group_prefix}\\{member}")),
+                            written: Ident {
+                                name: self.interner.name(&member),
+                                span: member_span,
+                            },
                             alias,
                             kind,
                         });
@@ -237,14 +240,16 @@ impl Parser {
                     return Ok(self.stmt(StmtKind::Use(imports), start));
                 }
                 let alias = if self.eat(&Token::Keyword(Keyword::As)) {
-                    Some(self.expect_ident()?)
+                    Some(self.expect_ident_spanned()?)
                 } else {
                     None
                 };
                 let mut imports = vec![UseImport {
-                    written: name.clone(),
-                    written_span: name_span,
-                    path: name,
+                    path: self.use_path(&name),
+                    written: Ident {
+                        name: self.interner.name(&name),
+                        span: name_span,
+                    },
                     alias,
                     kind: default_kind,
                 }];
@@ -255,14 +260,16 @@ impl Parser {
                 while self.eat(&Token::Comma) {
                     let (path, path_span) = self.parse_qualified_name_spanned();
                     let alias = if self.eat(&Token::Keyword(Keyword::As)) {
-                        Some(self.expect_ident()?)
+                        Some(self.expect_ident_spanned()?)
                     } else {
                         None
                     };
                     imports.push(UseImport {
-                        written: path.clone(),
-                        written_span: path_span,
-                        path,
+                        path: self.use_path(&path),
+                        written: Ident {
+                            name: self.interner.name(&path),
+                            span: path_span,
+                        },
                         alias,
                         kind: default_kind,
                     });
@@ -402,7 +409,7 @@ impl Parser {
             }
             Token::Keyword(Keyword::Goto) => {
                 self.skip();
-                let name = self.expect_ident()?;
+                let name = self.expect_ident_spanned()?;
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Goto(name), start)
             }
@@ -411,9 +418,7 @@ impl Parser {
             // (ternary's `:` always follows a `?`, and array/match arms
             // use `=>`, not `:`).
             Token::Identifier(_) if matches!(self.peek_at(1), Token::Colon) => {
-                let Token::Identifier(name) = self.take_token() else {
-                    unreachable!()
-                };
+                let name = self.take_ident().unwrap();
                 self.skip();
                 self.stmt(StmtKind::Label(name), start)
             }
@@ -466,7 +471,12 @@ impl Parser {
         if self.eat(&Token::Dollar) {
             return Ok(GlobalVar::Dynamic(self.parse_primary()?));
         }
-        self.expect_variable().map(GlobalVar::Name)
+        self.expect_variable_spanned().map(GlobalVar::Name)
+    }
+
+    /// A `use` statement's imported name, without a leading `\`.
+    fn use_path(&self, written: &str) -> Name {
+        self.interner.name(written.trim_start_matches('\\'))
     }
 }
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::ast::{Attribute, Ident};
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Span, Token};
+use crate::token::{Keyword, Position, Span, Token};
 
 impl Parser {
     // ---- token stream helpers ----
@@ -191,6 +191,30 @@ impl Parser {
         }
     }
 
+    /// `expect_ident`, with the name's span.
+    pub(crate) fn expect_ident_spanned(&mut self) -> Result<Ident, ParseError> {
+        let start = self.current_pos();
+        let name = self.expect_ident()?;
+        Ok(self.ident_from(&name, start))
+    }
+
+    /// `expect_variable`, with the variable's span (its `$` included).
+    pub(crate) fn expect_variable_spanned(&mut self) -> Result<Ident, ParseError> {
+        let start = self.current_pos();
+        let name = self.expect_variable()?;
+        Ok(self.ident_from(&name, start))
+    }
+
+    fn ident_from(&self, name: &str, start: Position) -> Ident {
+        Ident {
+            name: self.interner.name(name),
+            span: Span {
+                start,
+                end: self.previous_end(),
+            },
+        }
+    }
+
     pub(crate) fn expect_variable(&mut self) -> Result<Arc<str>, ParseError> {
         let span = self.spans.get(self.pos).copied().unwrap_or_default();
         match self.take_token() {
@@ -202,27 +226,6 @@ impl Parser {
         }
     }
 
-    // A qualified name is one identifier, optionally namespaced by
-    // backslash-separated segments (`Foo`, `\App\Foo`, `App\Foo\Bar`).
-    // Consecutive bare identifiers with no backslash between them are two
-    // separate tokens, not one name - `array BASE_SECTIONS` must not
-    // collapse into "arrayBASE_SECTIONS", which silently swallowed a
-    // constant's own name until this was fixed.
-    /// Consumes one identifier *or* keyword token as a name segment - most
-    /// keywords are only reserved in declaration position in real PHP
-    /// ("semi-reserved words"), so `Enum`/`Match`/`New`/... are all valid
-    /// namespace segments (`Piwigo\Common\Enum\Foo`).
-    // Returns `Arc<str>` (not `String`): an `Identifier` token's own
-    // payload is already interned by the lexer, and this is the *only*
-    // place that value gets moved out of the token stream into every
-    // name-in-declaration-position AST field (`expect_ident`) or, for the
-    // fast (non-namespaced) path, into `parse_qualified_name`'s own
-    // result - re-materializing a fresh `String` here would throw that
-    // interning away right at the token->AST boundary (see Fix 10 Stage
-    // 1's own "wash trap" note). The rarer `Keyword` case has no interned
-    // source of its own to move (`keyword_raw` is a plain, deliberately
-    // non-interned `String` - see its own doc comment), so it's interned
-    // here instead, same as any other identifier text.
     /// `take_name_segment`, with the name's span.
     pub(crate) fn take_ident(&mut self) -> Option<Ident> {
         let start = self.current_pos();
@@ -236,6 +239,18 @@ impl Parser {
         })
     }
 
+    // A qualified name is one identifier, optionally namespaced by
+    // backslash-separated segments (`Foo`, `\App\Foo`, `App\Foo\Bar`).
+    // Consecutive bare identifiers with no backslash between them are two
+    // separate tokens, not one name - `array BASE_SECTIONS` must not
+    // collapse into "arrayBASE_SECTIONS", which silently swallowed a
+    // constant's own name until this was fixed.
+    /// Consumes one identifier *or* keyword token as a name segment - most
+    /// keywords are only reserved in declaration position in real PHP
+    /// ("semi-reserved words"), so `Enum`/`Match`/`New`/... are all valid
+    /// namespace segments (`Piwigo\Common\Enum\Foo`).
+    /// An `Identifier` token's text is moved out already interned; a
+    /// keyword's source spelling is interned here.
     pub(crate) fn take_name_segment(&mut self) -> Option<Arc<str>> {
         match self.peek() {
             Token::Identifier(_) => {

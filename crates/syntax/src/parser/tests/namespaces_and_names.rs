@@ -151,9 +151,15 @@ fn use_group_expands_each_member_with_the_shared_prefix() {
     };
     assert_eq!(imports.len(), 2);
     assert_eq!(imports[0].path, "Foo\\Bar\\Baz");
-    assert_eq!(imports[0].alias, None);
+    assert!(imports[0].alias.is_none());
     assert_eq!(imports[1].path, "Foo\\Bar\\Qux");
-    assert_eq!(imports[1].alias, Some("Quux".into()));
+    let alias = imports[1].alias.as_ref().expect("an alias");
+    assert_eq!(alias.name, "Quux");
+    assert_eq!(
+        (alias.span.start.col, alias.span.end.col),
+        (32, 36),
+        "the alias spans its own text"
+    );
 }
 
 #[test]

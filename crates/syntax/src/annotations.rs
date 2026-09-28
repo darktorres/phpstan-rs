@@ -115,8 +115,8 @@ struct Builder {
     catch_stack: Vec<Vec<QualifiedName>>,
     current_catch: u32,
     /// The current function body's `goto` targets and labels.
-    gotos: FxHashSet<std::sync::Arc<str>>,
-    labels: Vec<(std::sync::Arc<str>, NodeId)>,
+    gotos: FxHashSet<crate::name::Name>,
+    labels: Vec<(crate::name::Name, NodeId)>,
     /// `if` statements that are an `elseif` of a chain already marked.
     elseifs: FxHashSet<NodeId>,
 }
@@ -263,9 +263,9 @@ impl<'ast> Visitor<'ast> for Builder {
                 self.condition(cond, false)
             }
             StmtKind::Goto(name) => {
-                self.gotos.insert(name.clone());
+                self.gotos.insert(name.name.clone());
             }
-            StmtKind::Label(name) => self.labels.push((name.clone(), stmt.id)),
+            StmtKind::Label(name) => self.labels.push((name.name.clone(), stmt.id)),
             _ => {}
         }
         self.path.push(stmt.id);

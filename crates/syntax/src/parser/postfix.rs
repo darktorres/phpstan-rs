@@ -256,9 +256,9 @@ impl Parser {
             let name = if matches!(self.peek(), Token::Identifier(_) | Token::Keyword(_))
                 && self.peek_at(1) == &Token::Colon
             {
-                let name = self.take_name_segment().unwrap();
+                let name = self.take_ident().unwrap();
                 self.skip();
-                Some(name.to_string())
+                Some(name)
             } else {
                 None
             };
