@@ -975,7 +975,14 @@ corpus, type, baseline, performance and build-time gates run locally
     - reflection reads no settings type but `ReflectionSettings`;
     - no `Locals` map outside the holder model;
     - no engine I/O (including no `current_dir`, `canonicalize` or
-      `path::absolute` outside the session, binary, LSP and tests);
+      `path::absolute` outside the session, binary, LSP and tests), wherever
+      the engine's code lives: the rule reads paths under
+      `crates/phpstan-rs/src` alone today, so an extracted crate leaves it
+      (its test lists `crates/composer/src/manifest.rs` as exempt for that
+      reason). It covers the extracted engine crates by name (`syntax`,
+      `types`, `phpdoc`, `stub-sources`, `diagnostics`, and `reflection` from
+      C10); `composer`, `config` and `sql` read manifests, config files and
+      databases by design and are exempt;
     - no engine construction outside `project`;
     - the built-in function names the analyser may mention form an
       allowlist (scope-effect built-ins only: extract, compact,
@@ -2810,7 +2817,8 @@ Fixes, each its own behaviour commit:
   (`call-to-static-method-without-impure-points.php`).
 
 **C10. Extract `reflection`.** No module-graph edge remains; `cargo machete`
-checks Appendix E's rows for it.
+checks Appendix E's rows for it; gate 10's engine-I/O rule covers
+`crates/reflection` from this commit, which it wouldn't by its package path.
 
 ### Stage D: engine (in the package, module-gated)
 
@@ -6599,11 +6607,17 @@ interim fix with the general one:
     one file are one file, a case-insensitive filesystem's `Foo.php` and
     `foo.php` included. It is used for comparing, never printed. On Windows it
     drops `canonicalize`'s verbatim `\\?\` prefix where that keeps the path
-    valid, as the `dunce` crate does: today `Session::resolve` and
-    `composer_roots` canonicalize the root and compare it with composer's
-    unprefixed manifest paths, so on Windows (a release target) no file would
-    match its package's directory, and every package-aware check (package
-    names, composer hygiene, `phpstan_api` gating) would see no package.
+    valid, as the `dunce` crate does, so every source of paths spells a file one
+    way, `composer`'s five `canonicalize` calls (manifest roots, install and
+    vendor directories) going through the same function. Today, on Windows (a
+    release target; read from the code, not run), package lookup matches because
+    both sides go through `canonicalize`: the owner directories
+    (`absolute_root`, the vendor links joined onto it, `install_dir`) and a
+    file's `Project::absolute_path` (joined onto the canonical `absolute_root`)
+    all carry the prefix. What doesn't carry it is compared with what does:
+    `working_dir` comes from `current_dir()`, so a file named by an absolute
+    path outside it is joined as written and matches no package, and a path
+    repository whose `canonicalize` fails falls back to its unprefixed join.
   - *URIs*: each open document keeps the URI its client used, which its
     diagnostics are published under (a workspace opened through a symlink sees
     its own paths), and a URI the server makes for a file never opened follows
@@ -7605,9 +7619,11 @@ crates, in one commit:
   today since it holds every module not yet extracted, is checked against the
   `bin` row.
 - **Architecture (gate 10).** The engine-I/O rule covers every crate but
-  `project`'s session module, `app`, `lsp`, the bin and tests, where
-  `is_engine_source` reads paths under `crates/phpstan-rs/src` today; the rules
-  scoped to the analyser read `crates/analyser`.
+  `composer`, `config` and `sql`, `project`'s session module, `app`, `lsp`, the
+  bin and tests, where `is_engine_source` reads paths under
+  `crates/phpstan-rs/src` today (each G1 extraction adding its crate as it
+  goes); the rules scoped to the analyser read `crates/analyser`; and `xtask`'s
+  own tests of the gates, which pin `crates/phpstan-rs/src/...` paths, follow.
 - **Build time (gate 9).** Each scenario's file moves to the crate it stands
   for (G4).
 
