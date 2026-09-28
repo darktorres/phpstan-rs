@@ -6,6 +6,11 @@ the fixes from its first review. Judged on runtime correctness and design,
 not parity with PHPStan. Each task names where the problem is, what is
 wrong, and what done looks like.
 
+Reviews 1 and 2 sampled the work (targeted reads of some modules); they
+were not a full review. The full review reads every commit's diff in
+order; its coverage is tracked at the end, and its findings are the F
+tasks.
+
 Legend: `[x]` done (commit given), `[ ]` open.
 
 ## Validation
@@ -199,6 +204,259 @@ Each fix needs a fixture.
     placeholder;
   - `Literal::String` documents an `Arc<str>` it no longer holds;
   - `StaticTarget::as_name` narrates the removed `"?"` sentinel.
+
+## Full review: findings
+
+Each was found reading the commit named; "probed" means reproduced with
+an `assertType` or diagnostic probe through `check-project`.
+
+### Correctness (probed)
+
+- [ ] **F1. `exit(...)` is typed `never`.** Since PHP 8.4 `exit`/`die`
+  are functions and `exit(...)` is a first-class callable. The parser
+  (`parser/primary.rs`, exit arm) drops `parse_args`' first-class-callable
+  flag, so `$f = exit(...);` is `never` and the rest of the function is
+  reported unreachable. Extra arguments (`exit(1, 2)`) are dropped silently,
+  and the status (`string|int` since 8.4, a `TypeError` otherwise) is never
+  checked. (`f9757b0a`)
+- [ ] **F2. `isset($x)` declares `$x` for the rest of the function.**
+  `check_existence_probe` (`checker/expr.rs`) declares a probed bare
+  variable in the enclosing scope, so `if (isset($maybe)) {} echo $maybe;`
+  reports nothing. Define it in the true branch only. (`6bdce4ce`)
+- [ ] **F3. `unset($a['k'])` doesn't remove the offset.** The `Unset`
+  statement (`checker/stmt.rs`) only checks non-variable targets as
+  expressions: `array{x: 1, y: 2}` stays `array{x: 1, y: 2}` after
+  `unset($b['x'])`. The offset goes (a list stops being a list, an array
+  may become empty), and an unset property is uninitialized again.
+  (`6bdce4ce`)
+- [ ] **F4. Method names are compared case-sensitively for unused private
+  members.** `$this->HELPER()` calling `private function helper()` reports
+  `helper()` unused (`checker/unused.rs`, `usage.methods`). PHP method names
+  are case-insensitive. (`481b224b` area)
+
+### Correctness (from reading)
+
+- [ ] **F5. Non-UTF-8 array keys collide.** `ShapeKey::Str` holds a
+  `String`, and keys from string literals go through `to_str_lossy`
+  (`shape.rs` `from_type`, `checker/assignment.rs`,
+  `checker/expr/array_ops.rs`, `coercion.rs` `to_array_key`), so `"\xff"`
+  and `"\xfe"` become one `U+FFFD` key where PHP has two. `ShapeKey::Str`
+  holds a `PhpString`. (`3af64337`)
+- [ ] **F6. A constant's bytes round-trip through lossy text.**
+  `registry/function_sig.rs` `infer_const_type_with` builds
+  `Type::string_literal(s.to_string().into())`; use `s.clone()`.
+  (`3af64337`)
+- [ ] **F7. A string literal's type text is ambiguous.** `display.rs`
+  prints `'{s}'` lossily and unescaped: `"\xff"` and `"\xfe"` both print
+  `'�'` (the `string_literals_are_bytes` fixture shows it), and `it's`
+  prints `'it's'`. Escape `'` and `\`, and show non-UTF-8 bytes as `\xNN`
+  in a double-quoted form. (`3af64337`)
+- [ ] **F8. `mb_*` case functions fold ASCII only.**
+  `infer_case_function_call` (`checker/expr/builtin_calls.rs`) folds a
+  literal for `mb_strtolower`/`mb_strtoupper`/`mb_lcfirst`/`mb_ucfirst`/
+  `mb_convert_case` with ASCII rules: `mb_strtolower('ÉCOLE')` gives
+  `'École'`, PHP gives `'école'`; `MB_CASE_TITLE` isn't folded. Use Unicode
+  case mapping for the `mb_` family, or don't fold non-ASCII input.
+  (`3af64337`)
+- [ ] **F9. Escapes are decided per heredoc flag, not per delimiter.**
+  `scan_interpolated` takes `heredoc: bool`, but PHP decodes by delimiter:
+  in `"…"` `\"` is `"`; in `` `…` `` `` \` `` is `` ` `` and `\"` stays
+  `\"`; in a heredoc both stay. Backtick strings decode `\"` and keep
+  `` \` `` as two bytes. The printer's `ShellExec` arm escapes with
+  double-quote rules. (`3af64337`, `75d3096f`)
+- [ ] **F10. `08` is read as 8.** A leading-zero literal with a non-octal
+  digit is a PHP parse error ("Invalid numeric literal"); the lexer reads
+  it as decimal. (`8f5b2af7`)
+
+### Precision (probed)
+
+- [ ] **F11. `isset`/`empty` narrow one branch only.** `!isset($i)` on a
+  defined `?int` leaves `int|null` (should be `null`); `empty($j)` true
+  leaves `int|string|null` (should be `0|''|'0'|null`). For a single
+  operand that is a defined variable, both branches narrow. (`6bdce4ce`)
+
+### Structure
+
+- [ ] **F12. Two name-resolution paths.** The resolve pass fills
+  `QualifiedName::resolved`, yet about 59 sites re-resolve written names
+  through a `NameContext`: the checker's `name_ctx.resolve`,
+  `resolve_function_candidates` and `resolve_constant_candidates`, and the
+  registry's `ctx.resolve` for attributes, access attributes, reflection
+  attributes, trait-alias trait names (`class_info.rs`), `phpstan_api.rs`
+  and `member_usage.rs`. AST names are read from `resolved` (the
+  function/constant global fallback belongs in `ResolvedName`); a
+  `NameContext` stays only for PHPDoc text. `unused/rebind.rs` matches
+  `Closure` on the written name, missing `\Closure` and aliases.
+  (`271fa92a`, `c935b1be`)
+- [ ] **F13. Declarations' namespaced names are computed and ignored.**
+  `namespaced_name` is read only by xtask's stub index. The registry
+  (`class_info.rs` `ctx.declared_name`, `index.rs`'s namespace walk,
+  `global_vars.rs`, `resolve.rs` `declared_name_in_namespace`, which
+  replicates `NameContext::declared_name`) and about 12 project and LSP
+  walkers derive it again, each with its own namespace and `use` tracking.
+  One iterator over a file's declarations, yielding each with its
+  namespaced name and whether it is conditional, replaces them; it also
+  removes the `Block(s) | Declare { body: Some(s) }` arm repeated at about
+  20 sites. (`47f973e9`, `cd23db61`)
+- [ ] **F14. Names leave the project's interner.** AST names are `Name`s
+  from the project's `Interner`, but the registry re-interns them as
+  `Arc<str>` through `syntax::intern::intern`, the process-global interner
+  (93 call sites in `registry/`), as do variable names in the checker and
+  LSP. `name.rs` promises a project's names are freed with it; in a
+  language-server session they never are. Registry keys become `Name`
+  (keyed by `lower()` where PHP is case-insensitive). The parser also
+  interns each name twice (`interner.str`, then `interner.name`).
+  (`481b224b`, `b7c04ec9`)
+- [ ] **F15. "Is this the constructor" is written 12 times.**
+  `name.eq_ignore_ascii_case("__construct")` in `checker/oop.rs`,
+  `unused.rs`, `generics/variance.rs`, `oop/property_hooks.rs`,
+  `oop/property_overrides.rs`, `class_info.rs` (3), `doctrine_entity.rs`,
+  `noop.rs`, `function_decl.rs`. One `ClassDecl::constructor()`.
+  (`481b224b`)
+- [ ] **F16. The enum/class merge is nominal.** 16
+  `ClassDecl(e) if e.kind == ClassKind::Enum` arms sit ahead of the class
+  arm and duplicate it: the checker's top-level check list (about 80 lines,
+  twice), `stmt.rs`, `phpstan_api.rs` `check_enum`, the LSP and use-site
+  `enum_decl` walkers, `anonymous_class.rs` `walk_enum`, and more. The
+  registry keeps two builders (`from_enum_decl`/`from_decl`,
+  `MemberSpans::of_enum`/`of_class`, `BuiltDecl::Enum`/`Class`), and the
+  parser two body loops (`parse_enum_decl`/`parse_class_body`). Use one
+  class-like arm that varies by kind where PHP does. An enum's `ClassDecl`
+  also says `is_final: false`, but an enum is implicitly final.
+  (`8e373302`)
+- [ ] **F17. Destructuring targets are two node kinds.** `[...]` on the
+  left is an `ArrayLiteral` and `list(...)` a `List`, so about 15 sites
+  match `ArrayLiteral(items) | List(items)`. Make an assignment or
+  `foreach` target its own pattern node, keeping `ArrayLiteral` for values;
+  the parser then rejects `list()` as a value (the checker's `List` arm now
+  returns `mixed`). (`f9651cf4`)
+- [ ] **F18. Transparent wrappers are matched by hand.**
+  `Grouping(inner) | ErrorSuppress(inner)` appears at about 30 sites
+  instead of one peel helper. `unwrap_grouping` also peels `@` but keeps
+  the grouping-only name. Nothing reads `ErrorSuppress`. (`5d93a01c`)
+- [ ] **F19. Variable names have two representations.** `StaticVar` and
+  `GlobalVar::Name` are `Ident`s (a `Name`), while `ExprKind::Variable` is
+  `Arc<str>`, so call sites convert through the global interner. Extends
+  S4. `strict_rules.rs` still gives a static variable the statement's span.
+  (`b7c04ec9`)
+- [ ] **F20. `exit` records its form by span width.** `banned.rs` tells a
+  bare `exit` from `exit()` by measuring the span; the node doesn't record
+  it. (`f9757b0a`)
+
+### Comments
+
+- [ ] **F21. Stale or misplaced comments.**
+  - `lexer/strings.rs` heredoc branch still calls positions "an honest,
+    coarser approximation"; offsets now map exactly (`0c4c62b3`). A
+    `{$…}` fragment spanning heredoc lines is re-lexed from stripped text,
+    so its later lines' columns are short by the indent.
+  - `parser/tokens.rs:242`: a `//` block about qualified names sits on
+    `take_name_segment`, fused with its doc (`b7c04ec9`).
+  - Nonsense from the enum rename (`8e373302`): "`ClassDecl` is its own
+    AST node, not a `ClassDecl` with `ClassKind::Enum`" (`duplicates.rs:24`),
+    "`ClassDecl` and `ClassDecl` are different AST types" (`oop.rs:542`),
+    "`ClassDecl`/`ClassDecl`" (`unused.rs:141`, `navigation.rs:25`,
+    `phpstan_api.rs:1072`, `stmt.rs:860`, `stmt.rs:974`, `oop.rs:188`).
+
+## Full review: coverage
+
+Every Stage B commit's full diff (`crates`, `xtask`), read in order. A
+commit is ticked once its whole diff has been read and its findings added
+above.
+
+- [x] `26f2267b` fix: dollar-brace interpolation ("${name}", "${name[expr]}", "${expr}") reads the varia...
+- [x] `8f5b2af7` fix: a legacy octal literal (0775) is octal, 509, and a hex, binary or octal literal pa...
+- [x] `3af64337` fix: string literals are bytes
+- [x] `fe4db52d` fix: keywords fold case everywhere
+- [x] `e27cb3f8` fix: a leading #! line is skipped as the CLI skips it, so declare(strict_types=1) after...
+- [x] `ffdd7d8c` fix: concatenation takes its PHP 8 precedence, looser than +/- and <</>>, so "sum: " . ...
+- [x] `7b2fd49e` fix: an assignment is an operand wherever an operand stands, by one grammar rule applie...
+- [x] `c935b1be` refactor: trait adaptations keep the insteadof choice and the as visibility
+- [x] `a4691beb` refactor: a promoted parameter keeps its (set) visibility and a &get hook is recorded a...
+- [x] `e3e3afc6` fix: $obj->$$name and $obj->${expr} keep both levels of indirection
+- [x] `0c4c62b3` fix: every part of an interpolated string spans its own text
+- [x] `4fbe8a7c` refactor: a string literal token moves into Literal::String without a conversion, and a...
+- [x] `271fa92a` fix: names resolve where they sit, not by the file's last namespace
+- [x] `47f973e9` refactor: declarations carry their namespaced name
+- [x] `481b224b` refactor: declaration and member names are interned Names
+- [x] `9742818c` refactor: an anonymous class has no name
+- [x] `b7c04ec9` refactor: named arguments, static and global variables, goto labels and use imports are...
+- [x] `cd23db61` refactor: a declare statement holds its block
+- [x] `75d3096f` refactor: a backtick command is its own node
+- [x] `f9757b0a` refactor: print, exit/die, eval and include/require are their own nodes instead of call...
+- [x] `6bdce4ce` refactor: isset, empty and unset are their own nodes
+- [x] `f9651cf4` refactor: list() is its own destructuring node
+- [x] `5d93a01c` refactor: the @ operator is kept as ExprKind::ErrorSuppress instead of dropped
+- [x] `8e373302` refactor: an enum is a ClassDecl of kind Enum
+- [ ] `bc28373d` refactor: match arms are spanned MatchArm nodes in written order, the default arm among...
+- [ ] `158f843b` refactor: class-likes, methods, properties, constants, enum cases, parameters, argument...
+- [ ] `16dd573b` fix: an expression nested past the depth limit is a ParseError, not a panic
+- [ ] `b4939433` refactor: one parse entry point
+- [ ] `0b579ab1` feat: the visitor gains visit_name, called for every class, function and constant name ...
+- [ ] `2b00a8d4` refactor: the side-effect, hidden-effect, keyword, declare, magic-constant, member-defa...
+- [ ] `854fdd86` refactor: the explicit-throw, parent-call, anonymous-class and nested-define walkers ar...
+- [ ] `786f6639` refactor: the promotion, assigned-variable, property-assignment, self-instance and rebi...
+- [ ] `a2cb7a42` refactor: the purity walkers recurse through callback walks, and the include-constant, ...
+- [ ] `f4c6eb9f` refactor: the global-variable scope walk is a visitor, and the backing-storage and pare...
+- [ ] `0e294c5b` refactor: the composer-fact and banned-code walks are visitors, and the architecture ne...
+- [ ] `167ff73d` refactor: the allocating child_exprs, child_stmts and stmt_exprs helpers are gone
+- [ ] `34571a3c` fix: an arrow function's body is outside the enclosing try's catch types, as a closure'...
+- [ ] `91bc9e49` refactor: one subtyping relation
+- [ ] `ab8df0b0` fix: an intersection is within whatever one of its members is, ahead of the void and ne...
+- [ ] `9355e811` fix: an interpolated string is its parts' string forms concatenated, a bare return coun...
+- [ ] `54fea123` fix: an isset or empty condition stored in a variable narrows when the variable is test...
+- [ ] `0e309c03` refactor: a conditional's two branches and a late key-of or value-of join through union...
+- [ ] `a7f5bc27` fix: a union drops never, reads true|false as bool and lets bool absorb either, and ded...
+- [ ] `510a7ecb` fix: a union with an explicit mixed stays explicit, in PHPDoc too, so a property declar...
+- [ ] `56c6e420` fix: a union merges array shapes only when neither loses a key's meaning, so tagged uni...
+- [ ] `102b907f` fix: an intersection reduces by the class hierarchy and folds shapes, so a class and it...
+- [ ] `6fe620f7` feat: an error type, displayed *ERROR*, that accepts and is accepted by everything and ...
+- [ ] `6429c47e` chore: an arch ratchet on paths naming a types::Type variant outside crates/types, coun...
+- [ ] `4362acc7` chore: the type-access baseline splits its total into patterns, comparisons and constru...
+- [ ] `5798014b` refactor: every type built outside crates/types goes through a Type constructor (Type::...
+- [ ] `089dae96` refactor: whether a type is mixed, explicit or not, is asked through Type::is_mixed/is_...
+- [ ] `a6dd2cc7` refactor: a union's members are Type::union_members, replacing four checker copies of f...
+- [ ] `b489dd00` refactor: the kind predicates of PHPStan (is_null, is_bool, is_int, is_float, is_string...
+- [ ] `20680eff` refactor: array and truthiness questions are Type methods
+- [ ] `56e1f538` refactor: concatenation, string refinements and integer bounds live in crates/types
+- [ ] `b62a1131` refactor: integer-range and comparison arithmetic moves to types::arithmetic
+- [ ] `e2bccf45` refactor: narrowing's type operations move to types::narrowing
+- [ ] `6acf61e9` refactor: generalize and finite_types are Type methods, replacing two disagreeing gener...
+- [ ] `325a8889` refactor: operand validity asks the kind predicates and whether the relation proves an ...
+- [ ] `323eeb36` refactor: array literal keys go through Type::to_array_key and a spread merges a single...
+- [ ] `3ac29a9a` refactor: the class names a type refers to come from Type::referenced_class_names and h...
+- [ ] `0b385315` refactor: deciding a declared type from its PHPDoc and native parts moves to types::rec...
+- [ ] `9819e786` refactor: whether a type can be iterated, offset-accessed, destructured or called is a ...
+- [ ] `e024c0bc` refactor: writing an array offset and asking whether one exists move to Type::set_offse...
+- [ ] `df967fc1` refactor: reading an array offset is Type::offset_value_type, replacing index_result_ty...
+- [ ] `3bdb7505` refactor: whether a value can access properties, call methods or name a class is a Rela...
+- [ ] `d0d331dd` refactor: null-exclusion, array certainty and array-key legality ask the type's questio...
+- [ ] `615ad35d` refactor: the result type of arithmetic, bitwise, shift and spaceship operators moves t...
+- [ ] `9046b99f` refactor: receiver classes come from object_class_names, literal method and constant na...
+- [ ] `f6d6b1e3` style: drop needless borrows of a resolved instanceof class name
+- [ ] `fd5c800e` refactor: binding static, unsealing shapes and stepping by ++/-- are Type methods (bind...
+- [ ] `20ee94a0` refactor: gettype/get_debug_type answer from the kind predicates, and array_filter/arra...
+- [ ] `3881d045` refactor: built-in call return types read literals, objects and shapes through int_lite...
+- [ ] `56c3beab` refactor: the native declaration a type can be written as moves to types::native_declar...
+- [ ] `dbe500c5` refactor: the missing-typehint walks move to Type methods (iterable_types_missing_value...
+- [ ] `e940abd8` refactor: psr3, no-op, strict-idiom, unresolvable-PHPDoc and banned-type checks ask Typ...
+- [ ] `31a2fd14` refactor: the template variance walks become Type::referenced_templates with PositionVa...
+- [ ] `1fe021dc` refactor: registry resolution, var-tag, generator, offset-assignment, narrowing, castab...
+- [ ] `7a2938f1` refactor: tests, Doctrine result shapes, mysqli, control flow and expression inference ...
+- [ ] `8437f51f` refactor: parameter-type resolution, foreach, restricted-symbol, instanceof, global-con...
+- [ ] `71cd4d4a` refactor: the remaining checker, registry, LSP and project code outside member lookup a...
+- [ ] `347ae90f` refactor: member lookup and method-call return inference ask Type (Type::instance_class...
+- [ ] `096812c5` refactor: the Type enum becomes opaque
+- [ ] `95724106` fix: a union answers the usage questions as PHPStan does (members agree or Maybe, null ...
+- [ ] `1fe63136` refactor: one answer per type question
+- [ ] `e53d7d7f` refactor: a template can be bounded by any type describing values (Type::can_bound_a_te...
+- [ ] `bfb797c8` refactor: the types crate's API is methods on what they ask about
+- [ ] `5fc4e990` refactor: the public union_of, benevolent_union_of and intersection_of normalize, so no...
+- [ ] `eeaf448c` refactor: branch-implied facts are keyed by a Discriminant (subject and value type) ins...
+- [ ] `4dc6a4b7` refactor: inside crates/types a type is built through its constructors (Type::int(), Ty...
+- [ ] `245f6b56` docs: comments follow the review's renames
+- [ ] `247e5226` refactor: a list has one encoding, its array member keyed on int<0, max> wherever it's ...
+- [ ] `34fd1014` fix: a union absorbs a refined array member into any present array that covers it, not ...
 
 ## Deferred to C8 (reflection)
 
