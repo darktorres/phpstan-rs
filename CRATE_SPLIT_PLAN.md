@@ -6431,7 +6431,27 @@ lines) builds its own `Project` with its own settings assembly
 observations below come from the debug binary at `56c3beab`, the LSP driven over
 stdio.
 
-**F1. Session** (§3.10). Structural commits first, one each:
+**F1. Session** (§3.10). Fixed first, each an interim commit with its test on
+today's code, long before the phase, since each ends the language server, loses
+data or corrupts files (Appendix F):
+
+- the LSP's debounce thread is spawned with `WORKER_STACK_SIZE` and the
+  workspace scan's parses run on the worker pool, so a file of 60 or 120 nested
+  arrays no longer aborts the server (the pool move below makes it general);
+- `queue_change` writes `latest_text` when `didChange` arrives, so completion
+  triggered by `>` reads the text with the `->`;
+- `didClose` restores the file's disk content;
+- `--generate-baseline` keeps the entries and `includes` of files the run
+  didn't analyse (it erases them today);
+- `--fix` skips a file whose content changed since it was analysed, rather than
+  patching it at stale offsets;
+- a closed output pipe ends the run quietly (`CRASH_REPORTING_PLAN.md`'s step 1b).
+
+F5's rename refuses, until its rewrite lands, any rename whose sites include a
+qualified name, an import or an alias, instead of returning an edit that leaves
+code resolving elsewhere.
+
+Structural commits first, one each:
 
 - **`AnalysisResult` owns its data** instead of the `Project`: file errors,
   not-file errors and internal errors as separate lists; each analysed file's
@@ -7450,14 +7470,16 @@ its owner. Non-Registry keys follow the table.
   completes it. The two ext data modules (`access_attributes`,
   `doctrine_entity`) move onto class-reflection data extensions in C8.
 - **Bugs in code a later phase rewrites.** A fixture first; the fix is that
-  phase's own behaviour commit (approved delta) after its structural
-  commit. Fixed first instead: the `PHP_VERSION_ID` range typing (C2),
-  C3a's `property.unused` delta, `int|float` arithmetic (D3), top-level
-  variables as maybe-defined (D5), loop/switch termination (D2) and
-  `is_resource()` never always true (D3), impure `$this` calls
-  dropping `$this->…` narrowing (D5) and `finally` reads of variables the
-  `try` assigns (D5) and `return.missing` on a `void|…` return type (E3f),
-  each a false positive on ordinary code; D2 and D5 name the interim fix.
+  phase's own behaviour commit (approved delta) after its structural commit.
+  Fixed first instead: the `PHP_VERSION_ID` range typing (C2), C3a's
+  `property.unused` delta, `int|float` arithmetic (D3), top-level variables as
+  maybe-defined (D5), loop/switch termination (D2) and `is_resource()` never
+  always true (D3), impure `$this` calls dropping `$this->…` narrowing (D5) and
+  `finally` reads of variables the `try` assigns (D5) and `return.missing` on a
+  `void|…` return type (E3f), each a false positive on ordinary code; D2 and D5
+  name the interim fix. Also fixed first, as Stage F's items name them: bugs
+  that end the language server, lose a user's data or write broken code,
+  whatever phase rewrites the code (F1 "Fixed first", F5's rename).
 - **phpstan-symfony** has no counterpart crate: the ROADMAP's extension
   config mapping marks it unsupported (its rules need the container XML or
   a console application loader).
