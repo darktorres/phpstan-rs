@@ -443,6 +443,23 @@ impl Type {
         }
     }
 
+    /// The value of a string literal; `None` for any other type.
+    pub fn string_literal_value(&self) -> Option<&crate::PhpString> {
+        match self {
+            Type::StringLiteral(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The class and generic arguments of an object of a named class;
+    /// `None` for any other type.
+    pub fn object_class_and_args(&self) -> Option<(&crate::Name, &[Type])> {
+        match self {
+            Type::Object(class, args) => Some((class, args)),
+            _ => None,
+        }
+    }
+
     /// The value of `true` or `false`; `None` for any other type.
     pub fn bool_literal_value(&self) -> Option<bool> {
         match self {

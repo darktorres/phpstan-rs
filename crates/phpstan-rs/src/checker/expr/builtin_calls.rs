@@ -102,8 +102,8 @@ impl<'a> Checker<'a> {
             // gets the same always-true "never negative" floor `strlen`
             // above does.
             "count" | "sizeof" if args.len() == 1 => {
-                if let Type::ArrayShape(shape) = self.infer_expr(&args[0].value, locals)
-                    && shape.is_sealed()
+                let counted = self.infer_expr(&args[0].value, locals);
+                if let [shape] = counted.constant_arrays()[..]
                     && shape.fields.iter().all(|f| !f.optional)
                 {
                     return Type::int_literal(shape.fields.len() as i64);
@@ -132,10 +132,10 @@ impl<'a> Checker<'a> {
                 return hrtime_array_shape();
             }
             "hrtime" if args.len() == 1 => {
-                return match self.infer_expr(&args[0].value, locals) {
-                    Type::True => hrtime_number_type(),
-                    Type::False => hrtime_array_shape(),
-                    _ => union_types(hrtime_array_shape(), hrtime_number_type()),
+                return match self.infer_expr(&args[0].value, locals).bool_literal_value() {
+                    Some(true) => hrtime_number_type(),
+                    Some(false) => hrtime_array_shape(),
+                    None => union_types(hrtime_array_shape(), hrtime_number_type()),
                 };
             }
             // `array_pop`/`array_shift`'s element-or-null result type is
@@ -163,19 +163,17 @@ impl<'a> Checker<'a> {
             // non-emptiness but isn't needed by any real call site yet) -
             // anything else falls through to the generic path below.
             "range" if args.len() == 2 => {
-                let elem = match (
-                    &self.infer_expr(&args[0].value, locals),
-                    &self.infer_expr(&args[1].value, locals),
-                ) {
-                    (Type::Int | Type::IntLiteral(_), Type::Int | Type::IntLiteral(_)) => {
-                        Some(Type::int())
-                    }
-                    (Type::StringLiteral(a), Type::StringLiteral(b))
-                        if a.len() == 1 && b.len() == 1 =>
-                    {
-                        Some(Type::string())
-                    }
-                    _ => None,
+                let (from, to) = (
+                    self.infer_expr(&args[0].value, locals),
+                    self.infer_expr(&args[1].value, locals),
+                );
+                let one_char = |t: &Type| t.string_literal_value().is_some_and(|s| s.len() == 1);
+                let elem = if from.is_int().yes() && to.is_int().yes() {
+                    Some(Type::int())
+                } else if one_char(&from) && one_char(&to) {
+                    Some(Type::string())
+                } else {
+                    None
                 };
                 if let Some(elem) = elem {
                     return Type::intersection_of(vec![
@@ -676,7 +674,8 @@ impl<'a> Checker<'a> {
             | "mysqli_fetch_column"
                 if !args.is_empty() =>
             {
-                if let Type::Object(class, type_args) = self.infer_expr(&args[0].value, locals)
+                let result_ty = self.infer_expr(&args[0].value, locals);
+                if let Some((class, type_args)) = result_ty.object_class_and_args()
                     && class.eq_ignore_ascii_case("mysqli_result")
                     && let Some(ty) = self.mysqli_fetch_type(
                         name.trim_start_matches("mysqli_"),
@@ -812,10 +811,7 @@ impl<'a> Checker<'a> {
                 let num_literal = args
                     .get(1)
                     .map(|a| self.infer_expr(&a.value, locals))
-                    .and_then(|t| match t {
-                        Type::IntLiteral(n) => Some(n),
-                        _ => None,
-                    });
+                    .and_then(|t| t.int_literal_value());
                 if let Some(key_ty) = arr_ty.array_key_type() {
                     match num_literal.unwrap_or(1) {
                         1 => return key_ty,
@@ -925,11 +921,11 @@ impl<'a> Checker<'a> {
                 // `ArrayShape`'s.
                 let all_string_keyed_or_shape = !has_spread
                     && arg_types.iter().any(|t| {
-                        matches!(t, Type::ArrayShape(_))
+                        t.shape().is_some()
                             || has_offset_value_parts(t).is_some_and(|(_, pairs)| !pairs.is_empty())
                     })
-                    && arg_types.iter().all(|t| match t {
-                        Type::ArrayShape(shape) => shape
+                    && arg_types.iter().all(|t| match t.shape() {
+                        Some(shape) => shape
                             .fields
                             .iter()
                             .all(|f| matches!(f.key, ShapeKey::Str(_))),
@@ -943,14 +939,14 @@ impl<'a> Checker<'a> {
                         // key type that provably excludes `Int` is just
                         // as safe here, not only the bare `Type::String`
                         // variant.
-                        _ => t.array_key_type().is_some_and(|k| k.is_int().no()),
+                        None => t.array_key_type().is_some_and(|k| k.is_int().no()),
                     });
                 if all_string_keyed_or_shape {
                     let mut merged = Shape::sealed(Vec::new());
                     let mut next_index: i64 = 0; // unused - no int keys reach this path
                     for arg_ty in &arg_types {
-                        match arg_ty {
-                            Type::ArrayShape(inner) => {
+                        match arg_ty.shape() {
+                            Some(inner) => {
                                 for f in &inner.fields {
                                     Self::merge_shape_field(
                                         &mut merged,
@@ -1013,11 +1009,11 @@ impl<'a> Checker<'a> {
                     }
                     return Type::array_shape(merged);
                 }
-                if !has_spread && arg_types.iter().all(|t| matches!(t, Type::ArrayShape(_))) {
+                if !has_spread && arg_types.iter().all(|t| t.shape().is_some()) {
                     let mut merged = Shape::sealed(Vec::new());
                     let mut next_index: i64 = 0;
                     for arg_ty in &arg_types {
-                        if let Type::ArrayShape(inner) = arg_ty {
+                        if let Some(inner) = arg_ty.shape() {
                             for f in &inner.fields {
                                 Self::merge_shape_field(
                                     &mut merged,
@@ -1145,12 +1141,11 @@ impl<'a> Checker<'a> {
                     self.infer_expr(&args[2].value, locals),
                 );
                 let start_is_zero =
-                    matches!(self.infer_expr(&args[0].value, locals), Type::IntLiteral(0));
-                let count_is_non_empty = match self.infer_expr(&args[1].value, locals) {
-                    Type::IntLiteral(n) => n >= 1,
-                    Type::IntRange(Some(min), _) => min >= 1,
-                    _ => false,
-                };
+                    self.infer_expr(&args[0].value, locals).int_literal_value() == Some(0);
+                let count_is_non_empty = self
+                    .infer_expr(&args[1].value, locals)
+                    .int_range_bounds()
+                    .is_some_and(|(min, _)| min.is_some_and(|m| m >= 1));
                 let mut members = vec![base];
                 if start_is_zero {
                     members.push(Type::accessory(AccessoryKind::ArrayList));
@@ -1236,12 +1231,12 @@ impl<'a> Checker<'a> {
                     // shape for a raw DB-fetch row) has no per-key
                     // precision to offer, so every column read is simply
                     // the row's own uniform element type.
-                    let field_ty = match &row_ty {
-                        Type::ArrayShape(shape) => literal_string_key(&args[1].value)
+                    let field_ty = match row_ty.shape() {
+                        Some(shape) => literal_string_key(&args[1].value)
                             .and_then(|key| shape.field(&ShapeKey::from_name(&key)))
                             .map(|f| f.ty.clone()),
-                        _ if row_ty.is_array().yes() => row_ty.array_value_type(),
-                        _ => None,
+                        None if row_ty.is_array().yes() => row_ty.array_value_type(),
+                        None => None,
                     };
                     if let Some(field_ty) = field_ty {
                         let arr_ty = Type::array(Type::unknown_array_key(), field_ty);
@@ -1308,14 +1303,14 @@ impl<'a> Checker<'a> {
                 None => return Type::string(),
                 Some(ty)
                     if types::Relation::structural()
-                        .is_super_type_of(&Type::True, &ty)
+                        .is_super_type_of(&Type::bool_literal(true), &ty)
                         .yes() =>
                 {
                     return Type::float();
                 }
                 Some(ty)
                     if types::Relation::structural()
-                        .is_super_type_of(&Type::False, &ty)
+                        .is_super_type_of(&Type::bool_literal(false), &ty)
                         .yes() =>
                 {
                     return Type::string();
@@ -1347,7 +1342,7 @@ impl<'a> Checker<'a> {
             "preg_replace" | "preg_replace_callback" | "preg_filter"
                 if args.len() >= 3
                     && types::Relation::structural()
-                        .is_super_type_of(&Type::String, &self.infer_expr(&args[2].value, locals))
+                        .is_super_type_of(&Type::string(), &self.infer_expr(&args[2].value, locals))
                         .yes() =>
             {
                 let resolved = resolve_call_args(args, sig.params());
@@ -1415,17 +1410,20 @@ impl<'a> Checker<'a> {
             "str_repeat" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 let count_ty = self.infer_expr(&args[1].value, locals);
-                if matches!(count_ty, Type::IntLiteral(n) if n <= 0) {
+                if count_ty.int_literal_value().is_some_and(|n| n <= 0) {
                     return Type::string_literal(PhpString::default());
                 }
-                if let (Type::StringLiteral(s), Type::IntLiteral(n)) = (&input_ty, &count_ty)
-                    && *n >= 0
-                    && s.len().saturating_mul(*n as usize) < 100
+                if let (Some(s), Some(n)) = (
+                    input_ty.string_literal_value(),
+                    count_ty.int_literal_value(),
+                ) && n >= 0
+                    && s.len().saturating_mul(n as usize) < 100
                 {
-                    return Type::string_literal(s.repeat(*n as usize));
+                    return Type::string_literal(s.repeat(n as usize));
                 }
-                let count_is_at_least_one = matches!(count_ty, Type::IntLiteral(n) if n >= 1)
-                    || matches!(count_ty, Type::IntRange(Some(min), _) if min >= 1);
+                let count_is_at_least_one = count_ty
+                    .int_range_bounds()
+                    .is_some_and(|(min, _)| min.is_some_and(|m| m >= 1));
                 if count_is_at_least_one && is_non_falsy_string(&input_ty) {
                     return Type::intersection_of(vec![
                         Type::string(),
@@ -1532,7 +1530,7 @@ impl<'a> Checker<'a> {
             "preg_replace_callback_array"
                 if args.len() >= 2
                     && types::Relation::structural()
-                        .is_super_type_of(&Type::String, &self.infer_expr(&args[1].value, locals))
+                        .is_super_type_of(&Type::string(), &self.infer_expr(&args[1].value, locals))
                         .yes() =>
             {
                 let resolved = resolve_call_args(args, sig.params());
@@ -1546,7 +1544,7 @@ impl<'a> Checker<'a> {
             "mb_convert_encoding"
                 if args.len() >= 2
                     && types::Relation::structural()
-                        .is_super_type_of(&Type::String, &self.infer_expr(&args[0].value, locals))
+                        .is_super_type_of(&Type::string(), &self.infer_expr(&args[0].value, locals))
                         .yes() =>
             {
                 let resolved = resolve_call_args(args, sig.params());
@@ -1584,8 +1582,9 @@ impl<'a> Checker<'a> {
             // argument whose type isn't a concrete `Object` falls through
             // to plain `string`, unchanged.
             "get_class" if args.len() == 1 => {
-                if let Type::Object(class, _) = self.infer_expr(&args[0].value, locals) {
-                    return Type::class_string(Type::object(class, Vec::new()));
+                let object_ty = self.infer_expr(&args[0].value, locals);
+                if let Some((class, _)) = object_ty.object_class_and_args() {
+                    return Type::class_string(Type::object(class.clone(), Vec::new()));
                 }
             }
             // `get_called_class()`'s stub is unconditionally
@@ -1614,8 +1613,9 @@ impl<'a> Checker<'a> {
             // for anything `find_declared_parent_class` can't answer
             // confidently.
             "get_parent_class" if args.len() == 1 => {
-                if let Type::Object(class, _) = self.infer_expr(&args[0].value, locals)
-                    && let Some(ty) = self.find_declared_parent_class(&class)
+                let object_ty = self.infer_expr(&args[0].value, locals);
+                if let Some((class, _)) = object_ty.object_class_and_args()
+                    && let Some(ty) = self.find_declared_parent_class(class)
                 {
                     return ty;
                 }
@@ -1651,8 +1651,7 @@ impl<'a> Checker<'a> {
             // entirely of recognized characters - anything else falls
             // through to plain `string`, unchanged.
             "date" if !args.is_empty() => {
-                if let Type::StringLiteral(format) = self.infer_expr(&args[0].value, locals)
-                    && let Some(format) = format.as_str()
+                if let [format] = self.infer_expr(&args[0].value, locals).constant_strings()[..]
                     && let Some(ty) = date_format_return_type(format)
                 {
                     return ty;
@@ -1664,8 +1663,7 @@ impl<'a> Checker<'a> {
             // format string, `idate()`'s only real accepted shape -
             // anything else falls through to plain `int|false`, unchanged.
             "idate" if !args.is_empty() => {
-                if let Type::StringLiteral(format) = self.infer_expr(&args[0].value, locals)
-                    && let Some(format) = format.as_str()
+                if let [format] = self.infer_expr(&args[0].value, locals).constant_strings()[..]
                     && let Some(c) = single_char(format)
                     && let Some((min, max)) = idate_format_char_range(c)
                 {
@@ -1738,8 +1736,7 @@ impl<'a> Checker<'a> {
             // `int|null` instead, a materially different shape not
             // modeled here.
             "sscanf" if args.len() == 2 => {
-                if let Type::StringLiteral(format) = self.infer_expr(&args[1].value, locals)
-                    && let Some(format) = format.as_str()
+                if let [format] = self.infer_expr(&args[1].value, locals).constant_strings()[..]
                     && let Some(fields) = sscanf_result_fields(format)
                 {
                     return Type::union_of(vec![Type::array_shape(fields), Type::null()]);
@@ -1906,7 +1903,7 @@ impl<'a> Checker<'a> {
         keep_upper: bool,
     ) -> Type {
         let arg_ty = self.infer_expr(arg, locals);
-        if let Type::StringLiteral(s) = &arg_ty {
+        if let Some(s) = arg_ty.string_literal_value() {
             let folded = if force_lower {
                 s.to_ascii_lowercase()
             } else if force_upper {
@@ -2205,7 +2202,7 @@ fn filter_validate_result(
     let flags_ty_ref = flags_ty.expect("flags_is_options_array implies Some");
     let fields = filter_var_options_fields(flags_ty_ref);
     if fields.is_none()
-        && let Type::ArrayShape(flags_shape) = flags_ty_ref
+        && let Some(flags_shape) = flags_ty_ref.shape()
         && flags_shape.field(&ShapeKey::from_name("options")).is_some()
     {
         return None;
@@ -2236,13 +2233,11 @@ fn filter_validate_result(
 }
 
 fn filter_var_options_fields(flags_ty: &Type) -> Option<&Shape> {
-    let Type::ArrayShape(shape) = flags_ty else {
-        return None;
-    };
-    match &shape.field(&ShapeKey::from_name("options"))?.ty {
-        Type::ArrayShape(options) => Some(options),
-        _ => None,
-    }
+    flags_ty
+        .shape()?
+        .field(&ShapeKey::from_name("options"))?
+        .ty
+        .shape()
 }
 
 /// One named option's value type (`'default'`/`'min_range'`/`'max_range'`)
@@ -2560,17 +2555,12 @@ fn gettype_string_for(ty: &Type) -> Option<&'static str> {
 }
 
 fn gettype_result(ty: &Type) -> Option<Type> {
-    match ty {
-        Type::Union(members) => {
-            let mut iter = members.iter();
-            let mut acc = Type::string_literal(gettype_string_for(iter.next()?)?.into());
-            for m in iter {
-                acc = union_types(acc, Type::string_literal(gettype_string_for(m)?.into()));
-            }
-            Some(acc)
-        }
-        other => gettype_string_for(other).map(|s| Type::string_literal(s.to_string().into())),
-    }
+    ty.union_members()
+        .iter()
+        .map(|m| gettype_string_for(m).map(|s| Type::string_literal(s.into())))
+        .collect::<Option<Vec<_>>>()?
+        .into_iter()
+        .reduce(union_types)
 }
 
 /// Whether `s` is exactly one Unicode scalar value - `idate()`'s format
