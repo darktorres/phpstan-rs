@@ -7495,6 +7495,9 @@ What an extraction checks:
 - **The public API** is snapshotted from the extraction commit on (gate 14), and
   the commit lists its difference from §3's design: an item the design names
   that the crate lacks, or one it exports that the design doesn't name.
+- **Compile-time values.** Nothing in the package but the binary's version
+  reads a Cargo variable (`env!`, `option_env!`), so no value changes meaning
+  when a module compiles in another crate.
 - **Standalone build.** The crate builds alone (gate 1's `cargo hack check
   --workspace --no-dev-deps`), so a dependency feature it needs is in its own
   manifest rather than unified in from another member.
@@ -7545,12 +7548,14 @@ Per crate:
 - **`testing`**: the harness leaves the package's `tests/fixtures.rs` for a
   library: RuleTestCase (with collectors), TypeInferenceTestCase,
   LevelsTestCase, Integration and Codemod (§3.11), and the libtest-mimic runner,
-  `testing::run(registrations, fixtures_dir)`. It depends on `project` alone and
-  takes its registrations from the caller, so a fixtures target registers what
-  its crate needs, builtins always (E2). TypeInferenceTestCase evaluates the
-  asserts through a node callback, as PHPStan's `gatherAssertTypes` does,
-  rather than through `rules`' `FileAssertRule`, which is what keeps `rules` out
-  of its dependencies.
+  `testing::run(registrations, fixtures_dir)`. It depends on nothing above
+  `project` (its row names `project` and the crates below it, which it names
+  directly: `analyser`'s node callbacks, `diagnostics`' expectations, `config`'s
+  schema for the fixture header) and takes its registrations from the caller, so
+  a fixtures target registers what its crate needs, builtins always (E2).
+  TypeInferenceTestCase evaluates the asserts through a node callback, as
+  PHPStan's `gatherAssertTypes` does, rather than through `rules`'
+  `FileAssertRule`, which is what keeps `rules` out of its dependencies.
 - **`app`**: the composition root (every registration, extension activation),
   the ErrorFormatter set, `run(args, extra)` over already parsed arguments (no
   `clap` in a library crate, §3.7), and the crash reporter's `crash_report`
@@ -7563,17 +7568,15 @@ Per crate:
   through `testing`, and checks the formatter's output, so an API the design
   names but the crates don't export fails a test instead of a user.
 - **`lsp`**: the server and its features over the Session and observers
-  (`lsp-server`, `lsp-types`, `crossbeam-channel`). Its entry point takes the function
-  `app` exposes for building a root's Session from that root's config (the
-  registrations and the extensions its composer files activate, C1, so each
-  root of F1's per-root Sessions gets its own) and the server info the bin
-  passes (§2):
-  `serverInfo.version` stays the binary's, as today (`main.rs` passes its
-  `env!("CARGO_PKG_VERSION")` to `lsp::run`, and the `lsp` tests pass theirs,
-  which after the split is `lsp`'s own and the same workspace version), with
-  F4's build identity added. Nothing else in the package reads a Cargo
-  variable at compile time, so no other value changes meaning when a module
-  compiles in another crate.
+  (`lsp-server`, `lsp-types`, `crossbeam-channel`). Its entry point takes,
+  beside the config schema the bin already passes from `app`
+  (`app::config_schema()`), the function `app` exposes for building a root's
+  Session from that root's config (the registrations and the extensions its
+  composer files activate, C1, so each root of F1's per-root Sessions gets its
+  own) and the server info the bin passes (§2): `serverInfo.version` stays the
+  binary's, as today (`main.rs` passes its `env!("CARGO_PKG_VERSION")` to
+  `lsp::run`, and the `lsp` tests pass theirs, which after the split is `lsp`'s
+  own and the same workspace version), with F4's build identity added.
 - **The bin** keeps `main.rs` alone, with `clap`, `clap_complete`, `ctrlc` and
   `dhat`, and the `hotpath`, `hotpath-alloc` and `dhat-heap` features; the
   package has no library target. Every `phpstan_rs::` user is repointed:
@@ -7635,10 +7638,11 @@ crates, in one commit:
   gate profile's suite does at the time; the commit records each crate's debug
   wall time, and until the bar is met the targets stay in the gate profile.
   `default-members` keeps the bin, so a bare `cargo test` runs only the binary's
-  tests, and the documented command is `cargo test --workspace`. CI's two
-  fixture steps (`cargo test --profile gate --test fixtures`, with and without
-  default features) fold into its workspace test steps, and
-  `GATE_SPEED_PLAN.md`'s fixture command follows.
+  tests, and the documented command is `cargo test --workspace`. When the targets
+  leave the gate profile, CI's two fixture steps (`cargo test --profile gate
+  --test fixtures`, with and without default features) fold into its workspace
+  test steps and `GATE_SPEED_PLAN.md`'s fixture command follows; until then
+  they become `cargo test --profile gate --workspace --test fixtures`.
 - **The binary's own tests** stay in the bin package: `tests/cli.rs`,
   `version.rs`, `lsp_exit_code.rs` and their `common` helper, which run the
   built binary (`CARGO_BIN_EXE_phpstan-rs`).
