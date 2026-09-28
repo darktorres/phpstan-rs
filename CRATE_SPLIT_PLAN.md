@@ -7715,7 +7715,12 @@ build script's `rerun-if-changed` scope, `include_str!` inputs and feature
 unification between the build and the test build rebuild crates too. At
 `25d63876` a stub edit rebuilt `syntax`, `types`, `phpdoc`, `diagnostics` and
 `composer`, none of which depends on `stub-sources`; at `1b20b638` it rebuilds
-`stub_sources` and the package alone. The asserted sets:
+`stub_sources` and the package alone. The recorder counts a crate as rebuilt
+from cargo's `compiler-artifact` messages of `lib` targets only
+(`rebuilt_workspace_crates`), which today catches the package through its
+library; with the bin left alone in it, the recorder counts `bin` targets too,
+so the bin's rebuild is seen and the sets below can name it. The asserted
+sets:
 
 - an engine edit (a file in `analyser`) rebuilds nothing below `analyser`;
 - a rule edit (a file in `rules`) rebuilds neither `analyser`, `builtins` nor
