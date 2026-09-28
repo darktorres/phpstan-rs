@@ -1345,6 +1345,50 @@ Follow-ups:
   nowhere else: a missing member on a union or intersection, GMP operators
   with a non-numeric string, a PHPDoc for a missing parameter, `$this` in a
   static closure). D3's handlers produce it.
+- **Type behaviour lives on the type.** PHPStan asks a type what it does
+  (`getOffsetValueType`, `hasOffsetValueType`, `setOffsetValueType`,
+  `getIterableKeyType`/`getIterableValueType`, `isArray`/`isList`/
+  `isString`/`isObject`/`isCallable`/`isIterable`, `isNull`/`isTrue`/
+  `isFalse`/`toBoolean`, `isConstantValue`, `getConstantStrings`/
+  `getConstantArrays`/`getConstantScalarValues`, `generalize`,
+  `toNumber`/`toArray`/`toArrayKey`, `looseCompare`, `tryRemove`); here each
+  question is a `match ty` in whichever checker file needed it, answered
+  again wherever else it came up, and not always the same way: four
+  `flatten_union`s (`by_ref_params`, `property_type_too_wide`,
+  `return_type_too_wide`, `throws/too_wide`), two `is_array_like`
+  (`expr/array_ops`, `var_tag_types`), two `is_object_like`
+  (`narrowing/type_ops`, `strict_idioms`), two `generalize` (`comparisons`,
+  `constant_resolver`), `iterable_element_type` (`stmt/loops`) beside
+  `iterable_value_of`/`iterable_key_of` (`var_tag_types`), and
+  `is_string`/`is_string_type`/`is_exactly_string_operand`/
+  `is_string_shaped`/`is_string_or_nullable_string` across `strict_rules`,
+  `offset_assignment`, `operators` and `expr`. Measured: 373 functions in
+  `crates/phpstan-rs/src` take a `Type` (204 free, 169 methods): 63 rules
+  that report, 8 scope storage, and 302 questions - 52 `is_*`/`has_*`
+  predicates, 41 template binding, 32 offset and key, 28 constant values,
+  22 iteration, 22 name resolution, 21 narrowing, 15 coercion, 14 union
+  flattening, 13 transformations (accessories stripped and rewrapped,
+  nullability added), 12 function return types, 10 member lookup, 9
+  relation wrappers, 7 comparison, 4 generalization. 108 files hold about
+  1,055 more inline inspections (`matches!(.., Type::..)`, `if let
+  Type::..`, match arms).
+  - Each question becomes one `Type` method (a trinary one where PHPStan's
+    is: `is_array()` of `array|int` is `Maybe`), or a `Relation` method
+    where it needs the class hierarchy, in `crates/types`.
+  - The checker's helpers are deleted, and every inline inspection that
+    asks one of these questions calls the method. What stays in the
+    checker is building types from syntax and deciding what to report.
+  - Where two copies disagreed, the method follows PHPStan and the
+    difference is fixtured.
+  - `Type` becomes opaque: its representation is private to
+    `crates/types`, and other crates build types through constructors
+    and read them only through methods, so matching on a type outside the
+    crate doesn't compile. While sites move, an xtask gate counts `Type::`
+    patterns outside `crates/types` and fails when the count grows; once
+    it reaches zero the variants go private and the gate is deleted.
+  - Subtraction, `Relation::remove` and the coercions already moving in
+    follow the same shape. Member lookup (`getMethod`/`getProperty`/
+    `getConstant`) moves once C8's reflection exists.
 - **Subtracted types.** `mixed~T`, `object~T`, `Foo~Bar` and
   `$this(Foo~Bar)` (PHPStan's `SubtractableType`): narrowing a type away
   from `mixed`, `object`, a class, `static`/`$this` or a template keeps
@@ -1360,9 +1404,10 @@ Follow-ups:
   - The subtraction is a field of the subtractable variants, not a
     wrapper: `Mixed { explicit, subtracted }`, `Object { class, args,
     subtracted }`, `ObjectWithoutClass { subtracted }`, and the same on
-    `This`/`StaticRef` and `TemplateParam`. `mixed~null` stays a `mixed`
-    to every arm that asks, and each pattern over these variants is
-    rewritten, not left to a `_` arm.
+    `This`/`StaticRef` and `TemplateParam`. With `Type` opaque (the item
+    above), these are fields of its private representation: `mixed~null`
+    answers every question a `mixed` does, and only `crates/types`'s own
+    patterns change, none of them left to a `_` arm.
   - `==` on `Type` is structural, every field included; PHPStan's
     `equals()` (which ignores `explicit`) is `Type::equals`. Each `==` on
     types today is audited into one or the other, and each `==
@@ -1558,50 +1603,6 @@ Follow-ups:
 - **Patch versions.** `PhpVersion` carries the patch: the false branch of
   `PHP_VERSION_ID >= 80105` keeps 8.1 (`narrow_at_least` drops it, which
   D5's scope narrowing would read as dead code).
-- **Type behaviour lives on the type.** PHPStan asks a type what it does
-  (`getOffsetValueType`, `hasOffsetValueType`, `setOffsetValueType`,
-  `getIterableKeyType`/`getIterableValueType`, `isArray`/`isList`/
-  `isString`/`isObject`/`isCallable`/`isIterable`, `isNull`/`isTrue`/
-  `isFalse`/`toBoolean`, `isConstantValue`, `getConstantStrings`/
-  `getConstantArrays`/`getConstantScalarValues`, `generalize`,
-  `toNumber`/`toArray`/`toArrayKey`, `looseCompare`, `tryRemove`); here each
-  question is a `match ty` in whichever checker file needed it, answered
-  again wherever else it came up, and not always the same way: four
-  `flatten_union`s (`by_ref_params`, `property_type_too_wide`,
-  `return_type_too_wide`, `throws/too_wide`), two `is_array_like`
-  (`expr/array_ops`, `var_tag_types`), two `is_object_like`
-  (`narrowing/type_ops`, `strict_idioms`), two `generalize` (`comparisons`,
-  `constant_resolver`), `iterable_element_type` (`stmt/loops`) beside
-  `iterable_value_of`/`iterable_key_of` (`var_tag_types`), and
-  `is_string`/`is_string_type`/`is_exactly_string_operand`/
-  `is_string_shaped`/`is_string_or_nullable_string` across `strict_rules`,
-  `offset_assignment`, `operators` and `expr`. Measured: 373 functions in
-  `crates/phpstan-rs/src` take a `Type` (204 free, 169 methods): 63 rules
-  that report, 8 scope storage, and 302 questions - 52 `is_*`/`has_*`
-  predicates, 41 template binding, 32 offset and key, 28 constant values,
-  22 iteration, 22 name resolution, 21 narrowing, 15 coercion, 14 union
-  flattening, 13 transformations (accessories stripped and rewrapped,
-  nullability added), 12 function return types, 10 member lookup, 9
-  relation wrappers, 7 comparison, 4 generalization. 108 files hold about
-  1,055 more inline inspections (`matches!(.., Type::..)`, `if let
-  Type::..`, match arms).
-  - Each question becomes one `Type` method (a trinary one where PHPStan's
-    is: `is_array()` of `array|int` is `Maybe`), or a `Relation` method
-    where it needs the class hierarchy, in `crates/types`.
-  - The checker's helpers are deleted, and every inline inspection that
-    asks one of these questions calls the method. What stays in the
-    checker is building types from syntax and deciding what to report.
-  - Where two copies disagreed, the method follows PHPStan and the
-    difference is fixtured.
-  - `Type` becomes opaque: its representation is private to
-    `crates/types`, and other crates build types through constructors
-    and read them only through methods, so matching on a type outside the
-    crate doesn't compile. While sites move, an xtask gate counts `Type::`
-    patterns outside `crates/types` and fails when the count grows; once
-    it reaches zero the variants go private and the gate is deleted.
-  - Subtraction, `Relation::remove` and the coercions already moving in
-    follow the same shape. Member lookup (`getMethod`/`getProperty`/
-    `getConstant`) moves once C8's reflection exists.
 - **Tests move in.** `checker/tests/accessory_and_refinement_types.rs`
   (12 tests of `types::union_types`) and
   `checker/tests/array_literals_and_shapes.rs` (2 of
