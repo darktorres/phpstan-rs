@@ -6704,7 +6704,7 @@ its owner. Non-Registry keys follow the table.
 | pest_this_type, pest_hook_properties | ext-pest (closure-this ext + file-set hook) |
 | include_guarded_paths, include_path_dirs, include_constant_initializers, working_dir | RequireFileExists rule state |
 | enum_chain_tails | rules (enum exhaustiveness, ext-shipmonk) file state |
-| constant_facts | magic-constant rule file state |
+| constant_facts | deleted (the magic-constant rule reads the scope) |
 | by_ref_empty_dim_args | by-ref argument context on the resolved-call node |
 | property_assign_facts, cross_file_property_assign_facts, named_argument_call_facts, facts_only | deleted (ClassPropertiesNode rule / collectors) |
 | external_rules | rule registry in AnalysisContext |
