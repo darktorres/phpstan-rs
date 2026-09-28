@@ -126,7 +126,7 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
 
 | Crate | Mirrors |
 | --- | --- |
-| `ext-strict-rules` | phpstan-strict-rules, exactly. Includes porting its remaining families: disallowedBacktick, disallowedEmpty, disallowedShortTernary, closureUsesThis, matchingInheritedMethodNames, noVariableVariables, booleansInLoopConditions |
+| `ext-strict-rules` | phpstan-strict-rules, exactly. Includes porting its remaining families: disallowedLooseComparison, disallowedBacktick, disallowedEmpty, disallowedShortTernary, closureUsesThis, noVariableVariables |
 | `ext-deprecation-rules` | phpstan-deprecation-rules (built on the restricted-usage framework) |
 | `ext-doctrine` | phpstan-doctrine: ORM + DQL, entity metadata, `doctrine_functions` |
 | `ext-sql` | phpstan-dba-style SQL/DBAL row typing, parameter validation, mysqli |
@@ -3316,7 +3316,10 @@ fixture:
     subclass may hook it); all three are unreported today;
   - a property that is only appended to is write-only:
     `$this->only[] = $v` with no read isn't `property.onlyWritten` today,
-    where a plain assignment is;
+    where a plain assignment is; a read through an alias of `$this` counts
+    as a read: `$that = $this; function () use ($that) { return
+    $that->p; }` leaves `$p` `property.onlyWritten` today, a false
+    positive;
   - a readonly property, native or `@readonly`, read before its
     initialization is reported
     (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
@@ -3425,10 +3428,10 @@ for the analyser.
      vendored package): `disallowedLooseComparison` (`==`/`!=`),
      `disallowedBacktick`, `disallowedEmpty`, `disallowedShortTernary`,
      `noVariableVariables` (with the dynamic method, property, static
-     method and static property names), `closureUsesThis`,
-     `matchingInheritedMethodNames` (`method.nameCase`) and
-     `booleansInLoopConditions` (bleeding edge only in the package), plus
-     the core parameters the package sets (C1's list);
+     method and static property names) and `closureUsesThis`, plus the
+     core parameters the package sets (C1's list).
+     `matchingInheritedMethodNames` (through `check_function_name_case`)
+     and `booleansInLoopConditions` already exist;
   7. ext-deprecation-rules;
   8. ext-disallowed-calls;
   9. ext-shipmonk, ext-type-perfect, ext-voku, ext-sidz, ext-slam,
