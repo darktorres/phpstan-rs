@@ -109,7 +109,7 @@ mod tests {
         assert_eq!(numeric_value(b"1e3"), Some(Float(1000.0)));
         assert_eq!(
             numeric_value(b"9223372036854775808"),
-            Some(Float(9.223372036854775808e18))
+            Some(Float(9_223_372_036_854_775_808.0))
         );
         for not in [
             &b""[..],
