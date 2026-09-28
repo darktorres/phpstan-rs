@@ -3194,6 +3194,10 @@ fixture:
     `staticMethod.void`, `function.void`): `$x = $o->v();` for `v(): void`
     isn't reported today (49 oracle findings, e.g. PSR-3
     `LoggerInterface::debug()` results);
+  - a pure call whose result is discarded is reported
+    (`function.resultUnused`, `method.resultUnused`,
+    `staticMethod.resultUnused`): `strlen($s);` and `E::tryFrom($v);` on
+    their own line aren't reported today;
   - a template the call can't resolve is `argument.templateType`:
     `make($s)` for `@param class-string<T> $c` with a plain `string` is
     unreported today (17 oracle findings).
@@ -3210,7 +3214,11 @@ fixture:
     and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
     (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
     fail and stays unreported (331 PHPStan reports on `mixed`).
-- (e) declarations, generics checks and PHPDoc.
+- (e) declarations, generics checks and PHPDoc:
+  - a required parameter after an optional one is
+    `parameter.requiredAfterOptional` (deprecated since PHP 8.0, and the
+    default is then ignored): `function g(int $a = 1, int $b)` isn't
+    reported today.
 - (f) control flow, returns, throws and generators:
   - a return type that includes `void` accepts falling off the end (fixed
     first): `@return void|int` on a function that returns only on some
