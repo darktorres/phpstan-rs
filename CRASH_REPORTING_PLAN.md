@@ -430,10 +430,22 @@ through it. The hook:
   stores the record in a process-wide deferred list, newest first, holding at
   most 64. Rayon carries such a panic to the thread that called into the pool,
   with `resume_unwind`, which runs no hook, so the decision belongs to
-  whichever catch receives it: an `isolated` unit up the calling thread (a
-  load step running `par_iter`, §4.5) takes the newest record whose message
-  equals its payload's, and so records the location and backtrace from the
-  worker, not from the resume. Records nobody takes age out of the list;
+  whichever catch receives it. Our own parallel closures carry the record
+  exactly: every `par_iter`/`into_par_iter`/`par_chunks` closure in the engine
+  (the eight in `registry/resolve.rs`, `hierarchy.rs`, `purity.rs`,
+  `stubs.rs`, and the per-file ones in `project.rs`, `session.rs` and
+  `main/check.rs`) runs its body through `crash_context::carry(|| ..)`, which
+  catches a panic on the worker, takes the thread's record, and resumes with a
+  `CarriedPanic(record)` payload that `isolated` and `entry` unwrap. A panic
+  from pool code that isn't ours (a dependency's own `par_iter`) falls back to
+  the deferred list: the catch takes the newest record whose message equals
+  its payload's. `clippy.toml`, which already bans randomly seeded hash
+  types, gains `disallowed-methods` entries for rayon's parallel-iterator
+  constructors (`par_iter`, `into_par_iter`, `par_chunks`, `par_bridge`,
+  `join`, `scope`), with the reason "run the body through
+  `crash_context::carry`"; each audited site carries
+  `#[allow(clippy::disallowed_methods)]`, so a new site can't skip `carry`
+  unnoticed. Records nobody takes age out of the list;
 - **anywhere else** prints the default message (the previous hook, kept) and,
   with a client, builds the event with `PanicIntegration::event_from_panic_info`
   and captures it as a pending report (§4.6). A location already reported by
@@ -495,11 +507,31 @@ Output, a behaviour commit with its `tests/cli.rs` changes:
   `phpstan-rs lsp: internal error while checking <path>: <message> (at
   <location>)`.
 
-JSON, checkstyle and JUnit output and the exit code stay as they are until
-Stage F's "Internal errors are reported in every format" and "The exit code".
-The JSON's `totals.files_checked` keeps excluding every file with an internal
-error, now including the parse panics it used to count as skipped, so its
-value doesn't change.
+Every other format carries them too, and the run fails: Stage F's "Internal
+errors are reported in every format" and "The exit code" are pulled forward
+whole (§5), since a crash CI can't see is the problem this plan exists for.
+
+- **JSON:** a top-level `internal_errors` array, each
+  `{ "path": <path or null>, "unit": "check", "message": ..., "location":
+  "file:line:col", "focus": <path or null> }`, `totals.internal_errors`, and
+  `"incomplete": true` when there is any. `totals.files_checked` keeps
+  excluding every file with an internal error, now including the parse
+  panics it used to count as skipped, so its value doesn't change.
+- **Checkstyle:** an `<error severity="error" source="phpstan-rs.internal"
+  message="internal error while <unit>: <message> (at <location>)"/>`
+  without a line, under the file's `<file>`; a pass or load error goes under
+  its focus file, or under the config file (the working directory when there
+  is none) without a focus.
+- **JUnit:** one failing `<testcase classname="phpstan-rs.internal"
+  name="<unit> <path>">` per internal error, its `<failure>` holding the
+  message and location.
+- **Text and friendly:** the summary adds "the result is incomplete".
+- **Exit code** (the Stage F item as written, with its approved delta in
+  `tests/cli.rs`): 0 when nothing remains after the post-filters; 1 when a
+  file or not-file error remains; 2 when the run couldn't start (an invalid
+  config, no files under the paths, an unreadable baseline) or finished
+  incomplete (an internal error). Today every run exits 0 except a config or
+  `--set` error (1). The supervisor passes the code through (§4.11).
 
 ### 4.5 Whole-program passes
 
@@ -664,6 +696,22 @@ external/<n>/<name>      files outside the root, mapped in the manifest
   path that isn't UTF-8 is exact in the tar header and lossy, with a flag, in
   the manifest.
 - **Archive:** `tar` + `flate2` (`flate2` is already in the lock).
+- **Checked before it's sent.** A bundle is replayed before it goes out: its
+  files loaded into a fresh project with its config, its crashing unit run
+  under `isolated`, and the result compared with the crash (the same panic
+  location; for a native crash, the child running it dying of the same
+  signal). A panic's replay runs in-process, where the bundle was built; a
+  native crash's, and any finisher's, runs in a child
+  (`phpstan-rs __crash-replay <bundle>`, hidden like `__crash-finish`) so a
+  second abort can't take the report with it. A bundle that doesn't
+  reproduce is rebuilt with its walk widened (the next reference distance;
+  for a pass or load unit, every analysed file) and replayed again, at most
+  three times within the cap. The event is tagged `reproduces` = `yes`, `no`
+  or `unchecked` (a live SQL connection the bundle can't carry, a replay
+  that timed out after 60 s), so a maintainer knows before downloading
+  whether the bundle alone is enough. Replay runs only phpstan-rs's analysis
+  over the files, never the project's code, and costs one check of the
+  crashing unit per unique crash (`sent.json` skips repeats).
 
 ### 4.9 Crash state and minidumps
 
@@ -766,17 +814,18 @@ The worker must not outlive the supervisor. On Unix the supervisor forwards
 `SIGTERM`, `SIGHUP` and `SIGINT` to it (`signal-hook`'s iterator and
 `nix::sys::signal::kill`, no `unsafe`), so a CI timeout still stops the
 analysis, and on Linux the worker also sets `PR_SET_PDEATHSIG` to `SIGTERM`
-(`nix::sys::prctl::set_pdeathsig`) against a supervisor killed outright,
-then checks that its parent is still the supervisor (`getppid` against the
-pid the supervisor passes down), and exits if not, since the supervisor may
-have died before the call. On
-Windows the worker is started in a job object with kill-on-close
-(`win32job`), so ending the supervisor ends the worker. macOS has no
-parent-death signal; a supervisor killed with `SIGKILL` leaves its worker to
-finish its run. A `SIGINT` while the supervisor waits for reports ends the
-wait at once; the finishers are in their own process group and
-carry on. The LSP runs without a supervisor: the
-editor restarts it, and its detached finishers run on the same machine.
+(`nix::sys::prctl::set_pdeathsig`) against a supervisor killed outright, then
+checks that its parent is still the supervisor (`getppid` against the pid the
+supervisor passes down), and exits if not, since the supervisor may have died
+before the call. On Windows the worker is started in a job object with
+kill-on-close (`win32job`), so ending the supervisor ends the worker. macOS has
+no parent-death signal, so the worker watches its parent with a kqueue
+`EVFILT_PROC`/`NOTE_EXIT` event on the supervisor's pid (`nix::sys::event`, no
+`unsafe`) on a small thread, and exits when it fires; before that thread starts,
+it checks `getppid` as on Linux, so no window is left open. A `SIGINT` while the
+supervisor waits for reports ends the wait at once; the finishers are in their
+own process group and carry on. The LSP runs without a supervisor: the editor
+restarts it, and its detached finishers run on the same machine.
 
 ### 4.12 Outbox
 
@@ -835,11 +884,26 @@ of its crash.
 - **Focus and breadcrumbs:** `run_dispatch_loop` sets the focus and adds a
   breadcrumb per message before `handle_request`, `handle_notification` or
   `queue_change`; the debounce worker does the same per recheck.
-- **Isolated panics** (the workspace check through
-  `check_paths_isolating_panics`) go to the report thread (§4.6).
-- **Unisolated panics** in a handler are pending reports finished by a
-  detached finisher (§4.6, §4.10); the LSP's behaviour after the panic is
-  unchanged (Stage F moves those handlers onto the pool).
+- **Every handler's work runs on the pool, isolated** (Stage F's "Panic
+  isolation, on the pool", pulled forward whole, §5): the workspace scan,
+  `didOpen`, the debounced `didChange` recheck, watched-file events, folder
+  removal, and the requests that parse or check (hover, inlay hints, code
+  actions, completion probes, references' first member index) each run as
+  `pool.install(|| isolated(unit, ..))` on `project::worker_pool`'s 64 MiB
+  stacks. The files that abort the server today (60 nested arrays on
+  `didChange`, 120 in the startup scan) are checked there like
+  `check-project` checks them. A panic no longer unwinds through the
+  `Server` lock, so the mutex is never poisoned.
+- **After a panic:** a read-only request answers with a `ResponseError`
+  (`InternalError`, -32603) naming the internal error; a notification that
+  mutated the project (an update, a removal, a folder change) may have left
+  the registry half-updated, so the server rebuilds its project with
+  `lsp::load_workspace` (§4.10) from disk and the open buffers, republishes,
+  and shows one `window/showMessage` warning per session. Stage F's snapshots
+  later replace the rebuild with keeping the last good state.
+- **Isolated panics** go to the report thread (§4.6). What remains
+  unisolated is code outside any handler (the dispatch loop itself, the
+  reader thread), whose panics `entry` reports as pending reports (§4.3).
 - **Client:** `initialize` sets the `lsp.client` tags and writes `clientInfo`
   into the crash state.
 - **Shutdown:** on `exit`, the dispatch loop closes the report thread's
@@ -1033,6 +1097,17 @@ so the user's binary doesn't carry it:
   itself and exits with its result.
 - **SQL cache:** a panic injected while the cache lock is held leaves later
   files' SQL reflection working.
+- **Formats and exit code:** an injected check panic appears in the JSON's
+  `internal_errors`, checkstyle's `phpstan-rs.internal` error and a failing
+  JUnit case, and the run exits 2; a run with only findings exits 1, a clean
+  one 0.
+- **Replay:** a bundle whose first walk misses a needed declaration is
+  widened until it reproduces and tagged `reproduces = yes`; one depending on
+  a live SQL connection is tagged `unchecked`.
+- **LSP on the pool:** a file with 120 nested arrays in the startup scan and
+  60 on `didChange` is checked without aborting; an injected panic in hover
+  answers `InternalError` and the server keeps serving; one in `didChange`
+  triggers the rebuild and the next diagnostics match a fresh server's.
 
 The injection hook the unit tests already use (`tests::panic_injection`)
 becomes the `crash-injection` feature's hook, compiled under
@@ -1119,16 +1194,14 @@ A "Crash reporting" section, in these words:
 Each goes in with the step that causes it (§6):
 
 - **B8, "No global panic hook":** marked landed early (step 1).
-- **F1, "Panic isolation, on the pool":** the single hook and the internal
-  error with file, message, location and backtrace marked landed early (step
-  1), naming the backtrace as an unresolved `backtrace::Backtrace`; running
-  the LSP's handlers on the pool stays in F1, and when it lands each handler
-  runs through `crash_report::isolated`, so their panics become internal
-  errors reported like the workspace check's, and this plan's unisolated LSP
-  path (§4.14) is left for panics outside any handler.
-- **F1, "Internal errors are reported in every format":** the text and
-  friendly lines and the summary landed early (step 1); JSON, checkstyle and
-  JUnit stay.
+- **F1, "Panic isolation, on the pool":** marked landed early whole (steps
+  1 and 1f): the single hook, the internal error with file, message,
+  location and backtrace (an unresolved `backtrace::Backtrace`), and every
+  LSP handler's work on the pool; F1 keeps only replacing the post-panic
+  rebuild (§4.14) with its snapshots.
+- **F1, "Internal errors are reported in every format":** marked landed
+  early whole (step 1d), with the JSON, checkstyle and JUnit shapes of §4.4.
+- **F1, "The exit code":** marked landed early whole (step 1e).
 - **F1, `AnalysisResult`:** its internal-error list is `Vec<InternalError>`
   (§4.4), and each whole-program pass is an isolated unit.
 - **F2, result cache location:** it uses `crash_report::cache_dir()` (step 3).
@@ -1156,7 +1229,11 @@ tests; the end-to-end tests run from step 8 on and again at the end.
    F1.
    Then, each its own behaviour commit with its test: **1b** output through
    a writer, broken pipes exiting 141 (§4.20), with the §5 edit for F3;
-   **1c** the SQL cache's poison recovery (§4.20).
+   **1c** the SQL cache's poison recovery (§4.20); **1d** internal errors in
+   the JSON, checkstyle and JUnit formats (§4.4); **1e** the exit code, with
+   its approved `tests/cli.rs` delta (§4.4); **1f** the LSP's handlers on the
+   pool with the post-panic rebuild (§4.14), with the edit tests covering a
+   handler panic; the §5 edits for F1 with each.
 2. **Build:** `[profile.dist]`, the build-ID flags, the release workflow's
    split, strip, artifact and `upload-debug-files` job (§4.16), the secrets,
    and `docs/crash-reporting-server.md` (§4.17).
@@ -1192,9 +1269,10 @@ tests; the end-to-end tests run from step 8 on and again at the end.
   LSP, reaches the test server as one event per location with a bundle that
   `crash-repro replay` reproduces, and the rest of the run's results are
   still reported.
-- A stack overflow on a worker thread and on the LSP's debounce thread each
-  reach it as a fatal event with a minidump and a bundle; for the CLI, before
-  the supervisor exits.
+- A stack overflow on a worker thread reaches it as a fatal event with a
+  minidump and a bundle; for the CLI, before the supervisor exits. The LSP's
+  handlers no longer overflow at the depths that abort it today.
+- An internal error makes every output format say so and the run exit 2.
 - A report made while the server is down reaches it on the next run.
 - A release built by the workflow produces events whose frames Sentry shows
   with function, file and line, and source context from the uploaded
