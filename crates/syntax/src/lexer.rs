@@ -300,7 +300,6 @@ impl<'a> Lexer<'a> {
         self.src[self.pos..].starts_with(s.as_bytes())
     }
 
-    #[hotpath::measure]
     fn next_token(&mut self) -> Token {
         if !self.in_php {
             self.last_token_start = self.pos;
