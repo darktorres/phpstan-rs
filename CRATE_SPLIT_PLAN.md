@@ -973,7 +973,13 @@ commit); the unsorted corpus comparison starts here.
 `gates/approved/a2-known-bugs`):
 
 - class names resolve case-insensitively, in `catch`, static-call targets
-  and types;
+  and types, `self`/`static`/`parent` included: `Self::X`, `SELF::$p`,
+  `Self::m()` and `instanceof SELF` are `class.notFound` today (the rules
+  oracle's `class-constant-visibility.php`, `instanceof.php`,
+  `call-static-methods.php`, `access-static-properties.php`);
+- `self` inside an anonymous class is that class: `self::Y`,
+  `self::$p`, `self::m()` and `new self()` there are `class.notFound`
+  "class@anonymous not found" today (`bug-13042.php`, `bug-7904.php`);
 - casts, `echo` and interpolation give precise types, a resource included:
   `(array)` of a scalar is a one-element list and of a list stays one, so
   `(array) true` and `(array) $v` on `string|list<string>` are `array`
@@ -995,6 +1001,12 @@ commit); the unsorted corpus comparison starts here.
 - each declaration of a duplicate method is checked against its own
   signature, and every class-body duplicate is reported;
 - `function_exists()` and `defined()` guards hold inside a closure;
+- `class_exists(Bar::class)` guards as `class_exists('N\Bar')` does (only
+  the string form guards today): under it, `Bar::set()`, `new Bar()`,
+  `instanceof Bar` and `@var Bar` are `class.notFound`, in an `if`, after
+  `if (!class_exists(…)) { return; }`, in a ternary's true branch and in a
+  closure inside the guard (the rules oracle's `*-class-exists.php`
+  files, `class-exists-on-static-call.php`, `bug-9055.php`);
 - a child property inherits the hooks it does not redeclare;
   `parent::$prop::get()`/`set()` resolve; a set hook without a parameter
   list takes the property's type;
@@ -1107,6 +1119,14 @@ Follow-ups, behaviour fixes:
   (`phpunit/src/Framework/Constraint/Operator/LogicalXor.php:64`), and
   `include 'a.php' or die()` is read as including `a.php` where PHP
   includes `'1'`.
+- **`new` takes PHP's `new_variable`**: `new $b[0]()`, `new
+  $c[$key]()`, `new $o->cls()` and `new $o::$cls()` instantiate the class
+  the whole expression names. Today `new $b[0]()` parses as `(new
+  $b)[0]()`, so it is `new.nonObject` "cannot instantiate class using
+  array{0: 'K'}" plus `offsetAccess.nonOffsetAccessible` (the rules
+  oracle's `instantiation.php:172`, `:179`), `new $o->cls()` as `(new
+  $o)->cls()` ("Cannot call method cls() on mixed") and `new $o::$s()`
+  reports `$s` undefined.
 - **Assignment as an operand** at every binary operator, by one grammar rule
   instead of the per-level patches: `$a ?? $b = 1`, `1 | $g = 2` and
   `2 * $i = 3` report `assign.invalidExpr` and `variable.undefined` today.
@@ -1246,6 +1266,13 @@ Follow-ups:
   `(T is false ? never : T)` with `T` bound to `stdClass|false` is
   `stdClass`, `never|stdClass|false` today (the rules oracle's
   `bug-10653.php`).
+- **Built-in classes with offset access** are offset-accessible without
+  `ArrayAccess` (`ObjectType::EXTRA_OFFSET_CLASSES`: `DOMNamedNodeMap`,
+  `DOMNodeList`, the `Dom\` node lists and maps, `PDORow`,
+  `ResourceBundle`, `FFI\CData`, `SimpleXMLElement`, `Threaded`), for
+  reading and existence: `$v[0]` on a `DOMNodeList` is
+  `offsetAccess.nonOffsetAccessible` today (80 rules-oracle findings in
+  `internal-classes-overload-offset-access*.php`).
 - **Removing an enum case** leaves the enum's other cases
   (`TypeCombinator::remove` through `getEnumCases()`): after `if ($s ===
   FE::A) { return; }` on a three-case `FE`, `$s` is `FE::B|FE` today, a
@@ -2048,7 +2075,9 @@ Follow-ups:
     `$item` as `mixed` and is `missingType.parameter` today, so
     `$item->getName()` is `method.nonObject` (the rules oracle's
     `bug-4415.php`);
-  - `@phpstan-type` aliases apply in `@property`/`@method` tags and on
+  - `@phpstan-type` aliases apply in `@property`/`@method` and
+    `@phpstan-assert*` tags (`@phpstan-assert-if-true Callback1 $callback`
+    is `class.notFound` today, the rules oracle's `bug-10594.php`) and on
     enums, chained to any depth; an alias on an import cycle stays
     unresolved;
   - enums read `@deprecated` on cases, `@var` on constants, and
@@ -2191,7 +2220,15 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
   checker (`resolve_written_type`). An inline `@var self::COLUMN_A` or
   `@var self::COLUMN_*` reads as `mixed` today while `K::COLUMN_*` and a
   `@param self::COLUMN_*` resolve, so `sprintf('%s', $value)` after one is
-  `argument.type` (the rules oracle's `bug-8074.php`). The active
+  `argument.type` (the rules oracle's `bug-8074.php`). PHPDoc keyword
+  types resolve before namespace qualification: in a namespace,
+  `pure-callable`, `pure-Closure`, `callable-array`, `callable-object`,
+  `non-empty-literal-string` and `non-decimal-int-string` resolve to
+  `N\…` classes today (`class.notFound` plus
+  `parameter.unresolvableType`), and `enum-string` to `N\UnitEnum`
+  (`bug-14557.php`, `bug-14549.php`, `bug-13114.php`, `bug-13067.php`,
+  `pure-function.php`); `__benevolent<…>` is `class.notFound` in any
+  namespace (18 findings, `bug-11663.php`). The active
   templates include an enclosing function's inside an anonymous class:
   `@implements Option<T>` and `@return T` in `new class($t) implements
   Option` read `T` as a class named `T` today (`bug-6353.php`);
@@ -2274,7 +2311,10 @@ structural one, each fixtured:
 - a mixin brings in the target's inherited members, the target's own
   mixins (guarded per type and member against recursion, as PHPStan's
   `inProcess`), and a used trait's mixins;
-- `@mixin Box<int>` binds `Box`'s templates;
+- `@mixin Box<int>` binds `Box`'s templates, and `@mixin T` for a class
+  template mixes in the bound argument: `@mixin T` under `@template T of
+  object` is `class.notFound` "unknown class T" today (the rules oracle's
+  `mixin.php` in Classes, Methods and Properties);
 - a mixin method is static on a class with a native `__callStatic`
   (`method.staticCall` today);
 - `mixin_exclude_classes` (`ReflectionSettings`) skips mixin types naming
@@ -3722,6 +3762,15 @@ fixture:
     (`unset.variable`), `unset()` of an offset on a non-array
     (`unset.offset`), and a statement with no effect for `new class {};`
     (`expr.resultUnused`) are unreported today;
+  - a statement that can throw or runs code is not `expr.resultUnused`
+    (`NoopRule` reads the expression's throw and impure points): `$a /
+    $b;`, `$a % $b;` and `99 / $v;` (`DivisionByZeroError`), a `match`
+    that can miss (`UnhandledMatchError`), `(string) $o;` (it calls
+    `__toString()`), and a pipe (`1 |> 'f';`, `5 |> (fn ($x) => f($x));`,
+    a call) are all reported today (the rules oracle's
+    `noop-error-throws.php`, `bug-6349.php`, `bug-9534.php`,
+    `match-expr.php`, `deprecated-cast.php`, the `*-pipe.php` files: 38
+    findings); `static::$p;` stays reported, stricter than PHPStan;
   - `yield` outside a function is a compile error
     (`generator.outOfFunction`), unreported today;
   - a discarded pure call is reported inside PHP 8.5's `(void)` cast
