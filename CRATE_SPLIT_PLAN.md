@@ -3476,9 +3476,8 @@ for the analyser.
     `NarrowPublicClassMethodParamType`, `NarrowPrivateClassMethodParamType`,
     `NarrowReturnObjectType`, `ReturnNullOverFalse`;
   - ext-voku has the mixed-operand checks (`ExtendedBinaryOp`,
-    `ExtendedAssignOp`); missing: the eight `IfCondition*`/
-    `ElseIfConditionBasic` rules, `WrongCast` and
-    `DisallowedCallMethodOnNull`;
+    `ExtendedAssignOp`); missing: the eight `IfCondition*` rules,
+    `ElseIfConditionBasic`, `WrongCast` and `DisallowedCallMethodOnNull`;
   - ext-mockstan has eight of rector/mockstan's ten (`mock_hygiene`);
     missing: `NoEntityMocking` and `NoDocumentMocking`;
   - ext-disallowed-calls maps functions, methods and classes onto
