@@ -1,11 +1,10 @@
 //! Building a `Type`: one constructor per kind of type, taking its parts.
 
-use crate::Repr;
 use std::sync::Arc;
 
 use crate::{
     AccessoryKind, CallSiteVariance, CallableSig, ClassKind, ExtensionTypeData, Name, PhpString,
-    Shape, ShapeKey, TemplateParam, Type,
+    Repr, Shape, ShapeKey, TemplateParam, Type,
 };
 
 impl Type {
@@ -256,5 +255,88 @@ impl Type {
             negated,
             template_subject,
         })
+    }
+}
+
+impl Type {
+    /// A union of `members` of the same kind as `self`: benevolent when
+    /// `self` is a benevolent union, plain otherwise.
+    pub fn with_members(&self, members: Vec<Type>) -> Type {
+        match self {
+            Type(Repr::BenevolentUnion(_)) => Type(Repr::BenevolentUnion(members)),
+            _ => Type(Repr::Union(members)),
+        }
+    }
+
+    /// A closure/arrow-fn literal's own value: a real `Closure` instance
+    /// (so `->bindTo()`/`->call()`/`instanceof Closure` keep resolving
+    /// against the `Closure` class) that also carries the literal's own
+    /// signature - real PHPStan's `ClosureType`, which is both at once.
+    /// `Display` renders this exact pair as `Closure(params): return`.
+    pub fn closure_literal(sig: CallableSig) -> Type {
+        Type(Repr::Intersection(vec![
+            Type(Repr::Object("Closure".into(), Vec::new())),
+            Type(Repr::Callable(Some(Arc::new(sig)))),
+        ]))
+    }
+
+    /// `list<element>`: an array whose keys are `0..n` in order.
+    pub fn list_of(element: Type) -> Type {
+        Type(Repr::Intersection(vec![
+            Type(Repr::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(element),
+            )),
+            Type(Repr::Accessory(AccessoryKind::ArrayList)),
+        ]))
+    }
+
+    /// PHP's full legal-array-key domain (`int|string`) - the default for
+    /// a bare `array`/`array<V>` with no key argument given.
+    pub fn unknown_array_key() -> Type {
+        Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]))
+    }
+
+    /// `Type::Array(unknown_array_key(), value)`, for a construction site
+    /// with no more precise key type available.
+    pub fn array_of(value: Type) -> Type {
+        Type(Repr::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(value),
+        ))
+    }
+
+    /// The `int|string` key type PHPDoc's `Type[]` array-shorthand
+    /// (`Item[]`), the single-generic-arg `array<V>` form, and the
+    /// array-union `+` operator's own "neither side had a more precise
+    /// key" fallback all use - a real `BenevolentUnionType([Int,
+    /// String])` marker (mirrors real PHPStan's
+    /// `TypeNodeResolver::resolveArrayTypeNode`/`resolveGenericTypeNode`'s
+    /// own `array<V>` arm/`InitializerExprTypeResolver::getPlusType`,
+    /// confirmed reading all three directly), *not* the plain, strict
+    /// `unknown_array_key()`. `RuleLevelHelper::accepts()` treats a
+    /// benevolent union specially - accepted if *any* member matches,
+    /// not only when *all* do - the real difference: a `@var Item[]`
+    /// foreach-key passed to a `string`-typed parameter produces zero
+    /// errors in real PHPStan (confirmed via `dumpType()`), unlike a
+    /// plain, strict `int|string` checked the same way. Deliberately a
+    /// *narrower* helper than `unknown_array_key()`, not a blanket
+    /// replacement for it: real PHPStan's own benevolence for a bare
+    /// `array` (no generic args at all)'s *stored* `Mixed` key type is a
+    /// separate, read-time-only substitution
+    /// (`ArrayType::getIterableKeyType()`) keyed on a distinction
+    /// (`Mixed` vs. an already-real key type) this project's own eagerly-
+    /// constructed `unknown_array_key()` has no way to preserve, and a
+    /// 2-arg `array<K, V>` with an explicit key never gets the marker
+    /// either - see this function's own real call sites (`types/parse.rs`'s
+    /// `Type[]`-shorthand and `array<V>` parses, `checker/expr.rs`'s `+`
+    /// operator fallback) for exactly which real-PHPStan-confirmed
+    /// construction sites this marker belongs at, not every "no more
+    /// precise key" site project-wide.
+    pub fn benevolent_array_key() -> Type {
+        Type(Repr::BenevolentUnion(vec![
+            Type(Repr::Int),
+            Type(Repr::String),
+        ]))
     }
 }

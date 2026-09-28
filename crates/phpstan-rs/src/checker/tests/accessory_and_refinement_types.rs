@@ -12,14 +12,14 @@ use types::Shape;
 #[test]
 fn union_types_collapses_a_string_literal_into_an_already_present_string() {
     assert_eq!(
-        union_types(Type::string(), Type::string_literal("".into())),
+        Type::union(Type::string(), Type::string_literal("".into())),
         Type::string()
     );
 }
 
 #[test]
 fn union_types_collapses_an_int_literal_into_an_already_present_int() {
-    assert_eq!(union_types(Type::int(), Type::int_literal(0)), Type::int());
+    assert_eq!(Type::union(Type::int(), Type::int_literal(0)), Type::int());
 }
 
 #[test]
@@ -33,14 +33,14 @@ fn union_types_collapses_a_mixed_member_reached_only_via_flattening() {
     // unexamined, instead of collapsing the whole thing to `mixed` the
     // way it's vacuously equal to.
     assert_eq!(
-        union_types(
+        Type::union(
             Type::union_of(vec![Type::string(), Type::mixed()]),
             Type::null()
         ),
         Type::mixed()
     );
     assert_eq!(
-        union_types(
+        Type::union(
             Type::null(),
             Type::union_of(vec![Type::string(), Type::mixed()])
         ),
@@ -56,7 +56,7 @@ fn union_types_collapses_a_mixed_member_reached_only_via_flattening() {
 #[test]
 fn union_types_does_not_collapse_an_int_literal_into_an_unrelated_float() {
     assert_eq!(
-        union_types(Type::float(), Type::int_literal(0)),
+        Type::union(Type::float(), Type::int_literal(0)),
         Type::union_of(vec![Type::float(), Type::int_literal(0)])
     );
 }
@@ -71,7 +71,7 @@ fn union_types_collapses_a_non_empty_string_into_an_already_present_string() {
         Type::string(),
         Type::accessory(AccessoryKind::NonEmptyString),
     ]);
-    assert_eq!(union_types(Type::string(), non_empty), Type::string());
+    assert_eq!(Type::union(Type::string(), non_empty), Type::string());
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn union_types_collapses_a_list_into_an_already_present_array() {
         Type::accessory(AccessoryKind::ArrayList),
     ]);
     assert_eq!(
-        union_types(Type::array(Type::unknown_array_key(), Type::int()), list_ty),
+        Type::union(Type::array(Type::unknown_array_key(), Type::int()), list_ty),
         Type::array(Type::unknown_array_key(), Type::int())
     );
 }
@@ -89,7 +89,7 @@ fn union_types_collapses_a_list_into_an_already_present_array() {
 #[test]
 fn union_types_collapses_an_int_range_into_an_already_present_int() {
     assert_eq!(
-        union_types(Type::int(), Type::int_range(Some(1), None)),
+        Type::union(Type::int(), Type::int_range(Some(1), None)),
         Type::int()
     );
 }
@@ -97,7 +97,7 @@ fn union_types_collapses_an_int_range_into_an_already_present_int() {
 #[test]
 fn union_types_collapses_a_float_literal_into_an_already_present_float() {
     assert_eq!(
-        union_types(Type::float(), Type::float_literal(1.5)),
+        Type::union(Type::float(), Type::float_literal(1.5)),
         Type::float()
     );
 }
@@ -114,7 +114,7 @@ fn union_types_does_not_collapse_a_real_class_intersection() {
         Type::object("Iterator".into(), Vec::new()),
     ]);
     assert_eq!(
-        union_types(
+        Type::union(
             Type::object("Countable".into(), Vec::new()),
             intersection.clone()
         ),
@@ -138,7 +138,7 @@ fn union_types_does_not_collapse_a_real_class_intersection() {
 fn union_types_caps_runaway_member_growth_instead_of_hanging() {
     let result = (0..20)
         .map(|i| Type::array_shape(Shape::from_named(vec![(i.to_string(), Type::int(), false)])))
-        .reduce(union_types)
+        .reduce(Type::union)
         .unwrap();
     assert_eq!(
         result,
@@ -154,7 +154,7 @@ fn union_types_caps_runaway_member_growth_instead_of_hanging() {
 fn union_types_below_the_cap_still_builds_a_precise_union() {
     let result = [Type::int(), Type::string(), Type::bool(), Type::null()]
         .into_iter()
-        .reduce(union_types)
+        .reduce(Type::union)
         .unwrap();
     assert_eq!(
         result,
@@ -193,8 +193,8 @@ fn union_types_itself_generalizes_before_collapsing_to_mixed() {
         Type::int_literal(12),
         false,
     )]));
-    let result = union_types(first_twelve, thirteenth);
-    match result.shape() {
+    let result = Type::union(first_twelve, thirteenth);
+    match result.as_array_shape() {
         Some(fields) => {
             let fields = fields.named_fields();
             assert_eq!(fields.len(), 1);

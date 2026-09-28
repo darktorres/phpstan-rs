@@ -5,7 +5,7 @@ use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberVisibilityCheck, TemplateBindings,
     UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
-    is_real_variable_key, literal_string_key, merge_scopes, narrow_type_excluding, narrowing_key,
+    is_real_variable_key, literal_string_key, merge_scopes, narrowing_key,
     propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
     superglobal_default_type,
 };
@@ -28,8 +28,7 @@ mod probe_checks;
 pub(crate) mod ranges;
 
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
-use types::arithmetic::{compare_range_outcome, loose_compare_literals, numeric_comparison_bounds};
-use types::union_types;
+use types::compare_range_outcome;
 
 // `checker::throws::dynamic` reuses this bitwise-or-flag-chain scan for
 // `JSON_THROW_ON_ERROR`/`FILTER_THROW_ON_FAILURE`, the same helper
@@ -839,7 +838,7 @@ impl<'a> Checker<'a> {
                     // idiom is recovered by `apply_narrowing`'s
                     // `preg_match_condition` recognizer, not by this
                     // unconditional type itself.
-                    let shape = union_types(matched, Type::array_shape(Shape::sealed(Vec::new())));
+                    let shape = Type::union(matched, Type::array_shape(Shape::sealed(Vec::new())));
                     purge_stale_narrowing_for(locals, matches_name);
                     // `$matches` is very commonly undeclared before this
                     // exact call - its real first appearance, so
@@ -1025,7 +1024,7 @@ impl<'a> Checker<'a> {
                 // to `null` rather than erroring, while plain
                 // `$x->method()` on the same `$x` is a real bug.
                 let nonobject_ty = if *nullsafe {
-                    narrow_type_excluding(&recv_ty, &Type::null())
+                    recv_ty.without(&Type::null())
                 } else {
                     recv_ty.clone()
                 };
@@ -1300,7 +1299,7 @@ impl<'a> Checker<'a> {
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
                 if (*nullsafe || postfix_chain_has_nullsafe(recv)) && !result.is_mixed() {
-                    union_types(result, Type::null())
+                    Type::union(result, Type::null())
                 } else {
                     result
                 }
@@ -1568,7 +1567,7 @@ impl<'a> Checker<'a> {
                 if inner_ty.is_string().yes() {
                     Type::int()
                 } else if *op == UnaryOp::Neg {
-                    types::arithmetic::negate_numeric_literal(inner_ty)
+                    inner_ty.negate()
                 } else {
                     inner_ty
                 }
@@ -2025,7 +2024,7 @@ impl<'a> Checker<'a> {
                 // union but can't reach inside it to strip its own
                 // `false` member.
                 match then_ty {
-                    Some(then_ty) => union_types(then_ty, else_ty),
+                    Some(then_ty) => Type::union(then_ty, else_ty),
                     None => Type::mixed(),
                 }
             }
@@ -2657,7 +2656,7 @@ impl<'a> Checker<'a> {
                         // type `narrow_enum_from_call` just computed
                         // rather than threading a new span parameter
                         // through it.
-                        if let Some((case_class, case)) = resolved_ty.enum_class_and_case() {
+                        if let Some((case_class, case)) = resolved_ty.as_enum_case() {
                             self.record_member_ref(e.span, case_class, case);
                         }
                         match self.class_argument_return(class, method, args, locals) {
@@ -2687,7 +2686,7 @@ impl<'a> Checker<'a> {
                     (Some(names), None) if !names.is_empty() => names
                         .into_iter()
                         .map(|n| self.check_expr(&constant_fetch(target, n, e.span), locals, label))
-                        .reduce(types::union_types)
+                        .reduce(Type::union)
                         .unwrap_or(Type::mixed()),
                     (Some(names), Some(Some(class))) if !names.is_empty() => names
                         .into_iter()
@@ -2698,7 +2697,7 @@ impl<'a> Checker<'a> {
                                 self.static_member_of_class(e, &class, None, &n, false)
                             }
                         })
-                        .reduce(types::union_types)
+                        .reduce(Type::union)
                         .unwrap_or(Type::mixed()),
                     (_, Some(Some(class))) => {
                         if self.collect_member_refs {
@@ -2813,7 +2812,7 @@ impl<'a> Checker<'a> {
                 // it short-circuits before `property.notFound` ever gets
                 // a chance to also fire on the same access.
                 let nonobject_ty = if *nullsafe {
-                    narrow_type_excluding(&base_ty, &Type::null())
+                    base_ty.without(&Type::null())
                 } else {
                     base_ty.clone()
                 };
@@ -2864,8 +2863,7 @@ impl<'a> Checker<'a> {
                 // `find_property_owner` recurses through both `Union` and
                 // `Intersection`, keeping the first member that actually
                 // declares it.
-                let owner_and_sig =
-                    self.find_property_owner(&narrow_type_excluding(&base_ty, &Type::null()), prop);
+                let owner_and_sig = self.find_property_owner(&base_ty.without(&Type::null()), prop);
                 if let Some((owner, p)) = owner_and_sig {
                     self.check_member_visibility(MemberVisibilityCheck {
                         kind: "property",
@@ -2907,10 +2905,9 @@ impl<'a> Checker<'a> {
                 // `Object` lookup all live in `property_access_type`,
                 // shared with `infer_expr`'s identical arm - see its doc
                 // comment.
-                let result = self
-                    .property_access_type(&narrow_type_excluding(&base_ty, &Type::null()), prop);
+                let result = self.property_access_type(&base_ty.without(&Type::null()), prop);
                 if (*nullsafe || postfix_chain_has_nullsafe(base)) && !result.is_mixed() {
-                    union_types(result, Type::null())
+                    Type::union(result, Type::null())
                 } else {
                     result
                 }
@@ -3194,8 +3191,7 @@ impl<'a> Checker<'a> {
                             // `accumulated`'s value above.
                             let cond_ty = self.infer_expr(c, locals);
                             if cond_ty.is_single_value() {
-                                remaining_subject_ty =
-                                    narrow_type_excluding(&remaining_subject_ty, &cond_ty);
+                                remaining_subject_ty = remaining_subject_ty.without(&cond_ty);
                             }
                         }
                     }
@@ -3282,7 +3278,7 @@ impl<'a> Checker<'a> {
                             for c in conds {
                                 let cond_ty = self.infer_expr(c, locals);
                                 if cond_ty.is_single_value() {
-                                    remaining = narrow_type_excluding(&remaining, &cond_ty);
+                                    remaining = remaining.without(&cond_ty);
                                 }
                             }
                         }
@@ -3328,7 +3324,7 @@ impl<'a> Checker<'a> {
                 // others).
                 result_types
                     .into_iter()
-                    .reduce(union_types)
+                    .reduce(Type::union)
                     .unwrap_or(Type::never())
             }
             ExprKind::Closure {
@@ -3737,7 +3733,7 @@ impl<'a> Checker<'a> {
                     }
                     let mutated = closure_byref_exit_snapshots
                         .get(&u.name)
-                        .and_then(|snapshots| snapshots.iter().cloned().reduce(union_types))
+                        .and_then(|snapshots| snapshots.iter().cloned().reduce(Type::union))
                         .unwrap_or_else(|| {
                             closure_locals
                                 .get(&u.name)
@@ -4322,7 +4318,7 @@ impl<'a> Checker<'a> {
                 // dedup-then-`Type::Union(deduped)` construction.
                 result_types
                     .into_iter()
-                    .reduce(union_types)
+                    .reduce(Type::union)
                     .unwrap_or(Type::never())
             }
             // A throw expression never actually produces a value - Never
@@ -4349,7 +4345,7 @@ impl<'a> Checker<'a> {
                 if inner_ty.is_string().yes() {
                     Type::int()
                 } else if *op == UnaryOp::Neg {
-                    types::arithmetic::negate_numeric_literal(inner_ty)
+                    inner_ty.negate()
                 } else {
                     inner_ty
                 }
@@ -4418,20 +4414,13 @@ impl<'a> Checker<'a> {
                                     // an explicit `Foo::class` would,
                                     // mirroring real PHPStan's
                                     // `ConstantStringType::isClassString()`.
-                                    let promoted = types::promote_class_string_literals(
-                                        param.ty(),
-                                        &arg_ty,
-                                        &|s| {
+                                    let promoted =
+                                        param.ty().promote_class_string_literals(&arg_ty, &|s| {
                                             self.registry
                                                 .lookup_class(s)
                                                 .map(|(c, _)| c.to_string())
-                                        },
-                                    );
-                                    types::bind_template_param(
-                                        param.ty(),
-                                        &promoted,
-                                        &mut bindings,
-                                    );
+                                        });
+                                    param.ty().infer_template_bindings(&promoted, &mut bindings);
                                 }
                             }
                             // A template the constructor's arguments
@@ -4490,14 +4479,14 @@ impl<'a> Checker<'a> {
                 // Null])`, not a bare `Object` - strip `Null` out before
                 // matching, the same real class the method is actually
                 // being looked up on either way.
-                let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::null());
+                let recv_ty = self.infer_expr(recv, locals).without(&Type::null());
                 let result = self.method_call_return_type(recv, &recv_ty, method, args, locals);
                 // `$x?->method()` short-circuits to `null` when `$x` is
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
                 if (*nullsafe || postfix_chain_has_nullsafe(recv)) && !result.is_mixed() {
-                    union_types(result, Type::null())
+                    Type::union(result, Type::null())
                 } else {
                     result
                 }
@@ -4543,7 +4532,7 @@ impl<'a> Checker<'a> {
                                 // already-computed type rather than
                                 // threading a new span parameter through
                                 // `narrow_enum_from_call`.
-                                if let Some((case_class, case)) = resolved.enum_class_and_case() {
+                                if let Some((case_class, case)) = resolved.as_enum_case() {
                                     self.record_member_ref(e.span, case_class, case);
                                 }
                                 if let Some(ty) =
@@ -4575,7 +4564,7 @@ impl<'a> Checker<'a> {
                     .into_iter()
                     .flatten()
                     .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
-                    .reduce(types::union_types)
+                    .reduce(Type::union)
                     .unwrap_or(Type::mixed())
             }
             ExprKind::ClassNameFetch(target) => {
@@ -4647,7 +4636,7 @@ impl<'a> Checker<'a> {
                         // See the parallel arm in `check_expr` for why
                         // this must be `union_types`, not a raw
                         // `Type::Union(vec![...])`.
-                        union_types(then_ty, else_ty)
+                        Type::union(then_ty, else_ty)
                     }
                     None => Type::mixed(),
                 }
@@ -4680,14 +4669,14 @@ impl<'a> Checker<'a> {
                 {
                     return narrowed.clone();
                 }
-                let base_ty = narrow_type_excluding(&self.infer_expr(base, locals), &Type::null());
+                let base_ty = self.infer_expr(base, locals).without(&Type::null());
                 // See `property_access_type`'s doc comment - shared
                 // with `check_expr`'s identical arm.
                 let result = self.property_access_type(&base_ty, prop);
                 // Same implicit nullability as `?->method()` just above,
                 // for `$x?->prop`.
                 if (*nullsafe || postfix_chain_has_nullsafe(base)) && !result.is_mixed() {
-                    union_types(result, Type::null())
+                    Type::union(result, Type::null())
                 } else {
                     result
                 }
@@ -4924,12 +4913,12 @@ impl<'a> Checker<'a> {
                 sig.map(|s| {
                     let mut bindings: TemplateBindings = TemplateBindings::default();
                     for (param, ty) in s.params().iter().zip(param_overrides) {
-                        let promoted = types::promote_class_string_literals(param.ty(), ty, &|s| {
+                        let promoted = param.ty().promote_class_string_literals(ty, &|s| {
                             self.registry.lookup_class(s).map(|(c, _)| c.to_string())
                         });
-                        types::bind_template_param(param.ty(), &promoted, &mut bindings);
+                        param.ty().infer_template_bindings(&promoted, &mut bindings);
                     }
-                    let substituted = types::substitute_template(s.return_type(), &bindings);
+                    let substituted = s.return_type().substitute_templates(&bindings);
                     match &class {
                         Some(class) => self.resolve_pseudo(&substituted, class),
                         None => substituted,
@@ -5066,10 +5055,10 @@ impl<'a> Checker<'a> {
             return if matches!(l.kind, ExprKind::Variable(_)) {
                 l_ty
             } else {
-                union_types(l_ty, Type::null())
+                Type::union(l_ty, Type::null())
             };
         }
-        let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::null());
+        let l_ty = self.infer_expr(l, locals).without(&Type::null());
         // `$x ?? throw new Foo();` (or any other never-returning right
         // side: `exit`, a `never`-typed call) - falling through to the
         // generic `_ => r_ty` fallback below would make the whole
@@ -5091,16 +5080,16 @@ impl<'a> Checker<'a> {
         // `list<T>`/`non-empty-array<T>`-typed left side (a real
         // `Intersection`), which would otherwise lose its type here the
         // same way a plain `Type::Array` would.
-        let l_is_array = l_ty.is_array().yes() && l_ty.shape().is_none();
+        let l_is_array = l_ty.is_array().yes() && l_ty.as_array_shape().is_none();
         match &r_ty {
-            r if l_is_array && r.shape().is_some() => l_ty,
+            r if l_is_array && r.as_array_shape().is_some() => l_ty,
             // The general case must not discard `l_ty` entirely, keeping
             // only `r_ty` - that's wrong for `??`'s semantics regardless
             // of precision: the result is `$expr` itself when it's not
             // null (already computed above, with `Null` excluded) or
             // `$default` when it is - a real union of both outcomes, not
             // "the default's type, unconditionally."
-            _ => union_types(l_ty, r_ty),
+            _ => Type::union(l_ty, r_ty),
         }
     }
 
@@ -5112,11 +5101,9 @@ impl<'a> Checker<'a> {
             // composition of every accessory kind (`NonFalsyString`/
             // `NonEmptyString`/`LiteralString`/`LowercaseString`/
             // `UppercaseString`/`NumericString`), not just non-falsiness.
-            BinOp::Concat => types::concat_types(
-                &self.infer_expr(l, locals),
-                &self.infer_expr(r, locals),
-                self.registry,
-            ),
+            BinOp::Concat => self
+                .infer_expr(l, locals)
+                .concat(&self.infer_expr(r, locals), self.registry),
             // Real constant folding, mirroring real PHPStan's
             // `BooleanAndHandler`/`BooleanOrHandler::resolveType` -
             // without this, `check_boolean_and_or`'s "whole result"
@@ -5182,7 +5169,7 @@ impl<'a> Checker<'a> {
                 let rt = self.infer_expr(r, locals);
                 match self
                     .registry
-                    .php_version_consensus(|v| loose_compare_literals(&lt, &rt, v))
+                    .php_version_consensus(|v| lt.loosely_equals(&rt, v))
                 {
                     Some(equal) => {
                         let outcome = if matches!(op, BinOp::Eq) {
@@ -5215,10 +5202,8 @@ impl<'a> Checker<'a> {
             BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
-                if let (Some(l_bounds), Some(r_bounds)) = (
-                    numeric_comparison_bounds(&lt),
-                    numeric_comparison_bounds(&rt),
-                ) && let Some(outcome) = compare_range_outcome(op, l_bounds, r_bounds)
+                if let (Some(l_bounds), Some(r_bounds)) = (lt.int_bounds(), rt.int_bounds())
+                    && let Some(outcome) = compare_range_outcome(op, l_bounds, r_bounds)
                 {
                     if outcome {
                         Type::bool_literal(true)
@@ -5256,7 +5241,7 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
                     return ty;
                 }
-                types::arithmetic::binary_operation_type(op, &lt, &rt)
+                Type::binary_operation(op, &lt, &rt)
             }
             BinOp::Coalesce => {
                 let r_ty = self.infer_expr(r, locals);
@@ -6112,10 +6097,10 @@ impl<'a> Checker<'a> {
         };
         let l_ty = self.infer_expr(l, locals);
         let r_ty = self.infer_expr(r, locals);
-        let Some(l_bounds) = numeric_comparison_bounds(&l_ty) else {
+        let Some(l_bounds) = l_ty.int_bounds() else {
             return false;
         };
-        let Some(r_bounds) = numeric_comparison_bounds(&r_ty) else {
+        let Some(r_bounds) = r_ty.int_bounds() else {
             return false;
         };
         compare_range_outcome(op, l_bounds, r_bounds) == Some(true)
@@ -6155,7 +6140,7 @@ impl<'a> Checker<'a> {
                 _ => ty.with_members(expanded),
             };
         }
-        let Some((class_name, _)) = ty.object_class_and_args() else {
+        let Some((class_name, _)) = ty.as_object() else {
             return ty.clone();
         };
         let Some(info) = self.registry.classes.get(class_name.as_str()) else {
@@ -6164,7 +6149,7 @@ impl<'a> Checker<'a> {
         let cases: Vec<Type> = info
             .consts()
             .values()
-            .filter_map(|c| c.ty().enum_class_and_case())
+            .filter_map(|c| c.ty().as_enum_case())
             .filter(|(cls, _)| *cls == class_name)
             .map(|(cls, case)| Type::enum_case(cls.clone(), case.clone()))
             .collect();
@@ -6239,7 +6224,7 @@ fn closure_inferred_return_type(
     members.sort_by_key(|m| m.is_null().yes());
     members
         .into_iter()
-        .reduce(union_types)
+        .reduce(Type::union)
         .unwrap_or(Type::void())
 }
 
@@ -6257,6 +6242,6 @@ fn static_target_end(target: &StaticTarget) -> syntax::token::Position {
 fn concat_string_parts(parts: Vec<Type>, hierarchy: &dyn types::ClassHierarchy) -> Type {
     parts
         .into_iter()
-        .reduce(|acc, part| types::concat_types(&acc, &part, hierarchy))
+        .reduce(|acc, part| acc.concat(&part, hierarchy))
         .unwrap_or(Type::string())
 }

@@ -6,8 +6,7 @@
 //! (PHPStan's `ObjectType::toInteger()`/`toFloat()`/`toString()`) and in
 //! `ArrayTypeTrait`'s always-`ErrorType` `toString()`.
 
-use crate::Repr;
-use crate::{AccessoryKind, ClassHierarchy, PhpString, Type, format_php_float, union_types};
+use crate::{AccessoryKind, ClassHierarchy, PhpString, Repr, Type, format_php_float};
 
 /// The built-in classes PHPStan's `ObjectType::toInteger()`/`toFloat()`
 /// special-case as numeric-castable; every other object is illegal for
@@ -94,7 +93,7 @@ impl Type {
             }
             _ => self
                 .to_float(hierarchy)
-                .map(|_| union_types(Type(Repr::Int), Type(Repr::Float))),
+                .map(|_| Type::union(Type(Repr::Int), Type(Repr::Float))),
         }
     }
 
@@ -197,7 +196,7 @@ impl Type {
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(Type::to_array_key)
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or(Type(Repr::Never)),
             other => other.clone(),
         }
@@ -232,7 +231,7 @@ impl Type {
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(Type::to_absolute_number)
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or_else(|| self.clone()),
             Type(Repr::Int) | Type(Repr::Float) => self.clone(),
             _ => Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::Float)])),
@@ -261,5 +260,5 @@ fn castable(hierarchy: &dyn ClassHierarchy, name: &str, classes: &[&str]) -> boo
 /// every member illegal - is illegal.
 fn union_coercion(members: &[Type], f: impl Fn(&Type) -> Option<Type>) -> Option<Type> {
     let legal: Vec<Type> = members.iter().filter_map(f).collect();
-    legal.into_iter().reduce(union_types)
+    legal.into_iter().reduce(Type::union)
 }

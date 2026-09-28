@@ -51,7 +51,7 @@ impl<'a> Checker<'a> {
                 return None;
             }
             let target = &first.ty;
-            let class = if let Some((class, _)) = target.object_class_and_args() {
+            let class = if let Some((class, _)) = target.as_object() {
                 class.to_string()
             } else if let Some(class) = target.class_string_class() {
                 class.to_string()
@@ -60,7 +60,7 @@ impl<'a> Checker<'a> {
             };
             return self.resolve_callable_method(&class, method, format!("callable {ty}"));
         }
-        let (class, _) = ty.object_class_and_args()?;
+        let (class, _) = ty.as_object()?;
         let (owner, sig) = self.registry.lookup_method_with_owner(class, "__invoke")?;
         Some(NamedCallable {
             description: format!("callable {ty}"),

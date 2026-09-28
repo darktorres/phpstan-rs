@@ -1249,9 +1249,8 @@ pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::{ITERABLE_GENERIC_CLASS_NAMES, class_kind_word};
 pub(crate) use named_argument_renames::NamedArgumentCallFacts;
 pub(crate) use narrowing::{
-    count_call_operand, is_real_variable_key, narrow_array_shape_by_key_presence,
-    narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to, narrowing_key,
-    narrowing_type_for_predicate, propagate_container_field_facts, purge_stale_narrowing_for,
+    count_call_operand, is_real_variable_key, narrowing_key, narrowing_type_for_predicate,
+    propagate_container_field_facts, purge_stale_narrowing_for,
 };
 pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
@@ -1262,7 +1261,7 @@ pub(crate) use semantic_tokens::UsageTokenKind;
 pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
 #[cfg(test)]
 pub(crate) use types::generalize_by_key_set;
-pub(crate) use types::union_types;
+
 pub(crate) use visibility::MemberVisibilityCheck;
 
 impl<'a> Checker<'a> {

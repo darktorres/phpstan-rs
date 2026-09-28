@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
             };
             return bad.then_some("offsetAssign.dimType");
         }
-        let (class, _) = container.object_class_and_args()?;
+        let (class, _) = container.as_object()?;
         if !self.registry.is_subclass_of(class, "ArrayAccess") {
             return None;
         }

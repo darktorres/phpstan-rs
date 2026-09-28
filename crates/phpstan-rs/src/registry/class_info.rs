@@ -1472,7 +1472,7 @@ impl ClassReflection {
             .and_then(|d| d.extends.as_ref())
             .map(|raw| {
                 resolve_generic_tag(raw)
-                    .object_class_and_args()
+                    .as_object()
                     .map(|(_, args)| args.to_vec())
                     .unwrap_or_default()
             })
@@ -2358,6 +2358,6 @@ fn native_const_type(cc: &syntax::ast::ClassConst, ctx: &NameContext) -> Option<
 
 /// An ancestor tag's class and generic arguments.
 fn class_and_args(ty: &Type) -> Option<(Arc<str>, Vec<Type>)> {
-    ty.object_class_and_args()
+    ty.as_object()
         .map(|(name, args)| (intern(name), args.to_vec()))
 }

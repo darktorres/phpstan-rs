@@ -1,9 +1,8 @@
-use crate::Repr;
 use std::sync::Arc;
 
 use crate::{
-    AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Shape, ShapeField,
-    ShapeKey, Type, late,
+    AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Repr, Shape,
+    ShapeField, ShapeKey, Type, late,
 };
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,

@@ -14,7 +14,6 @@
 use crate::checker::Checker;
 use syntax::ast::{Expr, ExprKind, Visibility};
 use types::Type;
-use types::union_types;
 
 /// Same shape as the identically-named private helper in
 /// `return_type_too_wide.rs`/`property_type_too_wide.rs`/`throws/
@@ -151,7 +150,7 @@ impl<'a> Checker<'a> {
             let Some(snapshots) = self.current_function_by_ref_exit_snapshots.get(&name) else {
                 continue;
             };
-            let Some(actual) = snapshots.iter().cloned().reduce(union_types) else {
+            let Some(actual) = snapshots.iter().cloned().reduce(Type::union) else {
                 continue;
             };
             if self.rule_level_accepts(&declared, &actual).yes() {
@@ -189,7 +188,7 @@ impl<'a> Checker<'a> {
             let Some(snapshots) = self.current_function_by_ref_exit_snapshots.get(&name) else {
                 continue;
             };
-            let Some(actual) = snapshots.iter().cloned().reduce(union_types) else {
+            let Some(actual) = snapshots.iter().cloned().reduce(Type::union) else {
                 continue;
             };
             if actual.is_mixed() {

@@ -5,7 +5,7 @@
 
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
-use types::union_types;
+
 use types::{Shape, ShapeField, ShapeKey, Type, parse_type_string};
 
 /// The statements that produce a result set - anything else (`INSERT`,
@@ -31,14 +31,14 @@ fn widen_for_text_protocol(ty: &Type) -> Type {
         .iter()
         .map(|m| {
             if m.is_int().yes() || m.is_float().yes() {
-                union_types(m.clone(), parse_type_string("numeric-string"))
+                Type::union(m.clone(), parse_type_string("numeric-string"))
             } else if m.is_bool().yes() {
-                union_types(parse_type_string("0|1"), parse_type_string("'0'|'1'"))
+                Type::union(parse_type_string("0|1"), parse_type_string("'0'|'1'"))
             } else {
                 m.clone()
             }
         })
-        .reduce(union_types)
+        .reduce(Type::union)
         .unwrap_or(Type::never())
 }
 
@@ -62,7 +62,7 @@ impl<'a> Checker<'a> {
                     self.sql,
                     sql,
                 );
-                match row.as_ref().and_then(Type::shape) {
+                match row.as_ref().and_then(Type::as_array_shape) {
                     Some(shape) => {
                         let widened = shape.map_types(&mut widen_for_text_protocol);
                         Type::object("mysqli_result".into(), vec![Type::array_shape(widened)])
@@ -78,7 +78,7 @@ impl<'a> Checker<'a> {
         if self.mysqli_throws_exceptions() {
             success
         } else {
-            union_types(success, Type::bool_literal(false))
+            Type::union(success, Type::bool_literal(false))
         }
     }
 
@@ -93,7 +93,7 @@ impl<'a> Checker<'a> {
         row: Option<&Type>,
         arg: Option<&Expr>,
     ) -> Option<Type> {
-        let shape = row?.shape()?;
+        let shape = row?.as_array_shape()?;
         let fields = &shape.fields;
         let assoc = || Type::array_shape(shape.clone());
         let numeric = || {
@@ -144,9 +144,9 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         Some(match method {
-            "fetch_assoc" => union_types(assoc(), end),
-            "fetch_row" => union_types(numeric(), end),
-            "fetch_array" => union_types(by_mode(&mode("MYSQLI_BOTH")?)?, end),
+            "fetch_assoc" => Type::union(assoc(), end),
+            "fetch_row" => Type::union(numeric(), end),
+            "fetch_array" => Type::union(by_mode(&mode("MYSQLI_BOTH")?)?, end),
             "fetch_all" => Type::list_of(by_mode(&mode("MYSQLI_NUM")?)?),
             "fetch_column" => {
                 let index = match arg.map(|e| &e.kind) {
@@ -156,7 +156,7 @@ impl<'a> Checker<'a> {
                 };
                 let field = fields.get(index)?;
                 // No more rows is `false` here, not `null`.
-                union_types(field.ty.clone(), Type::bool_literal(false))
+                Type::union(field.ty.clone(), Type::bool_literal(false))
             }
             _ => return None,
         })

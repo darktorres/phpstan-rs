@@ -273,7 +273,7 @@ impl<'a> Checker<'a> {
         // A non-negated conditional return type on a parameter
         // (`($params is array{wrapperClass: class-string<T>} ? T : X)`)
         // references its templates through that parameter.
-        if let Some((_, _, false, false)) = sig.return_type().conditional_condition() {
+        if let Some((_, _, false, false)) = sig.return_type().as_conditional() {
             collect_scoped_template_params(sig.return_type(), bare_name, &mut in_params);
         }
         let mut in_signature = in_params.clone();
@@ -312,7 +312,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         self.resolve_name_expr(class_name)
-            .object_class_and_args()
+            .as_object()
             .map(|(class, _)| class.to_string())
     }
 
@@ -750,6 +750,5 @@ fn collect_scoped_template_params(
 /// The class a receiver's value is an instance of, when its type names
 /// one.
 pub(crate) fn receiver_class(ty: Type) -> Option<String> {
-    ty.instance_class_and_args()
-        .map(|(class, _)| class.to_string())
+    ty.as_object().map(|(class, _)| class.to_string())
 }

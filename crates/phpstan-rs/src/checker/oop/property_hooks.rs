@@ -8,7 +8,7 @@ use phpdoc::docblock;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
-use types::union_types;
+
 use types::{self, Type};
 
 impl<'a> Checker<'a> {
@@ -157,7 +157,7 @@ impl<'a> Checker<'a> {
             let ty = crate::registry::parse_type_node(node);
             let ty = resolve_names_in_type(ty, &self.name_ctx);
             Some(match acc {
-                Some(prev) => union_types(prev, ty),
+                Some(prev) => Type::union(prev, ty),
                 None => ty,
             })
         })

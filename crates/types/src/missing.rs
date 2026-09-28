@@ -1,8 +1,7 @@
 //! What a declared type leaves unsaid: PHPStan's `MissingTypehintCheck`
 //! walks.
 
-use crate::Repr;
-use crate::Type;
+use crate::{Repr, Type};
 
 impl Type {
     /// The iterable types in this type whose value type is implicit

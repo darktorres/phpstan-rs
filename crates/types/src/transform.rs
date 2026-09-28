@@ -1,12 +1,10 @@
 //! Types rewritten into related types: `static` bound, shapes unsealed,
 //! a value stepped by `++`/`--`.
 
-use crate::Repr;
 use std::sync::Arc;
 
 use crate::{
-    AccessoryKind, CallableParam, CallableSig, Name, Shape, ShapeField, TemplateParam, Type,
-    union_types,
+    AccessoryKind, CallableParam, CallableSig, Name, Repr, Shape, ShapeField, TemplateParam, Type,
 };
 
 impl Type {
@@ -142,7 +140,7 @@ impl Type {
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(|m| m.step(by))
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or(Type(Repr::Mixed(false))),
             other => other.clone(),
         }
@@ -222,7 +220,7 @@ impl Type {
             Type(Repr::Union(members)) => members
                 .iter()
                 .map(Type::without_accessories)
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or(Type(Repr::Mixed(false))),
             other => other.clone(),
         }

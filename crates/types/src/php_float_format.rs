@@ -21,7 +21,7 @@
 //! negative()` answers the same question precisely, so callers never
 //! need the union-of-both-signs workaround.
 
-pub fn format_php_float(f: f64) -> String {
+pub(crate) fn format_php_float(f: f64) -> String {
     if f.is_nan() {
         return "NAN".to_string();
     }

@@ -3,7 +3,6 @@ use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_ke
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use types::Type;
-use types::narrowing::{narrow_type_excluding, narrow_type_to};
 
 impl<'a> Checker<'a> {
     /// The type to narrow *from* for a synthetic `narrowing_key` (a
@@ -169,7 +168,7 @@ impl<'a> Checker<'a> {
                 && let Some(receiver_key) = narrowing_key(receiver)
             {
                 let current = self.current_narrowed_type(receiver, &receiver_key, locals);
-                locals.insert(receiver_key, narrow_type_excluding(&current, &Type::null()));
+                locals.insert(receiver_key, current.without(&Type::null()));
             }
         }
         let Some((key, narrowed_expr, target_ty)) = pair else {
@@ -197,9 +196,9 @@ impl<'a> Checker<'a> {
         // regardless of whether `target_ty` is a literal or a general
         // type, so only the exclusion branch needs gating here.
         let narrowed = if matches_when_true {
-            narrow_type_to(&self.relation(), &current, &target_ty)
+            self.relation().narrow(&current, &target_ty)
         } else if target_ty.is_single_value() {
-            narrow_type_excluding(&current, &target_ty)
+            current.without(&target_ty)
         } else {
             current.into_owned()
         };
@@ -236,10 +235,7 @@ impl<'a> Checker<'a> {
             && let [alias_target] = alias_targets.as_slice()
         {
             let current = self.current_narrowed_type(receiver, alias_target, locals);
-            locals.insert(
-                alias_target.clone(),
-                narrow_type_excluding(&current, &Type::null()),
-            );
+            locals.insert(alias_target.clone(), current.without(&Type::null()));
         }
         locals.insert(key, narrowed);
     }
@@ -313,7 +309,7 @@ impl<'a> Checker<'a> {
                 && let Some(key) = narrowing_key(&arg.value)
             {
                 let current = self.current_narrowed_type(&arg.value, &key, locals);
-                locals.insert(key, narrow_type_to(&self.relation(), &current, target));
+                locals.insert(key, self.relation().narrow(&current, target));
             }
         };
         let narrow_excluding = |locals: &mut Locals, idx: usize, excluded: &Type| {
@@ -321,7 +317,7 @@ impl<'a> Checker<'a> {
                 && let Some(key) = narrowing_key(&arg.value)
             {
                 let current = self.current_narrowed_type(&arg.value, &key, locals);
-                locals.insert(key, narrow_type_excluding(&current, excluded));
+                locals.insert(key, current.without(excluded));
             }
         };
         match method {
@@ -388,9 +384,9 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let narrowed = if info.negated {
-                narrow_type_excluding(&current, &info.ty)
+                current.without(&info.ty)
             } else {
-                narrow_type_to(&self.relation(), &current, &info.ty)
+                self.relation().narrow(&current, &info.ty)
             };
             locals.insert(key, narrowed);
         }

@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
                     if !bindings.contains_key(name.as_ref())
                         && let Some(default) = info.template_defaults().get(name)
                     {
-                        let default = types::substitute_templates_of(default, &bindings, owner);
+                        let default = default.substitute_templates_of(&bindings, owner);
                         bindings.insert(name.to_string(), default);
                     }
                 }
@@ -147,7 +147,7 @@ impl<'a> Checker<'a> {
             scoped_bindings
                 .iter()
                 .fold(ty.clone(), |acc, (scope, bindings)| {
-                    types::substitute_templates_of(&acc, bindings, scope)
+                    acc.substitute_templates_of(bindings, scope)
                 })
         };
         std::borrow::Cow::Owned(sig.map_types(subst))
@@ -180,7 +180,7 @@ impl<'a> Checker<'a> {
             return ty.clone();
         }
         let bindings = self.class_template_bindings(class, type_args, owner);
-        types::substitute_templates_of(ty, &bindings, owner)
+        ty.substitute_templates_of(&bindings, owner)
     }
 }
 
@@ -193,9 +193,9 @@ impl<'a> Checker<'a> {
 /// corpus work has found).
 fn signature_references_any_template(sig: &FunctionReflection) -> bool {
     sig.params().iter().any(|p| {
-        types::references_template(p.ty())
-            || types::references_template(p.ty_native())
-            || p.out_ty().as_ref().is_some_and(types::references_template)
-    }) || types::references_template(sig.return_type())
-        || types::references_template(sig.return_type_native())
+        p.ty().references_template()
+            || p.ty_native().references_template()
+            || p.out_ty().as_ref().is_some_and(Type::references_template)
+    }) || sig.return_type().references_template()
+        || sig.return_type_native().references_template()
 }

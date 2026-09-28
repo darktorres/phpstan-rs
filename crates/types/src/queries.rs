@@ -1,7 +1,10 @@
 //! What a type is: the questions asked of a type from outside this crate.
 
-use crate::Repr;
-use crate::{AccessoryKind, CallSiteVariance, Relation, Shape, TrinaryLogic, Type, union_types};
+use std::sync::Arc;
+
+use crate::{
+    AccessoryKind, CallSiteVariance, CallableSig, Relation, Repr, Shape, TrinaryLogic, Type,
+};
 
 impl Type {
     /// Whether this is `mixed`, written or not.
@@ -180,19 +183,19 @@ impl Type {
     }
 
     /// The object shape this type is, or an intersection refines.
-    pub fn object_shape_of(&self) -> Option<&Shape> {
+    pub fn as_object_shape(&self) -> Option<&Shape> {
         match self {
             Type(Repr::ObjectShape(shape)) => Some(shape),
-            Type(Repr::Intersection(members)) => members.iter().find_map(Type::object_shape_of),
+            Type(Repr::Intersection(members)) => members.iter().find_map(Type::as_object_shape),
             _ => None,
         }
     }
 
     /// The array shape this type is, or an intersection refines.
-    pub fn shape(&self) -> Option<&Shape> {
+    pub fn as_array_shape(&self) -> Option<&Shape> {
         match self {
             Type(Repr::ArrayShape(shape)) => Some(shape),
-            Type(Repr::Intersection(members)) => members.iter().find_map(Type::shape),
+            Type(Repr::Intersection(members)) => members.iter().find_map(Type::as_array_shape),
             _ => None,
         }
     }
@@ -284,7 +287,7 @@ impl Type {
     /// A conditional type's condition: its subject (a parameter or
     /// template name), its target, whether it's negated (`is not`), and
     /// whether the subject names a template. `None` for any other type.
-    pub fn conditional_condition(&self) -> Option<(&str, &Type, bool, bool)> {
+    pub fn as_conditional(&self) -> Option<(&str, &Type, bool, bool)> {
         match self {
             Type(Repr::Conditional {
                 subject,
@@ -303,7 +306,7 @@ impl Type {
     }
 
     /// An enum case's enum and case name; `None` for any other type.
-    pub fn enum_class_and_case(&self) -> Option<(&crate::Name, &crate::Name)> {
+    pub fn as_enum_case(&self) -> Option<(&crate::Name, &crate::Name)> {
         match self {
             Type(Repr::EnumCase(class, case)) => Some((class, case)),
             _ => None,
@@ -381,7 +384,7 @@ impl Type {
             Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
                 .iter()
                 .map(Type::generalize)
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or(Type(Repr::Never)),
             Type(Repr::Intersection(members)) => crate::intersect_types(
                 members
@@ -422,7 +425,7 @@ impl Type {
     /// class-string of anything but one named class.
     pub fn class_string_class(&self) -> Option<&crate::Name> {
         match self {
-            Type(Repr::ClassString(inner)) => inner.object_class_and_args().map(|(class, _)| class),
+            Type(Repr::ClassString(inner)) => inner.as_object().map(|(class, _)| class),
             _ => None,
         }
     }
@@ -430,7 +433,7 @@ impl Type {
     /// A reflected member's owner type and member name (a
     /// `ReflectionMethod`/`ReflectionProperty` bound to one member);
     /// `None` for any other type.
-    pub fn reflected_member_of(&self) -> Option<(&Type, &str)> {
+    pub fn as_reflected_member(&self) -> Option<(&Type, &str)> {
         match self {
             Type(Repr::ReflectedMember(owner, name)) => Some((owner, name)),
             _ => None,
@@ -549,10 +552,11 @@ impl Type {
         }
     }
 
-    /// The `(min, max)` of an integer literal or range, `None` bounds
-    /// unbounded; `None` for any other type.
-    pub fn int_range_bounds(&self) -> Option<(Option<i64>, Option<i64>)> {
+    /// The `(min, max)` of an integer type, `None` bounds unbounded
+    /// (`int` is `int<min, max>`); `None` for any other type.
+    pub fn int_bounds(&self) -> Option<(Option<i64>, Option<i64>)> {
         match self {
+            Type(Repr::Int) => Some((None, None)),
             Type(Repr::IntLiteral(n)) => Some((Some(*n), Some(*n))),
             Type(Repr::IntRange(min, max)) => Some((*min, *max)),
             _ => None,
@@ -614,7 +618,7 @@ impl Type {
                     .iter()
                     .map(|f| f.ty.clone())
                     .chain(shape.unsealed.as_deref().map(|tail| tail.1.clone()))
-                    .reduce(union_types)
+                    .reduce(Type::union)
                     .unwrap_or(Type(Repr::Never)),
             ),
             Type(Repr::Intersection(members)) => members.iter().find_map(Type::array_value_type),
@@ -623,7 +627,7 @@ impl Type {
                 .map(Type::array_value_type)
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
-                .reduce(union_types),
+                .reduce(Type::union),
             Type(Repr::TemplateParam(param)) => param.bound.array_value_type(),
             _ => None,
         }
@@ -635,9 +639,9 @@ impl Type {
         match self {
             Type(Repr::Array(key, _)) => Some((**key).clone()),
             Type(Repr::ArrayShape(shape)) => {
-                let keys = crate::shape_key_type(shape);
+                let keys = shape.key_type();
                 Some(match shape.unsealed.as_deref() {
-                    Some(tail) => union_types(keys, tail.0.clone()),
+                    Some(tail) => Type::union(keys, tail.0.clone()),
                     None => keys,
                 })
             }
@@ -658,7 +662,7 @@ impl Type {
                 .map(Type::array_key_type)
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
-                .reduce(union_types),
+                .reduce(Type::union),
             Type(Repr::TemplateParam(param)) => param.bound.array_key_type(),
             _ => None,
         }
@@ -701,19 +705,11 @@ impl Type {
         }
     }
 
-    /// The class and generic arguments of an object of a named class;
-    /// `None` for any other type.
-    pub fn object_class_and_args(&self) -> Option<(&crate::Name, &[Type])> {
-        match self {
-            Type(Repr::Object(class, args)) => Some((class, args)),
-            _ => None,
-        }
-    }
-
     /// The class an instance of this type belongs to, with its generic
-    /// arguments: an object's, or an enum case's enum (with none).
-    /// `None` for any other type.
-    pub fn instance_class_and_args(&self) -> Option<(&crate::Name, &[Type])> {
+    /// arguments: an object's, or an enum case's enum (with none, an
+    /// enum case being an object of its enum). `None` for any other
+    /// type.
+    pub fn as_object(&self) -> Option<(&crate::Name, &[Type])> {
         match self {
             Type(Repr::Object(class, args)) => Some((class, args)),
             Type(Repr::EnumCase(class, _)) => Some((class, &[])),
@@ -778,7 +774,7 @@ impl Type {
             Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
                 .iter()
                 .map(Type::to_boolean)
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or(Type(Repr::Never)),
             Type(Repr::Intersection(members)) => {
                 crate::intersect_types(members.iter().map(Type::to_boolean).collect())
@@ -786,6 +782,60 @@ impl Type {
             Type(Repr::TemplateParam(param)) => param.bound.to_boolean(),
             Type(Repr::Never) => Type(Repr::Never),
             _ => Type(Repr::Bool),
+        }
+    }
+}
+
+impl Type {
+    /// Every string value this type can only be: a string literal, each
+    /// member's of an intersection, and a union's only when every member
+    /// has some (PHPStan's `Type::getConstantStrings()`). Empty for
+    /// anything else.
+    pub fn constant_strings(&self) -> Vec<&str> {
+        match self {
+            Type(Repr::StringLiteral(s)) => s.as_str().into_iter().collect(),
+            Type(Repr::Intersection(members)) => {
+                members.iter().flat_map(Type::constant_strings).collect()
+            }
+            Type(Repr::Union(members)) => {
+                let mut all = Vec::new();
+                for member in members {
+                    let strings = member.constant_strings();
+                    if strings.is_empty() {
+                        return Vec::new();
+                    }
+                    all.extend(strings);
+                }
+                all
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Whether this is an accessory refinement - only ever an
+    /// `Intersection` member alongside the base type it refines.
+    pub fn is_accessory(&self) -> bool {
+        matches!(
+            self,
+            Type(Repr::Accessory(_))
+                | Type(Repr::HasOffsetValue(..))
+                | Type(Repr::HasOffset(_))
+                | Type(Repr::HasMethod(_))
+                | Type(Repr::HasProperty(_))
+        )
+    }
+
+    /// The signature a value of this type can be invoked with, when one
+    /// is known: a shaped `Closure(...)`/`callable(...)` PHPDoc type, or a
+    /// closure literal's `closure_literal` intersection.
+    pub fn callable_sig(&self) -> Option<&Arc<CallableSig>> {
+        match self {
+            Type(Repr::Callable(Some(sig))) => Some(sig),
+            Type(Repr::Intersection(members)) => members.iter().find_map(|m| match m {
+                Type(Repr::Callable(Some(sig))) => Some(sig),
+                _ => None,
+            }),
+            _ => None,
         }
     }
 }

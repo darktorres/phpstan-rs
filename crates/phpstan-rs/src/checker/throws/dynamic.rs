@@ -93,7 +93,7 @@ impl<'a> Checker<'a> {
                     && !custom.spread
                 {
                     let custom_ty = self.infer_expr(&custom.value, locals);
-                    if let Some((class, _)) = custom_ty.object_class_and_args()
+                    if let Some((class, _)) = custom_ty.as_object()
                         && self.registry.is_subclass_of(class, "Throwable")
                     {
                         return Some(custom_ty);

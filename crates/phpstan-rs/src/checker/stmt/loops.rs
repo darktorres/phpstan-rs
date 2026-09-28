@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::checker::{
     Checker, Locals, LoopZeroIterations, count_call_operand, is_truthy_literal, merge_scopes,
-    propagate_container_field_facts, stmt_contains_break, stmt_contains_escaping_exit, union_types,
+    propagate_container_field_facts, stmt_contains_break, stmt_contains_escaping_exit,
 };
 use syntax::ast::*;
 use syntax::visit::body_contains_yield;
@@ -497,15 +497,15 @@ impl<'a> Checker<'a> {
             }
             return Some((
                 keys.into_iter()
-                    .reduce(union_types)
+                    .reduce(Type::union)
                     .unwrap_or(Type::mixed()),
                 values
                     .into_iter()
-                    .reduce(union_types)
+                    .reduce(Type::union)
                     .unwrap_or(Type::mixed()),
             ));
         }
-        let (name, args) = ty.object_class_and_args()?;
+        let (name, args) = ty.as_object()?;
         if self.registry.is_subclass_of(name, "IteratorAggregate") {
             let agg_bindings =
                 self.registry
@@ -514,9 +514,8 @@ impl<'a> Checker<'a> {
                 let declared = self.resolve_pseudo(sig.return_type(), name);
                 // Avoid infinite recursion on a `getIterator(): static`
                 // that resolved right back to this same class.
-                let recurses_into_self = declared
-                    .object_class_and_args()
-                    .is_some_and(|(inner, _)| inner == name);
+                let recurses_into_self =
+                    declared.as_object().is_some_and(|(inner, _)| inner == name);
                 if !recurses_into_self && let Some(result) = self.iterable_element_type(&declared) {
                     return Some(result);
                 }
@@ -802,7 +801,7 @@ impl<'a> Checker<'a> {
             && let Some(final_value_ty) = last_value_ty
             && let Some(current_subject_ty) = locals.get(subject_name).cloned()
         {
-            let widened_element_ty = union_types(old_element_ty, final_value_ty);
+            let widened_element_ty = Type::union(old_element_ty, final_value_ty);
             // See `ContainerFieldFactsMap`'s own doc comment - records
             // (or, for a second by-ref `foreach` over the same
             // container, overwrites - a disclosed, non-unsound

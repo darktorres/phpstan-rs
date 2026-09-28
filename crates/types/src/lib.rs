@@ -10,7 +10,7 @@ pub use syntax::ast::ClassKind;
 pub use syntax::name::Name;
 pub use syntax::php_string::PhpString;
 
-pub mod arithmetic;
+mod arithmetic;
 mod coercion;
 mod concat;
 mod conditional;
@@ -22,55 +22,44 @@ mod hierarchy;
 mod intersection;
 mod late;
 mod missing;
-pub mod narrowing;
+mod narrowing;
 mod native;
 mod offsets;
 mod parse;
 mod php_float_format;
 pub mod php_version;
 mod queries;
-pub mod relation;
+mod relation;
 mod shape;
 mod subtype;
 mod template_references;
 mod templates;
 mod transform;
+mod traverse;
 mod trinary;
 mod union;
 
-pub use concat::concat_types;
-pub use conditional::conditional_branch;
-pub use conditional::resolve_conditional;
-pub use decide::reconcile_with_native;
+pub use arithmetic::compare_range_outcome;
 pub use extension::ExtensionTypeData;
 pub(crate) use hierarchy::effective_slot_variance;
 pub use hierarchy::{ClassFacts, ClassHierarchy, NoClasses};
-pub use intersection::intersect_types;
-pub use late::{
-    ClassConstants, contains_late, references_template, resolve_late_to_bounds, settle,
-};
-pub use native::native_declaration;
+pub(crate) use intersection::intersect_types;
+pub use late::ClassConstants;
+pub use narrowing::comparison_narrowed_bounds;
 pub use parse::{canonical_int_key, has_explicit_mixed_nested_somewhere};
 pub use parse::{parse_native_type_string, parse_type_string};
-pub use php_float_format::format_php_float;
+pub(crate) use php_float_format::format_php_float;
 pub use php_version::{
     KNOWN_PHP_VERSIONS, PhpFeature, PhpVersion, PhpVersions, known_php_versions_where,
     parse_php_version,
 };
 pub use relation::{AcceptsResult, Relation};
 pub use shape::{Shape, ShapeField, ShapeKey};
-pub use subtype::{
-    callable_sig_is_subtype, is_numeric_string_literal, shape_fields_are_list_like, shape_key_type,
-    types_equal_for_union,
-};
+pub(crate) use subtype::callable_sig_is_subtype;
+pub use subtype::is_numeric_string_literal;
 pub use template_references::PositionVariance;
-pub use templates::{
-    bind_template_param, promote_class_string_literals, substitute_template,
-    substitute_template_resolving_to_bounds, substitute_templates_of,
-};
 pub use trinary::TrinaryLogic;
 pub use union::generalize_by_key_set;
-pub use union::{has_offset_value_parts, union_types};
 
 // A slice of PHPStan's type system covering what the parser captures as
 // type-hint strings, plus self/parent/static and `@template` generics.
@@ -655,298 +644,6 @@ impl CallableSig {
         }
         self.return_type = Box::new(rebind(&self.return_type, &self.templates));
         self
-    }
-}
-
-impl Type {
-    /// Every string value this type can only be: a string literal, each
-    /// member's of an intersection, and a union's only when every member
-    /// has some (PHPStan's `Type::getConstantStrings()`). Empty for
-    /// anything else.
-    pub fn constant_strings(&self) -> Vec<&str> {
-        match self {
-            Type(Repr::StringLiteral(s)) => s.as_str().into_iter().collect(),
-            Type(Repr::Intersection(members)) => {
-                members.iter().flat_map(Type::constant_strings).collect()
-            }
-            Type(Repr::Union(members)) => {
-                let mut all = Vec::new();
-                for member in members {
-                    let strings = member.constant_strings();
-                    if strings.is_empty() {
-                        return Vec::new();
-                    }
-                    all.extend(strings);
-                }
-                all
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    /// `VerbosityLevel::typeOnly()`: literal values and array shapes
-    /// collapse to their plain type.
-    pub fn describe_type_only(&self) -> String {
-        match self {
-            Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => "int".to_string(),
-            Type(Repr::FloatLiteral(_)) => "float".to_string(),
-            Type(Repr::StringLiteral(_)) => "string".to_string(),
-            Type(Repr::True) | Type(Repr::False) => "bool".to_string(),
-            Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => "array".to_string(),
-            Type(Repr::Object(class, _)) | Type(Repr::EnumCase(class, _)) => class.to_string(),
-            Type(Repr::Intersection(members)) => members
-                .iter()
-                .find(|m| !m.is_accessory())
-                .map_or_else(|| self.to_string(), Type::describe_type_only),
-            Type(Repr::Union(members)) => {
-                let mut parts: Vec<String> = Vec::new();
-                for member in members {
-                    let part = member.describe_type_only();
-                    if !parts.contains(&part) {
-                        parts.push(part);
-                    }
-                }
-                parts.join("|")
-            }
-            other => other.to_string(),
-        }
-    }
-
-    /// This type with `f` applied to each directly nested type (generic
-    /// arguments, array key/value, shape fields, union/intersection
-    /// members, callable parameters and return, conditional branches);
-    /// a leaf is returned unchanged. `f` decides whether to recurse.
-    pub fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
-        match self {
-            Type(Repr::Array(k, v)) => Type(Repr::Array(Box::new(f(k)), Box::new(f(v)))),
-            Type(Repr::ClassString(inner)) => Type(Repr::ClassString(Box::new(f(inner)))),
-            Type(Repr::ArrayShape(shape)) => Type(Repr::ArrayShape(shape.map_types(f))),
-            Type(Repr::ObjectShape(shape)) => Type(Repr::ObjectShape(shape.map_types(f))),
-            Type(Repr::Object(name, args)) => Type(Repr::Object(
-                name.clone(),
-                args.iter().map(&mut *f).collect(),
-            )),
-            Type(Repr::SelfRef(args)) => Type(Repr::SelfRef(args.iter().map(&mut *f).collect())),
-            Type(Repr::StaticRef(args)) => {
-                Type(Repr::StaticRef(args.iter().map(&mut *f).collect()))
-            }
-            Type(Repr::Callable(Some(sig))) => Type(Repr::Callable(Some(Arc::new(CallableSig {
-                params: sig
-                    .params
-                    .iter()
-                    .map(|p| CallableParam {
-                        ty: f(&p.ty),
-                        ..p.clone()
-                    })
-                    .collect(),
-                return_type: Box::new(f(&sig.return_type)),
-                templates: sig.templates.clone(),
-            })))),
-            Type(Repr::VarianceArg(variance, inner)) => {
-                Type(Repr::VarianceArg(*variance, Box::new(f(inner))))
-            }
-            Type(Repr::Union(ms)) => Type(Repr::Union(ms.iter().map(&mut *f).collect())),
-            Type(Repr::BenevolentUnion(ms)) => {
-                Type(Repr::BenevolentUnion(ms.iter().map(&mut *f).collect()))
-            }
-            Type(Repr::Intersection(ms)) => {
-                Type(Repr::Intersection(ms.iter().map(&mut *f).collect()))
-            }
-            Type(Repr::HasOffsetValue(key, inner)) => {
-                Type(Repr::HasOffsetValue(key.clone(), Box::new(f(inner))))
-            }
-            Type(Repr::ReflectedMember(owner, member)) => {
-                Type(Repr::ReflectedMember(Box::new(f(owner)), member.clone()))
-            }
-            Type(Repr::ValueOf(inner)) => Type(Repr::ValueOf(Box::new(f(inner)))),
-            Type(Repr::KeyOf(inner)) => Type(Repr::KeyOf(Box::new(f(inner)))),
-            Type(Repr::OffsetAccess(base, key)) => {
-                Type(Repr::OffsetAccess(Box::new(f(base)), Box::new(f(key))))
-            }
-            Type(Repr::ClassConstant { class, pattern }) => Type(Repr::ClassConstant {
-                class: Box::new(f(class)),
-                pattern: pattern.clone(),
-            }),
-            Type(Repr::Conditional {
-                subject,
-                target,
-                if_true,
-                if_false,
-                negated,
-                template_subject,
-            }) => Type(Repr::Conditional {
-                subject: subject.clone(),
-                target: Box::new(f(target)),
-                if_true: Box::new(f(if_true)),
-                if_false: Box::new(f(if_false)),
-                negated: *negated,
-                template_subject: *template_subject,
-            }),
-            leaf => leaf.clone(),
-        }
-    }
-
-    /// Calls `f` on each directly nested type - the children
-    /// `map_children` rebuilds, in the same order.
-    pub fn for_each_child<'t>(&'t self, f: &mut impl FnMut(&'t Type)) {
-        match self {
-            Type(Repr::Array(k, v)) => {
-                f(k);
-                f(v);
-            }
-            Type(Repr::ClassString(inner))
-            | Type(Repr::VarianceArg(_, inner))
-            | Type(Repr::HasOffsetValue(_, inner))
-            | Type(Repr::ReflectedMember(inner, _))
-            | Type(Repr::ValueOf(inner))
-            | Type(Repr::KeyOf(inner))
-            | Type(Repr::ClassConstant { class: inner, .. }) => f(inner),
-            Type(Repr::OffsetAccess(base, key)) => {
-                f(base);
-                f(key);
-            }
-            Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => {
-                shape.types().for_each(f)
-            }
-            Type(Repr::Object(_, args))
-            | Type(Repr::SelfRef(args))
-            | Type(Repr::StaticRef(args)) => args.iter().for_each(f),
-            Type(Repr::Callable(Some(sig))) => {
-                for p in &sig.params {
-                    f(&p.ty);
-                }
-                f(&sig.return_type);
-            }
-            Type(Repr::Union(ms))
-            | Type(Repr::BenevolentUnion(ms))
-            | Type(Repr::Intersection(ms)) => ms.iter().for_each(f),
-            Type(Repr::Conditional {
-                target,
-                if_true,
-                if_false,
-                ..
-            }) => {
-                f(target);
-                f(if_true);
-                f(if_false);
-            }
-            _ => {}
-        }
-    }
-
-    /// Whether `f` holds for some directly nested type.
-    pub fn any_child(&self, mut f: impl FnMut(&Type) -> bool) -> bool {
-        let mut found = false;
-        self.for_each_child(&mut |t| found = found || f(t));
-        found
-    }
-
-    /// Whether this is an accessory refinement - only ever an
-    /// `Intersection` member alongside the base type it refines.
-    pub fn is_accessory(&self) -> bool {
-        matches!(
-            self,
-            Type(Repr::Accessory(_))
-                | Type(Repr::HasOffsetValue(..))
-                | Type(Repr::HasOffset(_))
-                | Type(Repr::HasMethod(_))
-                | Type(Repr::HasProperty(_))
-        )
-    }
-
-    /// A union of `members` of the same kind as `self`: benevolent when
-    /// `self` is a benevolent union, plain otherwise.
-    pub fn with_members(&self, members: Vec<Type>) -> Type {
-        match self {
-            Type(Repr::BenevolentUnion(_)) => Type(Repr::BenevolentUnion(members)),
-            _ => Type(Repr::Union(members)),
-        }
-    }
-
-    /// A closure/arrow-fn literal's own value: a real `Closure` instance
-    /// (so `->bindTo()`/`->call()`/`instanceof Closure` keep resolving
-    /// against the `Closure` class) that also carries the literal's own
-    /// signature - real PHPStan's `ClosureType`, which is both at once.
-    /// `Display` renders this exact pair as `Closure(params): return`.
-    pub fn closure_literal(sig: CallableSig) -> Type {
-        Type(Repr::Intersection(vec![
-            Type(Repr::Object("Closure".into(), Vec::new())),
-            Type(Repr::Callable(Some(Arc::new(sig)))),
-        ]))
-    }
-
-    /// The signature a value of this type can be invoked with, when one
-    /// is known: a shaped `Closure(...)`/`callable(...)` PHPDoc type, or a
-    /// closure literal's `closure_literal` intersection.
-    pub fn callable_sig(&self) -> Option<&Arc<CallableSig>> {
-        match self {
-            Type(Repr::Callable(Some(sig))) => Some(sig),
-            Type(Repr::Intersection(members)) => members.iter().find_map(|m| match m {
-                Type(Repr::Callable(Some(sig))) => Some(sig),
-                _ => None,
-            }),
-            _ => None,
-        }
-    }
-
-    /// `list<element>`: an array whose keys are `0..n` in order.
-    pub fn list_of(element: Type) -> Type {
-        Type(Repr::Intersection(vec![
-            Type(Repr::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(element),
-            )),
-            Type(Repr::Accessory(AccessoryKind::ArrayList)),
-        ]))
-    }
-
-    /// PHP's full legal-array-key domain (`int|string`) - the default for
-    /// a bare `array`/`array<V>` with no key argument given.
-    pub fn unknown_array_key() -> Type {
-        Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]))
-    }
-
-    /// `Type::Array(unknown_array_key(), value)`, for a construction site
-    /// with no more precise key type available.
-    pub fn array_of(value: Type) -> Type {
-        Type(Repr::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(value),
-        ))
-    }
-
-    /// The `int|string` key type PHPDoc's `Type[]` array-shorthand
-    /// (`Item[]`), the single-generic-arg `array<V>` form, and the
-    /// array-union `+` operator's own "neither side had a more precise
-    /// key" fallback all use - a real `BenevolentUnionType([Int,
-    /// String])` marker (mirrors real PHPStan's
-    /// `TypeNodeResolver::resolveArrayTypeNode`/`resolveGenericTypeNode`'s
-    /// own `array<V>` arm/`InitializerExprTypeResolver::getPlusType`,
-    /// confirmed reading all three directly), *not* the plain, strict
-    /// `unknown_array_key()`. `RuleLevelHelper::accepts()` treats a
-    /// benevolent union specially - accepted if *any* member matches,
-    /// not only when *all* do - the real difference: a `@var Item[]`
-    /// foreach-key passed to a `string`-typed parameter produces zero
-    /// errors in real PHPStan (confirmed via `dumpType()`), unlike a
-    /// plain, strict `int|string` checked the same way. Deliberately a
-    /// *narrower* helper than `unknown_array_key()`, not a blanket
-    /// replacement for it: real PHPStan's own benevolence for a bare
-    /// `array` (no generic args at all)'s *stored* `Mixed` key type is a
-    /// separate, read-time-only substitution
-    /// (`ArrayType::getIterableKeyType()`) keyed on a distinction
-    /// (`Mixed` vs. an already-real key type) this project's own eagerly-
-    /// constructed `unknown_array_key()` has no way to preserve, and a
-    /// 2-arg `array<K, V>` with an explicit key never gets the marker
-    /// either - see this function's own real call sites (`types/parse.rs`'s
-    /// `Type[]`-shorthand and `array<V>` parses, `checker/expr.rs`'s `+`
-    /// operator fallback) for exactly which real-PHPStan-confirmed
-    /// construction sites this marker belongs at, not every "no more
-    /// precise key" site project-wide.
-    pub fn benevolent_array_key() -> Type {
-        Type(Repr::BenevolentUnion(vec![
-            Type(Repr::Int),
-            Type(Repr::String),
-        ]))
     }
 }
 

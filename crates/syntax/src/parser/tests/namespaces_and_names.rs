@@ -123,11 +123,7 @@ fn namespace_relative_name_parses_as_expression_and_as_type() {
 fn group_use_with_trailing_comma_parses() {
     parse(
         r#"<?php
-            use Foo\{
-                const FOO_CONST,
-                function foo_func,
-                FooClass as BarClass,
-            };
+            use Foo\{const FOO_CONST, function foo_func, FooClass as BarClass};
         "#,
     );
 }

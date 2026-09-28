@@ -61,10 +61,10 @@ impl<'a> Checker<'a> {
         if check_arity {
             self.check_generic_reference_arity(ty, location, span);
         }
-        if check_arity && let Some((class, args)) = ty.object_class_and_args() {
+        if check_arity && let Some((class, args)) = ty.as_object() {
             self.check_call_site_variance(class, args, location, span);
         }
-        match ty.object_class_and_args() {
+        match ty.as_object() {
             Some((class, args)) => {
                 if !args.is_empty()
                     && let Some(info) = self.registry.classes.get(class.as_str())
@@ -94,7 +94,7 @@ impl<'a> Checker<'a> {
                         let Some(bound) = info.template_bounds().get(name) else {
                             continue;
                         };
-                        let bound = types::substitute_template(bound, &bindings);
+                        let bound = bound.substitute_templates(&bindings);
                         let Some(checked_arg) = arg.without_call_site_variance() else {
                             continue;
                         };
@@ -151,7 +151,7 @@ impl<'a> Checker<'a> {
     /// already document). `check_generic_bounds` uses this to skip a
     /// bound it has no way to actually verify, rather than guess wrong.
     pub(crate) fn is_type_fully_known(&self, ty: &Type) -> bool {
-        ty.object_class_and_args()
+        ty.as_object()
             .is_none_or(|(name, _)| self.registry.classes.contains_key(name.as_str()))
             && !ty.any_child(|t| !self.is_type_fully_known(t))
     }
@@ -348,7 +348,7 @@ impl<'a> Checker<'a> {
     /// ordinary application code, whose registry state already reflects
     /// every stub-granted template correctly, ever reaches this check.
     fn check_generic_reference_arity(&mut self, ty: &Type, location: &str, span: Span) {
-        let Some((class, args)) = ty.object_class_and_args() else {
+        let Some((class, args)) = ty.as_object() else {
             return;
         };
         if args.is_empty() {

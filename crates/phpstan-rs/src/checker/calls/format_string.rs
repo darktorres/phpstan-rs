@@ -661,7 +661,7 @@ fn constant_array_sizes(ty: &Type) -> Option<Vec<Count>> {
     ty.union_members()
         .iter()
         .map(|member| {
-            let shape = member.shape()?;
+            let shape = member.as_array_shape()?;
             let tail = usize::from(!shape.is_sealed());
             let required = shape.fields.iter().filter(|f| !f.optional).count() + tail;
             Some(Count {

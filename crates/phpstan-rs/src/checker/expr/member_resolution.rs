@@ -5,7 +5,7 @@ use crate::checker::expr::doctrine_query_result_list_type;
 use crate::checker::{Checker, Locals, resolve_call_args};
 use crate::registry::{FunctionReflection, PropertyReflection};
 use syntax::ast::*;
-use types::union_types;
+
 use types::{self, Shape, ShapeField, ShapeKey, Type};
 
 impl<'a> Checker<'a> {
@@ -39,7 +39,7 @@ impl<'a> Checker<'a> {
                 .rev()
                 .find_map(|m| self.find_property_owner(m, prop));
         }
-        let (class, _) = base_ty.instance_class_and_args()?;
+        let (class, _) = base_ty.as_object()?;
         self.registry.lookup_property_with_owner(class, prop)
     }
 
@@ -69,7 +69,7 @@ impl<'a> Checker<'a> {
                 .rev()
                 .find_map(|m| self.find_method_owner(m, method));
         }
-        let (class, _) = base_ty.instance_class_and_args()?;
+        let (class, _) = base_ty.as_object()?;
         self.registry.lookup_method_with_owner(class, method)
     }
 
@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
                 .min_by_key(|(sig, _)| sig.map(|s| visibility_rank(&s.visibility())))
                 .unwrap_or((None, None));
         }
-        match base_ty.instance_class_and_args() {
+        match base_ty.as_object() {
             Some((class, _)) => (
                 self.registry.lookup_method(class, method),
                 Some(class.to_string()),
@@ -162,7 +162,7 @@ impl<'a> Checker<'a> {
                 .collect();
             return (failures.len() == parts.len()).then(|| failures.into_iter().next().unwrap());
         }
-        let (class, _) = ty.object_class_and_args()?;
+        let (class, _) = ty.as_object()?;
         (self.class_name_exists(class) && !self.registry.is_subclass_of(class, "Throwable"))
             .then(|| class.to_string())
     }
@@ -198,7 +198,7 @@ impl<'a> Checker<'a> {
                 .rev()
                 .find_map(|m| self.find_property_receiver(m, prop));
         }
-        let (class, type_args) = base_ty.instance_class_and_args()?;
+        let (class, type_args) = base_ty.as_object()?;
         self.registry
             .lookup_property_with_owner(class, prop)
             .map(|(owner, sig)| (class.to_string(), type_args.to_vec(), owner, sig.clone()))
@@ -258,7 +258,7 @@ impl<'a> Checker<'a> {
                 .filter_map(|m| self.find_method_receiver(m, method))
                 .min_by_key(|(_, _, _, sig)| visibility_rank(&sig.visibility()));
         }
-        let (class, type_args) = base_ty.instance_class_and_args()?;
+        let (class, type_args) = base_ty.as_object()?;
         self.registry
             .lookup_method_with_owner(class, method)
             .map(|(owner, sig)| {
@@ -305,10 +305,10 @@ impl<'a> Checker<'a> {
                 .iter()
                 .map(|m| self.property_access_type(m, prop))
                 .filter(|ty| !ty.is_mixed())
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or(Type::mixed());
         }
-        if let Some((fqn, case)) = base_ty.enum_class_and_case() {
+        if let Some((fqn, case)) = base_ty.as_enum_case() {
             return match prop {
                 "name" => Type::string_literal(case.to_string().into()),
                 "value" => self
@@ -328,13 +328,13 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::mixed()),
             };
         }
-        if let Some((class, type_args)) = base_ty.object_class_and_args() {
+        if let Some((class, type_args)) = base_ty.as_object() {
             return self
                 .registry
                 .lookup_property_with_owner(class, prop)
                 .map(|(owner, p)| {
                     let bindings = self.class_template_bindings(class, type_args, &owner);
-                    let resolved = types::substitute_template(p.ty(), &bindings);
+                    let resolved = p.ty().substitute_templates(&bindings);
                     self.resolve_pseudo_at(&resolved, &owner, class)
                 })
                 .unwrap_or_else(|| {
@@ -342,14 +342,14 @@ impl<'a> Checker<'a> {
                     // readable through `__get`, as the queried class or
                     // `null`.
                     if self.registry.is_subclass_of(class, "SimpleXMLElement") {
-                        union_types(Type::object(class.clone(), Vec::new()), Type::null())
+                        Type::union(Type::object(class.clone(), Vec::new()), Type::null())
                     } else {
                         Type::mixed()
                     }
                 });
         }
         base_ty
-            .object_shape_of()
+            .as_object_shape()
             .and_then(|shape| shape.field(&ShapeKey::from_name(prop)))
             .map(|f| f.ty.clone())
             .unwrap_or(Type::mixed())
@@ -418,7 +418,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
-        if let Some((class, type_args)) = recv_ty.object_class_and_args() {
+        if let Some((class, type_args)) = recv_ty.as_object() {
             return match self.class_argument_return(class, method, args, locals) {
                 Some(ty) => ty,
                 None => self
@@ -438,8 +438,8 @@ impl<'a> Checker<'a> {
         // owner that isn't itself a plain resolved `Type::Object`
         // (an unresolved template, a union, ...) can't be looked up
         // at all - stays `Mixed`, not a guess.
-        if let Some((owner_ty, name)) = recv_ty.reflected_member_of() {
-            return match (method, owner_ty.object_class_and_args()) {
+        if let Some((owner_ty, name)) = recv_ty.as_reflected_member() {
+            return match (method, owner_ty.as_object()) {
                 ("getValue", Some((class, type_args))) => {
                     self.generic_object_property_type(class, type_args, name)
                 }
@@ -454,7 +454,7 @@ impl<'a> Checker<'a> {
         }
         // An enum case is an instance of its enum for method calls, with
         // no template arguments.
-        if let Some((fqn, _)) = recv_ty.enum_class_and_case() {
+        if let Some((fqn, _)) = recv_ty.as_enum_case() {
             return self
                 .registry
                 .lookup_method_with_owner(fqn, method)
@@ -485,7 +485,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .map(|m| self.method_call_return_type(recv, m, method, args, locals))
                 .filter(|ty| !ty.is_mixed())
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or(Type::mixed());
         }
         Type::mixed()
@@ -875,7 +875,7 @@ impl<'a> Checker<'a> {
 /// array key" question.
 fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<Type> {
     let row_type = row_type?;
-    let shape = row_type.shape()?;
+    let shape = row_type.as_array_shape()?;
     let fields = &shape.fields;
     let numeric_shape = || {
         Type::array_shape(Shape::sealed(
@@ -1153,7 +1153,7 @@ impl<'a> Checker<'a> {
         let single_scalar = mode == HydrationMode::SingleScalar;
         match method {
             "getSingleScalarResult" | "getSingleResult" => element_or_mixed,
-            "getOneOrNullResult" => union_types(element_or_mixed, Type::null()),
+            "getOneOrNullResult" => Type::union(element_or_mixed, Type::null()),
             "toIterable" => Type::union_of(vec![
                 Type::array(
                     key.filter(|k| !k.is_null().yes())

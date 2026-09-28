@@ -54,7 +54,7 @@ pub(crate) fn generator_template_param(ty: &Type, registry: &Registry, param: &s
     ty.union_members()
         .iter()
         .flat_map(Type::intersection_members)
-        .filter_map(Type::object_class_and_args)
+        .filter_map(Type::as_object)
         .filter_map(|(name, args)| {
             registry
                 .class_template_bindings(name, args, "Generator")
@@ -111,7 +111,7 @@ impl<'a> Checker<'a> {
         // a plain `array`/other `Traversable` doesn't carry `TSend`, and
         // its own key/value types aren't available here yet either.
         // Don't guess past what's known.
-        let Some((name, args)) = inner_ty.object_class_and_args() else {
+        let Some((name, args)) = inner_ty.as_object() else {
             return;
         };
         let inner_bindings = self

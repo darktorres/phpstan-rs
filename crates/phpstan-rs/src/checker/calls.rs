@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::checker::{Checker, Locals, purge_stale_narrowing_for, union_types};
+use crate::checker::{Checker, Locals, purge_stale_narrowing_for};
 use crate::registry::{FunctionReflection, ParameterReflection};
 use syntax::ast::*;
 use syntax::token::Span;
@@ -211,9 +211,9 @@ impl<'a> Checker<'a> {
                             let pushed_ty = args[1..]
                                 .iter()
                                 .map(|a| self.infer_expr(&a.value, locals))
-                                .reduce(union_types);
+                                .reduce(Type::union);
                             let combined_elem = match pushed_ty {
-                                Some(pushed_ty) => union_types(elem_ty, pushed_ty),
+                                Some(pushed_ty) => Type::union(elem_ty, pushed_ty),
                                 None => elem_ty,
                             };
                             let members = vec![
@@ -263,7 +263,7 @@ impl<'a> Checker<'a> {
                                 args.get(3).map(|a| self.infer_expr(&a.value, locals));
                             let (combined_elem, non_empty) = match &replacement_ty {
                                 Some(r) => (
-                                    union_types(
+                                    Type::union(
                                         elem_ty,
                                         r.array_value_type().unwrap_or(Type::mixed()),
                                     ),
@@ -309,7 +309,7 @@ impl<'a> Checker<'a> {
             if param.out_ty().is_some() {
                 continue;
             }
-            let substituted = types::substitute_template(param.ty(), &FxHashMap::default());
+            let substituted = param.ty().substitute_templates(&FxHashMap::default());
             // `Type::is_array` also trusts a `list<T>`/
             // `non-empty-array<T>`-declared by-ref parameter (an
             // `Intersection`), rather than falling into the "anything
@@ -357,7 +357,7 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            let out_ty = types::substitute_template(out_ty, &FxHashMap::default());
+            let out_ty = out_ty.substitute_templates(&FxHashMap::default());
             locals.clear_native(name);
             purge_stale_narrowing_for(locals, name);
             locals.insert(name.to_string(), out_ty);
@@ -699,7 +699,7 @@ impl<'a> Checker<'a> {
             return self.registry.lookup_function(name.trim_start_matches('\\'));
         }
         let ty = self.infer_expr(callable_expr, locals);
-        let shape = ty.shape()?;
+        let shape = ty.as_array_shape()?;
         let method = shape
             .field(&types::ShapeKey::Int(1))?
             .ty
@@ -711,7 +711,7 @@ impl<'a> Checker<'a> {
         } else if let Some(c) = class_ty.class_string_class() {
             c.as_str()
         } else {
-            class_ty.object_class_and_args()?.0.as_str()
+            class_ty.as_object()?.0.as_str()
         };
         self.registry.lookup_method(class, method)
     }

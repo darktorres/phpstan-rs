@@ -7,7 +7,6 @@ use std::sync::{Arc, OnceLock};
 type AncestorBindings = FxHashMap<Arc<str>, FxHashMap<String, Type>>;
 
 use crate::registry::Registry;
-use crate::registry::function_sig;
 use crate::registry::{
     ClassReflection, ConstantReflection, FunctionReflection, PropertyReflection,
     substitute_type_aliases,
@@ -956,10 +955,7 @@ impl Registry {
     /// hint already resolves to - backfilling it would still silently
     /// widen away the already-correct, more specific native class.
     pub(crate) fn safe_to_backfill_object_type(ancestor_ty: &Type, native_ty: &Type) -> bool {
-        match (
-            ancestor_ty.object_class_and_args(),
-            native_ty.object_class_and_args(),
-        ) {
+        match (ancestor_ty.as_object(), native_ty.as_object()) {
             (Some((a, _)), Some((n, _))) => a == n,
             _ => true,
         }
@@ -1120,13 +1116,11 @@ impl Registry {
                                 {
                                     param_fills.push((
                                         i,
-                                        function_sig::reconcile_with_native(
-                                            Registry::substitute_class_scoped_ancestor_templates(
-                                                &ancestor_param.ty.bind_self(&owner),
-                                                ancestor_bindings(),
-                                            ),
-                                            p.ty_native.clone(),
-                                        ),
+                                        Registry::substitute_class_scoped_ancestor_templates(
+                                            &ancestor_param.ty.bind_self(&owner),
+                                            ancestor_bindings(),
+                                        )
+                                        .reconcile_with_native(p.ty_native.clone()),
                                         ancestor_param.explicit_mixed_hint,
                                     ));
                                 }
@@ -1154,13 +1148,11 @@ impl Registry {
                                 {
                                     param_fills.push((
                                         i,
-                                        function_sig::reconcile_with_native(
-                                            Registry::substitute_class_scoped_ancestor_templates(
-                                                &ancestor_param.ty.bind_self(&owner),
-                                                ancestor_bindings(),
-                                            ),
-                                            p.ty_native.clone(),
-                                        ),
+                                        Registry::substitute_class_scoped_ancestor_templates(
+                                            &ancestor_param.ty.bind_self(&owner),
+                                            ancestor_bindings(),
+                                        )
+                                        .reconcile_with_native(p.ty_native.clone()),
                                         ancestor_param.explicit_mixed_hint,
                                     ));
                                 }
@@ -1193,13 +1185,11 @@ impl Registry {
                         ))
                     .then(|| {
                         (
-                            function_sig::reconcile_with_native(
-                                Registry::substitute_class_scoped_ancestor_templates(
-                                    &ancestor_sig.return_type.bind_self(&owner),
-                                    ancestor_bindings(),
-                                ),
-                                sig.return_type_native.clone(),
-                            ),
+                            Registry::substitute_class_scoped_ancestor_templates(
+                                &ancestor_sig.return_type.bind_self(&owner),
+                                ancestor_bindings(),
+                            )
+                            .reconcile_with_native(sig.return_type_native.clone()),
                             ancestor_sig.return_explicit_mixed_hint,
                         )
                     });
@@ -1306,7 +1296,7 @@ fn resolve_class_const_type(
     pattern: &str,
     classes: &FxHashMap<Arc<str>, ClassReflection>,
 ) -> Type {
-    let Some((fqn, _)) = class.object_class_and_args() else {
+    let Some((fqn, _)) = class.as_object() else {
         return Type::mixed();
     };
     let fqn = fqn.trim_start_matches('\\');
@@ -1450,7 +1440,7 @@ fn bind_class_const_self_at(
     ty.map_class_constants(&mut |owner, pattern| {
         let names_self = owner.is_self_reference()
             || owner
-                .object_class_and_args()
+                .as_object()
                 .is_some_and(|(fqn, _)| fqn.trim_start_matches('\\') == class);
         if !names_self {
             return None;
@@ -1697,7 +1687,7 @@ impl Registry {
     fn is_fully_known_class_type(&self, ty: &Type) -> bool {
         ty.union_members().iter().all(|m| {
             m.is_null().yes()
-                || m.object_class_and_args().is_some_and(|(name, _)| {
+                || m.as_object().is_some_and(|(name, _)| {
                     self.lookup_class(name).is_some()
                         && self
                             .all_ancestor_names(name)
@@ -1823,7 +1813,7 @@ fn resolve_constant_names(ty: &Type, registry: &Registry) -> Option<Type> {
 }
 
 fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool) -> Type {
-    if let Some((name, args)) = ty.object_class_and_args()
+    if let Some((name, args)) = ty.as_object()
         && args.is_empty()
         && let Some(value) = constant_named_type(name, registry)
     {

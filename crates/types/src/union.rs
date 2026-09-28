@@ -1,5 +1,4 @@
-use crate::Repr;
-use crate::{Shape, ShapeField, ShapeKey, Type};
+use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
 /// A defensive cap on how many distinct members `union_types` will ever
 /// materialize into a real `Type::Union`. Collapsing to `Mixed` past this
 /// point is a stable fixed point (`union_types(Mixed, _) == Mixed` is
@@ -16,8 +15,12 @@ const MAX_UNION_MEMBERS: usize = 12;
 /// Union of two types for a scope-merge join point - flattens nested
 /// unions and keeps `Mixed` "unknown" rather than let it compose into a
 /// falsely-precise-looking Union (same principle as the ternary inference).
-pub fn union_types(a: Type, b: Type) -> Type {
-    union_types_impl(a, b)
+impl Type {
+    /// The union of this type and `other`, normalized: nested unions
+    /// flattened, subsumed members absorbed, `mixed` kept unknown.
+    pub fn union(self, other: Type) -> Type {
+        union_types_impl(self, other)
+    }
 }
 
 fn union_types_impl(a: Type, b: Type) -> Type {
@@ -29,7 +32,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
         return normalize_generic_args(a);
     }
     let (a, b) = (normalize_generic_args(a), normalize_generic_args(b));
-    if crate::types_equal_for_union(&a, &b) {
+    if a.equals_for_union(&b) {
         return a;
     }
     // An error absorbs everything, as a `mixed` does.
@@ -52,16 +55,13 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     match b {
         Type(Repr::Union(m)) => {
             for x in m {
-                if !members.iter().any(|m| crate::types_equal_for_union(m, &x)) {
+                if !members.iter().any(|m| m.equals_for_union(&x)) {
                     members.push(x);
                 }
             }
         }
         other => {
-            if !members
-                .iter()
-                .any(|m| crate::types_equal_for_union(m, &other))
-            {
+            if !members.iter().any(|m| m.equals_for_union(&other)) {
                 members.push(other);
             }
         }
@@ -197,11 +197,11 @@ fn union_types_impl(a: Type, b: Type) -> Type {
             };
             merged_key = Some(match merged_key.take() {
                 None => (**k).clone(),
-                Some(acc) => union_types(acc, (**k).clone()),
+                Some(acc) => Type::union(acc, (**k).clone()),
             });
             merged_val = Some(match merged_val.take() {
                 None => (**v).clone(),
-                Some(acc) => union_types(acc, (**v).clone()),
+                Some(acc) => Type::union(acc, (**v).clone()),
             });
             false
         });
@@ -358,7 +358,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
                     let field = shape.field(&first.key).unwrap();
                     ty = Some(match ty {
                         None => field.ty.clone(),
-                        Some(acc) => union_types(acc, field.ty.clone()),
+                        Some(acc) => Type::union(acc, field.ty.clone()),
                     });
                     optional |= field.optional;
                 }
@@ -368,7 +368,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
         let unsealed = variants
             .iter()
             .filter_map(|shape| shape.unsealed.as_deref().cloned())
-            .reduce(|(ka, va), (kb, vb)| (union_types(ka, kb), union_types(va, vb)))
+            .reduce(|(ka, va), (kb, vb)| (Type::union(ka, kb), Type::union(va, vb)))
             .map(Box::new);
         passthrough.push(Type(Repr::ArrayShape(Shape { fields, unsealed })));
     }
@@ -414,41 +414,43 @@ fn literal_base_type(t: &Type) -> Option<Type> {
     }
 }
 
-/// Splits a plain `Type::Array` or a "pure" `hasOffsetValue(...)`-carrying
-/// `Type::Intersection` (`write_literal_key_aware`'s own construction
-/// shape - an `Array` member plus zero or more `HasOffsetValue` members,
-/// nothing else) into its base `Array` and its own tracked
-/// `(key, value)` pairs. `None` for anything else (a real class
-/// intersection, a list/`non-empty-array`-marked one, ...) - this is
-/// deliberately narrow, matching only the one shape
-/// `write_literal_key_aware` ever produces, not "any intersection that
-/// happens to contain an `Array` member." Also reused directly by
-/// `array_merge`'s own shape-merge path (`checker::expr::builtin_calls`)
-/// to promote a `hasOffsetValue`-carrying argument's own tracked keys
-/// into real merged-shape fields, not just this module's own pairwise
-/// union merge below.
-pub fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(ShapeKey, Type)>)> {
-    match t {
-        Type(Repr::Array(..)) => Some((t.clone(), Vec::new())),
-        Type(Repr::Intersection(members))
-            if members
-                .iter()
-                .all(|m| matches!(m, Type(Repr::Array(..)) | Type(Repr::HasOffsetValue(..)))) =>
-        {
-            let base = members
-                .iter()
-                .find(|m| matches!(m, Type(Repr::Array(..))))?
-                .clone();
-            let pairs = members
-                .iter()
-                .filter_map(|m| match m {
-                    Type(Repr::HasOffsetValue(k, v)) => Some((k.clone(), (**v).clone())),
-                    _ => None,
-                })
-                .collect();
-            Some((base, pairs))
+impl Type {
+    /// Splits a plain `Type::Array` or a "pure" `hasOffsetValue(...)`-carrying
+    /// `Type::Intersection` (`write_literal_key_aware`'s own construction
+    /// shape - an `Array` member plus zero or more `HasOffsetValue` members,
+    /// nothing else) into its base `Array` and its own tracked
+    /// `(key, value)` pairs. `None` for anything else (a real class
+    /// intersection, a list/`non-empty-array`-marked one, ...) - this is
+    /// deliberately narrow, matching only the one shape
+    /// `write_literal_key_aware` ever produces, not "any intersection that
+    /// happens to contain an `Array` member." Also reused directly by
+    /// `array_merge`'s own shape-merge path (`checker::expr::builtin_calls`)
+    /// to promote a `hasOffsetValue`-carrying argument's own tracked keys
+    /// into real merged-shape fields, not just this module's own pairwise
+    /// union merge below.
+    pub fn has_offset_value_parts(&self) -> Option<(Type, Vec<(ShapeKey, Type)>)> {
+        match self {
+            Type(Repr::Array(..)) => Some((self.clone(), Vec::new())),
+            Type(Repr::Intersection(members))
+                if members.iter().all(|m| {
+                    matches!(m, Type(Repr::Array(..)) | Type(Repr::HasOffsetValue(..)))
+                }) =>
+            {
+                let base = members
+                    .iter()
+                    .find(|m| matches!(m, Type(Repr::Array(..))))?
+                    .clone();
+                let pairs = members
+                    .iter()
+                    .filter_map(|m| match m {
+                        Type(Repr::HasOffsetValue(k, v)) => Some((k.clone(), (**v).clone())),
+                        _ => None,
+                    })
+                    .collect();
+                Some((base, pairs))
+            }
+            _ => None,
         }
-        _ => None,
     }
 }
 
@@ -474,8 +476,8 @@ pub fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(ShapeKey, Type)>)>
 /// genuinely unrelated type on either side (an object, a shape, ...)
 /// never reaches this merge at all.
 fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
-    let (base_a, pairs_a) = has_offset_value_parts(a)?;
-    let (base_b, pairs_b) = has_offset_value_parts(b)?;
+    let (base_a, pairs_a) = a.has_offset_value_parts()?;
+    let (base_b, pairs_b) = b.has_offset_value_parts()?;
     // Neither side tracked anything - the plain `Array`/`Array` case
     // `union_types`' own generic "merge multiple Array members" step
     // already handles just as well; leave it to that instead of
@@ -485,8 +487,8 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
     }
     let merged_base = match (base_a, base_b) {
         (Type(Repr::Array(ka, va)), Type(Repr::Array(kb, vb))) => Type(Repr::Array(
-            Box::new(union_types(*ka, *kb)),
-            Box::new(union_types(*va, *vb)),
+            Box::new(Type::union(*ka, *kb)),
+            Box::new(Type::union(*va, *vb)),
         )),
         // Unreachable given `has_offset_value_parts`'s own contract
         // (its `base` is always a `Type::Array`), kept as a safe
@@ -496,7 +498,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
     let mut merged_pairs: Vec<(ShapeKey, Type)> = Vec::new();
     for (k, va) in &pairs_a {
         if let Some((_, vb)) = pairs_b.iter().find(|(kb, _)| kb == k) {
-            merged_pairs.push((k.clone(), union_types(va.clone(), vb.clone())));
+            merged_pairs.push((k.clone(), Type::union(va.clone(), vb.clone())));
         }
     }
     if merged_pairs.is_empty() {
@@ -566,7 +568,7 @@ fn reduce_array_members(members: &mut Vec<Type>) {
                 && a.fields.len() == 1
                 && b.fields.len() == 1
                 && !matches!(
-                    union_types(a.fields[0].ty.clone(), b.fields[0].ty.clone()),
+                    Type::union(a.fields[0].ty.clone(), b.fields[0].ty.clone()),
                     Type(Repr::Union(_))
                 );
             if single_key_same_type
@@ -618,8 +620,8 @@ fn shape_as_general_array(shape: &Shape) -> Type {
         values.push(tail.1.clone());
     }
     match (
-        keys.into_iter().reduce(union_types),
-        values.into_iter().reduce(union_types),
+        keys.into_iter().reduce(Type::union),
+        values.into_iter().reduce(Type::union),
     ) {
         (Some(key), Some(value)) => Type(Repr::Array(Box::new(key), Box::new(value))),
         _ => Type(Repr::Never),
@@ -709,22 +711,22 @@ fn merge_shapes(sa: &Shape, sb: &Shape, sb_first: bool) -> Shape {
         let field = match (sa.field(key), sb.field(key)) {
             (Some(fa), Some(fb)) => {
                 let ty = if sb_first {
-                    union_types(fb.ty.clone(), fa.ty.clone())
+                    Type::union(fb.ty.clone(), fa.ty.clone())
                 } else {
-                    union_types(fa.ty.clone(), fb.ty.clone())
+                    Type::union(fa.ty.clone(), fb.ty.clone())
                 };
                 ShapeField::new(key.clone(), ty, fa.optional || fb.optional)
             }
             (Some(fa), None) => {
                 let ty = match &rest_b {
-                    Some(rest) => union_types(fa.ty.clone(), rest.clone()),
+                    Some(rest) => Type::union(fa.ty.clone(), rest.clone()),
                     None => fa.ty.clone(),
                 };
                 ShapeField::new(key.clone(), ty, true)
             }
             (None, Some(fb)) => {
                 let ty = match &rest_a {
-                    Some(rest) => union_types(fb.ty.clone(), rest.clone()),
+                    Some(rest) => Type::union(fb.ty.clone(), rest.clone()),
                     None => fb.ty.clone(),
                 };
                 ShapeField::new(key.clone(), ty, true)
@@ -735,8 +737,8 @@ fn merge_shapes(sa: &Shape, sb: &Shape, sb_first: bool) -> Shape {
     }
     merged.unsealed = match (sa.unsealed.as_deref(), sb.unsealed.as_deref()) {
         (Some((ka, va)), Some((kb, vb))) => Some(Box::new((
-            union_types(ka.clone(), kb.clone()),
-            union_types(va.clone(), vb.clone()),
+            Type::union(ka.clone(), kb.clone()),
+            Type::union(va.clone(), vb.clone()),
         ))),
         (Some(tail), None) | (None, Some(tail)) => Some(Box::new(tail.clone())),
         (None, None) => None,
@@ -756,7 +758,7 @@ fn normalize_generic_args(ty: Type) -> Type {
                 .map(|arg| match arg {
                     Type(Repr::Union(members)) => members
                         .into_iter()
-                        .reduce(union_types)
+                        .reduce(Type::union)
                         .unwrap_or(Type(Repr::Never)),
                     other => other,
                 })

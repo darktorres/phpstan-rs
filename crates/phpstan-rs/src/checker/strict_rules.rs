@@ -689,7 +689,7 @@ impl<'a> Checker<'a> {
         let ty = self.infer_expr(receiver, locals);
         let mut found: Option<(String, String)> = None;
         for member in ty.union_members().iter().filter(|m| !m.is_null().yes()) {
-            let (class, _) = member.object_class_and_args()?;
+            let (class, _) = member.as_object()?;
             let (owner, _) = self.registry.lookup_method_with_owner(class, method)?;
             let name = self
                 .registry

@@ -1,7 +1,6 @@
 //! `intersect_types`: which members fold together and which drop.
 
-use crate::Repr;
-use crate::{AccessoryKind, Shape, ShapeField, ShapeKey, Type, intersect_types};
+use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, Type, intersect_types};
 
 fn field(key: i64, ty: Type, optional: bool) -> ShapeField {
     ShapeField::new(ShapeKey::Int(key), ty, optional)

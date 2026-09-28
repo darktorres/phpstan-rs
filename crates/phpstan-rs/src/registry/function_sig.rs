@@ -10,7 +10,7 @@ use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Visibility};
 use syntax::name_resolution::NameContext;
 use types::has_explicit_mixed_nested_somewhere;
-use types::union_types;
+
 use types::{self, Shape, TemplateParam, Type};
 
 mod asserts;
@@ -25,7 +25,6 @@ pub(crate) use generics::{
 pub(crate) use type_resolution::{
     apply_implicit_nullable_default, resolve_type, resolve_type_with_parsed_native,
 };
-pub(crate) use types::reconcile_with_native;
 
 #[derive(Debug, Clone)]
 pub struct ParameterReflection {
@@ -770,7 +769,7 @@ impl FunctionReflection {
                     let ty = mark_template_params(ty, &template_params);
                     let ty = resolve_names_in_type(ty, ctx);
                     Some(match acc {
-                        Some(prev) => union_types(prev, ty),
+                        Some(prev) => Type::union(prev, ty),
                         None => ty,
                     })
                 });
@@ -832,8 +831,8 @@ impl FunctionReflection {
     /// sharing one name), mirroring `ClassReflection::merge`'s own "later
     /// declaration wins on conflict" convention.
     pub(crate) fn merge(self, other: FunctionReflection) -> FunctionReflection {
-        let return_type = union_types(self.return_type, other.return_type);
-        let return_type_native = union_types(self.return_type_native, other.return_type_native);
+        let return_type = Type::union(self.return_type, other.return_type);
+        let return_type_native = Type::union(self.return_type_native, other.return_type_native);
         // Permissive, same direction as `variadic`/`has_default` below:
         // if either real overload actually carries the marker, the merged
         // signature should too - a caller ignoring the return value must
@@ -856,8 +855,8 @@ impl FunctionReflection {
                     // Later declaration wins on conflict, matching
                     // `ClassReflection::merge`'s own convention.
                     name: b.name,
-                    ty: union_types(a.ty, b.ty),
-                    ty_native: union_types(a.ty_native, b.ty_native),
+                    ty: Type::union(a.ty, b.ty),
+                    ty_native: Type::union(a.ty_native, b.ty_native),
                     // Permissive: accepting a variadic-style tail call
                     // when *either* real overload allows it costs nothing
                     // a stricter rule would have caught.
@@ -957,7 +956,7 @@ impl FunctionReflection {
             // one's own `@throws` documents - a caller has to be
             // prepared for either, whichever one actually runs.
             throws: match (self.throws, other.throws) {
-                (Some(a), Some(b)) => Some(union_types(a, b)),
+                (Some(a), Some(b)) => Some(Type::union(a, b)),
                 (Some(t), None) | (None, Some(t)) => Some(t),
                 (None, None) => None,
             },

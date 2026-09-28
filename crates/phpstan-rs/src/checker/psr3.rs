@@ -156,7 +156,7 @@ impl<'a> Checker<'a> {
         if self.settings.psr3.check_psr3_exception_context && !levels.is_empty() {
             let has_exception_key = match &context_ty {
                 None => false,
-                Some(ty) => ty.shape().is_none_or(|shape| {
+                Some(ty) => ty.as_array_shape().is_none_or(|shape| {
                     shape
                         .field(&ShapeKey::from_name("exception"))
                         .is_some_and(|f| !f.optional)
@@ -267,7 +267,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let Some(shape) = context_ty.shape() else {
+            let Some(shape) = context_ty.as_array_shape() else {
                 continue;
             };
             let missing: Vec<String> = names
@@ -299,7 +299,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_psr3_context(&mut self, context: &Type, span: Span) {
-        let Some(shape) = context.shape() else {
+        let Some(shape) = context.as_array_shape() else {
             return;
         };
         for field in &shape.fields {
@@ -380,7 +380,7 @@ impl<'a> Checker<'a> {
                 || m.is_bool().yes()
                 || m.is_refined_string(AccessoryKind::LiteralString).yes()
                 || m.is_enum_case()
-                || m.object_class_and_args().is_some_and(|(class, _)| {
+                || m.as_object().is_some_and(|(class, _)| {
                     self.registry
                         .classes
                         .get(class.as_str())

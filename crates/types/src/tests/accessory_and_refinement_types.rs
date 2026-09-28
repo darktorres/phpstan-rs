@@ -547,26 +547,26 @@ fn an_intersection_of_arrays_is_one_array_with_every_refinement() {
 fn an_integer_range_absorbs_the_constants_and_ranges_touching_it() {
     let range = |min, max| Type(Repr::IntRange(min, max));
     assert_eq!(
-        union_types(Type(Repr::IntLiteral(0)), range(Some(1), None)),
+        Type::union(Type(Repr::IntLiteral(0)), range(Some(1), None)),
         range(Some(0), None)
     );
     assert_eq!(
-        union_types(range(Some(1), Some(5)), range(Some(6), Some(9))),
+        Type::union(range(Some(1), Some(5)), range(Some(6), Some(9))),
         range(Some(1), Some(9))
     );
     assert_eq!(
-        union_types(range(None, Some(0)), range(Some(1), None)),
+        Type::union(range(None, Some(0)), range(Some(1), None)),
         Type(Repr::Int)
     );
     assert_eq!(
-        union_types(range(Some(3), Some(5)), Type(Repr::IntLiteral(1))),
+        Type::union(range(Some(3), Some(5)), Type(Repr::IntLiteral(1))),
         Type(Repr::Union(vec![
             range(Some(3), Some(5)),
             Type(Repr::IntLiteral(1))
         ]))
     );
     assert_eq!(
-        union_types(Type(Repr::IntLiteral(1)), Type(Repr::IntLiteral(2))),
+        Type::union(Type(Repr::IntLiteral(1)), Type(Repr::IntLiteral(2))),
         Type(Repr::Union(vec![
             Type(Repr::IntLiteral(1)),
             Type(Repr::IntLiteral(2))

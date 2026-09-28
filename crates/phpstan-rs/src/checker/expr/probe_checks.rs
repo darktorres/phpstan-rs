@@ -1,12 +1,9 @@
 use crate::checker::expr::ranges::{NullProbeVerdictFn, expr_reads_a_property};
-use crate::checker::{
-    Checker, Locals, literal_string_key, narrow_array_shape_by_key_presence,
-    narrowing_type_for_predicate,
-};
+use crate::checker::{Checker, Locals, literal_string_key, narrowing_type_for_predicate};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::Type;
-use types::arithmetic::{compare_range_outcome, loose_compare_literals, numeric_comparison_bounds};
+use types::compare_range_outcome;
 
 impl<'a> Checker<'a> {
     /// Looks up a bare global-constant reference (`ExprKind::Name`,
@@ -210,7 +207,7 @@ impl<'a> Checker<'a> {
                 // already answers both questions correctly (including
                 // through a `Union`, recursively), this just asks it
                 // twice rather than duplicating its own logic.
-                if narrow_array_shape_by_key_presence(&base_ty, &key, true).is_never() {
+                if base_ty.with_key_presence(&key, true).is_never() {
                     self.report(
                         format!(
                             "Offset '{key}' on {base_ty} {operator_description} does not exist."
@@ -221,7 +218,7 @@ impl<'a> Checker<'a> {
                     );
                     return None;
                 }
-                if narrow_array_shape_by_key_presence(&base_ty, &key, false).is_never() {
+                if base_ty.with_key_presence(&key, false).is_never() {
                     return base_ty.offset_value_type(Some(&types::ShapeKey::from_name(&key)));
                 }
                 None
@@ -357,7 +354,7 @@ impl<'a> Checker<'a> {
         }
         let Some(equal) = self
             .registry
-            .php_version_consensus(|v| loose_compare_literals(l_ty, r_ty, v))
+            .php_version_consensus(|v| l_ty.loosely_equals(r_ty, v))
         else {
             return;
         };
@@ -509,10 +506,10 @@ impl<'a> Checker<'a> {
             BinOp::GtEq => "greaterOrEqual",
             _ => return,
         };
-        let Some(l_bounds) = numeric_comparison_bounds(l_ty) else {
+        let Some(l_bounds) = l_ty.int_bounds() else {
             return;
         };
-        let Some(r_bounds) = numeric_comparison_bounds(r_ty) else {
+        let Some(r_bounds) = r_ty.int_bounds() else {
             return;
         };
         let Some(outcome) = compare_range_outcome(op, l_bounds, r_bounds) else {

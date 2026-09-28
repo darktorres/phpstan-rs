@@ -1,13 +1,12 @@
 use crate::checker::{
-    Checker, Locals, is_real_variable_key, literal_string_key, narrow_type_excluding,
-    narrow_type_excluding_falsy, narrow_type_to, narrowing_type_for_predicate, resolve_call_args,
+    Checker, Locals, is_real_variable_key, literal_string_key, narrowing_type_for_predicate,
+    resolve_call_args,
 };
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::PhpString;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
-use types::{has_offset_value_parts, union_types};
 
 use super::{is_false_literal, is_true_literal};
 
@@ -123,11 +122,11 @@ impl<'a> Checker<'a> {
             "random_int" | "rand" | "mt_rand" if args.len() == 2 => {
                 let min = self
                     .infer_expr(&args[0].value, locals)
-                    .int_range_bounds()
+                    .int_bounds()
                     .and_then(|(min, _)| min);
                 let max = self
                     .infer_expr(&args[1].value, locals)
-                    .int_range_bounds()
+                    .int_bounds()
                     .and_then(|(_, max)| max);
                 return Type::int_range(min, max);
             }
@@ -143,7 +142,7 @@ impl<'a> Checker<'a> {
                 return match self.infer_expr(&args[0].value, locals).bool_literal_value() {
                     Some(true) => hrtime_number_type(),
                     Some(false) => hrtime_array_shape(),
-                    None => union_types(hrtime_array_shape(), hrtime_number_type()),
+                    None => Type::union(hrtime_array_shape(), hrtime_number_type()),
                 };
             }
             // `array_pop`/`array_shift`'s element-or-null result type is
@@ -217,7 +216,7 @@ impl<'a> Checker<'a> {
                     Type::array(Type::unknown_array_key(), elem),
                     Type::accessory(AccessoryKind::ArrayList),
                 ]);
-                return union_types(list_ty, Type::bool_literal(false));
+                return Type::union(list_ty, Type::bool_literal(false));
             }
             // Mirrors real PHPStan's `FilterFunctionReturnTypeHelper`,
             // scoped to what's statically provable - see
@@ -257,7 +256,7 @@ impl<'a> Checker<'a> {
                     let unioned = if throw_on_failure {
                         element_ty.clone()
                     } else {
-                        union_types(element_ty.clone(), fallback.clone())
+                        Type::union(element_ty.clone(), fallback.clone())
                     };
                     if require_array || force_array {
                         let key_ty = if value_ty.is_array().yes() {
@@ -316,11 +315,11 @@ impl<'a> Checker<'a> {
                     // `False` matches this project's established
                     // convention for this three-way union.
                     let mut result = element_ty;
-                    result = union_types(result, Type::null());
+                    result = Type::union(result, Type::null());
                     if !throw_on_failure {
-                        result = union_types(result, fallback);
+                        result = Type::union(result, fallback);
                     }
-                    return union_types(result, Type::bool_literal(false));
+                    return Type::union(result, Type::bool_literal(false));
                 }
             }
             // Real PHPStan's `MinMaxFunctionReturnTypeExtension`
@@ -339,7 +338,7 @@ impl<'a> Checker<'a> {
                 if !arg_types.iter().any(|t| t.is_array().yes()) {
                     return arg_types
                         .into_iter()
-                        .reduce(union_types)
+                        .reduce(Type::union)
                         .unwrap_or(Type::mixed());
                 }
             }
@@ -350,13 +349,13 @@ impl<'a> Checker<'a> {
             "array_find" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = input_ty.array_value_type() {
-                    return union_types(elem_ty, Type::null());
+                    return Type::union(elem_ty, Type::null());
                 }
             }
             "array_find_key" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(key_ty) = input_ty.array_key_type() {
-                    return union_types(key_ty, Type::null());
+                    return Type::union(key_ty, Type::null());
                 }
             }
             // Scoped to the common 2-arg single-array form - the real
@@ -425,7 +424,7 @@ impl<'a> Checker<'a> {
                         // exactly `narrow_type_excluding_falsy`'s job
                         // (`list<int|null>` -> `list<non-zero-int>`,
                         // stripping both `0` and `null`, not just `null`).
-                        return stripped.filter_array_values(&narrow_type_excluding_falsy);
+                        return stripped.filter_array_values(&Type::without_falsy);
                     }
                     return stripped;
                 }
@@ -590,7 +589,7 @@ impl<'a> Checker<'a> {
                 // value here, or throws - either way the exact resulting
                 // key isn't knowable), so it only unseals the result:
                 // more keys exist, just not statically known which.
-                if let Some(shape) = arr_ty.shape() {
+                if let Some(shape) = arr_ty.as_array_shape() {
                     let mut flipped = Shape::sealed(Vec::new());
                     if !shape.is_sealed() {
                         unseal(&mut flipped);
@@ -683,7 +682,7 @@ impl<'a> Checker<'a> {
                 if !args.is_empty() =>
             {
                 let result_ty = self.infer_expr(&args[0].value, locals);
-                if let Some((class, type_args)) = result_ty.object_class_and_args()
+                if let Some((class, type_args)) = result_ty.as_object()
                     && class.eq_ignore_ascii_case("mysqli_result")
                     && let Some(ty) = self.mysqli_fetch_type(
                         name.trim_start_matches("mysqli_"),
@@ -752,11 +751,11 @@ impl<'a> Checker<'a> {
                     let arg_ty = self.infer_expr(&a.value, locals);
                     if let Some(k) = arg_ty.array_key_type() {
                         key_ty =
-                            Some(key_ty.map_or(k.clone(), |existing| union_types(existing, k)));
+                            Some(key_ty.map_or(k.clone(), |existing| Type::union(existing, k)));
                     }
                     if let Some(v) = arg_ty.array_value_type() {
                         val_ty =
-                            Some(val_ty.map_or(v.clone(), |existing| union_types(existing, v)));
+                            Some(val_ty.map_or(v.clone(), |existing| Type::union(existing, v)));
                     }
                 }
                 if let (Some(k), Some(v)) = (key_ty, val_ty) {
@@ -775,7 +774,7 @@ impl<'a> Checker<'a> {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 let pad_ty = self.infer_expr(&args[2].value, locals);
                 if let Some(elem_ty) = arr_ty.array_value_type() {
-                    return Type::array(Type::unknown_array_key(), union_types(elem_ty, pad_ty));
+                    return Type::array(Type::unknown_array_key(), Type::union(elem_ty, pad_ty));
                 }
             }
             // The result's keys are the values of `$array` (only
@@ -929,10 +928,11 @@ impl<'a> Checker<'a> {
                 // `ArrayShape`'s.
                 let all_string_keyed_or_shape = !has_spread
                     && arg_types.iter().any(|t| {
-                        t.shape().is_some()
-                            || has_offset_value_parts(t).is_some_and(|(_, pairs)| !pairs.is_empty())
+                        t.as_array_shape().is_some()
+                            || t.has_offset_value_parts()
+                                .is_some_and(|(_, pairs)| !pairs.is_empty())
                     })
-                    && arg_types.iter().all(|t| match t.shape() {
+                    && arg_types.iter().all(|t| match t.as_array_shape() {
                         Some(shape) => shape
                             .fields
                             .iter()
@@ -953,7 +953,7 @@ impl<'a> Checker<'a> {
                     let mut merged = Shape::sealed(Vec::new());
                     let mut next_index: i64 = 0; // unused - no int keys reach this path
                     for arg_ty in &arg_types {
-                        match arg_ty.shape() {
+                        match arg_ty.as_array_shape() {
                             Some(inner) => {
                                 for f in &inner.fields {
                                     Self::merge_shape_field(
@@ -982,7 +982,7 @@ impl<'a> Checker<'a> {
                                 // array_merge never touches).
                                 let elem_ty = arg_ty.array_value_type().unwrap_or(Type::mixed());
                                 for f in merged.fields.iter_mut() {
-                                    f.ty = union_types(f.ty.clone(), elem_ty.clone());
+                                    f.ty = Type::union(f.ty.clone(), elem_ty.clone());
                                 }
                                 // Mark unsealed - the plain array may also
                                 // contribute keys this shape never had.
@@ -1001,7 +1001,7 @@ impl<'a> Checker<'a> {
                                 // gets an empty `pairs`, so this is a
                                 // strict no-op for that already-covered
                                 // case.
-                                if let Some((_, pairs)) = has_offset_value_parts(arg_ty) {
+                                if let Some((_, pairs)) = arg_ty.has_offset_value_parts() {
                                     for (k, v) in pairs {
                                         Self::merge_shape_field(
                                             &mut merged,
@@ -1017,11 +1017,11 @@ impl<'a> Checker<'a> {
                     }
                     return Type::array_shape(merged);
                 }
-                if !has_spread && arg_types.iter().all(|t| t.shape().is_some()) {
+                if !has_spread && arg_types.iter().all(|t| t.as_array_shape().is_some()) {
                     let mut merged = Shape::sealed(Vec::new());
                     let mut next_index: i64 = 0;
                     for arg_ty in &arg_types {
-                        if let Some(inner) = arg_ty.shape() {
+                        if let Some(inner) = arg_ty.as_array_shape() {
                             for f in &inner.fields {
                                 Self::merge_shape_field(
                                     &mut merged,
@@ -1111,7 +1111,7 @@ impl<'a> Checker<'a> {
                 if all_known_array_like {
                     let elem_ty = elem_types
                         .into_iter()
-                        .reduce(union_types)
+                        .reduce(Type::union)
                         .unwrap_or(Type::mixed());
                     let key_ty = match (key_could_be_int, key_could_be_string) {
                         (true, false) => Type::int(),
@@ -1152,7 +1152,7 @@ impl<'a> Checker<'a> {
                     self.infer_expr(&args[0].value, locals).int_literal_value() == Some(0);
                 let count_is_non_empty = self
                     .infer_expr(&args[1].value, locals)
-                    .int_range_bounds()
+                    .int_bounds()
                     .is_some_and(|(min, _)| min.is_some_and(|m| m >= 1));
                 let mut members = vec![base];
                 if start_is_zero {
@@ -1214,7 +1214,7 @@ impl<'a> Checker<'a> {
                 // even when every real key written is always an `int`.
                 // Only an `ArrayShape`'s own key type is trustworthy
                 // enough to propagate.
-                if arg_ty.shape().is_some()
+                if arg_ty.as_array_shape().is_some()
                     && let Some(key_ty) = arg_ty.array_key_type()
                 {
                     return Type::intersection_of(vec![
@@ -1239,7 +1239,7 @@ impl<'a> Checker<'a> {
                     // shape for a raw DB-fetch row) has no per-key
                     // precision to offer, so every column read is simply
                     // the row's own uniform element type.
-                    let field_ty = match row_ty.shape() {
+                    let field_ty = match row_ty.as_array_shape() {
                         Some(shape) => literal_string_key(&args[1].value)
                             .and_then(|key| shape.field(&ShapeKey::from_name(&key)))
                             .map(|f| f.ty.clone()),
@@ -1279,7 +1279,7 @@ impl<'a> Checker<'a> {
             "array_search" if args.len() >= 2 => {
                 let haystack_ty = self.infer_expr(&args[1].value, locals);
                 if haystack_ty.is_list().yes() {
-                    return union_types(Type::int(), Type::bool_literal(false));
+                    return Type::union(Type::int(), Type::bool_literal(false));
                 }
                 // Same idea, one level less precise - a haystack whose
                 // key type is confidently known (not just "definitely a
@@ -1289,7 +1289,7 @@ impl<'a> Checker<'a> {
                 if let Some(key_ty) = haystack_ty.array_key_type()
                     && key_ty != Type::unknown_array_key()
                 {
-                    return union_types(key_ty, Type::bool_literal(false));
+                    return Type::union(key_ty, Type::bool_literal(false));
                 }
             }
             // The real stub declares `version_compare(string, string,
@@ -1355,7 +1355,7 @@ impl<'a> Checker<'a> {
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return narrow_type_excluding(&generic, &Type::array(Type::mixed(), Type::mixed()));
+                return generic.without(&Type::array(Type::mixed(), Type::mixed()));
             }
             // Same subject-dependent-return-type family as the two arms
             // above - the real stub is `substr_replace(array|string
@@ -1430,7 +1430,7 @@ impl<'a> Checker<'a> {
                     return Type::string_literal(s.repeat(n as usize));
                 }
                 let count_is_at_least_one = count_ty
-                    .int_range_bounds()
+                    .int_bounds()
                     .is_some_and(|(min, _)| min.is_some_and(|m| m >= 1));
                 if count_is_at_least_one
                     && input_ty
@@ -1547,7 +1547,7 @@ impl<'a> Checker<'a> {
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return narrow_type_excluding(&generic, &Type::array(Type::mixed(), Type::mixed()));
+                return generic.without(&Type::array(Type::mixed(), Type::mixed()));
             }
             // `mb_convert_encoding()`'s real dynamic extension is
             // considerably more involved (it also reasons about
@@ -1561,7 +1561,7 @@ impl<'a> Checker<'a> {
             {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return narrow_type_excluding(&generic, &Type::array(Type::mixed(), Type::mixed()));
+                return generic.without(&Type::array(Type::mixed(), Type::mixed()));
             }
             // `json_encode(...): string|false` - passing
             // `JSON_THROW_ON_ERROR` makes a real failure throw instead of
@@ -1571,7 +1571,7 @@ impl<'a> Checker<'a> {
             "json_encode" if args.len() >= 2 && contains_json_throw_on_error(&args[1].value) => {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return narrow_type_excluding(&generic, &Type::bool_literal(false));
+                return generic.without(&Type::bool_literal(false));
             }
             // The real stub declares `curl_getinfo` unconditionally
             // `mixed` - maps a literal `CURLINFO_*` option constant to a
@@ -1595,7 +1595,7 @@ impl<'a> Checker<'a> {
             // to plain `string`, unchanged.
             "get_class" if args.len() == 1 => {
                 let object_ty = self.infer_expr(&args[0].value, locals);
-                if let Some((class, _)) = object_ty.object_class_and_args() {
+                if let Some((class, _)) = object_ty.as_object() {
                     return Type::class_string(Type::object(class.clone(), Vec::new()));
                 }
             }
@@ -1626,7 +1626,7 @@ impl<'a> Checker<'a> {
             // confidently.
             "get_parent_class" if args.len() == 1 => {
                 let object_ty = self.infer_expr(&args[0].value, locals);
-                if let Some((class, _)) = object_ty.object_class_and_args()
+                if let Some((class, _)) = object_ty.as_object()
                     && let Some(ty) = self.find_declared_parent_class(class)
                 {
                     return ty;
@@ -1832,7 +1832,7 @@ impl<'a> Checker<'a> {
         if arr_ty.is_non_empty_array().yes() && !force_union {
             return result_ty;
         }
-        union_types(result_ty, empty_marker)
+        Type::union(result_ty, empty_marker)
     }
 
     /// `PrintfParametersRule`'s by-ref-output-variable-count half, for
@@ -2068,7 +2068,7 @@ fn is_null_filter_callback(e: &Expr) -> bool {
 /// element type, not just the accessory markers every `array_filter`
 /// call already loses (`strip_accessory_markers`).
 fn strip_null_from_array_element(ty: Type) -> Type {
-    ty.filter_array_values(&|elem| narrow_type_excluding(elem, &Type::null()))
+    ty.filter_array_values(&|elem| elem.without(&Type::null()))
 }
 
 /// Recognizes real PHPStan's other `array_filter` callback shape:
@@ -2210,7 +2210,7 @@ fn filter_validate_result(
     let flags_ty_ref = flags_ty.expect("flags_is_options_array implies Some");
     let fields = filter_var_options_fields(flags_ty_ref);
     if fields.is_none()
-        && let Some(flags_shape) = flags_ty_ref.shape()
+        && let Some(flags_shape) = flags_ty_ref.as_array_shape()
         && flags_shape.field(&ShapeKey::from_name("options")).is_some()
     {
         return None;
@@ -2224,10 +2224,10 @@ fn filter_validate_result(
     // ("PHPStan does not yet support FloatRangeType").
     let element_ty = if filter_name == "FILTER_VALIDATE_INT" {
         let min = filter_var_option(fields, "min_range")
-            .and_then(|t| t.int_range_bounds())
+            .and_then(|t| t.int_bounds())
             .and_then(|(min, _)| min);
         let max = filter_var_option(fields, "max_range")
-            .and_then(|t| t.int_range_bounds())
+            .and_then(|t| t.int_bounds())
             .and_then(|(_, max)| max);
         if min.is_some() || max.is_some() {
             Type::int_interval(min, max)
@@ -2242,10 +2242,10 @@ fn filter_validate_result(
 
 fn filter_var_options_fields(flags_ty: &Type) -> Option<&Shape> {
     flags_ty
-        .shape()?
+        .as_array_shape()?
         .field(&ShapeKey::from_name("options"))?
         .ty
-        .shape()
+        .as_array_shape()
 }
 
 /// One named option's value type (`'default'`/`'min_range'`/`'max_range'`)
@@ -2328,7 +2328,7 @@ fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) ->
         if relation.disjoint(elem, target) {
             Type::never()
         } else {
-            narrow_type_to(relation, elem, target)
+            relation.narrow(elem, target)
         }
     })
 }
@@ -2487,7 +2487,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
             return None;
         };
         result = Some(match result {
-            Some(acc) => union_types(acc, answer),
+            Some(acc) => Type::union(acc, answer),
             None => answer,
         });
     }
@@ -2530,7 +2530,7 @@ fn gettype_result(ty: &Type) -> Option<Type> {
         .map(|m| gettype_string_for(m).map(|s| Type::string_literal(s.into())))
         .collect::<Option<Vec<_>>>()?
         .into_iter()
-        .reduce(union_types)
+        .reduce(Type::union)
 }
 
 /// Whether `s` is exactly one Unicode scalar value - `idate()`'s format

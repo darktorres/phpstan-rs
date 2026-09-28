@@ -55,7 +55,7 @@ impl<'a> Checker<'a> {
             }
             InstanceofTarget::Name(name, _) => {
                 let resolved = self.resolve_name_expr(name);
-                let Some((class, _)) = resolved.object_class_and_args() else {
+                let Some((class, _)) = resolved.as_object() else {
                     return;
                 };
                 (class.to_string(), false)
@@ -95,7 +95,7 @@ impl<'a> Checker<'a> {
         if ty.is_never() {
             return None;
         }
-        if let Some((class, _)) = ty.object_class_and_args() {
+        if let Some((class, _)) = ty.as_object() {
             return self.class_instanceof_verdict(class, target);
         }
         if let Some(bound) = ty.template_bound() {

@@ -1,9 +1,9 @@
-//! `concat_types`: what concatenating two types gives.
+//! `Type::concat`: what concatenating two types gives.
 
-use crate::{AccessoryKind, NoClasses, PhpString, Type, concat_types};
+use crate::{AccessoryKind, NoClasses, PhpString, Type};
 
 fn concat(l: &Type, r: &Type) -> Type {
-    concat_types(l, r, &NoClasses)
+    l.concat(r, &NoClasses)
 }
 
 #[test]

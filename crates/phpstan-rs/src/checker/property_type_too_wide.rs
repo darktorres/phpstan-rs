@@ -17,7 +17,6 @@
 use crate::checker::Checker;
 use syntax::ast::{ClassDecl, Expr, ExprKind, Literal, Visibility};
 use types::Type;
-use types::union_types;
 
 /// A property's own `= null` default is a real, reachable value (every
 /// instance starts there until a real write happens), but only an
@@ -78,11 +77,11 @@ impl<'a> Checker<'a> {
             let Some(assign_types) = assign_types else {
                 continue;
             };
-            let Some(actual) = assign_types.iter().cloned().reduce(union_types) else {
+            let Some(actual) = assign_types.iter().cloned().reduce(Type::union) else {
                 continue;
             };
             let actual = if is_null_default(&p.default) {
-                union_types(actual, Type::null())
+                Type::union(actual, Type::null())
             } else {
                 actual
             };

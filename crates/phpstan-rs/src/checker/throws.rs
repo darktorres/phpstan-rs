@@ -169,7 +169,7 @@ fn call_throw_type(dynamic: Option<&Type>, sig: Option<&FunctionReflection>) -> 
 /// real typo'd/missing class.
 fn throws_is_valid(ty: &Type, registry: &Registry) -> bool {
     ty.union_members().iter().all(|m| {
-        m.object_class_and_args().is_none_or(|(class, _)| {
+        m.as_object().is_none_or(|(class, _)| {
             !registry.classes.contains_key(class.as_str())
                 || registry.is_subclass_of(class, "Throwable")
         })

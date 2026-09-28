@@ -2,8 +2,7 @@
 //! `IntegerRangeType` operations and `InitializerExprTypeResolver`'s
 //! arithmetic, and the outcome of comparing ranges and literals.
 
-use crate::Repr;
-use crate::{Type, union_types};
+use crate::{Repr, Type};
 use syntax::ast::BinOp;
 
 /// Applies `op` to two bounds, distinguishing a genuine `i64` overflow
@@ -13,7 +12,7 @@ use syntax::ast::BinOp;
 /// former, the signal `Add`/`Sub`/`Mul` need to union `Type::Float`
 /// into their result the same way real PHP silently promotes an
 /// overflowing int operation to float at runtime.
-pub fn checked_bound_op(
+pub(crate) fn checked_bound_op(
     a: Option<i64>,
     b: Option<i64>,
     op: impl Fn(i64, i64) -> Option<i64>,
@@ -60,7 +59,7 @@ fn finite_bound(v: f64) -> Option<i64> {
 /// `0 * (anything, including an unbounded end)` is special-cased to `0`
 /// first, matching the real source exactly - naively substituting
 /// infinity there would compute `0 * INF = NaN` instead.
-pub fn mul_int_range(
+pub(crate) fn mul_int_range(
     l_min: Option<i64>,
     l_max: Option<i64>,
     r_min: Option<i64>,
@@ -87,7 +86,7 @@ pub fn mul_int_range(
     // int-to-float promotion `checked_bound_op` signals for `Add`/`Sub`.
     let all_bounded = l_min.is_some() && l_max.is_some() && r_min.is_some() && r_max.is_some();
     if all_bounded && (min_bound.is_none() || max_bound.is_none()) {
-        union_types(result, Type::float())
+        Type::union(result, Type::float())
     } else {
         result
     }
@@ -102,7 +101,7 @@ pub fn mul_int_range(
 /// independent expressions, since correctness here depends on matching
 /// the real source's own execution order exactly, not just its inputs
 /// and outputs in isolation.
-pub fn sub_int_range_full(
+pub(crate) fn sub_int_range_full(
     l_min: Option<i64>,
     l_max: Option<i64>,
     r_min: Option<i64>,
@@ -177,12 +176,12 @@ fn checked_i64_pow(base: i64, exp: i64) -> Option<i64> {
 /// same gate every one of real PHPStan's own non-numeric-exponent cases
 /// (`string`/`bool`/`null`) this project's type system doesn't route
 /// through this path at all. A literal base's own `(min, max)` bounds
-/// coincide (`int_range_bounds`'s own doc comment), so this single
+/// coincide (`int_bounds`'s own doc comment), so this single
 /// formula - real PHPStan's own two separate call sites, one for a
 /// `ConstantScalarType` base and one for an `IntegerRangeType` base,
 /// happen to collapse into exactly the same shape here - correctly
 /// covers both a literal and a genuine range base with no separate case.
-pub fn pow_int_range(
+pub(crate) fn pow_int_range(
     l_min: Option<i64>,
     l_max: Option<i64>,
     r_min: Option<i64>,
@@ -203,7 +202,7 @@ pub fn pow_int_range(
 /// operand (`getShiftLeftType`/`getShiftRightType` themselves bail to
 /// plain `int` the moment the right side isn't a `ConstantIntegerType` -
 /// no range-shifted-by-range case exists at all), so
-/// `infer_binary`'s own call site only invokes this once `int_range_bounds`
+/// `infer_binary`'s own call site only invokes this once `int_bounds`
 /// on the right side has already collapsed to a single value. `amount`
 /// outside `0..64` (negative - PHP throws `ArithmeticError` at runtime,
 /// not modeled as `ErrorType` here, matching this project's existing
@@ -215,7 +214,12 @@ pub fn pow_int_range(
 /// real PHPStan's own `is_float($min) ? null : $min` guard (PHP silently
 /// promotes an overflowing int to `float`, which these two functions
 /// then treat as "no longer a precise int bound").
-pub fn shift_int_range(l_min: Option<i64>, l_max: Option<i64>, amount: i64, left: bool) -> Type {
+pub(crate) fn shift_int_range(
+    l_min: Option<i64>,
+    l_max: Option<i64>,
+    amount: i64,
+    left: bool,
+) -> Type {
     let Ok(amount) = u32::try_from(amount) else {
         return Type::int();
     };
@@ -311,77 +315,68 @@ pub fn compare_range_outcome(
     }
 }
 
-/// Bounds for `</>/<=/>=`'s own range-outcome check - a bare `Type::Int`
-/// counts as an unbounded range (matching `checker::narrowing`'s own
-/// `numeric_bounds_for_narrowing`), an ordinary, not-yet-narrowed `int`
-/// parameter being exactly the common real case this needs to stay
-/// silent on; anything else defers to `int_range_bounds`. Shared between
-/// `infer_binary`'s own constant-folding arm and `check_constant_
-/// numeric_comparison`'s standalone diagnostic below - both need the
-/// identical answer.
-pub fn numeric_comparison_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> {
-    match ty {
-        Type(Repr::Int) => Some((None, None)),
-        other => other.int_range_bounds(),
-    }
-}
-
-/// The provable outcome of a loose `==` comparison between two literal
-/// scalar types (`!=` is just its negation), or `None` when not
-/// statically decidable - matches real PHPStan's own
-/// `LooseComparisonHelper::compareConstantScalars`, read directly from
-/// `vendor/phpstan-src` rather than assumed. Deliberately narrower than
-/// that helper in one disclosed respect: PHP 8.0 changed exactly one
-/// corner of the loose-comparison table - a non-numeric string compared
-/// against a number now casts the *number* to a string instead of the
-/// string to a number (`PhpVersion::castsNumbersToStringsOnLooseComparison`),
-/// so that one branch below is only attempted once `php_version` is
-/// configured at 8.0+, matching this project's existing "a version-gated
-/// fact stays silent with no configured version" precedent
-/// (`php_version.rs`) rather than guessing a runtime default. Every
-/// other branch here is exactly as version-independent in real PHP as it
-/// is below: same-kind literals, numeric-string-vs-number (always
-/// numeric, regardless of version), and bool/null-vs-anything (always a
-/// plain bool-cast-both-sides comparison).
-pub fn loose_compare_literals(
-    l: &Type,
-    r: &Type,
-    php_version: Option<crate::php_version::PhpVersion>,
-) -> Option<bool> {
-    // bool/null vs anything: PHP casts *both* sides to bool and compares
-    // - version-independent, and subsumes the same-kind True/False/Null
-    // combinations too (no need to special-case them separately below).
-    if matches!(l, Type(Repr::True) | Type(Repr::False) | Type(Repr::Null))
-        || matches!(r, Type(Repr::True) | Type(Repr::False) | Type(Repr::Null))
-    {
-        return Some(l.to_boolean().bool_literal_value()? == r.to_boolean().bool_literal_value()?);
-    }
-    match (l, r) {
-        (Type(Repr::IntLiteral(a)), Type(Repr::IntLiteral(b))) => Some(a == b),
-        (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b))) => Some(a == b),
-        (Type(Repr::IntLiteral(a)), Type(Repr::FloatLiteral(b)))
-        | (Type(Repr::FloatLiteral(b)), Type(Repr::IntLiteral(a))) => Some(*a as f64 == *b),
-        (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) => {
-            match (numeric_string_value(a), numeric_string_value(b)) {
-                (Some(x), Some(y)) => Some(x == y),
-                _ => Some(a == b),
+impl Type {
+    /// The provable outcome of a loose `==` comparison between two literal
+    /// scalar types (`!=` is just its negation), or `None` when not
+    /// statically decidable - matches real PHPStan's own
+    /// `LooseComparisonHelper::compareConstantScalars`, read directly from
+    /// `vendor/phpstan-src` rather than assumed. Deliberately narrower than
+    /// that helper in one disclosed respect: PHP 8.0 changed exactly one
+    /// corner of the loose-comparison table - a non-numeric string compared
+    /// against a number now casts the *number* to a string instead of the
+    /// string to a number (`PhpVersion::castsNumbersToStringsOnLooseComparison`),
+    /// so that one branch below is only attempted once `php_version` is
+    /// configured at 8.0+, matching this project's existing "a version-gated
+    /// fact stays silent with no configured version" precedent
+    /// (`php_version.rs`) rather than guessing a runtime default. Every
+    /// other branch here is exactly as version-independent in real PHP as it
+    /// is below: same-kind literals, numeric-string-vs-number (always
+    /// numeric, regardless of version), and bool/null-vs-anything (always a
+    /// plain bool-cast-both-sides comparison).
+    pub fn loosely_equals(
+        &self,
+        r: &Type,
+        php_version: Option<crate::php_version::PhpVersion>,
+    ) -> Option<bool> {
+        // bool/null vs anything: PHP casts *both* sides to bool and compares
+        // - version-independent, and subsumes the same-kind True/False/Null
+        // combinations too (no need to special-case them separately below).
+        if matches!(
+            self,
+            Type(Repr::True) | Type(Repr::False) | Type(Repr::Null)
+        ) || matches!(r, Type(Repr::True) | Type(Repr::False) | Type(Repr::Null))
+        {
+            return Some(
+                self.to_boolean().bool_literal_value()? == r.to_boolean().bool_literal_value()?,
+            );
+        }
+        match (self, r) {
+            (Type(Repr::IntLiteral(a)), Type(Repr::IntLiteral(b))) => Some(a == b),
+            (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b))) => Some(a == b),
+            (Type(Repr::IntLiteral(a)), Type(Repr::FloatLiteral(b)))
+            | (Type(Repr::FloatLiteral(b)), Type(Repr::IntLiteral(a))) => Some(*a as f64 == *b),
+            (Type(Repr::StringLiteral(a)), Type(Repr::StringLiteral(b))) => {
+                match (numeric_string_value(a), numeric_string_value(b)) {
+                    (Some(x), Some(y)) => Some(x == y),
+                    _ => Some(a == b),
+                }
             }
-        }
-        (Type(Repr::IntLiteral(n)), Type(Repr::StringLiteral(s)))
-        | (Type(Repr::StringLiteral(s)), Type(Repr::IntLiteral(n))) => {
-            if let Some(x) = numeric_string_value(s) {
-                Some(*n as f64 == x)
-            } else if php_version.is_some_and(|v| v >= crate::PhpVersion::new(8, 0)) {
-                Some(*s == n.to_string())
-            } else {
-                None
+            (Type(Repr::IntLiteral(n)), Type(Repr::StringLiteral(s)))
+            | (Type(Repr::StringLiteral(s)), Type(Repr::IntLiteral(n))) => {
+                if let Some(x) = numeric_string_value(s) {
+                    Some(*n as f64 == x)
+                } else if php_version.is_some_and(|v| v >= crate::PhpVersion::new(8, 0)) {
+                    Some(*s == n.to_string())
+                } else {
+                    None
+                }
             }
+            (Type(Repr::FloatLiteral(n)), Type(Repr::StringLiteral(s)))
+            | (Type(Repr::StringLiteral(s)), Type(Repr::FloatLiteral(n))) => {
+                numeric_string_value(s).map(|x| *n == x)
+            }
+            _ => None,
         }
-        (Type(Repr::FloatLiteral(n)), Type(Repr::StringLiteral(s)))
-        | (Type(Repr::StringLiteral(s)), Type(Repr::FloatLiteral(n))) => {
-            numeric_string_value(s).map(|x| *n == x)
-        }
-        _ => None,
     }
 }
 
@@ -397,7 +392,7 @@ pub fn loose_compare_literals(
 /// exactly matching real PHPStan's own two-step structure (its own
 /// `getModType` does the identical cross-product fold before ever
 /// reaching this same fallback).
-pub fn mod_int_range(
+pub(crate) fn mod_int_range(
     l_min: Option<i64>,
     l_max: Option<i64>,
     r_min: Option<i64>,
@@ -457,7 +452,7 @@ fn div_sign(v: f64) -> f64 {
 /// integerRangeMath(...)` self-calls per split exactly, each one
 /// already returning a complete, tail-processed `Type` that's unioned
 /// directly rather than combined as raw bounds.
-pub fn div_int_range(
+pub(crate) fn div_int_range(
     l_min: Option<i64>,
     l_max: Option<i64>,
     r_min: Option<i64>,
@@ -474,12 +469,12 @@ pub fn div_int_range(
     if operand_min.is_none_or(|v| v < 0) && operand_max.is_none_or(|v| v > 0) {
         let negative = div_int_range(l_min, l_max, operand_min, Some(0));
         let positive = div_int_range(l_min, l_max, Some(0), operand_max);
-        return union_types(negative, positive);
+        return Type::union(negative, positive);
     }
     if l_min.is_none_or(|v| v < 0) && l_max.is_none_or(|v| v > 0) {
         let negative = div_int_range(l_min, Some(0), r_min, r_max);
         let positive = div_int_range(Some(0), l_max, r_min, r_max);
-        return union_types(negative, positive);
+        return Type::union(negative, positive);
     }
 
     let range_min_sign = div_sign(bound_or_inf(l_min, f64::NEG_INFINITY));
@@ -546,7 +541,7 @@ pub fn div_int_range(
         // it explicitly rather than teach that absorption to every other
         // `union_types` caller for the sake of this one.
         Type(Repr::Never) => Type::float(),
-        int_half => union_types(int_half, Type::float()),
+        int_half => Type::union(int_half, Type::float()),
     }
 }
 
@@ -559,123 +554,129 @@ fn numeric_string_value(s: &crate::PhpString) -> Option<f64> {
     text.trim().parse::<f64>().ok()
 }
 
-/// Unary `-` negates a literal/range operand's actual value - `+` is a
-/// true no-op on the value (only ever coercing a numeric string), but `-`
-/// must flip it: `-32768` infers as `IntLiteral(-32768)`, not
-/// `IntLiteral(32768)`. `IntRange`'s min/max swap on negation (`-int<a,
-/// b>` is `int<-b, -a>`) mirrors real PHPStan's `IntegerRangeType`
-/// negation handling. Anything else (a bare `Type::Int`, `Type::Float`,
-/// ...) has no specific value to flip, so it's returned unchanged.
-pub fn negate_numeric_literal(ty: Type) -> Type {
-    match ty {
-        Type(Repr::IntLiteral(n)) => Type(Repr::IntLiteral(-n)),
-        Type(Repr::FloatLiteral(f)) => Type(Repr::FloatLiteral(-f)),
-        Type(Repr::IntRange(min, max)) => Type(Repr::IntRange(max.map(|m| -m), min.map(|m| -m))),
-        other => other,
+impl Type {
+    /// Unary `-` negates a literal/range operand's actual value - `+` is a
+    /// true no-op on the value (only ever coercing a numeric string), but `-`
+    /// must flip it: `-32768` infers as `IntLiteral(-32768)`, not
+    /// `IntLiteral(32768)`. `IntRange`'s min/max swap on negation (`-int<a,
+    /// b>` is `int<-b, -a>`) mirrors real PHPStan's `IntegerRangeType`
+    /// negation handling. Anything else (a bare `Type::Int`, `Type::Float`,
+    /// ...) has no specific value to flip, so it's returned unchanged.
+    pub fn negate(self) -> Type {
+        match self {
+            Type(Repr::IntLiteral(n)) => Type(Repr::IntLiteral(-n)),
+            Type(Repr::FloatLiteral(f)) => Type(Repr::FloatLiteral(-f)),
+            Type(Repr::IntRange(min, max)) => {
+                Type(Repr::IntRange(max.map(|m| -m), min.map(|m| -m)))
+            }
+            other => other,
+        }
     }
 }
 
-/// The result of `l op r` for an arithmetic, bitwise or shift operator
-/// or `<=>` over operands of these types, operator overloading aside
-/// (PHPStan's `InitializerExprTypeResolver`).
-pub fn binary_operation_type(op: &BinOp, lt: &Type, rt: &Type) -> Type {
-    let either_float = lt.is_float().yes() || rt.is_float().yes();
-    match op {
-        BinOp::Spaceship => Type(Repr::IntRange(Some(-1), Some(1))),
-        BinOp::Add => {
-            if lt.is_array().yes() || rt.is_array().yes() {
-                return array_union_type(lt, rt);
+impl Type {
+    /// The result of `l op r` for an arithmetic, bitwise or shift operator
+    /// or `<=>` over operands of these types, operator overloading aside
+    /// (PHPStan's `InitializerExprTypeResolver`).
+    pub fn binary_operation(op: &BinOp, lt: &Type, rt: &Type) -> Type {
+        let either_float = lt.is_float().yes() || rt.is_float().yes();
+        match op {
+            BinOp::Spaceship => Type(Repr::IntRange(Some(-1), Some(1))),
+            BinOp::Add => {
+                if lt.is_array().yes() || rt.is_array().yes() {
+                    return array_union_type(lt, rt);
+                }
+                if either_float {
+                    return Type(Repr::Float);
+                }
+                if let (Some((l_min, l_max)), Some((r_min, r_max))) =
+                    (lt.int_bounds(), rt.int_bounds())
+                {
+                    let (min, min_overflow) = checked_bound_op(l_min, r_min, i64::checked_add);
+                    let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
+                    let result = Type::int_interval(min, max);
+                    return if min_overflow || max_overflow {
+                        Type::union(result, Type(Repr::Float))
+                    } else {
+                        result
+                    };
+                }
+                Type(Repr::Int)
             }
-            if either_float {
-                return Type(Repr::Float);
+            BinOp::Sub => {
+                if either_float {
+                    return Type(Repr::Float);
+                }
+                if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
+                    (lt.int_bounds(), rt.int_bounds())
+                    && c == rc
+                {
+                    let (min, min_overflow) = checked_bound_op(l_min, Some(c), i64::checked_sub);
+                    let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
+                    let result = Type::int_interval(min, max);
+                    return if min_overflow || max_overflow {
+                        Type::union(result, Type(Repr::Float))
+                    } else {
+                        result
+                    };
+                }
+                match (lt.int_bounds(), rt.int_bounds()) {
+                    (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                        sub_int_range_full(l_min, l_max, r_min, r_max)
+                    }
+                    _ => Type(Repr::Int),
+                }
             }
-            if let (Some((l_min, l_max)), Some((r_min, r_max))) =
-                (lt.int_range_bounds(), rt.int_range_bounds())
-            {
-                let (min, min_overflow) = checked_bound_op(l_min, r_min, i64::checked_add);
-                let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
-                let result = Type::int_interval(min, max);
-                return if min_overflow || max_overflow {
-                    union_types(result, Type(Repr::Float))
-                } else {
-                    result
-                };
+            BinOp::Mul => {
+                if either_float {
+                    return Type(Repr::Float);
+                }
+                match (lt.int_bounds(), rt.int_bounds()) {
+                    (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                        mul_int_range(l_min, l_max, r_min, r_max)
+                    }
+                    _ => Type(Repr::Int),
+                }
             }
-            Type(Repr::Int)
-        }
-        BinOp::Sub => {
-            if either_float {
-                return Type(Repr::Float);
+            BinOp::Pow => {
+                if either_float {
+                    return Type(Repr::Float);
+                }
+                match (lt.int_bounds(), rt.int_bounds()) {
+                    (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                        pow_int_range(l_min, l_max, r_min, r_max)
+                    }
+                    _ => Type(Repr::Int),
+                }
             }
-            if let (Some((l_min, l_max)), Some((Some(c), Some(rc)))) =
-                (lt.int_range_bounds(), rt.int_range_bounds())
-                && c == rc
-            {
-                let (min, min_overflow) = checked_bound_op(l_min, Some(c), i64::checked_sub);
-                let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
-                let result = Type::int_interval(min, max);
-                return if min_overflow || max_overflow {
-                    union_types(result, Type(Repr::Float))
-                } else {
-                    result
-                };
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type(Repr::Int))
             }
-            match (lt.int_range_bounds(), rt.int_range_bounds()) {
-                (Some((l_min, l_max)), Some((r_min, r_max))) => {
-                    sub_int_range_full(l_min, l_max, r_min, r_max)
+            BinOp::Shl | BinOp::Shr => match (lt.int_bounds(), rt.int_bounds()) {
+                (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) if amount == r_max => {
+                    shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl))
                 }
                 _ => Type(Repr::Int),
-            }
-        }
-        BinOp::Mul => {
-            if either_float {
-                return Type(Repr::Float);
-            }
-            match (lt.int_range_bounds(), rt.int_range_bounds()) {
+            },
+            BinOp::Mod => match (lt.int_bounds(), rt.int_bounds()) {
                 (Some((l_min, l_max)), Some((r_min, r_max))) => {
-                    mul_int_range(l_min, l_max, r_min, r_max)
+                    mod_int_range(l_min, l_max, r_min, r_max)
                 }
                 _ => Type(Repr::Int),
-            }
-        }
-        BinOp::Pow => {
-            if either_float {
-                return Type(Repr::Float);
-            }
-            match (lt.int_range_bounds(), rt.int_range_bounds()) {
-                (Some((l_min, l_max)), Some((r_min, r_max))) => {
-                    pow_int_range(l_min, l_max, r_min, r_max)
+            },
+            BinOp::Div => {
+                if either_float {
+                    return Type(Repr::Float);
                 }
-                _ => Type(Repr::Int),
-            }
-        }
-        BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-            fold_bitwise_int_literals(op, lt, rt).unwrap_or(Type(Repr::Int))
-        }
-        BinOp::Shl | BinOp::Shr => match (lt.int_range_bounds(), rt.int_range_bounds()) {
-            (Some((l_min, l_max)), Some((Some(amount), Some(r_max)))) if amount == r_max => {
-                shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl))
-            }
-            _ => Type(Repr::Int),
-        },
-        BinOp::Mod => match (lt.int_range_bounds(), rt.int_range_bounds()) {
-            (Some((l_min, l_max)), Some((r_min, r_max))) => {
-                mod_int_range(l_min, l_max, r_min, r_max)
-            }
-            _ => Type(Repr::Int),
-        },
-        BinOp::Div => {
-            if either_float {
-                return Type(Repr::Float);
-            }
-            match (lt.int_range_bounds(), rt.int_range_bounds()) {
-                (Some((l_min, l_max)), Some((r_min, r_max))) => {
-                    div_int_range(l_min, l_max, r_min, r_max)
+                match (lt.int_bounds(), rt.int_bounds()) {
+                    (Some((l_min, l_max)), Some((r_min, r_max))) => {
+                        div_int_range(l_min, l_max, r_min, r_max)
+                    }
+                    _ => Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::Float)])),
                 }
-                _ => Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::Float)])),
             }
+            _ => Type(Repr::Mixed(false)),
         }
-        _ => Type(Repr::Mixed(false)),
     }
 }
 
@@ -687,11 +688,11 @@ fn array_union_type(lt: &Type, rt: &Type) -> Type {
     let key_ty = match (key_of(lt), key_of(rt)) {
         _ if !both_arrays => Type::benevolent_array_key(),
         (Some(lk), Some(rk)) if lk == rk => lk,
-        (Some(lk), Some(rk)) => union_types(lk, rk),
+        (Some(lk), Some(rk)) => Type::union(lk, rk),
         (Some(k), None) | (None, Some(k)) => k,
         (None, None) => Type::benevolent_array_key(),
     };
-    let val_ty = union_types(
+    let val_ty = Type::union(
         lt.array_value_type().unwrap_or(Type(Repr::Mixed(false))),
         rt.array_value_type().unwrap_or(Type(Repr::Mixed(false))),
     );
@@ -741,7 +742,7 @@ fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
             values.dedup();
             let mut members = values.into_iter().map(Type::int_literal);
             let first = members.next()?;
-            Some(members.fold(first, union_types))
+            Some(members.fold(first, Type::union))
         }
         (_, Some(ks)) | (Some(ks), _)
             if matches!(op, BinOp::BitAnd) && ks.len() == 1 && ks[0] >= 0 =>

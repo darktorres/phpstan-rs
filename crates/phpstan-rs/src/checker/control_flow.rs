@@ -1,4 +1,4 @@
-use crate::checker::{Checker, Locals, union_types};
+use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use syntax::visit::any_stmt_in_body;
 use types::{self, Type};
@@ -419,8 +419,8 @@ impl<'a> Checker<'a> {
 /// either.
 pub(crate) fn add_implied_fact(facts: &mut Vec<(String, Type)>, name: &str, ty: &Type) {
     match facts.iter_mut().find(|(k, _)| k == name) {
-        Some((_, existing)) if types::types_equal_for_union(existing, ty) => {}
-        Some((_, existing)) => *existing = union_types(existing.clone(), ty.clone()),
+        Some((_, existing)) if existing.equals_for_union(ty) => {}
+        Some((_, existing)) => *existing = Type::union(existing.clone(), ty.clone()),
         None => facts.push((name.to_string(), ty.clone())),
     }
 }
@@ -580,7 +580,7 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     // A native type survives only when both branches know one.
     for (key, then_native) in then_locals.natives() {
         if let Some(else_native) = else_locals.native(key) {
-            merged.set_native(key, union_types(then_native.clone(), else_native.clone()));
+            merged.set_native(key, Type::union(then_native.clone(), else_native.clone()));
         }
     }
     // Same "both branches inherited the identical, unchanged alias"
@@ -631,11 +631,11 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     merged.discriminant_array_facts = then_locals.discriminant_array_facts.clone();
     for (key, else_ty) in else_locals.discriminant_array_facts.iter() {
         match merged.discriminant_array_facts.get(key) {
-            Some(then_ty) if types::types_equal_for_union(then_ty, else_ty) => {}
+            Some(then_ty) if then_ty.equals_for_union(else_ty) => {}
             Some(then_ty) => {
                 merged
                     .discriminant_array_facts
-                    .insert(key.clone(), union_types(then_ty.clone(), else_ty.clone()));
+                    .insert(key.clone(), Type::union(then_ty.clone(), else_ty.clone()));
             }
             None => {
                 merged
@@ -696,10 +696,10 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
             // equality here first avoids ever cloning `else_ty` at all,
             // rather than cloning it just to have `union_types` discard
             // it a moment later.
-            let merged_ty = if types::types_equal_for_union(then_ty, else_ty) {
+            let merged_ty = if then_ty.equals_for_union(else_ty) {
                 then_ty.clone()
             } else {
-                union_types(then_ty.clone(), else_ty.clone())
+                Type::union(then_ty.clone(), else_ty.clone())
             };
             merged.insert_with_provenance(name.clone(), merged_ty, provenance);
         }

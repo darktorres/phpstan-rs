@@ -1,8 +1,7 @@
 //! Where a type uses templates, and the variance of each position
 //! (PHPStan's `getReferencedTemplateTypes()`).
 
-use crate::Repr;
-use crate::{CallSiteVariance, ClassHierarchy, TemplateParam, Type, Variance};
+use crate::{CallSiteVariance, ClassHierarchy, Repr, TemplateParam, Type, Variance};
 
 /// The variance of a position a type occurs in (PHPStan's
 /// `TemplateTypeVariance` as a position).

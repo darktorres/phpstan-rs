@@ -104,7 +104,7 @@ impl<'a> Checker<'a> {
         // that hook's own parameter type when one exists, not the
         // property's read type.
         let write_ty = prop_sig.set_ty().as_ref().unwrap_or(prop_sig.ty());
-        let expected = types::substitute_template(write_ty, &bindings);
+        let expected = write_ty.substitute_templates(&bindings);
         let expected = self.resolve_pseudo(&expected, &class);
         let actual = self.infer_expr(rhs, locals);
         // `check_too_wide_property_types`'s own accumulation half - scoped

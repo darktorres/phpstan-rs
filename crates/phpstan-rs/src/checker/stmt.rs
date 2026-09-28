@@ -1,7 +1,7 @@
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
-    purge_stale_narrowing_for, union_types,
+    purge_stale_narrowing_for,
 };
 use crate::registry::class_decl_name;
 use syntax::ast::*;
@@ -21,7 +21,7 @@ fn reconstructed_discriminant_return_type(e: &Expr, locals: &Locals) -> Option<T
         .iter()
         .filter(|((container, _, _), _)| container.as_str() == name.as_ref())
         .map(|(_, ty)| ty.clone())
-        .reduce(union_types)
+        .reduce(Type::union)
 }
 
 mod loops;

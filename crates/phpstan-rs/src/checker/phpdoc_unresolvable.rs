@@ -198,7 +198,7 @@ impl<'a> Checker<'a> {
                 let types: Vec<Type> = members.iter().map(|m| self.node_type(m, class)).collect();
                 // A class the registry never saw proves nothing either way.
                 let unknown_class = |t: &Type| {
-                    t.object_class_and_args()
+                    t.as_object()
                         .is_some_and(|(n, _)| self.registry.lookup_class(n).is_none())
                 };
                 if types.iter().any(unknown_class) {
@@ -245,7 +245,7 @@ impl<'a> Checker<'a> {
                 name.contains('-')
                     && !name.trim_start_matches('\\').starts_with("OCI-")
                     && types::parse_type_string(name)
-                        .object_class_and_args()
+                        .as_object()
                         .is_some_and(|(n, _)| n.contains('-'))
             }
         }

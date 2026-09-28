@@ -2,8 +2,7 @@
 //! answer depends on a `T` that may be a template until a call binds it
 //! (PHPStan's `LateResolvableType`).
 
-use crate::Repr;
-use crate::{ShapeKey, Type};
+use crate::{Repr, ShapeKey, Type};
 
 /// What resolving a class reference inside a type needs to know.
 pub trait ClassConstants {
@@ -112,10 +111,10 @@ pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
 /// access whose operand no longer holds a template is answered, `Mixed`
 /// when the operand isn't an array type; a `value-of` is answered only
 /// over an array type (an enum's needs the registry).
-pub fn settle(ty: Type) -> Type {
+pub(crate) fn settle(ty: Type) -> Type {
     match &ty {
         Type(Repr::KeyOf(inner)) | Type(Repr::OffsetAccess(inner, _))
-            if !references_template(inner) =>
+            if !inner.references_template() =>
         {
             resolve_node(&ty, &|t| t.clone()).unwrap_or(Type(Repr::Mixed(false)))
         }
@@ -124,39 +123,46 @@ pub fn settle(ty: Type) -> Type {
     }
 }
 
-/// Whether `ty` names a template anywhere: a template parameter, or a
-/// conditional whose subject is one.
-pub fn references_template(ty: &Type) -> bool {
-    match ty {
-        Type(Repr::TemplateParam(_)) => true,
-        Type(Repr::Conditional {
-            template_subject: true,
-            ..
-        }) => true,
-        _ => ty.any_child(references_template),
+impl Type {
+    /// Whether `ty` names a template anywhere: a template parameter, or a
+    /// conditional whose subject is one.
+    pub fn references_template(&self) -> bool {
+        match self {
+            Type(Repr::TemplateParam(_)) => true,
+            Type(Repr::Conditional {
+                template_subject: true,
+                ..
+            }) => true,
+            _ => self.any_child(Type::references_template),
+        }
     }
 }
 
-/// `ty` with every late-resolvable node answered as far as its
-/// templates' bounds allow - what a template-typed value can be relied
-/// on to be inside the generic code itself. An answer the bound doesn't
-/// give is `Mixed`.
-pub fn resolve_late_to_bounds(ty: &Type) -> Type {
-    let ty = ty.map_children(&mut resolve_late_to_bounds);
-    match ty {
-        Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)) => {
-            resolve_node(&ty, &upper_bound).unwrap_or(Type(Repr::Mixed(false)))
+impl Type {
+    /// `ty` with every late-resolvable node answered as far as its
+    /// templates' bounds allow - what a template-typed value can be relied
+    /// on to be inside the generic code itself. An answer the bound doesn't
+    /// give is `Mixed`.
+    pub fn resolve_late_to_bounds(&self) -> Type {
+        let ty = self.map_children(&mut Type::resolve_late_to_bounds);
+        match ty {
+            Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)) => {
+                resolve_node(&ty, &upper_bound).unwrap_or(Type(Repr::Mixed(false)))
+            }
+            Type(Repr::ValueOf(ref inner)) if matches!(**inner, Type(Repr::TemplateParam(_))) => {
+                resolve_node(&ty, &upper_bound).unwrap_or(Type(Repr::Mixed(false)))
+            }
+            other => other,
         }
-        Type(Repr::ValueOf(ref inner)) if matches!(**inner, Type(Repr::TemplateParam(_))) => {
-            resolve_node(&ty, &upper_bound).unwrap_or(Type(Repr::Mixed(false)))
-        }
-        other => other,
     }
 }
 
-/// Whether `ty` holds a `KeyOf`/`OffsetAccess` anywhere.
-pub fn contains_late(ty: &Type) -> bool {
-    matches!(ty, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) || ty.any_child(contains_late)
+impl Type {
+    /// Whether `ty` holds a `KeyOf`/`OffsetAccess` anywhere.
+    pub fn contains_late(&self) -> bool {
+        matches!(self, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)))
+            || self.any_child(Type::contains_late)
+    }
 }
 
 /// A template's bound, recursively (`T of U`, `U of array`).
@@ -183,6 +189,6 @@ fn resolve_node(ty: &Type, operand: &dyn Fn(&Type) -> Type) -> Option<Type> {
 fn join(members: Vec<Type>) -> Type {
     members
         .into_iter()
-        .reduce(crate::union_types)
+        .reduce(Type::union)
         .unwrap_or(Type(Repr::Never))
 }

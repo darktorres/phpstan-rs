@@ -898,7 +898,7 @@ fn patch_datetime_fluent_returns(classes: &mut [(Arc<str>, ClassReflection)]) {
                 continue;
             };
             let to_static = |ty: &Type| {
-                if ty.object_class_and_args().is_some_and(|(n, _)| *n == class) {
+                if ty.as_object().is_some_and(|(n, _)| *n == class) {
                     Type::static_ref(Vec::new())
                 } else {
                     ty.clone()

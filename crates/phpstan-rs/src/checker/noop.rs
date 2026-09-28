@@ -147,7 +147,7 @@ impl<'a> Checker<'a> {
             && receiver.union_members().iter().all(|m| {
                 m.is_null().yes()
                     || m.is_enum_case()
-                    || m.object_class_and_args().is_some_and(|(class, _)| {
+                    || m.as_object().is_some_and(|(class, _)| {
                         if self.registry.lookup_method(class, "__get").is_some() {
                             return false;
                         }
@@ -279,7 +279,7 @@ impl<'a> Checker<'a> {
                 // scope (a `Union`/`Intersection` receiver is treated
                 // conservatively - not flagged - the same "don't guess"
                 // default everywhere else in this feature).
-                let Some((recv_class, _)) = recv_ty.object_class_and_args() else {
+                let Some((recv_class, _)) = recv_ty.as_object() else {
                     return;
                 };
                 if !crate::registry::is_non_overridable(
@@ -330,7 +330,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::New(_, _) => {
                 let new_ty = self.infer_expr(e, locals);
-                let Some((class, _)) = new_ty.object_class_and_args() else {
+                let Some((class, _)) = new_ty.as_object() else {
                     return;
                 };
                 let Some(sig) = self.registry.lookup_method(class, "__construct") else {

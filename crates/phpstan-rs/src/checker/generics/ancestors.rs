@@ -286,7 +286,7 @@ impl<'a> Checker<'a> {
         let location = format!("PHPDoc tag @{}", tag.word());
         let mut unused: Vec<&String> = names.iter().collect();
         for (node, ty) in &tag_types {
-            let Some((class, args)) = ty.object_class_and_args() else {
+            let Some((class, args)) = ty.as_object() else {
                 self.report(
                     format!("{} {ty}.", messages.incompatible),
                     span,
@@ -456,7 +456,7 @@ impl<'a> Checker<'a> {
                 let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
                 let ty = registry::substitute_type_aliases(ty, &aliases);
                 let ty = self.registry.resolve_deferred_value_of_now(ty);
-                let key = match ty.object_class_and_args() {
+                let key = match ty.as_object() {
                     Some((class, _)) => class.to_ascii_lowercase(),
                     None => ty.to_string(),
                 };

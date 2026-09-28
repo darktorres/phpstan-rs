@@ -1,6 +1,5 @@
-use crate::Repr;
 use crate::relation::Relation;
-use crate::{AccessoryKind, Shape, TrinaryLogic, Type};
+use crate::{AccessoryKind, Repr, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
 
 impl Relation<'_> {
@@ -38,7 +37,7 @@ impl Relation<'_> {
             }
             (Type(Repr::Never), _) => TrinaryLogic::No,
             (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
-                self.is_super_type_of(&crate::resolve_late_to_bounds(sup), sub)
+                self.is_super_type_of(&sup.resolve_late_to_bounds(), sub)
             }
             (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => a
                 .is_super_type_of(&**b, self.hierarchy)
@@ -50,7 +49,7 @@ impl Relation<'_> {
             },
             (_, Type(Repr::Extension(b))) => self.is_super_type_of(sup, &b.base()),
             (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
-                self.is_super_type_of(sup, &crate::resolve_late_to_bounds(sub))
+                self.is_super_type_of(sup, &sub.resolve_late_to_bounds())
             }
             // A benevolent union (`(int|string)`) is its members for
             // `isSuperTypeOf`; only `accepts` is lenient about it.

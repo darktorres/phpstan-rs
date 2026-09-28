@@ -1,100 +1,107 @@
-use crate::Repr;
-use crate::{AccessoryKind, CallableParam, CallableSig, Relation, Shape, ShapeKey, Type, Variance};
+use crate::{
+    AccessoryKind, CallableParam, CallableSig, Relation, Repr, Shape, ShapeKey, Type, Variance,
+};
 
-/// Whether `shape` is a *definite* list: sealed, int-keyed sequentially
-/// from zero, *and* no optional field followed by a later, non-optional
-/// one. Per real PHPStan's own
-/// `ConstantArrayTypeBuilder` algorithm, `array{0: int, 1?: string, 2:
-/// int}` is only `Maybe`-a-list, since an absent optional field 1 would
-/// leave the remaining keys `{0, 2}` non-sequential - a `Maybe` counts
-/// as "not a definite list" here, the project's false-negative-favoring
-/// default.
-pub fn shape_fields_are_list_like(shape: &Shape) -> bool {
-    if !shape.is_sealed() {
-        return false;
-    }
-    let mut seen_optional = false;
-    for (i, field) in shape.fields.iter().enumerate() {
-        if field.key != ShapeKey::Int(i as i64) {
+impl Shape {
+    /// Whether `shape` is a *definite* list: sealed, int-keyed sequentially
+    /// from zero, *and* no optional field followed by a later, non-optional
+    /// one. Per real PHPStan's own
+    /// `ConstantArrayTypeBuilder` algorithm, `array{0: int, 1?: string, 2:
+    /// int}` is only `Maybe`-a-list, since an absent optional field 1 would
+    /// leave the remaining keys `{0, 2}` non-sequential - a `Maybe` counts
+    /// as "not a definite list" here, the project's false-negative-favoring
+    /// default.
+    pub fn is_list(&self) -> bool {
+        if !self.is_sealed() {
             return false;
         }
-        if seen_optional && !field.optional {
-            return false;
+        let mut seen_optional = false;
+        for (i, field) in self.fields.iter().enumerate() {
+            if field.key != ShapeKey::Int(i as i64) {
+                return false;
+            }
+            if seen_optional && !field.optional {
+                return false;
+            }
+            seen_optional |= field.optional;
         }
-        seen_optional |= field.optional;
-    }
-    true
-}
-
-/// The aggregate key type real PHPStan's `ConstantArrayType::
-/// getIterableKeyType()` reports for a shape - the union of each
-/// field's key kind (an unsealed tail contributes nothing). Lets `registry::assignability`/`is_super_type_of` compare an
-/// `ArrayShape`'s real key type against a `Type::Array`'s declared one,
-/// so `array{name: string}` isn't wrongly assignable to
-/// `array<int, string>`. `Type::Never` for a shape with no real fields
-/// (vacuously a subtype of any key type via the `(Never, _) => true` arm
-/// below).
-///
-/// An int-canonical key contributes its own `Type::IntLiteral`, not the
-/// bare `Type::Int` widening - needed so `array{0: ...}` doesn't wrongly
-/// fail against an `array<int<0, max>, ...>`-typed parameter (`Type::Int`
-/// isn't a confirmed subtype of `int<0, max>`, even though the one
-/// concrete key written always is non-negative).
-pub fn shape_key_type(shape: &Shape) -> Type {
-    let mut key_types: Vec<Type> = Vec::new();
-    for field in &shape.fields {
-        let kt = match field.key {
-            ShapeKey::Int(n) => Type(Repr::IntLiteral(n)),
-            ShapeKey::Str(_) => Type(Repr::String),
-        };
-        if !key_types.contains(&kt) {
-            key_types.push(kt);
-        }
-    }
-    match key_types.len() {
-        0 => Type(Repr::Never),
-        1 => key_types.into_iter().next().expect("len checked above"),
-        _ => Type(Repr::Union(key_types)),
+        true
     }
 }
 
-/// Is every value described by `sub` also described by `sup`? The same
-/// relation PHPStan calls `isSuperTypeOf` (inverted). Class hierarchy
-/// isn't modeled yet, so `Object` subtyping is name-equality only;
-/// self/parent/static are accepted against any `Object` as a placeholder
-/// until a class-context resolver exists.
-/// Whether `a`/`b` should be treated as the identical type for union
-/// deduplication - ordinary `==` for everything except a `list<T>`/
-/// `non-empty-list<T>` pair, which can be structurally unequal (a
-/// literal `Type::Int` key vs. the generic `unknown_array_key()`
-/// sentinel - see `is_super_type_of`'s `Intersection`-vs-`Intersection` list
-/// arm) while still the same type PHPStan-visibly. Without this,
-/// `union_types` would print a duplicate `list<int>|list<int>` whenever
-/// a docblock-declared `list<T>` and a runtime-inferred one of the same
-/// element type meet in one union.
-pub fn types_equal_for_union(a: &Type, b: &Type) -> bool {
-    if a == b {
-        return true;
-    }
-    match (a, b) {
-        (Type(Repr::Intersection(ma)), Type(Repr::Intersection(mb)))
-            if ma.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList)))
-                && mb.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
-        {
-            let keyless = |members: &[Type]| -> Vec<Type> {
-                members
-                    .iter()
-                    .map(|m| match m {
-                        Type(Repr::Array(_, v)) => {
-                            Type(Repr::Array(Box::new(Type::unknown_array_key()), v.clone()))
-                        }
-                        other => other.clone(),
-                    })
-                    .collect()
+impl Shape {
+    /// The aggregate key type real PHPStan's `ConstantArrayType::
+    /// getIterableKeyType()` reports for a shape - the union of each
+    /// field's key kind (an unsealed tail contributes nothing). Lets `registry::assignability`/`is_super_type_of` compare an
+    /// `ArrayShape`'s real key type against a `Type::Array`'s declared one,
+    /// so `array{name: string}` isn't wrongly assignable to
+    /// `array<int, string>`. `Type::Never` for a shape with no real fields
+    /// (vacuously a subtype of any key type via the `(Never, _) => true` arm
+    /// below).
+    ///
+    /// An int-canonical key contributes its own `Type::IntLiteral`, not the
+    /// bare `Type::Int` widening - needed so `array{0: ...}` doesn't wrongly
+    /// fail against an `array<int<0, max>, ...>`-typed parameter (`Type::Int`
+    /// isn't a confirmed subtype of `int<0, max>`, even though the one
+    /// concrete key written always is non-negative).
+    pub fn key_type(&self) -> Type {
+        let mut key_types: Vec<Type> = Vec::new();
+        for field in &self.fields {
+            let kt = match field.key {
+                ShapeKey::Int(n) => Type(Repr::IntLiteral(n)),
+                ShapeKey::Str(_) => Type(Repr::String),
             };
-            keyless(ma) == keyless(mb)
+            if !key_types.contains(&kt) {
+                key_types.push(kt);
+            }
         }
-        _ => false,
+        match key_types.len() {
+            0 => Type(Repr::Never),
+            1 => key_types.into_iter().next().expect("len checked above"),
+            _ => Type(Repr::Union(key_types)),
+        }
+    }
+}
+
+impl Type {
+    /// Is every value described by `sub` also described by `sup`? The same
+    /// relation PHPStan calls `isSuperTypeOf` (inverted). Class hierarchy
+    /// isn't modeled yet, so `Object` subtyping is name-equality only;
+    /// self/parent/static are accepted against any `Object` as a placeholder
+    /// until a class-context resolver exists.
+    /// Whether `a`/`b` should be treated as the identical type for union
+    /// deduplication - ordinary `==` for everything except a `list<T>`/
+    /// `non-empty-list<T>` pair, which can be structurally unequal (a
+    /// literal `Type::Int` key vs. the generic `unknown_array_key()`
+    /// sentinel - see `is_super_type_of`'s `Intersection`-vs-`Intersection` list
+    /// arm) while still the same type PHPStan-visibly. Without this,
+    /// `union_types` would print a duplicate `list<int>|list<int>` whenever
+    /// a docblock-declared `list<T>` and a runtime-inferred one of the same
+    /// element type meet in one union.
+    pub fn equals_for_union(&self, b: &Type) -> bool {
+        if self == b {
+            return true;
+        }
+        match (self, b) {
+            (Type(Repr::Intersection(ma)), Type(Repr::Intersection(mb)))
+                if ma.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList)))
+                    && mb.contains(&Type(Repr::Accessory(AccessoryKind::ArrayList))) =>
+            {
+                let keyless = |members: &[Type]| -> Vec<Type> {
+                    members
+                        .iter()
+                        .map(|m| match m {
+                            Type(Repr::Array(_, v)) => {
+                                Type(Repr::Array(Box::new(Type::unknown_array_key()), v.clone()))
+                            }
+                            other => other.clone(),
+                        })
+                        .collect()
+                };
+                keyless(ma) == keyless(mb)
+            }
+            _ => false,
+        }
     }
 }
 
@@ -218,7 +225,7 @@ impl Relation<'_> {
                 Type(Repr::Accessory(AccessoryKind::NonEmptyArray)),
             ) => true,
             (Type(Repr::ArrayShape(shape)), Type(Repr::Accessory(AccessoryKind::ArrayList))) => {
-                shape_fields_are_list_like(shape)
+                shape.is_list()
             }
 
             // An unresolved `Conditional` - either it leaked into a
@@ -273,7 +280,7 @@ impl Relation<'_> {
             // The reverse - does some array have these exact keys - is never
             // provable.
             (Type(Repr::ArrayShape(shape)), Type(Repr::Array(key, value))) => {
-                self.is_super_type_of(key, &shape_key_type(shape)).yes()
+                self.is_super_type_of(key, &shape.key_type()).yes()
                     && shape.types().all(|t| self.is_super_type_of(value, t).yes())
             }
 
@@ -400,7 +407,7 @@ fn effective_callable_param_at(params: &[CallableParam], i: usize) -> Option<&Ca
 /// `is_sub` decides each individual parameter/return comparison, so the
 /// registry can supply its hierarchy-aware relation while this module
 /// passes its own structural one.
-pub fn callable_sig_is_subtype(
+pub(crate) fn callable_sig_is_subtype(
     a: &CallableSig,
     b: &CallableSig,
     is_sub: &dyn Fn(&Type, &Type) -> bool,

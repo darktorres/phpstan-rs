@@ -1,13 +1,12 @@
 //! What a type relation needs to know about classes. Reflection
 //! implements it (C8); until then `Registry` does.
 
-use crate::Repr;
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 use syntax::ast::ClassKind;
 
-use crate::{CallSiteVariance, Type, Variance};
+use crate::{CallSiteVariance, Repr, Type, Variance};
 
 /// A class as a type relation sees it.
 pub struct ClassFacts<'a> {

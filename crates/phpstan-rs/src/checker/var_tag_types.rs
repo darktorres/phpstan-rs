@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
                 if l.is_mixed() || r.is_mixed() {
                     Type::mixed()
                 } else {
-                    union_types(l, r)
+                    Type::union(l, r)
                 }
             }
             ExprKind::ArrayLiteral(items) => {
@@ -123,7 +123,7 @@ impl<'a> Checker<'a> {
                     };
                     value = Some(match value {
                         None => item_ty,
-                        Some(prev) => union_types(prev, item_ty),
+                        Some(prev) => Type::union(prev, item_ty),
                     });
                 }
                 Type::array(Type::unknown_array_key(), value.unwrap_or(Type::mixed()))
@@ -148,7 +148,7 @@ impl<'a> Checker<'a> {
                 CastKind::Unset => Type::null(),
                 CastKind::Object | CastKind::Void => Type::mixed(),
             },
-            ExprKind::New(..) => match self.infer_expr(e, locals).object_class_and_args() {
+            ExprKind::New(..) => match self.infer_expr(e, locals).as_object() {
                 Some((class, _)) => Type::object(class.clone(), Vec::new()),
                 None => Type::mixed(),
             },
@@ -178,7 +178,7 @@ impl<'a> Checker<'a> {
                     if l.is_mixed() || r.is_mixed() {
                         Type::mixed()
                     } else {
-                        union_types(l, r)
+                        Type::union(l, r)
                     }
                 }
                 _ => Type::mixed(),
@@ -189,7 +189,7 @@ impl<'a> Checker<'a> {
                 if t.is_mixed() || o.is_mixed() {
                     Type::mixed()
                 } else {
-                    union_types(t, o)
+                    Type::union(t, o)
                 }
             }
             ExprKind::Call(callee, _) => {
@@ -209,12 +209,12 @@ impl<'a> Checker<'a> {
             }
             ExprKind::MethodCall(receiver, method, _, nullsafe) => {
                 let receiver = self.native_expr_type(receiver, locals);
-                let Some((class, _)) = receiver.object_class_and_args() else {
+                let Some((class, _)) = receiver.as_object() else {
                     return Type::mixed();
                 };
                 let ty = self.native_method_return(class, method);
                 if *nullsafe && !ty.is_mixed() {
-                    union_types(ty, Type::null())
+                    Type::union(ty, Type::null())
                 } else {
                     ty
                 }
@@ -224,7 +224,7 @@ impl<'a> Checker<'a> {
                     StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
                     StaticTarget::Expr(receiver) => self
                         .native_expr_type(receiver, locals)
-                        .object_class_and_args()
+                        .as_object()
                         .map(|(class, _)| class.to_string()),
                 };
                 match class {
@@ -234,12 +234,12 @@ impl<'a> Checker<'a> {
             }
             ExprKind::PropertyAccess(receiver, prop, nullsafe) => {
                 let receiver = self.native_expr_type(receiver, locals);
-                let Some((class, _)) = receiver.object_class_and_args() else {
+                let Some((class, _)) = receiver.as_object() else {
                     return Type::mixed();
                 };
                 let ty = self.native_property_type(class, prop, false);
                 if *nullsafe && !ty.is_mixed() {
-                    union_types(ty, Type::null())
+                    Type::union(ty, Type::null())
                 } else {
                     ty
                 }

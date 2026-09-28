@@ -37,7 +37,7 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
         1,
         "expected every same-key-set shape to merge into one"
     );
-    match result[0].shape() {
+    match result[0].as_array_shape() {
         Some(fields) => {
             let fields = fields.named_fields();
             assert_eq!(fields.len(), 1);
@@ -83,7 +83,7 @@ fn generalize_by_key_set_only_merges_the_matching_subset() {
     let untouched_y_shapes = result
         .iter()
         .filter(|m| {
-            m.shape().is_some_and(|shape| {
+            m.as_array_shape().is_some_and(|shape| {
                 shape.fields.len() == 1 && shape.fields[0].key.to_string().starts_with('y')
             })
         })

@@ -1,7 +1,7 @@
 use crate::regex_groups;
 use syntax::ast::*;
 use types::PhpString;
-use types::union_types;
+
 use types::{AccessoryKind, Shape, Type};
 
 /// The type of one matched group's "leaf" value in `preg_match`'s own
@@ -32,7 +32,7 @@ fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type
         let literal_ty = values
             .iter()
             .map(|v| Type::string_literal(v.as_str().into()))
-            .reduce(union_types)
+            .reduce(Type::union)
             .expect("literal_values is never Some(empty) by construction");
         return refine_leaf(leaf, literal_ty);
     }
@@ -65,7 +65,7 @@ fn refine_leaf(leaf: &Type, refined: Type) -> Type {
     if *leaf == Type::string() {
         return refined;
     }
-    match leaf.shape() {
+    match leaf.as_array_shape() {
         Some(shape) if shape.fields.len() == 2 => {
             let mut shape = shape.clone();
             shape.fields[0].ty = refined;
@@ -127,7 +127,7 @@ pub(crate) fn preg_match_matches_shape(
         let is_last_group = i == groups.len() - 1;
         let base = group_leaf_type(leaf, g);
         let (leaf_ty, optional) = if g.optional && unmatched_as_null {
-            (union_types(base, Type::null()), false)
+            (Type::union(base, Type::null()), false)
         } else if is_trailing_optional {
             (base, g.optional) // today's existing, already-correct behavior
         } else {
@@ -148,7 +148,7 @@ pub(crate) fn preg_match_matches_shape(
         // collapses back to plain `String`) - only observable once
         // literal enumeration narrows `base` below plain `String`.
         let ty = if g.optional && !is_last_group && !unmatched_as_null && *leaf == Type::string() {
-            union_types(leaf_ty, Type::string_literal(PhpString::default()))
+            Type::union(leaf_ty, Type::string_literal(PhpString::default()))
         } else {
             leaf_ty
         };
@@ -214,7 +214,7 @@ pub(crate) fn build_matched_shape(
         // the qualifying gate requires *exactly one* top-level group, so
         // any other group in the pattern must be nested inside it - if
         // it didn't run, nothing nested inside it could have either.
-        return union_types(
+        return Type::union(
             preg_match_matches_shape(&with_group, leaf, unmatched_as_null),
             preg_match_matches_shape(&[], leaf, unmatched_as_null),
         );
@@ -317,7 +317,7 @@ pub(crate) fn build_matched_shape(
         }
         return variants
             .into_iter()
-            .reduce(union_types)
+            .reduce(Type::union)
             .expect("branches is non-empty: at least one top-level group exists");
     }
 
@@ -344,7 +344,7 @@ pub(super) fn preg_match_all_pattern_order_shape(
 ) -> Type {
     let element_ty = |base: Type, optional: bool| {
         if optional && unmatched_as_null {
-            union_types(base, Type::null())
+            Type::union(base, Type::null())
         } else {
             base
         }

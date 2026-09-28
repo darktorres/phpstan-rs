@@ -220,7 +220,7 @@ impl<'a> Checker<'a> {
         };
         let ty = self.infer_expr(expr, locals);
         if let Some(pattern) = &cond.class_pattern {
-            return ty.object_class_and_args().is_some_and(|(name, _)| {
+            return ty.as_object().is_some_and(|(name, _)| {
                 glob_matches(&pattern.to_lowercase(), &name.to_lowercase())
             });
         }

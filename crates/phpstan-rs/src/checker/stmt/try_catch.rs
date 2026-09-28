@@ -12,11 +12,11 @@ impl<'a> Checker<'a> {
     /// `caught`. An unknown class on either side may be.
     fn may_catch(&self, thrown: &Type, caught: &[Type]) -> bool {
         thrown.union_members().iter().any(|t| {
-            let Some((t, _)) = t.object_class_and_args() else {
+            let Some((t, _)) = t.as_object() else {
                 return true;
             };
             caught.iter().any(|c| {
-                let Some((c, _)) = c.object_class_and_args() else {
+                let Some((c, _)) = c.as_object() else {
                     return true;
                 };
                 t.eq_ignore_ascii_case(c)
@@ -32,11 +32,11 @@ impl<'a> Checker<'a> {
     /// `caught`.
     fn surely_caught(&self, thrown: &Type, caught: &[Type]) -> bool {
         thrown.union_members().iter().all(|t| {
-            let Some((t, _)) = t.object_class_and_args() else {
+            let Some((t, _)) = t.as_object() else {
                 return false;
             };
             caught.iter().any(|c| {
-                c.object_class_and_args().is_some_and(|(c, _)| {
+                c.as_object().is_some_and(|(c, _)| {
                     t.eq_ignore_ascii_case(c) || self.registry.is_subclass_of(t, c)
                 })
             })
@@ -79,7 +79,7 @@ impl<'a> Checker<'a> {
             .iter()
             .flat_map(|c| &c.types)
             .map(|t| self.resolve_name_expr(t))
-            .filter(|t| t.object_class_and_args().is_some())
+            .filter(|t| t.as_object().is_some())
             .collect();
         self.current_catch_types.extend(new_catch_types);
         self.try_throw_states.push(Vec::new());
@@ -154,7 +154,7 @@ impl<'a> Checker<'a> {
             // because it does not implement Throwable").
             for (i, t) in c.types.iter().enumerate() {
                 let resolved = self.resolve_name_expr(t);
-                if let Some((class, _)) = resolved.object_class_and_args() {
+                if let Some((class, _)) = resolved.as_object() {
                     // `CaughtExceptionExistenceRule`'s own existence
                     // half, checked first - a typo'd/missing exception
                     // class would otherwise fall straight through to
@@ -207,11 +207,11 @@ impl<'a> Checker<'a> {
                 c.types.iter().map(|t| self.resolve_name_expr(t)).collect();
             if !clause_types.is_empty()
                 && clause_types.iter().all(|ct| {
-                    let Some((class, _)) = ct.object_class_and_args() else {
+                    let Some((class, _)) = ct.as_object() else {
                         return false;
                     };
                     previously_caught.iter().any(|pt| {
-                        let Some((prev, _)) = pt.object_class_and_args() else {
+                        let Some((prev, _)) = pt.as_object() else {
                             return false;
                         };
                         class == prev || self.registry.is_subclass_of(class, prev)
@@ -379,7 +379,7 @@ impl<'a> Checker<'a> {
         }
         if self.settings.extras.check_throw_base_class
             && let ExprKind::New(_, _) = &e.kind
-            && let Some((class, _)) = thrown_ty.object_class_and_args()
+            && let Some((class, _)) = thrown_ty.as_object()
             && (class.eq_ignore_ascii_case("Exception") || class.eq_ignore_ascii_case("Error"))
         {
             self.report(format!("Throwing the base {class} class is not recommended, use a specific subclass instead."),
@@ -480,7 +480,7 @@ impl<'a> Checker<'a> {
                     continue;
                 };
                 let resolved = self.resolve_name_expr(raw);
-                let Some((class, _)) = resolved.object_class_and_args() else {
+                let Some((class, _)) = resolved.as_object() else {
                     continue;
                 };
                 let accepts_previous = self
@@ -507,7 +507,7 @@ impl<'a> Checker<'a> {
         }
         let base = c.types.iter().find_map(|t| {
             let resolved = self.resolve_name_expr(t);
-            let (class, _) = resolved.object_class_and_args()?;
+            let (class, _) = resolved.as_object()?;
             BASE_EXCEPTIONS
                 .iter()
                 .any(|b| class.eq_ignore_ascii_case(b))

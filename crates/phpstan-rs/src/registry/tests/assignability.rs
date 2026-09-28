@@ -356,8 +356,7 @@ fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() 
             final class Shape extends Coll {}
             "#,
     );
-    let Some((_, args)) = r.classes["ProbeTb\\Shape"].extends_args[0].object_class_and_args()
-    else {
+    let Some((_, args)) = r.classes["ProbeTb\\Shape"].extends_args[0].as_object() else {
         panic!("expected a generic parent");
     };
     let case = |c: &str| Type::enum_case("ProbeTb\\Id".into(), c.into());
@@ -444,8 +443,8 @@ fn an_extension_payload_relates_through_its_hooks_and_its_base() {
     assert_eq!(r.is_super_type_of(&builder, &joins(3)), TrinaryLogic::Yes);
     assert_eq!(r.is_super_type_of(&joins(3), &builder), TrinaryLogic::Maybe);
     // Distinct payloads stay distinct until the union cap, then widen.
-    let two = types::union_types(joins(1), joins(2));
+    let two = Type::union(joins(1), joins(2));
     assert_eq!(two.union_members().len(), 2, "got {two:?}");
-    let many = (0..20).map(joins).reduce(types::union_types).unwrap();
+    let many = (0..20).map(joins).reduce(Type::union).unwrap();
     assert_eq!(many, builder);
 }

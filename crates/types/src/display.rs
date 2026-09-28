@@ -1,10 +1,9 @@
-use crate::Repr;
 use std::fmt;
 
 use syntax::ast::ClassKind;
 
 use crate::parse::display_shape_key;
-use crate::{AccessoryKind, CallSiteVariance, CallableSig, Shape, Type};
+use crate::{AccessoryKind, CallSiteVariance, CallableSig, Repr, Shape, Type};
 
 /// `keyword(params): return` - shared by a shaped `callable(...)`/
 /// `Closure(...)` PHPDoc type and a closure literal's own
@@ -322,4 +321,34 @@ fn write_shape(f: &mut fmt::Formatter<'_>, keyword: &str, shape: &Shape) -> fmt:
         }
     }
     write!(f, "{keyword}{{{}}}", parts.join(", "))
+}
+
+impl Type {
+    /// `VerbosityLevel::typeOnly()`: literal values and array shapes
+    /// collapse to their plain type.
+    pub fn describe_type_only(&self) -> String {
+        match self {
+            Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => "int".to_string(),
+            Type(Repr::FloatLiteral(_)) => "float".to_string(),
+            Type(Repr::StringLiteral(_)) => "string".to_string(),
+            Type(Repr::True) | Type(Repr::False) => "bool".to_string(),
+            Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => "array".to_string(),
+            Type(Repr::Object(class, _)) | Type(Repr::EnumCase(class, _)) => class.to_string(),
+            Type(Repr::Intersection(members)) => members
+                .iter()
+                .find(|m| !m.is_accessory())
+                .map_or_else(|| self.to_string(), Type::describe_type_only),
+            Type(Repr::Union(members)) => {
+                let mut parts: Vec<String> = Vec::new();
+                for member in members {
+                    let part = member.describe_type_only();
+                    if !parts.contains(&part) {
+                        parts.push(part);
+                    }
+                }
+                parts.join("|")
+            }
+            other => other.to_string(),
+        }
+    }
 }

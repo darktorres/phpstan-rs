@@ -79,7 +79,7 @@ fn an_array_literal_assigned_global_accumulates_shape_fields_across_files() {
         ("b.php", "<?php $conf['b'] = 'x';"),
     ]);
     let ty = global_type(&registry, "conf");
-    match ty.and_then(Type::shape) {
+    match ty.and_then(Type::as_array_shape) {
         Some(fields) => {
             let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
@@ -203,7 +203,7 @@ fn a_shape_field_picks_up_a_helpers_registry_resolved_return_type() {
         "#,
     )]);
     let ty = global_type(&registry, "g");
-    match ty.and_then(Type::shape) {
+    match ty.and_then(Type::as_array_shape) {
         Some(fields) => {
             let fields = fields.named_fields();
             let (_, ty, _) = fields
@@ -252,7 +252,7 @@ fn array_merge_with_self_folds_the_calls_resolved_shape_fields_in() {
         "#,
     )]);
     let ty = global_type(&registry, "g");
-    match ty.and_then(Type::shape) {
+    match ty.and_then(Type::as_array_shape) {
         Some(fields) => {
             let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
@@ -273,7 +273,7 @@ fn coalesce_assign_contributes_the_rhs_type_but_compound_concat_assign_is_mixed(
         "#,
     )]);
     let ty = global_type(&registry, "g");
-    match ty.and_then(Type::shape) {
+    match ty.and_then(Type::as_array_shape) {
         Some(fields) => {
             let fields = fields.named_fields();
             let a = &fields.iter().find(|(k, _, _)| k == "a").expect("a field").1;
@@ -301,7 +301,10 @@ fn a_genuine_object_and_array_conflict_resolves_to_a_union_not_mixed() {
         members.contains(&Type::object("Foo".into(), vec![])),
         "got: {ty:?}"
     );
-    assert!(members.iter().any(|m| m.shape().is_some()), "got: {ty:?}");
+    assert!(
+        members.iter().any(|m| m.as_array_shape().is_some()),
+        "got: {ty:?}"
+    );
 }
 
 #[test]
@@ -313,7 +316,7 @@ fn exceeding_the_shape_field_cap_degrades_to_array_mixed_not_mixed() {
     let registry = build_with_files(&[("a.php", &src)]);
     let ty = global_type(&registry, "g").expect("a type");
     assert!(
-        ty.shape().is_none() && ty.array_value_type() == Some(Type::mixed()),
+        ty.as_array_shape().is_none() && ty.array_value_type() == Some(Type::mixed()),
         "expected a plain array<mixed> after overflow, got: {ty:?}"
     );
 }
@@ -458,7 +461,7 @@ fn a_multi_level_nested_index_write_still_records_its_outermost_key() {
         "#,
     )]);
     let ty = global_type(&registry, "switch_lang");
-    match ty.and_then(Type::shape) {
+    match ty.and_then(Type::as_array_shape) {
         Some(fields) => {
             let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
@@ -481,7 +484,7 @@ fn a_nested_append_write_still_records_its_outermost_key() {
         "#,
     )]);
     let ty = global_type(&registry, "switch_lang");
-    match ty.and_then(Type::shape) {
+    match ty.and_then(Type::as_array_shape) {
         Some(fields) => {
             let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();

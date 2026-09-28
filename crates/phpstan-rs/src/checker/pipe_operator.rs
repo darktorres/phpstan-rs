@@ -80,7 +80,7 @@ impl<'a> Checker<'a> {
                         ExprKind::Literal(Literal::String(name)) => name.to_string(),
                         _ => self
                             .infer_expr(&recv_item.value, locals)
-                            .object_class_and_args()?
+                            .as_object()?
                             .0
                             .to_string(),
                     };
@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::MethodCall(recv, method, _, _) => {
                 let recv_ty = self.infer_expr(recv, locals);
-                let (class, _) = recv_ty.object_class_and_args()?;
+                let (class, _) = recv_ty.as_object()?;
                 let sig = self.registry.lookup_method(class, method)?;
                 Some(sig.params().first().is_some_and(|p| p.by_ref()))
             }

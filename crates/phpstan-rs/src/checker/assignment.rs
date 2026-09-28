@@ -1,4 +1,4 @@
-use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
+use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use types::{Shape, ShapeKey, Type};
@@ -483,7 +483,7 @@ impl<'a> Checker<'a> {
                             for literal_key in literal_keys_from_type(idx_ty) {
                                 let synthetic_key = format!("{name}[{literal_key}]");
                                 let merged = match locals.get(&synthetic_key) {
-                                    Some(prior) => union_types(prior.clone(), ty.clone()),
+                                    Some(prior) => Type::union(prior.clone(), ty.clone()),
                                     None => ty.clone(),
                                 };
                                 locals.insert(synthetic_key, merged);

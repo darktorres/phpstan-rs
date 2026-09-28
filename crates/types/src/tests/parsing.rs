@@ -679,7 +679,7 @@ fn a_docblock_parsed_list_is_a_mutual_subtype_of_the_runtime_inferred_shape() {
     );
     assert!(is_subtype(&runtime_list, &docblock_list));
     assert!(is_subtype(&docblock_list, &runtime_list));
-    assert!(types_equal_for_union(&docblock_list, &runtime_list));
+    assert!(docblock_list.equals_for_union(&runtime_list));
 }
 
 #[test]
@@ -695,7 +695,7 @@ fn a_docblock_parsed_non_empty_list_is_a_mutual_subtype_of_the_runtime_inferred_
     ]));
     assert!(is_subtype(&runtime_list, &docblock_list));
     assert!(is_subtype(&docblock_list, &runtime_list));
-    assert!(types_equal_for_union(&docblock_list, &runtime_list));
+    assert!(docblock_list.equals_for_union(&runtime_list));
 }
 
 // The `NonEmptyArray` half of the same rule: a plain (possibly-empty)

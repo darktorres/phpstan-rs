@@ -1,28 +1,29 @@
 //! The native declaration a type can be written as: PHP's own type
 //! syntax, as far as the configured version allows.
 
-use crate::Repr;
-use crate::{PhpVersion, Type};
+use crate::{PhpVersion, Repr, Type};
 
-/// The native declaration `ty` can be written as on `version` (a
-/// return type when `for_return`, where `void`, `never` and `static` are
-/// allowed); `None` when some part has no native spelling or the
-/// version can't declare it.
-pub fn native_declaration(
-    ty: &Type,
-    for_return: bool,
-    version: Option<PhpVersion>,
-) -> Option<String> {
-    let position = if for_return {
-        Position::Return
-    } else {
-        Position::Parameter
-    };
-    let mut native = Native::default();
-    if !collect(ty, position, &mut native) {
-        return None;
+impl Type {
+    /// The native declaration `ty` can be written as on `version` (a
+    /// return type when `for_return`, where `void`, `never` and `static` are
+    /// allowed); `None` when some part has no native spelling or the
+    /// version can't declare it.
+    pub fn native_declaration(
+        &self,
+        for_return: bool,
+        version: Option<PhpVersion>,
+    ) -> Option<String> {
+        let position = if for_return {
+            Position::Return
+        } else {
+            Position::Parameter
+        };
+        let mut native = Native::default();
+        if !collect(self, position, &mut native) {
+            return None;
+        }
+        render(native, version)
     }
-    render(native, version)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

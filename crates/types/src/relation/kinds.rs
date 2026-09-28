@@ -1,10 +1,9 @@
 //! What a type can be used as, over the class hierarchy: an instance of a
 //! class, iterable, offset-accessible, destructurable, callable.
 
-use crate::Repr;
 use syntax::ast::ClassKind;
 
-use crate::{Relation, TrinaryLogic, Type};
+use crate::{Relation, Repr, TrinaryLogic, Type};
 
 impl Relation<'_> {
     /// PHPStan's `isInstanceOf()`: `Yes` for an object of `class` or a

@@ -194,7 +194,7 @@ fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> FxHashMap<Strin
 fn association_target_from_native_type(ty: &Type) -> Option<String> {
     ty.union_members()
         .iter()
-        .find_map(|m| m.object_class_and_args())
+        .find_map(|m| m.as_object())
         .map(|(class, _)| class.to_string())
 }
 

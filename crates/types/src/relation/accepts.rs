@@ -1,6 +1,5 @@
-use crate::Repr;
 use crate::relation::{AcceptsResult, Relation};
-use crate::{ShapeKey, Type, Variance};
+use crate::{Repr, ShapeKey, Type, Variance};
 
 // Real PHPStan's own level-gated `RuleLevelHelper` behaviors
 // (`rule_level_accepts`/`rule_level_accepts`/
@@ -37,10 +36,10 @@ impl Relation<'_> {
             // A `key-of<T>`/`T[K]` still over a template is what `T`'s
             // bound makes it.
             (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
-                self.accepts_type(&crate::resolve_late_to_bounds(sub), sup)
+                self.accepts_type(&sub.resolve_late_to_bounds(), sup)
             }
             (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
-                self.accepts_type(sub, &crate::resolve_late_to_bounds(sup))
+                self.accepts_type(sub, &sup.resolve_late_to_bounds())
             }
             // Two payloads ask the extension; anything else reads a
             // payload as its base type.
@@ -405,7 +404,7 @@ impl Relation<'_> {
                 !self.strict_mixed_arrays
                     && matches!(**a, Type(Repr::Mixed(_)))
                     && (**key == Type::unknown_array_key()
-                        || self.accepts_type(key, &crate::shape_key_type(shape)))
+                        || self.accepts_type(key, &shape.key_type()))
             }
             // Now that an array literal carries a real per-position/
             // per-key shape instead of always reading as `Array(Mixed)`,
@@ -426,7 +425,7 @@ impl Relation<'_> {
             // silently accepted as satisfying `array<int, string>`,
             // checking only whether every field's value type matched.
             (Type(Repr::ArrayShape(shape)), Type(Repr::Array(key, b))) => {
-                self.accepts_type(&crate::shape_key_type(shape), key)
+                self.accepts_type(&shape.key_type(), key)
                     && shape.fields.iter().all(|f| {
                         (!self.strict_mixed_arrays && matches!(f.ty, Type(Repr::Mixed(_))))
                             || self.accepts_type(&f.ty, b)

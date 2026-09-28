@@ -2,13 +2,12 @@
 //! array member folded into one array or shape, and a member dropped when
 //! another member is within it.
 
-use crate::Repr;
-use crate::{AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type, union_types};
+use crate::{AccessoryKind, Relation, Repr, Shape, ShapeField, ShapeKey, Type};
 
 /// The intersection of `members`, with no class knowledge. `list<int>&
 /// non-empty-array` is one array (`int` values, `int` keys) carrying both
 /// refinements, i.e. `non-empty-list<int>`.
-pub fn intersect_types(members: Vec<Type>) -> Type {
+pub(crate) fn intersect_types(members: Vec<Type>) -> Type {
     Relation::structural().intersect(members)
 }
 
@@ -145,7 +144,7 @@ impl Relation<'_> {
         }
         kept.sort_by_key(|m| *m == Type(Repr::Null));
         kept.into_iter()
-            .reduce(union_types)
+            .reduce(Type::union)
             .unwrap_or_else(|| native.clone())
     }
 

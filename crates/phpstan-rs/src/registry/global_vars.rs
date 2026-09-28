@@ -28,7 +28,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::registry::infer_const_type;
 use syntax::ast::{BinOp, Expr, ExprKind, GlobalVar, Literal, StaticTarget, Stmt, StmtKind};
 use syntax::visit::{Visitor, any_stmt_in_body, opens_scope, walk_expr, walk_stmt};
-use types::union_types;
+
 use types::{Shape, Type};
 
 use super::Registry;
@@ -55,7 +55,7 @@ struct GlobalAccumulator {
 impl GlobalAccumulator {
     fn add_shape_field(&mut self, key: String, ty: Type) {
         if let Some((_, existing, _)) = self.shape_fields.iter_mut().find(|(k, _, _)| *k == key) {
-            *existing = union_types(existing.clone(), ty);
+            *existing = Type::union(existing.clone(), ty);
             return;
         }
         if self.shape_fields.len() >= MAX_GLOBAL_SHAPE_FIELDS {
@@ -67,7 +67,7 @@ impl GlobalAccumulator {
 
     fn add_other(&mut self, ty: Type) {
         self.other = Some(match self.other.take() {
-            Some(existing) => union_types(existing, ty),
+            Some(existing) => Type::union(existing, ty),
             None => ty,
         });
     }
@@ -90,7 +90,7 @@ impl GlobalAccumulator {
             (None, None) => Type::mixed(),
             (Some(shape), None) => shape,
             (None, Some(other)) => other,
-            (Some(shape), Some(other)) => union_types(shape, other),
+            (Some(shape), Some(other)) => Type::union(shape, other),
         }
     }
 }
@@ -113,7 +113,7 @@ enum SiteContribution {
 impl SiteContribution {
     fn apply(self, acc: &mut GlobalAccumulator) {
         match self {
-            SiteContribution::WholeValue(ty) => match ty.shape() {
+            SiteContribution::WholeValue(ty) => match ty.as_array_shape() {
                 Some(shape) => {
                     for f in &shape.fields {
                         acc.add_shape_field(f.key.to_string(), f.ty.clone());
@@ -596,7 +596,7 @@ fn array_merge_self_fields(
         return None;
     }
     let shape = resolve_static_expr_type(&args[1].value, registry, ctx)
-        .shape()?
+        .as_array_shape()?
         .clone();
     Some(
         shape
@@ -676,7 +676,7 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
         ExprKind::MethodCall(recv, method, _args, _) => {
             let recv_ty = resolve_static_expr_type(recv, registry, ctx);
             recv_ty
-                .object_class_and_args()
+                .as_object()
                 .and_then(|(class, _)| registry.lookup_method(class, method))
                 .map(|sig| sig.return_type.clone())
                 .unwrap_or(Type::mixed())

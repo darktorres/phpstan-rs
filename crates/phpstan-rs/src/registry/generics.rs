@@ -104,7 +104,7 @@ impl Registry {
             let parent_args: Vec<Type> = info
                 .extends_args
                 .iter()
-                .map(|t| types::substitute_template(t, &own_bindings))
+                .map(|t| t.substitute_templates(&own_bindings))
                 .collect();
             if let Some(found) =
                 self.class_template_bindings_rec(parent, &parent_args, target, &mut seen.clone())
@@ -118,7 +118,7 @@ impl Registry {
                 .get(iface)
                 .map(|args| {
                     args.iter()
-                        .map(|t| types::substitute_template(t, &own_bindings))
+                        .map(|t| t.substitute_templates(&own_bindings))
                         .collect()
                 })
                 .unwrap_or_default();

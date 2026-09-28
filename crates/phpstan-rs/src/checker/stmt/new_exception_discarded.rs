@@ -18,7 +18,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let ty = self.infer_expr(inner, locals);
-        if let Some((class, _)) = ty.object_class_and_args()
+        if let Some((class, _)) = ty.as_object()
             && self.class_name_exists(class)
             && self.registry.is_subclass_of(class, "Throwable")
         {

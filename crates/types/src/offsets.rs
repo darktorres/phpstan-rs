@@ -1,8 +1,7 @@
 //! Array offsets: whether a type has one, and the type after writing one
 //! (PHPStan's `hasOffsetValueType()`/`setOffsetValueType()`).
 
-use crate::Repr;
-use crate::{AccessoryKind, Shape, ShapeField, ShapeKey, TrinaryLogic, Type, union_types};
+use crate::{AccessoryKind, Repr, Shape, ShapeField, ShapeKey, TrinaryLogic, Type};
 
 impl Type {
     /// PHPStan's `hasOffsetValueType()`: whether this array surely has
@@ -74,7 +73,7 @@ impl Type {
                 .map(|m| m.offset_value_type(key))
                 .collect::<Option<Vec<_>>>()?
                 .into_iter()
-                .reduce(union_types),
+                .reduce(Type::union),
             Type(Repr::TemplateParam(param)) => param.bound.offset_value_type(key),
             _ => None,
         }
@@ -108,7 +107,7 @@ impl Type {
                 None => {
                     let widened = shape
                         .types()
-                        .fold(value, |acc, field_ty| union_types(acc, field_ty.clone()));
+                        .fold(value, |acc, field_ty| Type::union(acc, field_ty.clone()));
                     // An append onto a list-like container takes the next
                     // sequential int key, so the result stays a list, now
                     // surely non-empty. A dynamic key need not be
@@ -152,7 +151,7 @@ impl Type {
                         track_literal_key,
                     )?);
                 }
-                updated.into_iter().reduce(union_types)
+                updated.into_iter().reduce(Type::union)
             }
             // A container carrying `hasOffsetValue` members from earlier
             // literal writes accumulates them.
@@ -185,7 +184,7 @@ impl Type {
             // only if it already was.
             Type(Repr::Intersection(members)) => {
                 let inner = members.iter().find_map(Type::array_value_type)?;
-                let widened = union_types(value, inner);
+                let widened = Type::union(value, inner);
                 let key = offset
                     .map(Type::write_key_type)
                     .unwrap_or_else(Type::unknown_array_key);
@@ -240,12 +239,12 @@ fn write_literal_key_aware(
     existing_has_offset_values: &[Type],
 ) -> Type {
     let key_ty = match offset.map(Type::write_key_type) {
-        Some(new_key) => union_types(key.clone(), new_key),
+        Some(new_key) => Type::union(key.clone(), new_key),
         None => key.clone(),
     };
     let base = Type(Repr::Array(
         Box::new(key_ty),
-        Box::new(union_types(value.clone(), inner.clone())),
+        Box::new(Type::union(value.clone(), inner.clone())),
     ));
     match offset.and_then(literal_key_name) {
         Some(name) if track_literal_key => {

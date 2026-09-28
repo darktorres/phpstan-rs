@@ -6,7 +6,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::calls::{contains_nullsafe_access, is_valid_byref_argument_expr};
-use crate::checker::{Checker, Locals, union_types};
+use crate::checker::{Checker, Locals};
 use crate::registry::{FunctionReflection, ParameterReflection};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
@@ -351,7 +351,7 @@ impl<'a> Checker<'a> {
         let shapes: Vec<&Shape> = ty
             .union_members()
             .iter()
-            .map(Type::shape)
+            .map(Type::as_array_shape)
             .collect::<Option<Vec<_>>>()?;
         let unsealed = shapes.iter().any(|shape| !shape.is_sealed());
         let size = if unsealed {
@@ -372,7 +372,7 @@ impl<'a> Checker<'a> {
                 let field = &shape.fields[j];
                 optional = field.optional;
                 value_ty = Some(match value_ty {
-                    Some(t) => union_types(t, field.ty.clone()),
+                    Some(t) => Type::union(t, field.ty.clone()),
                     None => field.ty.clone(),
                 });
                 common_key = match common_key {

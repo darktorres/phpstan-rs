@@ -4,7 +4,7 @@ use super::generics::mark_template_params;
 use crate::registry::type_node::parse_type_node;
 use phpdoc::grammar::TypeNode;
 use syntax::ast::{Expr, ExprKind, Literal};
-use types::{self, TemplateParam, Type, reconcile_with_native};
+use types::{self, TemplateParam, Type};
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
 /// over the native hint, since it's usually the more precise of the two
@@ -78,7 +78,7 @@ pub(crate) fn resolve_type_with_parsed_native(
     // A conditional return type states its nullability per branch
     // (`($p is non-empty-array ? T : T|null)`), so a native `?` must not
     // be unioned onto every resolution of it.
-    let already_nullable = ty.conditional_condition().is_some() || !ty.is_null().no();
+    let already_nullable = ty.as_conditional().is_some() || !ty.is_null().no();
     let ty = if native_is_nullable && !already_nullable {
         Type::union_of(vec![ty, Type::null()])
     } else {
@@ -112,7 +112,7 @@ pub(crate) fn resolve_type_with_parsed_native(
     // explicit guard.
     match (native_hint, native_ty) {
         (Some(native), Some(native_ty)) if native.trim() != "object" => {
-            reconcile_with_native(ty, native_ty.clone())
+            ty.reconcile_with_native(native_ty.clone())
         }
         _ => ty,
     }

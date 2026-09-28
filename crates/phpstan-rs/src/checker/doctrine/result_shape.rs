@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::checker::Checker;
 use crate::doctrine_functions::DoctrineFunctionKind;
 use crate::registry::ClassReflection;
-use types::union_types;
+
 use types::{Shape, Type};
 
 use super::dql::{AggregateFn, FieldRef, SelectItem, SelectItemKind};
@@ -144,7 +144,7 @@ fn entity_row_type(checker: &Checker, entity: &str) -> Type {
             subclasses
                 .into_iter()
                 .map(|class| Type::object(class.into(), Vec::new()))
-                .reduce(union_types)
+                .reduce(Type::union)
                 .unwrap_or_else(|| Type::object(entity.into(), Vec::new()))
         }
         _ => Type::object(entity.into(), Vec::new()),
@@ -221,7 +221,7 @@ fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) ->
             // `parse_case` requires at least one `WHEN ... THEN ...`
             // before accepting `END`), so this always has a first
             // element to reduce from.
-            arm_types.reduce(union_types).unwrap_or(Type::mixed())
+            arm_types.reduce(Type::union).unwrap_or(Type::mixed())
         }
         // Real Doctrine constructs the named class from the query's own
         // positional results directly - exact once the class is named,
@@ -286,8 +286,8 @@ fn aggregate_type(
     let numeric_string = types::parse_type_string("numeric-string");
     let value = match func {
         AggregateFn::Min | AggregateFn::Max => raw,
-        AggregateFn::Sum => union_types(raw, numeric_string),
-        AggregateFn::Avg => union_types(Type::float(), numeric_string),
+        AggregateFn::Sum => Type::union(raw, numeric_string),
+        AggregateFn::Avg => Type::union(Type::float(), numeric_string),
         AggregateFn::Count => unreachable!(),
     };
     nullable_if(value, raw_nullable || !aliases.group_by)
@@ -316,7 +316,7 @@ fn raw_field_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
     if contains_object(ty) {
         return None;
     }
-    let non_null = crate::checker::narrow_type_excluding(ty, &Type::null());
+    let non_null = ty.without(&Type::null());
     let nullable = non_null != *ty || join_nullable;
     Some((non_null, nullable))
 }
@@ -343,7 +343,7 @@ fn column_php_type(ty: &sql::column::ColumnType) -> Type {
 
 fn nullable_if(ty: Type, nullable: bool) -> Type {
     if nullable {
-        union_types(ty, Type::null())
+        Type::union(ty, Type::null())
     } else {
         ty
     }
@@ -526,7 +526,7 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
 /// `HYDRATE_OBJECT` computation, rather than duplicating every select-
 /// item-kind match arm a second time for the array-mode case.
 fn to_array_mode(checker: &Checker, ty: Type) -> Type {
-    if let Some((class, _)) = ty.object_class_and_args()
+    if let Some((class, _)) = ty.as_object()
         && entity_info(checker, class).is_some()
     {
         return entity_array_shape(checker, class);

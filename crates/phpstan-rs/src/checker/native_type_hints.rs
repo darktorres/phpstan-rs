@@ -54,7 +54,7 @@ impl<'a> Checker<'a> {
             if param.type_hint.is_some() || param_sig.doc_ty().is_none() {
                 continue;
             }
-            let Some(suggested) = types::native_declaration(param_sig.ty(), false, version) else {
+            let Some(suggested) = param_sig.ty().native_declaration(false, version) else {
                 continue;
             };
             let suggested_ty = self.suggested_type(&suggested, class_name);
@@ -90,7 +90,7 @@ impl<'a> Checker<'a> {
         if f.return_type.is_some() || sig.return_doc_ty().is_none() {
             return;
         }
-        let Some(suggested) = types::native_declaration(sig.return_type(), true, version) else {
+        let Some(suggested) = sig.return_type().native_declaration(true, version) else {
             return;
         };
         let suggested_ty = self.suggested_type(&suggested, class_name);
@@ -121,8 +121,7 @@ impl<'a> Checker<'a> {
             if param.type_hint.is_some() || ty.has_unknown_part() {
                 continue;
             }
-            let Some(suggested) =
-                types::native_declaration(ty, false, self.registry.php_version_min())
+            let Some(suggested) = ty.native_declaration(false, self.registry.php_version_min())
             else {
                 continue;
             };
@@ -161,8 +160,9 @@ impl<'a> Checker<'a> {
             if sig.native_ty().is_some() || sig.ty().has_unknown_part() {
                 continue;
             }
-            let Some(suggested) =
-                types::native_declaration(sig.ty(), false, self.registry.php_version_min())
+            let Some(suggested) = sig
+                .ty()
+                .native_declaration(false, self.registry.php_version_min())
             else {
                 continue;
             };

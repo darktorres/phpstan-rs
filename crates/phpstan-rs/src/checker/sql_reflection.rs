@@ -19,7 +19,7 @@ pub(crate) mod query_builder;
 pub(crate) mod resolve;
 
 use sql::column::{Column, ColumnType};
-use types::{Shape, Type, union_types};
+use types::{Shape, Type};
 
 /// The PHP type of the value a raw fetch of a column returns.
 pub(crate) fn column_php_type(ty: &ColumnType) -> Type {
@@ -45,7 +45,7 @@ pub(crate) fn column_php_type(ty: &ColumnType) -> Type {
 pub(crate) fn column_value_type(column: &Column) -> Type {
     let ty = column_php_type(&column.ty);
     if column.nullable {
-        union_types(ty, Type::null())
+        Type::union(ty, Type::null())
     } else {
         ty
     }

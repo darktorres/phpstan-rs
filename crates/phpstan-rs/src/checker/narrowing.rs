@@ -13,15 +13,8 @@ pub(crate) use predicates::{
     is_real_variable_key, key_depends_on, narrowing_key, narrowing_type_for_predicate,
     propagate_container_field_facts, purge_stale_narrowing_for,
 };
-use types::narrowing::narrow_instanceof_true;
-use types::narrowing::{
-    comparison_narrowed_bounds, narrow_array_to_non_list, numeric_bounds_for_narrowing,
-    upgrade_array_to_list, upgrade_array_to_non_empty,
-};
-pub(crate) use types::narrowing::{
-    narrow_array_shape_by_key_presence, narrow_isset_container, narrow_type_excluding_falsy,
-};
-pub(crate) use types::narrowing::{narrow_type_excluding, narrow_type_to};
+
+use types::comparison_narrowed_bounds;
 
 /// `count($x)`'s own operand-order detection for the count-comparison
 /// narrowing below - same shape as `int_comparison_operands`, but keyed
@@ -236,7 +229,7 @@ impl<'a> Checker<'a> {
                 ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _) => {
                     if let Some(base_key) = narrowing_key(base) {
                         let current = self.current_narrowed_type(base, &base_key, locals);
-                        locals.insert(base_key, narrow_type_excluding(&current, &Type::null()));
+                        locals.insert(base_key, current.without(&Type::null()));
                     }
                     e = unwrap_grouping(base);
                     continue;
@@ -245,7 +238,7 @@ impl<'a> Checker<'a> {
             };
             if let Some(base_key) = narrowing_key(base) {
                 let current = self.current_narrowed_type(base, &base_key, locals);
-                let narrowed = narrow_isset_container(&current, lit_key.as_deref());
+                let narrowed = current.to_isset_container(lit_key.as_deref());
                 if !narrowed.is_never() {
                     locals.insert(base_key, narrowed);
                 }
@@ -455,8 +448,8 @@ impl<'a> Checker<'a> {
             // (`replay_object_discriminant_facts`'s own doc comment) - the
             // object-typed counterpart of the boolean-flag-proxy case
             // above.
-            let is_object_proxy = after_ty.object_class_and_args().is_some()
-                || *after_ty == Type::object_without_class();
+            let is_object_proxy =
+                after_ty.as_object().is_some() || *after_ty == Type::object_without_class();
             // Same proxy shape as `is_object_proxy` above, for a variable
             // that became a concrete enum case specifically within this
             // branch (`AuthService::authKeyLogin`'s own `$valid_key =
@@ -779,7 +772,7 @@ impl<'a> Checker<'a> {
                     self.or_chain_narrowing_target(cond, locals)
                 {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
-                    locals.insert(key, narrow_type_to(&self.relation(), &current, &target_ty));
+                    locals.insert(key, self.relation().narrow(&current, &target_ty));
                 }
             }
             // `if ((! is_int($a) && ! is_string($a)) || (!
@@ -806,7 +799,7 @@ impl<'a> Checker<'a> {
                     self.and_chain_narrowing_target(cond, locals)
                 {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
-                    locals.insert(key, narrow_type_to(&self.relation(), &current, &target_ty));
+                    locals.insert(key, self.relation().narrow(&current, &target_ty));
                 }
             }
             // Deliberately `===`/`!==` only, not `==`/`!=` - a loose
@@ -854,7 +847,7 @@ impl<'a> Checker<'a> {
                     // `mirror_comparison` canonicalizing the operator back
                     // to the `count(...)`-on-the-left shape below.
                     let current = self.current_narrowed_type(count_arg, &key, locals);
-                    locals.insert(key, upgrade_array_to_non_empty(&current));
+                    locals.insert(key, current.to_non_empty_array());
                 } else if matches!(op, BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq)
                     && let Some((keyed_expr, bound_expr, keyed_on_left)) =
                         int_comparison_operands(l, r)
@@ -873,15 +866,15 @@ impl<'a> Checker<'a> {
                     // when both the narrowed side's *current* type and the
                     // other side's *inferred* type are already unambiguously
                     // numeric (a bare `Type::Int` counts as an unbounded
-                    // range here, unlike `int_range_bounds` itself), and the
+                    // range here, unlike `int_bounds` itself), and the
                     // other side is a single literal value, not a genuine
                     // range (matching the `count() > 0` arm's own "exactly
                     // this shape" scoping just above, not general range-vs-
                     // range subtraction).
                     let current = self.current_narrowed_type(keyed_expr, &key, locals);
-                    if let Some((cur_min, cur_max)) = numeric_bounds_for_narrowing(&current) {
+                    if let Some((cur_min, cur_max)) = current.int_bounds() {
                         let bound_ty = self.infer_expr(bound_expr, locals);
-                        if let Some((Some(bound), Some(bound_max))) = bound_ty.int_range_bounds()
+                        if let Some((Some(bound), Some(bound_max))) = bound_ty.int_bounds()
                             && bound == bound_max
                             && let Some((new_min, new_max)) = comparison_narrowed_bounds(
                                 op,
@@ -919,7 +912,7 @@ impl<'a> Checker<'a> {
             ExprKind::Empty(operand) => {
                 if !branch_true && let Some(key) = narrowing_key(operand) {
                     let current = self.current_narrowed_type(operand, &key, locals);
-                    locals.insert(key, narrow_type_excluding_falsy(&current));
+                    locals.insert(key, current.without_falsy());
                 }
             }
             // `isset($x)`'s truthy branch means specifically "not null" -
@@ -943,7 +936,7 @@ impl<'a> Checker<'a> {
                     for operand in operands {
                         if let Some(key) = narrowing_key(operand) {
                             let current = self.current_narrowed_type(operand, &key, locals);
-                            locals.insert(key, narrow_type_excluding(&current, &Type::null()));
+                            locals.insert(key, current.without(&Type::null()));
                         }
                         self.narrow_isset_containers(operand, locals);
                     }
@@ -983,15 +976,15 @@ impl<'a> Checker<'a> {
                         // already accepts (`upgrade_array_to_non_empty`
                         // has no "prove empty" counterpart).
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
-                        locals.insert(key, upgrade_array_to_non_empty(&current));
+                        locals.insert(key, current.to_non_empty_array());
                     } else if name == "array_is_list" {
                         // Passing proves list-ness. Failing proves the
                         // array non-empty, as an empty array is a list.
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         let narrowed = if branch_true {
-                            upgrade_array_to_list(&current)
+                            current.to_list()
                         } else {
-                            narrow_array_to_non_list(&current)
+                            current.to_non_list()
                         };
                         locals.insert(key, narrowed);
                     } else if name == "is_numeric" {
@@ -1026,9 +1019,7 @@ impl<'a> Checker<'a> {
                                 Type::null(),
                             ]
                             .into_iter()
-                            .fold(current.into_owned(), |acc, excluded| {
-                                narrow_type_excluding(&acc, &excluded)
-                            });
+                            .fold(current.into_owned(), |acc, excluded| acc.without(&excluded));
                             excluded.with_string_accessory(AccessoryKind::NumericString)
                         } else {
                             // Int/Float are unconditionally numeric, so
@@ -1036,17 +1027,15 @@ impl<'a> Checker<'a> {
                             // one - nothing else can be dropped this way.
                             [Type::int(), Type::float()]
                                 .into_iter()
-                                .fold(current.into_owned(), |acc, excluded| {
-                                    narrow_type_excluding(&acc, &excluded)
-                                })
+                                .fold(current.into_owned(), |acc, excluded| acc.without(&excluded))
                         };
                         locals.insert(key, narrowed);
                     } else if let Some(target_ty) = narrowing_type_for_predicate(name) {
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         let narrowed = if branch_true {
-                            narrow_type_to(&self.relation(), &current, &target_ty)
+                            self.relation().narrow(&current, &target_ty)
                         } else {
-                            narrow_type_excluding(&current, &target_ty)
+                            current.without(&target_ty)
                         };
                         locals.insert(key, narrowed);
                     } else if let ExprKind::Name(raw) = &callee.kind {
@@ -1065,9 +1054,9 @@ impl<'a> Checker<'a> {
                 {
                     let current = self.current_narrowed_type(&needle.value, &key, locals);
                     let narrowed = if branch_true {
-                        Some(narrow_type_to(&self.relation(), &current, &target_ty))
+                        Some(self.relation().narrow(&current, &target_ty))
                     } else {
-                        excluded_ty.map(|excluded| narrow_type_excluding(&current, &excluded))
+                        excluded_ty.map(|excluded| current.without(&excluded))
                     };
                     if let Some(narrowed) = narrowed {
                         locals.insert(key, narrowed);
@@ -1094,8 +1083,7 @@ impl<'a> Checker<'a> {
                     // based on a provable fact" shape `instanceof`'s own
                     // member resolution already uses.
                     let current = self.current_narrowed_type(&arr_arg.value, &arr_key, locals);
-                    let narrowed =
-                        narrow_array_shape_by_key_presence(&current, &lit_key, branch_true);
+                    let narrowed = current.with_key_presence(&lit_key, branch_true);
                     // Also narrow the specific element
                     // access itself (`$arr['key']`), not just `$arr`'s
                     // own overall type - see `array_value_type_for_key`'s
@@ -1186,10 +1174,10 @@ impl<'a> Checker<'a> {
                         if branch_true {
                             locals.insert(
                                 key,
-                                narrow_instanceof_true(&self.relation(), &current, &resolved),
+                                self.relation().narrow_to_instance(&current, &resolved),
                             );
                         } else {
-                            locals.insert(key, narrow_type_excluding(&current, &resolved));
+                            locals.insert(key, current.without(&resolved));
                         }
                     }
                 } else if let ExprKind::Name(name) = &callee.kind {
@@ -1256,13 +1244,10 @@ impl<'a> Checker<'a> {
                     if branch_true {
                         self.replay_object_discriminant_facts(&key, &resolved, locals);
                         let current = self.current_narrowed_type(inner, &key, locals);
-                        locals.insert(
-                            key,
-                            narrow_instanceof_true(&self.relation(), &current, &resolved),
-                        );
+                        locals.insert(key, self.relation().narrow_to_instance(&current, &resolved));
                     } else {
                         let current = self.current_narrowed_type(inner, &key, locals);
-                        locals.insert(key, narrow_type_excluding(&current, &resolved));
+                        locals.insert(key, current.without(&resolved));
                     }
                 }
             }
@@ -1315,7 +1300,7 @@ impl<'a> Checker<'a> {
                     && let Some(key) = narrowing_key(lhs)
                     && let Some(current) = locals.get(&key).cloned()
                 {
-                    locals.insert(key, narrow_type_excluding_falsy(&current));
+                    locals.insert(key, current.without_falsy());
                 }
             }
             // The narrow slice of real PHPStan's `ConditionalExpressionHolder`
@@ -1340,7 +1325,7 @@ impl<'a> Checker<'a> {
                 self.replay_truthiness_discriminant_facts(name, locals, branch_true);
                 if branch_true {
                     let current = self.current_narrowed_type(cond, name, locals);
-                    locals.insert(name.to_string(), narrow_type_excluding_falsy(&current));
+                    locals.insert(name.to_string(), current.without_falsy());
                 }
             }
             // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
@@ -1352,7 +1337,7 @@ impl<'a> Checker<'a> {
             _ if branch_true && narrowing_key(cond).is_some() => {
                 let key = narrowing_key(cond).expect("checked by guard above");
                 let current = self.current_narrowed_type(cond, &key, locals);
-                locals.insert(key, narrow_type_excluding_falsy(&current));
+                locals.insert(key, current.without_falsy());
             }
             _ => {}
         }

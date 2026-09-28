@@ -14,8 +14,7 @@
 //! need ad hoc generator exclusions purpose-built to dodge this
 //! project's own documented design decisions.
 
-use crate::Repr;
-use crate::{AccessoryKind, Type};
+use crate::{AccessoryKind, Repr, Type};
 use proptest::prelude::*;
 
 fn leaf_type() -> impl Strategy<Value = Type> {

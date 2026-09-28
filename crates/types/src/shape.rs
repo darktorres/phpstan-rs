@@ -1,10 +1,9 @@
 //! Array and object shapes: `array{name: string, 0: int, ...}`,
 //! `object{name: string}`.
 
-use crate::Repr;
 use std::fmt;
 
-use crate::{Type, parse::canonical_int_key};
+use crate::{Repr, Type, parse::canonical_int_key};
 
 /// An array shape key, canonicalized the way PHP canonicalizes an array
 /// key: a decimal integer string is an int key.
@@ -118,12 +117,6 @@ impl Shape {
     /// Whether this is `array{}`: sealed, with no fields.
     pub fn is_empty_array(&self) -> bool {
         self.is_sealed() && self.fields.is_empty()
-    }
-
-    /// PHPStan's `ConstantArrayType::isList()`: sealed, keyed `0..n` in
-    /// order, no required key after an optional one.
-    pub fn is_list(&self) -> bool {
-        crate::shape_fields_are_list_like(self)
     }
 
     pub fn field(&self, key: &ShapeKey) -> Option<&ShapeField> {

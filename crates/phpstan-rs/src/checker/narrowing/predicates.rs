@@ -1,4 +1,4 @@
-use crate::checker::{Checker, Locals, literal_string_key, union_types};
+use crate::checker::{Checker, Locals, literal_string_key};
 use syntax::ast::*;
 use types::Type;
 
@@ -407,7 +407,7 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
                 let (lk, lt, le) = self.or_chain_narrowing_target(l, locals)?;
                 let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
-                (lk == rk).then(|| (lk, union_types(lt, rt), le))
+                (lk == rk).then(|| (lk, Type::union(lt, rt), le))
             }
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
                 self.or_chain_narrowing_target(inner, locals)
@@ -474,7 +474,7 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
                 let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
                 let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
-                (lk == rk).then(|| (lk, union_types(lt, rt), le))
+                (lk == rk).then(|| (lk, Type::union(lt, rt), le))
             }
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
                 self.and_chain_narrowing_target(inner, locals)

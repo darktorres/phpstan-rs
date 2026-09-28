@@ -1,7 +1,6 @@
-use crate::Repr;
 use rustc_hash::FxHashMap;
 
-use crate::Type;
+use crate::{Repr, Type};
 
 /// Resolves every `Type::Conditional` node in `ty` against `param_bindings`
 /// (parameter *name* -> the actual, already-inferred type bound to it at
@@ -31,7 +30,7 @@ use crate::Type;
 /// trinary: `target->isSuperTypeOf(subject)` yes picks one branch, no
 /// the other, and maybe (a possibly-empty `array<T>` checked against
 /// `non-empty-array<T>`) keeps both.
-pub fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<bool> {
+pub(crate) fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<bool> {
     let matches = match crate::Relation::structural().is_super_type_of(target, bound) {
         crate::TrinaryLogic::Yes => Some(true),
         crate::TrinaryLogic::No => Some(false),
@@ -40,31 +39,33 @@ pub fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<
     matches.map(|m| m != negated)
 }
 
-pub fn resolve_conditional(ty: &Type, param_bindings: &FxHashMap<String, Type>) -> Type {
-    match ty {
-        Type(Repr::Conditional {
-            subject,
-            target,
-            if_true,
-            if_false,
-            negated,
-            template_subject,
-        }) => match param_bindings.get(subject).filter(|_| !*template_subject) {
-            Some(bound) if *bound != Type(Repr::Mixed(false)) => {
-                match conditional_branch(bound, target, *negated) {
-                    Some(true) => resolve_conditional(if_true, param_bindings),
-                    Some(false) => resolve_conditional(if_false, param_bindings),
-                    None => crate::union_types(
-                        resolve_conditional(if_true, param_bindings),
-                        resolve_conditional(if_false, param_bindings),
-                    ),
+impl Type {
+    pub fn resolve_conditional(&self, param_bindings: &FxHashMap<String, Type>) -> Type {
+        match self {
+            Type(Repr::Conditional {
+                subject,
+                target,
+                if_true,
+                if_false,
+                negated,
+                template_subject,
+            }) => match param_bindings.get(subject).filter(|_| !*template_subject) {
+                Some(bound) if *bound != Type(Repr::Mixed(false)) => {
+                    match conditional_branch(bound, target, *negated) {
+                        Some(true) => if_true.resolve_conditional(param_bindings),
+                        Some(false) => if_false.resolve_conditional(param_bindings),
+                        None => Type::union(
+                            if_true.resolve_conditional(param_bindings),
+                            if_false.resolve_conditional(param_bindings),
+                        ),
+                    }
                 }
-            }
-            _ => crate::union_types(
-                resolve_conditional(if_true, param_bindings),
-                resolve_conditional(if_false, param_bindings),
-            ),
-        },
-        _ => ty.map_children(&mut |t| resolve_conditional(t, param_bindings)),
+                _ => Type::union(
+                    if_true.resolve_conditional(param_bindings),
+                    if_false.resolve_conditional(param_bindings),
+                ),
+            },
+            _ => self.map_children(&mut |t| t.resolve_conditional(param_bindings)),
+        }
     }
 }

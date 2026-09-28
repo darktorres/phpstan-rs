@@ -45,7 +45,7 @@ use crate::registry::Registry;
 use sql::config::SqlDriver;
 use sql::context::SqlContext;
 use sql::schema::SchemaCatalog;
-use types::union_types;
+
 use types::{Shape, ShapeField, Type};
 
 /// The row type `sql` returns, its columns refined by the matching
@@ -88,7 +88,7 @@ pub(crate) fn resolve_sql_row_type(
 /// schema fact. Scoped to the same single-table, no-`JOIN` shape every
 /// other step in this module already restricts itself to.
 fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type) -> Type {
-    let Some(fields) = row_type.shape() else {
+    let Some(fields) = row_type.as_array_shape() else {
         return row_type;
     };
     let Some(table) = single_table_name(sql) else {
@@ -328,7 +328,7 @@ fn literal_value_type(value: &Value, driver: Option<SqlDriver>) -> Option<Type> 
 /// own reported type here is already more accurate than force-matching
 /// 168d's simpler DQL heuristic would be.
 fn refine_count_columns(sql: &str, row_type: Type) -> Type {
-    let Some(mut fields) = row_type.shape().cloned() else {
+    let Some(mut fields) = row_type.as_array_shape().cloned() else {
         return row_type;
     };
     if let Some(positions) = count_column_positions(sql) {
@@ -458,7 +458,7 @@ impl TypedColumn {
 /// is nullable.
 fn column_value_type(col: &TypedColumn) -> Type {
     if col.nullable {
-        union_types(col.ty.clone(), Type::null())
+        Type::union(col.ty.clone(), Type::null())
     } else {
         col.ty.clone()
     }

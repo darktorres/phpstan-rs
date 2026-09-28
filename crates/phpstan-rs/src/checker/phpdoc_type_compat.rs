@@ -456,8 +456,7 @@ impl<'a> Checker<'a> {
         }
         let templates = self.declared_template_names(f, class_name);
         for c in conditionals {
-            let Some((subject, target, negated, template_subject)) = c.conditional_condition()
-            else {
+            let Some((subject, target, negated, template_subject)) = c.as_conditional() else {
                 continue;
             };
             let subject_ty = if template_subject {
@@ -646,7 +645,7 @@ impl<'a> Checker<'a> {
 
 /// Every conditional type inside `ty`, outermost first.
 fn collect_conditionals(ty: &Type, out: &mut Vec<Type>) {
-    if ty.conditional_condition().is_some() {
+    if ty.as_conditional().is_some() {
         out.push(ty.clone());
     }
     let _ = ty.map_children(&mut |child| {

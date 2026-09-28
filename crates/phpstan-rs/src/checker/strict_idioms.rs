@@ -57,7 +57,7 @@ impl<'a> Checker<'a> {
     /// inside that class's own `equals()`, which may use identity as its
     /// fast path.
     fn equals_method_owner(&self, ty: &Type, other: &Type) -> Option<String> {
-        let (class, _) = ty.object_class_and_args()?;
+        let (class, _) = ty.as_object()?;
         if !other.is_object().yes() {
             return None;
         }

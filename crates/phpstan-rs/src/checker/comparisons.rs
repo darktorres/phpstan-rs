@@ -14,7 +14,6 @@ use crate::checker::{Checker, Locals};
 use crate::registry::FunctionReflection;
 use syntax::ast::Arg;
 use syntax::token::Span;
-use types::arithmetic::loose_compare_literals;
 
 use types::{Type, is_numeric_string_literal};
 
@@ -52,7 +51,7 @@ impl<'a> Checker<'a> {
             let never_identical = || this.registry.identical_result(&needle, value) == Some(false);
             let never_equal = || {
                 this.registry
-                    .php_version_consensus(|v| loose_compare_literals(&needle, value, v))
+                    .php_version_consensus(|v| needle.loosely_equals(value, v))
                     == Some(false)
             };
             match strict {

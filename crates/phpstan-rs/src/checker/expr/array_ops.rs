@@ -3,7 +3,7 @@ use crate::checker::{Checker, Locals, TemplateBindings};
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
-use types::union_types;
+
 use types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
 
 impl<'a> Checker<'a> {
@@ -294,7 +294,7 @@ impl<'a> Checker<'a> {
         elem_types.extend(shape.fields.into_iter().map(|f| f.ty));
         let elem_ty = elem_types
             .into_iter()
-            .reduce(union_types)
+            .reduce(Type::union)
             .unwrap_or(Type::mixed());
         let mut members = vec![Type::array(Type::unknown_array_key(), elem_ty)];
         if list_safe {
@@ -514,10 +514,10 @@ impl<'a> Checker<'a> {
             // template binding, never for `param_bindings` (which feeds
             // `resolve_conditional`'s `$x is T` checks and must see the
             // argument's real, unpromoted type).
-            let promoted = types::promote_class_string_literals(param.ty(), &arg_ty, &|s| {
+            let promoted = param.ty().promote_class_string_literals(&arg_ty, &|s| {
                 self.registry.lookup_class(s).map(|(c, _)| c.to_string())
             });
-            types::bind_template_param(param.ty(), &promoted, &mut bindings);
+            param.ty().infer_template_bindings(&promoted, &mut bindings);
             param_bindings.insert(param.name().to_string(), arg_ty);
         }
         // The call's own templates (scoped to this function or method,
@@ -525,12 +525,13 @@ impl<'a> Checker<'a> {
         // bounds; a class template left unbound here belongs to an
         // erased receiver and stays `Mixed`.
         let substituted =
-            types::substitute_template_resolving_to_bounds(sig.return_type(), &bindings, &|tp| {
-                tp.scope
-                    .as_deref()
-                    .is_some_and(|scope| !self.registry.classes.contains_key(scope))
-            });
-        types::resolve_conditional(&substituted, &param_bindings)
+            sig.return_type()
+                .substitute_templates_resolving_to_bounds(&bindings, &|tp| {
+                    tp.scope
+                        .as_deref()
+                        .is_some_and(|scope| !self.registry.classes.contains_key(scope))
+                });
+        substituted.resolve_conditional(&param_bindings)
     }
 
     /// `Suit::from(1)`/`Suit::tryFrom(1)` called with a literal

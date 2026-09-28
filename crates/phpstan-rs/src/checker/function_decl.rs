@@ -556,8 +556,8 @@ impl<'a> Checker<'a> {
                     };
                     // Inside the generic code itself a `key-of<T>`/`T[K]`
                     // is what `T`'s bound makes it.
-                    let ty = if types::contains_late(&ty) {
-                        types::resolve_late_to_bounds(&ty)
+                    let ty = if ty.contains_late() {
+                        ty.resolve_late_to_bounds()
                     } else {
                         ty
                     };
@@ -1457,7 +1457,7 @@ impl<'a> Checker<'a> {
         }
         let mut names = Vec::with_capacity(members.len());
         for m in members {
-            let Some((name, _)) = m.object_class_and_args() else {
+            let Some((name, _)) = m.as_object() else {
                 return;
             };
             names.push(name.to_string());

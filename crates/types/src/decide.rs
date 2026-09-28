@@ -1,85 +1,86 @@
 //! A declared type from its PHPDoc and native parts: PHPStan's
 //! `TypehintHelper::decideType`.
 
-use crate::Repr;
-use crate::{Relation, Type};
+use crate::{Relation, Repr, Type};
 
-/// Filters `doc_ty`'s own members down to whichever are subtypes of
-/// `native_ty` - see `resolve_type`'s own doc comment for the reasoning.
-/// Falls back to `native_ty` itself when *no* doc member survives (rather
-/// than collapsing to `Mixed`), so a doc type that's entirely stale
-/// (`finfo_file`'s bare `resource` against a modern `finfo` native) still
-/// resolves to the real, useful native type instead of losing all
-/// precision.
-pub fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
-    let members: Vec<Type> = match doc_ty {
-        Type(Repr::Union(members)) => members,
-        other => vec![other],
-    };
-    let mut kept: Vec<Type> = members
-        .into_iter()
-        .filter(|m| member_possible_given_native(m, &native_ty))
-        .map(|m| refine_callable_member(m, &native_ty))
-        .collect();
-    // A doc union that only narrows *one* member of a native union
-    // (`array|string` native, `@param array<int, string>` doc) must keep
-    // the native's *other*, untouched alternatives alongside the refined
-    // one - the filter above only ever narrows `kept`'s own member list
-    // down, it never adds one back. Mirrors real PHPStan's own
-    // `TypehintHelper::decideType` per-native-member keep-or-refine
-    // logic, confirmed via `dumpType()`: a native `string|array` refined
-    // by `@param array<int, string>` resolves to `array<int,
-    // string>|string`, not bare `array<int, string>`. A native member
-    // already covered by a surviving, narrower `kept` entry (`kept`
-    // contains a real subtype of it) was the one the docblock refined -
-    // only an *uncovered* native member (the docblock said nothing about
-    // it at all) survives verbatim.
-    //
-    // Skipped whenever a kept member still contains an unresolved
-    // `Type::ValueOf` (`value-of<T>` on a still-unbound `@template`):
-    // `Registry::resolve_deferred_value_of_with_native_fallback`
-    // runs *after* this function, expects to find the `ValueOf` alone
-    // (not already unioned with extra native members this function
-    // doesn't yet know will turn out unneeded), and does its own,
-    // separate "resolved to bare `Mixed`? use the native type instead"
-    // swap once its real value is known - unioning native
-    // members in early would corrupt that later check's own `resolved ==
-    // Type::Mixed(false)` test (a real regression caught by this project's own
-    // existing `value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`
-    // test).
-    //
-    // Also skipped when nothing survived the filter at all (the
-    // `0 => native_ty` fallback below is the answer then - backfilling
-    // here would instead leave only the native union's non-object
-    // leftovers, e.g. a bare `null` out of `?Pkg`), and when a kept member
-    // is a conditional return type: it resolves per call site, and a
-    // backfilled native alternative would survive every resolution,
-    // turning a `non-empty-array` call's `T` into `T|null`. A kept member
-    // naming a template is skipped the same way: the template's binding
-    // is the alternative the native member stands for, so `TKey|null`
-    // over a native `string|int|null` stays `TKey|null`.
-    if let Type(Repr::Union(native_members)) = &native_ty
-        && !kept.is_empty()
-        && !kept.iter().any(Type::contains_deferred)
-        && !kept
-            .iter()
-            .any(|k| matches!(k, Type(Repr::Conditional { .. })))
-        && !kept.iter().any(crate::references_template)
-    {
-        for nm in native_members {
-            if native_member_addable(nm)
-                && !kept
-                    .iter()
-                    .any(|k| Relation::structural().is_super_type_of(nm, k).yes())
-            {
-                kept.push(nm.clone());
+impl Type {
+    /// Filters `doc_ty`'s own members down to whichever are subtypes of
+    /// `native_ty` - see `resolve_type`'s own doc comment for the reasoning.
+    /// Falls back to `native_ty` itself when *no* doc member survives (rather
+    /// than collapsing to `Mixed`), so a doc type that's entirely stale
+    /// (`finfo_file`'s bare `resource` against a modern `finfo` native) still
+    /// resolves to the real, useful native type instead of losing all
+    /// precision.
+    pub fn reconcile_with_native(self, native_ty: Type) -> Type {
+        let members: Vec<Type> = match self {
+            Type(Repr::Union(members)) => members,
+            other => vec![other],
+        };
+        let mut kept: Vec<Type> = members
+            .into_iter()
+            .filter(|m| member_possible_given_native(m, &native_ty))
+            .map(|m| refine_callable_member(m, &native_ty))
+            .collect();
+        // A doc union that only narrows *one* member of a native union
+        // (`array|string` native, `@param array<int, string>` doc) must keep
+        // the native's *other*, untouched alternatives alongside the refined
+        // one - the filter above only ever narrows `kept`'s own member list
+        // down, it never adds one back. Mirrors real PHPStan's own
+        // `TypehintHelper::decideType` per-native-member keep-or-refine
+        // logic, confirmed via `dumpType()`: a native `string|array` refined
+        // by `@param array<int, string>` resolves to `array<int,
+        // string>|string`, not bare `array<int, string>`. A native member
+        // already covered by a surviving, narrower `kept` entry (`kept`
+        // contains a real subtype of it) was the one the docblock refined -
+        // only an *uncovered* native member (the docblock said nothing about
+        // it at all) survives verbatim.
+        //
+        // Skipped whenever a kept member still contains an unresolved
+        // `Type::ValueOf` (`value-of<T>` on a still-unbound `@template`):
+        // `Registry::resolve_deferred_value_of_with_native_fallback`
+        // runs *after* this function, expects to find the `ValueOf` alone
+        // (not already unioned with extra native members this function
+        // doesn't yet know will turn out unneeded), and does its own,
+        // separate "resolved to bare `Mixed`? use the native type instead"
+        // swap once its real value is known - unioning native
+        // members in early would corrupt that later check's own `resolved ==
+        // Type::Mixed(false)` test (a real regression caught by this project's own
+        // existing `value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`
+        // test).
+        //
+        // Also skipped when nothing survived the filter at all (the
+        // `0 => native_ty` fallback below is the answer then - backfilling
+        // here would instead leave only the native union's non-object
+        // leftovers, e.g. a bare `null` out of `?Pkg`), and when a kept member
+        // is a conditional return type: it resolves per call site, and a
+        // backfilled native alternative would survive every resolution,
+        // turning a `non-empty-array` call's `T` into `T|null`. A kept member
+        // naming a template is skipped the same way: the template's binding
+        // is the alternative the native member stands for, so `TKey|null`
+        // over a native `string|int|null` stays `TKey|null`.
+        if let Type(Repr::Union(native_members)) = &native_ty
+            && !kept.is_empty()
+            && !kept.iter().any(Type::contains_deferred)
+            && !kept
+                .iter()
+                .any(|k| matches!(k, Type(Repr::Conditional { .. })))
+            && !kept.iter().any(Type::references_template)
+        {
+            for nm in native_members {
+                if native_member_addable(nm)
+                    && !kept
+                        .iter()
+                        .any(|k| Relation::structural().is_super_type_of(nm, k).yes())
+                {
+                    kept.push(nm.clone());
+                }
             }
         }
-    }
-    match kept.len() {
-        0 => native_ty,
-        1 => kept.into_iter().next().unwrap(),
-        _ => Type(Repr::Union(kept)),
+        match kept.len() {
+            0 => native_ty,
+            1 => kept.into_iter().next().unwrap(),
+            _ => Type(Repr::Union(kept)),
+        }
     }
 }
 
