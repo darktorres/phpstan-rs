@@ -36,7 +36,7 @@ use crate::checker::Checker;
 use syntax::ast::unwrap_grouping;
 use syntax::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
 use syntax::token::Span;
-use types::{AccessoryKind, Type};
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// Mirrors real PHPStan's own `Type::toNumber()` legality: every
@@ -54,47 +54,36 @@ impl<'a> Checker<'a> {
     /// all," or a PHPDoc type alias combined with a `mixed` parameter
     /// would be wrongly flagged.
     pub(crate) fn is_number_operand(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Array(..) | Type::ArrayShape(_) => false,
-            Type::ClassString(_) | Type::ClassKindString(_) => false,
-            Type::String => false,
-            Type::StringLiteral(_) => types::Relation::structural()
-                .is_super_type_of(&Type::accessory(AccessoryKind::NumericString), ty)
-                .yes(),
-            Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
-                types::Relation::structural()
-                    .is_super_type_of(&Type::accessory(AccessoryKind::NumericString), ty)
-                    .yes()
+        let not_a_number = Type::union_of(vec![
+            Type::array(Type::mixed(), Type::mixed()),
+            Type::class_string(Type::mixed()),
+            Type::resource(false),
+            Type::resource(true),
+        ]);
+        ty.union_members().iter().any(|m| {
+            if m.is_within(&not_a_number).yes() {
+                false
+            } else if m.is_string().yes() {
+                m.is_numeric_string().yes()
+            } else if m.is_object().yes()
+                && m.object_class_names()
+                    .iter()
+                    .any(|c| self.registry.classes.contains_key(c.as_str()))
+            {
+                self.instance_of_any(m, &["SimpleXMLElement", "GMP", "BcMath\\Number"])
+            } else {
+                true
             }
-            Type::Resource { .. } => false,
-            Type::Object(name, _) if self.registry.classes.contains_key(name.as_str()) => {
-                self.registry.is_subclass_of(name, "SimpleXMLElement")
-                    || self.registry.is_subclass_of(name, "GMP")
-                    || self.registry.is_subclass_of(name, "BcMath\\Number")
-            }
-            Type::Union(members) => members.iter().any(|m| self.is_number_operand(m)),
-            Type::Intersection(members) => members.iter().any(|m| self.is_number_operand(m)),
-            _ => true,
-        }
+        })
     }
 
     /// Whether `ty` is (or, inside a `Union`, could be) a real
     /// instance of `class` - `is_subclass_of`'s own reflexive "a class is
     /// always its own subclass" covers the exact-name case too.
-    ///
-    /// `Type::Intersection` needs handling too, unlike `Union` ("could
-    /// be this member"): an `Intersection` value genuinely is every
-    /// member simultaneously, so it's just as true an instance of `class`
-    /// the moment any one member confirms it (the same "any" shape, for a
-    /// different reason).
     fn type_is_instance_of(&self, ty: &Type, class: &str) -> bool {
-        match ty {
-            Type::Object(name, _) => self.registry.is_subclass_of(name, class),
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().any(|m| self.type_is_instance_of(m, class))
-            }
-            _ => false,
-        }
+        ty.union_members()
+            .iter()
+            .any(|m| self.instance_of_any(m, &[class]))
     }
 
     /// The "other side" legality gate real PHPStan's own
@@ -109,24 +98,9 @@ impl<'a> Checker<'a> {
     /// `is_number_operand` above, for the same reason (this project's own
     /// unions are coarser than real PHPStan's).
     fn is_valid_overload_operand(&self, ty: &Type, class: &str) -> bool {
-        match ty {
-            Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => true,
-            Type::StringLiteral(_) => types::Relation::structural()
-                .is_super_type_of(&Type::accessory(AccessoryKind::NumericString), ty)
-                .yes(),
-            Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
-                types::Relation::structural()
-                    .is_super_type_of(&Type::accessory(AccessoryKind::NumericString), ty)
-                    .yes()
-            }
-            Type::Object(name, _) => self.registry.is_subclass_of(name, class),
-            // Same reasoning as `type_is_instance_of` just above -
-            // `Type::Intersection` needs the identical "any member" check.
-            Type::Union(members) | Type::Intersection(members) => members
-                .iter()
-                .any(|m| self.is_valid_overload_operand(m, class)),
-            _ => false,
-        }
+        ty.union_members().iter().any(|m| {
+            m.is_int().yes() || m.is_numeric_string().yes() || self.instance_of_any(m, &[class])
+        })
     }
 
     /// `GMP`/`BcMath\Number`'s own operator-overloading return
@@ -203,12 +177,7 @@ impl<'a> Checker<'a> {
     /// two strings directly (a per-byte operation, no numeric coercion
     /// at all), independent of whether either string is numeric.
     fn is_exactly_string_operand(&self, ty: &Type) -> bool {
-        match ty {
-            Type::String | Type::StringLiteral(_) => true,
-            Type::Intersection(members) => members.iter().any(|m| matches!(m, Type::String)),
-            Type::Union(members) => members.iter().any(|m| self.is_exactly_string_operand(m)),
-            _ => false,
-        }
+        ty.union_members().iter().any(|m| m.is_string().yes())
     }
 
     /// Real PHPStan's `InvalidBinaryOperationRule` (`binaryOp.invalid` for
@@ -396,11 +365,9 @@ impl<'a> Checker<'a> {
             BinOp::Mod => ("Modulo", "modulo.byZero"),
             _ => return,
         };
-        let is_zero = match divisor_ty {
-            Type::IntLiteral(0) => true,
-            Type::FloatLiteral(n) => *n == 0.0,
-            _ => matches!(&divisor.kind, ExprKind::Literal(Literal::Float(f)) if *f == 0.0),
-        };
+        let is_zero = *divisor_ty == Type::int_literal(0)
+            || *divisor_ty == Type::float_literal(0.0)
+            || matches!(&divisor.kind, ExprKind::Literal(Literal::Float(f)) if *f == 0.0);
         if !is_zero {
             return;
         }
@@ -611,13 +578,9 @@ impl<'a> Checker<'a> {
     /// matching this project's own existing number-castable-class
     /// precedent everywhere else in this file/`coercion.rs`.
     fn is_strictly_number(&self, ty: &Type) -> bool {
-        types::Relation::structural()
-            .is_super_type_of(&Type::union_of(vec![Type::int(), Type::float()]), ty)
+        ty.is_within(&Type::union_of(vec![Type::int(), Type::float()]))
             .yes()
-            || matches!(ty, Type::Object(name, _) if
-                self.registry.is_subclass_of(name, "SimpleXMLElement")
-                    || self.registry.is_subclass_of(name, "GMP")
-                    || self.registry.is_subclass_of(name, "BcMath\\Number"))
+            || self.instance_of_any(ty, &["SimpleXMLElement", "GMP", "BcMath\\Number"])
     }
 
     /// Real PHPStan's own `InvalidIncDecOperationRule` allowed-type union
@@ -626,19 +589,30 @@ impl<'a> Checker<'a> {
     /// numeric-string/non-null/non-bool narrowing - see `check_incdec_
     /// validity`'s own doc comment for why.
     fn is_incdec_operand_valid(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Array(..)
-            | Type::ArrayShape(_)
-            | Type::ClassString(_)
-            | Type::ClassKindString(_) => false,
-            Type::Object(name, _) => {
-                self.registry.is_subclass_of(name, "SimpleXMLElement")
-                    || self.registry.is_subclass_of(name, "GMP")
+        let invalid = Type::union_of(vec![
+            Type::array(Type::mixed(), Type::mixed()),
+            Type::class_string(Type::mixed()),
+        ]);
+        ty.union_members().iter().any(|m| {
+            if m.is_within(&invalid).yes() {
+                false
+            } else if m.is_object().yes() {
+                self.instance_of_any(m, &["SimpleXMLElement", "GMP"])
+            } else {
+                true
             }
-            Type::Union(members) => members.iter().any(|m| self.is_incdec_operand_valid(m)),
-            Type::Intersection(members) => members.iter().any(|m| self.is_incdec_operand_valid(m)),
-            _ => true,
-        }
+        })
+    }
+
+    /// Whether every value of `ty` is an instance of one of `classes`.
+    fn instance_of_any(&self, ty: &Type, classes: &[&str]) -> bool {
+        let of = Type::union_of(
+            classes
+                .iter()
+                .map(|c| Type::object((*c).into(), Vec::new()))
+                .collect(),
+        );
+        self.relation().is_super_type_of(&of, ty).yes()
     }
 }
 
