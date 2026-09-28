@@ -2810,8 +2810,8 @@ deleted; the file-size gate.
   `bug-7291.php`, `isset-nullsafe.php`, `bug-12574c.php`); a dynamic
   name on a non-nullable receiver is "on non-nullable type" as a plain
   name is (`$this?->{'n'}`, `$this?->{$stringable}`;
-  `dynamic-stringable-nullsafe-access.php`, 11); all unreported today
-  but the plain-name and `??` forms. The isset rules read the same
+  `dynamic-stringable-nullsafe-access.php`, 11); only `$d?->n` on a
+  non-nullable `$d` is reported today. The isset rules read the same
   certainty: `isset($bar)`, `empty($foo)` and `$baz ?? 1` on a variable
   that is never defined are `isset.variable`/`empty.variable`/
   `nullCoalesce.variable` "is never defined", unreported today. The
