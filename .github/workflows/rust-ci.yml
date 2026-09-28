@@ -32,9 +32,9 @@ jobs:
           path: ~/.rustup/toolchains
           key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
       # rust-toolchain.toml pins the nightly (and its components);
-      # `rustup show` installs it.
+      # `rustup install` installs it without updating rustup itself.
       - name: Install the pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
+        run: rustup install --no-self-update
 
       # The cargo registry and the dependencies' build artifacts, keyed by
       # the lockfiles and the toolchain; the workspace's own crates rebuild.
