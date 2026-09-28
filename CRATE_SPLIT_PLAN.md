@@ -753,9 +753,10 @@ Visitor-based walk.
     host class.
 - **app:**
   - an `ErrorFormatter` trait over `AnalysisResult`, with PHPStan's set (raw,
-    table, github, gitlab, teamcity, ci-detected, json PHPStan-compatible) plus
-    the existing text, checkstyle and junit; baselines are phpstan-rs's own JSON
-    only, neither PHPStan's written nor read;
+    table, github, gitlab, teamcity, ci-detected, json PHPStan-compatible,
+    checkstyle, junit) plus sarif and the full-record `phpstan-rs-json`; today's
+    text and friendly fold into raw and table (F3); baselines are phpstan-rs's
+    own JSON only, neither PHPStan's written nor read;
   - registrable by third parties.
 - **lsp:**
   - uses the same rule and collector set (incrementally), the same
@@ -6909,13 +6910,17 @@ exit code is the app's, decided from the result (F1), not each formatter's.
 Today's five formats (`text`, `friendly`, `json`, `checkstyle`, `junit`) live in
 `output.rs` and see only per-file diagnostics.
 
-- `text` (the default: one line per error,
-  `path:line:col: message (identifier)`, a tip line and a summary) and
-  `friendly` (code frames) keep their shape and gain not-file errors, internal
-  errors and warnings.
-- `raw`; `table`, grouped per file with tips, identifiers and
-  `editorUrl`/`editorUrlTitle` links (`%file%`, `%relFile%`, `%line%`);
-  `github`, workflow commands carrying `file`, `line`, `col`, `endLine` and
+- Two human formats, not four: nothing is released, so today's `text` and
+  `friendly` merge into PHPStan's names instead of standing beside them. `raw`
+  is one line per error, `path:line:col: message (identifier)` as `text` prints
+  it today (PHPStan's `raw` has no column, and the identifier only when
+  verbose), a tip line under it, and not-file errors, internal errors and
+  warnings as `?:?:` lines; `table` groups per file with tips, identifiers and
+  `editorUrl`/`editorUrlTitle` links (`%file%`, `%relFile%`, `%line%`), and on a
+  terminal shows each error's code frame as `friendly` does today. The default
+  is `table` when stdout is a terminal and `raw` otherwise, so a pipe or an
+  editor's problem matcher gets one line per error with no flag.
+- `github`, workflow commands carrying `file`, `line`, `col`, `endLine` and
   `endColumn` from the span and the identifier as `title` (PHPStan writes
   `col=0`), warnings as `::warning`, and the whole report as a Markdown table in
   `$GITHUB_STEP_SUMMARY` when it is set, since GitHub shows at most 10 error and
