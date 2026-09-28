@@ -6760,6 +6760,16 @@ Behaviour commits, one each with its fixture:
   - activation adds `workspaceContains:**/phpstan-rs.toml` and
     `workspaceContains:**/composer.json`, so a workspace's diagnostics appear
     before a PHP file is opened; today only `onLanguage:php` activates it;
+    - the first scan uses the configured file: the server takes `configPath`
+      and `enable` from `initializationOptions`, and pulls each folder's
+      settings (`workspace/configuration`) before it loads that folder. Today
+      the server never reads `initialization_options` (a test pins only that it
+      tolerates them), so the startup scan uses the root's `phpstan-rs.toml` and
+      the override arrives with the first configuration pull, after the load,
+      where a changed file set only logs "reload the window";
+  - a server found through `serverPath` or `PATH` whose `serverInfo.version`
+    differs from the extension's (they are released in lockstep, and the
+    downloaded one always matches) is named once in a warning;
   - `capabilities.untrustedWorkspaces` (below) and the stub content provider
     (F5) are declared here.
 - **Untrusted workspaces.** The VS Code extension declares
