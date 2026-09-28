@@ -714,9 +714,12 @@ Visitor-based walk.
      An unmatched entry with only a message, whose pattern may be worded
      after PHPStan's messages, is a notice rather than an error;
   3. baseline filter / generate;
-  4. (span, message) dedup;
-  5. a total order (path, line, col, identifier, message, tip) for every
+  4. a total order (path, line, col, identifier, message, tip) for every
      consumer.
+
+  Nothing is deduplicated: a finding reported twice is a rule's bug, fixed
+  where it reports (gate 13), and a trait's per-host findings are merged
+  by E1's trait-host merge, not by the finalizer.
 
   Parse errors and lexer warnings are non-ignorable file errors.
   Framework identifiers (`ignore.*`, parse errors) belong to the validation
@@ -812,7 +815,8 @@ progress, feature work touching that stage's modules waits for it.
   - the scoped and all-on corpus runs;
   - the type snapshots;
   - baseline compatibility;
-  - the nsrt oracle (gate 12, from Stage D).
+  - the nsrt oracle (gate 12, from Stage D);
+  - no repeated findings (gate 13, from E1).
 - **full** (`--full`, run at the end of every phase and on any commit
   that touches levels, acceptance or performance-sensitive code):
   - everything in quick;
@@ -943,6 +947,17 @@ corpus, type, baseline, performance and build-time gates run locally
     All three record under `.corpus-runs/gate/{nsrt,oracle,rules}/<hash>`. A
     count
     rises only through an approved delta that names the cause.
+13. **No repeated findings** (from E1). No result of the corpus runs, the
+    fixtures or the rules oracle's phpstan-rs side holds two findings with the
+    same file, span (start and end), identifier and message. A rule that reports
+    once per offending element spans that element, so two real findings never
+    share one: PHPStan's `generics.noParent` per `@implements` tag and
+    `varTag.noVariable` per static variable span the tag and the variable, where
+    phpstan-rs spans the declaration today. The rules oracle's phpstan-rs side
+    has 7 findings sharing another's line and column today: 3 are nested or
+    chained expressions (`$array[][]`, `->find(1)->find(1)`) whose spans end
+    apart, 3 are those two rules, and one is a real repeat, `phpDoc.parseError`
+    reported twice for one tag at `ignore-line-within-phpdoc.php:26`.
 
 **Approved deltas.** A commit that intentionally changes output records its
 expected diffs (corpus, fixtures, type snapshot, baseline) in the commit.
@@ -4503,7 +4518,14 @@ the rest), which the gate excludes and lists.
   `bug-9155.php`, `call-methods.php`, `access-properties.php`);
 - renamed named arguments;
 - the trait-host constant-condition verdict as a collector plus rule;
-- the (span, message) dedup moved to the finalizer;
+- the trait-host merge: a trait method's findings carry the host class they were
+  found in, and the same finding (span, identifier and message) from several
+  hosts is reported once, naming its hosts as PHPStan's "in context of class …"
+  does; a finding some hosts lack stays with the hosts that have it. It replaces
+  `check_trait_methods`' sort and `dedup_by` on (span, message), which merges
+  any two findings sharing text and span whatever reported them, and no other
+  deduplication exists (the finalizer has none, and gate 13 fails a repeated
+  finding);
 - `constant_facts` as per-file rule state.
 
 **E2. builtins.**
