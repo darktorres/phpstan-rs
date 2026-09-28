@@ -1749,8 +1749,7 @@ impl<'a> Checker<'a> {
                         if let [class] = resolved.object_class_names()[..]
                             && !resolved.is_enum_case()
                         {
-                            if !self.class_name_exists(&class)
-                                && !Self::class_guarded(&class, locals)
+                            if !self.class_name_exists(class) && !Self::class_guarded(class, locals)
                             {
                                 self.report(
                                     format!("instanceof check target class {class} not found"),
@@ -1763,9 +1762,9 @@ impl<'a> Checker<'a> {
                                 // as-written text, still a bare string
                                 // right here in the AST.
                                 self.check_class_name_case(name, *name_span);
-                                self.check_internal_instanceof(&class, e.span);
+                                self.check_internal_instanceof(class, e.span);
                                 self.check_restricted_class_name_usage(
-                                    &class,
+                                    class,
                                     "Instanceof references",
                                     e.span,
                                     crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
