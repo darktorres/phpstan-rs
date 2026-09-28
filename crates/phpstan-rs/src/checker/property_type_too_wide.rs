@@ -19,13 +19,6 @@ use syntax::ast::{ClassDecl, Expr, ExprKind, Literal, Visibility};
 use types::Type;
 use types::union_types;
 
-fn flatten_union(ty: &Type) -> Vec<&Type> {
-    match ty {
-        Type::Union(members) => members.iter().collect(),
-        other => vec![other],
-    }
-}
-
 /// A property's own `= null` default is a real, reachable value (every
 /// instance starts there until a real write happens), but only an
 /// `ExprKind::Assign` node inside a method body ever accumulates a
@@ -95,7 +88,7 @@ impl<'a> Checker<'a> {
             } else {
                 actual
             };
-            let actual_members = flatten_union(&actual);
+            let actual_members = actual.union_members();
             let identifier = if prop_sig.is_static() {
                 "staticProperty.unusedType"
             } else {

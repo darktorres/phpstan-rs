@@ -18,13 +18,6 @@ use syntax::token::Span;
 use types::Type;
 use types::union_types;
 
-fn flatten_union(ty: &Type) -> Vec<&Type> {
-    match ty {
-        Type::Union(members) => members.iter().collect(),
-        other => vec![other],
-    }
-}
-
 impl<'a> Checker<'a> {
     /// Mirrors `should_check_too_wide_method_throw_type`'s gate exactly
     /// (`checker/throws/too_wide.rs`): private/final/first-declaration.
@@ -72,7 +65,7 @@ impl<'a> Checker<'a> {
         // Only acts when the declared type is literally a `Union`; any
         // other single declared type (a bare class, a `list<int>`-shaped
         // `Intersection`, ...) is returned unchanged with no comparison -
-        // treating it as "one member to check" via `flatten_union` would
+        // treating it as "one member to check" via `union_members` would
         // produce a redundant second diagnostic for the same fact
         // `return.type` already reports.
         let Type::Union(declared_members) = declared else {
@@ -112,7 +105,7 @@ impl<'a> Checker<'a> {
         let actual_members: Vec<Type> = self
             .current_function_return_points
             .iter()
-            .flat_map(flatten_union)
+            .flat_map(Type::union_members)
             .map(|t| match t {
                 Type::Void => Type::null(),
                 other => other.clone(),

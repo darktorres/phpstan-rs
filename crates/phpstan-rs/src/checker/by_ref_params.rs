@@ -21,13 +21,6 @@ use types::union_types;
 /// too_wide.rs` - lets a single non-`Union` actual type (e.g. only one
 /// exit point was ever recorded) be compared as a one-member set
 /// instead of forcing every caller to special-case it.
-fn flatten_union(ty: &Type) -> Vec<&Type> {
-    match ty {
-        Type::Union(members) => members.iter().collect(),
-        other => vec![other],
-    }
-}
-
 impl<'a> Checker<'a> {
     /// Mirrors `should_check_too_wide_method_return_type`'s gate exactly
     /// (`checker/return_type_too_wide.rs`) - private/final/first-
@@ -204,7 +197,7 @@ impl<'a> Checker<'a> {
             if actual.is_mixed() {
                 continue;
             }
-            let actual_members = flatten_union(&actual);
+            let actual_members = actual.union_members();
             let too_wide: Vec<String> = declared_members
                 .iter()
                 .filter(|m| {

@@ -1,10 +1,10 @@
 # Paths naming a `types::Type` variant outside crates/types, per file.
 # A count may only fall; `cargo xtask arch --bless-types` records a fall.
-# total 1729: 1646 in patterns, 83 in comparisons, 0 building a type
+# total 1725: 1642 in patterns, 83 in comparisons, 0 building a type
 10	crates/phpstan-rs/src/checker.rs
 6	crates/phpstan-rs/src/checker/access_attributes.rs
 137	crates/phpstan-rs/src/checker/assignment.rs
-2	crates/phpstan-rs/src/checker/by_ref_params.rs
+1	crates/phpstan-rs/src/checker/by_ref_params.rs
 8	crates/phpstan-rs/src/checker/callable_values.rs
 7	crates/phpstan-rs/src/checker/calls.rs
 8	crates/phpstan-rs/src/checker/calls/format_string.rs
@@ -56,11 +56,11 @@
 12	crates/phpstan-rs/src/checker/phpdoc_type_compat.rs
 20	crates/phpstan-rs/src/checker/phpdoc_unresolvable.rs
 2	crates/phpstan-rs/src/checker/pipe_operator.rs
-2	crates/phpstan-rs/src/checker/property_type_too_wide.rs
+1	crates/phpstan-rs/src/checker/property_type_too_wide.rs
 28	crates/phpstan-rs/src/checker/psr3.rs
 36	crates/phpstan-rs/src/checker/resolve.rs
 9	crates/phpstan-rs/src/checker/restricted_symbol_usage.rs
-6	crates/phpstan-rs/src/checker/return_type_too_wide.rs
+5	crates/phpstan-rs/src/checker/return_type_too_wide.rs
 2	crates/phpstan-rs/src/checker/sql_reflection/parameter_validation.rs
 6	crates/phpstan-rs/src/checker/sql_reflection/query_builder.rs
 2	crates/phpstan-rs/src/checker/sql_reflection/resolve.rs
@@ -77,7 +77,7 @@
 5	crates/phpstan-rs/src/checker/throws.rs
 1	crates/phpstan-rs/src/checker/throws/dynamic.rs
 1	crates/phpstan-rs/src/checker/throws/missing.rs
-2	crates/phpstan-rs/src/checker/throws/too_wide.rs
+1	crates/phpstan-rs/src/checker/throws/too_wide.rs
 1	crates/phpstan-rs/src/checker/type_declarations.rs
 3	crates/phpstan-rs/src/checker/uninitialized_dataflow.rs
 23	crates/phpstan-rs/src/checker/var_tag_types.rs

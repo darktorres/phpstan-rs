@@ -13,6 +13,14 @@ impl Type {
         matches!(self, Type::Mixed(true))
     }
 
+    /// A union's members, or this type alone.
+    pub fn union_members(&self) -> &[Type] {
+        match self {
+            Type::Union(members) | Type::BenevolentUnion(members) => members,
+            other => std::slice::from_ref(other),
+        }
+    }
+
     /// Whether this is a `mixed` with no type information behind it.
     pub fn is_implicit_mixed(&self) -> bool {
         matches!(self, Type::Mixed(false))

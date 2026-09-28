@@ -21,13 +21,6 @@ use syntax::token::Span;
 use types::Type;
 use types::union_types;
 
-fn flatten_union(ty: &Type) -> Vec<&Type> {
-    match ty {
-        Type::Union(members) => members.iter().collect(),
-        other => vec![other],
-    }
-}
-
 impl<'a> Checker<'a> {
     /// A `private` method, a method on a `final` class, or a method
     /// itself declared `final` always gets checked; everything else is
@@ -88,7 +81,7 @@ impl<'a> Checker<'a> {
             .iter()
             .cloned()
             .reduce(union_types);
-        let members: Vec<Type> = flatten_union(throws).into_iter().cloned().collect();
+        let members: Vec<Type> = throws.union_members().to_vec();
         for declared in members {
             // Calling `accepts(actual, &declared)` directly would be
             // wrong once `actual` is a `Union` of several distinct throw
@@ -104,9 +97,9 @@ impl<'a> Checker<'a> {
             // covers.
             let is_used = actual
                 .as_ref()
-                .map(flatten_union)
+                .map(Type::union_members)
                 .unwrap_or_default()
-                .into_iter()
+                .iter()
                 .any(|a| self.accepts(&declared, a).yes());
             if is_used {
                 continue;

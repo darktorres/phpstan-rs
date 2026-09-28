@@ -3448,7 +3448,7 @@ impl<'a> Checker<'a> {
                 // result was already a Union - a nested Union member
                 // breaks any consumer that walks a Union's members
                 // expecting each to be a flat leaf type
-                // (`return_type_too_wide`'s `flatten_union`, among
+                // (`return_type_too_wide`'s `union_members`, among
                 // others).
                 result_types
                     .into_iter()
