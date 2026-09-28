@@ -174,6 +174,15 @@ impl Type {
         ) || self.any_child(Type::contains_deferred)
     }
 
+    /// The object shape this type is, or an intersection refines.
+    pub fn object_shape_of(&self) -> Option<&Shape> {
+        match self {
+            Type::ObjectShape(shape) => Some(shape),
+            Type::Intersection(members) => members.iter().find_map(Type::object_shape_of),
+            _ => None,
+        }
+    }
+
     /// The array shape this type is, or an intersection refines.
     pub fn shape(&self) -> Option<&Shape> {
         match self {
@@ -381,6 +390,16 @@ impl Type {
     pub fn class_string_class(&self) -> Option<&crate::Name> {
         match self {
             Type::ClassString(inner) => inner.object_class_and_args().map(|(class, _)| class),
+            _ => None,
+        }
+    }
+
+    /// A reflected member's owner type and member name (a
+    /// `ReflectionMethod`/`ReflectionProperty` bound to one member);
+    /// `None` for any other type.
+    pub fn reflected_member_of(&self) -> Option<(&Type, &str)> {
+        match self {
+            Type::ReflectedMember(owner, name) => Some((owner, name)),
             _ => None,
         }
     }
@@ -647,6 +666,17 @@ impl Type {
     pub fn object_class_and_args(&self) -> Option<(&crate::Name, &[Type])> {
         match self {
             Type::Object(class, args) => Some((class, args)),
+            _ => None,
+        }
+    }
+
+    /// The class an instance of this type belongs to, with its generic
+    /// arguments: an object's, or an enum case's enum (with none).
+    /// `None` for any other type.
+    pub fn instance_class_and_args(&self) -> Option<(&crate::Name, &[Type])> {
+        match self {
+            Type::Object(class, args) => Some((class, args)),
+            Type::EnumCase(class, _) => Some((class, &[])),
             _ => None,
         }
     }

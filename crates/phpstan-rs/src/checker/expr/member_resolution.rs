@@ -23,23 +23,24 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         prop: &str,
     ) -> Option<(std::sync::Arc<str>, &'a PropertyReflection)> {
-        match base_ty {
-            Type::Object(class, _) => self.registry.lookup_property_with_owner(class, prop),
-            Type::EnumCase(fqn, _) => self.registry.lookup_property_with_owner(fqn, prop),
-            Type::Union(members) => members
+        let members = base_ty.union_members();
+        if members.len() > 1 {
+            return members
                 .iter()
-                .find_map(|m| self.find_property_owner(m, prop)),
-            // `narrow_instanceof_true` always puts the narrower,
-            // just-`instanceof`-checked type last in an `Intersection` -
-            // see `property_access_type`'s own doc comment. Reversed so
-            // that narrower type's own declaration (if any) is
-            // preferred over the broader original type's.
-            Type::Intersection(members) => members
+                .find_map(|m| self.find_property_owner(m, prop));
+        }
+        // `narrow_instanceof_true` puts the narrower, just-`instanceof`-
+        // checked type last in an intersection: reversed, so its own
+        // declaration is preferred over the broader original type's.
+        let parts = base_ty.intersection_members();
+        if parts.len() > 1 {
+            return parts
                 .iter()
                 .rev()
-                .find_map(|m| self.find_property_owner(m, prop)),
-            _ => None,
+                .find_map(|m| self.find_property_owner(m, prop));
         }
+        let (class, _) = base_ty.instance_class_and_args()?;
+        self.registry.lookup_property_with_owner(class, prop)
     }
 
     /// `find_property_owner`'s own method counterpart, used by
@@ -54,19 +55,22 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         method: &str,
     ) -> Option<(std::sync::Arc<str>, &'a FunctionReflection)> {
-        match base_ty {
-            Type::Object(class, _) => self.registry.lookup_method_with_owner(class, method),
-            Type::EnumCase(fqn, _) => self.registry.lookup_method_with_owner(fqn, method),
-            Type::Union(members) => members
+        let members = base_ty.union_members();
+        if members.len() > 1 {
+            return members
                 .iter()
-                .find_map(|m| self.find_method_owner(m, method)),
-            // Same reasoning as `find_property_owner` just above.
-            Type::Intersection(members) => members
+                .find_map(|m| self.find_method_owner(m, method));
+        }
+        // Reversed as in `find_property_owner`.
+        let parts = base_ty.intersection_members();
+        if parts.len() > 1 {
+            return parts
                 .iter()
                 .rev()
-                .find_map(|m| self.find_method_owner(m, method)),
-            _ => None,
+                .find_map(|m| self.find_method_owner(m, method));
         }
+        let (class, _) = base_ty.instance_class_and_args()?;
+        self.registry.lookup_method_with_owner(class, method)
     }
 
     /// `find_method_owner`'s own sibling, used by `ExprKind::
@@ -84,33 +88,33 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         method: &str,
     ) -> (Option<&'a FunctionReflection>, Option<String>) {
-        match base_ty {
-            Type::Object(class, _) => (
-                self.registry.lookup_method(class, method),
-                Some(class.clone().to_string()),
-            ),
-            Type::EnumCase(fqn, _) => (
-                self.registry.lookup_method(fqn, method),
-                Some(fqn.clone().to_string()),
-            ),
-            Type::Union(members) => members
+        let members = base_ty.union_members();
+        if members.len() > 1 {
+            return members
                 .iter()
                 .map(|m| self.find_method_receiver_class(m, method))
                 .find(|(sig, _)| sig.is_some())
-                .unwrap_or((None, None)),
-            // Same reasoning as `find_property_owner`'s own doc
-            // comment above.
-            // An instance of every member has the most visible of their
-            // declarations: a subclass implementing a public interface
-            // method is public, whatever a parent keeps private.
-            Type::Intersection(members) => members
+                .unwrap_or((None, None));
+        }
+        // An instance of every member has the most visible of their
+        // declarations: a subclass implementing a public interface
+        // method is public, whatever a parent keeps private.
+        let parts = base_ty.intersection_members();
+        if parts.len() > 1 {
+            return parts
                 .iter()
                 .rev()
                 .map(|m| self.find_method_receiver_class(m, method))
                 .filter(|(sig, _)| sig.is_some())
                 .min_by_key(|(sig, _)| sig.map(|s| visibility_rank(&s.visibility())))
-                .unwrap_or((None, None)),
-            _ => (None, None),
+                .unwrap_or((None, None));
+        }
+        match base_ty.instance_class_and_args() {
+            Some((class, _)) => (
+                self.registry.lookup_method(class, method),
+                Some(class.to_string()),
+            ),
+            None => (None, None),
         }
     }
 
@@ -144,22 +148,23 @@ impl<'a> Checker<'a> {
     /// `Throwable`, even though the real, unprefixed interface genuinely
     /// does.
     pub(crate) fn thrown_value_not_throwable(&self, ty: &Type) -> Option<String> {
-        match ty {
-            Type::Object(class, _) => (self.class_name_exists(class)
-                && !self.registry.is_subclass_of(class, "Throwable"))
-            .then(|| class.to_string()),
-            Type::Union(members) => members
+        let members = ty.union_members();
+        if members.len() > 1 {
+            return members
                 .iter()
-                .find_map(|m| self.thrown_value_not_throwable(m)),
-            Type::Intersection(members) => {
-                let failures: Vec<String> = members
-                    .iter()
-                    .filter_map(|m| self.thrown_value_not_throwable(m))
-                    .collect();
-                (failures.len() == members.len()).then(|| failures.into_iter().next().unwrap())
-            }
-            _ => None,
+                .find_map(|m| self.thrown_value_not_throwable(m));
         }
+        let parts = ty.intersection_members();
+        if parts.len() > 1 {
+            let failures: Vec<String> = parts
+                .iter()
+                .filter_map(|m| self.thrown_value_not_throwable(m))
+                .collect();
+            return (failures.len() == parts.len()).then(|| failures.into_iter().next().unwrap());
+        }
+        let (class, _) = ty.object_class_and_args()?;
+        (self.class_name_exists(class) && !self.registry.is_subclass_of(class, "Throwable"))
+            .then(|| class.to_string())
     }
 
     /// `find_property_owner`'s own richer sibling, used by `checker::
@@ -179,26 +184,24 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         prop: &str,
     ) -> Option<(String, Vec<Type>, std::sync::Arc<str>, PropertyReflection)> {
-        match base_ty {
-            Type::Object(class, type_args) => self
-                .registry
-                .lookup_property_with_owner(class, prop)
-                .map(|(owner, sig)| (class.to_string(), type_args.clone(), owner, sig.clone())),
-            Type::EnumCase(fqn, _) => self
-                .registry
-                .lookup_property_with_owner(fqn, prop)
-                .map(|(owner, sig)| (fqn.to_string(), Vec::new(), owner, sig.clone())),
-            Type::Union(members) => members
+        let members = base_ty.union_members();
+        if members.len() > 1 {
+            return members
                 .iter()
-                .find_map(|m| self.find_property_receiver(m, prop)),
-            // Same reasoning as `find_property_owner`'s own doc
-            // comment above.
-            Type::Intersection(members) => members
+                .find_map(|m| self.find_property_receiver(m, prop));
+        }
+        // Reversed as in `find_property_owner`.
+        let parts = base_ty.intersection_members();
+        if parts.len() > 1 {
+            return parts
                 .iter()
                 .rev()
-                .find_map(|m| self.find_property_receiver(m, prop)),
-            _ => None,
+                .find_map(|m| self.find_property_receiver(m, prop));
         }
+        let (class, type_args) = base_ty.instance_class_and_args()?;
+        self.registry
+            .lookup_property_with_owner(class, prop)
+            .map(|(owner, sig)| (class.to_string(), type_args.to_vec(), owner, sig.clone()))
     }
 
     /// `find_property_receiver`'s own method counterpart, used by
@@ -239,34 +242,29 @@ impl<'a> Checker<'a> {
         std::sync::Arc<str>,
         std::borrow::Cow<'a, FunctionReflection>,
     )> {
-        match base_ty {
-            Type::Object(class, type_args) => self
-                .registry
-                .lookup_method_with_owner(class, method)
-                .map(|(owner, sig)| {
-                    let sig = self.substitute_class_templates(sig, class, type_args, &owner);
-                    (class.to_string(), type_args.clone(), owner, sig)
-                }),
-            Type::EnumCase(fqn, _) => {
-                self.registry
-                    .lookup_method_with_owner(fqn, method)
-                    .map(|(owner, sig)| {
-                        let sig = self.substitute_class_templates(sig, fqn, &[], &owner);
-                        (fqn.to_string(), Vec::new(), owner, sig)
-                    })
-            }
-            Type::Union(members) => members
+        let members = base_ty.union_members();
+        if members.len() > 1 {
+            return members
                 .iter()
-                .find_map(|m| self.find_method_receiver(m, method)),
-            // See `find_method_receiver_class`: the most visible
-            // declaration among the members.
-            Type::Intersection(members) => members
+                .find_map(|m| self.find_method_receiver(m, method));
+        }
+        // See `find_method_receiver_class`: the most visible declaration
+        // among the members.
+        let parts = base_ty.intersection_members();
+        if parts.len() > 1 {
+            return parts
                 .iter()
                 .rev()
                 .filter_map(|m| self.find_method_receiver(m, method))
-                .min_by_key(|(_, _, _, sig)| visibility_rank(&sig.visibility())),
-            _ => None,
+                .min_by_key(|(_, _, _, sig)| visibility_rank(&sig.visibility()));
         }
+        let (class, type_args) = base_ty.instance_class_and_args()?;
+        self.registry
+            .lookup_method_with_owner(class, method)
+            .map(|(owner, sig)| {
+                let sig = self.substitute_class_templates(sig, class, type_args, &owner);
+                (class.to_string(), type_args.to_vec(), owner, sig)
+            })
     }
 
     /// Both `check_expr`'s and `infer_expr`'s own `PropertyAccess` arms
@@ -285,8 +283,53 @@ impl<'a> Checker<'a> {
     /// more precision" bias elsewhere). See the `Union`/`Intersection`
     /// arms below for the real distinction between them.
     pub(crate) fn property_access_type(&self, base_ty: &Type, prop: &str) -> Type {
-        match base_ty {
-            Type::Object(class, type_args) => self
+        // An intersection value is every member at once, so the first
+        // member whose declaration resolves the property names its type -
+        // searched in reverse, since `narrow_instanceof_true` puts the
+        // narrower, just-`instanceof`-checked type last. A union value is
+        // one member at a time: the union of whichever members resolve.
+        let parts = base_ty.intersection_members();
+        if parts.len() > 1 {
+            return parts
+                .iter()
+                .rev()
+                .find_map(|m| {
+                    let ty = self.property_access_type(m, prop);
+                    (!ty.is_mixed()).then_some(ty)
+                })
+                .unwrap_or(Type::mixed());
+        }
+        let members = base_ty.union_members();
+        if members.len() > 1 {
+            return members
+                .iter()
+                .map(|m| self.property_access_type(m, prop))
+                .filter(|ty| !ty.is_mixed())
+                .reduce(union_types)
+                .unwrap_or(Type::mixed());
+        }
+        if let Some((fqn, case)) = base_ty.enum_class_and_case() {
+            return match prop {
+                "name" => Type::string_literal(case.to_string().into()),
+                "value" => self
+                    .registry
+                    .enum_case_value(fqn, case)
+                    .cloned()
+                    .or_else(|| {
+                        self.registry
+                            .lookup_property(fqn, "value")
+                            .map(|p| p.ty().clone())
+                    })
+                    .unwrap_or(Type::mixed()),
+                _ => self
+                    .registry
+                    .lookup_property_with_owner(fqn, prop)
+                    .map(|(owner, p)| self.resolve_pseudo(p.ty(), &owner))
+                    .unwrap_or(Type::mixed()),
+            };
+        }
+        if let Some((class, type_args)) = base_ty.object_class_and_args() {
+            return self
                 .registry
                 .lookup_property_with_owner(class, prop)
                 .map(|(owner, p)| {
@@ -295,86 +338,21 @@ impl<'a> Checker<'a> {
                     self.resolve_pseudo_at(&resolved, &owner, class)
                 })
                 .unwrap_or_else(|| {
-                    // `SimpleXMLElementClassPropertyReflectionExtension`'s
-                    // real-PHPStan equivalent - every undeclared property
-                    // on `SimpleXMLElement` (or a subclass) is magically
-                    // readable via `__get`, resolving to the *actual*
-                    // concrete class being queried (so a subclass gets
-                    // `MyXml|null`, not a hardcoded `SimpleXMLElement|null`)
-                    // rather than degrading all the way to `Mixed`.
+                    // Every undeclared property of a `SimpleXMLElement` is
+                    // readable through `__get`, as the queried class or
+                    // `null`.
                     if self.registry.is_subclass_of(class, "SimpleXMLElement") {
                         union_types(Type::object(class.clone(), Vec::new()), Type::null())
                     } else {
                         Type::mixed()
                     }
-                }),
-            Type::EnumCase(_, case) if prop == "name" => {
-                Type::string_literal(case.clone().to_string().into())
-            }
-            Type::EnumCase(fqn, case) if prop == "value" => self
-                .registry
-                .enum_case_value(fqn, case)
-                .cloned()
-                .or_else(|| {
-                    self.registry
-                        .lookup_property(fqn, "value")
-                        .map(|p| p.ty().clone())
-                })
-                .unwrap_or(Type::mixed()),
-            Type::EnumCase(fqn, _) => self
-                .registry
-                .lookup_property_with_owner(fqn, prop)
-                .map(|(owner, p)| self.resolve_pseudo(p.ty(), &owner))
-                .unwrap_or(Type::mixed()),
-            Type::ObjectShape(shape) => shape
-                .field(&ShapeKey::from_name(prop))
-                .map(|f| f.ty.clone())
-                .unwrap_or(Type::mixed()),
-            // An `Intersection` value genuinely is every member type
-            // simultaneously, so the first member whose declaration
-            // actually resolves the property names its one real type
-            // (no other member could disagree without the source itself
-            // being contradictory). A `Union` value is only one of its
-            // members at a time, so the honest answer is the union of
-            // whichever members' own declarations resolve at all, not
-            // just the first - `A|B` where `A::$prop: int` and `B::
-            // $prop: string` is really `int|string`, not just `int`.
-            // Skips (doesn't guess) a member that doesn't resolve at all,
-            // matching this project's usual leniency for a real, if
-            // incomplete, per-member answer rather than collapsing back
-            // to `Mixed`.
-            //
-            // In the `Intersection` arm specifically: `narrow_instanceof_
-            // true` (`checker/narrowing.rs`) always builds
-            // `Intersection(vec![original_type, target_type])` - the
-            // pre-existing, broader type first, the just-checked,
-            // narrower `instanceof` target last. Searching members in
-            // that same (forward) order would mean a same-named property
-            // declared on both the broader original type and the
-            // narrower target resolves to the broader type's own
-            // less-specific declaration instead of the narrower,
-            // presumably-intended one. Reversed instead: the narrower
-            // type is always checked first, which is never wrong (a
-            // class's own `lookup_property_with_owner` already walks its
-            // full ancestor chain, so this can only ever find a more
-            // specific answer, or fall through to the broader type
-            // exactly as before when the narrower one doesn't have it).
-            Type::Intersection(members) => members
-                .iter()
-                .rev()
-                .find_map(|m| {
-                    let ty = self.property_access_type(m, prop);
-                    (!ty.is_mixed()).then_some(ty)
-                })
-                .unwrap_or(Type::mixed()),
-            Type::Union(members) => members
-                .iter()
-                .map(|m| self.property_access_type(m, prop))
-                .filter(|ty| !ty.is_mixed())
-                .reduce(union_types)
-                .unwrap_or(Type::mixed()),
-            _ => Type::mixed(),
+                });
         }
+        base_ty
+            .object_shape_of()
+            .and_then(|shape| shape.field(&ShapeKey::from_name(prop)))
+            .map(|f| f.ty.clone())
+            .unwrap_or(Type::mixed())
     }
 
     /// `infer_expr`'s own `ExprKind::MethodCall` return-type resolution -
@@ -408,13 +386,14 @@ impl<'a> Checker<'a> {
                     || self.registry.is_subclass_of(class, &entry.class))
         })?;
         let arg = args.get(entry.argument.checked_sub(1)?)?;
-        let named = match self.infer_expr(&arg.value, locals) {
-            Type::ClassString(inner) => match *inner {
-                Type::Object(name, _) => name.to_string(),
-                _ => return None,
-            },
-            Type::StringLiteral(name) => name.as_str()?.trim_start_matches('\\').to_string(),
-            _ => return None,
+        let arg_ty = self.infer_expr(&arg.value, locals);
+        let named = match arg_ty.class_string_class() {
+            Some(name) => name.to_string(),
+            None => arg_ty
+                .string_literal_value()?
+                .as_str()?
+                .trim_start_matches('\\')
+                .to_string(),
         };
         let (canonical, _) = self.registry.lookup_class(&named)?;
         let object = Type::object(canonical.into(), Vec::new());
@@ -439,12 +418,96 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
-        if let Type::Object(class, _) = recv_ty
-            && let Some(ty) = self.class_argument_return(class, method, args, locals)
-        {
-            return ty;
+        if let Some((class, type_args)) = recv_ty.object_class_and_args() {
+            return match self.class_argument_return(class, method, args, locals) {
+                Some(ty) => ty,
+                None => self
+                    .object_method_call_return_type(recv, class, type_args, method, args, locals),
+            };
         }
-        match recv_ty {
+        // The consuming half of the feature just above -
+        // `ReflectionProperty::getValue($obj)`/`ReflectionMethod::
+        // invoke($obj, ...$args)` resolve the real member's own
+        // declared type on the owner this reflector was bound to,
+        // substituting the owner's own `@template` bindings the same
+        // way an ordinary generic method call already does.
+        // `invoke()`'s own extra arguments (after the leading
+        // `$object`) map onto the target method's own parameters
+        // positionally, so they're forwarded from index 1, matching
+        // real PHP's own `invoke($object, ...$args)` signature. An
+        // owner that isn't itself a plain resolved `Type::Object`
+        // (an unresolved template, a union, ...) can't be looked up
+        // at all - stays `Mixed`, not a guess.
+        if let Some((owner_ty, name)) = recv_ty.reflected_member_of() {
+            return match (method, owner_ty.object_class_and_args()) {
+                ("getValue", Some((class, type_args))) => {
+                    self.generic_object_property_type(class, type_args, name)
+                }
+                ("invoke", Some((class, type_args))) => {
+                    let forwarded = args.get(1..).unwrap_or(&[]);
+                    self.generic_object_method_return_type(
+                        class, type_args, name, forwarded, locals,
+                    )
+                }
+                _ => Type::mixed(),
+            };
+        }
+        // An enum case is an instance of its enum for method calls, with
+        // no template arguments.
+        if let Some((fqn, _)) = recv_ty.enum_class_and_case() {
+            return self
+                .registry
+                .lookup_method_with_owner(fqn, method)
+                .map(|(owner, sig)| {
+                    let resolved_args = resolve_call_args(args, sig.params());
+                    let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
+                    self.resolve_pseudo(&resolved, &owner)
+                })
+                .unwrap_or(Type::mixed());
+        }
+        // The narrower, just-`instanceof`-checked type is the last member
+        // `narrow_instanceof_true` puts into an intersection: searched
+        // first, so its own (possibly overriding) signature wins.
+        let parts = recv_ty.intersection_members();
+        if parts.len() > 1 {
+            return parts
+                .iter()
+                .rev()
+                .find_map(|m| {
+                    let ty = self.method_call_return_type(recv, m, method, args, locals);
+                    (!ty.is_mixed()).then_some(ty)
+                })
+                .unwrap_or(Type::mixed());
+        }
+        let members = recv_ty.union_members();
+        if members.len() > 1 {
+            return members
+                .iter()
+                .map(|m| self.method_call_return_type(recv, m, method, args, locals))
+                .filter(|ty| !ty.is_mixed())
+                .reduce(union_types)
+                .unwrap_or(Type::mixed());
+        }
+        Type::mixed()
+    }
+
+    /// `method_call_return_type` for an instance of `class<type_args>`:
+    /// the library-aware returns first, then the declared one.
+    fn object_method_call_return_type(
+        &self,
+        recv: &Expr,
+        class: &types::Name,
+        type_args: &[Type],
+        method: &str,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Type {
+        if method == "createQuery"
+            && self.settings.doctrine
+            && self
+                .registry
+                .is_subclass_of(class, "Doctrine\\ORM\\EntityManagerInterface")
+        {
             // `EntityManager::createQuery($dql)` (ROADMAP Phase 168
             // 168g) - the same DQL-aware row-shape inference as
             // `QueryBuilder::getQuery()` just below, fed a literal DQL
@@ -454,18 +517,16 @@ impl<'a> Checker<'a> {
             // `SELECT`), but the same select-item grammar doing strictly
             // less work, so building it keeps the feature honestly
             // general rather than `QueryBuilder`-only.
-            Type::Object(class, _)
-                if method == "createQuery"
-                    && self.settings.doctrine
-                    && self
-                        .registry
-                        .is_subclass_of(class, "Doctrine\\ORM\\EntityManagerInterface") =>
-            {
-                let source = args
-                    .first()
-                    .and_then(|arg| self.doctrine_dql_source(&arg.value, locals));
-                self.doctrine_query_type(source)
-            }
+            let source = args
+                .first()
+                .and_then(|arg| self.doctrine_dql_source(&arg.value, locals));
+            self.doctrine_query_type(source)
+        } else if method == "getQuery"
+            && self.settings.doctrine
+            && self
+                .registry
+                .is_subclass_of(class, "Doctrine\\ORM\\QueryBuilder")
+        {
             // `QueryBuilder::getQuery()` (ROADMAP Phase 168 168e) -
             // resolves the fluent chain (168b), parses its own select
             // items (168c) and builds the row shape (168d), carrying it
@@ -475,37 +536,28 @@ impl<'a> Checker<'a> {
             // `Type` variant). An undecidable chain/select falls back to
             // today's plain, argument-less `Query` object - no worse
             // than before this phase existed.
-            Type::Object(class, _)
-                if method == "getQuery"
-                    && self.settings.doctrine
-                    && self
-                        .registry
-                        .is_subclass_of(class, "Doctrine\\ORM\\QueryBuilder") =>
-            {
-                let source = self.doctrine_query_builder_source(recv, locals);
-                self.doctrine_query_type(source)
-            }
+            let source = self.doctrine_query_builder_source(recv, locals);
+            self.doctrine_query_type(source)
+        } else if matches!(
+            method,
+            "getResult"
+                | "execute"
+                | "toIterable"
+                | "getOneOrNullResult"
+                | "getSingleResult"
+                | "getArrayResult"
+                | "getSingleColumnResult"
+                | "getSingleScalarResult"
+                | "getScalarResult"
+        ) && self.settings.doctrine
+            && self
+                .registry
+                .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery")
+        {
             // `AbstractQuery`'s result methods, per hydration mode - see
             // `doctrine_query_result`.
-            Type::Object(class, type_args)
-                if matches!(
-                    method,
-                    "getResult"
-                        | "execute"
-                        | "toIterable"
-                        | "getOneOrNullResult"
-                        | "getSingleResult"
-                        | "getArrayResult"
-                        | "getSingleColumnResult"
-                        | "getSingleScalarResult"
-                        | "getScalarResult"
-                ) && self.settings.doctrine
-                    && self
-                        .registry
-                        .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery") =>
-            {
-                self.doctrine_query_result(recv, method, args, type_args, locals)
-            }
+            self.doctrine_query_result(recv, method, args, type_args, locals)
+        } else if method == "format" && self.registry.is_subclass_of(class, "DateTimeInterface") {
             // `DateTimeInterface::format()`'s own already-
             // shipped `date()` format-character table applies verbatim -
             // real, substantial corpus usage (dozens of literal
@@ -513,28 +565,21 @@ impl<'a> Checker<'a> {
             // plain `string` (unchanged) whenever the format isn't a
             // literal, or contains a character the table doesn't
             // confidently classify.
-            Type::Object(class, _)
-                if method == "format"
-                    && self.registry.is_subclass_of(class, "DateTimeInterface") =>
-            {
-                args.first()
-                    .and_then(|a| literal_string_value(&a.value))
-                    .and_then(|fmt| date_format_return_type(&fmt))
-                    .unwrap_or(Type::string())
-            }
+            args.first()
+                .and_then(|a| literal_string_value(&a.value))
+                .and_then(|fmt| date_format_return_type(&fmt))
+                .unwrap_or(Type::string())
+        } else if method == "format" && self.registry.is_subclass_of(class, "DateInterval") {
             // `DateInterval::format()`'s own hand-rolled
             // specifier table - see `date_interval_format_return_type`'s
             // own doc comment for why the zero-valued representative
             // substitution is genuinely sound (not just an
             // approximation) for the fixed-width specifiers.
-            Type::Object(class, _)
-                if method == "format" && self.registry.is_subclass_of(class, "DateInterval") =>
-            {
-                args.first()
-                    .and_then(|a| literal_string_value(&a.value))
-                    .and_then(|fmt| date_interval_format_return_type(&fmt))
-                    .unwrap_or(Type::string())
-            }
+            args.first()
+                .and_then(|a| literal_string_value(&a.value))
+                .and_then(|fmt| date_interval_format_return_type(&fmt))
+                .unwrap_or(Type::string())
+        } else if method == "diff" && self.registry.is_subclass_of(class, "DateTimeInterface") {
             // `DateTimeInterface::diff()` narrows the stub's own
             // plain `DateInterval` return type to also carry a real,
             // always-int `days` property - mirrors real PHPStan's own
@@ -542,14 +587,11 @@ impl<'a> Checker<'a> {
             // vendors PHPStan's own stub files, so reproduced directly
             // here instead). Real, direct corpus usage with no clamping
             // user-declared return type.
-            Type::Object(class, _)
-                if method == "diff" && self.registry.is_subclass_of(class, "DateTimeInterface") =>
-            {
-                Type::intersection_of(vec![
-                    Type::object("DateInterval".into(), Vec::new()),
-                    Type::object_shape(Shape::from_named([("days", Type::int(), false)])),
-                ])
-            }
+            Type::intersection_of(vec![
+                Type::object("DateInterval".into(), Vec::new()),
+                Type::object_shape(Shape::from_named([("days", Type::int(), false)])),
+            ])
+        } else if method == "asXML" && self.registry.is_subclass_of(class, "SimpleXMLElement") {
             // `SimpleXMLElement::asXML()`'s 0-arg/1-arg overload split
             // (mirrors PHPStan's own
             // `SimpleXMLElementAsXMLMethodReturnTypeExtension`): exactly
@@ -559,15 +601,14 @@ impl<'a> Checker<'a> {
             // Deliberately doesn't extend to the
             // separate `saveXML()` alias method, matching real PHPStan's
             // own narrower scope.
-            Type::Object(class, _)
-                if method == "asXML" && self.registry.is_subclass_of(class, "SimpleXMLElement") =>
-            {
-                if args.len() == 1 {
-                    Type::bool()
-                } else {
-                    Type::union_of(vec![Type::string(), Type::bool_literal(false)])
-                }
+            if args.len() == 1 {
+                Type::bool()
+            } else {
+                Type::union_of(vec![Type::string(), Type::bool_literal(false)])
             }
+        } else if matches!(method, "getMethod" | "getProperty")
+            && self.registry.is_subclass_of(class, "ReflectionClass")
+        {
             // Phase 77's reflected-member-binding stretch item:
             // `ReflectionClass<T>::getMethod('name')`/`getProperty('name')` -
             // once the member name is a genuine string literal (or a
@@ -581,68 +622,50 @@ impl<'a> Checker<'a> {
             // `Type::ReflectedMember`'s own doc comment. A non-literal
             // name just keeps the stub's own untargeted return type,
             // unchanged from before this feature existed.
-            Type::Object(class, type_args)
-                if matches!(method, "getMethod" | "getProperty")
-                    && self.registry.is_subclass_of(class, "ReflectionClass") =>
-            {
-                let base =
-                    self.generic_object_method_return_type(class, type_args, method, args, locals);
-                // An erased receiver `T` (`substitute_class_templates`'s
-                // own unbound-template fallback, `Type::Mixed(false)`) can never
-                // resolve a real member type either - skip the wrap
-                // entirely rather than attach a fact that can only ever
-                // stay unresolved, matching `Type::ReflectedMember`'s own
-                // "don't guess" leniency for a not-genuinely-concrete
-                // owner.
-                let owner_ty = type_args.first().cloned().filter(|t| !t.is_mixed());
-                let name = args
-                    .first()
-                    .and_then(|a| match literal_string_value(&a.value) {
-                        Some(s) => Some(s.into_owned()),
-                        None => match self.infer_expr(&a.value, locals) {
-                            Type::StringLiteral(s) => Some(s.to_string()),
-                            _ => None,
-                        },
-                    });
-                match (owner_ty, name) {
-                    (Some(owner_ty), Some(name)) => {
-                        Type::intersection_of(vec![base, Type::reflected_member(owner_ty, name)])
-                    }
-                    _ => base,
+            let base =
+                self.generic_object_method_return_type(class, type_args, method, args, locals);
+            // An erased receiver `T` (`substitute_class_templates`'s
+            // own unbound-template fallback, `Type::Mixed(false)`) can never
+            // resolve a real member type either - skip the wrap
+            // entirely rather than attach a fact that can only ever
+            // stay unresolved, matching `Type::ReflectedMember`'s own
+            // "don't guess" leniency for a not-genuinely-concrete
+            // owner.
+            let owner_ty = type_args.first().cloned().filter(|t| !t.is_mixed());
+            let name = args
+                .first()
+                .and_then(|a| match literal_string_value(&a.value) {
+                    Some(s) => Some(s.into_owned()),
+                    None => self
+                        .infer_expr(&a.value, locals)
+                        .string_literal_value()
+                        .map(|s| s.to_string()),
+                });
+            match (owner_ty, name) {
+                (Some(owner_ty), Some(name)) => {
+                    Type::intersection_of(vec![base, Type::reflected_member(owner_ty, name)])
                 }
+                _ => base,
             }
-            // The consuming half of the feature just above -
-            // `ReflectionProperty::getValue($obj)`/`ReflectionMethod::
-            // invoke($obj, ...$args)` resolve the real member's own
-            // declared type on the owner this reflector was bound to,
-            // substituting the owner's own `@template` bindings the same
-            // way an ordinary generic method call already does.
-            // `invoke()`'s own extra arguments (after the leading
-            // `$object`) map onto the target method's own parameters
-            // positionally, so they're forwarded from index 1, matching
-            // real PHP's own `invoke($object, ...$args)` signature. An
-            // owner that isn't itself a plain resolved `Type::Object`
-            // (an unresolved template, a union, ...) can't be looked up
-            // at all - stays `Mixed`, not a guess.
-            Type::ReflectedMember(owner_ty, name) if method == "getValue" => {
-                match owner_ty.as_ref() {
-                    Type::Object(class, type_args) => {
-                        self.generic_object_property_type(class, type_args, name)
-                    }
-                    _ => Type::mixed(),
-                }
-            }
-            Type::ReflectedMember(owner_ty, name) if method == "invoke" => {
-                match owner_ty.as_ref() {
-                    Type::Object(class, type_args) => {
-                        let forwarded = args.get(1..).unwrap_or(&[]);
-                        self.generic_object_method_return_type(
-                            class, type_args, name, forwarded, locals,
-                        )
-                    }
-                    _ => Type::mixed(),
-                }
-            }
+        } else if matches!(
+            method,
+            "fetchAssociative"
+                | "fetchAllAssociative"
+                | "fetchOne"
+                | "fetchFirstColumn"
+                | "fetchNumeric"
+                | "fetchAllNumeric"
+                | "fetchAllKeyValue"
+                | "fetchAllAssociativeIndexed"
+                | "iterateAssociative"
+                | "iterateNumeric"
+                | "iterateKeyValue"
+                | "iterateAssociativeIndexed"
+                | "iterateColumn"
+        ) && self
+            .registry
+            .is_subclass_of(class, "Doctrine\\DBAL\\Result")
+        {
             // Sub-phase D of the live SQL query reflection phase (see
             // delegated-tumbling-dongarra.md): `Doctrine\DBAL\Result`'s
             // own no-argument terminal methods - the second hop of the
@@ -652,34 +675,31 @@ impl<'a> Checker<'a> {
             // established for `Doctrine\ORM\Query` (`Result` isn't a
             // real templated class either - this project smuggles the
             // row type through the same way).
-            Type::Object(class, type_args)
-                if matches!(
-                    method,
-                    "fetchAssociative"
-                        | "fetchAllAssociative"
-                        | "fetchOne"
-                        | "fetchFirstColumn"
-                        | "fetchNumeric"
-                        | "fetchAllNumeric"
-                        | "fetchAllKeyValue"
-                        | "fetchAllAssociativeIndexed"
-                        | "iterateAssociative"
-                        | "iterateNumeric"
-                        | "iterateKeyValue"
-                        | "iterateAssociativeIndexed"
-                        | "iterateColumn"
-                ) && self
-                    .registry
-                    .is_subclass_of(class, "Doctrine\\DBAL\\Result") =>
-            {
-                dbal_row_method_return_type(method, type_args.first().cloned()).unwrap_or_else(
-                    || {
-                        self.generic_object_method_return_type(
-                            class, type_args, method, args, locals,
-                        )
-                    },
-                )
-            }
+            dbal_row_method_return_type(method, type_args.first().cloned()).unwrap_or_else(|| {
+                self.generic_object_method_return_type(class, type_args, method, args, locals)
+            })
+        } else if matches!(
+            method,
+            "fetchAssociative"
+                | "fetchAllAssociative"
+                | "fetchOne"
+                | "fetchFirstColumn"
+                | "fetchNumeric"
+                | "fetchAllNumeric"
+                | "fetchAllKeyValue"
+                | "fetchAllAssociativeIndexed"
+                | "iterateAssociative"
+                | "iterateNumeric"
+                | "iterateKeyValue"
+                | "iterateAssociativeIndexed"
+                | "iterateColumn"
+        ) && (self
+            .registry
+            .is_subclass_of(class, "Doctrine\\DBAL\\Connection")
+            || self
+                .registry
+                .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder"))
+        {
             // `Doctrine\DBAL\Connection`'s own directly-SQL-taking
             // fetch*/iterate* methods, and `Doctrine\DBAL\Query\
             // QueryBuilder`'s own no-argument convenience aliases for
@@ -691,42 +711,30 @@ impl<'a> Checker<'a> {
             // so those methods only ever reach this arm via
             // `Connection`) - `resolve_dbal_sql_from_call` picks the
             // right SQL source per receiver kind.
-            Type::Object(class, type_args)
-                if matches!(
-                    method,
-                    "fetchAssociative"
-                        | "fetchAllAssociative"
-                        | "fetchOne"
-                        | "fetchFirstColumn"
-                        | "fetchNumeric"
-                        | "fetchAllNumeric"
-                        | "fetchAllKeyValue"
-                        | "fetchAllAssociativeIndexed"
-                        | "iterateAssociative"
-                        | "iterateNumeric"
-                        | "iterateKeyValue"
-                        | "iterateAssociativeIndexed"
-                        | "iterateColumn"
-                ) && (self
+            let row_type = self
+                .resolve_dbal_sql_from_call(recv, class, args, locals)
+                .and_then(|sql| {
+                    crate::checker::sql_reflection::resolve::resolve_sql_row_type(
+                        self.doctrine_entities(),
+                        self.sql,
+                        &sql,
+                    )
+                });
+            dbal_row_method_return_type(method, row_type).unwrap_or_else(|| {
+                self.generic_object_method_return_type(class, type_args, method, args, locals)
+            })
+        } else if (method == "executeQuery"
+            && (self
+                .registry
+                .is_subclass_of(class, "Doctrine\\DBAL\\Connection")
+                || self
                     .registry
-                    .is_subclass_of(class, "Doctrine\\DBAL\\Connection")
-                    || self
-                        .registry
-                        .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder")) =>
-            {
-                let row_type = self
-                    .resolve_dbal_sql_from_call(recv, class, args, locals)
-                    .and_then(|sql| {
-                        crate::checker::sql_reflection::resolve::resolve_sql_row_type(
-                            self.doctrine_entities(),
-                            self.sql,
-                            &sql,
-                        )
-                    });
-                dbal_row_method_return_type(method, row_type).unwrap_or_else(|| {
-                    self.generic_object_method_return_type(class, type_args, method, args, locals)
-                })
-            }
+                    .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder")))
+            || (method == "executeCacheQuery"
+                && self
+                    .registry
+                    .is_subclass_of(class, "Doctrine\\DBAL\\Connection"))
+        {
             // `executeQuery()`/`executeCacheQuery()` - the first hop of
             // the two-hop propagation above: carries the resolved row
             // type forward as `Doctrine\DBAL\Result`'s own synthesized
@@ -738,89 +746,31 @@ impl<'a> Checker<'a> {
             // transform at all (a plain `int|string` affected-row
             // count, already correct via `generic_object_method_return_
             // type`'s own ordinary resolution) - not handled here.
-            Type::Object(class, _)
-                if (method == "executeQuery"
-                    && (self
-                        .registry
-                        .is_subclass_of(class, "Doctrine\\DBAL\\Connection")
-                        || self
-                            .registry
-                            .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder")))
-                    || (method == "executeCacheQuery"
-                        && self
-                            .registry
-                            .is_subclass_of(class, "Doctrine\\DBAL\\Connection")) =>
-            {
-                let row_type = self
-                    .resolve_dbal_sql_from_call(recv, class, args, locals)
-                    .and_then(|sql| {
-                        crate::checker::sql_reflection::resolve::resolve_sql_row_type(
-                            self.doctrine_entities(),
-                            self.sql,
-                            &sql,
-                        )
-                    });
-                match row_type {
-                    Some(row_type) => Type::object(
-                        ("Doctrine\\DBAL\\Result".to_string()).into(),
-                        vec![row_type],
-                    ),
-                    None => Type::object(("Doctrine\\DBAL\\Result".to_string()).into(), Vec::new()),
-                }
+            let row_type = self
+                .resolve_dbal_sql_from_call(recv, class, args, locals)
+                .and_then(|sql| {
+                    crate::checker::sql_reflection::resolve::resolve_sql_row_type(
+                        self.doctrine_entities(),
+                        self.sql,
+                        &sql,
+                    )
+                });
+            match row_type {
+                Some(row_type) => Type::object(
+                    ("Doctrine\\DBAL\\Result".to_string()).into(),
+                    vec![row_type],
+                ),
+                None => Type::object(("Doctrine\\DBAL\\Result".to_string()).into(), Vec::new()),
             }
-            Type::Object(class, _)
-                if method == "query" && self.registry.is_subclass_of(class, "mysqli") =>
-            {
-                self.mysqli_query_type(args.first().map(|a| &a.value), locals)
-            }
-            Type::Object(class, type_args)
-                if class.eq_ignore_ascii_case("mysqli_result")
-                    && let Some(ty) = self.mysqli_fetch_type(
-                        method,
-                        type_args.first(),
-                        args.first().map(|a| &a.value),
-                    ) =>
-            {
-                ty
-            }
-            Type::Object(class, type_args) => {
-                self.generic_object_method_return_type(class, type_args, method, args, locals)
-            }
-            // An enum case is a real instance of its enum for
-            // method-call purposes (see `member_confirmed_missing`'s
-            // identical `EnumCase` arm) - no real template-args list to
-            // carry through, same as every other synthesized enum-
-            // instance type.
-            Type::EnumCase(fqn, _) => self
-                .registry
-                .lookup_method_with_owner(fqn, method)
-                .map(|(owner, sig)| {
-                    let resolved_args = resolve_call_args(args, sig.params());
-                    let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
-                    self.resolve_pseudo(&resolved, &owner)
-                })
-                .unwrap_or(Type::mixed()),
-            // The same shape as `property_access_type`'s own
-            // identical handling: the narrower, just-`instanceof`-checked
-            // type is always the last member `narrow_instanceof_true`
-            // puts into an `Intersection`, so members must be searched
-            // in reverse to prefer its own (possibly overriding)
-            // signature over the broader original type's.
-            Type::Intersection(members) => members
-                .iter()
-                .rev()
-                .find_map(|m| {
-                    let ty = self.method_call_return_type(recv, m, method, args, locals);
-                    (!ty.is_mixed()).then_some(ty)
-                })
-                .unwrap_or(Type::mixed()),
-            Type::Union(members) => members
-                .iter()
-                .map(|m| self.method_call_return_type(recv, m, method, args, locals))
-                .filter(|ty| !ty.is_mixed())
-                .reduce(union_types)
-                .unwrap_or(Type::mixed()),
-            _ => Type::mixed(),
+        } else if method == "query" && self.registry.is_subclass_of(class, "mysqli") {
+            self.mysqli_query_type(args.first().map(|a| &a.value), locals)
+        } else if class.eq_ignore_ascii_case("mysqli_result")
+            && let Some(ty) =
+                self.mysqli_fetch_type(method, type_args.first(), args.first().map(|a| &a.value))
+        {
+            ty
+        } else {
+            self.generic_object_method_return_type(class, type_args, method, args, locals)
         }
     }
 
@@ -924,9 +874,8 @@ impl<'a> Checker<'a> {
 /// identical "what does this uncertain-typed value become as a real PHP
 /// array key" question.
 fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<Type> {
-    let Some(Type::ArrayShape(shape)) = row_type else {
-        return None;
-    };
+    let row_type = row_type?;
+    let shape = row_type.shape()?;
     let fields = &shape.fields;
     let numeric_shape = || {
         Type::array_shape(Shape::sealed(
@@ -1058,10 +1007,10 @@ impl<'a> Checker<'a> {
     fn doctrine_dql_source(&self, dql: &Expr, locals: &Locals) -> Option<DoctrineQuerySource> {
         let dql = match literal_string_value(dql) {
             Some(s) => s.into_owned(),
-            None => match self.infer_expr(dql, locals) {
-                Type::StringLiteral(s) => s.to_string(),
-                _ => return None,
-            },
+            None => self
+                .infer_expr(dql, locals)
+                .string_literal_value()?
+                .to_string(),
         };
         crate::checker::doctrine::dql::parse_select_statement(&dql)
     }
@@ -1145,7 +1094,7 @@ impl<'a> Checker<'a> {
         } else {
             self.doctrine_query_source_of(recv, locals)
         };
-        let dml = matches!(object_row, Some(Type::Never))
+        let dml = object_row.as_ref().is_some_and(Type::is_never)
             || source.as_ref().is_some_and(|(chain, _)| chain.dml);
         if dml && method != "toIterable" {
             return Type::int_range(Some(0), None);
