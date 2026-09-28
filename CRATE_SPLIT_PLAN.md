@@ -4363,7 +4363,9 @@ The prologue, one commit each, before any rule moves:
   messages name a namespaced function by its namespaced name, as they
   already name methods: 576 of the rules oracle's phpstan-rs rows print
   `Function as_array2()` for `Bug13247\as_array2()` (`missingType.*` 522,
-  `return.unusedType` 18, `throws.*` 15, the purity rules 4).
+  `return.unusedType` 18, `throws.*` 15, the purity rules 4); an integer
+  shape offset prints as `2`, not `'2'` ("Offset '2' on array{0: string,
+  …} in isset() always exists" today).
 
 Then the sub-phases, grouped by derived node, each listing its Appendix A
 rows, and each rule's behaviour commits after its move, each with its
