@@ -1317,12 +1317,16 @@ Follow-ups:
   `subtractedType`) are variants: narrowing `mixed` away from a type keeps
   what was removed. Today `$m !== null`, `isset($m)` and `!is_int($m)` on a
   `mixed` all leave plain `mixed`, so a level-9/10 check can't see that
-  `null` is gone. A `@phpstan-sealed a|b|c` class is its permitted
-  subclasses for narrowing (validated today, oop.rs and `sealed()`, but
-  never read by inference): after `if ($s instanceof a) { return; }`, `$s`
-  is `s~a` where it stays `s` today, excluding all three leaves nothing,
-  and `match (true)` over the `instanceof` arms or `match ($s::class)`
-  over the class names is exhaustive; today each is `match.unhandled`
+  `null` is gone, and after `if ($o instanceof \Exception) { return; }` a
+  later `$o instanceof \InvalidArgumentException` isn't
+  `instanceof.alwaysFalse` (`impossible-instanceof.php:303`, `:307`,
+  `:318`, `:322`, `match-expr.php:86`, `:92`). A `@phpstan-sealed a|b|c`
+  class is its permitted subclasses for narrowing (validated today,
+  oop.rs and `sealed()`, but never read by inference): after `if ($s
+  instanceof a) { return; }`, `$s` is `s~a` where it stays `s` today,
+  excluding all three leaves nothing, and `match (true)` over the
+  `instanceof` arms or `match ($s::class)` over the class names is
+  exhaustive; today each is `match.unhandled`
   (the rules oracle's `sealed_concrete.php`, `bug-12241.php`).
 - **A conditional on a template distributes over its argument**:
   `(T is false ? never : T)` with `T` bound to `stdClass|false` is
@@ -4368,6 +4372,13 @@ fixture:
     PHPStan-only `if.alwaysTrue`: `if-condition.php`,
     `if-condition-not-phpdoc.php`, `boolean-logical-*.php`,
     `logical-xor.php`, `foreach.php`, `bug-6211.php`, `bug-8980.php`);
+  - `instanceof` is reported on a subject already `*NEVER*` (a union an
+    `elseif` chain exhausted: `if ($u instanceof Foo) {} elseif ($u
+    instanceof Bar) {} elseif ($u instanceof Lorem)` on `Foo|Bar`; 12 of
+    the rules oracle's 37 PHPStan-only `instanceof.alwaysFalse`,
+    `impossible-instanceof.php`, `boolean-*.php`, `elseif-condition.php`,
+    `if-condition.php`), and a `callable` is never an instance of a final
+    class without `__invoke()`; both unreported today;
   - `--`/`++` on a non-numeric string (`$s = 'a'; $s--;`, which PHP
     leaves unchanged), `unset()` of an undefined variable
     (`unset.variable`), `unset()` of an offset on a non-array
