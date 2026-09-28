@@ -48,7 +48,7 @@ Status: design. Nothing here is implemented.
 - **Source is sent as-is.** The user opted in, and a report that reproduces
   beats one that protects the code; nothing is anonymised, hashed or scrubbed.
   The README and the VS Code setting's description say exactly what a report
-  holds (§4.20).
+  holds (§4.21).
 - **The hostname is not sent.** The contexts integration fills `server_name`
   with it; `before_send` clears it.
 - **No report is lost to a process ending.** Every envelope is written to an
@@ -66,6 +66,19 @@ Status: design. Nothing here is implemented.
   (`ext.sql.reflection`'s `host`, `port`, `user`, `password`, `password_env`,
   `database`, `path`, `session_init_sql`) are dropped from every bundle, crash
   state and recorded command line (§4.8).
+- **Two layers, two crates.** Panic isolation (the hook, `isolated`, focus,
+  panic records, `entry`, `InternalError`) is a new low crate,
+  `crates/crash-context`, with no dependency beyond `backtrace`: the engine
+  code that calls it (`project`, and `reflection`'s load steps) moves into
+  crates below the app in the crate split (§3.5, §3.10 of
+  `CRATE_SPLIT_PLAN.md`), and must not depend on Sentry. Reporting (Sentry,
+  the outbox, bundles, the supervisor, the finisher) lives in the app crate's
+  `crash_report` module and plugs into the low crate through a `Reporter`
+  trait object that `init` registers. Without a registered reporter, the low
+  crate still records locations, backtraces and focus for internal errors.
+- **A broken pipe isn't a crash.** `phpstan-rs check-project | head` panics
+  today (§2); the CLI stops panicking there (§4.20) rather than the reporter
+  learning to ignore it.
 - **A `crash-reporting` cargo feature**, on by default, carries all of it.
   Without it `init` is a no-op and `sentry`, `reqwest`, the minidump crates
   (with `crash-handler`'s `pthread_create` interposer) and the supervisor's
@@ -141,6 +154,27 @@ Status: design. Nothing here is implemented.
   starts `phpstan-rs lsp` with no environment of its own (`extension.ts:67`);
   its settings `enable`, `serverPath` and `configPath` restart the client when
   changed (`extension.ts:133`). Nothing is on crates.io (`publish = false`).
+- **A broken stdout pipe panics.** Output goes through `println!`, which
+  panics when stdout is closed: a program printing 200,000 lines into
+  `| head -1` exits 101 with "failed printing to stdout: Broken pipe (os error
+  32)" (checked with rustc 1.100.0-nightly, 2026-09-21). `check-project`'s
+  report, `check`'s summary, `demo` and `convert-baseline` all print this way.
+- **A poisoned SQL cache cascades.** `sql::context::SqlContext::reflect`
+  (`crates/sql/src/context.rs:61,69`) takes its cache lock with
+  `lock().unwrap()`. Its critical sections are a `get` and an `insert`, which
+  can't leave the map torn, but a panic while the lock is held would poison it
+  and every later file using SQL would fail on the `unwrap`, burying the first
+  panic under a group of `PoisonError`s.
+- **Processes that run the binary:** `xtask` (gates, corpus, performance with
+  `hyperfine`, `xtask/src/main.rs:535,602,762,1033`) and the integration tests
+  (`tests/cli.rs`, `lsp_exit_code.rs`, `version.rs`) spawn `phpstan-rs` with
+  the developer's environment. `tools/gate-runner` uses the library in-process.
+  The fuzz targets call `syntax` directly and never pass through a `catch_unwind`.
+- **Terminations no handler sees:** `SIGKILL` (the OOM killer, `kill -9`, a CI
+  runner's hard stop) on every OS. On Windows, Rust's `abort` (an allocation
+  failure, a panic while panicking) uses `__fastfail`, which ends the process
+  without running exception handlers. On Linux and macOS an abort raises
+  `SIGABRT`, which `crash-handler` catches.
 - **Cache directory:** none exists yet. Stage F2 names the user cache
   directory (`$XDG_CACHE_HOME/phpstan-rs` or the platform equivalent) for the
   result cache.
@@ -196,10 +230,23 @@ Status: design. Nothing here is implemented.
 
 ## 4. Design
 
-The code lives in `crates/phpstan-rs/src/crash_report/`: `init`, `hook`,
-`internal_error`, `events`, `focus`, `bundle`, `state`, `pending`,
-`supervisor`, `outbox`, `lsp`. The `tools/crash-repro` crate uses `bundle`
-through the library.
+`crates/crash-context` (library name `crash_context`) holds `hook`,
+`isolated`, `focus`, `record` (panic records and the deferred list), `entry`,
+`internal_error` and the `Reporter` trait. `crates/phpstan-rs/src/crash_report/`
+holds `init`, `events`, `bundle`, `state`, `pending`, `supervisor`, `outbox`,
+`lsp`, and implements `Reporter`. The `tools/crash-repro` crate uses `bundle`
+through the library. Below, `crash_report::isolated` and the like name the
+re-exports the app crate keeps for its own call sites.
+
+The hook is installed on first use: `isolated`, `entry` and `focus` each
+call `crash_context::install_hook()`, a `Once`, so every user of the library
+(the binary, `tools/gate-runner`, the unit tests, `crash-repro`) gets
+locations and backtraces in its internal errors without a setup call, and
+`main` calls it too, first. The previous hook it keeps is whatever was
+installed before (std's, or libtest's capturing one in tests), so test
+output capture still works. Functions that are documented as
+panic-transparent (`Project::check_paths`, the fuzz targets' entry points)
+never pass through `isolated`.
 
 ### 4.1 Processes
 
@@ -220,7 +267,8 @@ environment, role included, so the marker must win); then
 `_PHPSTAN_RS_CRASH_ROLE`; then, with neither set, supervisor unless the first
 argument is `lsp` (the one command clap hasn't parsed yet that must not be
 supervised). Only the app installs the minidump integration; the finisher
-gets a client without it; the supervisor gets no client.
+gets a client without it; the supervisor builds one only after its worker
+ends abnormally (§4.11).
 
 Every child the plan starts (worker, finisher) gets its stdin and stdout set
 to null except the worker, which inherits the supervisor's. A detached
@@ -610,6 +658,16 @@ Every command but `lsp` runs under a supervisor when a DSN is set. The process t
 stdio, and a run id in the environment. It waits for the worker, then:
 
 - on a normal exit, exits with the worker's code;
+- after an abnormal end that left no pending report for the run (on Windows,
+  a `__fastfail` abort, exit code `0xC0000409`; anywhere, a crash the
+  reporter missed), creates one itself: a fatal event
+  "worker terminated by <signal or exception code>" with `unit = native` and
+  the run's crash state, finished like any other (§4.10), with no focus, so
+  its bundle is the manifest and config alone. Terminations from outside
+  (`SIGKILL`, `SIGTERM`, `SIGINT`, `SIGHUP`) are not reported: they are a
+  user's, a CI runner's or the OOM killer's decision, and nothing tells them
+  apart. For this the supervisor builds a client after the worker ends, only
+  when it needs one;
 - whatever the exit, checks for the run's reports: it waits until
   `reporter.lock` in the run's crash state can be taken (the reporter has
   written its pending report and gone, or never had one) and until no pending
@@ -832,6 +890,16 @@ so the user's binary doesn't carry it:
 - **Secrets:** a config with `ext.sql.reflection.password` and a `--set` of
   it produce a bundle, a crash state and a recorded command line with neither
   value in them.
+- **Broken pipe:** `check-project` over a fixture producing more output than
+  a pipe buffer, into a reader that closes after one line, exits 141 with
+  nothing on stderr and, with a DSN, sends nothing.
+- **Hygiene:** `tests/common::phpstan_rs()` run from a test process whose
+  environment has the DSN set starts a child without it; `xtask`'s command
+  builders likewise, as a unit test in `xtask`.
+- **Windows abort:** the `crash-injection` feature's abort, on the Windows
+  CI job, produces the supervisor's "worker terminated" event.
+- **SQL cache:** a panic injected while the cache lock is held leaves later
+  files' SQL reflection working.
 
 The injection hook the unit tests already use (`tests::panic_injection`)
 becomes the `crash-injection` feature's hook, compiled under
@@ -855,7 +923,36 @@ Step 3 also measures what the feature costs with no DSN: `hyperfine` on
 before and after, must agree within noise, and the commit message records the
 release binary's size before and after.
 
-### 4.20 README
+### 4.20 Broken pipes, poisoned caches and environment hygiene
+
+- **Broken pipes.** The CLI's output (`check-project`'s report in every
+  format, `check`'s summary, `demo`, `convert-baseline`) is written through a
+  locked `stdout` with `write!`, the errors propagated. A `BrokenPipe` error
+  ends the run quietly with exit code 141 (128 + `SIGPIPE`, what a shell
+  reports for a program the signal ended); any other write error is printed
+  and exits 1. This is F3's formatters writing to a `Write` (§5), pulled
+  forward for the formats that exist today. Stderr keeps `eprintln!`: a
+  closed stderr has no one to tell.
+- **Poisoned caches.** `SqlContext::reflect` takes its cache lock with
+  `lock().unwrap_or_else(PoisonError::into_inner)`: its critical sections are a
+  `get` and an `insert`, which leave the map valid whatever panicked around
+  them, so a poisoned lock holds nothing torn. The LSP's `Server` mutex keeps
+  `unwrap`: a handler that panicked mid-update can leave the server's state
+  inconsistent, and Stage F's snapshots replace the lock.
+- **Environment hygiene.** A developer who sets `PHPSTAN_RS_SENTRY_DSN` in
+  their shell must not have gate, corpus, performance or test runs supervised
+  or reported: the performance gate would time the supervisor too, and a
+  test's injected panic would reach the real server. Every place that starts
+  the binary removes `PHPSTAN_RS_SENTRY_DSN`, `PHPSTAN_RS_SENTRY_CA_FILE` and
+  every `_PHPSTAN_RS_*` variable from the child's environment: `xtask`'s
+  `binary()` and `runner()` commands, and one helper,
+  `tests/common::phpstan_rs()`, that `tests/cli.rs`, `lsp_exit_code.rs`,
+  `version.rs` and the LSP harness use in place of their own
+  `Command::new(env!("CARGO_BIN_EXE_phpstan-rs"))`. The crash-reporting tests
+  set the variables back explicitly, pointing at their test server.
+  `tools/gate-runner` never calls `init`.
+
+### 4.21 README
 
 A "Crash reporting" section, in these words:
 
@@ -898,6 +995,12 @@ Each goes in with the step that causes it (§6):
 - **F2, result cache location:** it uses `crash_report::cache_dir()` (step 3).
 - **F4, Binary:** the hidden `__crash-finish` subcommand and the supervisor
   and worker roles are part of the binary's surface.
+- **F3, ErrorFormatter set:** the existing formats write through a `Write`
+  with broken pipes ending the run quietly (step 1b); F3's formatters keep
+  that contract.
+- **§3 crate list:** `crash-context`, below `reflection` and `project`, with
+  `backtrace` its only dependency; the engine crates depend on it for
+  `isolated` and `focus`.
 
 ## 6. Order
 
@@ -906,18 +1009,23 @@ tests; the end-to-end tests run from step 8 on and again at the end.
 
 1. **Single panic hook, isolated units and internal errors** (§4.3 without
    the client paths, §4.4, §4.5 with focus), pulled forward with no Sentry
-   involved: the four swaps go, vendor discovery's with them; `entry` wraps
-   `main` and the LSP's threads; parse, facts, passes, the member-index
-   re-check and the load steps stop dropping or escaping panics; the CLI output changes (a
+   involved, in the new `crash-context` crate: the four swaps go, vendor
+   discovery's with them; `entry` wraps `main` and the LSP's threads; parse,
+   facts, passes, the member-index re-check and the load steps stop dropping
+   or escaping panics; the CLI output changes (a
    behaviour commit with its `tests/cli.rs` changes); the §5 edits for B8 and
    F1.
+   Then, each its own behaviour commit with its test: **1b** output through
+   a writer, broken pipes exiting 141 (§4.20), with the §5 edit for F3;
+   **1c** the SQL cache's poison recovery (§4.20).
 2. **Build:** `[profile.dist]`, the build-ID flags, the release workflow's
    split, strip, artifact and `upload-debug-files` job (§4.16), the secrets,
    and `docs/crash-reporting-server.md` (§4.17).
 3. **Client and outbox:** the `crash-reporting` feature and dependencies,
    roles, `init`, options, the rustls provider and CA file, the outbox
    transport and drain, `cache_dir`, `crash_report::exit`, the `SENTRY_DSN`
-   test, the no-DSN cost measurement; the §5 edit for F2.
+   test, the no-DSN cost measurement, the environment hygiene in `xtask` and
+   the tests (§4.20); the §5 edit for F2.
 4. **Events from internal errors:** grouping, fingerprint, tags, context and
    breadcrumbs, the CLI's sending and kept-for-later lines (§4.6, §4.7,
    §4.13), without bundles.
@@ -935,7 +1043,7 @@ tests; the end-to-end tests run from step 8 on and again at the end.
    session dedupe (§4.14), and its tests.
 10. **VS Code:** the setting (§4.15).
 11. **`tools/crash-repro`:** replay, reduce, fetch (§4.18).
-12. **README** (§4.20).
+12. **README** (§4.21).
 
 ## 7. Done when
 
