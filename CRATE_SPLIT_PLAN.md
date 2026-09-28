@@ -899,7 +899,13 @@ corpus, type, baseline, performance and build-time gates run locally
 3. **Tests.** The set of test names (`cargo test --workspace --all-targets
    -- --list` plus the fixture lists) must be a superset of the previous
    commit's set mapped through a committed rename/removal manifest (old →
-   new, or removed with a reason). Fixtures must match exactly.
+   new, or removed with a reason). Fixtures must match exactly. A name is
+   qualified by its package and target (`phpstan-rs-syntax lib
+   parser::tests::…`, `phpstan-rs test fixtures checker/…`): libtest's
+   `--list` prints bare names, and the gate's set holds them unqualified
+   today, so two crates' `tests::parses_x` are one entry and a test deleted
+   from one hides behind the other's. The qualified listing lands with its
+   first manifest before C4.
 4. **Corpus**, using `target/release/phpstan-rs` on the frozen Piwigo
    checkout with commands pinned in `.corpus-runs/README.md`, JSON
    normalized to one line per diagnostic (path, line, col, identifier,
@@ -7385,24 +7391,32 @@ extraction's commit (the thin-LTO profile, decided in A0, covers the rest).
 `builtins`, `rules`, the nineteen `ext-*` (one each, in E4's order), `project`,
 `testing`, `app`, `lsp`. What remains in `crates/phpstan-rs` is the binary.
 
-Each extraction is two commits (gate 11):
+Each extraction is one commit that builds and passes every gate: the modules
+move with `git mv` to `crates/<name>/src/` and are rewritten in place, and
+`git diff -M --summary` shows every moved file as a rename, since rewriting
+paths leaves a file far above git's similarity threshold. A file that falls
+below it moves first in a pure rename commit, content unchanged (gate 11),
+which doesn't build and which a bisect skips. Each module's path in the crate
+is Appendix A's module path without the package prefix that named the layer
+(`checker::unused` is `rules::unused`), unless §3 names another, and a new
+`lib.rs` declares them. The commit holds:
 
-1. **The move.** `git mv` of the crate's modules to `crates/<name>/src/`, its
-   root module becoming `lib.rs`, content unchanged. `git diff -M --summary`
-   shows every file as a 100% rename, and the commit is exempt from the build
-   gate.
-2. **The rewrite.** The crate's manifest (package `phpstan-rs-<name>`,
-   inheriting `[workspace.package]`, with `[lints] workspace = true`), its
-   `[workspace.dependencies]` alias, and its third-party dependencies moved off
-   the package's manifest by Appendix E (`cargo machete` fails on one left
-   behind); `crate::` paths rewritten to `<name>::` on both sides of the new
-   boundary; the module-graph spec's `module` rows for the crate replaced by an
-   `extern` line; `gates/test-renames` entries for every test whose path changed
-   (`phpstan_rs::checker::…` becoming `analyser::…`); intra-doc links rewritten
-   like paths (gate 1's `cargo doc` denies a broken one); the crate added to
-   gate 9's scenarios, its rebuilds recorded from then on; the hotpath label map
-   for the timing re-measurement (§2); the commit's hash in
-   `.git-blame-ignore-revs`.
+- the crate's manifest (package `phpstan-rs-<name>`, inheriting
+  `[workspace.package]`, with `[lints] workspace = true`), its
+  `[workspace.dependencies]` alias, and its third-party dependencies moved off
+  the package's manifest by Appendix E (`cargo machete` fails on one left
+  behind);
+- `crate::` paths rewritten to `<name>::` on both sides of the new boundary,
+  and intra-doc links with them (gate 1's `cargo doc` denies a broken one);
+- the module-graph spec's `module` rows for the crate replaced by an `extern`
+  line;
+- `gates/test-renames` entries for every test whose qualified name changed
+  (`phpstan-rs lib checker::unused::tests::…` becoming
+  `phpstan-rs-rules lib unused::tests::…`);
+- the crate in gate 9's scenarios, its rebuilds recorded from then on, and the
+  hotpath label map for the timing re-measurement (§2);
+- `Cargo.lock` with the new member (CI runs `--locked`), and the commit's hash
+  in `.git-blame-ignore-revs`.
 
 What an extraction checks:
 
@@ -7419,18 +7433,24 @@ What an extraction checks:
   `crash-injection` for `project`'s hook, `pcre-validate` for `builtins`); a
   `cfg(feature)` naming a feature its crate lacks is an `unexpected_cfgs` error
   under clippy's `-D warnings`.
-- **The public API** is snapshotted from the rewrite commit on (gate 14), and
+- **The public API** is snapshotted from the extraction commit on (gate 14), and
   the commit lists its difference from §3's design: an item the design names
   that the crate lacks, or one it exports that the design doesn't name.
-- **Tests.** Each `#[cfg(test)]` module moves with its module. A unit test that
-  needs a crate above its own (a checker test building a `Project`, a rule test
-  running the Session) can't compile there, since a unit test's dev-dependency
-  on a crate depending back on its own would link a second copy of it. Before
-  the extraction it becomes a fixture or a test through the crate's own API,
-  named in the rename manifest. An integration test has no such limit: it links
-  the crate's ordinary library, so a fixtures target may dev-depend on crates
-  above its own (G2).
-- **Lints**, active from the rewrite commit (§2): `missing_docs` on `analyser`,
+- **Standalone build.** The crate builds alone (gate 1's `cargo hack check
+  --workspace --no-dev-deps`), so a dependency feature it needs is in its own
+  manifest rather than unified in from another member.
+- **Tests.** Each `#[cfg(test)]` module moves with its module. A unit test may
+  dev-depend only on crates that don't depend on its own: a dev-dependency on
+  one that does links a second copy of the crate, whose types don't match the
+  test's. So `project`'s unit tests (70 today) may register `builtins`, `rules`
+  and any `ext-*`, and `lsp`'s (263) may use `app`, but an `analyser` test
+  needing a built-in's typing can't stay a unit test (169 `#[test]` sit under
+  `checker` today, its rule modules' included, each checked). Before the
+  extraction it becomes a fixture, or a test through the crate's own API, named
+  in the rename manifest. An integration test has no such limit: it links the
+  crate's ordinary library, so a fixtures target may dev-depend on crates above
+  its own (G2).
+- **Lints**, active from the extraction commit (§2): `missing_docs` on `analyser`,
   `project` and `testing`; `clippy::print_stdout`/`print_stderr` at `deny` in
   every library crate, the arch gate's `LIBRARY_CRATES` gaining the crate.
 - **Comments** follow the comment rules, as Stage B's crates did: a comment
@@ -7566,6 +7586,8 @@ paths is rewritten against the crates:
 - `editors/vscode/README.md`;
 - the `.cargo/config.toml` comment, which justifies mold and `-Z threads` by "a
   crate this large" (G4 measures what holds now);
+- the sibling plans still open (`CRASH_REPORTING_PLAN.md`, `UNSAFE_PLAN.md`,
+  `GATE_SPEED_PLAN.md`), which cite `crates/phpstan-rs/src` paths;
 - the documented test commands, the agent memory's included: the fixture
   command becomes `cargo test -p <crate> --test fixtures -- <filter>`, or
   `--lib` for white-box tests.
@@ -7600,13 +7622,14 @@ measurement.
   dependencies are within its row;
 - every Appendix A row names an existing crate, and no row's module remains
   in the package;
-- `cargo xtask gates --full` passes, with no approved delta pending, and
-  gate 14 holds a snapshot for every library crate;
+- `cargo xtask gates --full` passes, with no approved delta pending, gate 14
+  holds a snapshot for every library crate, and CI's run on the final commit
+  is green;
 - G4's build-time targets hold.
 
 The plan then folds into ROADMAP's Done section, its open items moved into
-ROADMAP's phases first, and the working documents it cites go with it once
-each open item in them has a ROADMAP phase: `CRATE_SPLIT_EVIDENCE.md` (the
+ROADMAP's phases first, and its working documents go with it once each open
+item in them has a ROADMAP phase: `CRATE_SPLIT_EVIDENCE.md` (the
 frozen copy kept to check that condensing dropped nothing),
 `CRATE_SPLIT_CAUSES.md` (Appendices G–J's generated cause lists),
 `CRATE_SPLIT_AUDIT.md` and `STAGE_B_REVIEW.md`.
