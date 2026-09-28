@@ -7877,6 +7877,9 @@ moves in the phase named.
 | fix | diagnostics (fix model) + project (apply) | B7/F1 |
 | baseline, ignore_errors, ignore_comments | project finalizer; glob util → config | F1 |
 | composer, composer/* | composer | B8 |
+| ext (`ActiveExtensions`, activation by config and installed packages) | app (extension activation, reading each extension crate's package list); assigned `root` in the module-graph spec today, a crate that doesn't exist at the end | E4 |
+| `ext/<name>` (each extension's config section and settings) | `ext-<name>`, as its crate's `lib.rs` with the registration function (G1's module paths) | C1/G1 |
+| lib.rs (the package's re-exports, `phpstan_rs::Project` and the rest) | deleted: the package has no library after G1 | G1 |
 | deps | deleted (resolved dependencies) | F2 |
 | config | config | C1 |
 | rules_settings | rules (the `[rules]` section's settings type) | C1 |
