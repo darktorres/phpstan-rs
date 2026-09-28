@@ -272,7 +272,13 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
   - float formatting.
 - **PHP versions:** `PhpVersion` plus a `PhpVersions` range, narrowable by
   `PHP_VERSION_ID` in the Scope. The default comes from composer
-  `config.platform`/`require.php`.
+  `config.platform`/`require.php`; with neither and no configured
+  version, it is PHPStan's whole supported range (`50207`–`80699`).
+  There is no unknown-version state: `Registry::php_versions` is an
+  `Option` today, and with it `None` (no `composer.json`, no
+  `--php-version`) every one of the 62 version-gated call sites is silent,
+  so `function g(int $a = 1, int $b)` isn't
+  `parameter.requiredAfterOptional`.
 - **`ExtensionTypeData`:**
   `Arc<dyn ExtensionTypeData + Send + Sync>`, with hooks for eq, hash,
   display, and payload-vs-payload subtyping taking `&dyn ClassHierarchy`.

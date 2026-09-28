@@ -5295,6 +5295,225 @@ follow-up (the config reference); E3 (the rule reference); Phase 183 and
 
 **Effort: medium** (the playground: large).
 
+## Part 16: Language versions
+
+### Phase 186 — PHP 8.6 readiness and a php-src conformance corpus (§AX)
+
+**Status: PLANNED.** PHP 8.6 is at RC2 (GA 2026-11-19). Nothing validates
+the parser against the language itself: the corpora are real-world
+libraries, with no 8.6 syntax and few grammar edge cases. php-src ships
+about 23k `.phpt` tests (22,710 with a `--FILE--` section, about 139
+expecting a parse error and 2,048 a fatal error), and nikic/PHP-Parser
+v5.9.0 (2026-09-13, the first release with 8.6 PFA) ships 180 parser
+fixture files with many cases each. Two goals: a repeatable conformance
+harness that treats a real PHP 8.6 `php -l` as the source of truth, and
+implementing what 8.6 changes.
+
+**What 8.6 changes** (a diff of `Zend/zend_language_parser.y` and
+`zend_language_scanner.l` between the PHP-8.5 and PHP-8.6 branches):
+
+- **The scanner is unchanged:** no new tokens, no new reserved words.
+- **Grammar: partial function application (PFA).** A call argument may be
+  `?`, `name: ?` or a bare `...` anywhere in the list. `foo(..., 1)`,
+  `new Foo(?)`, `$o?->f(?)`, `#[A(?)]` and `foo(?,)` all parse; the
+  compiler rejects some later. Placeholders are allowed in constant
+  expressions (`function f($a = g(?))`, `self::g(?)`), and `clone(?)`,
+  `clone($x, ?)` and `clone(...)` take the same argument path. Compile
+  errors: "Variadic placeholder must be last", "Variadic placeholder may
+  only appear once", "Cannot use positional argument after named
+  argument", "Cannot combine partial application and unpacking", "Cannot
+  create Closure for new expression".
+- **Grammar, minor:** a promoted parameter's doc comment is captured after
+  its default (`$x = 1 /** */`).
+- **Semantics only:** readonly property defaults; `#[\Override]` on class
+  constants and enum cases; writes through a constant's object
+  (`OBJ->p = 1`, `OBJS[0]->p = 1`); `__debugInfo()` on enums.
+- **Deprecations:** returning from a `finally` block; a class, interface,
+  enum or trait constant named `namespace`; calling a function `readonly`;
+  returning a value from a constructor or destructor, or making either a
+  generator; `define()` with a third argument; `?array` as
+  `__debugInfo()`'s return type; `is_a()`/`is_subclass_of()` given a
+  string when `$allow_string` is false.
+
+**1. Corpus submodules.** Each is `shallow = true` and pinned, and only
+read in place. The real PHP 8.6 decides every case's verdict, so a
+fixture set's age, dialect or target version never excludes it: a case
+valid in PHP 5 but rejected by 8.6 is exactly what to test. A fixture's
+own verdict and version marker (`min_php`, `!!version=`, a per-version
+directory) only explain `FIXTURE-DISAGREES` rows.
+
+| Submodule | Pin | Cases | Extract | Fixture's own verdict |
+| --- | --- | --- | --- | --- |
+| `vendor/php-src` | PHP-8.6 head (`php-8.6.0` at GA) | ~23k `.phpt` + 136 `*.stub.php` | `--FILE--`/`--FILEEOF--` | `--EXPECT*` starts with `Parse error`/`Fatal error` |
+| `vendor/php-parser` (nikic) | `v5.9.0` | 180 `test/code/parser/**/*.test` | split on `-----` | error lines before the AST dump; `!!version=` |
+| `vendor/tolerant-php-parser` (Microsoft) | main | 1,132 `tests/**/*.php` | whole file | a non-empty `.diag` |
+| `vendor/php-langspec` | master | 203 `tests/**/*.phpt` | `--FILE--` | as php-src |
+| `vendor/rust-php-parser` (jorgsowa) | main | 1,537 `tests/fixtures/**/*.phpt` (incl. `partial_function_application/`) + 304 printer and 29 phpdoc fixtures | `===source===` | `===config=== min_php` |
+| `vendor/php-rust-tools-parser` | last commit (archived) | 340 `tests/fixtures/*/code.php` | whole file | an `error.txt`/`parser-error.txt` sibling |
+| `vendor/pxp` | main | 264 `crates/parser/tests/**/*.php` | whole file | none |
+| `vendor/rphp` | main | 528 parser/tokenizer `.php` + 419 `examples/**/*.php` | whole file | none |
+| `vendor/tree-sitter-php` | master | 13 `test/corpus/*.txt` | the code between the `===` title and `---` | an `(ERROR`/`(MISSING` node |
+| `vendor/mago` | main | 4,014 `crates/*/tests/**/*.{php,inc}` | whole file | none |
+| `vendor/prettier-plugin-php` | main | 436 `tests/**/*.php` | whole file | none |
+| `vendor/php-codesniffer` | 4.x | tokenizer `.inc` cases + every sniff's `*.inc` | whole file | none |
+| `vendor/phan` | v6 | 2,203 `tests/**/*.php`, incl. 165 broken `tests/misc/fallback_ast_src` | whole file | none |
+| `vendor/php-ast` (nikic) | master | 97 `tests/*.phpt` | `--FILE--`, plus the code passed to `ast\parse_code()` | as php-src |
+| `vendor/eclipse-pdt` | master | 3,280 `.pdtt` | `--FILE--` | the `errors/` directory, `--EXPECT--` problems |
+| `vendor/peachpie` | master | 529 `tests/**/*.php` + `src/Tests/**/*.php` | whole file | the diagnostic tests' expected-diagnostic comments |
+| `vendor/kphp` | master | 2,417 `tests/phpt/**/*.php` | whole file minus the `@ok`/`@kphp_should_fail` header | the header tags |
+| `vendor/semgrep` | develop | 15 `tests/parsing/php/*.php` + 68 `tests/patterns/php/*.php` | whole file | none |
+| `vendor/grammars-v4` (antlr) | master | 63 `php/examples/*.php` | whole file | none |
+
+PHP embedded in other languages' tests, each with its own string-literal
+extractor, one case per file as `<source>/<file>#<n>.php`:
+
+| Submodule | Pin | Where the PHP is | Extract |
+| --- | --- | --- | --- |
+| `vendor/glayzzle-php-parser` | main | 183 files under `test/`, `parser.parseEval("…")`/`parseCode(`…`)` | JS string or template literal, prefixed with `<?php` and a space for `parseEval`; `suppressErrors: true` marks an expected error |
+| `vendor/z7zmey-php-parser` | master | `internal/php{5,7}/parser_test.go`, `internal/scanner/scanner_test.go` | Go raw strings assigned to `src` |
+| `vendor/vkcom-php-parser` | master | `internal/php{5,7,8}/parser*_test.go`, `scanner*_test.go` | as z7zmey |
+| `vendor/wudi-php-parser` | master | 268 `tests/*.rs` | `b"…"`/`r#"…"#` bound to `src`; `errors.len() == 0`/`> 0` is the verdict |
+| `vendor/phply` | master | `tests/test_parser.py`, `test_lexer.py` | Python `"""…"""` bound to `input` |
+
+Left out: Semgrep's `tests/patterns/php/*.sgrep` (search patterns with
+metavariables, not PHP); the `.php` targets beside them are in.
+
+**2. `cargo xtask conformance`**, next to `corpus`/`compare`, reusing
+their helpers and the `target/gate/phpstan-rs` binary:
+
+- **Extract** into `.corpus-runs/conformance/cases/<source>/`
+  (gitignored), one extractor per source behind a `Source` trait (`name`,
+  `cases() -> (path, bytes, Option<fixture verdict>, ini flags)`).
+  php-src: the `--FILE--`/`--FILEEOF--` section as raw bytes (some tests
+  aren't UTF-8), `--FILE_EXTERNAL--` resolved relative to the test,
+  `--INI--` kept as `-d` flags, `--REDIRECTTEST--` skipped; all 136 stubs
+  must be accepted. Multi-case files are written one case per file as
+  `<fixture>#<n>.php`, every case running, versioned ones included.
+  `--source <name>` limits a run.
+- **Oracle:** one `docker run --rm -v cases:/c:ro php:<tag>` running
+  `php -l` over every file in parallel with its `-d` flags; the tag
+  defaults to `8.6.0RC2-cli` (`--php-image`). Per file: accept,
+  parse-error or compile-error, plus the first message. Cached at
+  `.corpus-runs/conformance/oracle/<php-src-hash>-<tag>.txt`, since it
+  doesn't depend on our commit.
+- **Ours:** `phpstan-rs check <cases>` (`main/check.rs` is already a
+  threaded, panic-catching, parse-only harness).
+- **Classify** into `.corpus-runs/conformance/<commit>.txt` (`LC_ALL=C`
+  sorted): `REJECTS-VALID` (a parser bug), `CRASH` (a panic or stack
+  overflow), `ACCEPTS-PARSE-ERROR` (too permissive),
+  `ACCEPTS-COMPILE-ERROR` (checker candidates, informational),
+  `FIXTURE-DISAGREES` (informational).
+- **Gate:** non-zero exit when `REJECTS-VALID` or `CRASH` has an entry
+  outside `gates/conformance-allowlist.txt`, each allowlisted with a
+  one-line reason (`Zend/tests/stack_limit/*` depth tests, tests depending
+  on `zend.multibyte`/`declare(encoding)` or `short_open_tag`,
+  `__halt_compiler()` payload tests). `--against <commit>` diffs with an
+  earlier snapshot, like `compare`.
+
+**3. Baseline run and parser fixes.** Run it on the current grammar before
+any 8.6 work. Every `REJECTS-VALID` or `CRASH` that isn't a placeholder
+test is an existing parser bug, fixed in the syntax crate one commit per
+root cause with a regression test in `crates/syntax/src/parser/tests/`;
+genuinely too-permissive `ACCEPTS-PARSE-ERROR` entries follow. Its size is
+unknown until the first run; triage the buckets before estimating. It
+overlaps crate-split Stage B's parser behaviour fixes (precedence,
+keyword case, shebang, interpolation, integer literals), which it
+confirms or extends.
+
+**4. PFA in the syntax crate.**
+
+- **AST:** `ExprKind::ArgPlaceholder` (`?`) and
+  `ExprKind::VariadicPlaceholder` (a bare `...` not alone), only ever an
+  `Arg.value`; `ExprKind::PartialApplication(Box<Expr>)` wrapping a
+  `Call`/`MethodCall`/`NullsafeMethodCall`/`StaticCall`/`New` whose
+  arguments contain a placeholder, as `FirstClassCallable` wraps one, so
+  placeholders stay out of every ordinary-call checker path. `f(...)`
+  alone stays `FirstClassCallable` (equivalent under the RFC).
+- **Parser:** `parse_args` (`parser/postfix.rs`) accepts `?`, `name: ?`
+  and a bare `...` anywhere and returns
+  `CallForm { Plain, FirstClassCallable, Partial }` instead of a `bool`;
+  its call sites follow (calls in `postfix.rs`, `new` and `clone(...)` in
+  `primary.rs`, attribute arguments in `tokens.rs`, anonymous-class
+  arguments in `classes.rs`). Constant expressions need nothing extra.
+- Also the printer (round trip), `Visitor` (walk the inner call) and name
+  resolution.
+- **Tests:** every form in php-src's `Zend/tests/partial_application/` and
+  PHP-Parser's `partialFunctionApplication.test`; the harness's 147
+  `partial_application` tests leave `REJECTS-VALID`.
+- It lands on the finished typed AST (crate-split Stage B's follow-ups),
+  so the new variants are written once.
+
+**5. PFA in the checker.**
+
+- **Version gate:** `PhpFeature::PartialFunctionApplication` (8.6) in
+  `types/php_version.rs`, reported like `FirstClassCallables`.
+- **Compile errors** (non-ignorable, a rule module under `checker/calls/`):
+  a variadic placeholder not last or repeated, positional after named, a
+  placeholder with `...$spread`, `new` or nullsafe (`Cannot create Closure
+  for new expression`), placeholders in a language-construct call
+  (`compact`, `extract`, `func_get_args`), a named placeholder for an
+  unknown or already-bound parameter.
+- **Typing:** `PartialApplication` infers a `Closure` shape from the
+  callee's signature: the placeholders' parameters in order (named ones
+  reordered per the RFC), a trailing `...` keeping the rest (optional and
+  variadic parameters included), and template bindings from the pre-bound
+  arguments applied as `FirstClassCallable`'s resolution does.
+- **Callbacks:** the same resolution covers `array_map(f(1, ?), …)` and
+  `|> f(?, 2)` (`checker/pipe_operator.rs`).
+- **Arguments:** pre-bound arguments are checked against their parameters
+  like an ordinary call, placeholder slots skipped; they evaluate eagerly.
+- **Tests:** fixtures under `tests/fixtures/checker/closures_and_callables/`
+  with `assertType`.
+
+**6. Other 8.6 semantics.**
+
+- **Readonly defaults:** "Readonly property cannot have a default value."
+  (`checker/oop/property_declarations.rs`) gated on
+  `PhpFeature::ReadonlyPropertyDefaults` (8.6); still reported below 8.6
+  and with no version set.
+- **`#[\Override]` on constants and enum cases:** "X::C has #[\Override]
+  attribute, but no matching parent constant exists", modelled on the
+  property rule (`checker/oop/property_overrides.rs`), gated at 8.6, with
+  the removal fix.
+- **Writes through a constant's object** (`OBJ->p = …`, `OBJS[0]->p = …`,
+  `??=`, `++`, `unset`, by reference): not reported from 8.6; probe first.
+- **`__debugInfo()` on enums:** allowed from 8.6; probe whether it's
+  rejected today.
+- **Deprecations:** each a version-gated report with php-src's message
+  text, one commit each.
+- **Promoted-parameter PHPDoc:** a `/** */` after `= default` attaches to
+  that parameter, not the next.
+
+**7. Fuzz seeding.** `fuzz/seed_corpus.sh` also seeds from the extracted
+`.corpus-runs/conformance/cases/` when present: far denser in edge cases
+than library code.
+
+**8. Checker smoke run over the case corpus.** `check-project
+--no-composer` over every oracle-accepted case, with 8.6 as the PHP
+version. A panic, stack overflow or timeout on any file is a bug, one
+commit each. Phan's `tests/files` (1,362 cases with `.expected`), mago's
+analyzer cases and PeachPie's diagnostic tests state what their authors
+consider errors; where they and we disagree, what the code does at runtime
+decides, with `php` in the RC2 image as ground truth. Matching their
+messages is not a goal; every false positive or missed runtime error found
+is. Snapshot at `.corpus-runs/conformance-check/<commit>.txt` (`LC_ALL=C`
+sorted), for later diffs.
+
+**Verification:** per step, fmt, clippy and the touched module's tests
+(the syntax crate's parser tests for steps 3–4, the touched fixture
+directories for 5–6); `cargo xtask conformance` passes and its snapshot
+is kept by commit, diffed against step 3's baseline so the counts only
+move the right way; `cargo xtask corpus` + `compare` after steps 3, 4 and
+5–6; PFA probes spot-checked with `php -r` in the RC2 image against the
+inferred Closure types.
+
+**Depends on:** Docker and the `php:8.6.0RC2-cli` image (re-pinned to
+`8.6.0` at GA); step 4 on crate-split Stage B's typed-AST follow-ups;
+steps 5–6 go into today's checker modules and move with them in Stages D
+and E.
+
+**Effort: large** (step 3's size is unknown until the first run).
+
 ---
 
 # Known limitations
