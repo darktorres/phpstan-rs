@@ -6451,7 +6451,10 @@ stdio.
   two spellings of one file are one file. A deleted directory removes every file
   under it: a client may report a folder's deletion as one event for the folder,
   and `handle_watched_files_changed` passes that path to `remove_file`, which
-  removes nothing, so the folder's files stay analysed and published.
+  removes nothing, so the folder's files stay analysed and published. Contents
+  are read when needed and kept only for overlays and the files a request is
+  working on, with each file's line index; today `retain_source` keeps every
+  loaded file's text for the whole LSP session, vendor context included.
 - **Panic isolation, on the pool.** Every parse and check runs on the process's
   worker pool (`project::worker_pool`, 64 MiB stacks) under `catch_unwind`, and
   a panic becomes that file's internal error. That covers the batch run and, in
@@ -6481,10 +6484,12 @@ stdio.
   published snapshot (C4) while an update builds the next, so hover and
   completion stop waiting behind a recheck that holds the `Server` lock
   (`DebounceHandle`'s documented trade-off). A file that stops parsing keeps its
-  last good AST and declarations for navigation and for its dependents, as
-  `update_file` already does by parsing before it unindexes, while its parse
-  error is published (below). `reconfigure` rebuilds registrations and the file
-  set and reuses unchanged reflection and stub layers: today
+  last good AST, as `update_file` already does by parsing before it unindexes,
+  while its parse errors are published (below); once the parser recovers
+  (below), a declaration the recovered tree still holds is read from it and one
+  the error swallowed keeps its last good version, so the file's dependents
+  don't flood with errors mid-edit. `reconfigure` rebuilds registrations and the
+  file set and reuses unchanged reflection and stub layers: today
   `reload_configuration` applies settings but can't change the loaded files
   (`Project` has no unload), so a changed `scan_paths`, `stub_paths` or
   `no_composer` only logs "reload the window". Changes to `composer.json`,
@@ -6495,7 +6500,11 @@ stdio.
   share the worker pool and C5's version-keyed stub layer, so a second root
   costs its own files, not another copy of the stubs. Today `root`, `baseline`,
   `ignore_error_entries`, `level_cutoff` and the project's settings are
-  last-root-wins across folders.
+  last-root-wins across folders. A file opened outside every workspace folder
+  gets a Session rooted at its nearest ancestor holding a config file or
+  `composer.json`, else one for the file alone with the default settings; today
+  it joins the one `Project` with whatever the last root configured, or with no
+  configuration when no folder is open.
 - **The workspace load runs as the CLI's does**: parsed in parallel on the
   pool, context files first, reported through `$/progress`. Today
   `load_workspace_files` parses each file in turn on the main thread inside the
@@ -6550,6 +6559,13 @@ Behaviour commits, one each with its fixture:
   sends only a `window/logMessage`, so a syntax error never reaches the Problems
   panel. A context file that fails to parse is a warning. Lexer warnings are
   non-ignorable file errors (§3.10).
+- **The parser recovers.** It resynchronizes at statement and class-member
+  boundaries and returns the recovered tree with every error, where
+  `parse_program` returns the first error alone today. Every error is reported;
+  a file with parse errors is still not analysed (its findings would be noise);
+  and reflection and navigation read the recovered declarations, so a method
+  added above a syntax error resolves at once, where the last good AST alone
+  keeps the file's state from before the edit.
 - **Internal errors are reported in every format** and fail the run, with a
   note that the result is incomplete; the JSON, checkstyle and JUnit formats
   drop `check_panics` today.
@@ -6560,7 +6576,14 @@ Behaviour commits, one each with its fixture:
   paths are `../src/…`.
 - **Non-ignorable errors bypass the baseline**: `entries_for` writes them into
   a generated baseline, and `baseline::filter` suppresses them (it has no
-  `non_ignorable` check; `ignore_errors::filter` has one).
+  `non_ignorable` check; `ignore_errors::filter` has one). Generation reports
+  how many it left out.
+- **Only an analysed file's baseline entries can be stale.** `baseline::filter`
+  reports every entry left unmatched, so checking one file of a baselined
+  project calls every other file's entries stale: after a baseline of `src`,
+  `check-project --baseline bl.json src/a.php` reports `src/b.php`'s entry "no
+  longer matches any diagnostic". As §3.10 has for `ignore_errors` path entries,
+  an entry counts as unmatched only when its file was analysed.
 - **A baseline that can't be loaded fails the run** (today the error is printed
   and the run reports unfiltered, exit 0). A clean run's `--generate-baseline`
   writes an empty baseline, a valid result; paths that match nothing already
@@ -6603,6 +6626,10 @@ Behaviour commits, one each with its fixture:
   indistinguishable from "nothing here"). `lsp` accepts `--stdio`, which generic
   clients (a `vscode-languageclient` using `TransportKind.stdio`) append; the VS
   Code extension omits it today to avoid clap's rejection.
+- **An ignore code action**: every ignorable diagnostic offers "Ignore
+  `<identifier>` on this line", adding the identifier to a `@phpstan-ignore`
+  comment on the line (or the line above), extending one already there;
+  non-ignorable ones don't.
 - **Pull diagnostics.** A client offering `textDocument/diagnostic` and
   `workspace/diagnostic` pulls them, with `interFileDependencies` and
   `workspace/diagnostic/refresh` after an update changes other files' results;
@@ -6636,7 +6663,8 @@ the whole registry (§1), which C4's memo already removes.
   existence checks probe (`includes.rs`); and, for a trait's host, the trait's
   file, since the trait's methods are analysed in the host. A name that didn't
   resolve stays an edge, so a file created later that declares it rechecks its
-  readers. `deps.rs`, `Project::dependents`, `register_references`,
+  readers, and a deleted file's readers are rechecked and its cache entry
+  dropped. `deps.rs`, `Project::dependents`, `register_references`,
   `transitive_affected_files`, `transitive_affected_files_from` and `bare_name`
   are deleted.
 - **Fingerprints.** A file's exported fingerprint covers everything another
