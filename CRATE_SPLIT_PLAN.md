@@ -6650,6 +6650,14 @@ Behaviour commits, one each with its fixture:
   summary counts only what applied), and the fixed files are analysed again and
   fixed again until no fix applies, a fix exposed by another landing in the same
   run; the exit code reflects what remains.
+- **Deep nesting works on any thread.** The parser's recursive productions, the
+  analyser's expression and statement handlers and the type operations over
+  nested types grow the stack on demand (`stacker::maybe_grow` at each recursion
+  point), and `MAX_EXPR_DEPTH` goes with the `ParseError` B made of it: PHP
+  parses 2,000 nested arrays, where phpstan-rs reports 400 as a parse error
+  today (unreported, like every parse error), and the pool's 64 MiB stays a
+  throughput choice, not what correctness rests on. D3's iterative binary chains
+  stay.
 - **LSP positions follow the negotiated encoding.** A `Span` column counts code
   points. The server announces `utf-8` whenever the client offers it and
   otherwise leaves UTF-16, but sends code-point columns either way
@@ -6660,18 +6668,20 @@ Behaviour commits, one each with its fixture:
   preferred, then UTF-32, UTF-16 otherwise) and replaces `diagnostics::fix`'s
   `byte_offset` rescan of the source. Text sync becomes incremental, the edits
   applied to the overlay through the same index (full-document sync today).
+- **An edit's text applies at once; only its recheck waits.** `didChange`
+  updates the overlay and its line index immediately, and the debounce delays
+  only the analysis. Today the text itself waits: `queue_change` only queues it,
+  and `latest_text` is written by `handle_debounced_change` after the 200 ms
+  window. So a completion request, which a client sends the moment `>` is typed,
+  reads the text from before the `->`, and a hover or definition inside the
+  window maps the new position onto the old text. A request on a document with
+  an unanalysed change runs that document's recheck first (the edited file is
+  checked first anyway, above) or answers from the snapshot with positions
+  mapped through the pending edits.
 - **`didClose` restores the file's disk content**, or removes the file when
   none exists (an unsaved new file). It is a no-op today, so a file closed
   without saving keeps being analysed, and its dependents checked, against text
   that exists nowhere.
-- **Deep nesting works on any thread.** The parser's recursive productions, the
-  analyser's expression and statement handlers and the type operations over
-  nested types grow the stack on demand (`stacker::maybe_grow` at each recursion
-  point), and `MAX_EXPR_DEPTH` goes with the `ParseError` B made of it: PHP
-  parses 2,000 nested arrays, where phpstan-rs reports 400 as a parse error
-  today (unreported, like every parse error), and the pool's 64 MiB stays a
-  throughput choice, not what correctness rests on. D3's iterative binary chains
-  stay.
 - **LSP protocol conformance.** A request before `initialize` answers
   `ServerNotInitialized` and one after `shutdown` `InvalidRequest`; a request
   whose params don't deserialize answers `InvalidParams` (today each handler's
@@ -6692,185 +6702,6 @@ Behaviour commits, one each with its fixture:
   workspace's config names (ext-sql's live reflector reads the DDL schema only)
   and says so once. Today opening a repository whose `phpstan-rs.toml` names a
   database connects to it with the credentials in the file.
-- **An edit's text applies at once; only its recheck waits.** `didChange`
-  updates the overlay and its line index immediately, and the debounce delays
-  only the analysis. Today the text itself waits: `queue_change` only queues it,
-  and `latest_text` is written by `handle_debounced_change` after the 200 ms
-  window. So a completion request, which a client sends the moment `>` is typed,
-  reads the text from before the `->`, and a hover or definition inside the
-  window maps the new position onto the old text. A request on a document with
-  an unanalysed change runs that document's recheck first (the edited file is
-  checked first anyway, above) or answers from the snapshot with positions
-  mapped through the pending edits.
-- **One position query.** Hover, definition, highlight, signature help and
-  completion find what is at a position through one node-at-position query over
-  the `Visitor` (the innermost node with its ancestor chain) on the recovered
-  tree, answered from the analyser's resolved names and types. It replaces the
-  hand-written per-statement walkers each keeps today (`navigation::Walker`,
-  whose `collect_all` also serves highlights, `signature_help`'s own walker and
-  completion's token scan), which the module docs say are "Structured after (not
-  sharing code with)" `deps.rs` and each other, so a node one of them doesn't
-  descend into is invisible to that feature alone. The use-site index is E1's
-  reference-site collector (Appendix A).
-- **References are complete; rename touches only what it may rewrite.** Targets
-  are keyed by C4's folded names, so `new foo()` is a reference to `App\Foo`:
-  today the index keys each site by the name as written, and a differently cased
-  spelling is neither found by references nor rewritten by rename. `self::`,
-  `static::` and `parent::` sites are references to their class, listed by
-  references and highlights but marked read-only for rename, which keeps them as
-  written; today `use_sites::resolve_class_ref` drops them from the index
-  altogether, so references to `Foo` miss every `self::` in its body and every
-  `parent::` in its subclasses.
-- **Navigation resolves the member kind the syntax names.** `Foo::X` is a
-  constant, `Foo::x()` a method and `Foo::$x` a property, separate namespaces in
-  PHP; today `Resolved::Member` carries no kind and the caller tries a method,
-  then a property, then a constant, so in a class declaring both `x()` and
-  `const x`, definition and hover on `Foo::x` go to the method.
-- **Hover shows the declaration**, as Markdown when the client's
-  `hover.contentFormat` accepts it: the declaration written as PHP (modifiers,
-  templates, parameters with their native and PHPDoc types and defaults, the
-  return type), a constant's or enum case's value, the doc comment's description
-  with its `@deprecated` and `@throws` tags, and where the symbol comes from
-  (the project, a composer package, a built-in). Today it is a bare
-  `MarkedString::String` (`class App\Foo extends Base`, `Foo::X: int`) with
-  nothing from the doc comment.
-- **Definition reaches every declaration.** A name several files declare (a
-  polyfill beside the built-in, conditional declarations, the duplicates C4's
-  collision policy merges) answers each site, and a built-in's or embedded
-  stub's declaration opens as a read-only document under a `phpstan-rs-stub:`
-  URI (LSP 3.18's `workspace/textDocumentContent`, and the VS Code extension's
-  content provider for older clients). Today `class_declaration` and
-  `function_declaration` answer only an `Origin::File`, so definition on
-  `DateTime` or `array_map` answers nothing, and a name declared twice answers
-  one site.
-- **Navigation covers every name.** Definition, type definition, hover,
-  document highlight, references and rename resolve a name in a PHPDoc type
-  (C7's name scope: `@param`, `@var`, `@return`, `@throws`,
-  `@extends`/`@implements`/`@use` arguments, `@method`, `@property`, `@mixin`,
-  template bounds) and in a `use` import as they do one in code. Today, in a
-  file with `use App\Foo;` and `/** @param Foo $f */`, definition and hover
-  answer `null` on both, and references to `App\Foo` list neither.
-- **Rename produces code that still resolves.**
-  - Each site is rewritten in its written form. A fully-qualified or
-    namespace-relative name keeps its qualifier; a name reached through an
-    import renames the import, and the uses under an alias stay; a name in its
-    own namespace renames its last segment. Today every site is replaced by the
-    bare new name: renaming `App\Foo` to `Bar` turns `\App\Foo` in
-    `namespace Other` into `Bar`, which resolves to `Other\Bar`, and leaves
-    `use App\Foo;` pointing at nothing while `b(Foo $g)` becomes an unimported
-    `b(Bar $g)`.
-  - A rename that would collide with a name already declared or imported in a
-    file is refused, naming the file.
-  - The new name is checked as an identifier PHP accepts for that kind of
-    symbol (`1 bad` is applied as is today, and a class can't be named `self`,
-    `int` or another reserved name).
-  - `prepareRename` answers the range and placeholder, and refuses a symbol
-    declared in a stub or a context file, whose rename would edit vendor code
-    (`method not found` today).
-  - Methods, properties, class constants and enum cases rename through the
-    member index, across the hierarchy (an interface method with its
-    implementations and overrides, a `@method` or `@property` tag with its
-    uses); today a member rename returns `null`. Local variables and parameters
-    rename within their function, a parameter's named arguments at its call
-    sites included.
-  - A class whose file is named after it under a PSR-4 root renames the file
-    too, when the client supports resource operations.
-  - The edit is a versioned `documentChanges` edit, so a client rejects it
-    against a document that changed since, where today it is an unversioned
-    `changes` map.
-- **Completion reads the scope at the cursor.** It asks the Session for the D6
-  scope at the position in the recovered tree, where today `lsp/completion.rs`
-  re-lexes the live buffer, finds the enclosing function by name, clones its
-  last good body, truncates it at the edit line and splices in a probe
-  statement. In `function use_it(Shape $s, Circle $c)`, `$c->` offers nothing,
-  as does `$c->a` (unedited, just edited and half typed alike), and `Circle::`
-  offers `__construct` and the instance method `area`, both of which throw an
-  `Error` when called statically, but not `class`. The target:
-  - `->` offers the instance members visible from the calling scope (a private
-    one only inside its class, a protected one inside the hierarchy),
-    `@method`/`@property` tags and mixins included;
-  - `::` offers static methods, static properties, constants, enum cases and
-    `class`, with `parent::`/`self::` also reaching the parent's instance
-    methods, as PHP allows;
-  - the names after `new`, `instanceof`, `extends`, `implements`, `catch` and
-    type positions are class-likes of the fitting kind, with the auto-import
-    edit the bare completion already makes;
-  - a call's argument list offers its parameters' names for named arguments,
-    and `$` offers the variables defined at that point.
-- **Signature help shows the whole signature**, callable-typed values included
-  (`$cb(` on a `Closure(int $n): void`, a first-class callable, an invokable
-  object's `__invoke`, which have no signature to show today since only a named
-  callee resolves): default values, by-reference and variadic markers and the
-  PHPDoc types (`make(float $radius, bool $cached)` for `bool $cached = false`
-  today), the active parameter following named arguments as well as positions,
-  and every variant of a function C6 keeps several of.
-- **Hover at a write shows the written value's type**: on `$x` in
-  `$x = make(2.0, true);` it answers `mixed` today, while the inlay hint on the
-  same `$x` says `App\Circle`.
-- **Semantic tokens classify every resolved name**: namespaces, classes,
-  interfaces, enums and enum cases, traits, templates as type parameters,
-  functions, methods, properties, constants, parameters and variables, with the
-  `declaration`, `static`, `readonly`, `abstract`, `deprecated`, `internal` and
-  `defaultLibrary` (a built-in) modifiers, served for a range and as deltas too.
-  Today a token exists only for a deprecated or internal usage (E's shared
-  predicate widens which), so a file using neither answers `{"data": []}` and
-  the editor keeps its grammar's guesses (a constant and a class look alike
-  after `::`).
-- **Quick fixes follow §3.7's fix list**: each of a diagnostic's fixes is its
-  own action, the first preferred, and a fix editing several places (an import
-  added beside the use it enables) is one edit. Today `Diagnostic.fix` is an
-  `Option`, so a diagnostic offers at most one single-edit action, always marked
-  preferred.
-- **The outline is complete**: promoted constructor properties are listed as
-  the class's properties (`private float $r` in `__construct` is missing today),
-  and declarations below the top level (C4's indexed ones in function bodies,
-  `try` and `switch`) are listed where they sit; today only `if` and block
-  nesting is followed.
-- **Hierarchy navigation**: `textDocument/implementation` (an interface's or
-  abstract method's implementations, a class's subclasses), `typeHierarchy`
-  (supertypes and subtypes) and `callHierarchy` (callers and callees), answered
-  from reflection's `ClassHierarchy` and E1's reference-site collector; none is
-  served today. `workspace/willRenameFiles` renaming a PSR-4 class's file offers
-  the class rename (above) as its edit.
-- **Inlay hints come once per site, from the final pass.**
-  `inlay_param_name_hints` and `inlay_local_type_hints` are pushed on every
-  walk: each of a loop body's convergence passes (up to six), the quiet pre-pass
-  over a `while` or `for` condition, and each host of a trait method. Nothing
-  drops the earlier walks' hints the way `converge_loop_body` truncates their
-  diagnostics, and `filter_to_range` doesn't deduplicate, so a `$x = f();`
-  inside a loop gets one type hint per pass, each with that pass's intermediate
-  type. With E6's observers they come from the kept walk's events only, a trait
-  method's merged across its hosts.
-- **Inlay hints say what the text doesn't.** No parameter-name hint on an
-  argument that is a variable of the parameter's name (`make($radius)`), and no
-  type hint where the right side is a literal or a `new Foo` (today every
-  non-`mixed` assignment gets one); names print as the file imports them
-  (`Circle`, not `App\Circle`), the full name in the tooltip and the label part
-  linking to the declaration; a by-reference parameter's hint reads `&name:`;
-  and type hints also cover `foreach` keys and values, `list()`/`[...]`
-  destructuring, `catch` variables and untyped closure and arrow-function
-  parameters, where today only an assignment statement's plain variable gets
-  one.
-- **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
-  the document at once, which editors can run on save; today each quick fix is
-  offered alone.
-- **An ignore code action**: every ignorable diagnostic offers "Ignore
-  `<identifier>` on this line", adding the identifier to a `@phpstan-ignore`
-  comment on the line (or the line above), extending one already there;
-  non-ignorable ones don't.
-- **Pull diagnostics.** A client offering `textDocument/diagnostic` and
-  `workspace/diagnostic` pulls them, with `interFileDependencies` and
-  `workspace/diagnostic/refresh` after an update changes other files' results;
-  push stays for the rest.
-- **Diagnostics carry what the protocol has fields for**:
-  `DiagnosticTag::Deprecated` on the deprecation rules' findings and
-  `Unnecessary` on dead and unused code (identifiers declared with the tag by
-  their rules), and a finding naming other sites (a duplicate declaration's
-  other declarations, a namespace cycle's edges) lists them as
-  `relatedInformation`, where today they are text in the message;
-  `codeDescription` links each identifier to its page in the rule reference
-  (ROADMAP Phase 185), and the tip is a `relatedInformation` entry at the
-  finding's own span instead of being appended to the message text.
 
 **F2. Result cache and dependencies.** Today nothing persists between runs, and
 the LSP's invalidation is syntactic. `deps.rs` collects the names a file spells
@@ -7081,6 +6912,184 @@ on.
 - `tests/cli.rs` covers every format's output and exit code on a fixture tree
   holding a finding, a parse error, an internal error (the panic-injection hook)
   and a warning.
+
+**F5. Language features**, on F1's Session and snapshots, F2's dependency graph,
+E1's reference-site collector and E6's observers, each its own commit with its
+`lsp/tests` cases (the harness driving the Session in LSP mode) and held to gate
+7. The structural query first:
+
+- **One position query.** Hover, definition, highlight, signature help and
+  completion find what is at a position through one node-at-position query over
+  the `Visitor` (the innermost node with its ancestor chain) on the recovered
+  tree, answered from the analyser's resolved names and types. It replaces the
+  hand-written per-statement walkers each keeps today (`navigation::Walker`,
+  whose `collect_all` also serves highlights, `signature_help`'s own walker and
+  completion's token scan), which the module docs say are "Structured after (not
+  sharing code with)" `deps.rs` and each other, so a node one of them doesn't
+  descend into is invisible to that feature alone. The use-site index is E1's
+  reference-site collector (Appendix A).
+
+Then the features:
+
+- **Navigation covers every name.** Definition, type definition, hover,
+  document highlight, references and rename resolve a name in a PHPDoc type
+  (C7's name scope: `@param`, `@var`, `@return`, `@throws`,
+  `@extends`/`@implements`/`@use` arguments, `@method`, `@property`, `@mixin`,
+  template bounds) and in a `use` import as they do one in code. Today, in a
+  file with `use App\Foo;` and `/** @param Foo $f */`, definition and hover
+  answer `null` on both, and references to `App\Foo` list neither.
+- **Navigation resolves the member kind the syntax names.** `Foo::X` is a
+  constant, `Foo::x()` a method and `Foo::$x` a property, separate namespaces in
+  PHP; today `Resolved::Member` carries no kind and the caller tries a method,
+  then a property, then a constant, so in a class declaring both `x()` and
+  `const x`, definition and hover on `Foo::x` go to the method.
+- **Definition reaches every declaration.** A name several files declare (a
+  polyfill beside the built-in, conditional declarations, the duplicates C4's
+  collision policy merges) answers each site, and a built-in's or embedded
+  stub's declaration opens as a read-only document under a `phpstan-rs-stub:`
+  URI (LSP 3.18's `workspace/textDocumentContent`, and the VS Code extension's
+  content provider for older clients). Today `class_declaration` and
+  `function_declaration` answer only an `Origin::File`, so definition on
+  `DateTime` or `array_map` answers nothing, and a name declared twice answers
+  one site.
+- **Hover shows the declaration**, as Markdown when the client's
+  `hover.contentFormat` accepts it: the declaration written as PHP (modifiers,
+  templates, parameters with their native and PHPDoc types and defaults, the
+  return type), a constant's or enum case's value, the doc comment's description
+  with its `@deprecated` and `@throws` tags, and where the symbol comes from
+  (the project, a composer package, a built-in). Today it is a bare
+  `MarkedString::String` (`class App\Foo extends Base`, `Foo::X: int`) with
+  nothing from the doc comment.
+- **Hover at a write shows the written value's type**: on `$x` in
+  `$x = make(2.0, true);` it answers `mixed` today, while the inlay hint on the
+  same `$x` says `App\Circle`.
+- **References are complete; rename touches only what it may rewrite.** Targets
+  are keyed by C4's folded names, so `new foo()` is a reference to `App\Foo`:
+  today the index keys each site by the name as written, and a differently cased
+  spelling is neither found by references nor rewritten by rename. `self::`,
+  `static::` and `parent::` sites are references to their class, listed by
+  references and highlights but marked read-only for rename, which keeps them as
+  written; today `use_sites::resolve_class_ref` drops them from the index
+  altogether, so references to `Foo` miss every `self::` in its body and every
+  `parent::` in its subclasses.
+- **Rename produces code that still resolves.**
+  - Each site is rewritten in its written form. A fully-qualified or
+    namespace-relative name keeps its qualifier; a name reached through an
+    import renames the import, and the uses under an alias stay; a name in its
+    own namespace renames its last segment. Today every site is replaced by the
+    bare new name: renaming `App\Foo` to `Bar` turns `\App\Foo` in
+    `namespace Other` into `Bar`, which resolves to `Other\Bar`, and leaves
+    `use App\Foo;` pointing at nothing while `b(Foo $g)` becomes an unimported
+    `b(Bar $g)`.
+  - A rename that would collide with a name already declared or imported in a
+    file is refused, naming the file.
+  - The new name is checked as an identifier PHP accepts for that kind of
+    symbol (`1 bad` is applied as is today, and a class can't be named `self`,
+    `int` or another reserved name).
+  - `prepareRename` answers the range and placeholder, and refuses a symbol
+    declared in a stub or a context file, whose rename would edit vendor code
+    (`method not found` today).
+  - Methods, properties, class constants and enum cases rename through the
+    member index, across the hierarchy (an interface method with its
+    implementations and overrides, a `@method` or `@property` tag with its
+    uses); today a member rename returns `null`. Local variables and parameters
+    rename within their function, a parameter's named arguments at its call
+    sites included.
+  - A class whose file is named after it under a PSR-4 root renames the file
+    too, when the client supports resource operations.
+  - The edit is a versioned `documentChanges` edit, so a client rejects it
+    against a document that changed since, where today it is an unversioned
+    `changes` map.
+- **Completion reads the scope at the cursor.** It asks the Session for the D6
+  scope at the position in the recovered tree, where today `lsp/completion.rs`
+  re-lexes the live buffer, finds the enclosing function by name, clones its
+  last good body, truncates it at the edit line and splices in a probe
+  statement. In `function use_it(Shape $s, Circle $c)`, `$c->` offers nothing,
+  as does `$c->a` (unedited, just edited and half typed alike), and `Circle::`
+  offers `__construct` and the instance method `area`, both of which throw an
+  `Error` when called statically, but not `class`. The target:
+  - `->` offers the instance members visible from the calling scope (a private
+    one only inside its class, a protected one inside the hierarchy),
+    `@method`/`@property` tags and mixins included;
+  - `::` offers static methods, static properties, constants, enum cases and
+    `class`, with `parent::`/`self::` also reaching the parent's instance
+    methods, as PHP allows;
+  - the names after `new`, `instanceof`, `extends`, `implements`, `catch` and
+    type positions are class-likes of the fitting kind, with the auto-import
+    edit the bare completion already makes;
+  - a call's argument list offers its parameters' names for named arguments,
+    and `$` offers the variables defined at that point.
+- **Signature help shows the whole signature**, callable-typed values included
+  (`$cb(` on a `Closure(int $n): void`, a first-class callable, an invokable
+  object's `__invoke`, which have no signature to show today since only a named
+  callee resolves): default values, by-reference and variadic markers and the
+  PHPDoc types (`make(float $radius, bool $cached)` for `bool $cached = false`
+  today), the active parameter following named arguments as well as positions,
+  and every variant of a function C6 keeps several of.
+- **Semantic tokens classify every resolved name**: namespaces, classes,
+  interfaces, enums and enum cases, traits, templates as type parameters,
+  functions, methods, properties, constants, parameters and variables, with the
+  `declaration`, `static`, `readonly`, `abstract`, `deprecated`, `internal` and
+  `defaultLibrary` (a built-in) modifiers, served for a range and as deltas too.
+  Today a token exists only for a deprecated or internal usage (E's shared
+  predicate widens which), so a file using neither answers `{"data": []}` and
+  the editor keeps its grammar's guesses (a constant and a class look alike
+  after `::`).
+- **Inlay hints come once per site, from the final pass.**
+  `inlay_param_name_hints` and `inlay_local_type_hints` are pushed on every
+  walk: each of a loop body's convergence passes (up to six), the quiet pre-pass
+  over a `while` or `for` condition, and each host of a trait method. Nothing
+  drops the earlier walks' hints the way `converge_loop_body` truncates their
+  diagnostics, and `filter_to_range` doesn't deduplicate, so a `$x = f();`
+  inside a loop gets one type hint per pass, each with that pass's intermediate
+  type. With E6's observers they come from the kept walk's events only, a trait
+  method's merged across its hosts.
+- **Inlay hints say what the text doesn't.** No parameter-name hint on an
+  argument that is a variable of the parameter's name (`make($radius)`), and no
+  type hint where the right side is a literal or a `new Foo` (today every
+  non-`mixed` assignment gets one); names print as the file imports them
+  (`Circle`, not `App\Circle`), the full name in the tooltip and the label part
+  linking to the declaration; a by-reference parameter's hint reads `&name:`;
+  and type hints also cover `foreach` keys and values, `list()`/`[...]`
+  destructuring, `catch` variables and untyped closure and arrow-function
+  parameters, where today only an assignment statement's plain variable gets
+  one.
+- **Quick fixes follow §3.7's fix list**: each of a diagnostic's fixes is its
+  own action, the first preferred, and a fix editing several places (an import
+  added beside the use it enables) is one edit. Today `Diagnostic.fix` is an
+  `Option`, so a diagnostic offers at most one single-edit action, always marked
+  preferred.
+- **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
+  the document at once, which editors can run on save; today each quick fix is
+  offered alone.
+- **An ignore code action**: every ignorable diagnostic offers "Ignore
+  `<identifier>` on this line", adding the identifier to a `@phpstan-ignore`
+  comment on the line (or the line above), extending one already there;
+  non-ignorable ones don't.
+- **The outline is complete**: promoted constructor properties are listed as
+  the class's properties (`private float $r` in `__construct` is missing today),
+  and declarations below the top level (C4's indexed ones in function bodies,
+  `try` and `switch`) are listed where they sit; today only `if` and block
+  nesting is followed.
+- **Hierarchy navigation**: `textDocument/implementation` (an interface's or
+  abstract method's implementations, a class's subclasses), `typeHierarchy`
+  (supertypes and subtypes) and `callHierarchy` (callers and callees), answered
+  from reflection's `ClassHierarchy` and E1's reference-site collector; none is
+  served today. `workspace/willRenameFiles` renaming a PSR-4 class's file offers
+  the class rename (above) as its edit.
+- **Pull diagnostics.** A client offering `textDocument/diagnostic` and
+  `workspace/diagnostic` pulls them, with `interFileDependencies` and
+  `workspace/diagnostic/refresh` after an update changes other files' results;
+  push stays for the rest.
+- **Diagnostics carry what the protocol has fields for**:
+  `DiagnosticTag::Deprecated` on the deprecation rules' findings and
+  `Unnecessary` on dead and unused code (identifiers declared with the tag by
+  their rules), and a finding naming other sites (a duplicate declaration's
+  other declarations, a namespace cycle's edges) lists them as
+  `relatedInformation`, where today they are text in the message;
+  `codeDescription` links each identifier to its page in the rule reference
+  (ROADMAP Phase 185), and the tip is a `relatedInformation` entry at the
+  finding's own span instead of being appended to the message text.
 
 ### Stage G: extraction wave and tidy
 
