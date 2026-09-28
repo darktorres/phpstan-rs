@@ -13,8 +13,8 @@ cargo-fuzz = true
 # and token_stream_parse don't need it themselves (Vec<Token>'s Arbitrary
 # impl is a blanket one, and Token's own derive lives behind the syntax
 # crate's "fuzzing" feature below), but it's harmless for them.
-arbitrary = { version = "1", features = ["derive"] }
-libfuzzer-sys = "0.4"
+arbitrary = { version = "=1.4.2", features = ["derive"] }
+libfuzzer-sys = "=0.4.13"
 
 [dependencies.phpstan-rs]
 path = "../crates/phpstan-rs"

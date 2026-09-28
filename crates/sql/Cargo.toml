@@ -9,12 +9,12 @@ license.workspace = true
 name = "sql"
 
 [dependencies]
-mysql = { version = "28.0.2", default-features = false, features = ["rustls-tls", "minimal-rust"] }
-postgres = "0.19.14"
-r2d2 = "0.8.10"
-r2d2_postgres = "0.18.2"
-r2d2_sqlite = { version = "0.35.0", features = ["bundled"] }
-rusqlite = { version = "0.40.2", features = ["bundled", "column_decltype", "column_metadata"] }
+mysql = { version = "=28.0.2", default-features = false, features = ["rustls-tls", "minimal-rust"] }
+postgres = "=0.19.14"
+r2d2 = "=0.8.10"
+r2d2_postgres = "=0.18.2"
+r2d2_sqlite = { version = "=0.35.0", features = ["bundled"] }
+rusqlite = { version = "=0.40.2", features = ["bundled", "column_decltype", "column_metadata"] }
 rustc-hash.workspace = true
 serde.workspace = true
 sqlparser.workspace = true

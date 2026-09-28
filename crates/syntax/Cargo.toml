@@ -9,7 +9,7 @@ license.workspace = true
 name = "syntax"
 
 [dependencies]
-arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
+arbitrary = { version = "=1.4.2", features = ["derive"], optional = true }
 hotpath.workspace = true
 imbl.workspace = true
 rustc-hash.workspace = true
