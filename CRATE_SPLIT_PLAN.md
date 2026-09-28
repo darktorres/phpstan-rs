@@ -1242,7 +1242,11 @@ Follow-ups:
   bound. Today `'no_such_function'`, `[1, 2]` and `'stdClass'` for
   `class-string<DateTimeInterface>` are accepted. A plain `string` isn't a
   `class-string` either: `make($s)` for `@param class-string<T> $c` is
-  `argument.type` in PHPStan and accepted today.
+  `argument.type` in PHPStan and accepted today. A closure is accepted by a
+  callable type only when its signature fits (parameters contravariant,
+  the return covariant): `set_error_handler(function (int $no, string
+  $str): void {})` against `(callable(int, string, string, int): bool)|null`
+  is accepted today (28 corpus oracle findings).
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
   member covers (`A|B` for `B extends A` stays two members). Identical
   members collapse too: a closure parameter today reaches
@@ -3217,6 +3221,14 @@ fixture:
     is), and the oracle finds 21 `booleanAnd.leftAlwaysTrue` and 23
     `booleanOr.alwaysFalse` phpstan-rs misses.
 - (c) calls and member access:
+  - a method call or property read on a possibly-null receiver is
+    reported from level 8 (`findTypeToCheck`'s `checkNullables`), as a
+    `null` receiver throws an `Error`: `$c->has()` and `$c->p` on `?C` are
+    unreported today at every level, since `method.nonObject` and
+    `property.nonObject` fire only for a receiver that can never be an
+    object (161 `method.nonObject` and 110 `property.nonObject` "on
+    X|null" the corpus oracle finds and phpstan-rs misses; nullable
+    arguments and returns are already reported);
   - a by-reference argument PHP creates on the call is not type-checked
     against the parameter;
   - a `void` call's result is reported where it is used (`method.void`,
