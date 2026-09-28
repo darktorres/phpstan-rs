@@ -4393,6 +4393,18 @@ fixture:
     `new-static.php`; the other 6, `new self()`/`new parent()` of a
     constructor with no side effects, stay reported, stricter than
     PHPStan);
+  - a discarded `new` is `new.resultUnused` whenever constructing has no
+    effect, where today only a user constructor without impure points is:
+    a class without a constructor (`new NoCtor();`, `bug-4002_class.php`,
+    `pure-method.php:389`), a built-in class through
+    `functionMetadata.php` (`new \stdClass()`, `new \Exception('test')`,
+    `new \PDOStatement()`, `new \SimpleXMLElement(…)`, `new
+    \IntlDateFormatter(…)`), `new static()` in a final class, and a
+    constructor whose only impurity is a pure callable argument
+    (`pure-unless-callable-is-impure.php`); most of the rules oracle's 40
+    PHPStan-only. An instantiation that is itself an error (`new Ab()` of
+    an abstract class, an interface, `new NoCtor(1)`) throws, so it isn't
+    also `new.resultUnused` as PHPStan reports it (approved);
   - a statement that can throw or runs code is not `expr.resultUnused`
     (`NoopRule` reads the expression's throw and impure points): `$a /
     $b;`, `$a % $b;` and `99 / $v;` (`DivisionByZeroError`), a `match`
