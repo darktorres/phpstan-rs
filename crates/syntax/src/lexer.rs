@@ -584,8 +584,7 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
             }
             let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
-            let value = i64::from_str_radix(&text, 16).unwrap_or(0);
-            return Token::Integer(value);
+            return radix_literal(&text, 16);
         }
 
         if self.peek() == b'0' && (self.peek_at(1) == b'b' || self.peek_at(1) == b'B') {
@@ -594,24 +593,18 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
             }
             let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
-            let value = i64::from_str_radix(&text, 2).unwrap_or(0);
-            return Token::Integer(value);
+            return radix_literal(&text, 2);
         }
 
-        // PHP 8.1's explicit octal notation (`0o775`), distinct from the
-        // legacy leading-zero form (`0775`) the generic digit loop below
-        // already parses (as decimal, which happens to not crash even
-        // though the *value* comes out wrong for a real octal literal -
-        // not worth a special case since this prototype cares about types,
-        // not runtime values).
+        // PHP 8.1's explicit octal notation (`0o775`); the legacy
+        // leading-zero form (`0775`) is read after the digit loop below.
         if self.peek() == b'0' && (self.peek_at(1) == b'o' || self.peek_at(1) == b'O') {
             self.pos += 2;
             while (b'0'..=b'7').contains(&self.peek()) || self.peek() == b'_' {
                 self.pos += 1;
             }
             let text = Self::strip_digit_separators(&self.src[start + 2..self.pos]);
-            let value = i64::from_str_radix(&text, 8).unwrap_or(0);
-            return Token::Integer(value);
+            return radix_literal(&text, 8);
         }
 
         while self.peek().is_ascii_digit() || self.peek() == b'_' {
@@ -643,6 +636,12 @@ impl<'a> Lexer<'a> {
         let text = Self::strip_digit_separators(&self.src[start..self.pos]);
         if is_float {
             Token::Float(text.parse().unwrap_or(0.0))
+        } else if text.len() > 1
+            && text.starts_with('0')
+            && text.bytes().all(|b| (b'0'..=b'7').contains(&b))
+        {
+            // A legacy octal literal (`0775`).
+            radix_literal(&text[1..], 8)
         } else {
             match text.parse::<i64>() {
                 Ok(v) => Token::Integer(v),
@@ -859,6 +858,18 @@ impl<'a> Lexer<'a> {
                 self.next_token()
             }
         }
+    }
+}
+
+/// A hex, binary or octal integer literal's value: an `int` when it fits,
+/// a `float` past `PHP_INT_MAX`, as PHP reads it.
+fn radix_literal(digits: &str, radix: u32) -> Token {
+    match i64::from_str_radix(digits, radix) {
+        Ok(v) => Token::Integer(v),
+        Err(_) if digits.is_empty() => Token::Integer(0),
+        Err(_) => Token::Float(digits.chars().fold(0.0, |acc, c| {
+            acc * f64::from(radix) + f64::from(c.to_digit(radix).unwrap_or(0))
+        })),
     }
 }
 

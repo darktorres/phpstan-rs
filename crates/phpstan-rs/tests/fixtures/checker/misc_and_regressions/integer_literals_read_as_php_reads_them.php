@@ -1,0 +1,10 @@
+<?php
+use function PHPStan\Testing\assertType;
+assertType('509', 0775);
+assertType('509', 0o775);
+assertType('0', 00);
+assertType('255', 0xFF);
+assertType('9223372036854775807', 0x7FFFFFFFFFFFFFFF);
+assertType('float', 0xFFFFFFFFFFFFFFFF);
+assertType('float', 0b1000000000000000000000000000000000000000000000000000000000000000);
+assertType('float', 0o1000000000000000000000);
