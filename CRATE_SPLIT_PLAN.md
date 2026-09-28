@@ -6987,7 +6987,17 @@ on.
   `--baseline-per-identifier` go for `--set php_version=8.4`,
   `--set no_composer=true`, `--set 'scan_paths=["lib"]'` and the rest (nothing
   is released), and xtask, the gate runner and the tests that pass them move in
-  the same commit. `--level` stays, being PHPStan's `-l`.
+  the same commit. `--level` stays, being PHPStan's `-l`. The library follows:
+  `app::check_project::CheckRequest` keeps the config file, the `--set`
+  assignments, the paths, the level and the emission order (its `scan_paths`,
+  `stub_paths`, `php_version`, `no_composer`, `baseline`,
+  `baseline_match_identifier` and `baseline_per_identifier` go),
+  `project::session::Overrides` keeps the paths, the level and the emission
+  order (F1 already removes `report_level`), and `Session::for_fixture` turns
+  composer discovery off by setting `no_composer` on the fixture's config
+  instead of through an override; every other value reaches the Session as a
+  config key, one path for the command line, the fixtures and the gate runner
+  alike.
 - A progress line (files analysed of total) goes to stderr when it's a
   terminal, off with `--no-progress` and when stderr isn't one; today a run
   prints nothing until it finishes.
