@@ -3754,7 +3754,10 @@ building on the previous one:
   - `afterExtractCall` replacing extract/eval truncation:
     - Today an `extract()`/`eval()` drops every diagnostic of its function
       body. At file top level it drops every diagnostic after the file
-      pre-scan, so the class methods' `return.type` errors disappear too.
+      pre-scan, so the class methods' `return.type` errors disappear too,
+      and an `eval()` inside a top-level closure does the same to the whole
+      file: `unused-closure-uses.php` reports nothing, 14 of the rules
+      oracle's findings lost.
     - `extract()` of a constant array assigns its keys as variables, with
       optional keys Maybe; only another argument sets `afterExtractCall`.
     - `afterExtractCall` clears the conditional holders and makes every
