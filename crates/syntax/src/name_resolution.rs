@@ -4,8 +4,8 @@
 use crate::ast::*;
 use crate::token::Position;
 use crate::visit::{
-    VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_decl_mut, walk_enum_decl_mut,
-    walk_expr_mut, walk_stmt_mut, walk_stmts_mut,
+    VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_decl_mut, walk_expr_mut,
+    walk_stmt_mut, walk_stmts_mut,
 };
 
 type UseMap = rustc_hash::FxHashMap<(UseKind, String), String>;
@@ -412,9 +412,6 @@ impl VisitorMut for Resolver {
                             .as_ref()
                             .map(|name| self.ctx.declared_name(name).into());
                     }
-                    StmtKind::EnumDecl(e) => {
-                        e.namespaced_name = Some(self.ctx.declared_name(&e.name).into());
-                    }
                     StmtKind::GlobalConst(consts) => {
                         for c in consts {
                             c.namespaced_name = Some(self.ctx.declared_name(&c.name).into());
@@ -462,14 +459,6 @@ impl VisitorMut for Resolver {
         }
         self.trait_adaptations(&mut class.trait_aliases, &mut class.trait_precedences);
         walk_class_decl_mut(self, class);
-    }
-
-    fn visit_enum_decl(&mut self, decl: &mut EnumDecl) {
-        for name in decl.implements.iter_mut().chain(decl.uses.iter_mut()) {
-            self.class(name);
-        }
-        self.trait_adaptations(&mut decl.trait_aliases, &mut decl.trait_precedences);
-        walk_enum_decl_mut(self, decl);
     }
 
     fn visit_catch_clause(&mut self, clause: &mut CatchClause) {

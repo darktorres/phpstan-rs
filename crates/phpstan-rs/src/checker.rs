@@ -1834,7 +1834,7 @@ impl<'a> Checker<'a> {
         // allows a `namespace`/`use` statement at the top level of a file,
         // so a single left-to-right pass, mutating `self.name_ctx` in
         // place when one is seen, means that by the time this loop
-        // reaches a `ClassDecl`/`FunctionDecl`/`EnumDecl`, `self.name_ctx`
+        // reaches a `ClassDecl`/`FunctionDecl`/`ClassDecl`, `self.name_ctx`
         // reflects whichever `namespace` was active at that declaration's
         // own position - not merely the last one anywhere in the file,
         // which would wrongly resolve a declaration under an earlier
@@ -1848,6 +1848,102 @@ impl<'a> Checker<'a> {
                 StmtKind::Namespace(name) => self.name_ctx.set_namespace(name),
                 StmtKind::Use(imports) => self.name_ctx.add_uses(imports),
                 StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                    let fqn = self.name_ctx.declared_name(class_decl_name(e));
+                    if !self.facts_only {
+                        self.check_class_completeness(&fqn, e.span);
+                        self.check_class_references_exist(&fqn, e.span);
+                        self.check_inheritance_target_kinds(&fqn, false, e.span);
+                        self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
+                        self.check_restricted_class_inheritance(&fqn, e.span);
+                        for (i, iface) in e.implements.iter().enumerate() {
+                            let span = e.implements_spans.get(i).copied().unwrap_or(e.span);
+                            self.check_class_name_case(iface, span);
+                        }
+                        for (i, used) in e.uses.iter().enumerate() {
+                            let span = e.uses_spans.get(i).copied().unwrap_or(e.span);
+                            self.check_class_name_case(used, span);
+                        }
+                        self.check_ancestor_generic_bounds(&fqn, e.span);
+                        self.check_enum_template_tag(&fqn, e);
+                        self.check_enum_ancestors(&fqn, e);
+                        self.check_sealed_tag_types(e.doc_comment.as_deref(), e.span, true);
+                        self.check_misplaced_var_tag(
+                            e.doc_comment.as_deref(),
+                            "an enum",
+                            e.name_span,
+                        );
+                        self.check_enum_case_values(&fqn, e);
+                        self.check_enum_sanity(&fqn, e);
+                        self.check_trait_conflicts(&fqn, e.span);
+                        self.check_duplicate_enum_members(&fqn, e);
+                        self.check_method_declaration_sanity(
+                            &fqn,
+                            ClassKind::Enum,
+                            false,
+                            &e.methods,
+                        );
+                        self.check_reserved_class_constant_name(&e.consts);
+                        self.check_typed_class_constant_values(&fqn, &e.consts);
+                        self.check_class_constant_modifiers(&fqn, ClassKind::Enum, &e.consts);
+                        self.check_constant_overrides(&fqn, &e.consts);
+                        self.check_trait_constant_conflicts(&fqn, &e.consts);
+                        self.check_attributes(&e.attrs, &fqn);
+                        self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                        self.check_self_attribute_class_declaration(
+                            &e.attrs,
+                            &fqn,
+                            ClassKind::Enum,
+                            false,
+                        );
+                        self.check_class_like_marker_attributes(
+                            &e.attrs,
+                            ClassKind::Enum,
+                            false,
+                            &fqn,
+                        );
+                        for case in &e.enum_cases {
+                            self.check_attributes(&case.attrs, &fqn);
+                            self.check_attribute_targets(
+                                &case.attrs,
+                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                                "class constant",
+                            );
+                        }
+                        for cc in &e.consts {
+                            self.check_attributes(&cc.attrs, &fqn);
+                            self.check_attribute_targets(
+                                &cc.attrs,
+                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                                "class constant",
+                            );
+                        }
+                        // An enum can't declare instance properties at all
+                        // (see `ast::ClassDecl`'s doc comment), but its consts
+                        // are as real a missing-typehint candidate as a
+                        // class's.
+                        self.check_missing_class_constant_typehints(&fqn, &e.consts);
+                        if self.settings.extras.check_native_type_hints {
+                            self.check_native_class_constant_types(&fqn, &e.consts);
+                        }
+                    }
+                    for m in &e.methods {
+                        self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
+                    }
+                    // An enum can't declare instance properties at all
+                    // (see `ast::ClassDecl`'s own doc comment) - only its
+                    // own consts/methods are real unused-private-member
+                    // candidates.
+                    if !self.facts_only {
+                        self.check_unused_private_members(
+                            &fqn,
+                            ClassKind::Enum,
+                            &e.methods,
+                            &[],
+                            &e.consts,
+                        );
+                    }
+                }
                 StmtKind::ClassDecl(c) => {
                     // `current_class` must be the fully-qualified name -
                     // it's looked up directly against
@@ -2013,102 +2109,6 @@ impl<'a> Checker<'a> {
                             self.check_class_access_attributes(&fqn, c);
                             self.check_promoted_property_candidate(&fqn, c);
                         }
-                    }
-                }
-                StmtKind::EnumDecl(e) => {
-                    let fqn = self.name_ctx.declared_name(&e.name);
-                    if !self.facts_only {
-                        self.check_class_completeness(&fqn, e.span);
-                        self.check_class_references_exist(&fqn, e.span);
-                        self.check_inheritance_target_kinds(&fqn, false, e.span);
-                        self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
-                        self.check_restricted_class_inheritance(&fqn, e.span);
-                        for (i, iface) in e.implements.iter().enumerate() {
-                            let span = e.implements_spans.get(i).copied().unwrap_or(e.span);
-                            self.check_class_name_case(iface, span);
-                        }
-                        for (i, used) in e.uses.iter().enumerate() {
-                            let span = e.uses_spans.get(i).copied().unwrap_or(e.span);
-                            self.check_class_name_case(used, span);
-                        }
-                        self.check_ancestor_generic_bounds(&fqn, e.span);
-                        self.check_enum_template_tag(&fqn, e);
-                        self.check_enum_ancestors(&fqn, e);
-                        self.check_sealed_tag_types(e.doc_comment.as_deref(), e.span, true);
-                        self.check_misplaced_var_tag(
-                            e.doc_comment.as_deref(),
-                            "an enum",
-                            e.name_span,
-                        );
-                        self.check_enum_case_values(&fqn, e);
-                        self.check_enum_sanity(&fqn, e);
-                        self.check_trait_conflicts(&fqn, e.span);
-                        self.check_duplicate_enum_members(&fqn, e);
-                        self.check_method_declaration_sanity(
-                            &fqn,
-                            ClassKind::Enum,
-                            false,
-                            &e.methods,
-                        );
-                        self.check_reserved_class_constant_name(&e.consts);
-                        self.check_typed_class_constant_values(&fqn, &e.consts);
-                        self.check_class_constant_modifiers(&fqn, ClassKind::Enum, &e.consts);
-                        self.check_constant_overrides(&fqn, &e.consts);
-                        self.check_trait_constant_conflicts(&fqn, &e.consts);
-                        self.check_attributes(&e.attrs, &fqn);
-                        self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class");
-                        self.check_self_attribute_class_declaration(
-                            &e.attrs,
-                            &fqn,
-                            ClassKind::Enum,
-                            false,
-                        );
-                        self.check_class_like_marker_attributes(
-                            &e.attrs,
-                            ClassKind::Enum,
-                            false,
-                            &fqn,
-                        );
-                        for case in &e.cases {
-                            self.check_attributes(&case.attrs, &fqn);
-                            self.check_attribute_targets(
-                                &case.attrs,
-                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                                "class constant",
-                            );
-                        }
-                        for cc in &e.consts {
-                            self.check_attributes(&cc.attrs, &fqn);
-                            self.check_attribute_targets(
-                                &cc.attrs,
-                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                                "class constant",
-                            );
-                        }
-                        // An enum can't declare instance properties at all
-                        // (see `ast::EnumDecl`'s doc comment), but its consts
-                        // are as real a missing-typehint candidate as a
-                        // class's.
-                        self.check_missing_class_constant_typehints(&fqn, &e.consts);
-                        if self.settings.extras.check_native_type_hints {
-                            self.check_native_class_constant_types(&fqn, &e.consts);
-                        }
-                    }
-                    for m in &e.methods {
-                        self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
-                    }
-                    // An enum can't declare instance properties at all
-                    // (see `ast::EnumDecl`'s own doc comment) - only its
-                    // own consts/methods are real unused-private-member
-                    // candidates.
-                    if !self.facts_only {
-                        self.check_unused_private_members(
-                            &fqn,
-                            ClassKind::Enum,
-                            &e.methods,
-                            &[],
-                            &e.consts,
-                        );
                     }
                 }
                 // Top-level script statements share one scope across the

@@ -22,7 +22,7 @@
 //! `collect_stmt`/`collect_expr`/`collect_function`/`collect_class`/
 //! `collect_enum` - the same proven-exhaustive traversal shape (including
 //! `visit`'s own documented `child_stmts`/`child_exprs`
-//! exclusions: `FunctionDecl`/`ClassDecl`/`EnumDecl` bodies and
+//! exclusions: `FunctionDecl`/`ClassDecl`/`ClassDecl` bodies and
 //! `Closure`/`ArrowFn`/`NewAnonymousClass`), reused here for a different
 //! purpose (checking spans against a cursor, not collecting names into a
 //! `HashSet`) rather than generalized, to avoid risking `deps.rs`'s own
@@ -476,8 +476,8 @@ impl<'a> Walker<'a> {
                 );
                 self.function(f, &mut ctx.clone(), current_class, false, out);
             }
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, ctx, out),
             StmtKind::ClassDecl(c) => self.class(c, ctx, out),
-            StmtKind::EnumDecl(e) => self.enum_decl(e, ctx, out),
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
                     self.expr(&c.value, ctx, current_class, out);
@@ -932,8 +932,8 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn enum_decl(&mut self, e: &EnumDecl, ctx: &mut NameContext, out: &mut Vec<(Span, Resolved)>) {
-        let fqn = ctx.declared_name(&e.name);
+    fn enum_decl(&mut self, e: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, Resolved)>) {
+        let fqn = ctx.declared_name(class_decl_name(e));
         self.record(out, e.name_span, Resolved::Class(fqn.clone()));
         for (name, span) in e.implements.iter().zip(e.implements_spans.iter()) {
             if self.anchor.matches(*span)
@@ -965,7 +965,7 @@ impl<'a> Walker<'a> {
             );
             self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
         }
-        for case in &e.cases {
+        for case in &e.enum_cases {
             self.record(
                 out,
                 case.name_span,

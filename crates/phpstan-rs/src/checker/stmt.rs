@@ -117,7 +117,7 @@ impl<'a> Checker<'a> {
             return;
         };
         match &stmt.kind {
-            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => return,
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => return,
             StmtKind::Expression(e)
                 if !matches!(
                     e.kind,
@@ -144,10 +144,7 @@ impl<'a> Checker<'a> {
         if !doc.contains("var")
             || matches!(
                 stmt.kind,
-                StmtKind::FunctionDecl(_)
-                    | StmtKind::ClassDecl(_)
-                    | StmtKind::EnumDecl(_)
-                    | StmtKind::GlobalConst(_)
+                StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::GlobalConst(_)
             )
         {
             return true;
@@ -357,10 +354,7 @@ impl<'a> Checker<'a> {
         if !doc.contains("var")
             || matches!(
                 stmt.kind,
-                StmtKind::FunctionDecl(_)
-                    | StmtKind::ClassDecl(_)
-                    | StmtKind::EnumDecl(_)
-                    | StmtKind::GlobalConst(_)
+                StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::GlobalConst(_)
             )
         {
             return;
@@ -863,7 +857,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // `check_program`'s own top-level loop already handles a
-            // top-level FunctionDecl/ClassDecl/EnumDecl by checking its
+            // top-level FunctionDecl/ClassDecl/ClassDecl by checking its
             // body - but any of the same three declared nested inside a
             // block (the common `if (!function_exists('foo')) { function
             // foo() {} }` polyfill idiom, or a class conditionally
@@ -873,6 +867,33 @@ impl<'a> Checker<'a> {
             // exempt from every diagnostic, undefined-variable detection
             // included.
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                let fqn = self.name_ctx.declared_name(class_decl_name(e));
+                self.check_nested_enum_declaration(&fqn, e);
+                self.check_attributes(&e.attrs, &fqn);
+                self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class");
+                self.check_self_attribute_class_declaration(&e.attrs, &fqn, ClassKind::Enum, false);
+                self.check_class_like_marker_attributes(&e.attrs, ClassKind::Enum, false, &fqn);
+                for case in &e.enum_cases {
+                    self.check_attributes(&case.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &case.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                    );
+                }
+                for cc in &e.consts {
+                    self.check_attributes(&cc.attrs, &fqn);
+                    self.check_attribute_targets(
+                        &cc.attrs,
+                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                        "class constant",
+                    );
+                }
+                for m in &e.methods {
+                    self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
+                }
+            }
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(class_decl_name(c));
                 self.check_nested_class_declaration(&fqn, c);
@@ -921,33 +942,6 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            StmtKind::EnumDecl(e) => {
-                let fqn = self.name_ctx.declared_name(&e.name);
-                self.check_nested_enum_declaration(&fqn, e);
-                self.check_attributes(&e.attrs, &fqn);
-                self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class");
-                self.check_self_attribute_class_declaration(&e.attrs, &fqn, ClassKind::Enum, false);
-                self.check_class_like_marker_attributes(&e.attrs, ClassKind::Enum, false, &fqn);
-                for case in &e.cases {
-                    self.check_attributes(&case.attrs, &fqn);
-                    self.check_attribute_targets(
-                        &case.attrs,
-                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                        "class constant",
-                    );
-                }
-                for cc in &e.consts {
-                    self.check_attributes(&cc.attrs, &fqn);
-                    self.check_attribute_targets(
-                        &cc.attrs,
-                        ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                        "class constant",
-                    );
-                }
-                for m in &e.methods {
-                    self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
-                }
-            }
             // A bare `break;` (`None`, level 1) or an explicit `break N;`
             // targets the Nth-innermost open loop/switch frame -
             // `checked_sub` naturally no-ops for an out-of-range level
@@ -977,7 +971,7 @@ impl<'a> Checker<'a> {
             // already falls through to this same `check_stmt` catch-all
             // for anything it doesn't special-case) and any nested
             // occurrence - `GlobalConst` needs no class/FQN context the
-            // way `ClassDecl`/`EnumDecl` do, so one arm here is enough.
+            // way `ClassDecl`/`ClassDecl` do, so one arm here is enough.
             StmtKind::GlobalConst(consts) => {
                 self.check_global_const_attributes(consts, stmt.span, label);
                 for c in consts {
@@ -1291,10 +1285,7 @@ impl<'a> Checker<'a> {
         if !doc.contains("var")
             || matches!(
                 stmt.kind,
-                StmtKind::FunctionDecl(_)
-                    | StmtKind::ClassDecl(_)
-                    | StmtKind::EnumDecl(_)
-                    | StmtKind::GlobalConst(_)
+                StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::GlobalConst(_)
             )
         {
             return Vec::new();

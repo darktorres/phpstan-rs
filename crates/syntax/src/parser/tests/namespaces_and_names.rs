@@ -195,7 +195,9 @@ fn enum_usable_as_plain_function_and_constant_name() {
         "#,
     );
     assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "enum"));
-    assert!(matches!(&program[3].kind, StmtKind::EnumDecl(e) if e.name == "Suit"));
+    assert!(
+        matches!(&program[3].kind, StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum && e.name.as_deref() == Some("Suit"))
+    );
 }
 
 #[test]

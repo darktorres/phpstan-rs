@@ -123,16 +123,12 @@ impl Parser {
         };
         let decl = ClassDecl {
             namespaced_name: None,
-            // No name multiple anonymous classes in the same file could
-            // share safely - never indexed into the registry by this name,
-            // only used structurally within this one expression. Interned
-            // like any other name: every anonymous class in the corpus
-            // shares this identical text, a real (if small) dedup win.
             name: None,
-            // No real name token to point at - see `ClassDecl::name_span`'s
-            // own doc comment.
+            // No name token to point at - see `ClassDecl::name_span`'s own
+            // doc comment.
             name_span: decl_span,
             kind: ClassKind::Class,
+            backing_type: None,
             extends,
             extends_spans,
             implements,
@@ -639,6 +635,7 @@ impl Parser {
             name: Some(self.interner.name(&name)),
             name_span,
             kind,
+            backing_type: None,
             extends,
             extends_spans,
             implements,

@@ -602,6 +602,19 @@ fn build_declarations_with_context(
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
+            StmtKind::ClassDecl(e) if e.kind == syntax::ast::ClassKind::Enum => {
+                for m in &e.methods {
+                    collect_nested_defines(&m.function.body, out);
+                }
+                let name = intern(&ctx.declared_name(class_decl_name(e)));
+                let mut info = ClassReflection::from_enum_decl(e, ctx);
+                info.record_provenance(origin, &name, e.name_span, &MemberSpans::of_enum(e));
+                out.push(BuiltDecl::Enum {
+                    name,
+                    conditional,
+                    info,
+                });
+            }
             StmtKind::ClassDecl(c) => {
                 for m in &c.methods {
                     collect_nested_defines(&m.function.body, out);
@@ -610,19 +623,6 @@ fn build_declarations_with_context(
                 let mut info = ClassReflection::from_decl(c, ctx);
                 info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
                 out.push(BuiltDecl::Class {
-                    name,
-                    conditional,
-                    info,
-                });
-            }
-            StmtKind::EnumDecl(e) => {
-                for m in &e.methods {
-                    collect_nested_defines(&m.function.body, out);
-                }
-                let name = intern(&ctx.declared_name(&e.name));
-                let mut info = ClassReflection::from_enum_decl(e, ctx);
-                info.record_provenance(origin, &name, e.name_span, &MemberSpans::of_enum(e));
-                out.push(BuiltDecl::Enum {
                     name,
                     conditional,
                     info,

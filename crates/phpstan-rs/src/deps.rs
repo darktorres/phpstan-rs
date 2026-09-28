@@ -2,8 +2,7 @@ use rustc_hash::FxHashSet;
 
 use syntax::ast::*;
 use syntax::visit::{
-    Visitor, walk_attribute, walk_catch_clause, walk_class_decl, walk_enum_decl, walk_expr,
-    walk_stmts,
+    Visitor, walk_attribute, walk_catch_clause, walk_class_decl, walk_expr, walk_stmts,
 };
 
 /// Best-effort, deliberately over-approximating set of every function/class
@@ -68,14 +67,6 @@ impl<'ast> Visitor<'ast> for Collector {
         self.names
             .extend(class.uses.iter().map(|n| n.written.to_string()));
         walk_class_decl(self, class);
-    }
-
-    fn visit_enum_decl(&mut self, decl: &'ast EnumDecl) {
-        self.names
-            .extend(decl.implements.iter().map(|n| n.written.to_string()));
-        self.names
-            .extend(decl.uses.iter().map(|n| n.written.to_string()));
-        walk_enum_decl(self, decl);
     }
 
     fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {

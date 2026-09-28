@@ -172,8 +172,7 @@ fn collect_facts_in_stmts(stmts: &[Stmt], facts: &mut FileFacts) {
 fn collect_facts_in_stmt(stmt: &Stmt, facts: &mut FileFacts) {
     match &stmt.kind {
         StmtKind::FunctionDecl(f) => collect_facts_in_stmts(&f.body, facts),
-        StmtKind::ClassDecl(c) => collect_facts_in_class(c, facts),
-        StmtKind::EnumDecl(e) => {
+        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
             for m in &e.methods {
                 collect_facts_in_stmts(&m.function.body, facts);
             }
@@ -181,6 +180,7 @@ fn collect_facts_in_stmt(stmt: &Stmt, facts: &mut FileFacts) {
                 collect_facts_in_expr(&k.value, facts);
             }
         }
+        StmtKind::ClassDecl(c) => collect_facts_in_class(c, facts),
         _ => {
             for e in stmt_exprs(stmt) {
                 collect_facts_in_expr(e, facts);
@@ -804,10 +804,12 @@ fn collect_declared_classes(stmts: &[Stmt], ctx: &mut NameContext, out: &mut Vec
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                out.push((ctx.declared_name(class_decl_name(e)), e.name_span))
+            }
             StmtKind::ClassDecl(c) => {
                 out.push((ctx.declared_name(class_decl_name(c)), c.name_span))
             }
-            StmtKind::EnumDecl(e) => out.push((ctx.declared_name(&e.name), e.name_span)),
             StmtKind::Block(body)
             | StmtKind::Declare {
                 body: Some(body), ..

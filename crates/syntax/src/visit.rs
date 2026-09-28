@@ -36,10 +36,6 @@ pub trait Visitor<'ast> {
         walk_class_decl(self, class);
     }
 
-    fn visit_enum_decl(&mut self, decl: &'ast EnumDecl) {
-        walk_enum_decl(self, decl);
-    }
-
     fn visit_method_decl(&mut self, method: &'ast MethodDecl) {
         walk_method_decl(self, method);
     }
@@ -176,7 +172,6 @@ pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
         }
         StmtKind::FunctionDecl(f) => v.visit_function_decl(f),
         StmtKind::ClassDecl(c) => v.visit_class_decl(c),
-        StmtKind::EnumDecl(e) => v.visit_enum_decl(e),
         StmtKind::GlobalConst(consts) => {
             for c in consts {
                 v.visit_class_const(c);
@@ -410,6 +405,9 @@ pub fn walk_class_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Clas
     for attr in &c.attrs {
         v.visit_attribute(attr);
     }
+    if let Some(hint) = &c.backing_type {
+        v.visit_type_hint(hint);
+    }
     for constant in &c.consts {
         v.visit_class_const(constant);
     }
@@ -420,24 +418,6 @@ pub fn walk_class_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, c: &'ast Clas
         v.visit_property_decl(property);
     }
     for method in &c.methods {
-        v.visit_method_decl(method);
-    }
-}
-
-pub fn walk_enum_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, e: &'ast EnumDecl) {
-    for attr in &e.attrs {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &e.backing_type {
-        v.visit_type_hint(hint);
-    }
-    for constant in &e.consts {
-        v.visit_class_const(constant);
-    }
-    for case in &e.cases {
-        v.visit_enum_case(case);
-    }
-    for method in &e.methods {
         v.visit_method_decl(method);
     }
 }
@@ -571,7 +551,6 @@ pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> 
         fn visit_expr(&mut self, _: &'ast Expr) {}
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
-        fn visit_enum_decl(&mut self, _: &'ast EnumDecl) {}
     }
     let mut search = Search { pred, found: false };
     search.visit_stmt(stmt);
@@ -657,7 +636,6 @@ pub fn any_child_stmt<'ast>(stmt: &'ast Stmt, f: impl FnMut(&'ast Stmt) -> bool)
         fn visit_expr(&mut self, _: &'ast Expr) {}
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
-        fn visit_enum_decl(&mut self, _: &'ast EnumDecl) {}
         fn visit_class_const(&mut self, _: &'ast ClassConst) {}
     }
     let mut children = Children { f, found: false };
@@ -689,7 +667,6 @@ pub fn stmt_exprs(stmt: &Stmt) -> Vec<&Expr> {
         }
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
-        fn visit_enum_decl(&mut self, _: &'ast EnumDecl) {}
         fn visit_switch_case(&mut self, case: &'ast SwitchCase) {
             if let Some(test) = &case.test {
                 self.out.push(test);
@@ -745,10 +722,6 @@ pub trait VisitorMut {
     /// A class, interface or trait declaration, or an anonymous class.
     fn visit_class_decl(&mut self, class: &mut ClassDecl) {
         walk_class_decl_mut(self, class);
-    }
-
-    fn visit_enum_decl(&mut self, decl: &mut EnumDecl) {
-        walk_enum_decl_mut(self, decl);
     }
 
     fn visit_method_decl(&mut self, method: &mut MethodDecl) {
@@ -891,7 +864,6 @@ pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
         }
         StmtKind::FunctionDecl(f) => v.visit_function_decl(f),
         StmtKind::ClassDecl(c) => v.visit_class_decl(c),
-        StmtKind::EnumDecl(e) => v.visit_enum_decl(e),
         StmtKind::GlobalConst(consts) => {
             for c in consts {
                 v.visit_class_const(c);
@@ -1125,6 +1097,9 @@ pub fn walk_class_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut ClassDecl)
     for attr in c.attrs.iter_mut() {
         v.visit_attribute(attr);
     }
+    if let Some(hint) = &mut c.backing_type {
+        v.visit_type_hint(hint);
+    }
     for constant in c.consts.iter_mut() {
         v.visit_class_const(constant);
     }
@@ -1135,24 +1110,6 @@ pub fn walk_class_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, c: &mut ClassDecl)
         v.visit_property_decl(property);
     }
     for method in c.methods.iter_mut() {
-        v.visit_method_decl(method);
-    }
-}
-
-pub fn walk_enum_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, e: &mut EnumDecl) {
-    for attr in e.attrs.iter_mut() {
-        v.visit_attribute(attr);
-    }
-    if let Some(hint) = &mut e.backing_type {
-        v.visit_type_hint(hint);
-    }
-    for constant in e.consts.iter_mut() {
-        v.visit_class_const(constant);
-    }
-    for case in e.cases.iter_mut() {
-        v.visit_enum_case(case);
-    }
-    for method in e.methods.iter_mut() {
         v.visit_method_decl(method);
     }
 }

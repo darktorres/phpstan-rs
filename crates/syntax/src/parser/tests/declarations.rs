@@ -38,14 +38,15 @@ fn pure_enum_parses_with_unbacked_cases() {
             }
         "#,
     );
-    let StmtKind::EnumDecl(e) = &program[0].kind else {
-        panic!("expected EnumDecl");
+    let StmtKind::ClassDecl(e) = &program[0].kind else {
+        panic!("expected an enum");
     };
-    assert_eq!(e.name, "SortDirection");
+    assert_eq!(e.kind, ClassKind::Enum);
+    assert_eq!(e.name.as_deref(), Some("SortDirection"));
     assert!(e.backing_type.is_none());
-    assert_eq!(e.cases.len(), 2);
-    assert_eq!(e.cases[0].name, "Ascending");
-    assert!(e.cases[0].value.is_none());
+    assert_eq!(e.enum_cases.len(), 2);
+    assert_eq!(e.enum_cases[0].name, "Ascending");
+    assert!(e.enum_cases[0].value.is_none());
 }
 
 #[test]
@@ -65,9 +66,10 @@ fn backed_enum_with_interface_and_method_parses() {
             }
         "#,
     );
-    let StmtKind::EnumDecl(e) = &program[0].kind else {
-        panic!("expected EnumDecl");
+    let StmtKind::ClassDecl(e) = &program[0].kind else {
+        panic!("expected an enum");
     };
+    assert_eq!(e.kind, ClassKind::Enum);
     assert_eq!(
         e.backing_type.as_ref().map(TypeHint::to_string).as_deref(),
         Some("string")
@@ -77,7 +79,7 @@ fn backed_enum_with_interface_and_method_parses() {
         vec!["\\JsonSerializable"]
     );
     assert!(matches!(
-        &e.cases[0].value,
+        &e.enum_cases[0].value,
         Some(Expr {
             kind: ExprKind::Literal(_),
             ..
@@ -697,11 +699,12 @@ fn enum_case_attribute_parses() {
             }
         "#,
     );
-    let StmtKind::EnumDecl(e) = &program[0].kind else {
-        panic!("expected EnumDecl");
+    let StmtKind::ClassDecl(e) = &program[0].kind else {
+        panic!("expected an enum");
     };
-    assert_eq!(e.cases[0].attrs.len(), 1);
-    assert_eq!(e.cases[0].attrs[0].name, "Label");
+    assert_eq!(e.kind, ClassKind::Enum);
+    assert_eq!(e.enum_cases[0].attrs.len(), 1);
+    assert_eq!(e.enum_cases[0].attrs[0].name, "Label");
 }
 
 #[test]

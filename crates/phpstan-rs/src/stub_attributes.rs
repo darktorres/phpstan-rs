@@ -21,9 +21,7 @@ use syntax::ast::*;
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 use syntax::token::{Span, Token};
-use syntax::visit::{
-    VisitorMut, walk_class_decl_mut, walk_enum_decl_mut, walk_function_decl_mut, walk_stmt_mut,
-};
+use syntax::visit::{VisitorMut, walk_class_decl_mut, walk_function_decl_mut, walk_stmt_mut};
 
 const NAMESPACE: &str = "JetBrains\\PhpStorm\\Internal\\";
 
@@ -348,13 +346,6 @@ impl VisitorMut for Pass {
                 }
                 self.visit_class_decl(c);
             }
-            StmtKind::EnumDecl(e) => {
-                for ty in self.return_overrides(&e.attrs) {
-                    append_to(&mut e.doc_comment, &format!("@return {ty}"));
-                    append_to(&mut stmt.doc_comment, &format!("@return {ty}"));
-                }
-                self.visit_enum_decl(e);
-            }
             _ => walk_stmt_mut(self, stmt),
         }
     }
@@ -382,21 +373,6 @@ impl VisitorMut for Pass {
             self.strip(&mut case.attrs);
         }
         walk_class_decl_mut(self, c);
-    }
-
-    fn visit_enum_decl(&mut self, e: &mut EnumDecl) {
-        self.strip(&mut e.attrs);
-        self.methods(&mut e.methods);
-        for k in &mut e.consts {
-            for ty in self.return_overrides(&k.attrs) {
-                append_to(&mut k.doc_comment, &format!("@return {ty}"));
-            }
-            self.strip(&mut k.attrs);
-        }
-        for case in &mut e.cases {
-            self.strip(&mut case.attrs);
-        }
-        walk_enum_decl_mut(self, e);
     }
 
     fn visit_expr(&mut self, expr: &mut Expr) {

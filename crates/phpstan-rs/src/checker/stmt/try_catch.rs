@@ -422,7 +422,7 @@ fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Spa
                 out.push((e, stmt.span, top));
                 in_expr(e, out);
             }
-            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => {}
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
             StmtKind::Try { body, finally, .. } => {
                 collect_throws(body, false, out);
                 if let Some(finally) = finally {

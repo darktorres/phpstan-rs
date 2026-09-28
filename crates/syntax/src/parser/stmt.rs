@@ -157,7 +157,7 @@ impl Parser {
             {
                 let mut e = self.parse_enum_decl()?;
                 e.attrs = attrs;
-                self.stmt(StmtKind::EnumDecl(e), start)
+                self.stmt(StmtKind::ClassDecl(e), start)
             }
             // `namespace\foo();` - a relative-name expression statement,
             // not a declaration (a real namespace declaration never

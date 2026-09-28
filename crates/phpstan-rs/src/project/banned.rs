@@ -201,13 +201,13 @@ impl<'a> Walker<'a> {
                 }
                 self.stmts(&f.body);
             }
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                let fqn = ctx.declared_name(class_decl_name(e));
+                self.class_like(&fqn, &e.methods, &[], &e.consts);
+            }
             StmtKind::ClassDecl(c) => {
                 let fqn = ctx.declared_name(class_decl_name(c));
                 self.class_like(&fqn, &c.methods, &c.properties, &c.consts);
-            }
-            StmtKind::EnumDecl(e) => {
-                let fqn = ctx.declared_name(&e.name);
-                self.class_like(&fqn, &e.methods, &[], &e.consts);
             }
             _ => {
                 match &stmt.kind {

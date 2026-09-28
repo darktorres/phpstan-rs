@@ -43,7 +43,7 @@ use crate::project::Project;
 use crate::registry::Registry;
 use crate::registry::class_decl_name;
 use syntax::ast::{
-    Arg, ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
+    Arg, ClassDecl, ClassKind, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
 };
 use syntax::token::{Position, Span};
 use syntax::visit::{child_exprs, child_stmts};
@@ -184,8 +184,10 @@ impl<'a> Walker<'a> {
             StmtKind::FunctionDecl(f) => {
                 self.function(f, &mut ctx.clone(), current_class, false, best);
             }
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                self.enum_decl(e, &mut ctx.clone(), best)
+            }
             StmtKind::ClassDecl(c) => self.class(c, &mut ctx.clone(), best),
-            StmtKind::EnumDecl(e) => self.enum_decl(e, &mut ctx.clone(), best),
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
                     self.expr(&c.value, ctx, current_class, best);
@@ -265,15 +267,15 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn enum_decl(&mut self, e: &EnumDecl, ctx: &mut NameContext, best: &mut Option<SigHelp>) {
-        let fqn = ctx.declared_name(&e.name);
+    fn enum_decl(&mut self, e: &ClassDecl, ctx: &mut NameContext, best: &mut Option<SigHelp>) {
+        let fqn = ctx.declared_name(class_decl_name(e));
         for m in &e.methods {
             self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
         }
         for cst in &e.consts {
             self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), best);
         }
-        for case in &e.cases {
+        for case in &e.enum_cases {
             if let Some(v) = &case.value {
                 self.expr(v, &mut ctx.clone(), Some(&fqn), best);
             }

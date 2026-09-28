@@ -91,6 +91,14 @@ fn scan_stmt_for_rebinds(stmt: &Stmt, targets: &mut FxHashSet<Arc<str>>, escape_
         // `Closure::bind`/`bindTo` call reaching into some other class
         // entirely.
         StmtKind::FunctionDecl(f) => scan_stmts_for_rebinds(&f.body, targets, escape_all),
+        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+            for m in &e.methods {
+                scan_stmts_for_rebinds(&m.function.body, targets, escape_all);
+            }
+            for cst in &e.consts {
+                scan_expr_for_rebinds(&cst.value, targets, escape_all);
+            }
+        }
         StmtKind::ClassDecl(c) => {
             for m in &c.methods {
                 scan_stmts_for_rebinds(&m.function.body, targets, escape_all);
@@ -101,14 +109,6 @@ fn scan_stmt_for_rebinds(stmt: &Stmt, targets: &mut FxHashSet<Arc<str>>, escape_
                 }
             }
             for cst in &c.consts {
-                scan_expr_for_rebinds(&cst.value, targets, escape_all);
-            }
-        }
-        StmtKind::EnumDecl(e) => {
-            for m in &e.methods {
-                scan_stmts_for_rebinds(&m.function.body, targets, escape_all);
-            }
-            for cst in &e.consts {
                 scan_expr_for_rebinds(&cst.value, targets, escape_all);
             }
         }

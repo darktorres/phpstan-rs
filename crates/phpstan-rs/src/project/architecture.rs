@@ -38,14 +38,14 @@ fn collect_declared<'a>(
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::ClassDecl(c) => {
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
                 out.insert(
-                    ctx.declared_name(class_decl_name(c)).to_ascii_lowercase(),
+                    ctx.declared_name(class_decl_name(e)).to_ascii_lowercase(),
                     Declared {
-                        name_span: c.name_span,
+                        name_span: e.name_span,
                         span: stmt.span,
-                        attributes: c.attrs.iter().map(|a| ctx.resolve(&a.name)).collect(),
-                        public_methods: c
+                        attributes: e.attrs.iter().map(|a| ctx.resolve(&a.name)).collect(),
+                        public_methods: e
                             .methods
                             .iter()
                             .filter(|m| {
@@ -57,14 +57,14 @@ fn collect_declared<'a>(
                     },
                 );
             }
-            StmtKind::EnumDecl(e) => {
+            StmtKind::ClassDecl(c) => {
                 out.insert(
-                    ctx.declared_name(&e.name).to_ascii_lowercase(),
+                    ctx.declared_name(class_decl_name(c)).to_ascii_lowercase(),
                     Declared {
-                        name_span: e.name_span,
+                        name_span: c.name_span,
                         span: stmt.span,
-                        attributes: e.attrs.iter().map(|a| ctx.resolve(&a.name)).collect(),
-                        public_methods: e
+                        attributes: c.attrs.iter().map(|a| ctx.resolve(&a.name)).collect(),
+                        public_methods: c
                             .methods
                             .iter()
                             .filter(|m| {
@@ -100,6 +100,11 @@ fn new_class_spans(stmts: &[Stmt], out: &mut FxHashSet<Span>) {
 fn new_class_spans_in_stmt(stmt: &Stmt, out: &mut FxHashSet<Span>) {
     match &stmt.kind {
         StmtKind::FunctionDecl(f) => new_class_spans(&f.body, out),
+        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+            for m in &e.methods {
+                new_class_spans(&m.function.body, out);
+            }
+        }
         StmtKind::ClassDecl(c) => {
             for m in &c.methods {
                 new_class_spans(&m.function.body, out);
@@ -108,11 +113,6 @@ fn new_class_spans_in_stmt(stmt: &Stmt, out: &mut FxHashSet<Span>) {
                 if let Some(d) = &p.default {
                     new_class_spans_in_expr(d, out);
                 }
-            }
-        }
-        StmtKind::EnumDecl(e) => {
-            for m in &e.methods {
-                new_class_spans(&m.function.body, out);
             }
         }
         _ => {

@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
     /// Flags a private const/method/property never referenced anywhere in
     /// this class's own declared bodies. Scanning only
     /// `methods`/`properties`/`consts` exactly as declared on this one
-    /// `ClassDecl`/`EnumDecl` (never the registry's own trait-flattened
+    /// `ClassDecl`/`ClassDecl` (never the registry's own trait-flattened
     /// `ClassReflection`) means a trait-provided member is never a candidate
     /// here at all.
     pub(crate) fn check_unused_private_members(

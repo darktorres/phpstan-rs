@@ -146,7 +146,6 @@ fn declarations_carry_the_namespace_they_are_declared_in() {
     let mut names = Vec::new();
     for_each_in_context(&program, |stmt, _| match &stmt.kind {
         StmtKind::ClassDecl(c) => names.push(c.namespaced_name.clone()),
-        StmtKind::EnumDecl(e) => names.push(e.namespaced_name.clone()),
         StmtKind::GlobalConst(consts) => {
             names.extend(consts.iter().map(|c| c.namespaced_name.clone()))
         }

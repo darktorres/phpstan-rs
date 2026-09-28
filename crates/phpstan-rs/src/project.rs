@@ -1992,7 +1992,7 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
             StmtKind::ClassDecl(c) if c.kind == syntax::ast::ClassKind::Trait => {
                 ranges.push((stmt.span.start.line, stmt.span.end.line));
             }
-            StmtKind::ClassDecl(_) | StmtKind::FunctionDecl(_) | StmtKind::EnumDecl(_) => {}
+            StmtKind::ClassDecl(_) | StmtKind::FunctionDecl(_) => {}
             _ => stack.extend(syntax::visit::child_stmts(stmt)),
         }
     }
@@ -2226,8 +2226,10 @@ fn declared_names_with_context(
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
             StmtKind::FunctionDecl(f) => functions.push(ctx.declared_name(&f.name)),
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                classes.push(ctx.declared_name(class_decl_name(e)))
+            }
             StmtKind::ClassDecl(c) => classes.push(ctx.declared_name(class_decl_name(c))),
-            StmtKind::EnumDecl(e) => classes.push(ctx.declared_name(&e.name)),
             // Must mirror Registry::index's recursion into `if`/block
             // bodies (the `if (!function_exists(...)) { function foo()
             // {} }` polyfill idiom) - otherwise an incremental update

@@ -128,7 +128,6 @@ pub enum StmtKind {
     // matters for a single-call static analysis pass. The name is
     // without its `$`.
     StaticVar(Vec<(Ident, Option<Expr>)>),
-    EnumDecl(EnumDecl),
     Switch {
         subject: Expr,
         cases: Vec<SwitchCase>,
@@ -457,6 +456,9 @@ pub struct ClassDecl {
     // just `span` again, never actually looked up by name.
     pub name_span: Span,
     pub kind: ClassKind,
+    // An enum's backing type (`int` or `string`); `None` for a pure enum
+    // and every other class-like.
+    pub backing_type: Option<TypeHint>,
     pub extends: Vec<QualifiedName>,
     // Each `extends` entry's span (same index).
     pub extends_spans: Vec<Span>,
@@ -511,35 +513,6 @@ pub struct EnumCase {
     // one (`case Hearts;`).
     pub value: Option<Expr>,
     // `#[Attr]` groups preceding this case.
-    pub attrs: Vec<Attribute>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct EnumDecl {
-    pub name: Name,
-    // The name with the file's namespace. Filled in by name resolution.
-    pub namespaced_name: Option<Arc<str>>,
-    pub name_span: Span,
-    // "int" | "string" for a backed enum, None for a pure one. Enums can't
-    // extend anything or declare instance properties, unlike ClassDecl.
-    pub backing_type: Option<TypeHint>,
-    pub implements: Vec<QualifiedName>,
-    pub implements_spans: Vec<Span>,
-    pub cases: Vec<EnumCase>,
-    pub methods: Vec<MethodDecl>,
-    pub consts: Vec<ClassConst>,
-    pub uses: Vec<QualifiedName>,
-    pub uses_spans: Vec<Span>,
-    // See `ClassDecl::uses_doc_comments`'s own doc comment.
-    pub uses_doc_comments: Vec<Option<Arc<str>>>,
-    pub trait_aliases: Vec<TraitAlias>,
-    pub trait_precedences: Vec<TraitPrecedence>,
-    pub resolved_trait_conflicts: Vec<Name>,
-    // The enum's own `/** ... */` doc comment, if any - needed
-    // only to reject a stray `@template` tag (enums can't be generic).
-    pub doc_comment: Option<Arc<str>>,
-    // `#[Attr]` groups preceding this enum declaration.
     pub attrs: Vec<Attribute>,
     pub span: Span,
 }

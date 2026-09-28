@@ -38,7 +38,7 @@ impl Parser {
     // `use`, `const`, methods are identical), except enums have `case
     // Name [= value];` instead of properties - they can't declare instance
     // properties or extend anything.
-    pub(crate) fn parse_enum_decl(&mut self) -> Result<EnumDecl, ParseError> {
+    pub(crate) fn parse_enum_decl(&mut self) -> Result<ClassDecl, ParseError> {
         let start = self.current_pos();
         // Captured here, at the very first token, mirroring
         // `parse_class_decl`'s identical note above - needed for
@@ -238,14 +238,21 @@ impl Parser {
         }
         self.expect(&Token::RBrace)?;
 
-        Ok(EnumDecl {
+        Ok(ClassDecl {
             namespaced_name: None,
-            name: self.interner.name(&name),
+            name: Some(self.interner.name(&name)),
             name_span,
+            kind: ClassKind::Enum,
             backing_type,
+            extends: Vec::new(),
+            extends_spans: Vec::new(),
             implements,
             implements_spans,
-            cases,
+            is_abstract: false,
+            is_final: false,
+            is_readonly: false,
+            properties: Vec::new(),
+            enum_cases: cases,
             methods,
             consts,
             uses,

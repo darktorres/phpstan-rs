@@ -15,7 +15,7 @@ use crate::registry::type_node::parse_type_node;
 use phpdoc::docblock::{self, DocBlock};
 use phpdoc::grammar::TypeNode;
 use syntax::ast::TypeHint;
-use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, Visibility};
+use syntax::ast::{ClassDecl, ClassKind, ExprKind, Literal, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
@@ -900,11 +900,11 @@ impl<'a> MemberSpans<'a> {
         spans
     }
 
-    pub(crate) fn of_enum(e: &'a EnumDecl) -> MemberSpans<'a> {
+    pub(crate) fn of_enum(e: &'a ClassDecl) -> MemberSpans<'a> {
         let mut spans = MemberSpans::default();
         spans.add_methods(&e.methods);
         spans.add_consts(&e.consts);
-        for case in &e.cases {
+        for case in &e.enum_cases {
             spans.consts.insert(&case.name, case.name_span);
         }
         spans
@@ -1712,7 +1712,7 @@ impl ClassReflection {
     /// not just enums - a separate, pre-existing gap this doesn't attempt
     /// to close.
     #[hotpath::measure]
-    pub(crate) fn from_enum_decl(e: &EnumDecl, ctx: &NameContext) -> ClassReflection {
+    pub(crate) fn from_enum_decl(e: &ClassDecl, ctx: &NameContext) -> ClassReflection {
         // Enums can't be generic in real PHP (no `@template` on an enum
         // means anything), so there's no enclosing-class template list to
         // pass down here, unlike ClassReflection::from_decl. An enum CAN
@@ -1721,7 +1721,7 @@ impl ClassReflection {
         // real), so `@implements` tags are still worth resolving - just
         // with an empty `template_params` map, since there's no class-
         // level template a tag's argument could reference.
-        let fqn = ctx.declared_name(&e.name);
+        let fqn = ctx.declared_name(class_decl_name(e));
         let class_doc: Option<DocBlock> = e.doc_comment.as_deref().map(docblock::parse);
         let implements_args: FxHashMap<Arc<str>, Vec<Type>> = class_doc
             .iter()
@@ -1942,7 +1942,7 @@ impl ClassReflection {
         // static-access existence check and its type inference both just
         // work, with no new lookup path needed. A case has no visibility
         // syntax in real PHP - always public.
-        for case in &e.cases {
+        for case in &e.enum_cases {
             consts.insert(
                 intern(&case.name),
                 ConstantReflection {
@@ -1964,7 +1964,7 @@ impl ClassReflection {
         }
         // Cases and constants interleave in source; keep that order.
         let position = |name: &Arc<str>| {
-            e.cases
+            e.enum_cases
                 .iter()
                 .find(|c| c.name == **name)
                 .map(|c| c.name_span)
@@ -1985,7 +1985,7 @@ impl ClassReflection {
         // literal argument's matching case, if any, and a partial map
         // still answers that for the literal-valued cases it covers.
         let enum_case_values: FxHashMap<Arc<str>, Type> = e
-            .cases
+            .enum_cases
             .iter()
             .filter_map(|c| {
                 let v = c.value.as_ref()?;
@@ -2059,11 +2059,11 @@ impl ClassReflection {
             // Desc = 'DESC'; }`'s `->value` needs to be `'ASC'|'DESC'`,
             // not bare `string`).
             let case_values: Vec<Type> = e
-                .cases
+                .enum_cases
                 .iter()
                 .filter_map(|c| enum_case_values.get(c.name.as_ref()).cloned())
                 .collect();
-            let value_ty = if !case_values.is_empty() && case_values.len() == e.cases.len() {
+            let value_ty = if !case_values.is_empty() && case_values.len() == e.enum_cases.len() {
                 match case_values.len() {
                     1 => case_values.into_iter().next().unwrap(),
                     _ => Type::Union(case_values),
@@ -2198,7 +2198,7 @@ impl ClassReflection {
             final_methods,
             static_methods,
             // An enum can't declare instance properties at all (see
-            // `ast::EnumDecl`'s doc comment) - never a `final`-property
+            // `ast::ClassDecl`'s doc comment) - never a `final`-property
             // candidate either.
             final_properties: FxHashSet::default(),
             // An enum can never be `extends`-subclassed by anything

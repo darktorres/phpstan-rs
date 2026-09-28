@@ -106,6 +106,14 @@ impl Walk<'_, '_> {
                         self.stmts(std::slice::from_ref(e));
                     }
                 }
+                StmtKind::ClassDecl(en) if en.kind == ClassKind::Enum => {
+                    let name = declared(&en.namespaced_name);
+                    let interfaces = en.implements.iter().map(resolved).collect();
+                    let e = self.entry("enum", name.to_ascii_lowercase(), &name, &[]);
+                    if e.declarations.len() == 1 {
+                        e.interfaces = interfaces;
+                    }
+                }
                 StmtKind::ClassDecl(c) => {
                     let kind = match c.kind {
                         ClassKind::Interface => "interface",
@@ -125,14 +133,6 @@ impl Walk<'_, '_> {
                     let e = self.entry(kind, name.to_ascii_lowercase(), &name, &c.attrs);
                     if e.declarations.len() == 1 {
                         e.parent = parent;
-                        e.interfaces = interfaces;
-                    }
-                }
-                StmtKind::EnumDecl(en) => {
-                    let name = declared(&en.namespaced_name);
-                    let interfaces = en.implements.iter().map(resolved).collect();
-                    let e = self.entry("enum", name.to_ascii_lowercase(), &name, &[]);
-                    if e.declarations.len() == 1 {
                         e.interfaces = interfaces;
                     }
                 }

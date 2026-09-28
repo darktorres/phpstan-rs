@@ -931,8 +931,8 @@ impl<'a> Walker<'a> {
         self.current_class_fqn = None;
     }
 
-    fn check_enum(&mut self, e: &EnumDecl, ctx: &NameContext) {
-        let fqn = ctx.declared_name(&e.name);
+    fn check_enum(&mut self, e: &ClassDecl, ctx: &NameContext) {
+        let fqn = ctx.declared_name(class_decl_name(e));
         for iface in &e.implements {
             if let Some(ifqn) = self.resolve_if_phpstan(iface, ctx) {
                 let action = format!("implementing {ifqn}");
@@ -951,7 +951,7 @@ impl<'a> Walker<'a> {
         for cst in &e.consts {
             self.check_expr(&cst.value, ctx, &empty, &fqn);
         }
-        for case in &e.cases {
+        for case in &e.enum_cases {
             if let Some(v) = &case.value {
                 self.check_expr(v, ctx, &empty, &fqn);
             }
@@ -1069,7 +1069,7 @@ impl<'a> Walker<'a> {
     /// own doc comment for why the recursion is split this way
     /// (`child_stmts` for nested *statements*, this match for a
     /// variant's own non-statement fields, with `FunctionDecl`/
-    /// `ClassDecl`/`EnumDecl` needing both since they have their own
+    /// `ClassDecl`/`ClassDecl` needing both since they have their own
     /// dedicated declaration-walker instead of being flattened into an
     /// ordinary statement list).
     fn check_stmt(
@@ -1133,8 +1133,8 @@ impl<'a> Walker<'a> {
                 self.check_expr(value, ctx, param_types, label);
             }
             StmtKind::FunctionDecl(f) => self.check_function(f, ctx, &f.name),
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.check_enum(e, ctx),
             StmtKind::ClassDecl(c) => self.check_class(c, ctx),
-            StmtKind::EnumDecl(e) => self.check_enum(e, ctx),
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
                     self.check_expr(&c.value, ctx, param_types, label);

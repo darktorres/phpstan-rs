@@ -21,7 +21,7 @@ use syntax::ast::*;
 impl<'a> Checker<'a> {
     /// `DuplicateDeclarationHelper::checkClassLike`'s equivalent for a
     /// `class`/`interface`/`trait`. Enums use `check_duplicate_enum_members`
-    /// instead - `EnumDecl` is its own AST node, not a `ClassDecl` with
+    /// instead - `ClassDecl` is its own AST node, not a `ClassDecl` with
     /// `ClassKind::Enum` (see this project's own `ast.rs`).
     pub(crate) fn check_duplicate_class_members(&mut self, fqn: &str, c: &ClassDecl) {
         let kind = class_kind_identifier(&c.kind);
@@ -30,8 +30,8 @@ impl<'a> Checker<'a> {
         self.check_duplicate_methods(fqn, kind, &c.methods);
     }
 
-    pub(crate) fn check_duplicate_enum_members(&mut self, fqn: &str, e: &EnumDecl) {
-        self.check_duplicate_consts(fqn, "enum", &e.cases, &e.consts);
+    pub(crate) fn check_duplicate_enum_members(&mut self, fqn: &str, e: &ClassDecl) {
+        self.check_duplicate_consts(fqn, "enum", &e.enum_cases, &e.consts);
         self.check_duplicate_properties(fqn, "enum", &[], &e.methods);
         self.check_duplicate_methods(fqn, "enum", &e.methods);
     }

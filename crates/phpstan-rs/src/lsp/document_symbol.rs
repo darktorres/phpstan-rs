@@ -7,7 +7,7 @@
 use crate::registry::class_decl_name;
 use lsp_types::{DocumentSymbol, SymbolKind};
 
-use syntax::ast::{ClassDecl, ClassKind, EnumDecl, FunctionDecl, MethodDecl, Stmt, StmtKind};
+use syntax::ast::{ClassDecl, ClassKind, FunctionDecl, MethodDecl, Stmt, StmtKind};
 use syntax::token::Span;
 
 use super::protocol::to_lsp_range;
@@ -17,8 +17,8 @@ pub(super) fn document_symbols(stmts: &[Stmt]) -> Vec<DocumentSymbol> {
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => symbols.push(function_symbol(f, SymbolKind::FUNCTION)),
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => symbols.push(enum_symbol(e)),
             StmtKind::ClassDecl(c) => symbols.push(class_symbol(c)),
-            StmtKind::EnumDecl(e) => symbols.push(enum_symbol(e)),
             StmtKind::Namespace(_) | StmtKind::Use(_) => {}
             // A conditional top-level declaration (`if (...) { class Foo {} }`)
             // still gets an outline entry - mirrors `DeclLocations::index`'s
@@ -116,9 +116,9 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
     )
 }
 
-fn enum_symbol(e: &EnumDecl) -> DocumentSymbol {
+fn enum_symbol(e: &ClassDecl) -> DocumentSymbol {
     let mut children: Vec<DocumentSymbol> = e.consts.iter().map(const_symbol).collect();
-    children.extend(e.cases.iter().map(|case| {
+    children.extend(e.enum_cases.iter().map(|case| {
         symbol(
             case.name.to_string(),
             SymbolKind::ENUM_MEMBER,
@@ -129,7 +129,7 @@ fn enum_symbol(e: &EnumDecl) -> DocumentSymbol {
     }));
     children.extend(e.methods.iter().map(method_symbol));
     symbol(
-        e.name.to_string(),
+        class_decl_name(e).to_string(),
         SymbolKind::ENUM,
         e.span,
         e.name_span,

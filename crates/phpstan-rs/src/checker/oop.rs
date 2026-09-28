@@ -186,7 +186,7 @@ impl<'a> Checker<'a> {
     /// Checks every entry - an interface's `extends A, B;` is real,
     /// valid PHP with more than one target. Operates purely on the
     /// already-indexed, already name-resolved `ClassReflection`, so this needs
-    /// no raw `ClassDecl`/`EnumDecl` at all and covers both uniformly
+    /// no raw `ClassDecl`/`ClassDecl` at all and covers both uniformly
     /// from one call site. Existence-only - kind compatibility (a
     /// class `implements`-ing another class instead of an interface) is
     /// `check_inheritance_target_kinds`'.
@@ -532,7 +532,7 @@ impl<'a> Checker<'a> {
     /// rather than read back from the already-flattened
     /// `ClassReflection::sealed`. Takes scalars rather than a whole
     /// `&ClassDecl` since `@phpstan-sealed`'s `sealed.onEnum` check needs
-    /// a real `StmtKind::EnumDecl` call site too - `EnumDecl` and
+    /// a real `StmtKind::ClassDecl` call site too - `ClassDecl` and
     /// `ClassDecl` are different AST types with no shared struct to
     /// borrow fields from.
     pub(crate) fn check_sealed_tag_types(
@@ -672,7 +672,7 @@ impl<'a> Checker<'a> {
     /// declaring a class constant by that name is a real, unconditional
     /// PHP fatal error. Shared between `check_method_declaration_sanity`'s
     /// two call sites' const lists (a `ClassDecl`'s `consts` and an
-    /// `EnumDecl`'s) rather than living inside that function itself -
+    /// `ClassDecl`'s) rather than living inside that function itself -
     /// unrelated to methods.
     pub(crate) fn check_reserved_class_constant_name(&mut self, consts: &[ClassConst]) {
         for c in consts {
@@ -999,7 +999,7 @@ impl<'a> Checker<'a> {
     }
 
     /// `check_nested_class_declaration`'s enum counterpart.
-    pub(crate) fn check_nested_enum_declaration(&mut self, fqn: &str, e: &EnumDecl) {
+    pub(crate) fn check_nested_enum_declaration(&mut self, fqn: &str, e: &ClassDecl) {
         if self.facts_only {
             return;
         }

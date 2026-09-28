@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::checker::{Checker, class_kind_identifier};
 use crate::registry;
 use phpdoc::grammar::{self, PhpDocTagValue};
-use syntax::ast::{ClassDecl, ClassKind, EnumDecl, QualifiedName};
+use syntax::ast::{ClassDecl, ClassKind, QualifiedName};
 use syntax::token::Span;
 use types::{self, Type};
 
@@ -224,7 +224,7 @@ impl<'a> Checker<'a> {
     }
 
     /// The ancestor checks of an enum declaration.
-    pub(crate) fn check_enum_ancestors(&mut self, fqn: &str, e: &EnumDecl) {
+    pub(crate) fn check_enum_ancestors(&mut self, fqn: &str, e: &ClassDecl) {
         let doc = e.doc_comment.as_deref();
         let templates = self.declared_templates(fqn, doc);
         let implements: Vec<String> = e

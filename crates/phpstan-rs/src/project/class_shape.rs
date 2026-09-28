@@ -31,7 +31,10 @@ fn collect_classes<'a>(
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::ClassDecl(c) => out.push((ctx.declared_name(class_decl_name(c)), c)),
+            // An enum is final and has no properties or subclasses.
+            StmtKind::ClassDecl(c) if c.kind != ClassKind::Enum => {
+                out.push((ctx.declared_name(class_decl_name(c)), c))
+            }
             StmtKind::Block(body)
             | StmtKind::Declare {
                 body: Some(body), ..

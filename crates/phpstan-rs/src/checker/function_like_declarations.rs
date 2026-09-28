@@ -74,17 +74,17 @@ impl<'a> Checker<'a> {
                 );
                 self.walk_promoted_in_body(&f.body, &f.name);
             }
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                let fqn = self.name_ctx.declared_name(class_decl_name(e));
+                let previous_class = self.current_class.replace(fqn.clone());
+                self.check_promoted_in_methods(&fqn, ClassKind::Enum, &e.methods);
+                self.current_class = previous_class;
+            }
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(class_decl_name(c));
                 let previous_class = self.current_class.replace(fqn.clone());
                 self.check_promoted_in_methods(&fqn, c.kind, &c.methods);
                 self.walk_promoted_in_property_hooks(&fqn, &c.properties);
-                self.current_class = previous_class;
-            }
-            StmtKind::EnumDecl(e) => {
-                let fqn = self.name_ctx.declared_name(&e.name);
-                let previous_class = self.current_class.replace(fqn.clone());
-                self.check_promoted_in_methods(&fqn, ClassKind::Enum, &e.methods);
                 self.current_class = previous_class;
             }
             _ => {

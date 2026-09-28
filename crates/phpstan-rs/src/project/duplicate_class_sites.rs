@@ -60,6 +60,18 @@ impl DuplicateClassSites {
             match &stmt.kind {
                 StmtKind::Namespace(name) => ctx.set_namespace(name),
                 StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                    if conditional {
+                        continue;
+                    }
+                    self.record(
+                        ctx.declared_name(class_decl_name(e)),
+                        path,
+                        e.name_span,
+                        ClassKind::Enum,
+                        is_stub,
+                    );
+                }
                 StmtKind::ClassDecl(c) => {
                     if conditional {
                         continue;
@@ -69,18 +81,6 @@ impl DuplicateClassSites {
                         path,
                         c.name_span,
                         c.kind,
-                        is_stub,
-                    );
-                }
-                StmtKind::EnumDecl(e) => {
-                    if conditional {
-                        continue;
-                    }
-                    self.record(
-                        ctx.declared_name(&e.name),
-                        path,
-                        e.name_span,
-                        ClassKind::Enum,
                         is_stub,
                     );
                 }

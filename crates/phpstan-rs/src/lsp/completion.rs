@@ -273,11 +273,6 @@ fn find_function_by_name<'a>(
                 .iter()
                 .find(|m| m.function.name.as_ref() == function_name)
                 .map(|m| (&m.function, m.is_static)),
-            StmtKind::EnumDecl(e) if e.name.as_ref() == class_name => e
-                .methods
-                .iter()
-                .find(|m| m.function.name.as_ref() == function_name)
-                .map(|m| (&m.function, m.is_static)),
             _ => None,
         }),
         None => stmts.iter().find_map(|stmt| match &stmt.kind {

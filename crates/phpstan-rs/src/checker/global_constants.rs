@@ -46,13 +46,13 @@ pub(crate) fn constant_facts(program: &[Stmt]) -> ConstantFacts {
 fn collect_in_stmt(stmt: &Stmt, in_closure: bool, out: &mut ConstantFacts) {
     match &stmt.kind {
         StmtKind::FunctionDecl(f) => collect_in_body(&f.body, false, out),
-        StmtKind::ClassDecl(c) => {
-            for m in &c.methods {
+        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+            for m in &e.methods {
                 collect_in_body(&m.function.body, false, out);
             }
         }
-        StmtKind::EnumDecl(e) => {
-            for m in &e.methods {
+        StmtKind::ClassDecl(c) => {
+            for m in &c.methods {
                 collect_in_body(&m.function.body, false, out);
             }
         }

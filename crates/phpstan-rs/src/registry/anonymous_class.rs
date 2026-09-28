@@ -146,8 +146,8 @@ fn walk_stmt<'a>(stmt: &'a Stmt, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
             walk_expr(value, found);
         }
         StmtKind::FunctionDecl(f) => walk_function(f, found),
+        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => walk_enum(e, found),
         StmtKind::ClassDecl(c) => walk_class(c, found),
-        StmtKind::EnumDecl(e) => walk_enum(e, found),
         StmtKind::GlobalConst(consts) => {
             for c in consts {
                 walk_expr(&c.value, found);
@@ -206,14 +206,14 @@ fn walk_class<'a>(c: &'a ClassDecl, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) 
     }
 }
 
-fn walk_enum<'a>(e: &'a EnumDecl, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
+fn walk_enum<'a>(e: &'a ClassDecl, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
     for m in &e.methods {
         walk_function(&m.function, found);
     }
     for cst in &e.consts {
         walk_expr(&cst.value, found);
     }
-    for case in &e.cases {
+    for case in &e.enum_cases {
         if let Some(v) = &case.value {
             walk_expr(v, found);
         }

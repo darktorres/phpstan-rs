@@ -58,9 +58,9 @@ impl<'a> Checker<'a> {
     /// int/string (the overwhelming majority in practice) - a computed or
     /// otherwise non-literal case value isn't evaluated, matching this
     /// project's usual "don't guess" leniency.
-    pub(crate) fn check_enum_case_values(&mut self, fqn: &str, e: &EnumDecl) {
+    pub(crate) fn check_enum_case_values(&mut self, fqn: &str, e: &ClassDecl) {
         let mut seen: FxHashMap<(bool, String), &str> = FxHashMap::default();
-        for case in &e.cases {
+        for case in &e.enum_cases {
             let Some(value) = &case.value else {
                 continue;
             };
@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
     /// PHP (there's no `enum Foo<T>` syntax at all), so a stray
     /// `@template` tag on one's own doc comment is always a mistake,
     /// never a real declaration the way it would be on a class.
-    pub(crate) fn check_enum_template_tag(&mut self, fqn: &str, e: &EnumDecl) {
+    pub(crate) fn check_enum_template_tag(&mut self, fqn: &str, e: &ClassDecl) {
         let Some(raw) = &e.doc_comment else {
             return;
         };
@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
     /// itself doesn't reject it at parse time, but real PHPStan still
     /// flags it as a design-level error (an enum has no identity to
     /// serialize/unserialize into).
-    pub(crate) fn check_enum_sanity(&mut self, fqn: &str, e: &EnumDecl) {
+    pub(crate) fn check_enum_sanity(&mut self, fqn: &str, e: &ClassDecl) {
         for m in &e.methods {
             let lower = m.function.name.to_ascii_lowercase();
             if is_magic_method_name(&lower) {
@@ -209,7 +209,7 @@ impl<'a> Checker<'a> {
                     "string"
                 }
             });
-        for case in &e.cases {
+        for case in &e.enum_cases {
             match (&e.backing_type, &case.value) {
                 (None, Some(value)) => {
                     let ty = registry::infer_const_type(value);

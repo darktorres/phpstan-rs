@@ -258,8 +258,8 @@ impl<'a> ClassFnRefWalker<'a> {
             StmtKind::FunctionDecl(f) => {
                 self.function(f, &mut ctx.clone(), current_class, out);
             }
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, ctx, out),
             StmtKind::ClassDecl(c) => self.class(c, ctx, out),
-            StmtKind::EnumDecl(e) => self.enum_decl(e, ctx, out),
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
                     self.expr(&c.value, ctx, current_class, out);
@@ -452,8 +452,8 @@ impl<'a> ClassFnRefWalker<'a> {
         }
     }
 
-    fn enum_decl(&self, e: &EnumDecl, ctx: &mut NameContext, out: &mut Vec<(Span, RefTarget)>) {
-        let fqn = ctx.declared_name(&e.name);
+    fn enum_decl(&self, e: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, RefTarget)>) {
+        let fqn = ctx.declared_name(class_decl_name(e));
         for (name, span) in e.implements.iter().zip(e.implements_spans.iter()) {
             if let Some(target) = resolve_class_ref(name, Some(&fqn), ctx) {
                 out.push((*span, RefTarget::Class(target)));
@@ -470,7 +470,7 @@ impl<'a> ClassFnRefWalker<'a> {
         for cst in &e.consts {
             self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
         }
-        for case in &e.cases {
+        for case in &e.enum_cases {
             if let Some(v) = &case.value {
                 self.expr(v, &mut ctx.clone(), Some(&fqn), out);
             }

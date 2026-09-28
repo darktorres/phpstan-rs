@@ -139,7 +139,6 @@ fn collect_origins(stmts: &[Stmt], out: &mut FxHashMap<String, bool>) {
         }
         fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
         fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
-        fn visit_enum_decl(&mut self, _: &'ast EnumDecl) {}
     }
     walk_stmts(&mut Origins { out }, stmts);
 }
@@ -300,12 +299,12 @@ impl<'ast> Visitor<'ast> for Walker<'_> {
     }
 
     fn visit_class_decl(&mut self, c: &'ast ClassDecl) {
-        self.class(c);
-    }
-
-    fn visit_enum_decl(&mut self, e: &'ast EnumDecl) {
-        for m in &e.methods {
-            walk_stmts(self, &m.function.body);
+        if c.kind == ClassKind::Enum {
+            for m in &c.methods {
+                walk_stmts(self, &m.function.body);
+            }
+        } else {
+            self.class(c);
         }
     }
 

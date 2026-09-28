@@ -33,7 +33,7 @@ mod too_wide;
 /// body - `Some(span)` of the first one found. Mirrors
 /// `visit`'s `body_contains_yield` trio, including their
 /// "stops at a nested `Closure`/`ArrowFn`/`NewAnonymousClass`/
-/// `FunctionDecl`/`ClassDecl`/`EnumDecl` boundary" semantics - a `throw`
+/// `FunctionDecl`/`ClassDecl`/`ClassDecl` boundary" semantics - a `throw`
 /// inside a nested closure belongs to that closure, not the outer one.
 pub(crate) fn body_contains_explicit_throw(stmts: &[Stmt]) -> Option<Span> {
     stmts.iter().find_map(stmt_contains_explicit_throw)

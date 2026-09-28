@@ -1031,7 +1031,7 @@ pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {
 
 fn walk_stmt(stmt: &Stmt, loops: &mut Vec<syntax::token::Span>, out: &mut Vec<AssignedVariable>) {
     match &stmt.kind {
-        StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => return,
+        StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => return,
         StmtKind::Foreach { key, value, .. } => {
             loops.push(stmt.span);
             for target in key.iter().chain(std::iter::once(value)) {

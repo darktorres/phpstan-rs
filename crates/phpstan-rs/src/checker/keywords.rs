@@ -61,7 +61,7 @@ impl Scope {
 
     fn walk_stmt(&mut self, stmt: &Stmt) {
         match &stmt.kind {
-            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => {}
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
             StmtKind::While { body, .. }
             | StmtKind::DoWhile { body, .. }
             | StmtKind::For { body, .. }

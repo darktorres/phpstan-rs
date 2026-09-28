@@ -122,13 +122,14 @@ fn property_and_class_const_name_and_type_hint_spans_are_precise() {
 fn enum_decl_name_implements_and_case_name_spans_are_precise() {
     let src = "<?php enum Suit implements HasColor { case Hearts; }";
     let program = parse(src);
-    let StmtKind::EnumDecl(e) = &program[0].kind else {
-        panic!("expected EnumDecl");
+    let StmtKind::ClassDecl(e) = &program[0].kind else {
+        panic!("expected an enum");
     };
+    assert_eq!(e.kind, ClassKind::Enum);
     assert_eq!(text_at(src, e.name_span), "Suit");
     assert_eq!(e.implements_spans.len(), 1);
     assert_eq!(text_at(src, e.implements_spans[0]), "HasColor");
-    assert_eq!(text_at(src, e.cases[0].name_span), "Hearts");
+    assert_eq!(text_at(src, e.enum_cases[0].name_span), "Hearts");
 }
 
 #[test]

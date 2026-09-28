@@ -61,14 +61,14 @@ pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, 
                     add(short_name(&c.name).to_string(), &c.value);
                 }
             }
+            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                for k in &e.consts {
+                    add(class_constant_key(class_decl_name(e), &k.name), &k.value);
+                }
+            }
             StmtKind::ClassDecl(c) => {
                 for k in &c.consts {
                     add(class_constant_key(class_decl_name(c), &k.name), &k.value);
-                }
-            }
-            StmtKind::EnumDecl(e) => {
-                for k in &e.consts {
-                    add(class_constant_key(&e.name, &k.name), &k.value);
                 }
             }
             StmtKind::FunctionDecl(_) => {}
