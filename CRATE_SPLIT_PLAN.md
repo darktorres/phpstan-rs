@@ -4991,13 +4991,15 @@ fixture:
     function __construct`) as under a final class or
     `@phpstan-consistent-constructor`; `new.static` today (`bug-4396.php`,
     `bug-2861.php`);
-  - a conditional return whose subject is a template isn't
-    `conditionalType.alwaysTrue` from the bound alone: `(T is object ? … :
-    …)` under `T of object` (`bug-10622b.php`), nor `(int is int ? …)`
-    shadowing a parameter (`callable-type-predicate-rule.php`), but a bound
-    disjoint from the tested type decides it: `(T is string ? … : …)`
-    under `T of int` is `conditionalType.alwaysFalse`, unreported today
-    (`*-conditional-return-type.php`, 4);
+  - a conditional return on a template is decided by its whole bound:
+    `(T is object ? … : …)` under `T of TKey|TValue`, each `of
+    object|array<mixed>`, is only maybe true, `conditionalType.alwaysTrue`
+    today (`bug-10622b.php`), as is `(int is int ? …)` shadowing a
+    parameter (`callable-type-predicate-rule.php`); a bound inside the
+    tested type makes it always true and a disjoint one always false: `(T
+    is int ? …)` under `T of int` is `conditionalType.alwaysTrue` and `(T
+    is string ? …)` under `T of int` `conditionalType.alwaysFalse`, both
+    unreported today (`*-conditional-return-type.php`, 4 each);
   - `@var` above `global $x;` and `static $x = 1;` sets the variable's
     type; it is `varTag.nativeType` against the default today
     (`bug-4500.php`, `invalid-var-tag-type.php`). A `@var` is checked
