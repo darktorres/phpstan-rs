@@ -134,6 +134,13 @@ Each fix needs a fixture.
     from a table rather than a string match run for every call, user
     functions included; long `.`/`+` chains are walked iteratively.
 
+- [ ] **P3. An append onto a shape widens it to a general array.**
+  `$a = ['x' => 1]; $a[] = 2;` gives `array<int|string, 1|2>`, though the
+  appended key is known: the next index (`NextArrayIndex`), so the result
+  is `array{x: 1, 0: 2}`. `set_offset_value_type`'s shape branch
+  (`offsets.rs`) handles a missing offset like a dynamic one. An unsealed
+  shape's next key isn't known, and stays the widened form.
+
 ## Review 2: structure, types crate
 
 - [ ] **T1. One absorption rule for unions.** `union_types_impl` in
@@ -263,7 +270,7 @@ through `check-project`.
   or analysis runs on a thread with a stack sized for a stated depth
   limit.
 
-- [ ] **F29. Integer overflow crashes the checker.** Each of these aborts
+- [x] **F29. Integer overflow crashes the checker.** (`e5db6811`) Each of these aborts
   checking the file ("internal error while checking: attempt to … with
   overflow"); a release build wraps silently to the wrong literal instead:
   - `-$m` for `$m = PHP_INT_MIN` (`arithmetic.rs` `negate_numeric_literal`
@@ -390,6 +397,14 @@ through `check-project`.
   and `[]` for null), and `$o?->nope` isn't checked. `interpolation.rs`'s
   comment says PHP has no such form; PHP 8 does. (lexer final state,
   probed)
+
+- [ ] **F58. The next array key after a negative key is version-blind.**
+  Since PHP 8.3 an element appended after a negative key takes the next
+  integer (`[-5 => 'a', 'b']` has key `-4`); before 8.3 it took `0`.
+  `NextArrayIndex` (`shape.rs`) always clamps to `0`, so on 8.3+ the
+  literal's shape has the wrong key. The rule follows the configured PHP
+  versions, with the key unknown when the range spans 8.3. (found fixing
+  F29, probed with php 8.5)
 
 ### False positives (from reading)
 
