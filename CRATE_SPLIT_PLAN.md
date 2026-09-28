@@ -4190,6 +4190,18 @@ fixture:
     and an interface or abstract method marked `@phpstan-impure` is not
     `impureMethod.pure` (it has no body to judge; 7 findings,
     `bug-5984.php`, `bug-6702.php`, `strict-comparison.php`);
+  - a statement that only reads is `expr.resultUnused` whatever else the
+    read reports: `$foo->test;` on an unknown class or undefined property,
+    `$mixed?->foo;`, `$null->foo;`, `$resource[42];`,
+    `$arrayDoesNotExist['foo'];`, `isset($string->prop);`, `$this->foo;`
+    are silent today where the read is otherwise reported or its receiver
+    is `mixed` (about 45 rules-oracle findings, `access-properties.php`,
+    `bug-6899.php`, `this.php`, `nullsafe-property-fetch*.php`,
+    `nonexistent-offset.php`); `clone $p;` of a class without `__clone()`,
+    `clone 'abc';` and a first-class callable made from a variable
+    (`$f(...);`) are unreported too (the rules oracle's 168 PHPStan-only
+    `expr.resultUnused` are these, `new class {};`, bare closure calls and
+    `match` statements);
   - `new static(…);` as a statement is not `new.resultUnused`: a subclass's
     constructor may have effects (13 of the rules oracle's 19
     phpstan-rs-only `new.resultUnused`, in `instantiation.php` and
