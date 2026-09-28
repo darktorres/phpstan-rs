@@ -612,24 +612,35 @@ impl<'a> Checker<'a> {
             None => match self.iterable_element_type(&subject_ty) {
                 Some(pair) => pair,
                 None => {
-                    // `foreach.nonIterable` - a subject confirmed to
-                    // never be iterable at all (a scalar, a registered
-                    // class that isn't `Traversable`). Reported and the
-                    // body is still checked against `Mixed`/`Mixed`,
-                    // matching `check_dim_fetch_key_type`'s "report and
-                    // continue" precedent.
-                    if let Some(level) =
-                        self.failing_level(&subject_ty, 3, |m| self.relation().is_iterable(m).no())
+                    // `foreach` takes an array or any object: an object
+                    // that isn't `Traversable` iterates its visible
+                    // properties, keyed by name. Anything else is
+                    // `foreach.nonIterable`, reported, and the body still
+                    // checked against `mixed`.
+                    let relation = self.relation();
+                    let foreachable = |m: &Type| {
+                        relation
+                            .is_iterable(m)
+                            .or(relation.can_access_properties(m))
+                    };
+                    if let Some(level) = self.failing_level(&subject_ty, 3, |m| foreachable(m).no())
                     {
                         self.report(format!(
-                                "Argument of an invalid type {subject_ty} supplied for foreach, only iterables are supported."
+                                "Argument of an invalid type {subject_ty} supplied for foreach, only arrays and objects are supported."
                             ),
                             subject.span,
                             level,
                             "foreach.nonIterable",
                         );
                     }
-                    (Type::mixed(), Type::mixed())
+                    let iterates_properties = subject_ty.union_members().iter().all(|m| {
+                        relation.can_access_properties(m).yes() && relation.is_iterable(m).no()
+                    });
+                    if iterates_properties {
+                        (Type::string(), Type::mixed())
+                    } else {
+                        (Type::mixed(), Type::mixed())
+                    }
                 }
             },
         };

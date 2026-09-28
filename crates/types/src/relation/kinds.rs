@@ -7,9 +7,8 @@ use crate::{Relation, Repr, TrinaryLogic, Type};
 
 impl Relation<'_> {
     /// PHPStan's `isInstanceOf()`: `Yes` for an object of `class` or a
-    /// subclass, `No` for any other registered class that isn't an
-    /// interface and for a non-object, `Maybe` for an interface, an
-    /// unregistered class, or anything unknown.
+    /// subclass, `No` for a non-object and for a class no subclass of which
+    /// can be a `class`, `Maybe` otherwise (see `class_is`).
     pub fn is_instance_of(&self, ty: &Type, class: &str) -> TrinaryLogic {
         self.answer(ty, &mut |leaf| match leaf {
             Type(Repr::Object(name, _)) | Type(Repr::EnumCase(name, _)) => {
@@ -76,8 +75,8 @@ impl Relation<'_> {
 
     /// PHPStan's `isCallable()`, as far as it can say No: never a
     /// boolean, number, `null`, `void` or resource, nor an object of a
-    /// registered class that isn't an interface or `Closure` and has no
-    /// `__invoke()`. A string or an array may name a callable.
+    /// final class (or enum) without `__invoke()`, which no subclass can
+    /// add. A string or an array may name a callable.
     pub fn is_callable(&self, ty: &Type) -> TrinaryLogic {
         self.answer(ty, &mut |leaf| match leaf {
             Type(Repr::Null)
@@ -94,11 +93,10 @@ impl Relation<'_> {
             Type(Repr::Object(name, _)) | Type(Repr::EnumCase(name, _)) => {
                 if name.as_str() == "Closure" || self.hierarchy.has_method(name, "__invoke") {
                     TrinaryLogic::Yes
-                } else if self
-                    .hierarchy
-                    .find_class(name)
-                    .is_some_and(|facts| facts.kind != ClassKind::Interface)
-                {
+                } else if self.hierarchy.find_class(name).is_some_and(|facts| {
+                    facts.kind == ClassKind::Enum
+                        || (facts.is_final && facts.kind != ClassKind::Interface)
+                }) {
                     TrinaryLogic::No
                 } else {
                     TrinaryLogic::Maybe
@@ -115,13 +113,10 @@ impl Relation<'_> {
         self.answer(ty, &mut |leaf| object_like(leaf))
     }
 
-    /// PHPStan's `canCallMethods()`: as `can_access_properties`, except
-    /// that a `stdClass` has no methods to call.
+    /// PHPStan's `canCallMethods()`: as `can_access_properties`. Whether
+    /// the method exists is the method lookup's question.
     pub fn can_call_methods(&self, ty: &Type) -> TrinaryLogic {
-        self.answer(ty, &mut |leaf| match leaf {
-            Type(Repr::Object(class, _)) if class.as_str() == "stdClass" => TrinaryLogic::No,
-            _ => object_like(leaf),
-        })
+        self.answer(ty, &mut |leaf| object_like(leaf))
     }
 
     /// Whether a value of `ty` can name a class for `new $x` or `$x::m()`:
@@ -142,21 +137,11 @@ impl Relation<'_> {
         })
     }
 
-    /// Whether `class` is `of` for these questions: `Yes` when it is or
-    /// extends it, `No` when it's a registered class that isn't an
-    /// interface, `Maybe` otherwise.
+    /// Whether an instance of `class` is an `of`: `Yes` when it is or
+    /// extends it, `No` when no subclass of `class` can be one (a final
+    /// class or enum, or two classes neither extends), `Maybe` otherwise.
     fn class_is(&self, class: &str, of: &str) -> TrinaryLogic {
-        if self.hierarchy.is_subclass_of(class, of) {
-            TrinaryLogic::Yes
-        } else if self
-            .hierarchy
-            .find_class(class)
-            .is_some_and(|facts| facts.kind != ClassKind::Interface)
-        {
-            TrinaryLogic::No
-        } else {
-            TrinaryLogic::Maybe
-        }
+        self.object_super_type_of(of, class)
     }
 
     /// A question asked of each leaf of `ty`, answered for the whole as

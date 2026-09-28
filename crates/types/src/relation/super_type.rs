@@ -333,7 +333,7 @@ impl Relation<'_> {
     /// aside: `Yes` when `sub` is `sup` or extends or implements it, `No`
     /// when no class can be both, `Maybe` otherwise (an unknown class, a
     /// subclass of `sub` that could extend `sup`).
-    fn object_super_type_of(&self, sup: &str, sub: &str) -> TrinaryLogic {
+    pub(crate) fn object_super_type_of(&self, sup: &str, sub: &str) -> TrinaryLogic {
         if sup.eq_ignore_ascii_case(sub) || self.hierarchy.is_subclass_of(sub, sup) {
             return TrinaryLogic::Yes;
         }
@@ -358,8 +358,11 @@ impl Relation<'_> {
             return TrinaryLogic::Maybe;
         }
         let is_interface = |k: &ClassKind| matches!(k, ClassKind::Interface);
-        if (is_interface(&sup_info.kind) && !sub_info.is_final)
-            || (is_interface(&sub_info.kind) && !sup_info.is_final)
+        // An enum can't be extended either.
+        let is_final =
+            |facts: &crate::ClassFacts<'_>| facts.is_final || facts.kind == ClassKind::Enum;
+        if (is_interface(&sup_info.kind) && !is_final(&sub_info))
+            || (is_interface(&sub_info.kind) && !is_final(&sup_info))
         {
             return TrinaryLogic::Maybe;
         }
