@@ -37,6 +37,14 @@ pub fn union_types_keep_shapes_distinct(a: Type, b: Type) -> Type {
 }
 
 fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
+    // `never` has no values to add.
+    if a == Type::Never {
+        return normalize_generic_args(b);
+    }
+    if b == Type::Never {
+        return normalize_generic_args(a);
+    }
+    let (a, b) = (normalize_generic_args(a), normalize_generic_args(b));
     if crate::types_equal_for_union(&a, &b) {
         return a;
     }
@@ -88,6 +96,18 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     // specifically wouldn't find it).
     if members.contains(&Type::Mixed(false)) {
         return Type::Mixed(false);
+    }
+    members.retain(|m| *m != Type::Never);
+    // `true|false` is `bool`, and `bool` holds both.
+    if members.contains(&Type::True) && members.contains(&Type::False) {
+        let at = members
+            .iter()
+            .position(|m| matches!(m, Type::True | Type::False))
+            .expect("checked above");
+        members[at] = Type::Bool;
+    }
+    if members.contains(&Type::Bool) {
+        members.retain(|m| !matches!(m, Type::True | Type::False));
     }
     // An extension payload whose widened form is already a member adds
     // nothing - the union cap's widening stays put once it happened.
@@ -582,4 +602,25 @@ fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
         (None, None) => None,
     };
     Some(Type::ArrayShape(merged))
+}
+
+/// `ty` with each generic argument's union members deduplicated
+/// (`Collection<Dog|Dog>` is `Collection<Dog>`).
+fn normalize_generic_args(ty: Type) -> Type {
+    match ty {
+        Type::Object(name, args) if args.iter().any(|a| matches!(a, Type::Union(_))) => {
+            let args = args
+                .into_iter()
+                .map(|arg| match arg {
+                    Type::Union(members) => members
+                        .into_iter()
+                        .reduce(union_types)
+                        .unwrap_or(Type::Never),
+                    other => other,
+                })
+                .collect();
+            Type::Object(name, args)
+        }
+        other => other,
+    }
 }

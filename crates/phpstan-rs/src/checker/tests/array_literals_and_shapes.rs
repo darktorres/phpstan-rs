@@ -18,8 +18,8 @@ use types::Shape;
 #[test]
 fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
     // Only 2 distinct field values (alternating), so the per-field
-    // union stays well under its own cap and the result is a clean,
-    // precise `bool`, not `Mixed` - proving the merge actually folds
+    // union stays well under its own cap and the result is `bool`, not
+    // `Mixed` - proving the merge actually folds
     // real field types together, not just picks one arbitrarily.
     let members: Vec<Type> = (0..13)
         .map(|i| {
@@ -41,8 +41,8 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
             assert!(!fields[0].2, "the merged field must not be optional");
             assert_eq!(
                 fields[0].1,
-                Type::Union(vec![Type::True, Type::False]),
-                "expected the alternating True/False values to fold into a real Union"
+                Type::Bool,
+                "expected the alternating true and false values to fold into bool"
             );
         }
         other => panic!("expected a single merged ArrayShape, got {other:?}"),
