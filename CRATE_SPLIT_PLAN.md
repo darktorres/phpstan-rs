@@ -4578,7 +4578,21 @@ fixture:
     where a plain assignment is; a read through an alias of `$this` counts
     as a read: `$that = $this; function () use ($that) { return
     $that->p; }` leaves `$p` `property.onlyWritten` today, a false
-    positive;
+    positive. Only a real read counts: not a read that only feeds the
+    property back through its own class's constructor (`new
+    self($this->test)`, `new static(…)`, named arguments included;
+    `bug-14573.php`, 9, `bug-13440.php`), a read in the property's own
+    hook (`property-hooks-unused-property.php`,
+    `private-final-property-hooks.php`), or a dynamic read whose name
+    can't be the property (`$this->$name` over `['foo', 'bar']` leaves
+    `$baz` write-only, and so does `$x->{$y}` after `$y !== 'isFinal'`;
+    `unused-private-property.php:117`, `bug-11802.php`), where today any
+    dynamic read counts for every property. The writes that count are
+    PHP 8.5's `clone($this, ['priv' => 2])` (`property.unused` today;
+    `clone-with.php` and its readonly variants, 4), an offset write
+    (`$this->tuple[$i] = false`, `bug-3339.php`) and a static write
+    through a constant dynamic name (`self::${$name} = …`,
+    `bug-13093c.php`, `bug-13093d.php`);
   - every write form counts as a write for `property.onlyRead`/
     `property.neverWritten` (`PropertyWrite` through `PropertyAssignNode`
     and the by-reference and foreach paths): an offset write, append or
