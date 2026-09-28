@@ -3801,7 +3801,11 @@ building on the previous one:
     `0|1|2|3|4|5|6`, where PHPStan has `int<0, max>`, and `.=` in a loop
     leaves seven literal strings. The 14 `loop_depth` guards that suppress
     rules inside loops are deleted with it. The doc comments saying 3
-    passes (`converge_loop_body`, `check_foreach`) go too.
+    passes (`converge_loop_body`, `check_foreach`) go too. A narrowing
+    every iteration makes holds after the loop: when a `foreach` body's
+    `else` throws for `$number <= $compareTo`, `$compareTo` is `int<min,
+    0>` after it, so a second loop's `$number > $compareTo` is
+    `greater.alwaysTrue` (the rules oracle's `bug-7531.php`).
   - **For** follows `ForHandler`:
     - a loop whose first condition is `true` runs at least once: after
       `for ($i = 0; $i < 10; $i++) { $x = 1; }`, `echo $x` is
@@ -4334,7 +4338,9 @@ the rest), which the gate excludes and lists.
     oracle's `bug-7675.php`);
   - `count()` of a non-empty array is `int<1, max>`: after `$w[] = $v` it
     is `int<0, max>` today (the rules oracle's `bug-8277.php`), and so it
-    is for a `non-empty-array<int>` parameter or after `if ($a === [])
+    is for a constant shape (`count($a) > 0` on `array{1}` is
+    `greater.alwaysTrue`, `strict-comparison.php:118`), a
+    `non-empty-array<int>` parameter or after `if ($a === [])
     { return; }` (`bug-6260.php`, `bug-7578.php`, `bug-9104.php`);
   - the hash functions return what they produce: `md5()` is
     `lowercase-string&non-falsy-string` and `md5_file()` that or `false`,
@@ -5485,7 +5491,8 @@ fixture:
     against a one-parameter constructor, `new class(1) {}` with no
     constructor, a `@phpstan-require-extends` trait it uses, `ArrayAccess`
     methods without tentative return types, an uninitialized readonly
-    property and `echo $o->v()` of a `void` method are all unreported (41
+    property, `echo $o->v()` of a `void` method and an unknown trait it
+    uses (`trait.notFound`) are all unreported (41
     of the rules oracle's PHPStan-only findings name a `class@anonymous`);
   - `abstract` on an interface method is a compile error ("Interface
     method Baz::doBar() must not be abstract", `method.abstract` in
