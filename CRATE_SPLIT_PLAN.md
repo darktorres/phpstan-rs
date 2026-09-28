@@ -2701,7 +2701,7 @@ The mismatches span stages: `filterVar.php` (156 `mixed`),
 `set-type-type-specifying.php` (149) and the `minmax-*` files (140) are
 E2's built-in extensions, and the `methodPhpDocs-*` files are C's PHPDoc
 inheritance. The first `cargo xtask nsrt` run therefore checks in
-`gates/nsrt/owners.toml`, which names the owning phase (B4, C1–C10, D1–D6,
+`gates/nsrt/owners.toml`, which names the owning phase (B3, B4, C1–C10, D1–D6,
 E2) for each of the 1,360 mismatching files, split by line where a file
 spans phases. Appendix G is its draft for the extension calls and Appendix H
 for the 1,066 files the phases don't cite, by cause. A phase is done when
@@ -6578,7 +6578,12 @@ deviation that names its runtime reason. `ext:` keys are E2's extensions of the
 same name; their calls' own mismatches are in Appendix G, and these are the
 values that flow on from them.
 
-**B4** (591 mismatches, 136 files, 32 causes):
+**B3** (4 mismatches, 1 file, 1 cause):
+
+- `case-insensitive-names` (4, 1 file): `PARENT::` is `parent::`;
+  `case-insensitive-parent.php`.
+
+**B4** (863 mismatches, 219 files, 55 causes):
 
 - `type-print` (112, 38 files): display forms the nsrt normalization doesn't
   cover yet (`callable` as `callable(): mixed`, a template with its bound,
@@ -6611,9 +6616,22 @@ values that flow on from them.
   `this-subtractable.php`, `mixed-subtract.php`, `falsy-isset.php`,
   `bug-pr-339.php`, `negated-instanceof.php`, `subtracted.php`,
   `allowed-subtypes-enum.php`.
+- `generic-new-infer` (59, 14 files): `new` infers the class's templates from
+  constructor arguments (`WeakMap`, `ArrayObject`, `ReflectionClass`,
+  `DatePeriod`, `SensitiveParameterValue`), `never` with none; `bug-11844.php`,
+  `bug-15032.php`, `bug-7056.php`, `date-period-return-types.php`,
+  `bug-12473-types.php`, `bug-13144.php`, `sensitive-parameter-value.php`,
+  `bug-13783.php`, `bug-6505.php`, `native-reflection-default-values.php`,
+  `bug-4725.php`, `bug-9084.php`, `bug-6993.php`, `bug-7078.php`.
 - `shape-union` (36, 4 files): branches with different shapes stay a union of
   shapes rather than one optional-key shape; `bug11480.php`, `bug-13561.php`,
   `bug-9908.php`, `bug-10834.php`.
+- `callable-template-infer` (35, 12 files): a callable argument (closure, arrow
+  function, first-class or string callable, `uksort`'s callback) infers a
+  template from its parameters and return; `bug-12691.php`, `uksort-bug.php`,
+  `bug-7281.php`, `smaller-than-benevolent.php`, `closure-passed-to-type.php`,
+  `bug-14203.php`, `bug-5675.php`, `bug-9086.php`, `bug-9472.php`,
+  `bug-5508.php`, `bug-6196.php`, `bug-8257.php`.
 - `union-normalize` (27, 10 files): unions aren't normalized: duplicate members
   (`Dog|Dog`, `int|int|string`), `never` members (`true|never`), and
   `bool|int|false` for `bool|int`; `bug-15268.php`, `bug-2735.php`,
@@ -6624,6 +6642,18 @@ values that flow on from them.
   before PHP 8 and named-key arrays from 8; `bug-2600-php8.php`, `bug-2600.php`,
   `variadic-parameter-php8.php`, `anonymous-function.php`,
   `bug-2600-php-version-scope.php`, `bug-5698-php7.php`, `bug-5698-php8.php`.
+- `template-bound-generic` (23, 3 files): templates bounded by generics of other
+  templates unwrap; `nested-generic-types.php`,
+  `nested-generic-types-unwrapping-covariant.php`,
+  `nested-generic-types-unwrapping.php`.
+- `template-narrow` (21, 7 files): narrowing a template-typed value keeps `T` in
+  the intersection; `bug-6591.php`, `bug-10083.php`, `bug-4498.php`,
+  `bug-9961.php`, `bug-14348.php`, `bug-2580.php`, `bug-7688.php`.
+- `template-generalize` (19, 7 files): inferred template arguments generalize
+  (`Foo<1>` is `Foo<int>`) unless the argument is a class-string or the bound is
+  nullable; `generics-do-not-generalize.php`, `bug-3226.php`,
+  `generic-generalization.php`, `assert-class-type.php`, `bug-11430.php`,
+  `bug-7423.php`, `template-null-bound.php`.
 - `decimal-int-string` (16, 1 file): `decimal-int-string` and
   `non-decimal-int-string` types, and `[$s => 1]` keyed by them;
   `decimal-int-string.php`.
@@ -6635,6 +6665,8 @@ values that flow on from them.
   literal, `$x::class` is `class-string<X>&literal-string`, and `::class` in an
   array literal stays a literal; `class-constant-narrowing.php`, `bug-5843.php`,
   `bug-2677.php`, `bug-4875.php`.
+- `template-bound-union` (15, 3 files): a template bounded by a union stays `T`
+  when returned; `bug-6566-types.php`, `bug-9939.php`, `bug-5000.php`.
 - `callable-array` (14, 2 files): `is_array()` on a callable is
   `non-empty-list&callable(): mixed`, and `[$object, 'method']` is
   `list&callable`; `bug-3842.php`, `bug-4510.php`.
@@ -6642,6 +6674,11 @@ values that flow on from them.
   shape, folds into one shape; `bug-11234.php`, `constant-array-intersect.php`.
 - `static-closure` (14, 3 files): a static closure is `static-Closure(...)`;
   `closure-static-type.php`, `bug-9764.php`, `degrade-closures.php`.
+- `template-never` (14, 2 files): a `never` or empty-array argument infers a
+  template as `never`; `never-into-union-template.php`,
+  `generics-empty-array.php`.
+- `generic-static` (13, 1 file): `static(Foo<T, U>)` returned from a generic
+  method keeps `static` and resolves the arguments; `generic-static.php`.
 - `object-shape` (13, 1 file): `object{…}` shapes: a missing property is
   `*ERROR*`, `(object) []` is `object{}&stdClass`; `object-shape.php`.
 - `spread-string-keys` (12, 3 files): spreading string-keyed arrays keeps the
@@ -6650,13 +6687,24 @@ values that flow on from them.
 - `array-key-cast` (11, 2 files): literal and numeric-string array keys cast as
   PHP casts them (`'1'` is `1`, a `numeric-string` key is `int|numeric-string`);
   `literal-arrays-keys.php`, `bug-8592.php`.
+- `generic-method-infer` (11, 6 files): a generic method's templates infer from
+  arguments and resolve through returned generics; `bug-9456.php`,
+  `bug-4545.php`, `bug-8127.php`, `collected-data.php`,
+  `complex-generics-example.php`, `discussion-8447.php`.
 - `intersection-static` (10, 2 files): a `static` return on an intersection
   receiver keeps the intersection; `intersection-static.php`, `bug-6462.php`.
+- `template-return` (10, 6 files): a template parameter's return is the
+  argument's type; `bug-6609-83.php`, `bug-6609.php`, `bug-4209-2.php`,
+  `bug-4209.php`, `bug-6917.php`, `bug-9123.php`.
+- `generic-this` (8, 2 files): a generic fluent method returning `$this` keeps
+  `$this(Foo<T>)&static`; `bug-12575.php`, `new-in-initializers.php`.
 - `class-constant-keys` (7, 1 file): `self::class` as an array key builds a
   shape; `array-shape-class-constant-key.php`.
 - `enum-name-value` (7, 2 files): `->name` and `->value` of an enum union or
   subtracted enum are the remaining cases' literals; `bug-14839.php`,
   `array-key-exists-on-subtracted.php`.
+- `generic-closure-infer` (7, 1 file): a generic method's templates infer from
+  closures and shapes; `bug-10254.php`.
 - `implicit-nullable` (7, 2 files): a parameter defaulting to `null` is
   nullable; `nullable-closure-parameter.php`,
   `typehints-anonymous-function.php`.
@@ -6664,6 +6712,13 @@ values that flow on from them.
   `deducted-types.php`.
 - `spread-list` (6, 2 files): `[...$arr]` is `list<mixed>`; `bug-5287.php`,
   `bug-5287-php81.php`.
+- `template-infer-union` (5, 3 files): a template inferred from several
+  arguments unions them; `generics-reduce-types-first.php`, `bug-3321.php`,
+  `bug2577.php`.
+- `template-subtract` (5, 1 file): `$items[$k] ?? null` on a generic list is
+  `T~null|null`; `bug-4117.php`.
+- `template-variadic` (5, 3 files): a variadic template parameter unions every
+  argument; `bug-10092.php`, `bug-7068.php`, `bug-9881.php`.
 - `clone-type` (4, 1 file): `clone` of `?object` is `object`; `clone.php`.
 - `instanceof-expr` (4, 1 file): `$a instanceof $b` with an object on the right
   is `bool`; `bug-12107.php`.
@@ -6673,32 +6728,92 @@ values that flow on from them.
   keys for a literal-union key; `bug-5219.php`, `bug-9907.php`.
 - `spread-shapes` (4, 2 files): spreading shapes merges their keys, keeping
   required keys required; `bug-14708.php`, `bug-7776.php`.
+- `template-in-shape` (4, 1 file): a template-typed property inside a shape
+  keeps `T`; `bug-10445.php`.
 - `void-null` (4, 2 files): a void call used as a value is `null`; `void.php`,
   `emptyiterator.php`.
 - `new-dynamic` (3, 1 file): `new $class()` is `object`; `bug-4579.php`.
 - `range-union` (3, 1 file): adjacent integer ranges merge; `bug-14213.php`.
+- `template-bound` (3, 2 files): a template iterates and reads as its bound;
+  `bug-6748.php`, `bug-7301.php`.
+- `template-class-constant` (3, 1 file): `$this->model::class` on a
+  template-typed property is `class-string<TModel>`; `bug-6864.php`.
+- `template-class-string` (3, 3 files): `class-string<T>` arguments resolve `T`,
+  `static::class` included; `bug-2612.php`, `bug-4247.php`, `bug-7141.php`.
+- `template-key` (3, 2 files): a template key survives iteration and offsets;
+  `bug-5140.php`, `bug-7788.php`.
 - `allowed-subtypes` (2, 2 files): a sealed hierarchy minus a member is the
   remaining member: `Throwable` without `Exception` is `Error`,
   `DateTimeInterface` without `DateTime` is `DateTimeImmutable`;
   `allowed-subtypes-datetime.php`, `allowed-subtypes-throwable.php`.
 - `enum-this` (2, 1 file): `$this` in an enum narrowed by `match` is
   `$this(Enum)&Enum::A`; `bug-14478.php`.
+- `enum-value-template` (2, 1 file): a static method returning `value-of` for an
+  enum case argument folds to the value; `bug-13782.php`.
 - `shape-from-array` (2, 1 file): `array<1, T>` is `array{1?: T}`;
   `array-shape-from-general-array-with-single-finite-key.php`.
+- `template-default-param` (2, 1 file): a template parameter defaulting to
+  `null` infers `null`; `bug-6584.php`.
+- `template-invoke` (2, 1 file): `__invoke()` of a generic callable object
+  returns the template; `bug-12894.php`.
 
-**C4** (27 mismatches, 9 files, 3 causes):
+**C4** (168 mismatches, 43 files, 19 causes):
 
+- `iterable-intersect` (38, 5 files): `iterable<T>&Collection` PHPDoc types keep
+  the intersection and its offset type; `methodPhpDocs-phanPrefix.php`,
+  `methodPhpDocs-phpstanPrefix.php`, `methodPhpDocs-psalmPrefix.php`,
+  `bug-2676.php`, `array-accessable.php`.
+- `inheritdoc` (21, 7 files): PHPDoc is inherited without `{@inheritdoc}`
+  braces, from traits' abstract methods and with templates;
+  `method-phpDocs-inheritdoc-without-curly-braces.php`,
+  `abstract-generic-trait-method-implicit-phpdoc-inheritance.php`,
+  `bug-9045.php`, `inherit-abstract-trait-method-phpdoc.php`,
+  `inherit-phpdoc-merging-template.php`, `inheritdoc-from-trait.php`,
+  `inheritdoc-without-curly-braces-from-trait.php`.
 - `define-constants` (16, 4 files): constants from `define()` and `const` inside
   functions, with a cast initializer and the namespaced fallback;
   `const-in-functions-namespaced.php`, `const-in-functions.php`,
   `cast-in-initializer-define.php`, `cast-in-initializer.php`.
+- `generic-parent-params` (16, 4 files): a child's templates substitute into the
+  parent's, so an inherited or overriding method's parameters take the generic
+  types; `bug-9867.php`, `bug-4423.php`, `generic-parent.php`, `bug-12386.php`.
+- `trait-templates` (11, 1 file): trait templates resolve through `@use` and
+  their bounds; `generic-traits.php`.
+- `generic-self-out` (10, 3 files): `@phpstan-self-out` on generic methods
+  rewrites the receiver's arguments; `rule-error-builder.php`, `bug-13374.php`,
+  `bug-3866.php`.
+- `self-out` (10, 1 file): `@phpstan-self-out` rewrites the receiver;
+  `self-out.php`.
+- `static-return` (8, 1 file): a `static` return stays `static(Foo)` inside the
+  class; `methodPhpDocs.php`.
 - `class-constants` (7, 4 files): class constants resolve through `::class`
   values and spreads of other constants; `bug-7391.php`, `bug-4950.php`,
   `bug-3379.php`, `bug-5458.php`.
-- `case-insensitive-names` (4, 1 file): `PARENT::` is `parent::`;
-  `case-insensitive-parent.php`.
+- `private-property-infer` (6, 1 file): an untyped private property takes its
+  constructor-assigned type; `infer-private-property-type-from-constructor.php`.
+- `promoted-phpdoc` (6, 1 file): a promoted property's PHPDoc from `@param` and
+  `@var`; `promoted-properties-types.php`.
+- `no-named-arguments` (4, 1 file): `@no-named-arguments` makes a variadic a
+  list; `no-named-arguments.php`.
+- `property-tags` (4, 2 files): `@phpstan-property` overrides `@property`, and
+  `@property` applies to a private property outside the class;
+  `classPhpDocs-phpstanPropertyPrefix.php`,
+  `property-phpdoc-tag-private-property.php`.
+- `method-tags` (3, 2 files): `@method` tags type their returns and override a
+  native method; `classPhpDocs.php`, `bug-3142.php`.
+- `trait-method-phpdoc` (3, 2 files): a method from traits takes the right
+  PHPDoc (the last trait's, or the class's own); `traits/traits.php`,
+  `shadowed-trait-methods.php`.
+- `param-default-phpdoc` (2, 1 file): a parameter whose PHPDoc is a union of
+  class constants keeps it with a constant default; `bug-5530.php`.
+- `generic-property` (1, 1 file): a generic property returned through a method;
+  `bug-8008.php`.
+- `mixin` (1, 1 file): `@mixin` of a generic class forwards static calls;
+  `model-mixin.php`.
+- `trait-param-phpdoc` (1, 1 file): a trait method's `@param` applies inside the
+  trait; `bug-9733.php`.
 
-**C5** (413 mismatches, 109 files, 32 causes):
+**C6** (168 mismatches, 47 files, 6 causes):
 
 - `stub-return` (107, 32 files): method and function returns from the stubs
   (Redis, Ds, SPL, SQLite3, Imagick, SNMP, xdebug and others), `mixed` or wider
@@ -6713,32 +6828,27 @@ values that flow on from them.
   `bug-7341.php`, `bug-9714.php`, `die-74.php`, `error-get-last-php85.php`,
   `fgetcsv-php7.php`, `fgetcsv-php8.php`,
   `native-types-ftp-connect-resource.php`, `ssh2-functions.php`.
-- `assert-tags` (65, 20 files): `@phpstan-assert`, `-if-true` and `-if-false` on
-  methods, static methods, constructors, first-class and string callables,
-  inherited from a parent or interface, and with conditional, template,
-  intersection, `key-of` and `empty` types; `bug-14705.php`,
-  `assert-inheritance.php`, `bug-14249.php`, `bug-12376.php`,
-  `assert-conditional.php`, `assert-methods.php`, `assert-this.php`,
-  `bug-10040.php`, `assert-empty.php`, `assert-invariant.php`,
-  `assert-method.php`, `assert-constructor.php`, `assert-intersected.php`,
-  `bug-10037.php`, `bug-11441.php`, `bug-11472.php`, `bug-13282.php`,
-  `bug-14108.php`, `bug-14108c.php`, `bug-5785.php`.
 - `stub-asserts` (39, 2 files): stub `@phpstan-assert` tags narrow
   (`is_readable`, `dir`, `chdir`, `chroot`);
   `non-empty-string-file-functions.php`, `bug-14829.php`.
-- `iterable-intersect` (38, 5 files): `iterable<T>&Collection` PHPDoc types keep
-  the intersection and its offset type; `methodPhpDocs-phanPrefix.php`,
-  `methodPhpDocs-phpstanPrefix.php`, `methodPhpDocs-psalmPrefix.php`,
-  `bug-2676.php`, `array-accessable.php`.
-- `inheritdoc` (21, 7 files): PHPDoc is inherited without `{@inheritdoc}`
-  braces, from traits' abstract methods and with templates;
-  `method-phpDocs-inheritdoc-without-curly-braces.php`,
-  `abstract-generic-trait-method-implicit-phpdoc-inheritance.php`,
-  `bug-9045.php`, `inherit-abstract-trait-method-phpdoc.php`,
-  `inherit-phpdoc-merging-template.php`, `inheritdoc-from-trait.php`,
-  `inheritdoc-without-curly-braces-from-trait.php`.
-- `superglobals` (16, 2 files): `$argc`, `$argv` and `$GLOBALS` types;
-  `cli-globals.php`, `superglobals.php`.
+- `arrayaccess-generic` (8, 4 files): offsets of `SplDoublyLinkedList`,
+  `SplFixedArray`, `WeakMap` and `SplObjectStorage` return their generic value
+  type (`mixed` today); `bug-9274.php`, `splfixedarray-iterator-types.php`,
+  `bug-4436.php`, `weakMap.php`.
+- `stub-byref` (8, 4 files): by-reference out parameters from the stubs
+  (`socket_select`, `proc_open`'s pipes); `discussion-10285-php8.php`,
+  `discussion-10285.php`, `bug-13197.php`, `bug-13197b.php`.
+- `generic-reflection` (5, 4 files): `ReflectionClass<T>`'s `getName()`, `$name`
+  and `$class` are `class-string<T>`; `bug-2927.php`, `bug-6889.php`,
+  `isset-coalesce-empty-type-post-81.php`,
+  `isset-coalesce-empty-type-pre-81.php`.
+- `stub-property` (1, 1 file): `DateInterval::$days` is `int|false` after an
+  impure call; `bug-14428.php`.
+
+**C7** (103 mismatches, 26 files, 15 causes):
+
+- `generic-defaults` (17, 1 file): a generic without arguments is `Foo<mixed>`
+  and unions with `Foo<123>`; `bug-15198.php`.
 - `phpdoc-types` (12, 5 files): PHPDoc keyword types (`pure-callable`,
   `callable-array`, `lowercase-string`/`uppercase-string` in shapes), and an
   invalid `non-empty-list` falls back to `array`; `more-types.php`,
@@ -6747,207 +6857,38 @@ values that flow on from them.
 - `phpdoc-class-override` (11, 3 files): a class named like a PHPDoc pseudo-type
   wins when imported or in its namespace; `phpdoc-pseudotype-override.php`,
   `phpdoc-pseudotype-namespace.php`, `phpdoc-pseudotype-global.php`.
+- `template-default` (11, 3 files): `@template T = X` defaults fill missing
+  arguments; `template-default.php`, `generics-default.php`,
+  `template-default-referring-other.php`.
 - `type-alias-circular` (11, 1 file): circular type-alias imports are `*ERROR*`;
   `type-aliases.php`.
-- `self-out` (10, 1 file): `@phpstan-self-out` rewrites the receiver;
-  `self-out.php`.
 - `shape-const-keys` (8, 1 file): `array{static::KEY: T}` shape keys resolve
   class constants; `bug-6989.php`.
-- `static-return` (8, 1 file): a `static` return stays `static(Foo)` inside the
-  class; `methodPhpDocs.php`.
-- `stub-byref` (8, 4 files): by-reference out parameters from the stubs
-  (`socket_select`, `proc_open`'s pipes); `discussion-10285-php8.php`,
-  `discussion-10285.php`, `bug-13197.php`, `bug-13197b.php`.
-- `private-property-infer` (6, 1 file): an untyped private property takes its
-  constructor-assigned type; `infer-private-property-type-from-constructor.php`.
-- `promoted-phpdoc` (6, 1 file): a promoted property's PHPDoc from `@param` and
-  `@var`; `promoted-properties-types.php`.
+- `offset-access-type` (7, 2 files): `T[K]` offset-access types and template
+  keys in shapes; `offset-access.php`, `bug-15145.php`.
 - `int-mask` (5, 1 file): `int-mask<…>` and `int-mask-of<…>` types;
   `int-mask.php`.
 - `list-shape` (5, 1 file): `list{…}` shapes with optional elements;
   `array-shape-list-optional.php`.
-- `no-named-arguments` (4, 1 file): `@no-named-arguments` makes a variadic a
-  list; `no-named-arguments.php`.
 - `phpdoc-const-expr` (4, 1 file): PHPDoc constant expressions keep float
   literals (`1.0`); `const-expr-phpdoc-type.php`.
-- `property-tags` (4, 2 files): `@phpstan-property` overrides `@property`, and
-  `@property` applies to a private property outside the class;
-  `classPhpDocs-phpstanPropertyPrefix.php`,
-  `property-phpdoc-tag-private-property.php`.
 - `unresolvable-phpdoc` (4, 2 files): an unresolvable PHPDoc type falls back to
   the native type; `psalm-prefix-unresolvable.php`, `unresolvable-types.php`.
-- `method-tags` (3, 2 files): `@method` tags type their returns and override a
-  native method; `classPhpDocs.php`, `bug-3142.php`.
-- `trait-method-phpdoc` (3, 2 files): a method from traits takes the right
-  PHPDoc (the last trait's, or the class's own); `traits/traits.php`,
-  `shadowed-trait-methods.php`.
 - `value-of` (3, 2 files): `value-of<T>` on constants and generics;
   `value-of-generic.php`, `value-of.php`.
-- `param-default-phpdoc` (2, 1 file): a parameter whose PHPDoc is a union of
-  class constants keeps it with a constant default; `bug-5530.php`.
 - `type-alias-import` (2, 1 file): `@phpstan-import-type` aliases in enums;
   `enums-import-alias.php`.
 - `type-alias-invalid` (2, 1 file): an invalid type alias resolves to `mixed`;
   `invalid-type-aliases.php`.
+- `key-of` (1, 1 file): `key-of<…>` on a constant array; `key-of.php`.
+
+**D2** (2 mismatches, 2 files, 1 cause):
+
 - `var-tags` (2, 2 files): `@var` placement: above a `use` statement, and
   without a variable name above a `foreach`;
   `foreach/type-in-comment-no-variable-2.php`, `var-above-use.php`.
-- `key-of` (1, 1 file): `key-of<…>` on a constant array; `key-of.php`.
-- `mixin` (1, 1 file): `@mixin` of a generic class forwards static calls;
-  `model-mixin.php`.
-- `stub-property` (1, 1 file): `DateInterval::$days` is `int|false` after an
-  impure call; `bug-14428.php`.
-- `trait-param-phpdoc` (1, 1 file): a trait method's `@param` applies inside the
-  trait; `bug-9733.php`.
 
-**C7** (461 mismatches, 134 files, 37 causes):
-
-- `generic-new-infer` (59, 14 files): `new` infers the class's templates from
-  constructor arguments (`WeakMap`, `ArrayObject`, `ReflectionClass`,
-  `DatePeriod`, `SensitiveParameterValue`), `never` with none; `bug-11844.php`,
-  `bug-15032.php`, `bug-7056.php`, `date-period-return-types.php`,
-  `bug-12473-types.php`, `bug-13144.php`, `sensitive-parameter-value.php`,
-  `bug-13783.php`, `bug-6505.php`, `native-reflection-default-values.php`,
-  `bug-4725.php`, `bug-9084.php`, `bug-6993.php`, `bug-7078.php`.
-- `conditional-return` (58, 12 files): a conditional return type resolves on the
-  argument's type: arrays by emptiness, templates, nested conditions, `$this`,
-  class types, and against the argument's value before a reassignment;
-  `conditional-types.php`, `conditional-type-for-parameter-template.php`,
-  `bug-7279.php`, `bug-11565.php`, `bug-15296.php`, `bug-11894.php`,
-  `bug-9000.php`, `conditional-type-for-parameter-template-bound.php`,
-  `bug-12562.php`, `bug-3853.php`, `bug-9360.php`, `fizz-buzz.php`.
-- `callable-template-infer` (35, 12 files): a callable argument (closure, arrow
-  function, first-class or string callable, `uksort`'s callback) infers a
-  template from its parameters and return; `bug-12691.php`, `uksort-bug.php`,
-  `bug-7281.php`, `smaller-than-benevolent.php`, `closure-passed-to-type.php`,
-  `bug-14203.php`, `bug-5675.php`, `bug-9086.php`, `bug-9472.php`,
-  `bug-5508.php`, `bug-6196.php`, `bug-8257.php`.
-- `template-bound-generic` (23, 3 files): templates bounded by generics of other
-  templates unwrap; `nested-generic-types.php`,
-  `nested-generic-types-unwrapping-covariant.php`,
-  `nested-generic-types-unwrapping.php`.
-- `template-narrow` (21, 7 files): narrowing a template-typed value keeps `T` in
-  the intersection; `bug-6591.php`, `bug-10083.php`, `bug-4498.php`,
-  `bug-9961.php`, `bug-14348.php`, `bug-2580.php`, `bug-7688.php`.
-- `template-generalize` (19, 7 files): inferred template arguments generalize
-  (`Foo<1>` is `Foo<int>`) unless the argument is a class-string or the bound is
-  nullable; `generics-do-not-generalize.php`, `bug-3226.php`,
-  `generic-generalization.php`, `assert-class-type.php`, `bug-11430.php`,
-  `bug-7423.php`, `template-null-bound.php`.
-- `conditional-param` (17, 3 files): a conditional parameter type (`$k is 'a' ?
-  A : B`) resolves when the other parameter narrows; `bug-7915.php`,
-  `bug-10055.php`, `pr-5108.php`.
-- `generic-defaults` (17, 1 file): a generic without arguments is `Foo<mixed>`
-  and unions with `Foo<123>`; `bug-15198.php`.
-- `generic-parent-params` (16, 4 files): a child's templates substitute into the
-  parent's, so an inherited or overriding method's parameters take the generic
-  types; `bug-9867.php`, `bug-4423.php`, `generic-parent.php`, `bug-12386.php`.
-- `iterator-key` (16, 8 files): foreach over an `Iterator`, `iterable<K, V>` or
-  `SplObjectStorage` takes the key and value types; `bug-13985.php`,
-  `foreach/object-type.php`, `bug-4504.php`,
-  `foreach/foreach-iterable-with-specified-key-type.php`, `bug-4789.php`,
-  `bug-6576.php`, `class-reflection-interfaces.php`,
-  `foreach/foreach-iterable-with-complex-value-type.php`.
-- `template-bound-union` (15, 3 files): a template bounded by a union stays `T`
-  when returned; `bug-6566-types.php`, `bug-9939.php`, `bug-5000.php`.
-- `template-never` (14, 2 files): a `never` or empty-array argument infers a
-  template as `never`; `never-into-union-template.php`,
-  `generics-empty-array.php`.
-- `generic-static` (13, 1 file): `static(Foo<T, U>)` returned from a generic
-  method keeps `static` and resolves the arguments; `generic-static.php`.
-- `generic-method-infer` (11, 6 files): a generic method's templates infer from
-  arguments and resolve through returned generics; `bug-9456.php`,
-  `bug-4545.php`, `bug-8127.php`, `collected-data.php`,
-  `complex-generics-example.php`, `discussion-8447.php`.
-- `template-default` (11, 3 files): `@template T = X` defaults fill missing
-  arguments; `template-default.php`, `generics-default.php`,
-  `template-default-referring-other.php`.
-- `trait-templates` (11, 1 file): trait templates resolve through `@use` and
-  their bounds; `generic-traits.php`.
-- `generic-self-out` (10, 3 files): `@phpstan-self-out` on generic methods
-  rewrites the receiver's arguments; `rule-error-builder.php`, `bug-13374.php`,
-  `bug-3866.php`.
-- `template-return` (10, 6 files): a template parameter's return is the
-  argument's type; `bug-6609-83.php`, `bug-6609.php`, `bug-4209-2.php`,
-  `bug-4209.php`, `bug-6917.php`, `bug-9123.php`.
-- `arrayaccess-generic` (8, 4 files): offsets of `SplDoublyLinkedList`,
-  `SplFixedArray`, `WeakMap` and `SplObjectStorage` return their generic value
-  type (`mixed` today); `bug-9274.php`, `splfixedarray-iterator-types.php`,
-  `bug-4436.php`, `weakMap.php`.
-- `generic-this` (8, 2 files): a generic fluent method returning `$this` keeps
-  `$this(Foo<T>)&static`; `bug-12575.php`, `new-in-initializers.php`.
-- `conditional-param-out` (7, 2 files): a conditional `@param-out` type
-  resolves, defaulted parameters included; `bug-10699.php`,
-  `param-out-default.php`.
-- `generic-closure-infer` (7, 1 file): a generic method's templates infer from
-  closures and shapes; `bug-10254.php`.
-- `offset-access-type` (7, 2 files): `T[K]` offset-access types and template
-  keys in shapes; `offset-access.php`, `bug-15145.php`.
-- `generic-reflection` (5, 4 files): `ReflectionClass<T>`'s `getName()`, `$name`
-  and `$class` are `class-string<T>`; `bug-2927.php`, `bug-6889.php`,
-  `isset-coalesce-empty-type-post-81.php`,
-  `isset-coalesce-empty-type-pre-81.php`.
-- `static-call-union` (5, 3 files): a static call on a union of classes or
-  class-strings merges the returns; `bug-11687.php`,
-  `method-call-return-type-fallback.php`, `union-methods.php`.
-- `template-infer-union` (5, 3 files): a template inferred from several
-  arguments unions them; `generics-reduce-types-first.php`, `bug-3321.php`,
-  `bug2577.php`.
-- `template-subtract` (5, 1 file): `$items[$k] ?? null` on a generic list is
-  `T~null|null`; `bug-4117.php`.
-- `template-variadic` (5, 3 files): a variadic template parameter unions every
-  argument; `bug-10092.php`, `bug-7068.php`, `bug-9881.php`.
-- `template-in-shape` (4, 1 file): a template-typed property inside a shape
-  keeps `T`; `bug-10445.php`.
-- `template-bound` (3, 2 files): a template iterates and reads as its bound;
-  `bug-6748.php`, `bug-7301.php`.
-- `template-class-constant` (3, 1 file): `$this->model::class` on a
-  template-typed property is `class-string<TModel>`; `bug-6864.php`.
-- `template-class-string` (3, 3 files): `class-string<T>` arguments resolve `T`,
-  `static::class` included; `bug-2612.php`, `bug-4247.php`, `bug-7141.php`.
-- `template-key` (3, 2 files): a template key survives iteration and offsets;
-  `bug-5140.php`, `bug-7788.php`.
-- `enum-value-template` (2, 1 file): a static method returning `value-of` for an
-  enum case argument folds to the value; `bug-13782.php`.
-- `template-default-param` (2, 1 file): a template parameter defaulting to
-  `null` infers `null`; `bug-6584.php`.
-- `template-invoke` (2, 1 file): `__invoke()` of a generic callable object
-  returns the template; `bug-12894.php`.
-- `generic-property` (1, 1 file): a generic property returned through a method;
-  `bug-8008.php`.
-
-**D2** (158 mismatches, 28 files, 7 causes):
-
-- `closure-param-infer` (77, 13 files): an untyped closure parameter takes its
-  type from the callable parameter it is passed to (a union of callables, a
-  variadic, a named argument, a constructor, an attribute, an immediately
-  invoked closure's argument); `closure-passed-to-union-of-callables.php`,
-  `closure-argument-type.php`, `bug-9240-php7.php`, `bug-9240.php`,
-  `closure-passed-to-type-node-callback-scope-php81.php`,
-  `arrow-function-argument-type.php`, `bug-13253.php`, `bug-10671.php`,
-  `bug-10671b.php`, `callable-in-union.php`, `closure-in-attribute.php`,
-  `bug-9601.php`, `closure-inferred-typehint.php`.
-- `byref-closure-use` (29, 4 files): a by-reference `use` variable merges the
-  closure's writes into the outer scope, with the exact shape and without
-  `never`; `bug-11561.php`, `closure-passed-by-reference.php`, `bug-13810.php`,
-  `closure-passed-by-reference-in-call.php`.
-- `closure-generator` (13, 3 files): a closure or arrow function with `yield`
-  returns `Generator<K, V, S, R>`; `closure-return-type.php`,
-  `missing-closure-native-return-typehint.php`, `bug-7031.php`.
-- `fcc-return` (12, 3 files): calling a first-class callable returns the
-  method's return type and keeps its signature;
-  `native-types-first-class-callables.php`, `bug-14362.php`,
-  `intersection-template-mixed-method.php`.
-- `closure-invalidate` (10, 1 file): a closure that calls an impure method
-  invalidates property narrowing where it is called; `bug-10566.php`.
-- `closure-use-narrow` (10, 1 file): the narrowed properties of a `use` variable
-  carry into the closure; `specified-types-closure-use.php`.
-- `closure-return-infer` (7, 3 files): a closure's return is inferred: `never`
-  when it always throws, `void` without a `return`, and its return type when a
-  variable holding it is called; `bug-15167.php`, `bug-10283.php`,
-  `mixed-typehint.php`.
-
-**D3** (1,649 mismatches, 295 files, 84 causes):
+**D3** (1,745 mismatches, 318 files, 85 causes):
 
 - `count-narrow` (192, 19 files): `count()` compared with a constant, a range or
   another `count()` narrows the array: a list to an N-element shape, a union of
@@ -6973,6 +6914,25 @@ values that flow on from them.
 - `loose-eq-narrow` (83, 4 files): `==`/`!=` narrow strings and unions, keeping
   accessories; `equal-narrow.php`, `bug-12312.php`, `equal.php`,
   `bug-14047.php`.
+- `closure-param-infer` (77, 13 files): an untyped closure parameter takes its
+  type from the callable parameter it is passed to (a union of callables, a
+  variadic, a named argument, a constructor, an attribute, an immediately
+  invoked closure's argument); `closure-passed-to-union-of-callables.php`,
+  `closure-argument-type.php`, `bug-9240-php7.php`, `bug-9240.php`,
+  `closure-passed-to-type-node-callback-scope-php81.php`,
+  `arrow-function-argument-type.php`, `bug-13253.php`, `bug-10671.php`,
+  `bug-10671b.php`, `callable-in-union.php`, `closure-in-attribute.php`,
+  `bug-9601.php`, `closure-inferred-typehint.php`.
+- `assert-tags` (65, 20 files): `@phpstan-assert`, `-if-true` and `-if-false` on
+  methods, static methods, constructors, first-class and string callables,
+  inherited from a parent or interface, and with conditional, template,
+  intersection, `key-of` and `empty` types; `bug-14705.php`,
+  `assert-inheritance.php`, `bug-14249.php`, `bug-12376.php`,
+  `assert-conditional.php`, `assert-methods.php`, `assert-this.php`,
+  `bug-10040.php`, `assert-empty.php`, `assert-invariant.php`,
+  `assert-method.php`, `assert-constructor.php`, `assert-intersected.php`,
+  `bug-10037.php`, `bug-11441.php`, `bug-11472.php`, `bug-13282.php`,
+  `bug-14108.php`, `bug-14108c.php`, `bug-5785.php`.
 - `conditional-holders` (63, 29 files): a variable holding a condition's result,
   or assigned under a condition, narrows its sources when it is checked later
   (PHPStan's conditional expression holders); one is never applied outside its
@@ -6989,12 +6949,13 @@ values that flow on from them.
   matched against another `strlen()` narrow the string; `strlen-int-range.php`,
   `bug-13688.php`, `bug-13749.php`, `bug-10952b.php`, `non-falsy-string.php`,
   `bug-11035.php`, `bug-7949.php`.
-- `guards` (54, 8 files): a check on an impure-looking built-in
-  (`function_exists`, `is_file`, `is_dir`, `file_exists`, `ftell`,
-  `openssl_error_string`) is remembered until an impure call, closures included;
-  `bug-13608.php`, `closure-retain-expression-types.php`,
-  `clear-stat-cache.php`, `specified-function-call.php`, `bug-4816.php`,
-  `bug-7106.php`, `bug-4970.php`, `filesystem-functions.php`.
+- `conditional-return` (58, 12 files): a conditional return type resolves on the
+  argument's type: arrays by emptiness, templates, nested conditions, `$this`,
+  class types, and against the argument's value before a reassignment;
+  `conditional-types.php`, `conditional-type-for-parameter-template.php`,
+  `bug-7279.php`, `bug-11565.php`, `bug-15296.php`, `bug-11894.php`,
+  `bug-9000.php`, `conditional-type-for-parameter-template-bound.php`,
+  `bug-12562.php`, `bug-3853.php`, `bug-9360.php`, `fizz-buzz.php`.
 - `string-fn-narrow` (52, 7 files): a string function's result compared with a
   constant narrows its argument (`strtolower($s) === 'x'`, `substr`, `strstr`,
   `strrchr`, `trim($s) !== ''`); `non-empty-string-strcasing-specifying.php`,
@@ -7010,13 +6971,6 @@ values that flow on from them.
   positive int non-falsy, `(array)` of a non-empty list stays one; `casts.php`,
   `cast-to-numeric-string.php`, `bug-14753.php`, `bug-9208.php`,
   `range-to-string.php`.
-- `impure-invalidate` (42, 9 files): an impure call invalidates what it could
-  change: property narrowing after a void or impure method, remembered calls on
-  an object passed to a call, superglobals; `impure-method.php`,
-  `impure-constructor.php`, `do-not-remember-impure-functions.php`,
-  `invalidate-object-argument-function.php`,
-  `invalidate-object-argument-static.php`, `invalidate-object-argument.php`,
-  `bug-12799.php`, `bug-4351.php`, `bug-8543.php`.
 - `literal-key-writes` (39, 5 files): a write with a literal-union key builds a
   shape with optional keys; `bug-11716.php`, `array-keys-branches.php`,
   `bug-13805.php`, `set-constant-union-offset-on-constant-array.php`,
@@ -7029,13 +6983,10 @@ values that flow on from them.
   `composer-non-empty-array-after-unset.php`.
 - `concat-accessories` (30, 3 files): concatenation keeps the operands' case and
   non-falsy accessories; `bug-11129.php`, `bug-10863.php`, `bug-8568.php`.
-- `method-call-memory` (29, 11 files): a pure method call's narrowed result is
-  remembered until an impure call on the object (`hasAttributes()` then
-  `->attributes`); `bug-11200.php`,
-  `remember-possibly-impure-function-values.php`, `bug-4177.php`,
-  `bug-4231.php`, `bug-5501.php`, `DOMLegacyNamedNodeMap.php`,
-  `bug-11200-lt8.php`, `bug-13076.php`, `bug-7210.php`,
-  `enum-reflection-php82.php`, `specified-types-closure-edge.php`.
+- `byref-closure-use` (29, 4 files): a by-reference `use` variable merges the
+  closure's writes into the outer scope, with the exact shape and without
+  `never`; `bug-11561.php`, `closure-passed-by-reference.php`, `bug-13810.php`,
+  `closure-passed-by-reference-in-call.php`.
 - `mixed-narrow` (29, 1 file): `is_string()` with `&&`/`||` narrowing of
   `mixed`; `bug-6329.php`.
 - `tagged-union-narrow` (29, 5 files): checking one offset narrows a union of
@@ -7043,11 +6994,6 @@ values that flow on from them.
   `bug-7921.php`, `bug-10544.php`, `bug-6383.php`.
 - `fcc-static` (27, 1 file): first-class callables of static methods, and static
   calls through unions; `static-late-binding.php`.
-- `readonly-remember` (25, 5 files): a readonly property narrowed or assigned a
-  constant in the constructor keeps it in other methods and hooks;
-  `remember-readonly-constructor-narrowed.php`, `bug-12902.php`,
-  `bug-12902-non-strict.php`,
-  `remember-readonly-constructor-narrowed-hooks.php`, `bug-13321b.php`.
 - `is-fns-narrow` (24, 3 files): the `is_*` functions on `mixed`, unions and
   PHPDoc-typed strings; `specifiedTypesUsingIsFunctions.php`, `bug-3133.php`,
   `bug-9400.php`.
@@ -7062,9 +7008,6 @@ values that flow on from them.
 - `int-compare-narrow` (22, 4 files): integer comparisons narrow to ranges
   across `||` and later branches; `bug-10088.php`, `bug-6672.php`,
   `bug-4695.php`, `bug-1014.php`.
-- `foreach-destructure` (20, 1 file): `foreach ($list as [$x, $y])` over shapes
-  gives the elements' types (`mixed` today);
-  `foreach-destructure-tagged-union.php`.
 - `identical-fold` (20, 1 file): `[1] === [1]` folds;
   `constant-array-type-identical.php`.
 - `array-plus` (19, 7 files): `+` and `+=` on shapes keep the known keys, their
@@ -7073,13 +7016,12 @@ values that flow on from them.
   `bug-7492.php`.
 - `increment-types` (18, 3 files): `++`/`--` on `null`, strings and floats give
   PHP's result types; `bug-10122.php`, `constantTypes.php`, `bug-1870.php`.
+- `conditional-param` (17, 3 files): a conditional parameter type (`$k is 'a' ?
+  A : B`) resolves when the other parameter narrows; `bug-7915.php`,
+  `bug-10055.php`, `pr-5108.php`.
 - `arrayaccess-offset` (16, 3 files): an `ArrayAccess` offset reads
   `offsetGet()`'s return, and `isset` on it adds `hasOffset`; `bug-15021.php`,
   `bug-6399.php`, `bug-13204.php`.
-- `loop-body-narrow` (16, 5 files): inside `foreach`/`for` over an array, the
-  array is non-empty; `bug-13312.php`, `bug-13270a.php`, `bug-5058.php`,
-  `composer-treatPhpDocTypesAsCertainBug.php`,
-  `foreach/foreach-with-specified-key-type.php`.
 - `ternary-narrow` (16, 4 files): a ternary condition narrows its arms, and a
   ternary in a condition narrows like `&&`; `ternary-specified-types.php`,
   `bug-15307.php`, `bug-987.php`, `bug-6174.php`.
@@ -7101,6 +7043,9 @@ values that flow on from them.
   `array-search-offset-argument-count.php`.
 - `array-param-narrow` (13, 1 file): `is_string()` over an array's keys narrows
   it to `array<string, mixed>`; `bug-7076.php`.
+- `closure-generator` (13, 3 files): a closure or arrow function with `yield`
+  returns `Generator<K, V, S, R>`; `closure-return-type.php`,
+  `missing-closure-native-return-typehint.php`, `bug-7031.php`.
 - `unset-shape` (13, 5 files): `unset()` of a shape key removes it, a
   conditional or non-constant one makes keys optional;
   `filter-var-dynamic-return-type-extension-regression.php`,
@@ -7108,12 +7053,18 @@ values that flow on from them.
   `native-expressions.php`.
 - `enum-this-narrow` (12, 1 file): `$this !== self::A` narrows an enum's
   `$this`, and a conditional return follows it; `bug-12244.php`.
+- `fcc-return` (12, 3 files): calling a first-class callable returns the
+  method's return type and keeps its signature;
+  `native-types-first-class-callables.php`, `bug-14362.php`,
+  `intersection-template-mixed-method.php`.
 - `match-back-narrow` (11, 1 file): a `match` result compared back narrows the
   subject to the arms that produce it; `bug-14772.php`.
 - `nullsafe-narrow` (11, 2 files): a truthy or compared nullsafe call makes the
   receiver non-null; `bug-4757.php`, `nullsafe-vs-scalar.php`.
 - `and-narrow` (10, 2 files): `$a && $b` narrows both operands in either order
   and later null checks in the chain; `bug-14787.php`, `bug-8366.php`.
+- `closure-use-narrow` (10, 1 file): the narrowed properties of a `use` variable
+  carry into the closure; `specified-types-closure-use.php`.
 - `interpolation` (10, 3 files): interpolation and concatenation of constant
   unions and ranges give literal unions, `"$int"` is `decimal-int-string`;
   `constant-string-unions.php`, `bug-13378.php`, `bug-8635.php`.
@@ -7136,16 +7087,18 @@ values that flow on from them.
   `match-expression-inference.php`.
 - `reference-alias` (8, 2 files): a write through a reference updates the
   aliased variable; `bug-14275.php`, `bug-8056.php`.
-- `foreach-narrow-all` (7, 1 file): returning on `!is_string($x)` for every
-  element narrows the list to `list<string>`; `bug-5755.php`.
+- `closure-return-infer` (7, 3 files): a closure's return is inferred: `never`
+  when it always throws, `void` without a `return`, and its return type when a
+  variable holding it is called; `bug-15167.php`, `bug-10283.php`,
+  `mixed-typehint.php`.
+- `conditional-param-out` (7, 2 files): a conditional `@param-out` type
+  resolves, defaulted parameters included; `bug-10699.php`,
+  `param-out-default.php`.
 - `property-fetch-dynamic-name` (7, 1 file): `$obj->{'n'}` is the same
   expression as `$obj->n`; `bug-14847.php`.
 - `else-narrow` (6, 3 files): the else branch of a check removes the matched
   member (`?Foo` is `null`, a union of shapes loses the one with the key);
   `type-elimination.php`, `bug-12401.php`, `bug-5128.php`.
-- `foreach-key-value-link` (6, 2 files): narrowing a foreach key over a shape
-  narrows the value, and the reverse; `foreach-dependent-key-value.php`,
-  `bug-6108.php`.
 - `property-assign-narrow` (6, 3 files): a property just assigned keeps the
   assigned type, with and without `strict_types`; `bug-5129.php`,
   `remember-nullable-property-non-strict.php`,
@@ -7160,6 +7113,9 @@ values that flow on from them.
   `$b` through `$c`; `constant-types-duplicate-condition.php`.
 - `property-narrow` (5, 2 files): a property narrowed by an early return keeps
   its narrowing; `bug-6991.php`, `bug-12866.php`.
+- `static-call-union` (5, 3 files): a static call on a union of classes or
+  class-strings merges the returns; `bug-11687.php`,
+  `method-call-return-type-fallback.php`, `union-methods.php`.
 - `ternary-throw` (5, 1 file): a ternary with a `throw` arm narrows the other
   arm; `bug-6870.php`.
 - `assert-ternary` (4, 1 file): `assert($c ? $x instanceof A : $x instanceof B)`
@@ -7175,9 +7131,6 @@ values that flow on from them.
 - `finite-types` (3, 1 file): branches over booleans keep a union of shapes;
   `finite-types.php`.
 - `float-constants` (3, 1 file): `-1 * INF` is `-INF`; `bug-13097.php`.
-- `foreach-iterable-part` (3, 1 file): `foreach` over a union with a
-  non-iterable member iterates the iterable part;
-  `foreach-partially-non-iterable.php`.
 - `isset-constant-key` (3, 1 file): `assert(isset(self::KEYS[$k]))` narrows `$k`
   to the constant's keys; `bug-8559.php`.
 - `isset-fold` (3, 1 file): `isset()` of an always-defined non-null variable is
@@ -7189,8 +7142,6 @@ values that flow on from them.
   is evaluated (`[($a = 'foo') => $b] = …`); `bug-14019.php`.
 - `empty-narrow` (2, 2 files): `!empty()` makes a union of shapes non-empty and
   subtracts `array{}` and `null` from `mixed`; `bug-3993.php`, `bug-9985.php`.
-- `foreach-cast-shape` (2, 1 file): `foreach` over `(array)` of a shape offset,
-  narrowed by `isset` and `===`; `bug-13061.php`.
 - `get-class-narrow` (2, 1 file): `get_class($o) === static::class` narrows `$o`
   to `static`; `get-class-static-class.php`.
 - `nullsafe-static` (2, 1 file): `$a?->b::get()` is the return or `null`;
@@ -7210,29 +7161,7 @@ values that flow on from them.
 - `short-ternary` (1, 1 file): `$x ?: new A()` is the truthy part of `$x` or
   `A`; `bug-1897.php`.
 
-**D4** (53 mismatches, 17 files, 6 causes):
-
-- `finally-scope` (21, 5 files): `finally` sees only the scopes that reach it,
-  and an assignment that can't throw has completed before it;
-  `finally-scope.php`, `finally-exit-point-scope.php`,
-  `throw-points/assign-op.php`, `throw-points/assign.php`,
-  `finally-with-early-termination.php`.
-- `switch-true` (18, 6 files): `switch (true)`/`switch (false)` cases narrow
-  like `if`, with fallthrough, exits and unreachable cases; `bug-13211.php`,
-  `bug-11064.php`, `switch-instanceof-truthy.php`, `switch-instanceof.php`,
-  `switch-instanceof-fallthrough.php`, `switch-instanceof-not.php`.
-- `catch-scope` (10, 3 files): a `catch` block merges the scopes of every throw
-  point in the `try`, a caught variable after the `try` is the union of the
-  caught types, and a catch without a variable defines none;
-  `throw-points/try-catch.php`, `bug-778.php`, `catch-without-variable.php`.
-- `switch-get-class` (2, 1 file): `switch (get_class($x))` cases narrow `$x`;
-  `switch-get-class.php`.
-- `exit-narrow` (1, 1 file): `die()` on `null` makes the value non-null after;
-  `bug-10422.php`.
-- `switch-narrow` (1, 1 file): `switch` cases on a call narrow the value in
-  later cases; `switch-type-elimination.php`.
-
-**D5** (255 mismatches, 74 files, 3 causes):
+**D5** (601 mismatches, 147 files, 23 causes):
 
 - `loop-generalize` (232, 66 files): loop generalization: counters widen to
   ranges instead of unrolled constants, conditional appends make optional-key
@@ -7257,14 +7186,87 @@ values that flow on from them.
   `bug-9332.php`, `bug-9904.php`, `bug7856.php`, `for-loop-expr.php`,
   `foreach-array-rewrite.php`, `generalize-scope-recursive.php`,
   `generalize-scope.php`, `loop-fixpoint-conditional-expressions.php`.
+- `guards` (54, 8 files): a check on an impure-looking built-in
+  (`function_exists`, `is_file`, `is_dir`, `file_exists`, `ftell`,
+  `openssl_error_string`) is remembered until an impure call, closures included;
+  `bug-13608.php`, `closure-retain-expression-types.php`,
+  `clear-stat-cache.php`, `specified-function-call.php`, `bug-4816.php`,
+  `bug-7106.php`, `bug-4970.php`, `filesystem-functions.php`.
+- `ob-level` (47, 1 file): `ob_start()` and `ob_end_*()` move `ob_get_level()`;
+  `output-buffering.php`.
+- `impure-invalidate` (42, 9 files): an impure call invalidates what it could
+  change: property narrowing after a void or impure method, remembered calls on
+  an object passed to a call, superglobals; `impure-method.php`,
+  `impure-constructor.php`, `do-not-remember-impure-functions.php`,
+  `invalidate-object-argument-function.php`,
+  `invalidate-object-argument-static.php`, `invalidate-object-argument.php`,
+  `bug-12799.php`, `bug-4351.php`, `bug-8543.php`.
+- `method-call-memory` (29, 11 files): a pure method call's narrowed result is
+  remembered until an impure call on the object (`hasAttributes()` then
+  `->attributes`); `bug-11200.php`,
+  `remember-possibly-impure-function-values.php`, `bug-4177.php`,
+  `bug-4231.php`, `bug-5501.php`, `DOMLegacyNamedNodeMap.php`,
+  `bug-11200-lt8.php`, `bug-13076.php`, `bug-7210.php`,
+  `enum-reflection-php82.php`, `specified-types-closure-edge.php`.
+- `readonly-remember` (25, 5 files): a readonly property narrowed or assigned a
+  constant in the constructor keeps it in other methods and hooks;
+  `remember-readonly-constructor-narrowed.php`, `bug-12902.php`,
+  `bug-12902-non-strict.php`,
+  `remember-readonly-constructor-narrowed-hooks.php`, `bug-13321b.php`.
+- `finally-scope` (21, 5 files): `finally` sees only the scopes that reach it,
+  and an assignment that can't throw has completed before it;
+  `finally-scope.php`, `finally-exit-point-scope.php`,
+  `throw-points/assign-op.php`, `throw-points/assign.php`,
+  `finally-with-early-termination.php`.
+- `foreach-destructure` (20, 1 file): `foreach ($list as [$x, $y])` over shapes
+  gives the elements' types (`mixed` today);
+  `foreach-destructure-tagged-union.php`.
 - `goto` (20, 6 files): a `goto` target merges the scopes that jump to it, and
   loops built from it widen; `goto-label-stabilization.php`,
   `goto-property-hook.php`, `bug-14660-top-level.php`, `bug-14660.php`,
   `bug-4674.php`, `bug-7734.php`.
+- `switch-true` (18, 6 files): `switch (true)`/`switch (false)` cases narrow
+  like `if`, with fallthrough, exits and unreachable cases; `bug-13211.php`,
+  `bug-11064.php`, `switch-instanceof-truthy.php`, `switch-instanceof.php`,
+  `switch-instanceof-fallthrough.php`, `switch-instanceof-not.php`.
+- `iterator-key` (16, 8 files): foreach over an `Iterator`, `iterable<K, V>` or
+  `SplObjectStorage` takes the key and value types; `bug-13985.php`,
+  `foreach/object-type.php`, `bug-4504.php`,
+  `foreach/foreach-iterable-with-specified-key-type.php`, `bug-4789.php`,
+  `bug-6576.php`, `class-reflection-interfaces.php`,
+  `foreach/foreach-iterable-with-complex-value-type.php`.
+- `loop-body-narrow` (16, 5 files): inside `foreach`/`for` over an array, the
+  array is non-empty; `bug-13312.php`, `bug-13270a.php`, `bug-5058.php`,
+  `composer-treatPhpDocTypesAsCertainBug.php`,
+  `foreach/foreach-with-specified-key-type.php`.
+- `superglobals` (16, 2 files): `$argc`, `$argv` and `$GLOBALS` types;
+  `cli-globals.php`, `superglobals.php`.
+- `catch-scope` (10, 3 files): a `catch` block merges the scopes of every throw
+  point in the `try`, a caught variable after the `try` is the union of the
+  caught types, and a catch without a variable defines none;
+  `throw-points/try-catch.php`, `bug-778.php`, `catch-without-variable.php`.
+- `closure-invalidate` (10, 1 file): a closure that calls an impure method
+  invalidates property narrowing where it is called; `bug-10566.php`.
+- `foreach-narrow-all` (7, 1 file): returning on `!is_string($x)` for every
+  element narrows the list to `list<string>`; `bug-5755.php`.
+- `foreach-key-value-link` (6, 2 files): narrowing a foreach key over a shape
+  narrows the value, and the reverse; `foreach-dependent-key-value.php`,
+  `bug-6108.php`.
+- `foreach-iterable-part` (3, 1 file): `foreach` over a union with a
+  non-iterable member iterates the iterable part;
+  `foreach-partially-non-iterable.php`.
 - `oversized-array` (3, 2 files): appends keep exact shapes up to the size
   limit; `oversized-array-stages.php`, `bug-yield-oversized-self-rejection.php`.
+- `foreach-cast-shape` (2, 1 file): `foreach` over `(array)` of a shape offset,
+  narrowed by `isset` and `===`; `bug-13061.php`.
+- `switch-get-class` (2, 1 file): `switch (get_class($x))` cases narrow `$x`;
+  `switch-get-class.php`.
+- `exit-narrow` (1, 1 file): `die()` on `null` makes the value non-null after;
+  `bug-10422.php`.
+- `switch-narrow` (1, 1 file): `switch` cases on a call narrow the value in
+  later cases; `switch-type-elimination.php`.
 
-**E2** (1,581 mismatches, 264 files, 89 causes):
+**E2** (1,534 mismatches, 263 files, 88 causes):
 
 - `byref-array-fns` (205, 22 files): the by-reference array functions
   (`array_pop`, `array_shift`, `array_push`, `array_unshift`, `array_splice`,
@@ -7312,8 +7314,6 @@ values that flow on from them.
   `arrow-function-types.php`, `bug-4587.php`, `array-map.php`,
   `array_map_multiple.php`, `bug-11281.php`, `bug-11861.php`, `bug-4213.php`,
   `bug-10442.php`, `bug-11656.php`, `bug-14844.php`, `bug-5293.php`.
-- `ob-level` (47, 1 file): `ob_start()` and `ob_end_*()` move `ob_get_level()`;
-  `output-buffering.php`.
 - `ext:Randomizer` (40, 3 files): `Random\Randomizer`'s methods keep
   non-emptiness and element types; `bug-15256.php`, `bug-15256-83.php`,
   `bug-15256-shadowed-functions.php`.
