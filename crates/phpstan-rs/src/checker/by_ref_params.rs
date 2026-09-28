@@ -106,7 +106,7 @@ impl<'a> Checker<'a> {
     /// missing from `locals` entirely (shouldn't happen - every
     /// parameter is declared into `locals` up front - but this project's
     /// own "don't guess" precedent prefers a `Mixed` fallback over a
-    /// panic here) falls back to `Type::Mixed(false)`, matching
+    /// panic here) falls back to `mixed`, matching
     /// `check_by_ref_value`'s own "never flag a `Mixed` value" leniency.
     pub(crate) fn record_by_ref_exit_snapshot(&mut self, locals: &crate::checker::Locals) {
         if self.current_function_by_ref_params.is_empty()

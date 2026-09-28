@@ -123,7 +123,7 @@ pub(crate) fn settle(ty: Type) -> Type {
 }
 
 impl Type {
-    /// Whether `ty` names a template anywhere: a template parameter, or a
+    /// Whether this type names a template anywhere: a template parameter, or a
     /// conditional whose subject is one.
     pub fn references_template(&self) -> bool {
         match self {
@@ -138,7 +138,7 @@ impl Type {
 }
 
 impl Type {
-    /// `ty` with every late-resolvable node answered as far as its
+    /// This type with every late-resolvable node answered as far as its
     /// templates' bounds allow - what a template-typed value can be relied
     /// on to be inside the generic code itself. An answer the bound doesn't
     /// give is `Mixed`.
@@ -157,7 +157,7 @@ impl Type {
 }
 
 impl Type {
-    /// Whether `ty` holds a `KeyOf`/`OffsetAccess` anywhere.
+    /// Whether this type holds a `key-of` or offset access anywhere.
     pub fn contains_late(&self) -> bool {
         matches!(self, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)))
             || self.any_child(Type::contains_late)

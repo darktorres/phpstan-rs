@@ -29,7 +29,7 @@ impl<'a> Checker<'a> {
     ///
     /// Scoped to only `TemplateParam`s whose own `scope` field is
     /// genuinely `owner` itself - not merely same-named as one of
-    /// `owner`'s declared templates. `types::substitute_template`'s own
+    /// `owner`'s declared templates. `Type::substitute_templates`'s own
     /// fallback for a name absent from `bindings` is `mixed`,
     /// correct for a genuinely class-level template referenced with no or
     /// fewer type arguments than it declares (e.g. a bare `Collection`

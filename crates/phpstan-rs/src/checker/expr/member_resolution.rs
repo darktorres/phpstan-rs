@@ -29,7 +29,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .find_map(|m| self.find_property_owner(m, prop));
         }
-        // `narrow_instanceof_true` puts the narrower, just-`instanceof`-
+        // `Relation::narrow_to_instance` puts the narrower, just-`instanceof`-
         // checked type last in an intersection: reversed, so its own
         // declaration is preferred over the broader original type's.
         let parts = base_ty.intersection_members();
@@ -48,7 +48,7 @@ impl<'a> Checker<'a> {
     /// method called through a `Union`/`Intersection` receiver (a value
     /// narrowed via `instanceof` from an unrelated interface) must not
     /// be silently skipped just because the receiver's own type isn't
-    /// literally `Type::Object`. Same registry-tied lifetime as
+    /// literally object. Same registry-tied lifetime as
     /// `find_property_owner` above, for the same reason.
     pub(crate) fn find_method_owner(
         &self,
@@ -80,7 +80,7 @@ impl<'a> Checker<'a> {
     /// binding needs the real runtime receiver a `self`/`static` pseudo-
     /// return type resolves against, via a plain `lookup_method`, never
     /// `_with_owner`. Must not require the receiver's own type to be
-    /// literally `Type::Object` - a `Union`/`Intersection` receiver
+    /// literally object - a `Union`/`Intersection` receiver
     /// needs the same treatment. Same registry-tied lifetime as
     /// `find_property_owner` above, for the same reason.
     pub(crate) fn find_method_receiver_class(
@@ -127,7 +127,7 @@ impl<'a> Checker<'a> {
     /// unconfirmed, not a guess either way). Used by both `StmtKind::
     /// Throw` (`checker/stmt.rs`) and `ExprKind::Throw` just below -
     /// must not require the thrown value's own type to be literally
-    /// `Type::Object`: a value narrowed via `instanceof` from an
+    /// object: a value narrowed via `instanceof` from an
     /// unrelated interface, then thrown, is exactly as real a shape here
     /// as it was for property access. A `Union` member fails if any one
     /// of them isn't Throwable (the runtime value could be that one); an
@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
     /// `find_property_owner`'s own richer sibling, used by `checker::
     /// assignment::check_property_assignment`, the identical shape as the
     /// read-side one just above: the write side must not match
-    /// `Type::Object` directly, silently skipping every one of its checks
+    /// object directly, silently skipping every one of its checks
     /// (readonly, visibility,
     /// `@internal`/`@deprecated`, and the assigned value's own type) for
     /// a `Union`/`Intersection`-typed target. Also returns the matching
@@ -270,9 +270,9 @@ impl<'a> Checker<'a> {
     /// Both `check_expr`'s and `infer_expr`'s own `PropertyAccess` arms
     /// must not match `base_ty` against `Object`/`EnumCase`/`ObjectShape`
     /// directly with no `Union`/`Intersection` arm - falling to the
-    /// `_ => Type::Mixed(false)` catch-all would discard every bit of type
+    /// `mixed` fallback would discard every bit of type
     /// information whenever the base's own type happens to be a
-    /// `Union`/`Intersection` (a common shape: `narrow_instanceof_true`'s
+    /// `Union`/`Intersection` (a common shape: `Relation::narrow_to_instance`'s
     /// own deliberate design intersects an unrelated-looking `instanceof`
     /// target with the original type - see its own doc comment - and a
     /// plain `A|B` property/parameter type is exactly as common).
@@ -285,7 +285,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn property_access_type(&self, base_ty: &Type, prop: &str) -> Type {
         // An intersection value is every member at once, so the first
         // member whose declaration resolves the property names its type -
-        // searched in reverse, since `narrow_instanceof_true` puts the
+        // searched in reverse, since `Relation::narrow_to_instance` puts the
         // narrower, just-`instanceof`-checked type last. A union value is
         // one member at a time: the union of whichever members resolve.
         let parts = base_ty.intersection_members();
@@ -358,7 +358,7 @@ impl<'a> Checker<'a> {
     /// `infer_expr`'s own `ExprKind::MethodCall` return-type resolution -
     /// extracted so it can recurse through `Union`/`Intersection`, rather
     /// than silently collapsing any method call's own return type to
-    /// `Type::Mixed(false)` whenever the receiver is one. `infer_expr` is the
+    /// `mixed` whenever the receiver is one. `infer_expr` is the
     /// core type-inference path (used whenever a method call's result
     /// type needs computing without also running full diagnostics, e.g.
     /// as a sub-expression of a larger one). `Intersection` keeps "first
@@ -435,7 +435,7 @@ impl<'a> Checker<'a> {
         // `$object`) map onto the target method's own parameters
         // positionally, so they're forwarded from index 1, matching
         // real PHP's own `invoke($object, ...$args)` signature. An
-        // owner that isn't itself a plain resolved `Type::Object`
+        // owner that isn't itself a plain resolved object
         // (an unresolved template, a union, ...) can't be looked up
         // at all - stays `Mixed`, not a guess.
         if let Some((owner_ty, name)) = recv_ty.as_reflected_member() {
@@ -466,7 +466,7 @@ impl<'a> Checker<'a> {
                 .unwrap_or(Type::mixed());
         }
         // The narrower, just-`instanceof`-checked type is the last member
-        // `narrow_instanceof_true` puts into an intersection: searched
+        // `Relation::narrow_to_instance` puts into an intersection: searched
         // first, so its own (possibly overriding) signature wins.
         let parts = recv_ty.intersection_members();
         if parts.len() > 1 {
@@ -532,7 +532,7 @@ impl<'a> Checker<'a> {
             // items (168c) and builds the row shape (168d), carrying it
             // as `Doctrine\ORM\Query`'s own generic-argument slot (see
             // `doctrine_query_row_type`'s own doc comment for why this
-            // reuses `Type::Object`'s existing slot rather than a new
+            // reuses object's existing slot rather than a new
             // `Type` variant). An undecidable chain/select falls back to
             // today's plain, argument-less `Query` object - no worse
             // than before this phase existed.
@@ -615,20 +615,20 @@ impl<'a> Checker<'a> {
             // variable whose own inferred type is one, matching this
             // project's own established literal-or-string-literal-typed-
             // variable convention, e.g. the DQL literal-string arm above),
-            // attaches a `Type::ReflectedMember(T, name)` fact onto the
+            // attaches a reflected-member fact (`T`, `name`) onto the
             // stub's own `ReflectionMethod<T>`/`ReflectionProperty<T>`
             // return type so a later `->invoke()`/`->getValue()` call
             // (below) can resolve the real member's own value type - see
-            // `Type::ReflectedMember`'s own doc comment. A non-literal
+            // reflected member's own doc comment. A non-literal
             // name just keeps the stub's own untargeted return type,
             // unchanged from before this feature existed.
             let base =
                 self.generic_object_method_return_type(class, type_args, method, args, locals);
             // An erased receiver `T` (`substitute_class_templates`'s
-            // own unbound-template fallback, `Type::Mixed(false)`) can never
+            // own unbound-template fallback, `mixed`) can never
             // resolve a real member type either - skip the wrap
             // entirely rather than attach a fact that can only ever
-            // stay unresolved, matching `Type::ReflectedMember`'s own
+            // stay unresolved, matching reflected member's own
             // "don't guess" leniency for a not-genuinely-concrete
             // owner.
             let owner_ty = type_args.first().cloned().filter(|t| !t.is_mixed());
@@ -780,7 +780,7 @@ impl<'a> Checker<'a> {
     /// type the normal way. Every special-cased arm above that can fail
     /// to resolve a more precise answer (an unfoldable SQL string, an
     /// undecidable chain, ...) falls back to calling this directly,
-    /// rather than returning `Type::Mixed(false)` and silently discarding a
+    /// rather than returning `mixed` and silently discarding a
     /// real declared return type the ordinary path would have found.
     fn generic_object_method_return_type(
         &self,
@@ -803,7 +803,7 @@ impl<'a> Checker<'a> {
 
     /// `generic_object_method_return_type`'s property-typed sibling -
     /// Phase 77's reflected-member-binding feature's own `getValue()`
-    /// consumer (`Type::ReflectedMember`'s own doc comment).
+    /// consumer (reflected member's own doc comment).
     fn generic_object_property_type(&self, class: &str, type_args: &[Type], prop: &str) -> Type {
         self.registry
             .lookup_property_with_owner(class, prop)
@@ -849,7 +849,7 @@ impl<'a> Checker<'a> {
 /// shared between `Doctrine\DBAL\Result`'s own no-argument terminal
 /// methods and `Connection`/`QueryBuilder`'s own directly-resolved
 /// forms, which otherwise duplicate this exact dispatch. `row_type` is
-/// always `Some(Type::ArrayShape(_))` when it's `Some` at all (every
+/// always an array shape when it's `Some` at all (every
 /// `resolve_sql_row_type`-producing path already guarantees this) -
 /// anything else degrades to `None`, the same "don't guess" leniency as
 /// an unresolvable chain.

@@ -510,7 +510,7 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         then_locals.any_variable_may_exist || else_locals.any_variable_may_exist;
     // A `function_exists()` guard only survives a merge
     // point when both incoming branches agree it's guaranteed - the same
-    // reasoning every other narrowed fact here already gets (`union_types`
+    // reasoning every other narrowed fact here already gets (`Type::union`
     // above widens a type across both branches; a guard, being a boolean
     // fact rather than a type, "widens" to "not guaranteed" the moment
     // either branch doesn't have it). Since only the `function_exists(...)`
@@ -685,15 +685,15 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
             if let Some(else_provenance) = else_locals.get_provenance(name) {
                 provenance.extend(else_provenance.iter().copied());
             }
-            // `union_types` itself already short-circuits to `a` unchanged
-            // when `a`/`b` are equal (`types_equal_for_union`) - but by
+            // `Type::union` itself already short-circuits to `a` unchanged
+            // when `a`/`b` are equal (`Type::equals_for_union`) - but by
             // then both are already-cloned owned `Type`s, since it takes
             // its arguments by value. For a variable neither branch
             // touched (the common case - most locals in scope at a
             // branch point aren't reassigned by either specific branch),
             // `then_ty`/`else_ty` are the exact same value, so checking
             // equality here first avoids ever cloning `else_ty` at all,
-            // rather than cloning it just to have `union_types` discard
+            // rather than cloning it just to have `Type::union` discard
             // it a moment later.
             let merged_ty = if then_ty.equals_for_union(else_ty) {
                 then_ty.clone()

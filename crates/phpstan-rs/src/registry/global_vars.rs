@@ -43,7 +43,7 @@ const MAX_GLOBAL_SHAPE_FIELDS: usize = 64;
 
 /// A single, self-contained per-name accumulator - either building up an
 /// `ArrayShape` field-by-field, or folding a plain `Type` through
-/// `union_types` (the object/`Mixed` case), or both at once (a genuine
+/// `Type::union` (the object/`Mixed` case), or both at once (a genuine
 /// object/array conflict, resolved in `finish`).
 #[derive(Default)]
 struct GlobalAccumulator {

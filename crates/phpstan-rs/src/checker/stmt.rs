@@ -41,7 +41,7 @@ impl<'a> Checker<'a> {
         // fixed-point loop-body convergence so a variable reassigned
         // inside a loop doesn't keep its pre-loop-entry type for the
         // whole single-pass body check, which could wrongly narrow it to
-        // `Type::Never` and read here as "this statement always
+        // `never` and read here as "this statement always
         // terminates." Real PHPStan's own equivalent
         // (`UnreachableStatementRule`, `deadCode.unreachable`, level 4)
         // reports exactly once per maximal unreachable run, at its first
@@ -621,8 +621,8 @@ impl<'a> Checker<'a> {
             // early-exit guard clause).
             StmtKind::Return(None) => {
                 // Mirrors real PHPStan pushing `new VoidType()` for a
-                // bare `return;` - deliberately `Type::Void`, not
-                // `Type::Null` (`Void` is a return-position-only marker
+                // bare `return;` - deliberately `void`, not
+                // `null` (`Void` is a return-position-only marker
                 // meaning "produced no value," while a too-wide check's
                 // accumulated union needs to know that specifically, not
                 // conflate it with an actual `null` value).
@@ -687,11 +687,11 @@ impl<'a> Checker<'a> {
                     // the special *void* marker," never "does it accept
                     // the *value* null," and every nullable/union type
                     // this project's own `Type` can represent answers
-                    // that `No` the identical way a plain `Type::Null`
+                    // that `No` the identical way a plain `null`
                     // itself does (confirmed directly against `vendor/
                     // phpstan-src`'s own `JustNullableTypeTrait`/
-                    // `NullType::isVoid`) - only `Type::Void` (`Yes`) and
-                    // `Type::Mixed` (`Maybe`, matching `MixedType::
+                    // `NullType::isVoid`) - only `void` (`Yes`) and
+                    // `mixed` (`Maybe`, matching `MixedType::
                     // isVoid`, no explicit/implicit distinction there
                     // either) are exempt.
                     } else if !(expected.is_mixed() || expected.is_void()) {

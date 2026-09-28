@@ -277,7 +277,7 @@ impl<'a> Checker<'a> {
             // etc.), then delegating to the same `filter_validate_result`
             // `filter_var` uses, shifted one argument position over. The
             // always-`maybe`-present synthetic array means both
-            // `Type::Null` and `Type::False` are unconditionally unioned
+            // `null` and `false` are unconditionally unioned
             // in regardless of `FILTER_NULL_ON_FAILURE` - the flag changes
             // which fallback attaches to which underlying cause, not
             // whether both appear in the final union - and this holds
@@ -310,7 +310,7 @@ impl<'a> Checker<'a> {
                         flags_ty.as_ref(),
                     )
                 {
-                    // `union_types` preserves first-seen insertion order
+                    // `Type::union` preserves first-seen insertion order
                     // in its `Display`, so `Null`-then-fallback-then-
                     // `False` matches this project's established
                     // convention for this three-way union.
@@ -421,7 +421,7 @@ impl<'a> Checker<'a> {
                     } else {
                         // No callback at all - real PHP's default
                         // behavior, dropping every falsy element - is
-                        // exactly `narrow_type_excluding_falsy`'s job
+                        // exactly `Type::without_falsy`'s job
                         // (`list<int|null>` -> `list<non-zero-int>`,
                         // stripping both `0` and `null`, not just `null`).
                         return stripped.filter_array_values(&Type::without_falsy);
@@ -451,7 +451,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // Combining never changes the values' own type - $keys become
-            // what `Type::Array` can't represent (key types aren't
+            // what array can't represent (key types aren't
             // tracked), so the result is simply $values' own type
             // verbatim, the same "no transformation" shape as
             // array_filter above.
@@ -580,7 +580,7 @@ impl<'a> Checker<'a> {
             // can't change whether there's at least one element).
             "array_flip" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                // A real `Type::ArrayShape` gets a precise, field-by-field
+                // A real array shape gets a precise, field-by-field
                 // flip: a field whose own value is an int/string literal
                 // becomes a real named field in the result (keyed by that
                 // literal, valued at the original field's own key). A
@@ -915,7 +915,7 @@ impl<'a> Checker<'a> {
                 // canonical int key, sidestepping real PHP's int-key-
                 // renumbering semantics entirely (a genuinely int-keyed
                 // argument still falls through to the coarse path
-                // below). Eligible either when a real `Type::ArrayShape`
+                // below). Eligible either when a real array shape
                 // argument exists, or when a plain array already carries
                 // its own `hasOffsetValue(...)` precision
                 // (`has_offset_value_parts` - `checker::assignment::
@@ -943,9 +943,9 @@ impl<'a> Checker<'a> {
                         // genuinely include an int key would need real
                         // PHP's renumbering semantics, which this
                         // restricted path deliberately doesn't attempt.
-                        // Loosened from an exact `Type::String` match: any
+                        // Loosened from an exact `string` match: any
                         // key type that provably excludes `Int` is just
-                        // as safe here, not only the bare `Type::String`
+                        // as safe here, not only the bare `string`
                         // variant.
                         None => t.array_key_type().is_some_and(|k| k.is_int().no()),
                     });
@@ -997,7 +997,7 @@ impl<'a> Checker<'a> {
                                 // known keys were previously discarded
                                 // into the generic unsealed widening just
                                 // like any other unknown key). A bare
-                                // `Type::Array` (no tracked keys at all)
+                                // array (no tracked keys at all)
                                 // gets an empty `pairs`, so this is a
                                 // strict no-op for that already-covered
                                 // case.
@@ -1207,9 +1207,9 @@ impl<'a> Checker<'a> {
                 // `array_key_type` handles `ArrayShape` directly (a real
                 // union of each field's own key kind) - reused here for a
                 // literal-shaped argument only, not for a plain,
-                // non-shape `Type::Array`'s key type: this project's
+                // non-shape array's key type: this project's
                 // dynamic-key-write widening doesn't track the real key
-                // expression's type precisely, so a plain `Type::Array`'s
+                // expression's type precisely, so a plain array's
                 // key type can already be a too-wide `unknown_array_key()`
                 // even when every real key written is always an `int`.
                 // Only an `ArrayShape`'s own key type is trustworthy
@@ -1269,7 +1269,7 @@ impl<'a> Checker<'a> {
             }
             // The real stub declares `array_search(mixed, array, bool):
             // string|int|false` unconditionally - this project's
-            // `Type::Array` has no key-type parameter, so it can't
+            // array has no key-type parameter, so it can't
             // generally narrow the key-type half the way real PHPStan
             // does. But a list-typed haystack is a narrower special case
             // it already tracks precisely without any key-type machinery:
@@ -1329,10 +1329,10 @@ impl<'a> Checker<'a> {
             // `array` (`str_replace(...): array|string`), even though the
             // function only ever returns an array when `$subject` itself
             // is one. Scoped to "subject is string-like"
-            // (`Relation::is_super_type_of` against `Type::String`, not a bare
+            // (`Relation::is_super_type_of` against `string`, not a bare
             // `==`) - an accessory-refined subject (`non-empty-string`
             // parses to `Intersection([String, Accessory(_)])`) would
-            // silently fail to match a bare `== Type::String`.
+            // silently fail to equal plain `string`.
             "str_replace" | "str_ireplace" if args.len() == 3 || args.len() == 4 => {
                 if types::Relation::structural()
                     .is_super_type_of(&Type::string(), &self.infer_expr(&args[2].value, locals))
@@ -1980,7 +1980,7 @@ impl<'a> Checker<'a> {
 /// `mb_convert_case`'s `$mode` resolution - derives the same four
 /// force/keep-lowercase/uppercase booleans every other case function
 /// above has, from whichever `MB_CASE_*` constant value(s) `mode_ty`
-/// resolves to (a bare `Type::IntLiteral` for the common single-constant
+/// resolves to (a bare integer literal for the common single-constant
 /// call, or a `Union` for a conditional/computed mode).
 /// `MB_CASE_FOLD`/`MB_CASE_FOLD_SIMPLE` (`3`/`7`) count toward `keep_*`
 /// but not `force_*`.
@@ -2546,7 +2546,7 @@ fn single_char(s: &str) -> Option<char> {
 }
 
 /// `idate()`'s per-character numeric bound, transcribed from real
-/// PHPStan's `IdateFunctionReturnTypeHelper`, using `Type::IntRange` in
+/// PHPStan's `IdateFunctionReturnTypeHelper`, using integer range in
 /// place of `IntegerRangeType::fromInterval`. A handful of real `idate()`
 /// format characters (`B`/`o`/`U`/`Y`/`Z`) are unbounded integers -
 /// deliberately left out (returning `None`) rather than mapped to plain
@@ -2943,7 +2943,7 @@ fn sscanf_field_type(length: Option<u32>, specifier: &SscanfSpecifier) -> Type {
 /// `sscanf($string, $format)`'s numeric-keyed result-array fields, one
 /// per conversion specifier `parse_sscanf_format` finds, in order - keyed
 /// by each field's canonical string form of its integer index (`"0"`,
-/// `"1"`, ...), the same way `Type::ArrayShape` represents an int-keyed
+/// `"1"`, ...), the same way array shape represents an int-keyed
 /// array elsewhere in this project (see `literal_string_key`).
 fn sscanf_result_fields(format: &str) -> Option<Shape> {
     let specs = parse_sscanf_format(format)?;

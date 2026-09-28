@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 #[test]
 fn substitute_template_recurses_into_array_and_intersection_types() {
-    // Covers substitute_template's Array and Intersection arms - not
+    // Covers Type::substitute_templates's Array and Intersection arms - not
     // exercised by substituting a bare TemplateParam or one nested in a
     // Union, only `T[]`/`array<T>` or an intersection type mentioning T.
     let mut bindings = FxHashMap::default();
@@ -37,7 +37,7 @@ fn substitute_template_recurses_into_array_and_intersection_types() {
 
 #[test]
 fn substitute_template_recurses_into_a_generic_class_reference() {
-    // `substitute_template` must substitute through `Type::Object(name,
+    // `Type::substitute_templates` must substitute through `Repr::Object(name,
     // args)`: `T -> int` through `Box<T>` should produce `Box<int>`,
     // not leave it unchanged.
     let mut bindings = FxHashMap::default();

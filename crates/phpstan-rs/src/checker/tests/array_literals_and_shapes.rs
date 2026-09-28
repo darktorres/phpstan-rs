@@ -7,12 +7,12 @@ use types::Shape;
 // MAX_UNION_MEMBERS collapse - 13 shapes that all share the *same*
 // key set merge into one shape with unioned field types instead of
 // collapsing to `Mixed`. Tested directly against `generalize_by_key_
-// set` itself, not via sequential `union_types` calls: `.reduce()`
+// set` itself, not via sequential `Type::union` calls: `.reduce()`
 // builds the union one pairwise call at a time, which triggers
 // generalization repeatedly at different *partial* states (and can
 // itself separately trip the per-field union's own `MAX_UNION_
 // MEMBERS` cap when the field values are too varied) - a real
-// property of how `union_types` is actually invoked, but not what
+// property of how `Type::union` is actually invoked, but not what
 // this test is trying to isolate, which is `generalize_by_key_set`'s
 // own one-shot merge behavior over an already-complete member list.
 #[test]

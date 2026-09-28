@@ -54,7 +54,7 @@ impl Registry {
     /// A non-generic class (empty `templates`), a bare unspecified-generic
     /// reference (empty `type_args`), or a chain with no matching
     /// `@extends`/`@implements` tag along the way to `target` all just
-    /// leave that level's names unbound - `substitute_template` already
+    /// leave that level's names unbound - `Type::substitute_templates` already
     /// treats an unbound `TemplateParam` as `Mixed`, the right
     /// conservative fallback for an "erased" generic.
     pub(crate) fn class_template_bindings(
@@ -143,7 +143,7 @@ impl Registry {
     /// class-level template through `$parentClass->getActiveTemplateType
     /// Map()` immediately, at docblock-merge time - not deferred to each
     /// later call site the way this project's own method-scoped templates
-    /// correctly are (`types::bind_template_param`/`substitute_template`'s
+    /// correctly are (`Type::infer_template_bindings`/`Type::substitute_templates`'s
     /// own call-site binding, purely name-keyed and blind to which
     /// class's `FunctionReflection` a signature came from). Doing this
     /// immediately, rather than leaving the raw class-scoped `TemplateParam`

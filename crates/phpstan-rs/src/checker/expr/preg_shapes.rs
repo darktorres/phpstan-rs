@@ -143,8 +143,8 @@ pub(crate) fn preg_match_matches_shape(
         // commonly documented as `['', -1]`, but that hasn't been
         // checked the way every other fact here has, so this
         // stays unapplied rather than guessed when `leaf` isn't exactly
-        // `Type::String`. A no-op in the overwhelmingly common no-flags
-        // case anyway (`union_types(String, StringLiteral(""))` already
+        // `string`. A no-op in the overwhelmingly common no-flags
+        // case anyway (`Type::union(String, StringLiteral(""))` already
         // collapses back to plain `String`) - only observable once
         // literal enumeration narrows `base` below plain `String`.
         let ty = if g.optional && !is_last_group && !unmatched_as_null && *leaf == Type::string() {

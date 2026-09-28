@@ -35,7 +35,7 @@ fn a_leading_nullable_mark_on_mixed_still_collapses_to_plain_mixed() {
     // just above: `?mixed`'s nullable prefix is stripped and re-wrapped
     // around the already-parsed inner type at the very end of
     // `parse_type_string`, after the pipe-union collapse above has
-    // already run - unconditionally re-wrapping with `Type::Null`
+    // already run - unconditionally re-wrapping with `Repr::Null`
     // regardless of what the inner type turned out to be, building
     // `Union([Mixed, Null])` for this one shape with nothing to ever
     // collapse it back down.
@@ -265,7 +265,7 @@ fn a_leading_zero_shape_key_stays_a_string_literal_not_an_int() {
         )]))
     );
     // The key itself isn't the assertion - `shape_key_literal` (the
-    // Type::IntLiteral/StringLiteral choice `value-of<T>`/`key-of<T>` and
+    // Repr::IntLiteral/StringLiteral choice `value-of<T>`/`key-of<T>` and
     // key-access narrowing consume) is; confirmed via the dedicated
     // `canonical_int_key` unit tests below instead, since `ArrayShape`
     // itself only ever stores the raw key string, not which literal kind
@@ -399,7 +399,7 @@ fn class_constant_reference_types_parse_to_a_class_constant() {
     // `self::RFC_*` / `Foo::BAR` (PHPStan's constant-type convention,
     // real example: monolog/monolog's own `@param self::RFC_* $rfc`)
     // look like a class name syntactically but aren't one. They parse to
-    // a `Type::ClassConstant` carrying the class reference and the name
+    // a `Repr::ClassConstant` carrying the class reference and the name
     // pattern, resolved against real constants once the registry exists
     // (`registry::resolve`'s `resolve_class_const_type`) - never a
     // literal class named "self::RFC_*".
@@ -448,7 +448,7 @@ fn generic_array_with_one_type_arg_parses_as_value_type() {
 
 #[test]
 fn generic_array_with_key_and_value_uses_both() {
-    // The key argument is a real part of the resulting Type::Array, not
+    // The key argument is a real part of the resulting Repr::Array, not
     // silently discarded.
     assert_eq!(
         parse_type_string("array<string, int>"),
@@ -575,7 +575,7 @@ fn dnf_type_group_resolves_to_a_real_intersection_inside_the_union() {
 // ? list<string> : list<UserMailNotification>)`) must not fall into the
 // DNF-group unwrap above and get mangled into a nonsense,
 // namespace-qualified "class name". A bare `$param` subject parses into
-// a lazily-resolved `Type::Conditional` instead of eagerly unioning both
+// a lazily-resolved `Repr::Conditional` instead of eagerly unioning both
 // branches at parse time - `resolve_conditional` (wired into
 // `Checker::infer_call_return_type`) picks the real branch per call site
 // once the bound argument type is known.
@@ -633,7 +633,7 @@ fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() 
     assert!(template_subject);
 }
 
-// A docblock-parsed `list<int>` builds its key as a literal `Type::Int`
+// A docblock-parsed `list<int>` builds its key as a literal `Repr::Int`
 // (needed so a later marker-stripping op, e.g. `array_diff()`'s result,
 // still shows a known `array<int, T>` rather than collapsing to a
 // keyless `array<T>`), while every runtime-inferred list this project
@@ -646,7 +646,7 @@ fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() 
 // (`subtype(unknown_array_key(), Int)` is false, the reverse true),
 // so a genuine runtime `list<int>` would otherwise fail to satisfy an
 // identical docblock-declared `list<int>` parameter/return type -
-// `union_types`'s dedup (via `types_equal_for_union`) must collapse them
+// `Type::union`'s dedup (via `Type::equals_for_union`) must collapse them
 // into one.
 #[test]
 fn a_docblock_parsed_list_is_a_mutual_subtype_of_the_runtime_inferred_shape() {
@@ -694,7 +694,7 @@ fn a_plain_list_is_not_a_subtype_of_a_non_empty_list_of_the_same_element_type() 
 // A `Closure(self):T`-shaped callable-shape doc member must not fall
 // through to the generic class-name branch and get mangled into a
 // bogus, namespace-qualified "class name" - it parses into a real,
-// shaped `Type::Callable(Some(sig))` instead of degrading to the bare
+// shaped `Repr::Callable(Some(sig))` instead of degrading to the bare
 // marker. `self`/`T` stay unresolved `Object` references here (only
 // `parse_type_string` itself runs in this test, not the later
 // name-resolution/template-marking passes), but the structural shape
@@ -740,7 +740,7 @@ fn a_class_name_merely_starting_with_closure_is_not_mistaken_for_the_callable_sh
 // A fully-qualified `\Closure(CancelledException)` (leading `\`) must
 // not defeat the callable-shape check (`"\closure(...".starts_with(
 // "closure(")` is false), falling through to the generic-class branch
-// and mangling into a bogus `Type::Object("Closure(CancelledException)",
+// and mangling into a bogus `Repr::Object("Closure(CancelledException)",
 // [])` "class".
 //
 // `\Closure(CancelledException)` itself has no trailing `: ReturnType` -
@@ -767,7 +767,7 @@ fn fully_qualified_closure_shape_syntax_with_a_return_type_parses_into_a_real_sh
 // (`'->'|'::'`, the `>` in `'->'`) must not be read as a real closing
 // bracket by `split_top_level`, or it corrupts the depth counter and
 // swallows the `|` separator for the rest of the string, mangling the
-// whole thing into a single nonsensical `Type::StringLiteral`.
+// whole thing into a single nonsensical `Repr::StringLiteral`.
 #[test]
 fn a_quoted_literal_containing_a_bracket_shaped_character_does_not_corrupt_the_union_split() {
     assert_eq!(

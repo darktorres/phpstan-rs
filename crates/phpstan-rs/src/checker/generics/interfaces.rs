@@ -14,7 +14,7 @@
 //! closure at every recursion level, with its own `$first`-gated
 //! parent-chain short-circuit) - this walks the `extends`/`implements`
 //! graph directly via `ClassReflection`, substituting one level's own concrete
-//! arguments into the next via the same `types::substitute_template`
+//! arguments into the next via the same `Type::substitute_templates`
 //! primitive `Registry::class_template_bindings_rec` already uses for a
 //! single-target search, just without stopping at the first match: every
 //! reachable interface is recorded, and a second, differently-bound
@@ -52,7 +52,7 @@ impl<'a> Checker<'a> {
 
         // Seeds the walk with an *identity* binding for `fqn`'s own
         // templates (each maps to itself, as a real `TemplateParam` node)
-        // rather than an empty map - `types::substitute_template` treats
+        // rather than an empty map - `Type::substitute_templates` treats
         // any name *absent* from the bindings map as immediately unbound
         // (collapsed to `Mixed`, or its own default), which would erase
         // `fqn`'s own template identity at the very first substitution
@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
         // and `U` collapse to the same `Mixed` before ever reaching
         // `Base`, silently agreeing when they're actually two unrelated,
         // independently-instantiable templates). An identity entry makes
-        // `substitute_template` leave it alone instead.
+        // `Type::substitute_templates` leave it alone instead.
         let own_bindings = identity_template_bindings(root_info, fqn);
 
         let mut found: FxHashMap<String, Vec<Type>> = FxHashMap::default();

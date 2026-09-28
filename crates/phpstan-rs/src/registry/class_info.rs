@@ -143,9 +143,9 @@ pub struct PropertyReflection {
     // `.missingNativeType`/`.extraNativeType` family, which real PHPStan
     // checks purely at the native level. `resolve_type(None, native_hint)`
     // collapses "no native hint" and an explicit `mixed` hint into the
-    // same `Type::Mixed(false)` value, which is why `has_native_type` below must
+    // same `mixed` value, which is why `has_native_type` below must
     // be a separate boolean rather than testing this field against
-    // `Type::Mixed(false)`.
+    // `mixed`.
     pub(in crate::registry) ty_native: Type,
     // This declaration's own PHPDoc type (`@var`, or for a promoted
     // property its constructor `@param`/inline `@var`), resolved but not
@@ -430,7 +430,7 @@ pub struct ClassReflection {
     // generic itself but permanently binds `Collection`'s `T` to `int`).
     // An argument can itself reference this class's own `@template` name
     // (`class Box<T> extends Collection<T> {}`) - such an argument is
-    // `Type::TemplateParam(name)`, substituted using whatever this
+    // a template `name`, substituted using whatever this
     // class's templates are bound to at each use, not a fixed value.
     // Empty when there's no `@extends` tag, or no native `extends` for
     // it to apply to.
@@ -507,7 +507,7 @@ pub struct ClassReflection {
     // For a backed enum only, each case's literal backing value
     // (`StringLiteral`/`IntLiteral`), keyed by case name - lets
     // `::from()`/`::tryFrom()` narrow a literal-argument call to the
-    // exact matching case's `Type::EnumCase` instead of the coarse
+    // exact matching case's enum case instead of the coarse
     // `self`/`?self`. Only populated when every case's value is a bare
     // literal (mirrors the "don't guess" restriction the existing
     // `->value` union-of-literals property type applies) - empty for a
@@ -954,7 +954,7 @@ impl ClassReflection {
         // keyed by name - `templates` above stays a plain `Vec<String>`
         // (positional order still drives type-argument binding
         // elsewhere, e.g. `checker::class_template_bindings_rec`), but
-        // every `Type::TemplateParam` this class's docblock produces
+        // every template this class's docblock produces
         // (properties, consts, `@extends`/`@implements` args, and every
         // method's params/return type below) carries the real metadata
         // from here instead of a bare name.
@@ -1456,7 +1456,7 @@ impl ClassReflection {
         // come after `resolve_names_in_type`, not before): otherwise two
         // classes each declaring a same-named but locally-scoped
         // `@phpstan-type` alias, then referencing it in their own
-        // `@implements` tag, would stay distinct opaque `Type::Object`
+        // `@implements` tag, would stay distinct opaque object
         // nodes instead of each expanding to its real underlying shape,
         // making `check_cross_path_interface_conflicts`'s exact-equality
         // comparison see two "different" types where real PHPStan (which

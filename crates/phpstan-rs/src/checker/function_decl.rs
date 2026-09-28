@@ -1580,7 +1580,7 @@ impl<'a> Checker<'a> {
     /// parameter's own default would be checked against the bare,
     /// unresolved `TemplateParam` itself, which `registry::accepts`
     /// has no dedicated rule for on the *super*-type side (only the
-    /// *sub*-type side, `(Type::TemplateParam(tp), _) => ... self.
+    /// *sub*-type side, a template on the sub-type side answers for its bound (`self.
     /// accepts(&tp.bound, sup)`, already used elsewhere for the
     /// opposite direction). Deliberately shallow - only a bare top-level
     /// `T $x = ...`, not real PHPStan's own recursive substitution

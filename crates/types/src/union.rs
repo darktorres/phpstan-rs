@@ -1,10 +1,10 @@
 use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
-/// A defensive cap on how many distinct members `union_types` will ever
-/// materialize into a real `Type::Union`. Collapsing to `Mixed` past this
-/// point is a stable fixed point (`union_types(Mixed, _) == Mixed` is
+/// A defensive cap on how many distinct members `Type::union` will ever
+/// materialize into a real `Repr::Union`. Collapsing to `Mixed` past this
+/// point is a stable fixed point (`Type::union(Mixed, _) == Mixed` is
 /// this function's first special case below), so a variable that blows
 /// past the cap once stays collapsed rather than being recomputed on
-/// every subsequent merge. Needed because `Type::Union` sticks across
+/// every subsequent merge. Needed because `Repr::Union` sticks across
 /// reads/writes instead of immediately collapsing to `Mixed`: a function
 /// with many sequential and nested branches assigning distinct array
 /// shapes to the same variable can grow that variable's union member
@@ -71,7 +71,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // once flattened out of a multi-member `Union` operand (real shape:
     // `?mixed`'s own union-with-`Null` construction, `types/parse.rs`'s
     // `parse_type_string`, before its own analogous fix), which the
-    // fast-path's `a == Type::Mixed(false)`/`b == Type::Mixed(false)`
+    // fast-path's `a == Repr::Mixed(false)`/`b == Repr::Mixed(false)`
     // checks never see since neither whole operand is bare `Mixed` -
     // only one of its now-flattened members is. Without this, a
     // `Mixed`-containing union merged with anything else keeps
@@ -124,8 +124,8 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // Drop a literal member whenever its exact base type is also present
     // in the same union - a ternary's two branches
     // (`is_string($x) ? $x : ''`) build exactly this shape,
-    // `union_types(String, StringLiteral(""))`, and keeping both would
-    // stop later code from matching `== Type::String`. Snapshotting
+    // `Type::union(String, StringLiteral(""))`, and keeping both would
+    // stop later code from matching `== Repr::String`. Snapshotting
     // which base types are present first, rather than checking `members`
     // from inside its own `retain` closure (which the borrow checker
     // won't allow). Covers `Array`/`Float` alongside `Int`/`String`/
@@ -171,7 +171,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // checking against the specific `Array(key, val)` co-member to be
     // absorbed safely. Does not affect a whole-variable reassignment
     // merge like `$file_path = null; foreach (...) { $file_path = $row; }`
-    // - `Type::Null` is not a subtype of `Type::String`, so `string|null`
+    // - `Repr::Null` is not a subtype of `Repr::String`, so `string|null`
     // is correctly still kept apart.
     merge_int_ranges(&mut members);
     reduce_array_members(&mut members);
@@ -180,7 +180,7 @@ fn union_types_impl(a: Type, b: Type) -> Type {
     // separate union members - `array_element_type`'s `Union` arm, and
     // every other consumer wanting "the" element type of a plain array,
     // would otherwise silently only see the first matching member.
-    // Scoped to a bare `Type::Array` only, not an accessory-refined
+    // Scoped to a bare `Repr::Array` only, not an accessory-refined
     // `list<T>`/`non-empty-array<T>` (a real `Intersection`) - a mix of
     // the two is left as a narrower residual.
     if members
@@ -372,7 +372,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     passthrough
 }
 
-/// The "lossless absorption" half of `union_types`' own literal-dedup
+/// The "lossless absorption" half of `Type::union`' own literal-dedup
 /// fix - an `IntLiteral`/`StringLiteral`/`True`/`False` member is
 /// redundant once its own *exact* base type is already present in the
 /// same union (an `Int` member already includes every possible
@@ -412,8 +412,8 @@ fn literal_base_type(t: &Type) -> Option<Type> {
 }
 
 impl Type {
-    /// Splits a plain `Type::Array` or a "pure" `hasOffsetValue(...)`-carrying
-    /// `Type::Intersection` (`write_literal_key_aware`'s own construction
+    /// Splits a plain `Repr::Array` or a "pure" `hasOffsetValue(...)`-carrying
+    /// `Repr::Intersection` (`write_literal_key_aware`'s own construction
     /// shape - an `Array` member plus zero or more `HasOffsetValue` members,
     /// nothing else) into its base `Array` and its own tracked
     /// `(key, value)` pairs. `None` for anything else (a real class
@@ -460,7 +460,7 @@ impl Type {
 /// have taken this write at all. Without this, a variable written across
 /// several independent, non-mutually-exclusive branches (`if ($a) {
 /// $x['a'] = ...; } if ($b) { $x['b'] = ...; } ...`) would grow one
-/// extra `Type::Union` member per branch instead of converging back to a
+/// extra `Repr::Union` member per branch instead of converging back to a
 /// single type the way real PHPStan's own merge does - a real corpus
 /// regression this fixes (`ActivityService::record()`'s own
 /// `$details['method'] = ...`/`$details['script'] = ...`/... sequence:
@@ -468,7 +468,7 @@ impl Type {
 /// member count, hitting `MAX_UNION_MEMBERS` and collapsing the *whole*
 /// variable to `Mixed` a few branches in).
 ///
-/// Returns `None` (falling back to `union_types`' own generic handling)
+/// Returns `None` (falling back to `Type::union`' own generic handling)
 /// unless *both* operands are one of the two eligible shapes - a
 /// genuinely unrelated type on either side (an object, a shape, ...)
 /// never reaches this merge at all.
@@ -476,7 +476,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
     let (base_a, pairs_a) = a.has_offset_value_parts()?;
     let (base_b, pairs_b) = b.has_offset_value_parts()?;
     // Neither side tracked anything - the plain `Array`/`Array` case
-    // `union_types`' own generic "merge multiple Array members" step
+    // `Type::union`' own generic "merge multiple Array members" step
     // already handles just as well; leave it to that instead of
     // duplicating it here.
     if pairs_a.is_empty() && pairs_b.is_empty() {
@@ -487,7 +487,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
             Type::array(Type::union(*ka, *kb), Type::union(*va, *vb))
         }
         // Unreachable given `has_offset_value_parts`'s own contract
-        // (its `base` is always a `Type::Array`), kept as a safe
+        // (its `base` is always a `Repr::Array`), kept as a safe
         // fallback rather than an `unreachable!()`.
         (base_a, _) => base_a,
     };

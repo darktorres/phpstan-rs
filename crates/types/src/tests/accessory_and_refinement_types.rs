@@ -142,7 +142,7 @@ fn decimal_int_string_is_a_real_accessory_type() {
 // enumerate without resolving the referenced class constants. Falling
 // through to the generic-class branch would produce a bogus "class"
 // that then fails ordinary `int` assignability checks; degrading to the
-// pseudo-type's underlying kind, `Type::Int`, is a strict improvement.
+// pseudo-type's underlying kind, `Repr::Int`, is a strict improvement.
 #[test]
 fn int_mask_pseudo_types_degrade_to_plain_int() {
     assert_eq!(parse_type_string("int-mask"), Type::int());

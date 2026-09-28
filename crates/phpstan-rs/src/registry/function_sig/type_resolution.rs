@@ -104,7 +104,7 @@ pub(crate) fn resolve_type_with_parsed_native(
     // types something `mixed`/`object` *because* PHP has no native
     // `resource` type to declare, leaning on the docblock to carry the
     // only real type information. A `mixed` native doesn't need its own
-    // exclusion here: `subtype(_, Type::Mixed(false))` is unconditionally
+    // exclusion here: `mixed` as a super type is unconditionally
     // `true`, so `reconcile_with_native` already keeps every doc member
     // when native is `mixed`, for free. `object`'s own subtyping is
     // name-equality-only (see `Relation::is_super_type_of`'s own doc comment), so

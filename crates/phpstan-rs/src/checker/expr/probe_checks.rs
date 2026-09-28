@@ -203,7 +203,7 @@ impl<'a> Checker<'a> {
                 // calls, not a bespoke tri-state helper: assuming
                 // "present" is impossible means the key can never be
                 // there; assuming "absent" is impossible means it's
-                // unconditionally there - `narrow_array_shape_by_key_presence`
+                // unconditionally there - `Type::with_key_presence`
                 // already answers both questions correctly (including
                 // through a `Union`, recursively), this just asks it
                 // twice rather than duplicating its own logic.
@@ -322,7 +322,7 @@ impl<'a> Checker<'a> {
 
     /// Real PHPStan's own `ConstantLooseComparisonRule`
     /// (level 4): flags a `==`/`!=` whose outcome is provably constant
-    /// from both operands' own literal types - `loose_compare_literals`'s
+    /// from both operands' own literal types - `Type::loosely_equals`'s
     /// own doc comment has the full scope/version-gating reasoning.
     /// Fires independently of `infer_binary`'s identical constant-folding
     /// (consumed separately by the `if`/`while`/ternary/... constant-
@@ -461,7 +461,7 @@ impl<'a> Checker<'a> {
     /// Real PHPStan's own
     /// `NumberComparisonOperatorsConstantConditionRule` (level 4): flags a
     /// `</>/<=/>=` comparison whose outcome is provably constant from
-    /// both operands' known int ranges - `numeric_comparison_bounds`/
+    /// both operands' known int ranges - `Type::int_bounds`/
     /// `compare_range_outcome`'s own doc comments have the range-
     /// arithmetic reasoning; this is purely the reporting half, mirroring
     /// `check_constant_loose_comparison` just above's identical shape

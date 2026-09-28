@@ -425,7 +425,7 @@ impl Registry {
         changed
     }
 
-    /// Resolves every `Type::ValueOf`/`Type::ClassConstant` (`types::
+    /// Resolves every `value-of`/class constant reference (`types::
     /// parse_type_keyword_or_class`'s `value-of<T>`-on-a-class/enum, and
     /// `Foo::BAR` references) now that every class/enum is
     /// actually indexed - see that function's doc comment for why this
@@ -849,7 +849,7 @@ impl Registry {
         resolve_deferred_value_of_with_native_fallback(ty, native, &self.classes)
     }
 
-    /// Whether `ty` mentions a `Type::TemplateParam` scoped anywhere
+    /// Whether `ty` mentions a template scoped anywhere
     /// other than `method_name` - mirrors `function_sig::
     /// mark_template_params`'s recursive-case list (`Object`'s type
     /// args, `Array`'s key/value, `ClassString`, `Union`/`Intersection`,
@@ -866,8 +866,8 @@ impl Registry {
     /// vs. `class_info.rs`'s `class_scope = ctx.declared_name(&c.name)`
     /// for a class-level one - an FQN vs. a bare method name,
     /// structurally distinguishable). A method-scoped template is safe
-    /// to copy through verbatim: `types::bind_template_param`/
-    /// `substitute_template`'s call-site binding is purely name-keyed
+    /// to copy through verbatim: `Type::infer_template_bindings`/
+    /// `Type::substitute_templates`'s call-site binding is purely name-keyed
     /// and blind to which class's `FunctionReflection` a signature came from.
     /// Real PHPStan draws the identical line:
     /// `ResolvedPhpDocBlock::resolveTemplateTypeInTag` substitutes an
@@ -941,7 +941,7 @@ impl Registry {
 
     /// Whether backfilling `ancestor_ty` onto a position whose own native
     /// hint alone already resolves to `native_ty` is safe: `false` only
-    /// when both sides are a concrete `Type::Object` naming *different*
+    /// when both sides are a concrete object naming *different*
     /// classes - PHP's own native hint is authoritative about what a
     /// position's real static type is (enforced at runtime), so a
     /// same-family-but-different-class ancestor docblock type can only
@@ -1281,7 +1281,7 @@ impl types::ClassConstants for DeclaredConstants<'_> {
 }
 
 /// A `ClassConstant`'s value: the union of every matching
-/// constant's own type (an enum case's `Type::EnumCase`, a literal
+/// constant's own type (an enum case's enum case, a literal
 /// constant's literal type), mirroring real PHPStan's `TypeNodeResolver`
 /// for a `ConstTypeNode` - a `*` in the name matches any run of
 /// characters. Matches are ordered by name for a deterministic union
@@ -1490,7 +1490,7 @@ fn resolve_value_of_target(
 }
 
 /// Resolves `ty` (a param/return type that may contain a `ValueOf`)
-/// and, if the result is bare `Type::Mixed(false)`, falls back to
+/// and, if the result is bare `mixed`, falls back to
 /// `native` instead when that's itself something more useful - restores
 /// `function_sig::reconcile_with_native` behavior for a `value-of<T>`
 /// that turns out unresolvable (`T` not a real, registered enum): without

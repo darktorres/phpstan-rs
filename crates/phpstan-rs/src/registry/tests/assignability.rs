@@ -96,7 +96,7 @@ fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
 
 // An `ArrayShape`'s aggregate key type (int-vs-string, mirroring
 // PHPStan's `ConstantArrayType::getIterableKeyType()`) must actually
-// agree with a `Type::Array`'s declared key type, in both directions -
+// agree with an array's declared key type, in both directions -
 // not just each field's/element's value type.
 
 #[test]

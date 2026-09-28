@@ -146,8 +146,8 @@ impl fmt::Display for Type {
             // `describe_accessory_intersection`'s own known-shape fast
             // paths above (none of them match a `HasOffsetValue` member),
             // so this always reaches the generic `&`-joined
-            // `Type::Intersection` fallback alongside its own base
-            // `Type::Array`.
+            // `Repr::Intersection` fallback alongside its own base
+            // `Repr::Array`.
             Type(Repr::HasOffsetValue(key, value)) => {
                 write!(f, "hasOffsetValue('{key}', {value})")
             }
@@ -194,7 +194,7 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
 /// Recognizes the canonical `[base, Accessory(kind), ...]` shapes
 /// `parse_type_keyword_or_class` constructs and renders them
 /// as PHPStan's own atomic pseudo-type name, rather than the generic
-/// `&`-joined form `Type::Intersection`'s own `Display` otherwise uses
+/// `&`-joined form `Repr::Intersection`'s own `Display` otherwise uses
 /// (correct for a real user intersection like `Countable&Iterator`, but
 /// wrong - `"string&non-empty-string"` - for an accessory-refined one).
 /// Checks for the *presence* of each member independently, not an exact
@@ -226,11 +226,11 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         // `Mixed`): `array_flip()`'s own key/value-swapping return type
         // can genuinely carry a known, non-default key (e.g.
         // `non-empty-array<string, int>`), which would otherwise render
-        // as `non-empty-array<int>`. Mirrors `Type::Array`'s
+        // as `non-empty-array<int>`. Mirrors `Repr::Array`'s
         // own `Display` arm just above: a known key always shows both
         // positions, even when the value happens to be `Mixed`. Never
         // shown for a `list`/`non-empty-list`, though, even though its
-        // own key really is a "known" `Type::Int` under the same
+        // own key really is a "known" `Repr::Int` under the same
         // `!= unknown_array_key()` test - a list's keys are *always*
         // sequential ints by definition, so real PHPStan's own
         // `list<V>` convention never states it either.

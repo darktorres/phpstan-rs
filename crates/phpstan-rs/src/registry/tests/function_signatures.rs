@@ -5,7 +5,7 @@ use super::helpers::*;
 
 #[test]
 fn a_native_mixed_parameter_hint_resolves_to_explicit_mixed() {
-    // Phase 84's own `Type::Mixed(bool)` - the literal `mixed` keyword,
+    // Phase 84's own `mixed` - the literal `mixed` keyword,
     // written natively here, is real PHPStan's own definition of
     // *explicit* mixed (`vendor/phpstan-src/src/Type/
     // ParserNodeTypeToPHPStanType.php`).
@@ -334,7 +334,7 @@ fn a_stale_object_member_is_dropped_when_the_native_hint_is_void() {
     assert_eq!(r.functions["make14"].return_type, Type::void());
 }
 
-// `Type::Never` must be exempted from the native-`void` exclusion above -
+// `never` must be exempted from the native-`void` exclusion above -
 // an explicit `@return never` means the function always diverges
 // (throws/exits/loops forever), compatible with any native return hint
 // including `void` (mirrors PHPStan's own `TypehintHelper::decideType`
@@ -356,7 +356,7 @@ fn an_explicit_never_doc_survives_reconciliation_against_a_native_void_hint() {
 }
 
 // A PHPStan/Psalm callable-shape doc member (`Closure(Tv): bool`) parses
-// into a real, shaped `Type::Callable(Some(sig))`, not a bare
+// into a real, shaped `callable(...)`, not a bare
 // signature-less marker - `refine_callable_member`'s guard
 // (`registry/function_sig/type_resolution.rs`) must not touch an
 // already-shaped member, since it's already a genuine refinement in its
@@ -493,7 +493,7 @@ fn an_array_doc_member_with_a_plain_class_key_is_also_kept() {
 }
 
 // A `mixed`-native case must still trust the doc fully, now via the
-// general `subtype(_, Type::Mixed(false))` rule falling out for free
+// general "`mixed` is a super type of everything" rule falling out for free
 // rather than a dedicated `mixed`/`object` branch.
 #[test]
 fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {

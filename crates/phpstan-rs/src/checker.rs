@@ -185,14 +185,14 @@ type ContainerFieldFactsMap = imbl::GenericHashMap<
 // `(container variable name, discriminant subject name, branch value) ->
 // the array type this exact (container, branch) pair has accumulated so
 // far`, independent of the *other* branch's own accumulation - fixes a
-// real bug in `write_index_into`'s generic `Type::Union` handling
+// real bug in `write_index_into`'s generic union handling
 // (`checker/assignment.rs`): an append write applied there gets pushed
 // onto *every* member of an already-diverged union uniformly, including
 // a member that came from a *different* loop iteration's *other* branch
 // (confirmed via a minimal repro: `if ($f) { $x[] = 'a'; } else { $x[] =
 // new Obj(); }` inside a loop produces a genuinely-impossible
 // `list<string|Obj>` member after only two passes, not because
-// `merge_scopes` flattens anything - it doesn't, `union_types` never
+// `merge_scopes` flattens anything - it doesn't, `Type::union` never
 // merges two different `Array`/`Intersection` element types together -
 // but because the *next* pass's own append, applied uniformly to
 // *every* member of the prior pass's already-two-member union, widens
@@ -200,7 +200,7 @@ type ContainerFieldFactsMap = imbl::GenericHashMap<
 // instead of) the ordinary, single-flat-type tracking every other
 // container already gets - see `Checker::active_discriminant`'s own doc
 // comment for the write-side trigger. Consulted only when checking a
-// `return` statement whose declared type is `Type::Conditional` and the
+// `return` statement whose declared type is conditional type and the
 // ordinary (still-flat, still-corrupted) tracked type would otherwise
 // fail: reconstructing `Union([true-slot, false-slot])` from here and
 // re-checking against the same declared type's own already-flattened
@@ -551,7 +551,7 @@ impl PartialEq for Locals {
 /// A generic `@template` name -> concrete `Type` substitution map (class-
 /// hierarchy template binding, function-call argument-to-template
 /// binding) - built once per call/hierarchy-walk and consumed immediately
-/// by `types::substitute_template`/`bind_template_param`, never cloned
+/// by `Type::substitute_templates`/`Type::infer_template_bindings`, never cloned
 /// per-branch the way `Locals` is. A plain `std::collections::HashMap`,
 /// since this use case has none of the "cloned once per branch" cost
 /// profile that motivates `Locals`'s persistent-map backing.
@@ -567,7 +567,7 @@ pub(crate) type PropertyAssignFacts = FxHashMap<Arc<str>, FxHashMap<Arc<str>, Ve
 
 /// Walks function/method bodies, inferring a best-effort type for each
 /// expression and flagging argument/return type mismatches against the
-/// registry. Deliberately conservative: `Type::Mixed(false)` is overloaded here to
+/// registry. Deliberately conservative: `mixed` is overloaded here to
 /// mean both PHP's real `mixed` type AND "we don't know" for anything this
 /// prototype can't infer (property access, closures, dynamic calls, ...) -
 /// so every check below treats an inferred `Mixed` as inconclusive and
@@ -723,7 +723,7 @@ pub struct Checker<'a> {
     // thrown-value type, or a call's resolved `@throws` type (a matching
     // `checker/throws/dynamic.rs` per-callee override tried first) -
     // recorded at each of `ExprKind::Call`/`New`/`MethodCall`/`StaticCall`'s
-    // resolved-signature choke points. `Type::Void` contributes nothing,
+    // resolved-signature choke points. `void` contributes nothing,
     // matching real PHPStan. Consumed by `checker/throws/too_wide.rs`'s
     // `TooWideFunctionThrowTypeRule`/`TooWideMethodThrowTypeRule` port.
     pub(crate) current_function_throw_points: Vec<Type>,
@@ -746,9 +746,9 @@ pub struct Checker<'a> {
     pub(crate) current_function_explicit_throw_points: Vec<(Type, Span)>,
     // Every real return point recorded so far inside the enclosing body -
     // `StmtKind::Return(Some(e))`'s value type, `StmtKind::Return(None)`'s
-    // implicit `Type::Void` (real PHPStan pushes `VoidType`, not `Null`,
+    // implicit `void` (real PHPStan pushes `VoidType`, not `Null`,
     // for a bare `return;`), and the falls-off-the-end path's implicit
-    // `Type::Null` (only when the native return type allows it). Never
+    // `null` (only when the native return type allows it). Never
     // populated for a generator - its `return` sets `Generator::
     // getReturn()`, not the function's own return value. Consumed by
     // `checker::return_type::too_wide`'s
@@ -864,7 +864,7 @@ pub struct Checker<'a> {
     // `PestConfig::resolve_this_type`) before `check_program` runs, then
     // possibly overridden by a file-local `uses(...)` call `check_program`
     // itself finds (real Pest's resolution order: file-local wins over
-    // directory-scoped). Defaults to `Type::Mixed(false)`, so any call site never
+    // directory-scoped). Defaults to `mixed`, so any call site never
     // exercising an `is_this_binding_call`-recognized closure argument is
     // unaffected.
     pub(crate) pest_this_type: Type,
@@ -884,7 +884,7 @@ pub struct Checker<'a> {
     // than recomputing the name itself. Empty (not populated) in every
     // existing test, the same "no signal, stay quiet" leniency
     // `pest_this_type`'s own default gets - a lookup miss just falls back
-    // to `Type::Mixed(false)`, matching today's unconditional behavior.
+    // to `mixed`, matching today's unconditional behavior.
     pub(crate) anonymous_class_names: FxHashMap<syntax::token::Span, String>,
     // The registry name (`anonymous_class_names`' value) of the anonymous
     // class whose own methods are currently being checked - its methods

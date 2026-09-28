@@ -9,7 +9,7 @@ use syntax::ast::BinOp;
 /// (both operands were real values, but the exact result doesn't fit)
 /// from a merely-unbounded operand (`None` propagating as `None` is
 /// correct there, not an overflow) - `bool` is `true` only for the
-/// former, the signal `Add`/`Sub`/`Mul` need to union `Type::Float`
+/// former, the signal `Add`/`Sub`/`Mul` need to union `Repr::Float`
 /// into their result the same way real PHP silently promotes an
 /// overflowing int operation to float at runtime.
 pub(crate) fn checked_bound_op(
@@ -172,7 +172,7 @@ fn checked_i64_pow(base: i64, exp: i64) -> Option<i64> {
 /// Real PHPStan's own `ExponentiateHelper`/`IntegerRangeType::exponentiate`,
 /// transcribed for the pure-integer case this project's own `IntRange`
 /// represents - `infer_binary`'s own `Pow` arm already routes a `Float`-
-/// involving operand to bare `Type::Float` before ever reaching this, the
+/// involving operand to bare `Repr::Float` before ever reaching this, the
 /// same gate every one of real PHPStan's own non-numeric-exponent cases
 /// (`string`/`bool`/`null`) this project's type system doesn't route
 /// through this path at all. A literal base's own `(min, max)` bounds
@@ -207,7 +207,7 @@ pub(crate) fn pow_int_range(
 /// outside `0..64` (negative - PHP throws `ArithmeticError` at runtime,
 /// not modeled as `ErrorType` here, matching this project's existing
 /// choice not to surface that family - or too wide to be a real shift
-/// amount) falls back to plain `Type::Int` directly, the same "give up
+/// amount) falls back to plain `Repr::Int` directly, the same "give up
 /// gracefully" shape every other range-arithmetic arm here already has.
 /// Each bound shifts independently and collapses to `None` (unbounded)
 /// on overflow rather than aborting the whole computation - matching
@@ -535,11 +535,11 @@ pub(crate) fn div_int_range(
         // independently) can invert an otherwise-valid range into one
         // with no real int members at all - `normalize_int_range`'s own
         // doc comment has an example (`10 / 4`, always
-        // `2.5`, never any int). `union_types` has no general `Never`-
+        // `2.5`, never any int). `Type::union` has no general `Never`-
         // absorption rule of its own (nothing elsewhere in this project
         // ever produces a `Never` member to union away), so this handles
         // it explicitly rather than teach that absorption to every other
-        // `union_types` caller for the sake of this one.
+        // `Type::union` caller for the sake of this one.
         Type(Repr::Never) => Type::float(),
         int_half => Type::union(int_half, Type::float()),
     }
@@ -560,7 +560,7 @@ impl Type {
     /// must flip it: `-32768` infers as `IntLiteral(-32768)`, not
     /// `IntLiteral(32768)`. `IntRange`'s min/max swap on negation (`-int<a,
     /// b>` is `int<-b, -a>`) mirrors real PHPStan's `IntegerRangeType`
-    /// negation handling. Anything else (a bare `Type::Int`, `Type::Float`,
+    /// negation handling. Anything else (a bare `Repr::Int`, `Repr::Float`,
     /// ...) has no specific value to flip, so it's returned unchanged.
     pub fn negate(self) -> Type {
         match self {

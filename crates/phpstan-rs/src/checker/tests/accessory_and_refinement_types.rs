@@ -5,8 +5,8 @@ use types::AccessoryKind;
 use types::Shape;
 
 // Exact type equality is the wrong tool for "is this the kind of thing
-// being narrowed" - both `narrow_type_to`/`narrow_type_excluding`
-// (member filtering) and `union_types` (member dedup at construction
+// being narrowed" - both `Relation::narrow`/`Type::without`
+// (member filtering) and `Type::union` (member dedup at construction
 // time) must not use plain `==`/`!=`.
 
 #[test]
@@ -125,14 +125,14 @@ fn union_types_does_not_collapse_a_real_class_intersection() {
     );
 }
 
-// `merge_scopes` (one `union_types` call per `if`/`else`) and
-// `write_index_into`'s own `Union` arm both feed into `union_types`,
+// `merge_scopes` (one `Type::union` call per `if`/`else`) and
+// `write_index_into`'s own `Union` arm both feed into `Type::union`,
 // which must cap how many distinct members it accumulates - a function
 // with many sequential branches assigning genuinely distinct array
 // shapes to the same variable can otherwise grow that variable's union
 // member count combinatorially. Simulates that shape directly: 20
 // pairwise-distinct one-field `ArrayShape`s folded through
-// `union_types` one at a time, exactly the access pattern `merge_scopes`
+// `Type::union` one at a time, exactly the access pattern `merge_scopes`
 // uses across many sequential branches.
 #[test]
 fn union_types_caps_runaway_member_growth_instead_of_hanging() {
@@ -168,8 +168,8 @@ fn union_types_below_the_cap_still_builds_a_precise_union() {
 }
 
 // The two tests above exercise `generalize_by_key_set` directly;
-// this one confirms `union_types` itself actually calls it - built as
-// a single `union_types(pre_built_union_of_12, one_more_shape)` call
+// this one confirms `Type::union` itself actually calls it - built as
+// a single `Type::union(pre_built_union_of_12, one_more_shape)` call
 // (not a `.reduce()` chain) specifically so only *one* generalization
 // pass happens, matching what `generalize_by_key_set`'s own
 // standalone tests already prove that pass does.

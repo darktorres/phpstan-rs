@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
     /// never an array, a `resource`, a `class-string`, or any other
     /// registered class. `Mixed`, an unresolvable class, and a PHPDoc
     /// type alias this project doesn't resolve (both surface as
-    /// `Type::Object` with no matching registry entry - see
+    /// object with no matching registry entry - see
     /// `self.registry.classes.contains_key`) all fall through the
     /// catch-all, matching this project's usual "don't know, don't
     /// guess" leniency - this arm must tell "confidently not a
@@ -111,7 +111,7 @@ impl<'a> Checker<'a> {
     /// `GmpOperatorTypeSpecifyingExtension`/
     /// `BcMathNumberOperatorTypeSpecifyingExtension` (comparison operators
     /// and unary `-`/`+`/`~` are deliberately not covered here - the
-    /// comparisons already produce `Type::Bool` regardless of operand via
+    /// comparisons already produce `bool` regardless of operand via
     /// `infer_binary`'s own existing catch-all, and unary `-`/`+`/`~`
     /// already pass a non-string-shaped operand's type straight through
     /// unchanged, both already matching real PHP's actual behavior with
@@ -228,7 +228,7 @@ impl<'a> Checker<'a> {
 
     /// Flags a condition whose type isn't confidently `bool` at all,
     /// regardless of its value - distinct from `inferred_constant_
-    /// condition`'s always-true/false check. `Type::Mixed(false)` is always
+    /// condition`'s always-true/false check. `mixed` is always
     /// exempted: this project has no explicit-vs-implicit-mixed
     /// provenance on an inferred expression type, so it reads as "don't
     /// know, may be bool" rather than a confirmed non-bool.
@@ -345,8 +345,8 @@ impl<'a> Checker<'a> {
     /// residual not attempted, and a computed (non-literal) divisor is
     /// never guessed at either way. Takes the divisor's own raw
     /// expression, not just its inferred type - a plain float literal
-    /// (`0.0`) infers to bare `Type::Float` everywhere else in this
-    /// checker (`Type::FloatLiteral` is only ever produced by parsing a
+    /// (`0.0`) infers to bare `float` everywhere else in this
+    /// checker (float literal is only ever produced by parsing a
     /// docblock type *string*, never an ordinary literal float
     /// *expression*), so the type alone would silently miss the single
     /// most common real spelling of a literal-zero float divisor -

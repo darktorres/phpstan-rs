@@ -391,7 +391,7 @@ pub(crate) fn infer_const_type(value: &syntax::ast::Expr) -> Type {
 
 /// `infer_const_type` for a *class* constant's own value, which may also
 /// reference another constant (`self::A`, `Foo::BAR`): that reference
-/// becomes a `Type::ClassConstant` (the same one a `Foo::BAR` PHPDoc
+/// becomes a class constant reference (the same one a `Foo::BAR` PHPDoc
 /// type parses to), resolved once every class's constants exist by
 /// `Registry::resolve_deferred_value_of`'s constant pre-pass. Only class
 /// constants go through that pass, so only they get this; a global

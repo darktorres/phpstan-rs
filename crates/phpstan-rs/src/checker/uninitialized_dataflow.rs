@@ -238,7 +238,7 @@ fn walk_stmts(
 /// `else` can never qualify - the "condition false" path always falls
 /// through). Used only to decide whether a branch's resulting state
 /// should be excluded from a merge. Narrower than a full
-/// `always_terminates` (no `Type::Never`-returning-call detection, no
+/// `always_terminates` (no `never`-returning-call detection, no
 /// `Switch`/`Try` exhaustiveness, since either needs a real
 /// `Locals`/`infer_expr` this standalone module doesn't have) - errs
 /// safe (could only miss a real finding downstream, never invent a false

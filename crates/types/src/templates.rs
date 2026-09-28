@@ -8,7 +8,7 @@ impl Type {
     /// practice are handled: a bare `T` param, and `T[]`/`array<T>` unifying
     /// against an array argument's element type. Anything else (a template
     /// buried in a union, an array shape, etc) just isn't bound, which is safe
-    /// since `substitute_template` falls back to `Mixed` for anything left
+    /// since `Type::substitute_templates` falls back to `Mixed` for anything left
     /// unbound. First binding for a given name wins; conflicting uses of the
     /// same `T` across multiple params aren't reconciled (no union-widening).
     pub fn infer_template_bindings(&self, arg_ty: &Type, bindings: &mut FxHashMap<String, Type>) {
@@ -104,7 +104,7 @@ impl Type {
 
 impl Type {
     /// Rewrites `arg_ty` so a string-literal argument occupying a
-    /// `class-string<T>`-shaped position in `param_ty` is treated the way real
+    /// `class-string<T>`-shaped position in this parameter type is treated the way real
     /// PHPStan's own `ConstantStringType::isClassString()`/
     /// `getClassStringObjectType()` treats it: a literal naming a real,
     /// existing class binds a template exactly as well as an explicit
@@ -112,7 +112,7 @@ impl Type {
     /// param`'s own structural recursion (`Array`/`ClassString`/`Union`) so a
     /// literal nested inside e.g. `class-string<T>[]` or `class-string<T>|null`
     /// is reached too. Kept as a separate preprocessing pass rather than
-    /// folded into `bind_template_param` itself since only a caller with
+    /// folded into `Type::infer_template_bindings` itself since only a caller with
     /// registry access can answer "is this string a real class name" - this
     /// module deliberately has none (see the module doc above). Deliberately
     /// does NOT touch a bare `TemplateParam` position (`T $x` with no
@@ -222,7 +222,7 @@ impl Type {
 }
 
 impl Type {
-    /// `substitute_template` for the templates `scope` declares only: every
+    /// `Type::substitute_templates` for the templates `scope` declares only: every
     /// other template stays as it is.
     pub fn substitute_templates_of(&self, bindings: &FxHashMap<String, Type>, scope: &str) -> Type {
         substitute(
@@ -241,7 +241,7 @@ fn outside_callable(tp: &TemplateParam) -> bool {
 }
 
 impl Type {
-    /// `substitute_template`, except that an unbound template `to_bound`
+    /// `Type::substitute_templates`, except that an unbound template `to_bound`
     /// selects falls back to its declared bound when it has no default
     /// (`@template T of Connection` gives `Connection`) - real PHPStan's
     /// `resolveToBounds` for a call's own templates that no argument

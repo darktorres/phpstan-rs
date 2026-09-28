@@ -797,7 +797,7 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     // exists purely so the declaration type-checks, and was never meant
     // to be read literally. This project has no dedicated magic-constant
     // `Expr` kind (a bare `__DIR__`/`__LINE__`/... reference parses as
-    // an ordinary `ExprKind::Name`, already `Type::Mixed(false)` via
+    // an ordinary `ExprKind::Name`, already `mixed` via
     // `bare_name_literal_type`'s default arm) - excluding them here
     // protects that existing, already-correct "don't know" behavior
     // from being overwritten by the stub's placeholder.
@@ -824,7 +824,7 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     // rule does for this exact source text (`var_dump(-9223372036854775808)`
     // truly prints a float, not `PHP_INT_MIN`'s real int value).
     // `infer_const_type`'s `Neg` arm would then type the whole
-    // expression `Type::Float`, silently breaking every
+    // expression `float`, silently breaking every
     // `random_int(PHP_INT_MIN, PHP_INT_MAX)`-shaped call. `PHP_INT_MAX`
     // itself needs no equivalent exclusion - `9223372036854775807` fits
     // exactly, no `Neg`/overflow involved.
@@ -837,7 +837,7 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     // whether a name made it into `global_constants`. `PHP_INT_MIN` is
     // a real, always-defined PHP constant, so a real
     // `use const PHP_INT_MIN;` should never be flagged
-    // `constant.notFound`. `Type::Int` (not a literal, and deliberately
+    // `constant.notFound`. `int` (not a literal, and deliberately
     // not `infer_const_type`'s own float-overflow-affected inference)
     // is the safe, correct level of precision.
     if const_name == "PHP_INT_MIN" {

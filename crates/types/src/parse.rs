@@ -28,8 +28,8 @@ pub fn parse_type_string(raw: &str) -> Type {
         // `Mixed` already includes every other possible value, so a
         // union with `Mixed` alongside anything else (real shape:
         // `end()`'s stub `@return mixed|false`) is simply `Mixed` -
-        // `union_types` special-cases this at construction time, but
-        // this lower-level parser builds a `Type::Union` directly from
+        // `Type::union` special-cases this at construction time, but
+        // this lower-level parser builds a `Repr::Union` directly from
         // doc text with no such normalization; a stray non-`Mixed`
         // member would otherwise fail an ordinary compatibility check
         // even though the whole union is vacuously satisfiable.
@@ -68,7 +68,7 @@ pub fn parse_type_string(raw: &str) -> Type {
 /// call site). `None` on anything not confidently understood (a
 /// missing/unbalanced `(`, or the mandatory trailing `: ReturnType`
 /// missing - real phpdoc-parser's grammar unconditionally consumes a
-/// `:` token) - the caller falls back to the bare `Type::Callable(None)`
+/// `:` token) - the caller falls back to the bare `Repr::Callable(None)`
 /// marker, so a shape this doesn't recognize can only ever lose
 /// precision, never mis-parse.
 fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
@@ -852,7 +852,7 @@ pub fn parse_native_type_string(s: &str) -> Type {
 /// `"min"`/`"max"` keywords mean unbounded on that side (`Some(None)`),
 /// a plain integer literal is a real bound (`Some(Some(n))`). A
 /// malformed bound (neither) is `None` - distinct from "unbounded" so
-/// the caller can fall back to plain `Type::Int` instead of silently
+/// the caller can fall back to plain `Repr::Int` instead of silently
 /// treating garbage as an open range.
 fn parse_int_bound(s: &str) -> Option<Option<i64>> {
     match s {
@@ -863,7 +863,7 @@ fn parse_int_bound(s: &str) -> Option<Option<i64>> {
 
 /// `bare` (backslash-stripped) drives keyword matching; `original`
 /// (backslash-preserved) is what the class-name fallback arm constructs
-/// its `Type::Object` from - a leading `\` means "already fully
+/// its `Repr::Object` from - a leading `\` means "already fully
 /// qualified from the global namespace," which
 /// `name_resolution::NameContext::resolve` needs to see later (its first check
 /// is exactly `strip_prefix('\\')`) to know not to re-qualify it against
@@ -877,7 +877,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `int<min, max>` and its named shorthands are real ranges,
         // not aliased to plain `Int`. `int`/`integer` also read
         // `generic_args` when present (`int<0, 255>`) - a malformed
-        // bound falls back to plain `Type::Int` rather than guessing.
+        // bound falls back to plain `Repr::Int` rather than guessing.
         "int" | "integer" => match generic_args {
             [min, max] => match (parse_int_bound(min), parse_int_bound(max)) {
                 (Some(min), Some(max)) => Type::int_range(min, max),
@@ -899,7 +899,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // expands these into a union of every combinable bitmask value,
         // which this project can't enumerate without resolving the
         // referenced class constants (same boundary `value-of`/`key-of`
-        // below hit). Degrades to plain `Type::Int` (the pseudo-type's
+        // below hit). Degrades to plain `Repr::Int` (the pseudo-type's
         // real underlying kind) rather than falling through to the
         // generic class-name branch, which would produce a bogus
         // namespace-qualified "class" that fails every ordinary
@@ -1051,7 +1051,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // reference is real PHPStan's own `value-of<T>`-on-an-enum
         // special case (`key-of<T>` has no such case) and genuinely
         // needs registry access this parse-time function doesn't have,
-        // so it stays a `Type::ValueOf`, resolved later by
+        // so it stays a `Repr::ValueOf`, resolved later by
         // `Registry::resolve_deferred_value_of`.
         "value-of" => match generic_args {
             [single] => match parse_type_string(single) {
@@ -1082,7 +1082,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "null" => Type::null(),
         "void" => Type::void(),
         // The one genuine source of explicit `mixed` (Phase 84's own
-        // `Type::Mixed`'s doc comment, `types.rs`) - the literal keyword
+        // `Repr::Mixed`'s doc comment, `types.rs`) - the literal keyword
         // was written somewhere in this type expression, real PHPStan's
         // own `ParserNodeTypeToPHPStanType`/`TypeNodeResolver` both
         // resolving it to `MixedType(true)` too (confirmed directly
@@ -1090,7 +1090,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "mixed" => Type::explicit_mixed(),
         "never" | "noreturn" | "never-return" | "never-returns" | "no-return" => Type::never(),
         // `array<K, V>`'s key argument is real
-        // (`Type::Array`'s own key slot), not discarded. Bare `array`
+        // (`Repr::Array`'s own key slot), not discarded. Bare `array`
         // still means "key unknown" - `Type::unknown_array_key()`.
         // `array<V>` (1-arg) is different: real PHPStan's own
         // `TypeNodeResolver::resolveGenericTypeNode` constructs a real
@@ -1173,7 +1173,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         }
         // `Closure` is a concrete class only a real closure object
         // satisfies, strictly narrower than the four shapes `callable`
-        // accepts (see `accepts`'s `Type::Callable` arms) -
+        // accepts (see `accepts`'s `Repr::Callable` arms) -
         // represented as a real `Object` so `accepts`'s ordinary
         // class-hierarchy check handles it.
         //

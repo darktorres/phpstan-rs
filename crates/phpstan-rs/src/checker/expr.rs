@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
     /// by `registry::collect_anonymous_classes` - see that module's own
     /// doc comment) rather than recomputing its synthetic name here, so
     /// the checker and the registry entry it resolves against always
-    /// agree by construction. Falls back to `Type::Mixed(false)` when the span
+    /// agree by construction. Falls back to `mixed` when the span
     /// isn't found - every existing test (which never calls
     /// `set_anonymous_class_names`) keeps today's behavior unchanged.
     fn anonymous_class_type(&self, span: Span) -> Type {
@@ -2014,7 +2014,7 @@ impl<'a> Checker<'a> {
                 let mut else_locals = locals.clone();
                 self.apply_narrowing(cond, &mut else_locals, false);
                 let else_ty = self.check_expr(else_, &mut else_locals, label);
-                // `union_types`, not a raw `Type::Union(vec![...])` -
+                // `Type::union`, not a raw union -
                 // either branch's type is commonly already a `Union`
                 // itself (e.g. a stub-declared `resource|false`), and a
                 // bare `vec![then_ty, else_ty]` nests it unflattened
@@ -2092,7 +2092,7 @@ impl<'a> Checker<'a> {
                         }
                         // Calls the shared `index_result_type` directly,
                         // rather than a hand-maintained inline copy of it,
-                        // so its `Type::Union`/`Type::Intersection` arms
+                        // so its union/intersection arms
                         // stay in sync - a container widened to a `Union`
                         // across a loop's multi-pass fixed-point
                         // convergence must resolve here exactly as
@@ -2446,7 +2446,7 @@ impl<'a> Checker<'a> {
                 // reaching into an object's state from outside its class.
                 // Only special-cased when the first argument is literally
                 // a closure expression right here (not some arbitrary
-                // `Type::Object("Closure", _)`-typed value) - the closure
+                // `Closure`-typed value) - the closure
                 // body needs to still be reachable as an `Expr` to
                 // re-check with the rebound `$this`.
                 if resolved_class.as_deref() == Some("Closure")
@@ -3081,7 +3081,7 @@ impl<'a> Checker<'a> {
                 // by direct testing that `accumulated`'s own subject
                 // entry stays the bare, unexpanded enum type across
                 // repeated exclusions (a bare `Object(EnumClass)` has no
-                // case list of its own for `narrow_type_excluding` to
+                // case list of its own for `Type::without` to
                 // filter against without `expand_enum_cases` first, the
                 // exact same reason `match.unhandled`'s own "remaining"
                 // computation just below is independent too - see its
@@ -3260,7 +3260,7 @@ impl<'a> Checker<'a> {
                         // in some unrelated narrowing fact can't
                         // accidentally suppress or misfire this
                         // diagnostic. `expand_enum_cases` first, since a
-                        // plain enum-typed subject (`Type::Object(EnumClass,
+                        // plain enum-typed subject (`EnumClass`
                         // _)`, the overwhelmingly common real shape) has
                         // no case list of its own for `narrow_type_
                         // excluding` to filter against otherwise - only
@@ -3312,9 +3312,9 @@ impl<'a> Checker<'a> {
                 }
                 // Same "don't let an unknown arm compose into a partial
                 // Union that looks more precise than it is" rule Ternary
-                // applies (`union_types` absorbs `Mixed`), and the same
-                // flattening `union_types` gives every other multi-branch
-                // construct (`Ternary`, `??`, ...). A raw `Type::Union`
+                // applies (`Type::union` absorbs `Mixed`), and the same
+                // flattening `Type::union` gives every other multi-branch
+                // construct (`Ternary`, `??`, ...). A raw union
                 // built by hand here would leave a nested `Union` sitting
                 // as one opaque, unflattened member whenever one arm's
                 // result was already a Union - a nested Union member
@@ -4244,7 +4244,7 @@ impl<'a> Checker<'a> {
             // method(...)`) produces a real `Closure` instance at runtime
             // - infer the same `Object("Closure", ...)` the native
             // `Closure` type hint resolves to (rather than the broader
-            // `Type::Callable`, which `callable`-hinted parameters accept
+            // `callable`, which `callable`-hinted parameters accept
             // via `accepts`'s separate leniency), so a strictly
             // `Closure`-typed parameter correctly accepts it. A closure/
             // arrow-fn literal additionally carries its own signature
@@ -4314,8 +4314,8 @@ impl<'a> Checker<'a> {
                     result_types.push(self.infer_expr(d, &accumulated));
                 }
                 // See `check_expr`'s identical arm's doc comment for
-                // why this must be a `union_types` reduction, not a raw
-                // dedup-then-`Type::Union(deduped)` construction.
+                // why this must be a `Type::union` reduction, not a raw
+                // dedup-then-union construction.
                 result_types
                     .into_iter()
                     .reduce(Type::union)
@@ -4376,7 +4376,7 @@ impl<'a> Checker<'a> {
                     }
                     // `new ReflectionClass($view)`-shaped constructor-
                     // argument-driven class-level generic inference - the
-                    // same `bind_template_param`/`TemplateBindings`
+                    // same `Type::infer_template_bindings`/`TemplateBindings`
                     // primitive `infer_call_return_type` uses for
                     // ordinary call-site inference, just binding against
                     // a constructor's params instead of a function's.
@@ -4634,8 +4634,8 @@ impl<'a> Checker<'a> {
                         self.apply_narrowing(cond, &mut then_locals, true);
                         let then_ty = self.infer_expr(t, &then_locals);
                         // See the parallel arm in `check_expr` for why
-                        // this must be `union_types`, not a raw
-                        // `Type::Union(vec![...])`.
+                        // this must be `Type::union`, not a raw
+                        // a raw union.
                         Type::union(then_ty, else_ty)
                     }
                     None => Type::mixed(),
@@ -4649,7 +4649,7 @@ impl<'a> Checker<'a> {
             // for a different purpose (implicit `__toString()`/array-to-
             // string checks), not reused here since it doesn't compute or
             // return a refined type. An empty `parts` list can't occur in
-            // practice, but folds to plain `Type::String` rather than
+            // practice, but folds to plain `string` rather than
             // panicking if it somehow did.
             ExprKind::Interpolated(parts) => concat_string_parts(
                 parts
@@ -5019,8 +5019,8 @@ impl<'a> Checker<'a> {
     /// `$x ?? 'literal'` pattern (where `$x`'s real type is often
     /// genuinely `Mixed`) with unwanted `Mixed` noise across a much
     /// broader, currently-well-served set of call sites. Only widens when
-    /// `l`'s real non-null type is `Type::Array` (generic/unshaped) and
-    /// `r`'s type is a narrower `Type::ArrayShape` - `$details =
+    /// `l`'s real non-null type is array (generic/unshaped) and
+    /// `r`'s type is a narrower array shape - `$details =
     /// $row->details ?? [];` where `$row->details: ?array` genuinely
     /// holds arbitrary keys at runtime, which would otherwise collapse to
     /// the literal empty `[]` shape from the fallback alone, making every
@@ -5029,11 +5029,11 @@ impl<'a> Checker<'a> {
         // `$x ?? null` is a real, if unusual, no-op: if `$x` is null the
         // result is null either way, and otherwise the result is exactly
         // `$x` itself - so its type is exactly `$x`'s own type,
-        // unnarrowed, not the literal `r_ty` (`Type::Null`) this function
+        // unnarrowed, not the literal `r_ty` (`null`) this function
         // otherwise trusts as the fallback's type. Otherwise an unshaped-
         // array element read (`$post['selection'] ?? null`, `$post:
         // array` with no shape, so `Mixed`) would collapse all the way
-        // down to bare `Type::Null`, when code checking the original
+        // down to bare `null`, when code checking the original
         // expression with `is_array($selection_raw)` immediately after
         // should still be checking a real `Mixed`.
         if r_ty.is_null().yes() {
@@ -5050,7 +5050,7 @@ impl<'a> Checker<'a> {
             // notion folded in - the exact real-PHP case `?? null`
             // idiomatically guards against. Unioning `Null` back in here
             // is always safe for the already-covered `Mixed` case too
-            // (`union_types` collapses `Mixed | Null` back to plain
+            // (`Type::union` collapses `Mixed | Null` back to plain
             // `Mixed`).
             return if matches!(l.kind, ExprKind::Variable(_)) {
                 l_ty
@@ -5063,7 +5063,7 @@ impl<'a> Checker<'a> {
         // side: `exit`, a `never`-typed call) - falling through to the
         // generic `_ => r_ty` fallback below would make the whole
         // expression, and by extension any `$x = ... ?? throw ...;`
-        // assignment statement built from it, infer as `Type::Never`
+        // assignment statement built from it, infer as `never`
         // itself, which `always_terminates`'s `StmtKind::Expression` case
         // then reads as "this plain assignment statement always ends
         // control flow," wrongly marking every statement after it
@@ -5074,12 +5074,12 @@ impl<'a> Checker<'a> {
         if r_ty.is_never() {
             return l_ty;
         }
-        // Still scoped to exactly `Type::Array` on the left, matching
+        // Still scoped to exactly array on the left, matching
         // this function's documented, deliberately narrow boundary (an
         // ArrayShape on the left stays uncovered) - also recognizes a
         // `list<T>`/`non-empty-array<T>`-typed left side (a real
         // `Intersection`), which would otherwise lose its type here the
-        // same way a plain `Type::Array` would.
+        // same way a plain array would.
         let l_is_array = l_ty.is_array().yes() && l_ty.as_array_shape().is_none();
         match &r_ty {
             r if l_is_array && r.as_array_shape().is_some() => l_ty,
@@ -5109,7 +5109,7 @@ impl<'a> Checker<'a> {
             // without this, `check_boolean_and_or`'s "whole result"
             // diagnostic (`booleanAnd.always*`/`booleanOr.always*`) could
             // never fire at all, since it has nothing but a permanent
-            // bare `Type::Bool` to match against. A definitely-false left
+            // bare `bool` to match against. A definitely-false left
             // side makes `&&`'s result definitely false without even
             // considering the right side; otherwise the right side is
             // inferred against `l`'s truthy-narrowed scope (the same
@@ -5162,7 +5162,7 @@ impl<'a> Checker<'a> {
             }
             BinOp::Identical | BinOp::NotIdentical => Type::bool(),
             // Mirrors real PHPStan's `ConstantLooseComparisonRule` -
-            // `loose_compare_literals`'s doc comment has the full
+            // `Type::loosely_equals`'s doc comment has the full
             // scope/version-gating reasoning.
             BinOp::Eq | BinOp::NotEq => {
                 let lt = self.infer_expr(l, locals);
@@ -5302,7 +5302,7 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
 /// every part of `ty` is confidently illegal, `None` for anything
 /// ambiguous (`Mixed`, a union mixing legal and illegal members, an
 /// unresolved template, ...), matching this project's "don't guess"
-/// leniency elsewhere. A `Type::Object` covers both a real class
+/// leniency elsewhere. An object covers both a real class
 /// instance and this project's `resource`/`Closure`-as-object
 /// representations - none of which PHP ever accepts as a key, even one
 /// with a real `__toString()` (array-key coercion has no string-cast
@@ -5348,7 +5348,7 @@ impl<'a> Checker<'a> {
     /// The type of a call this project can't look up a real signature for.
     ///
     /// Takes `&self`/`locals` so a callee whose inferred type is a shaped
-    /// `Closure(...)` (`Type::Callable(Some(sig))`) can fall back to that
+    /// `Closure(...)` (`callable(...)`) can fall back to that
     /// shape's declared return type instead of `Mixed` - the same fix
     /// `check_expr`'s dynamic-call branch makes on the diagnostic-producing
     /// side.
@@ -5682,7 +5682,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Whether a `Type::ArrayShape` key string is one PHP itself would have
+/// Whether an array shape key string is one PHP itself would have
 /// already cast to a real integer at the point the array was built -
 /// PHP's rule: a decimal string with no leading zero (unless it's
 /// exactly `"0"`) and no leading `+`. Deliberately doesn't handle a
@@ -6077,7 +6077,7 @@ impl<'a> Checker<'a> {
     /// proving the *narrowing* itself was never the gap, only which
     /// function this check called to read it. Reaches for that same
     /// dedicated machinery directly (`compare_range_outcome`/
-    /// `numeric_comparison_bounds`, already used by `check_constant_
+    /// `Type::int_bounds`, already used by `check_constant_
     /// numeric_comparison` to report `smaller.alwaysTrue`/`greater.
     /// alwaysFalse`/etc.) as a plain predicate instead of that
     /// function's own side-effecting report. Scoped to the same four
@@ -6107,14 +6107,14 @@ impl<'a> Checker<'a> {
     }
 
     /// `match.unhandled`'s own case-expansion step: a plain enum-typed
-    /// `Type::Object(EnumClass, _)` has no case list of its own for
-    /// `narrow_type_excluding`'s existing `Union`-member-filtering to
+    /// `EnumClass` has no case list of its own for
+    /// `Type::without`'s existing `Union`-member-filtering to
     /// work against - only the fully-expanded `Union` of every real case
-    /// (`Type::EnumCase(EnumClass, CaseName)`, already how a case is
+    /// (`EnumClass::CaseName`, already how a case is
     /// represented everywhere else in this checker - `ClassReflection::
     /// from_enum_decl` folds each case into `consts` with exactly that
     /// type) lets excluding each arm's own case value reduce it all the
-    /// way to `Type::Never` once every case is covered. Recurses into a
+    /// way to `never` once every case is covered. Recurses into a
     /// `Union` member-by-member (real shape: `Status|null`, a nullable
     /// enum parameter - without this, a fully-exhaustive `Status::A =>
     /// ..., Status::B => ..., null => ...` match false-positived

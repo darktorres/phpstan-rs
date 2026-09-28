@@ -305,7 +305,7 @@ impl Type {
         Type(Repr::Union(vec![Type(Repr::Int), Type(Repr::String)]))
     }
 
-    /// `Type::Array(unknown_array_key(), value)`, for a construction site
+    /// `Repr::Array(unknown_array_key(), value)`, for a construction site
     /// with no more precise key type available.
     pub fn array_of(value: Type) -> Type {
         Type(Repr::Array(

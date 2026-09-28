@@ -280,7 +280,7 @@ fn phpstan_template_extends_and_implements_are_recognized() {
 #[test]
 fn a_real_phpstan_conditional_return_type_is_captured_as_its_own_raw_token() {
     // Doctrine DBAL's own DriverManager::getConnection().
-    // `Type::Conditional`/`resolve_conditional` do real per-call-site
+    // conditional type/`resolve_conditional` do real per-call-site
     // binding, so this type is captured like any other `@return`
     // type.
     let block = parse(

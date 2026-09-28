@@ -130,12 +130,12 @@ impl<'a> Checker<'a> {
     /// Best-effort literal-preserving constant fold for the `ParamFlags`
     /// family only - ordinary type inference for `BinOp::{BitOr,BitAnd,
     /// BitXor}` deliberately widens two folded int literals to plain
-    /// `Type::Int` (confirmed via direct grep, `checker/expr.rs:5101`),
+    /// `int` (confirmed via direct grep, `checker/expr.rs:5101`),
     /// so a flag mask like `JSON_HEX_TAG | JSON_HEX_APOS` needs its own
     /// literal-preserving evaluator here instead. Recognizes exactly the
     /// shapes a real PHP flag mask is built from: an int literal, a
     /// unary minus of one, a bare `Name` resolving through `Registry::
-    /// global_constants` (already a literal `Type::IntLiteral` for a
+    /// global_constants` (already a literal integer literal for a
     /// stub's `define('JSON_HEX_APOS', 4)` - confirmed live against the
     /// vendored phpstorm-stubs), and a bitwise combination of two
     /// foldable operands. `None` for anything else, including a class

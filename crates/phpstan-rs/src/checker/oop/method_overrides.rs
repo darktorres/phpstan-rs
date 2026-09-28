@@ -487,7 +487,7 @@ impl<'a> Checker<'a> {
             // this project's narrower scope elsewhere in this function
             // (`parameter.missing` above explicitly skips the fuller
             // variadic-contravariance treatment too). Neither is gated on
-            // either side being `Type::Mixed(false)` - both are about calling-
+            // either side being `mixed` - both are about calling-
             // convention compatibility, not type compatibility.
             if own_param.by_ref() != ancestor_param.by_ref() {
                 let (message, identifier) = if own_param.by_ref() {
@@ -529,7 +529,7 @@ impl<'a> Checker<'a> {
                     "parameter.notVariadic",
                 );
             }
-            // `Type::Mixed(false)` is overloaded throughout this project to
+            // `mixed` is overloaded throughout this project to
             // mean both real PHP `mixed` and "no type declared at all,
             // native or docblock" - and real PHP explicitly does not
             // enforce override compatibility for a parameter/return

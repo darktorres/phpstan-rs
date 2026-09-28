@@ -235,7 +235,7 @@ impl<'a> Checker<'a> {
     /// covered by the direct `check_param_out_assignment` call at this
     /// method's own call site). Mirrors `bind_assignment_target`'s
     /// per-position/per-key element-type resolution exactly, so a
-    /// destructured `Type::ArrayShape` source still checks each element
+    /// destructured array shape source still checks each element
     /// against its own real per-slot type, not a blanket `Mixed`.
     pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &Expr, ty: &Type) {
         let (ExprKind::ArrayLiteral(items) | ExprKind::List(items)) = &lhs.kind else {
@@ -256,7 +256,7 @@ impl<'a> Checker<'a> {
     /// `list($a, $b) = $arr;` both parse this way, including a nested
     /// `[[$a, $b], $c] = $nested;`) rather than only handling one level
     /// deep. Per-key precision (`['name' => $n] = $shapedArray`) isn't
-    /// resolved for a plain `Type::Array` source - every target gets the
+    /// resolved for a plain array source - every target gets the
     /// source's homogeneous element type, or Mixed for anything else.
     /// What a property reads as after `lhs = value`. A hooked property
     /// reads as its declared type, as its hooks decide what is stored and
@@ -695,12 +695,12 @@ impl<'a> Checker<'a> {
 /// `superglobals/_superglobals.php` bootstrap file declares every one of
 /// these (bar `argc`) with a literal `= []` assignment, which is exactly
 /// what real PHPStan's own global-variable seeding generalizes to a bare
-/// `array`, never `null`/`mixed`. Reusing the generic `Type::Mixed(false)`
+/// `array`, never `null`/`mixed`. Reusing the generic `mixed`
 /// fallback here (as if a superglobal's pre-assignment type were
 /// "unknown/could be anything") broke `$_SESSION ??= [];` specifically:
 /// `widen_coalesce_result`'s own "keep the left side's real array type
 /// instead of collapsing to the empty-shape fallback" rule only fires
-/// for an already-known `Type::Array`. Scoped to exactly the real declared
+/// for an already-known array. Scoped to exactly the real declared
 /// type: `Array(Mixed)` for the always-array superglobals, `Int` for
 /// `argc` (never `[]` in the stub at all).
 ///

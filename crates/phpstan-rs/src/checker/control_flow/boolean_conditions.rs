@@ -4,9 +4,9 @@ use syntax::ast::*;
 impl<'a> Checker<'a> {
     /// The real, original PHPStan design -
     /// `ConstantConditionRuleHelper::getBooleanType`. Trusts `e`'s own
-    /// inferred type being exactly `Type::True`/`Type::False`, not just
+    /// inferred type being exactly `true`/`false`, not just
     /// a syntactic literal - a bare literal already infers to
-    /// `Type::True`/`Type::False` exactly, so inferred-type trust is a
+    /// `true`/`false` exactly, so inferred-type trust is a
     /// strict superset of syntactic-literal trust.
     /// `should_skip_constant_condition`
     /// excludes every shape that has - or, for a `Call`-shaped condition,

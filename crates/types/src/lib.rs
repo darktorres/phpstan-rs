@@ -93,7 +93,7 @@ pub(crate) enum Repr {
     // phpstan-src/src/Type/MixedType.php`, confirmed directly) - `Type`'s
     // own `PartialEq` impl below (deliberately not derived) does the
     // same, so every one of this project's own pre-existing `==
-    // Type::Mixed(false)`-shaped comparisons keeps working unchanged regardless
+    // Repr::Mixed(false)`-shaped comparisons keeps working unchanged regardless
     // of which flag either side carries.
     Mixed(bool),
     // PHPStan's `ErrorType`: the value of an expression a rule reports as
@@ -182,11 +182,11 @@ pub(crate) enum Repr {
     // A real float literal (`1.5`) in a PHPDoc union (`1.5|2.5`); code
     // literals still infer plain `Float`.
     FloatLiteral(f64),
-    // Only ever a member of a `Type::Intersection` alongside its own base
+    // Only ever a member of a `Repr::Intersection` alongside its own base
     // type (`String` or `Array(_)`).
     Accessory(AccessoryKind),
     // Mirrors real PHPStan's `HasOffsetValueType` - only ever a member of
-    // a `Type::Intersection` alongside its own coarse `Type::Array(K, V)`
+    // a `Repr::Intersection` alongside its own coarse `Repr::Array(K, V)`
     // base, tracking one specific literal key's own precise value type
     // (`key`, `value`) without converting the whole container into an
     // `ArrayShape`. Confirmed directly against the vendored real
@@ -194,7 +194,7 @@ pub(crate) enum Repr {
     // already-coarse array keeps this precision (`non-empty-array<string,
     // mixed>&hasOffsetValue('a', array{1, 2, 3})`), and a second
     // literal-key write accumulates a further, separate
-    // `Type::HasOffsetValue` member rather than replacing the first (see
+    // `Repr::HasOffsetValue` member rather than replacing the first (see
     // `checker::assignment::write_literal_key_aware`, this project's own
     // construction site). A dynamic (non-literal) key write, or one
     // inside a loop body currently under analysis, never produces this -
@@ -214,8 +214,8 @@ pub(crate) enum Repr {
     // literally-named member (owner type, member name) of a
     // `ReflectionClass<T>`'s own reflected `T` - Phase 77's "binding a
     // specific reflected member's own value type" stretch item. Only
-    // ever a member of a `Type::Intersection` alongside its own coarse
-    // `Type::Object("ReflectionMethod"|"ReflectionProperty", [TClass])`
+    // ever a member of a `Repr::Intersection` alongside its own coarse
+    // `Repr::Object("ReflectionMethod"|"ReflectionProperty", [TClass])`
     // base (mirrors `HasOffsetValue`'s own shape exactly), constructed at
     // `getMethod('name')`/`getProperty('name')`'s own call site
     // (`checker::expr::member_resolution`) and consumed at
@@ -269,7 +269,7 @@ pub(crate) enum Repr {
 }
 
 /// Deliberately not derived: `Mixed`'s own `bool` is ignored entirely
-/// (matching real PHPStan's own `MixedType::equals()`, see `Type::Mixed`'s
+/// (matching real PHPStan's own `MixedType::equals()`, see `Repr::Mixed`'s
 /// doc comment), and two NaN float literals are equal (PHPStan's
 /// `ConstantFloatType::equals()`), which makes the relation an `Eq`.
 /// `Hash` below agrees with it.
@@ -649,7 +649,7 @@ impl CallableSig {
 
 // Mirrors real PHPStan's `Accessory*Type` family
 // (`vendor/phpstan-src/src/Type/Accessory/*.php`) - each kind only ever
-// appears wrapped in a `Type::Intersection` alongside its base type.
+// appears wrapped in a `Repr::Intersection` alongside its base type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccessoryKind {
     NonEmptyString,

@@ -632,7 +632,7 @@ fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<S
         // A double-quoted/heredoc string with every interpolated part
         // itself foldable (a literal text chunk, or a variable narrowed
         // to a literal) - `check_expr`'s own `Interpolated` arm
-        // deliberately widens this to plain `Type::String` unconditionally
+        // deliberately widens this to plain `string` unconditionally
         // (it exists to run the real `encapsedStringPart.nonString`/
         // implicit-`__toString()` diagnostics, not to preserve a literal
         // type), so `infer_expr`'s separate literal-fold arm below is

@@ -151,7 +151,7 @@ fn a_nullable_actual_type_is_not_accepted_by_a_definite_null_declared_type() {
     let nullable_string = Type::union_of(vec![Type::string(), Type::null()]);
     levels.configured_level = Some(5);
     // Stripping Null out of `sub` must never happen when `sup` is itself
-    // bare `Type::Null` - a `?string` actual value still doesn't
+    // bare `null` - a `?string` actual value still doesn't
     // definitely satisfy a target that only ever accepts `null`.
     assert!(
         !levels
@@ -311,7 +311,7 @@ fn at_level_ten_ordinary_rejection_is_unaffected() {
 fn a_benevolent_union_is_accepted_leniently_by_default() {
     let levels = RuleLevelHelper::default();
     assert!(!levels.check_benevolent_union_types);
-    // Only `Int` actually matches `Type::String` here - the default,
+    // Only `Int` actually matches `string` here - the default,
     // unconfigured leniency accepts because *any* member does.
     assert!(
         levels
@@ -328,7 +328,7 @@ fn a_benevolent_union_is_rejected_strictly_once_opted_in() {
         ..RuleLevelHelper::default()
     };
     // Once opted in, *every* member of the wrapped union must satisfy
-    // `sup` - `Int` doesn't satisfy `Type::String`, so this now fails.
+    // `sup` - `Int` doesn't satisfy `string`, so this now fails.
     assert!(
         !levels
             .relation(&NoClasses)

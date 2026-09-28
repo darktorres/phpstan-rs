@@ -400,16 +400,16 @@ pub fn generated_stubs() -> Vec<(Arc<str>, FunctionReflection)> {
 /// is equivalent to "reusing" any other node that would carry them.
 ///
 /// Union member order matters: `ClassString<T>` must come first, since
-/// `bind_template_param`'s own `Union` handling is first-`or_insert`-wins -
+/// `Type::infer_template_bindings`'s own `Union` handling is first-`or_insert`-wins -
 /// `new ReflectionClass(Foo::class)` needs the `ClassString` arm to bind
 /// `T=Foo` before the bare `T` arm would otherwise wrongly bind `T` to the
 /// `ClassString<Foo>` value itself.
 ///
 /// Disclosed residual limitation, not attempted here: `new
 /// ReflectionClass('Foo')` - a bare string literal, not `Foo::class` -
-/// still won't bind `T` correctly (`bind_template_param` has no arm
+/// still won't bind `T` correctly (`Type::infer_template_bindings` has no arm
 /// treating a string literal's own *value* as a class-name reference, only
-/// a real `Type::ClassString` construction via `::class`/`get_class()`
+/// a real class-string construction via `::class`/`get_class()`
 /// triggers that arm) - the `Foo::class`/object-instance shapes this fixes
 /// are the idiomatic PHP 8+ styles anyway.
 fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassReflection)]) {
@@ -486,7 +486,7 @@ fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassRe
 ///
 /// No new substitution engine work was needed for this: `checker::
 /// generics::substitute_class_templates`'s existing `substitute_scoped`
-/// already recurses through a returned `Type::Object`'s own type-argument
+/// already recurses through a returned object's own type-argument
 /// list - the identical mechanism any ordinary fluent generic
 /// collection API (a `Collection<T>`-shaped method returning another
 /// `Collection<T>`) already relies on.
@@ -601,7 +601,7 @@ fn backtrace_frame_list_type() -> Type {
         ("file".to_string(), Type::string(), true),
         // A bare (non-generic) `class-string` is already plain `Type::
         // String` in this project's own PHPDoc parser (`types/parse.rs`'s
-        // own `"class-string" => ... [] => Type::String`) - matched here
+        // own `"class-string"` with no argument is `string`) - matched here
         // for consistency, not a simplification specific to this patch.
         ("class".to_string(), Type::string(), true),
         (

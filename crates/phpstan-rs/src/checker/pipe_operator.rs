@@ -10,7 +10,7 @@
 //! answers something concrete for a PHPDoc-shaped `callable(...)`/
 //! `Closure(...)` type. This project doesn't synthesize that shape for
 //! an ordinary closure/arrow-fn *literal* expression's own inferred type
-//! (a bare literal infers as the coarse `Type::Object("Closure", [])| -
+//! (a bare literal infers as the coarse `Closure`| -
 //! see `ExprKind::Closure`'s own `check_expr` arm) - resolving through
 //! the type system here would need building that machinery first, a
 //! large, disproportionate undertaking for this one narrow check.

@@ -4,7 +4,7 @@
 use crate::{Relation, Repr, Type};
 
 impl Type {
-    /// Filters `doc_ty`'s own members down to whichever are subtypes of
+    /// Filters this PHPDoc type's members down to whichever are subtypes of
     /// `native_ty` - see `resolve_type`'s own doc comment for the reasoning.
     /// Falls back to `native_ty` itself when *no* doc member survives (rather
     /// than collapsing to `Mixed`), so a doc type that's entirely stale
@@ -36,7 +36,7 @@ impl Type {
         // it at all) survives verbatim.
         //
         // Skipped whenever a kept member still contains an unresolved
-        // `Type::ValueOf` (`value-of<T>` on a still-unbound `@template`):
+        // `Repr::ValueOf` (`value-of<T>` on a still-unbound `@template`):
         // `Registry::resolve_deferred_value_of_with_native_fallback`
         // runs *after* this function, expects to find the `ValueOf` alone
         // (not already unioned with extra native members this function
@@ -44,7 +44,7 @@ impl Type {
         // separate "resolved to bare `Mixed`? use the native type instead"
         // swap once its real value is known - unioning native
         // members in early would corrupt that later check's own `resolved ==
-        // Type::Mixed(false)` test (a real regression caught by this project's own
+        // Repr::Mixed(false)` test (a real regression caught by this project's own
         // existing `value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`
         // test).
         //
@@ -86,7 +86,7 @@ impl Type {
 
 /// Whether a native union member is safe for `reconcile_with_native` to
 /// add back on its own "the docblock never addressed this alternative"
-/// theory - deliberately excludes *every* `Type::Object` native member
+/// theory - deliberately excludes *every* `Repr::Object` native member
 /// and the `self`/`static`/`parent` class references (a doc `static`
 /// already covers a native `self`), including the `object`/`resource`
 /// pseudo-types: a doc member naming a
@@ -94,7 +94,7 @@ impl Type {
 /// the native `object` pseudo-type's own "accepts any object" leniency,
 /// or (for `Closure` specifically) a `Closure(...)`-shaped doc member
 /// `refine_callable_member` above deliberately leaves as a bare
-/// `Type::Callable` rather than the native `Object("Closure", _)` itself,
+/// `Repr::Callable` rather than the native `Object("Closure", _)` itself,
 /// all genuinely *did* address that native alternative - but
 /// `Relation::is_super_type_of`'s own Object handling is name-equality only, with
 /// none of those leniencies (this function has no `&Registry` to check
@@ -110,7 +110,7 @@ impl Type {
 /// that special-cased only `Closure`-vs-`Callable` broke nothing new but
 /// left the `object` case unguarded) - strictly worse than this
 /// mechanism's own pre-existing gap of simply not backfilling that one
-/// alternative, so no `Type::Object` native member is ever added back
+/// alternative, so no `Repr::Object` native member is ever added back
 /// here; only the non-Object cases this function can decide with no
 /// hierarchy needed (the actual target shape - a native `array|string`
 /// refined by `@param array<int, string>` - is one of these).
@@ -126,7 +126,7 @@ fn native_member_addable(native_member: &Type) -> bool {
     )
 }
 
-/// A surviving `Type::Callable` member (kept only because
+/// A surviving `Repr::Callable` member (kept only because
 /// `member_possible_given_native` can't disprove it) is itself a coarse
 /// marker with strictly less information than a real, present native
 /// type already carries - left as `Callable`, it can wrongly *lose* to
@@ -174,7 +174,7 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 
 /// Whether a docblock-derived member `m` could still be real given
 /// `native_ty`. A bare `subtype(m, native_ty)` call is reliable for
-/// anything except a named class/interface (`Type::Object`), where
+/// anything except a named class/interface (`Repr::Object`), where
 /// `is_super_type_of`'s own Object handling is name-equality only: this
 /// project has no class hierarchy to consult at the point `resolve_type`
 /// runs (`FunctionReflection::from_decl` is still building the very registry a
@@ -205,7 +205,7 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 // stop it, wrongly demanding a real `Node` return from a function whose
 // own, authoritative native signature is `void`.
 //
-// `Type::Never` is exempted from this exclusion - real PHPStan special-
+// `Repr::Never` is exempted from this exclusion - real PHPStan special-
 // cases it identically (`TypehintHelper::decideType`'s own `if
 // ($phpDocType instanceof NeverType && $phpDocType->isExplicit()) {
 // return $phpDocType; }`, checked *before* its general `isSuperTypeOf`
@@ -251,7 +251,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
                 | Type(Repr::Null)
         ),
         // A PHPStan/Psalm callable-shape doc member (`Closure(int):
-        // string`) degrades to plain `Type::Callable` at parse time
+        // string`) degrades to plain `Repr::Callable` at parse time
         // (`types::parse_type_atom`'s own documented simplification - no
         // per-parameter/return signature is tracked) - the same
         // information loss `Object`'s own case just above already has to
@@ -283,7 +283,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
             Type(Repr::Array(_, native_elem)) => member_possible_given_native(elem, native_elem),
             _ => Relation::structural().is_super_type_of(native_ty, m).yes(),
         },
-        // Same reasoning as the plain `Type::Array` arm just above, for
+        // Same reasoning as the plain `Repr::Array` arm just above, for
         // `list<T>`/`non-empty-array<T>`/`non-empty-list<T>`'s own real
         // `Intersection([Array(key, elem), Accessory(_), ...])`
         // representation - an accessory marker never affects

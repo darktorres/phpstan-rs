@@ -207,7 +207,7 @@ fn truthiness_discriminant_subject(cond: &Expr) -> Option<String> {
 
 impl<'a> Checker<'a> {
     /// A true `isset($a['x'][$k])` also proves every container along the
-    /// chain held an offset - see `narrow_isset_container`.
+    /// chain held an offset - see `Type::to_isset_container`.
     fn narrow_isset_containers(&self, arg: &Expr, locals: &mut Locals) {
         let mut e = unwrap_grouping(arg);
         loop {
@@ -291,7 +291,7 @@ impl<'a> Checker<'a> {
     /// string `truthiness_discriminant_subject` would have produced for
     /// the condition currently being narrowed (a bare variable's own
     /// name, or `"isset(key)"`). Looked up under whichever of `Type::
-    /// True`/`Type::False` matches `branch_true`, mirroring how the
+    /// True`/`false` matches `branch_true`, mirroring how the
     /// equality discriminant's own replay (`apply_equality_narrowing`)
     /// looks itself up by `(subject, value)`.
     pub(crate) fn replay_truthiness_discriminant_facts(
@@ -356,8 +356,8 @@ impl<'a> Checker<'a> {
     /// identity to key facts under) and a value comparably concrete
     /// enough to make "the identical comparison" reproducible (an enum
     /// case, a literal); a bare truthiness discriminant
-    /// (`truthiness_discriminant_subject`), keyed by `Type::True`/
-    /// `Type::False` as `Discriminant`'s own "value" half;
+    /// (`truthiness_discriminant_subject`), keyed by `true`/
+    /// `false` as `Discriminant`'s own "value" half;
     /// and any *other* local variable that itself became a literal
     /// `true`/`false` specifically within this branch (`AlbumsPageRenderer
     /// ::render`'s own `$order_by_date = true;` inside `if (str_starts_with
@@ -852,7 +852,7 @@ impl<'a> Checker<'a> {
                     // equality arm above already holds) - so this only acts
                     // when both the narrowed side's *current* type and the
                     // other side's *inferred* type are already unambiguously
-                    // numeric (a bare `Type::Int` counts as an unbounded
+                    // numeric (a bare `int` counts as an unbounded
                     // range here, unlike `int_bounds` itself), and the
                     // other side is a single literal value, not a genuine
                     // range (matching the `count() > 0` arm's own "exactly
@@ -960,7 +960,7 @@ impl<'a> Checker<'a> {
                         // "provably non-empty" fact. The false branch
                         // (`count($x) === 0`) isn't narrowed here, the
                         // same asymmetry the comparison form's own arm
-                        // already accepts (`upgrade_array_to_non_empty`
+                        // already accepts (`Type::to_non_empty_array`
                         // has no "prove empty" counterpart).
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         locals.insert(key, current.to_non_empty_array());
@@ -1180,7 +1180,7 @@ impl<'a> Checker<'a> {
             // checking - a variable typed as the union of several
             // concrete subclasses that all inherit the identical method
             // resolves the same `AssertInfo` any single member would.
-            // Once resolved, `apply_assert_infos`/`narrow_type_to`
+            // Once resolved, `apply_assert_infos`/`Relation::narrow`
             // already narrow the receiver's own full current type
             // generically, Union or not.
             ExprKind::MethodCall(recv, method, args, _) => {
@@ -1221,7 +1221,7 @@ impl<'a> Checker<'a> {
                 // "not this class" type to be representable - it only
                 // needs to *drop* the one member just proven impossible
                 // from an already-enumerated `Union`, exactly what
-                // `narrow_type_excluding` already does soundly elsewhere.
+                // `Type::without` already does soundly elsewhere.
                 // A dynamic target (`$x instanceof $className`) still
                 // doesn't name a concrete class to narrow to either way.
                 if let Some(key) = narrowing_key(inner)

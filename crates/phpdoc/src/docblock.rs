@@ -804,7 +804,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 // parse_type_string` collapsed one to an eager union of
                 // both branches, discarding the condition entirely, so
                 // setting `return_type` from one was worse than leaving
-                // it unset. Now that `Type::Conditional`/
+                // it unset. Now that conditional type/
                 // `resolve_conditional` exist and do real per-call-site
                 // resolution, that exclusion is gone -
                 // `grammar`'s own `parse_paren_or_conditional`

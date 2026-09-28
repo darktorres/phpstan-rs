@@ -33,15 +33,15 @@ impl Shape {
     /// The aggregate key type real PHPStan's `ConstantArrayType::
     /// getIterableKeyType()` reports for a shape - the union of each
     /// field's key kind (an unsealed tail contributes nothing). Lets `registry::assignability`/`is_super_type_of` compare an
-    /// `ArrayShape`'s real key type against a `Type::Array`'s declared one,
+    /// `ArrayShape`'s real key type against a `Repr::Array`'s declared one,
     /// so `array{name: string}` isn't wrongly assignable to
-    /// `array<int, string>`. `Type::Never` for a shape with no real fields
+    /// `array<int, string>`. `Repr::Never` for a shape with no real fields
     /// (vacuously a subtype of any key type via the `(Never, _) => true` arm
     /// below).
     ///
-    /// An int-canonical key contributes its own `Type::IntLiteral`, not the
-    /// bare `Type::Int` widening - needed so `array{0: ...}` doesn't wrongly
-    /// fail against an `array<int<0, max>, ...>`-typed parameter (`Type::Int`
+    /// An int-canonical key contributes its own `Repr::IntLiteral`, not the
+    /// bare `Repr::Int` widening - needed so `array{0: ...}` doesn't wrongly
+    /// fail against an `array<int<0, max>, ...>`-typed parameter (`Repr::Int`
     /// isn't a confirmed subtype of `int<0, max>`, even though the one
     /// concrete key written always is non-negative).
     pub fn key_type(&self) -> Type {
@@ -72,10 +72,10 @@ impl Type {
     /// Whether `a`/`b` should be treated as the identical type for union
     /// deduplication - ordinary `==` for everything except a `list<T>`/
     /// `non-empty-list<T>` pair, which can be structurally unequal (a
-    /// literal `Type::Int` key vs. the generic `unknown_array_key()`
+    /// literal `Repr::Int` key vs. the generic `unknown_array_key()`
     /// sentinel - see `is_super_type_of`'s `Intersection`-vs-`Intersection` list
     /// arm) while still the same type PHPStan-visibly. Without this,
-    /// `union_types` would print a duplicate `list<int>|list<int>` whenever
+    /// `Type::union` would print a duplicate `list<int>|list<int>` whenever
     /// a docblock-declared `list<T>` and a runtime-inferred one of the same
     /// element type meet in one union.
     pub fn equals_for_union(&self, b: &Type) -> bool {
@@ -153,7 +153,7 @@ impl Relation<'_> {
             // guessing. Only a real, structurally-provable `ArrayShape` (or
             // a value from a known list-producing source, e.g.
             // `array_values()`) can ever prove `ArrayList`/`NonEmptyArray` -
-            // a plain `Type::Array(_)` (even with a known element type)
+            // a plain `Repr::Array(_)` (even with a known element type)
             // deliberately never satisfies either, matching real PHPStan's
             // own confirmed strictness (a `list<int>`-typed parameter
             // rejects even a known-element `int[]` argument).
@@ -375,7 +375,7 @@ fn effective_callable_param_at(params: &[CallableParam], i: usize) -> Option<&Ca
         .or_else(|| params.last().filter(|p| p.variadic))
 }
 
-/// `Type::Callable(Some(a))` vs `Type::Callable(Some(b))`'s own
+/// `Repr::Callable(Some(a))` vs `Repr::Callable(Some(b))`'s own
 /// `is_super_type_of` arm - is `a` safely substitutable wherever `b` is
 /// expected? Real contravariant-parameter/covariant-return function-type
 /// subtyping: `a`'s return type must satisfy wherever `b`'s return is

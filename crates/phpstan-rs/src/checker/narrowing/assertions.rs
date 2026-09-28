@@ -7,7 +7,7 @@ use types::Type;
 impl<'a> Checker<'a> {
     /// The type to narrow *from* for a synthetic `narrowing_key` (a
     /// property chain or literal-key array-index chain, never a bare
-    /// variable) - `locals.get(key)` alone, defaulting to `Type::Mixed(false)`
+    /// variable) - `locals.get(key)` alone, defaulting to `mixed`
     /// when absent, is wrong for these: unlike a bare variable (already
     /// tracked in `locals` by ordinary assignment/definition), a
     /// property/index chain's key only ever exists in `locals` as the
@@ -27,11 +27,11 @@ impl<'a> Checker<'a> {
     /// correct for a bare variable too (`infer_expr` on a `Variable`
     /// just reads the same `locals` entry), so every `apply_narrowing`
     /// call site uses this instead of a raw `locals.get(key).unwrap_or
-    /// (Type::Mixed(false))`.
+    /// (mixed)`.
     /// `Cow`, not an owned `Type` - every one of this function's ~19 call
     /// sites in `checker/narrowing.rs` only ever reads the result as
-    /// `&current` afterward (feeding it into `narrow_type_to`/
-    /// `narrow_type_excluding`/`narrow_instanceof_true`/etc, each of which
+    /// `&current` afterward (feeding it into `Relation::narrow`/
+    /// `Type::without`/`Relation::narrow_to_instance`/etc, each of which
     /// already takes `&Type` and produces a fresh owned `Type` of their
     /// own), never needing ownership of `current` itself. Per this
     /// function's own doc comment just above, `locals.get(key)` hits on
@@ -54,7 +54,7 @@ impl<'a> Checker<'a> {
     /// The union of `in_array()`'s own haystack literal values, if every
     /// element is a bare, unkeyed literal (`int`/`string`/`bool`/`null`),
     /// or a bare empty-array literal `[]` (just as statically provable a
-    /// single exact type, `Type::ArrayShape(types::Shape::sealed(Vec::new()))`, as any scalar
+    /// single exact type, `array{}`, as any scalar
     /// literal - e.g. `! in_array($raw_tags_post, [null, '0', '', []],
     /// true)`'s 4th haystack element being a non-`Literal` `ArrayLiteral`
     /// must not bail this whole function to `None`, silently narrowing
@@ -178,7 +178,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let current = self.current_narrowed_type(narrowed_expr, &key, locals);
-        // `narrow_type_excluding` is only sound when `excluded`
+        // `Type::without` is only sound when `excluded`
         // represents one specific, already-proven value (`Null`,
         // `True`/`False`, a literal, an `is_*()` predicate's own
         // provably-exhaustive target) - every one of its other real
@@ -188,8 +188,8 @@ impl<'a> Checker<'a> {
         // specific value `$x` isn't - excluding the whole `Bool` type
         // from an already-`Bool`-typed `$x` (e.g. `function
         // test(?bool $a, bool $b) { if ($a !== null && $a !== $b) { ... }
-        // }`) would wrongly collapse it to `Type::Never`.
-        // `narrow_type_to` doesn't share this bug: for a non-`Union`
+        // }`) would wrongly collapse it to `never`.
+        // `Relation::narrow` doesn't share this bug: for a non-`Union`
         // original it always returns `target` outright (matches iff both
         // sides are already type-compatible, since `===` between
         // incompatible static types is dead code either way) - safe

@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
     /// `/** @var array{..., t: value-of<MemberType>, ...} $result */`).
     ///
     /// Also marks the *current class's own*
-    /// `@template` names as `Type::TemplateParam` (`registry::
+    /// `@template` names as template (`registry::
     /// mark_template_params`) *before* resolving names - order matters,
     /// the same as the registry-build pipeline's own `build_template_
     /// params` always running before `resolve_names_in_type` - since
@@ -202,7 +202,7 @@ impl<'a> Checker<'a> {
     /// function/method's own `@template`s. `FunctionReflection` doesn't persist
     /// its own raw template *names* the way `ClassReflection` does, so unlike
     /// the class-level lookup above, this reads them back off
-    /// `Type::TemplateParam` nodes already present in the signature's
+    /// template nodes already present in the signature's
     /// params/return type (each still carrying its full
     /// bound/variance/default metadata from `mark_template_params` at
     /// registry-build time) - filtered to
@@ -368,7 +368,7 @@ impl<'a> Checker<'a> {
     /// wrongly flagged).
     ///
     /// Recurses into `Union`/`Intersection`/`Array`/`ArrayShape` the same
-    /// way `types::substitute_template` does, not just the bare
+    /// way `Type::substitute_templates` does, not just the bare
     /// top-level case - needed for the common nullable-self return type
     /// (`?self`/`self|null`, e.g. `tryFromArray`-style factory methods):
     /// `accepts`/`is_super_type_of` have no arm for a concrete class
@@ -577,7 +577,7 @@ impl<'a> Checker<'a> {
     /// still caught, not just a bare top-level reference. A real
     /// `@template T` never reaches the `Object` arm at all - `registry::
     /// mark_template_params` already rewrites every one of a function's/
-    /// class's own declared template names to `Type::TemplateParam`
+    /// class's own declared template names to template
     /// before this checker ever sees the signature, so this never
     /// mistakes a generic placeholder for a missing class.
     ///
@@ -728,7 +728,7 @@ fn collect_prefixed_class_names<'b>(ty: &'b Type, out: &mut Vec<(&'b str, &'stat
     }
 }
 
-/// Walks `ty` collecting every distinct `Type::TemplateParam` node
+/// Walks `ty` collecting every distinct template node
 /// whose `.scope` matches `scope` exactly - `Checker::
 /// current_function_template_params`'s recursive helper. Mirrors
 /// `resolve_pseudo`'s/`collect_unknown_class_names`'s recursive shape,

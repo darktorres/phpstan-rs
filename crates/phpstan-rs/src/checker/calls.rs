@@ -287,16 +287,16 @@ impl<'a> Checker<'a> {
                 }
             }
             // An already-defined variable passed by-ref widens to the
-            // declared parameter's own type, not a blanket `Type::Mixed(false)`
-            // - `array &$errors` becomes `Type::Array(Mixed)`, preserving
+            // declared parameter's own type, not a blanket `mixed`
+            // - `array &$errors` becomes `array<mixed>`, preserving
             // the type-hint-guaranteed "still an array" information.
-            // `substitute_template` with empty bindings replaces any
+            // `Type::substitute_templates` with empty bindings replaces any
             // unresolved `TemplateParam` with `Mixed` too, since proper
             // substitution would need the receiver's own type arguments,
             // not available at this call site.
             //
             // Only trust the substituted declared type when it's itself
-            // plainly array-shaped (`Type::Array`/`Type::ArrayShape`):
+            // plainly array-shaped (array/array shape):
             // several stdlib by-ref parameters (`array_walk(array|object
             // &$array, ...)`) declare a union wider than what the
             // already-array-typed argument could actually become - the
@@ -727,7 +727,7 @@ impl<'a> Checker<'a> {
     /// only a literal/sequential shape" precedent) - real `Arg` nodes
     /// (needed for `check_args`'s by-ref/span handling) only exist for a
     /// literal array's elements, not for a value reached only through
-    /// its inferred `Type::ArrayShape`.
+    /// its inferred array shape.
     pub(crate) fn check_call_user_func(
         &mut self,
         name: &str,

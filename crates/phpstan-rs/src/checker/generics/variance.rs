@@ -93,7 +93,7 @@ impl<'a> Checker<'a> {
     /// `f.doc_comment` fresh rather than reading back through `FunctionReflection`
     /// (which has no persisted raw template-variance list of its own, the
     /// same reason `current_function_template_params` re-derives from
-    /// `Type::TemplateParam` nodes instead - see that function's own doc
+    /// template nodes instead - see that function's own doc
     /// comment) - cheap, since a function/method with no `@template` tag
     /// at all (the overwhelming majority) parses to an empty `DocBlock`
     /// in one pass either way.

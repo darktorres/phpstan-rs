@@ -19,7 +19,7 @@
 //! own `@throws` is that function's own author's responsibility to
 //! document, not evidence that *you* forgot to. Also unlike the too-wide
 //! check, a class the registry has no entry for at all, or anything not
-//! a plain `Type::Object` (a `Union`, `Mixed`, ...), is skipped rather
+//! a plain object (a `Union`, `Mixed`, ...), is skipped rather
 //! than guessed - "don't know, don't guess" matters more here (a false
 //! "too wide" costs a stray suggestion to narrow a tag; a false
 //! "missing" costs a stray demand to widen one that could easily be

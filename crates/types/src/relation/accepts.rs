@@ -61,7 +61,7 @@ impl Relation<'_> {
             // valid `callable`: an actual `Closure` (already handled by
             // the ordinary class-hierarchy arm just below, since
             // `Closure` is now its own real `Object` type rather than
-            // being conflated with `Type::Callable` itself), an object
+            // being conflated with `Repr::Callable` itself), an object
             // whose class declares `__invoke()`, a plain string naming a
             // real function, and a two-element array naming an instance-
             // or static-method callable. The latter two can't be
@@ -76,7 +76,7 @@ impl Relation<'_> {
             (Type(Repr::String) | Type(Repr::StringLiteral(_)), Type(Repr::Callable(_))) => true,
             (Type(Repr::Array(_, _)) | Type(Repr::ArrayShape(_)), Type(Repr::Callable(_))) => true,
             // Type arguments are compared with real variance
-            // (`Type::TemplateParam::variance`, `@template-covariant`/
+            // (`Repr::TemplateParam::variance`, `@template-covariant`/
             // `-contravariant`, and call-site `covariant`/`contravariant`/
             // `*` annotations, `crate::parse_generic_arg`), not just
             // skipped (`Collection<Cat>` and `Collection<Dog>` are not
@@ -119,7 +119,7 @@ impl Relation<'_> {
                 // `template_bounds`, never a class-level `@template T =
                 // Default` map the way `TemplateParam.default` carries
                 // one for a function/method's own templates (`crate::
-                // substitute_template`'s own real, shipped behavior pads
+                // Type::substitute_templates`'s own real, shipped behavior pads
                 // with `.default`, falling back to `Mixed` - never the
                 // bound). Plain `Mixed` is both what's actually available
                 // and what already skips this slot's comparison entirely
@@ -274,9 +274,9 @@ impl Relation<'_> {
                 matches!(*tp.bound, Type(Repr::Mixed(_))) || self.accepts_type(&tp.bound, sup)
             }
             // Mirrors `Relation::is_super_type_of`'s own identically-placed
-            // `Type::Conditional` arm exactly (see that arm's own doc
+            // `Repr::Conditional` arm exactly (see that arm's own doc
             // comment) - a real, independent gap this project's own
-            // `Type::Conditional`-returning-function corpus checks were
+            // `Repr::Conditional`-returning-function corpus checks were
             // silently missing: without this, a `sub` that's itself an
             // `Intersection` (any `list<T>`/`non-empty-array<T>`-typed
             // value - an extremely common real return type) hits this
@@ -395,8 +395,8 @@ impl Relation<'_> {
             // uses, `types.rs`'s own doc comment) stays unconditionally
             // lenient here too, the exact same "don't know" spirit as
             // the value-side `Mixed` check right next to it - only a
-            // *genuinely narrower, known* key type (a real `Type::Int`/
-            // `Type::String`) is held to the real subtyping check.
+            // *genuinely narrower, known* key type (a real `Repr::Int`/
+            // `Repr::String`) is held to the real subtyping check.
             (Type(Repr::Array(key, a)), Type(Repr::ArrayShape(shape))) => {
                 !self.strict_mixed_arrays
                     && matches!(**a, Type(Repr::Mixed(_)))
@@ -598,8 +598,8 @@ impl Relation<'_> {
         // argument) Union before deciding acceptance - real PHPStan's own
         // guard, applied exactly as it is there: never when `sup`
         // ("acceptingType" - the *declared/expected* type) is bare
-        // `Type::Null` (a nullable value must never satisfy a definite-
-        // null-only target), and never when `sub` is bare `Type::Null`
+        // `Repr::Null` (a nullable value must never satisfy a definite-
+        // null-only target), and never when `sub` is bare `Repr::Null`
         // itself (a definite null literal stays definitely rejected at
         // every level, `sub` must be a multi-member Union that *includes*
         // Null, not Null alone).
@@ -616,7 +616,7 @@ impl Relation<'_> {
                 .collect();
             Some(match non_null.len() {
                 // Unreachable in practice (`sub` was excluded above
-                // whenever it's bare `Type::Null`, so a real Union always
+                // whenever it's bare `Repr::Null`, so a real Union always
                 // has at least one non-Null member) - kept as a safe,
                 // total fallback rather than an `unwrap`/panic.
                 0 => Type::never(),
@@ -633,7 +633,7 @@ impl Relation<'_> {
         // that a nested Union-vs-Union pair is rare - but this project
         // represents every nullable declared type (`?string`, `?int`,
         // `?Foo`, the single most common PHP nullability idiom) as
-        // `Type::Union([X, Type::Null])` (`types/parse.rs`), so `sup` is
+        // `Repr::Union([X, Repr::Null])` (`types/parse.rs`), so `sup` is
         // a Union at every one of this method's real call sites checking
         // a nullable-declared parameter/property/return type - exactly
         // the scenario `checkNullables` exists for. Recursing into
@@ -659,8 +659,8 @@ impl Relation<'_> {
     /// This project's `is_super_type_of`/`accepts` never actually gave
     /// `Mixed` a blanket "accepted anywhere" structural rule the way real
     /// PHPStan's own `MixedType::isAcceptedBy()` unconditionally does
-    /// (confirmed directly: there is no `(Type::Mixed(_), _) => true` arm
-    /// in `Relation::is_super_type_of`, only the mirror-image `(_, Type::Mixed(_))
+    /// (confirmed directly: there is no `(Repr::Mixed(_), _) => true` arm
+    /// in `Relation::is_super_type_of`, only the mirror-image `(_, Repr::Mixed(_))
     /// => true`, a different direction entirely) - every one of dozens of
     /// existing call sites instead bails out ad hoc, on its own, whenever
     /// its *own* actual type happens to be `Mixed`. Rather than widen

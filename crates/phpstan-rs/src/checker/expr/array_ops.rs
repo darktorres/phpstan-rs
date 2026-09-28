@@ -123,7 +123,7 @@ impl<'a> Checker<'a> {
     /// its own headline use case (checking a hand-written literal
     /// against a declared shape) and make any destructuring from an
     /// inline literal lose all per-position precision. Builds a real
-    /// `Type::ArrayShape`, keyed by each literal
+    /// array shape, keyed by each literal
     /// key (or, for a positional element, PHP's own real auto-index
     /// rule: one past the highest explicit integer key seen so far, not
     /// just a running count - `[5 => 'a', 'b']`'s `'b'` really is key
@@ -483,7 +483,7 @@ impl<'a> Checker<'a> {
     /// `int`) and substitutes the result into the return type. A signature
     /// with no templates at all is untouched (the common case, cheap).
     ///
-    /// Also resolves a `Type::Conditional` in the
+    /// Also resolves a conditional type in the
     /// (already template-substituted) return type - `param_bindings`
     /// (parameter *name* -> actual argument type) is a deliberately
     /// separate map from `bindings` above (template *name* -> bound type),
@@ -568,8 +568,8 @@ impl<'a> Checker<'a> {
     }
 
     /// A literal array's own inferred type is a real
-    /// `Type::ArrayShape` instead of always `Array(Mixed)`, so a caller
-    /// that pattern-matches `Type::Array(elem_ty)` directly needs
+    /// array shape instead of always `Array(Mixed)`, so a caller
+    /// that reads only a general array's value type needs
     /// `array_element_type` instead, so
     /// `array_map(fn($x) => ..., [1, 2, 3])` (a literal shape) keeps
     /// working the same way it already does for a plain `array<int>`-typed
@@ -625,10 +625,10 @@ impl<'a> Checker<'a> {
     ///
     /// A used generic template parameter's type could otherwise leak
     /// through as a bogus, namespace-qualified `Object` reference instead
-    /// of staying `Type::TemplateParam` (e.g. `amphp/sync`'s own
+    /// of staying template (e.g. `amphp/sync`'s own
     /// `PriorityQueue<T of int|string>`) - reusing this project's own,
     /// already-shared `invalid_array_key_description` verbatim sidesteps
-    /// that: it has no arm for `Type::TemplateParam` at all, so it
+    /// that: it has no arm for template at all, so it
     /// already falls to the safe "don't know, don't flag" catch-all for
     /// one, exactly the leniency a still-generic key type needs.
     ///
@@ -708,7 +708,7 @@ impl<'a> Checker<'a> {
 /// `Int`/`String`, ...) too, matching `check_array_item_key_type`'s own
 /// "don't guess" leniency.
 ///
-/// A bare float literal expression infers to `Type::Float`, not a
+/// A bare float literal expression infers to `float`, not a
 /// `FloatLiteral`, everywhere else in this checker (nothing else needs
 /// the literal value kept around) - checked directly off the AST here
 /// instead, the one shape this function needs it for.

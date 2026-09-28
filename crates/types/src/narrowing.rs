@@ -39,7 +39,7 @@ impl Relation<'_> {
     /// `target`, not just when it's structurally identical to it - exact
     /// equality is the wrong tool for "is this the kind of thing being
     /// narrowed": `is_array()`'s registered target is generic
-    /// `Type::Array(Mixed)`, so a specific-element `Array(String)` member
+    /// `Repr::Array(Mixed)`, so a specific-element `Array(String)` member
     /// (from a docblock-refined param type) must survive an `is_array()`
     /// exclusion, even though `Array(String) != Array(Mixed)`. Deliberately
     /// scoped to this `Union(members)` branch only, not the `_ => target.
@@ -48,7 +48,7 @@ impl Relation<'_> {
     /// `original`'s own content, so there's nothing for `is_super_type_of` to
     /// usefully change there.
     /// `instanceof`'s own true-branch narrowing - deliberately not
-    /// `narrow_type_to` above, which unconditionally trusts `target` for a
+    /// `Relation::narrow` above, which unconditionally trusts `target` for a
     /// non-`Union` `original`. That's correct for a scalar predicate
     /// (`is_int($x)` on `int|string` needs nothing more than plain `int` -
     /// mutually exclusive scalar types can't combine), but wrong for
@@ -181,23 +181,23 @@ impl Relation<'_> {
 }
 
 impl Type {
-    /// Narrows `original` by removing `excluded` along the branch where a check
+    /// This type without `excluded`, along the branch where a check
     /// for it failed - the "not null" half of a `=== null` guard clause, the
     /// most common narrowing pattern in real code.
     ///
     /// A union member is dropped when it's a subtype of
     /// `excluded`, not just when it's structurally identical to it - the same
-    /// reasoning as `narrow_type_to` above, mirrored for exclusion (`is_array
+    /// reasoning as `Relation::narrow` above, mirrored for exclusion (`is_array
     /// (...)`'s false-branch exclusion of `Array(Mixed)` must also drop a
     /// specific-element `Array(String)` member, since it's never
     /// `==` to the generic target it should match as "an array").
     ///
     /// Deliberately **not** applied to the non-`Union` fallback below
-    /// (`other if other == excluded => Type::Never`): `is_super_type_of`'s own
-    /// int-to-float argument-coercion rule (`Type::Int` is a subtype of
-    /// `Type::Float`) would make `narrow_type_excluding(Type::Int,
-    /// Type::Float)` wrongly collapse a plain, correctly-known `int` to
-    /// `Type::Never` - the value genuinely is an int, and its coercibility to
+    /// (`other if other == excluded => Repr::Never`): `is_super_type_of`'s own
+    /// int-to-float argument-coercion rule (`Repr::Int` is a subtype of
+    /// `Repr::Float`) would make `Type::without(Repr::Int,
+    /// Repr::Float)` wrongly collapse a plain, correctly-known `int` to
+    /// `Repr::Never` - the value genuinely is an int, and its coercibility to
     /// `float` for parameter-passing purposes has nothing to do with whether
     /// it should be excluded here. Every existing caller of this branch
     /// (`isset`'s `Null` exclusion, and similar plain-`Null` exclusions
@@ -205,7 +205,7 @@ impl Type {
     /// ever a subtype of `Null`.
     pub fn without(&self, excluded: &Type) -> Type {
         match self {
-            // Recurses into `narrow_type_excluding` for each kept member,
+            // Recurses into `Type::without` for each kept member,
             // rather than just cloning it, so a `String`/`Array` member
             // found inside a `Union` gets the same accessory upgrade a
             // bare one does below - a member that doesn't hit a new arm
@@ -241,7 +241,7 @@ impl Type {
             // `$x !== []` on a plain `array`/`list` - the same idiom as the
             // `String` arm above: both a plain `array<T>` and an already-
             // `list<T>` upgrade to their own non-empty form. Shares
-            // `upgrade_array_to_non_empty` with `!empty($x)`/`count($x) > 0`
+            // `Type::to_non_empty_array` with `!empty($x)`/`count($x) > 0`
             // so the three
             // "prove this array is non-empty" paths can't drift apart.
             Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) | Type(Repr::Intersection(_))
@@ -283,7 +283,7 @@ impl Type {
             // one is ruled out leaves exactly the other, unconditionally -
             // no case this could ever get wrong. Without this, `match ($b)
             // { true => ..., false => ... }` (or a bare `if ($b !== true)`)
-            // never narrows `$b` down to `false` at all, since `Type::Bool`
+            // never narrows `$b` down to `false` at all, since `Repr::Bool`
             // isn't itself represented as `Union([True, False])`.
             Type(Repr::Bool) if *excluded == Type::bool_literal(true) => Type::bool_literal(false),
             Type(Repr::Bool) if *excluded == Type::bool_literal(false) => Type::bool_literal(true),
@@ -400,16 +400,16 @@ pub fn comparison_narrowed_bounds(
 impl Type {
     /// `array_is_list($x)`'s own true-branch narrowing - mirrors `upgrade_
     /// array_to_non_empty` exactly, just adding `ArrayList` instead of
-    /// `NonEmptyArray`. Doesn't force the key type itself to `Type::Int` -
+    /// `NonEmptyArray`. Doesn't force the key type itself to `Repr::Int` -
     /// every other list-producing call site in this project (`preg_split`,
     /// `array_values`, ...) leaves the stored key as `unknown_array_key()`
     /// too, relying on `describe_accessory_intersection`'s own display-layer
     /// guard (a list's key is always `int` by definition, so showing it
     /// would be redundant) rather than encoding it twice. A docblock-parsed
-    /// `list<T>` still uses a literal `Type::Int` key instead (needed
+    /// `list<T>` still uses a literal `Repr::Int` key instead (needed
     /// elsewhere - see `parse_type_string`'s own `"list"` arm), so `crate::
     /// subtype`'s dedicated list-vs-list `Intersection` arm and `crate::
-    /// types_equal_for_union` both compare the two representations ignoring
+    /// Type::equals_for_union` both compare the two representations ignoring
     /// key entirely, rather than this project settling on one encoding
     /// everywhere.
     pub fn to_list(&self) -> Type {
@@ -462,7 +462,7 @@ impl Type {
 }
 
 impl Type {
-    /// Narrows `ty` by whether `key` is (`present = true`) or isn't
+    /// This type narrowed by whether `key` is (`present = true`) or isn't
     /// (`present = false`) provably a real offset of it -
     /// `array_key_exists($key, $ty)`'s own true/false branches. A member
     /// declaring `key` required can't make the call `false`, and a sealed
@@ -623,7 +623,7 @@ impl Type {
 }
 
 impl Type {
-    /// Narrows `original` by excluding every falsy member this project can
+    /// This type without every falsy member this project can
     /// represent - used for a bare truthiness check (`if ($x)`) and
     /// `empty($x)`'s own truthy branch. The falsy set covers `Null`/`False`,
     /// `IntLiteral(0)`, `StringLiteral("")`/`StringLiteral("0")`, and an

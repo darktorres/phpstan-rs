@@ -75,7 +75,7 @@ impl<'a> Checker<'a> {
                     // (`Collection<covariant Foo>` still needs `Foo`
                     // itself checked against the bound -
                     // `accepts`'s own variance handling is
-                    // separate) - `strip_call_site_variance` unwraps for
+                    // separate) - `Type::without_call_site_variance` unwraps for
                     // both the substitution bindings and the bound
                     // comparison; the *displayed* `arg` below stays the
                     // original, marker-and-all, so a violation message

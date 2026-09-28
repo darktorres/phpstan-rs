@@ -285,7 +285,7 @@ impl PestConfig {
     /// Resolves the `$this` type for one file being checked - every
     /// directory binding whose prefix matches `file_path` (unioned,
     /// deduped), else the default (`PHPUnit\Framework\TestCase`, only if
-    /// actually known to `registry`), else `Type::Mixed(false)` as the honest
+    /// actually known to `registry`), else `mixed` as the honest
     /// last resort.
     pub fn resolve_this_type(&self, file_path: &Path, registry: &Registry) -> Type {
         let mut names: Vec<String> = self

@@ -4,7 +4,7 @@
 use crate::{PhpVersion, Repr, Type};
 
 impl Type {
-    /// The native declaration `ty` can be written as on `version` (a
+    /// The native declaration this type can be written as on `version` (a
     /// return type when `for_return`, where `void`, `never` and `static` are
     /// allowed); `None` when some part has no native spelling or the
     /// version can't declare it.

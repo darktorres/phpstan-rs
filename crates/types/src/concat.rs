@@ -147,7 +147,7 @@ impl Type {
     }
 }
 
-/// Strips a `Type::StringLiteral("")` member out of a `Union` (a no-op
+/// Strips a `Repr::StringLiteral("")` member out of a `Union` (a no-op
 /// for every other shape) - mirrors real PHPStan's own `TypeCombinator::
 /// remove($leftStringType, new ConstantStringType(''))` step in
 /// `resolveConcatType`'s own numeric-string propagation below, needed so

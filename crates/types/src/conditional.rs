@@ -2,28 +2,6 @@ use rustc_hash::FxHashMap;
 
 use crate::{Repr, Type};
 
-/// Resolves every `Type::Conditional` node in `ty` against `param_bindings`
-/// (parameter *name* -> the actual, already-inferred type bound to it at
-/// this call site - a genuinely different keyspace from `TemplateBindings`,
-/// which is keyed by template *name*, to avoid a real if rare name
-/// collision between the two). A genuinely separate mechanism from
-/// `substitute_template` (not folded into it): that function resolves
-/// `TemplateParam` nodes against a template-name-keyed map, this one
-/// resolves `Conditional` nodes against a parameter-name-keyed one - the
-/// two node kinds carry unrelated information and can appear nested inside
-/// each other (a conditional's own branch mentioning a template, or vice
-/// versa), so this recurses through the identical structural wrappers
-/// `substitute_template` already covers (`Array`/`Union`/`ClassString`/
-/// `Intersection`/`ArrayShape`/`ObjectShape`/`Object`/`Callable`) to reach
-/// every nested `Conditional`, not just a top-level one.
-///
-/// For a `Conditional` node: `param_bindings.get(subject)` - unbound, or
-/// bound to `Mixed` (the "genuinely unknown argument type" sentinel this
-/// project uses throughout) - falls back to the safe two-branch union
-/// (also, itself, recursively resolved - a real, if rarer, nested-
-/// conditional shape). A real bound resolves trinarily: a subtype of
-/// `target` picks one branch, a provably disjoint one the other, and
-/// anything else keeps both (see the arm's own comment).
 /// Which branch a conditional takes for a subject of type `bound`:
 /// `Some(true)` the `if_true` one, `Some(false)` the other, `None` both.
 /// Real PHPStan's `ConditionalType`/`ConditionalTypeForParameter` are
@@ -40,6 +18,28 @@ pub(crate) fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> 
 }
 
 impl Type {
+    /// Resolves every conditional node in this type against `param_bindings`
+    /// (parameter *name* -> the actual, already-inferred type bound to it at
+    /// this call site - a genuinely different keyspace from `TemplateBindings`,
+    /// which is keyed by template *name*, to avoid a real if rare name
+    /// collision between the two). A genuinely separate mechanism from
+    /// `Type::substitute_templates` (not folded into it): that function resolves
+    /// `TemplateParam` nodes against a template-name-keyed map, this one
+    /// resolves `Conditional` nodes against a parameter-name-keyed one - the
+    /// two node kinds carry unrelated information and can appear nested inside
+    /// each other (a conditional's own branch mentioning a template, or vice
+    /// versa), so this recurses through the identical structural wrappers
+    /// `Type::substitute_templates` already covers (`Array`/`Union`/`ClassString`/
+    /// `Intersection`/`ArrayShape`/`ObjectShape`/`Object`/`Callable`) to reach
+    /// every nested `Conditional`, not just a top-level one.
+    ///
+    /// For a `Conditional` node: `param_bindings.get(subject)` - unbound, or
+    /// bound to `Mixed` (the "genuinely unknown argument type" sentinel this
+    /// project uses throughout) - falls back to the safe two-branch union
+    /// (also, itself, recursively resolved - a real, if rarer, nested-
+    /// conditional shape). A real bound resolves trinarily: a subtype of
+    /// `target` picks one branch, a provably disjoint one the other, and
+    /// anything else keeps both (see the arm's own comment).
     pub fn resolve_conditional(&self, param_bindings: &FxHashMap<String, Type>) -> Type {
         match self {
             Type(Repr::Conditional {

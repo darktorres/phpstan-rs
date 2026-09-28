@@ -151,9 +151,9 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
 
 /// Mirrors real PHPStan's `MissingTypehintCheck::
 /// getCallablesWithMissingSignature`: every `callable`/`Closure` in `ty`
-/// written with no `(params): return` signature. `Type::Callable(None)`
+/// written with no `(params): return` signature. `Repr::Callable(None)`
 /// is exactly a bare `callable` (a written signature parses to
-/// `Type::Callable(Some(sig))`, whose own parameter/return types are
+/// `Repr::Callable(Some(sig))`, whose own parameter/return types are
 /// still walked); a bare `Closure` resolves to a plain class reference
 /// instead. Each finding is the type's own display text.
 fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {

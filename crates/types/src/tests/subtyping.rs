@@ -32,7 +32,7 @@ fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
 // On top of the "only when the array's own value type is Mixed" rule (no
 // per-field value comparison happens here at all - that's
 // `registry::accepts`'s own, separate job), a shape's aggregate key
-// type must also be a subtype of a precisely-keyed `Type::Array`'s
+// type must also be a subtype of a precisely-keyed `Repr::Array`'s
 // declared key type.
 
 #[test]
@@ -292,7 +292,7 @@ fn array_accessory_subtype_rules() {
 fn a_shape_with_a_non_trailing_optional_field_is_not_a_definite_list() {
     // `array{0: int, 1?: string, 2: int}` is only `Maybe`-a-list (if the
     // optional field 1 is genuinely absent, keys {0, 2} aren't
-    // sequential) - `is_list_like`/`shape_fields_are_list_like` must not
+    // sequential) - `is_list_like`/`Shape::is_list` must not
     // ignore each field's `optional` flag and answer `true`
     // unconditionally here.
     let list_ty = Type(Repr::Intersection(vec![
@@ -333,7 +333,7 @@ fn array_subtyping_is_covariant_on_value_type() {
     assert!(!is_subtype(&mixed_arr, &ints));
 }
 
-// An unresolved `Type::Conditional` falls back to comparing against
+// An unresolved `Repr::Conditional` falls back to comparing against
 // `Union([if_true, if_false])` on either side, mirroring the existing
 // `Union` arms exactly.
 #[test]

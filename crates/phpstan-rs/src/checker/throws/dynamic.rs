@@ -69,7 +69,7 @@ impl<'a> Checker<'a> {
                 let divisor = args.get(1)?;
                 match literal_int_value(divisor) {
                     Some(0) => Some(throwable("DivisionByZeroError")),
-                    // `Type::Void` is `record_call_throw_point`'s
+                    // `void` is `record_call_throw_point`'s
                     // "recognized, but definitely contributes nothing -
                     // don't fall back to the sig" sentinel; returning
                     // bare `None` here would be indistinguishable from
@@ -139,7 +139,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 match &unwrap_grouping(&arg.value).kind {
-                    // Same `Type::Void` sentinel as `intdiv` above.
+                    // Same `void` sentinel as `intdiv` above.
                     ExprKind::Literal(Literal::String(spec)) => {
                         if is_valid_date_interval_spec(&spec.to_str_lossy()) {
                             Some(Type::void())

@@ -62,7 +62,7 @@ fn a_param_type_is_inherited_from_an_interface_and_ty_native_is_left_alone() {
 #[test]
 fn inheritance_applies_even_when_the_native_return_hint_is_already_non_mixed() {
     // The corrected-algorithm case: a bare `array` native hint resolves
-    // to `Type::Array(_, Mixed)`, not `Type::Mixed(false)` itself - real
+    // to `array<mixed>`, not `mixed` itself - real
     // PHPStan's own trigger is "no own `@return` tag at all", never
     // gated on the resolved type being `Mixed`.
     let r = build_registry(
@@ -251,7 +251,7 @@ fn an_ancestors_mixed_tag_is_never_inherited() {
 
 // This project doesn't model cross-inheritance `@template` binding
 // (`@extends Base<Concrete>` fixing a parent's own type parameter - see
-// `Type::Object`'s own doc comment) - a template-parameterized ancestor
+// object's own doc comment) - a template-parameterized ancestor
 // type is only meaningful within the ancestor's own `@template` scope,
 // so backfilling it verbatim onto an unrelated descendant must never
 // happen, or the binding is silently lost, resolving to the far less

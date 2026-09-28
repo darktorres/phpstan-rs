@@ -233,7 +233,7 @@ impl<'a> Checker<'a> {
         // un-narrowed `Traversable`, and `$iterator->getIterator()`
         // isn't a real `Traversable` method - applying `!$iterator
         // instanceof \Iterator`'s true-branch narrowing subtracts
-        // `Iterator` back out first (`narrow_type_excluding`'s
+        // `Iterator` back out first (`Type::without`'s
         // `Traversable`-minus-`Iterator` special case), correctly
         // re-narrowing to `IteratorAggregate` instead.
         let entry = locals.clone();
@@ -582,7 +582,7 @@ impl<'a> Checker<'a> {
         // below (see that closure's own comment for why every
         // pass, not just once).
         //
-        // A `Type::ArrayShape` subject must not fall straight to the
+        // An array shape subject must not fall straight to the
         // `Mixed` catch-all, discarding real, known field types, e.g.
         // `foreach ($versions as $key => $value) { $versions[$key] =
         // preg_replace(..., $value); }` where every field of `$versions`

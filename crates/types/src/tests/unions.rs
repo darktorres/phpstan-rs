@@ -1,4 +1,4 @@
-//! `union_types`: which members merge and which stay apart.
+//! `Type::union`: which members merge and which stay apart.
 
 use crate::{Repr, Shape, ShapeField, ShapeKey, Type};
 
