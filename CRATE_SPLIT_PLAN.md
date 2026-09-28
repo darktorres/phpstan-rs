@@ -3184,9 +3184,9 @@ fixture:
     `cast.string`/`cast.int` (113), `postInc`/`preInc.type` (41) and
     `callable.nonCallable` (30);
   - an offset or array key of an invalid type is reported for every
-    type, not only `array`: `$a[$o]` and `$a[$o] = 1` with an object
-    offset and `[$o => 1]` throw a `TypeError` and aren't reported today,
-    nor a `float` offset (`$a[1.5]` truncates);
+    type: `$a[$o]` and `$a[$o] = 1` with an object offset and `[$o => 1]`
+    throw a `TypeError` and aren't reported today (an `array` offset and,
+    with a PHP version known, a `float` one already are);
   - `++`/`--` check their operand (`postInc.type` and the rest): `$b++` on
     a `bool` does nothing at runtime and isn't reported today;
   - a non-numeric string offset on a string throws a `TypeError`:
@@ -3235,11 +3235,7 @@ fixture:
     and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
     (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
     fail and stays unreported (331 PHPStan reports on `mixed`).
-- (e) declarations, generics checks and PHPDoc:
-  - a required parameter after an optional one is
-    `parameter.requiredAfterOptional` (deprecated since PHP 8.0, and the
-    default is then ignored): `function g(int $a = 1, int $b)` isn't
-    reported today.
+- (e) declarations, generics checks and PHPDoc.
 - (f) control flow, returns, throws and generators:
   - a return type that includes `void` accepts falling off the end (fixed
     first): `@return void|int` on a function that returns only on some
