@@ -2082,650 +2082,264 @@ registry; the concurrency/state model; `AnalysisContext` completed;
 
 ### Stage E: everything out of the engine (in the package, module-gated)
 
-Each rule is moved once, onto its final API: D6's returned-error `Rule`,
-`RuleErrorBuilder` and identifier families, and E3's prologue, which lands
-`RuleLevelHelper::find_type_to_check` and the rule → level table before any
-rule moves. The level-dependent checks are then one mechanism instead of a
-per-rule decision: on the corpus oracle's 941 files at `76e738b4` (level 10,
-PHP version pinned), about 2,950 of the 9,623 findings PHPStan reports and
-phpstan-rs doesn't are a rule that doesn't treat an implicit `mixed`
-operand as reportable (listed under E3b). Findings phpstan-rs reports
-that PHPStan doesn't are mostly the corpus's own strict-rules-style
-extensions (`*.condNotBoolean`, `staticMethod.dynamicCall`,
-`possiblyImpure.*`), which the extension-free oracle doesn't load, and
-B8's context gaps: 1,748 of the 1,855 phpstan-rs-only `class.notFound`
-name a class of the root package or of a package's bundled `vendor/`, and
-the `mixed` those unknown classes produce feeds the phpstan-rs-only
-`argument.type`/`return.type` "mixed given" findings. E's comparisons are
-read after B8's two context fixes land.
+Each rule moves once, onto its final API: D6's returned-error `Rule`,
+`RuleErrorBuilder` and identifier families, and E3's prologue
+(`RuleLevelHelper::find_type_to_check` and the rule → level table), which
+lands before any rule moves. The level-dependent checks are then one
+mechanism: about 2,950 of the corpus oracle's 9,623 PHPStan-only findings
+are a rule not treating an implicit `mixed` operand as reportable (E3b).
+The corpus's phpstan-rs-only findings are mostly its own strict-rules-style
+extensions, which the oracle doesn't load, and B8's context gaps (1,748 of
+1,855 phpstan-rs-only `class.notFound`), so E's comparisons are read after
+B8's two context fixes.
 
-Gate 12's rules oracle is Stage E's measure: over PHPStan's rule-test data
-at `76e738b4`, PHPStan reports 15,476 findings across 633 identifiers (its
-"(in context of class …)" copies of a trait's findings stripped and
-collapsed) and phpstan-rs 11,428; 8,840 match, 6,636 are PHPStan-only,
-and phpstan-rs never matches 152 of the identifiers. A finding matches
-one of the same identifier in the same file on the same line first, then
-within three lines, and within 60 for the signature-level identifiers the
-two tools place differently (`missingType.*`, `return.missing`,
-`constructor.unusedParameter`, `parameter.phpDocType`,
-`phpDoc.parseError`), each finding used once. Every PHPStan-only finding
-of an identifier phpstan-rs matches at least once was traced to its
-cause, a plan item citing the file and count. Each E3 sub-phase ends when its
-identifiers have no PHPStan-only findings left, or each remaining one is an
-approved deviation (an identifier named differently, such as
-`class.abstractMethodNotImplemented` for `method.abstract`,
-`class.extendsEnum` for `class.disallowedSubtype`, `generics.wrongParent`
-for a self-referencing `@extends`/`@implements`/`@use`'s
-`generics.notCompatible`, `requireExtends.nonObject` for
-`requireExtends.interface`, `intersectionType.int` for
-`property.unresolvableNativeType`, and `enum.duplicateConstant` on the
-constant for `enum.duplicateEnumCase` on the case, `property.private`
-for `property.writeOnly` on a private native property a `@property-write`
-tag shadows (PHP throws on the private read; `private-property-tag-write.php`),
-and a trait's `@use` tag errors on the trait's line rather than the `use`
-statement's (`generics.wrongParent`, `generics.callSiteVarianceNotAllowed`;
-`used-traits.php`), or a
-PHPStan-specific check: the assert mismatches of `phpstan.*` (E3h),
-`phpParser.*`,
-`phpstanApi.*` outside a PHPStan extension's package, `function.inner`,
-PHPStan's "inner named functions are not supported", and `class.prefixed`
-for a `_PHPStan_` prefix; the Rector, PHP-Scoper, PHPUnit PHAR and Box
-prefixes it also reports name classes that change with each release of
-those tools and ship opt-in in ext-extras, the rules oracle's other 4 of
-9). `void.pure` ("returns void but does not have any side effects") is a
-real dead-code check, not PHPStan-specific: it ships opt-in in ext-extras,
-the rules oracle's 81 being mostly test scaffolding
-(`filter-var-throw-on-failure.php`, `goto-undefined-label.php`,
-`inc-dec-gmp.php`). A call phpstan-rs reports as `possiblyImpure.*`
-"unknown" where PHPStan knows it is impure (`impure.*`, 23 rules-oracle
-findings) is a wrong verdict, not a rename: C5's `functionMetadata.php` and
-C9's purity summaries decide built-in, user and static calls, and E3(e)'s
-purity items first-class callables and closures.
+Gate 12's **rules oracle** is Stage E's measure: over PHPStan's rule-test data
+at `76e738b4`, PHPStan reports 15,476 findings across 633 identifiers (trait
+context copies collapsed) and phpstan-rs 11,428; 8,840 match, 6,636 are
+PHPStan-only, and 152 identifiers never match. Findings match by file and
+identifier on the same line first, then within three lines, and within one
+declaration for the signature-level identifiers. Every PHPStan-only finding
+of a matched identifier was traced to a plan item. An E3 sub-phase ends when
+its identifiers have no PHPStan-only findings, or each remaining one is an
+approved deviation: an identifier named differently
+(`class.abstractMethodNotImplemented` for `method.abstract`,
+`class.extendsEnum`, `generics.wrongParent`, `requireExtends.nonObject`,
+`intersectionType.int`, `enum.duplicateConstant`, `property.private` where a
+`@property-write` shadows a private property, a trait's `@use` errors on the
+trait's line), or a PHPStan-specific check (`phpstan.*` asserts, E3h;
+`phpParser.*`; `phpstanApi.*` outside an extension package;
+`function.inner`; `class.prefixed` for `_PHPStan_`, the other tool prefixes
+shipping opt-in in ext-extras). `void.pure` is a real dead-code check and
+ships opt-in in ext-extras (the oracle's 81 are test scaffolding). A call
+phpstan-rs reports `possiblyImpure.*` where PHPStan knows it is `impure.*`
+(23 findings) is a wrong verdict that C5, C9 and E3(e) fix, not a rename.
 
-The oracle's other side is the false-positive measure: phpstan-rs reports
-2,588 findings PHPStan doesn't, and every one was traced to its cause.
-Each cause is a plan item where it lives (the items cite the rules
-oracle's file; Appendix I lists, by cause and phase, the 1,019 in 410
-files no item names and the 444 in 105 cited files their item doesn't
-explain), and the phase that fixes it re-runs the oracle and removes
-its findings; what stays is approved: stricter checks that are right at
-runtime (`array_sum()` of arrays, printf placeholders that cast objects,
-`new self()` statements with no effects, `static::$p;` statements, a
-`private(set)` property never written, `5 / 0` ending reachability, a
-`catch (\Throwable)` after one that catches it, an `@var` naming an unknown
-class above an assignment operator, a promoted property never read,
-`#[\Override]` on a trait's `__get` in a `stdClass` subclass, a PHP fatal
-error), the
-bleeding-edge `featureToggles` C1 turns on by default, 246
-`phpstanRs.assertType` mismatches in rule-test data that the D and E2
-items name, and 145 findings in 13 files that use php-parser and PHPStan
-classes the phar loads and phpstan-rs doesn't (`self-contradiction.php`,
-`TestMethodTypeSpecifyingExtensions.php`, `rule-error-signature.php` and
-the rest), which the gate excludes and lists.
+The oracle's other side is the false-positive measure: phpstan-rs's 2,588
+findings PHPStan doesn't report were each traced to a cause (the items cite
+their files; Appendix I lists the 1,019 in 410 uncited files and the 444
+their citing item doesn't explain), and the phase fixing a cause reruns the
+oracle. What stays is approved: stricter checks right at runtime
+(`array_sum()` of arrays, printf placeholders casting objects, `new self()`
+statements without effects, `static::$p;`, a never-written `private(set)`
+property, `5 / 0` ending reachability, a shadowed `catch (\Throwable)`, …),
+the `featureToggles` C1 turns on, 246 `phpstanRs.assertType` mismatches the D
+and E2 items name, and 145 findings in 13 files using php-parser and PHPStan
+classes, excluded and listed by the gate.
 
 **E1. Collectors and project-level rules**, one commit each:
 
-- the reference-site collector (a built-in collector, consumed by the dead code,
-  architecture and circular-namespace rules and, later, the LSP);
-- dead code / members / enum cases / abstract classes, with every use
-  site the reference-site collector sees: a private constant read in an
-  enum case value (`case One = self::MY_CONST`), an attribute argument
-  (`#[Table(self::TABLE_NAME)]`), through `$this::C`/`$self::C` or a
-  class-string (`$class::C`) and from a used trait's method is
-  `classConstant.unused` today (16 rules-oracle findings: `bug-9402.php`,
-  `bug-9005.php`, `bug-5651.php`, `bug-12011.php`, `bug-6758.php`,
-  `bug-4570.php`, `class-constant-attribute.php`; a read the rule reports
-  as `classConstant.private` is still a use, `class-constant-visibility.php:36`);
-  a property read through
-  `?->`, `get_object_vars($this)`, `$this::$p`, a hooked property's own
-  get or set, a trait method of the host, and a PHP 8.5 `clone($o, ['p'
-  => …])` write are uses too, `property.unused`/`property.onlyWritten`
-  today (the rules oracle's 30: `nullsafe-property-fetch.php`,
-  `bug-3654.php`, `bug-9409.php`, `bug-12702.php`, `bug-7198.php`,
-  `clone-with.php`); and a private method called with another case
-  (`$this->sayhello()` for `sayHello()`), through `?->`, as a callable
-  (`[self::class, 'callBack']`), from a used trait (a trait's abstract
-  private method the host implements) or through a class-string is a
-  use, `method.unused` today (11: `bug-8346.php`, `bug-8071.php`,
-  `bug-6039.php`, `nullsafe-unused-private-method.php`,
-  `unused-private-method.php`); a private hooked property whose `get` no
-  one calls is `property.neverRead` ("Readable property … is never read",
-  an abstract private one included; `bug-12702.php`,
-  `abstract-private-property-hook.php`, 3), unreported today, and a
-  get-only one has no backing store to write, so it isn't
-  `property.onlyRead` (`bug-12702.php:11`); a private
-  method used only by itself (a
-  recursive call, a `[$this, 'doBaz']` callable in its own body) or only
-  from other unused ones is `method.unused`, and a dynamic `$x->$y()`
-  counts only for the names `$y` can be (after `$y !== 'doBar'` it
-  doesn't use `doBar()`); both unreported today (`unused-private-method.php`,
-  `bug-11802b.php`);
-- duplicate declarations across the project (`project::duplicate_classes` and
-  `duplicate_functions`; a class body's repeated members are E3(e)'s
-  `checker/duplicates.rs`): a collector over C4's per-file declaration sets and
-  a rule reporting `function.duplicate` and
-  `class.duplicate`/`interface.duplicate`/`trait.duplicate`/`enum.duplicate` on
-  every site, the message listing all sites with paths relative to the project
-  root, as PHPStan's `RelativePathHelper` prints them (absolute today). A
-  declaration counts when it is unconditional (under `if (!function_exists(…))`
-  or `class_exists()` it is a polyfill) and is project code: a file phpstan-rs
-  reads as a stub (its phpstorm-stubs, `stub_paths`) never counts. That replaces
-  the function check's signature-difference grouping, a workaround for
-  phpstorm-stubs declaring `strtr()` twice that also hides two project functions
-  with different signatures, which PHP rejects all the same ("Cannot
-  redeclare"). Names compare case-folded (C4's duplicate query). Both stay
-  opt-in: helpers of two test suites that never load into one process can't be
-  told from a real duplicate;
-- `namespace.circularDependency` over the reference-site collector's class
-  dependencies, the set the architecture rules read: today only `extends`,
-  `implements` and `use` edges count, so a cycle through type hints, `new`,
-  static calls, constants or PHPDoc types is unreported. The finding names the
-  namespaces and, for each edge of the cycle, the class and dependency that make
-  it (today one representative class), and only analysed files' namespaces form
-  cycles;
-- `[[rules.architecture]]` as a collector rule: a class's dependencies are the
-  reference-site collector's class references inside it (native hints, `new`,
-  static access, `instanceof`, `catch`, attributes, parameter defaults, hooks
-  and constants) and every class its resolved PHPDoc names, inline `@var`,
-  `@throws`, `@extends`/`@implements`/`@use` arguments, template bounds,
-  `@method`, `@property` and `@mixin` included. Today
-  `Project::check_architecture` walks each file again with its own reference
-  walker and reads PHPDoc only through method and property signatures, so `/**
-  @var Infra\Repo $r */` in a domain method is no dependency. It runs in the LSP
-  too (CLI-only today, §1);
-- `[rules.banned]`'s constructs and types as per-node rules in the rules walk,
-  each reporting `banned.<construct>` or `banned.type` where the node is: they
-  are per-file checks, not project-level, though `Project::check_banned` walks
-  each file again today and runs in the CLI only. `compact()` and `extract()`
-  are matched by the resolved function name (a raw-name match today, so a
-  namespace's own `compact()` is banned too), and `banned.type` reads the rules'
-  resolved types;
-- class shapes as a collector rule over the project's class declarations, run in
-  the LSP too (CLI-only today, §1): `check_closed_classes` (`class.notFinal`,
-  `method.protectedInFinalClass`, `property.protectedInFinalClass`,
-  `classConstant.protectedInFinalClass`, `method.notFinalInAbstractClass`) and
-  `[[parent_calls]]` (`parentCall.*`). A class stays open where something
-  subclasses it at runtime, and extensions say what through a registration hook:
-  a project class extending it (the one exemption `class_shape.rs` derives
-  itself), a Doctrine proxy of an entity or mapped superclass (ext-doctrine's
-  metadata, E4, instead of today's match on `@Entity` or `@ORM\Entity` in the
-  doc text or any attribute whose short name is `Entity`), and a test double
-  (`createMock(Foo::class)`, Mockery and Prophecy through ext-phpunit and
-  ext-mockery: PHPUnit can't double a final class, and today such a class is
-  `class.notFinal`). The required parent calls (`parent::setUp()` and the like)
-  register the same way, from ext-phpunit, ext-codeception and the rest, instead
-  of core defaults (§1's `TEST_BASE_CLASSES`);
-- composer hygiene as a collector rule over the reference-site collector and the
-  package context (the manifests B8 loads; the rule does no I/O), run in the LSP
-  too (CLI-only today, §1): `undeclared.`, `misplaced.`, `devOnly.` and
-  `unused.composerDependency`, `misplaced.autoloadDevSymbol`,
-  `psr4.pathMismatch`/`psr4.caseMismatch`, `provide.unimplemented`,
-  `ext.notRequired`, `composerScript.notFound`/`composerScript.notPublicStatic`
-  and `composer.platformPhpInconsistentWithRequire`. A package's symbols include
-  its global constants (`define()` in its autoloaded files, `const`
-  declarations), which the reference sites don't record today, so a package used
-  only through its constants is `unused.composerDependency`, and one whose
-  constants are used undeclared isn't `undeclared.composerDependency`; today the
-  check walks every file again with its own reference walker;
-- `property.unusedType` as a ClassPropertiesNode rule over host-class
-  assigns, including trait bodies per host (`facts_only`, the pre-pass
-  and every `*_facts` field deleted). An untyped property without a
-  default starts as `null`: `/** @var string|null */ private $debug;`
-  assigned a string only under `PHP_SAPI === 'cli'` is "never assigned
-  null" today (composer/xdebug-handler's `XdebugHandler.php:57`, one of 46
-  phpstan-rs-only `property.unusedType` on the corpus oracle's files, and
-  11 of the rules oracle's 16: `too-wide-property-type.php`,
-  `bug-4526.php`, `bug-4680.php`, `bug-6230.php`). A by-reference get
-  hook (`&get`) lets callers write any type, so the backing property
-  isn't too wide (`return-type-after-finally-property-hooks.php`). A
-  default counts as an assignment, a constant-expression one included
-  (`= self::NUMBER_TYPE_OFF`), and an assigned range covers each constant it
-  spans: `@var 0|1|2|3` with `=
-  0` and `$this->c = random_int(0, 3)` is "never assigned 0/1/2/3" today
-  (the rules oracle's `bug-4174.php`). A property no code assigns is
-  checked too, from its default alone: `private ?string $s = null` read
-  but never written is "never assigned string", and a `@var A|B` property
-  without a default "never assigned A" and "never assigned B"; today a
-  property with no assignment is skipped (all 42 of the rules oracle's
-  PHPStan-only `property.unusedType`, e.g. `bug-6486.php`,
-  `bug-9155.php`, `call-methods.php`, `access-properties.php`);
-- `argument.parameterRenamedInSubtype`, on by default (behind
-  `check_renamed_named_arguments`, off, today): a named argument naming a
-  parameter an override renames throws "Unknown named parameter" once the call
-  dispatches to that override. A collector records each named argument against
-  an overridable method (public or protected, neither it nor its class final),
-  keyed by the declaring class, and the rule reports the sites whose name an
-  override anywhere renames. Late-bound `static::m(old: 1)` and `new static(old:
-  1)` dispatch the same way (both throw in php 8.5) and are recorded too, where
-  only instance method calls are today, and the renaming overrides come from
-  reflection's declarations instead of `renamed_parameter_overrides`' second
-  walk over every file's AST;
-- the trait-host verdict as a collector plus rule: a trait method is analysed
-  once per host (PHPStan's "in context of class …"), and the constant-condition
-  and type-check rules (`if.alwaysTrue`, `function.alreadyNarrowedType` and
-  their families) report a trait's finding only when every host gives it the
-  same verdict, as `ConstantConditionInTraitRule`'s collector does, since the
-  trait's code is shared: `is_int($this->g())` in a trait used by hosts whose
-  `g()` returns `int` and `?int` is `function.alreadyNarrowedType` today, a
-  false positive (`impossible-function-call-in-trait.php`), and a condition true
-  in every host is unreported (the rules oracle's `*-in-trait.php`, 16 beside
-  their empty-body `return.missing`). Today `check_trait_methods` applies the
-  every-host rule only to identifiers named `*.always{True,False}`, so the
-  type-check family (`function.alreadyNarrowedType`, `function.impossibleType`
-  and the method and static-method forms) escapes it;
-- the trait-host merge: a trait method's findings carry the host class they were
-  found in, and the same finding (span, identifier and message) from several
-  hosts is reported once, naming its hosts as PHPStan's "in context of class …"
-  does; a finding some hosts lack stays with the hosts that have it. It replaces
-  `check_trait_methods`' sort and `dedup_by` on (span, message), which merges
-  any two findings sharing text and span whatever reported them, and no other
-  deduplication exists (the finalizer has none, and gate 13 fails a repeated
-  finding).
+- the **reference-site collector** (built-in; consumed by the dead-code,
+  architecture and circular-namespace rules and later the LSP);
+- **dead code / members / enum cases / abstract classes** with every use the
+  collector sees: a private constant read in an enum case value, an
+  attribute argument, `$this::C`, a class-string or a used trait (16
+  rules-oracle `classConstant.unused`); a property read through `?->`,
+  `get_object_vars($this)`, its own hook, a host's trait or a `clone()`
+  write (30 `property.unused`/`onlyWritten`); a private method called in
+  another case, through `?->`, as a callable, from a trait or a
+  class-string (11 `method.unused`). A private hooked property whose `get`
+  no one calls is `property.neverRead`, a get-only one isn't
+  `property.onlyRead`; a method used only by itself or by unused ones is
+  unused, and `$x->$y()` counts only for the names `$y` can be;
+- **duplicate declarations across the project** (`function.duplicate`,
+  `class.duplicate` and the other kinds) as a collector over C4's per-file
+  sets, every site listed with paths relative to the project root (absolute
+  today). Unconditional project declarations count; a stub file never does,
+  replacing the signature-difference grouping (a workaround for
+  phpstorm-stubs' two `strtr()` that also hides real duplicates PHP
+  rejects). Case-folded; both stay opt-in (two test suites' helpers never
+  loaded together look like duplicates);
+- **`namespace.circularDependency`** over the collector's class
+  dependencies (only `extends`/`implements`/`use` count today), naming the
+  class and dependency behind each edge, analysed namespaces only;
+- **`[[rules.architecture]]`** as a collector rule: a class's dependencies
+  are the collector's references in it plus every class its resolved PHPDoc
+  names (inline `@var`, `@throws`, `@extends` arguments, bounds, `@method`,
+  `@property`, `@mixin`); today `check_architecture` rewalks each file and
+  reads PHPDoc only through signatures, so `/** @var Infra\Repo $r */` in a
+  domain method is no dependency. It runs in the LSP too;
+- **`[rules.banned]`** as per-node rules (`banned.<construct>`,
+  `banned.type`) in the rules walk, not a second CLI-only walk; `compact()`
+  and `extract()` matched by resolved name (a namespace's own `compact()`
+  is banned today);
+- **class shapes** (`check_closed_classes`: `class.notFinal` and the
+  protected-in-final and not-final-in-abstract checks; `[[parent_calls]]`:
+  `parentCall.*`) as a collector rule, in the LSP too. A class stays open
+  where something subclasses it at runtime, as extensions report through a
+  hook: a project subclass, a Doctrine proxy (ext-doctrine's metadata, not
+  today's match on `@Entity` text or any attribute named `Entity`), a test
+  double (PHPUnit can't double a final class; `createMock(Foo::class)`'s
+  `Foo` is `class.notFinal` today). Required parent calls register from
+  their extensions, not core defaults;
+- **composer hygiene** (`*.composerDependency`,
+  `misplaced.autoloadDevSymbol`, `psr4.*`, `provide.unimplemented`,
+  `ext.notRequired`, `composerScript.*`,
+  `composer.platformPhpInconsistentWithRequire`) as a collector rule over
+  the reference sites and B8's package context, without I/O, in the LSP
+  too. A package's global constants count as its symbols (a package used
+  only through them is `unused.composerDependency` today);
+- **`property.unusedType`** as a ClassPropertiesNode rule over host-class
+  assigns, trait bodies per host (`facts_only` and every `*_facts` field
+  deleted): an untyped property starts as `null` (46 corpus and 11
+  rules-oracle phpstan-rs-only findings, e.g. xdebug-handler's `$debug`); a
+  by-reference `&get` isn't too wide; a default and an assigned range count
+  as assignments; a property no code assigns is checked from its default
+  (all 42 rules-oracle PHPStan-only findings);
+- **`argument.parameterRenamedInSubtype`**, on by default (off today): a
+  named argument naming a parameter an override renames throws "Unknown
+  named parameter" once dispatched there. A collector records named
+  arguments against overridable methods by declaring class, late-bound
+  `static::m(old: 1)` and `new static(old: 1)` included (both throw in php
+  8.5; only instance calls are recorded today), and the renaming overrides
+  come from reflection, not a second AST walk;
+- **the trait-host verdict** as a collector plus rule: a trait method is
+  analysed per host, and the constant-condition and type-check families
+  report a trait's finding only when every host gives the same verdict
+  (`ConstantConditionInTraitRule`). Today the every-host filter covers only
+  `*.always{True,False}`, so `function.alreadyNarrowedType` escapes it
+  (a false positive in `impossible-function-call-in-trait.php`), and a
+  condition true in every host is unreported (16 rules-oracle findings);
+- **the trait-host merge**: a trait's findings carry their host, and the
+  same finding (span, identifier, message) from several hosts is reported
+  once, naming them; a finding some hosts lack stays with those that have
+  it. It replaces `check_trait_methods`' `dedup_by` on (span, message);
+  nothing else deduplicates, and gate 13 fails a repeated finding.
 
 **E2. builtins.**
 
 - Moves onto the extension traits: `throws/dynamic.rs`, `builtin_calls`,
   `array_ops` returns, `preg_shapes`, `date_time`, the contextual-callback
-  block, preg `$matches` out-types, GMP / BcMath operators, the built-in
-  narrowing predicates, the date / xml / DateInterval validators (as
-  throw-type extensions), regex / PCRE, and the date parser.
-- `builtins` is always registered, including by the testing harness.
-- Every return-type extension in Appendix G reaches the most precise type that
-  holds at runtime in the nsrt suite (3,015 mismatches over 93 extensions
-  today). PHPStan's value is the candidate, not the target: ten of Appendix G's
-  are wrong at runtime and stay approved deviations. Of the 3,015, 2,498 are
-  wider than PHPStan's type and hold every value it holds; the 396 of them php
-  can evaluate outside their fixture were run in php 8.5 and PHPStan's value
-  held, and the other 2,102 need their fixture's context, so the commit adopting
-  each value runs it in php 8.5 first and keeps phpstan-rs's type where
-  PHPStan's is wrong. The other 517 are wrong at runtime, 220 missing a value
-  the call can return, 190 typing a call PHP rejects as returning and 107 giving
-  another PHP version's return, and the items below name every one of them,
-  fixed first.
-- The throw-type extensions `throws/dynamic.rs` lacks are added, each
-  throwing only for the arguments that can fail: `array_chunk()`/
-  `str_split()` with a length that may be below 1 (`ValueError`),
-  `array_combine()` of unequal sizes, `min()`/`max()` of one possibly
-  empty array, the printf family for a format that may be invalid or
-  short of arguments (`ValueError`, `ArgumentCountError`), `get_class()`
-  without an argument outside a class (`Error`) and of a non-object
-  (`TypeError`), `round()` with an invalid mode, `trigger_error()` with a
-  level other than `E_USER_*`, `unserialize()` with invalid options,
-  `version_compare()` with an unknown operator, `Ds\Map::get()`/
-  `remove()` without a default, `DateTime::modify()`,
-  `DateInterval::createFromDateString()` and the `ReflectionClassConstant`
-  constructor (PHPStan's `*ThrowTypeExtension`s). Without them a `catch`
-  around such a call can't be judged, so `catch.neverThrown` (D2's throw
-  points, E3f) misses them: the rules oracle's `printf-throw-type.php`
-  (20), `min-max-throw-type.php`, `round-throw-type.php`,
-  `get-class-throw-type.php`, `unserialize-throw-type.php`,
-  `str-split-throw-type.php`, `array-chunk-throw-type.php`,
-  `trigger-error-throw-type.php`, `ds-map-void-throw-type.php`,
-  `bug-9066.php` (about 50).
+  block, preg `$matches` out-types, GMP/BcMath operators, the built-in
+  narrowing predicates, the date/xml/DateInterval validators (as throw-type
+  extensions), regex/PCRE and the date parser. `builtins` is always
+  registered, the testing harness included.
+- Every return-type extension in Appendix G reaches the most precise type
+  that holds at runtime in the nsrt suite (3,015 mismatches over 93
+  extensions today). PHPStan's value is the candidate, not the target: ten
+  of Appendix G's are wrong at runtime and stay approved deviations. 2,498
+  are wider than PHPStan's type; 396 of them ran in php 8.5 and PHPStan's
+  value held, and the commit adopting each of the other 2,102 runs it in php
+  8.5 first. The other 517 are wrong at runtime (220 missing a value, 190
+  typing a call PHP rejects as returning, 107 another version's return),
+  named by the items below and fixed first.
+- The throw-type extensions `throws/dynamic.rs` lacks, each throwing only
+  for arguments that can fail (`array_chunk()`/`str_split()` lengths,
+  `array_combine()` sizes, `min()`/`max()` of an empty array, printf
+  formats, `get_class()`, `round()` modes, `trigger_error()` levels,
+  `unserialize()` options, `version_compare()` operators, `Ds\Map::get()`,
+  `DateTime::modify()`, …); without them `catch.neverThrown` misses about
+  50 rules-oracle findings.
 - Behaviour commits, each with its fixture, after the move. Wrong values
   first:
-  - `get_parent_class($this)` is `false` in a class with subclasses, so
-    `get_parent_class($this) === false` is `identical.alwaysTrue`; PHPStan
-    has `class-string<A>|false` (nsrt `bug-14951.php`), and on an
-    interface-typed object it is `false` too, so `if
-    (get_parent_class($object))` is `if.alwaysFalse` (the rules oracle's
-    `bug-4302.php`);
-  - `filter_var()` with a flags argument that isn't constant but may hold
-    `FILTER_NULL_ON_FAILURE` (`$strict ? FILTER_NULL_ON_FAILURE : 0`) returns
-    `bool|null`; it is `bool` today, so the `=== null` check is
-    `identical.alwaysFalse` (the rules oracle's `bug-11485.php`). An options
-    argument that isn't constant, and flags inside it that aren't, are read the
-    same way: `filter_var($m, FILTER_VALIDATE_INT, $options)` is `mixed` (a
-    `default` option can return anything), `['flags' => $nullFilter]` gives
-    `int|null` and a `FILTER_FORCE_ARRAY` flag an array, where each is the plain
-    filter's `int|false` today (35 nsrt mismatches, `filterVar.php` 32,
-    `filter-var.php` 3);
-  - `array_filter` keeps a shape's keys required: with a callback,
-    `array_filter([1, 2, 3], fn ($x) => $x > rand(0, 3))` is `array{0: 1, 1: 2,
-    2: 3}`, and without one `array{a: int}|array{b: string|null}` comes back
-    unchanged, where each key becomes optional and falsy values go; a narrowing
-    callback keeps what it rules out (`array_filter($data, isFoo(...))` over
-    `array{Foo|int, Foo|int}` keeps the `int`s), and an unsealed shape's key
-    stays required with its falsy values (16 nsrt mismatches: `bug-11730.php` 9,
-    `bug-6715.php` 2, `array-filter-constant.php`, `array-functions.php`,
-    `array-filter-string-callables.php`, `minmax.php`,
-    `unsealed-derivations.php`);
-  - `array_combine($keys, $values)` is keyed by the positions `0`, `1`, `2`
-    instead of the key array's values as PHP casts them: `array_combine(['a',
-    'b', 'c'], ['d', 'e', 'f'])` is `array{0: 'd', 1: 'e', 2: 'f'}` where PHP
-    gives `array{a: 'd', b: 'e', c: 'f'}`, and `[true, 'red', 1.5]` keys `1`,
-    `'red'` and `'1.5'` (29 nsrt mismatches: `array-combine-php8.php` 15,
-    `array-combine-php7.php` 8, `array-functions.php` 3, `bug-3351.php`,
-    `bug-14980.php`, `non-empty-array.php`);
-  - `array_intersect_key($a, [])` is `$a` instead of `array{}`, and so are
-    `array_intersect`, `array_intersect_assoc`, `array_intersect_uassoc`,
-    `array_intersect_ukey` and the `array_uintersect*` functions (nsrt
-    `array-functions.php`, `array-intersect-key-constant.php`); a key the other
-    array may lack stays required: `array_intersect_key(['a' => 1, 'b' => 2],
-    $a)` with `$a['b']` set on one path keeps `b: 2` where it is `b?: 2`
-    (`array-intersect-key-constant.php`, `unsealed-derivations.php`, 3);
-  - `array_map()` over several arrays is a `list`: `array_map(fn ($s,
-    $i) => …, $a, array_keys($a))` is `array` today (the rules oracle's
-    `bug-12223.php`); a spread argument passes its elements:
-    `array_replace(...$paths)` on `array<int, string> ...$paths` is
-    `array<array<int, string>>` today where it is `array<int, string>`
-    (`bug-7020.php`); `str_replace()` on a string subject is `string` (and
-    keeps `non-empty`/`non-falsy`), `string|array<string>` today
-    (`bug-8636.php`, `bug-12928.php`, `bug-13043.php`); `count($v) !== 3`
-    throwing leaves an `explode()` list an `array{string, string, string}`
-    (`bug-3499.php`);
-  - `array_reverse()` of a shape is the reversed shape: on `array{0:
-    string, 1?: string}` it is `array<string>` today (the rules oracle's
-    `bug-11549.php`); `array_sum()` of ints is `int`, not `int|float`
-    (`bug-9699.php`);
-  - a pattern built from parts is validated as `RegularExpressionPatternRule`
-    does: each constant alternative of the concatenation, with a
-    non-constant part standing in as `(?:.*)` (`'/' . preg_quote($s, '/')
-    . '}'` has no ending delimiter), and the empty pattern (`preg_replace('',
-    …)`) is invalid; only a whole constant pattern is checked today (the
-    rules oracle's 16 PHPStan-only `regexp.pattern`, `preg-quote.php`,
-    `valid-regex-pattern.php`, `null-coalesce.php:83`); `preg_quote()`'s
-    delimiter is checked the same way through named arguments
-    (`preg_split(subject: $s, pattern: '&' . preg_quote(delimiter: '/',
-    str: $s) …)`) and a delimiter taken from a prefix variable
-    (`argument.invalidPregQuote`, `preg-quote*.php`, 3);
-  - `json_decode()` of a constant string folds to its value
-    (`JsonThrowOnErrorDynamicReturnTypeExtension`): `json_decode('{"class":
-    "x"}')->class` is `property.nonObject` "on mixed" today (the rules
-    oracle's `bug-12273.php`);
-  - `E::from()`/`E::tryFrom()` of a constant resolve to its case or `null`
-    (`BackedEnumFromMethodDynamicReturnTypeExtension`): `Button::tryFrom(10)`
-    over the cases `0` and `1` is `Button|null` today, so `is_null($v =
-    Button::tryFrom(10))` isn't `function.alreadyNarrowedType` (the rules
-    oracle's `bug-12087*.php`, 4);
-  - the printf format parser follows PHP's: `%5%` and `%1$%` are a
-    literal `%`, `%ls` ignores the length modifier, `%'%5d` pads with
-    `%`, flags combine (`%-+5d`), and `*` takes a positional width or
-    precision (`%*2$d`, `%1$*2$d`, `%.*3$f`); each is `argument.sprintf`
-    "invalid placeholder" today (11 rules-oracle findings,
-    `printf-format-parser.php`, `printf-param-types-format-parser.php`);
-  - the scanf format parser follows PHP's: a NUL byte ends the format
-    (`"%d\0%d"` has one conversion), `%n` is a conversion and `l` a
-    modifier (`"%s%n"` takes two values, `"%ld %lf %s"` three); each is
-    `argument.sscanf` today, reported twice by two rules with different
-    messages ("contains 4 placeholders" and "contains 4 placeholder(s)"),
-    which become one (`bug-14567.php`, `printf.php`);
-  - `Closure::bind()`/`bindTo()` check the new `$this` against the
-    closure's `@param-closure-this` type (`Closure::bind($c, new self())`
-    for a `stdClass` closure-this is unreported today,
-    `closure-bind-param-closure-this.php`,
-    `closure-bind-to-param-closure-this.php`);
-  - `XMLReader::open()` is `XMLReader|false` called statically and `bool`
-    on an instance (`XMLReaderOpenReturnTypeExtension`); it is
-    `XMLReader|bool` today, so `->read()` after `!== false` is
-    `method.nonObject` "XMLReader|true" (the rules oracle's
-    `call-methods.php:1676`);
-  - `class_implements()`, `class_parents()` and `class_uses()` of an
-    object are `array`, without `false`, so a `foreach` over them isn't
-    `foreach.nonIterable` (`bug-4335.php`); `DateInterval::format('%a')`
-    is a numeric string, so `* 60` on it isn't `binaryOp.invalid`
-    (`bug-1452.php`); `BcMath\Number` supports `++`/`--`
-    (`inc-dec-bcmath-number.php`, four findings); `PDOStatement` is generic
-    through PHPStan's stub (`PDOStatement<int>` is `generics.notGeneric`
-    today, `missing-function-parameter-typehint.php`); a `SimpleXMLElement`
-    compares to scalars and takes `$xml->a[] = …` appends
-    (`invalid-comparison.php`, `bug-14054.php`);
-  - `Closure::bind()`/`bindTo()` of a closure literal is `Closure`, not
-    `Closure|null` (`ClosureBindDynamicReturnTypeExtension`; the rules
-    oracle's `bug-7675.php`);
-  - `count()` of a non-empty array is `int<1, max>`: after `$w[] = $v` it
-    is `int<0, max>` today (the rules oracle's `bug-8277.php`), and so it
-    is for a constant shape (`count($a) > 0` on `array{1}` is
-    `greater.alwaysTrue`, `strict-comparison.php:118`), a
-    `non-empty-array<int>` parameter or after `if ($a === [])
-    { return; }` (`bug-6260.php`, `bug-7578.php`, `bug-9104.php`);
-  - the hash functions return what they produce: `md5()` is
-    `lowercase-string&non-falsy-string` and `md5_file()` that or `false`,
-    `string` today (`hashing.php`); `(int)` of a decimal string past
-    `PHP_INT_MAX` folds to `PHP_INT_MAX` (`bug-4848.php`);
-  - `array_rand($a, $n)` is `int` instead of `int<0, max>|list<int<0, max>>` (a
-    list's keys; a list of them for a count other than 1), so `array_keys()` of
-    the result is `argument.type` (the rules oracle's `bug-9803.php`); with a
-    count that isn't known it leaves out the list: `array_rand([1 => 1, 2 =>
-    'b'], $mixed)` is `1|2` where it is `1|2|non-empty-list<1|2>` (nsrt
-    `array-functions.php`, 4);
-  - `array_map($cb, $l)` with a `callable(V): M` callback over `list<V>` is
-    `array` instead of `list<M>`, so `new self(array_map($callback,
-    $this->items))` into a `list<TValue>` parameter is `argument.type`
-    (the rules oracle's `bug-10732.php`), `array_filter($l, fn ($e) => $e
-    === '23423')` keeps `string` where the callback's narrowing gives
-    `'23423'` (`bug-8174.php`), and `array_map($cb, [])` is
-    `array` instead of `array{}` (`bug-14582.php`);
-  - `array_slice($nonEmptyList, 1)` is `non-empty-list` where a one-element list
-    slices to `[]`, and `array_slice($arr, 0, 0)` is `non-empty-array<string>`
-    where it is always `[]` (22 nsrt mismatches: `bug-10721.php` 17,
-    `array-slice.php` 5);
-  - `array_change_key_case()` ignores its mode: `CASE_UPPER` gives lowercase
-    keys (`array<lowercase-string, string>`, and `array{foo: 1, bar?: 2}` where
-    PHP gives `array{FOO: 1, BAR?: 2}`), a mode that isn't known assumes
-    `CASE_LOWER` where either case can come back, and a shape's keys and an
-    unsealed tail's key type keep their case: `array{Foo: int, ...<string,
-    float>}` with `CASE_LOWER` stays `Foo` where PHP gives `foo` (15 nsrt
-    mismatches: `array-change-key-case.php` 8, `unsealed-derivations.php` 7);
-  - `array_flip` of an unsealed shape ignores the tail: on `array{0: 1, 1: 2, 2:
-    3, ...<int, bool>}`, `array_flip($u)[1]` is `0` where the tail's `true`
-    values map to key `1`, and on `array{0: 'a'|'b', 1: 'c', ...<int, string>}`
-    the key `c` is `1` where a later `'c'` in the tail replaces it (nsrt
-    `array-flip.php`, `bug-14656.php`, `unsealed-derivations.php`);
-  - `array_key_last`, `array_pop` and `array_shift` on a possibly empty array
-    omit `null`: on `$c ? ['one', 'two'] : []` they give `0|1` and
-    `'one'|'two'`, and on an all-optional shape `array{a?: 0, b?: 1, c?: 2}`
-    `0|1|2` (nsrt `bug-14081.php`, `array-pop.php`, `array-shift.php`);
-  - `array_column($rows, null, 'key')` keys the whole rows by the column, where
-    it is typed as the column: `array<string>` for `array<int, array<string,
-    string>>`, where it is `array<int|string, array<string, string>>` (nsrt
-    `array-column.php`, `array-column-php82.php`);
-  - array keys built from values are cast as PHP casts them:
-    `array_fill_keys([true, false, 1.5, '999'], 'b')` has the keys `1`, `''`,
-    `'1.5'` and `999`, and `array_flip(['1', '2'])` the keys `1` and `2`, where
-    today the key type is the value type (`array<true, 'b'>`, `array<'1'|'2',
-    int>`); an object key is its `__toString()` (an `Error` without one), and an
-    unsealed shape's tail keeps its keys (`array_fill_keys()` of `array{0:
-    'a'|'b', 1: 'c', ...<int, string>}` drops them today; 18 nsrt mismatches:
-    `array-fill-keys.php` 13, `array-flip.php` 2, `bug-14980.php`,
-    `bug-14656.php`, `unsealed-derivations.php`);
-  - `array_merge()` is non-empty only when an argument is: of a possibly empty
-    `$arr2` and an `array`, or of an all-optional shape, it is `non-empty-array`
-    today (nsrt `array-merge-const-non-const.php` 4, `array-merge2.php`);
-  - `explode()` with a negative limit may return `[]` (`explode(',', 'a,b', -5)`
-    is `array{}`); it is `non-empty-list<string>` today (11 nsrt mismatches:
-    `bug-14651.php` 7, `explode.php` 3, `bug-3961-php8.php`);
-  - `get_defined_vars()` lists what can be defined: at file level any variable
-    can be (`array<string, mixed>`; `array{global: 'foo'}` today), a variable
-    assigned on one branch is an optional key (dropped today), and `$this` isn't
-    a key (it is today; nsrt `get-defined-vars.php`, 3);
-  - `preg_split()`'s flags decide its elements: `PREG_SPLIT_OFFSET_CAPTURE`,
-    constant or possibly set in a flags argument that isn't constant, makes each
-    an `array{string, int<0, max>}`; today every call is `list<string>|false`
-    (22 nsrt mismatches, `preg_split.php`);
-  - `rand()` takes its bounds in either order: `rand(5, 1)` is `int<1, 5>` and
-    `rand($i, 0)` `int<0, max>`, where today they are the empty `int<5, 1>` and
-    `int<0, 0>` (nsrt `rand-swapped-arguments.php`, 4);
-  - `array_search()` with `$strict` over an unsealed shape takes the key from
-    the entries whose value can be the needle: `array_search(true, $arr, true)`
-    on `array{a: int, b: string, ...<int, bool>}` is `string|false` today where
-    only a tail key, an `int`, can match (nsrt `unsealed-array-shapes.php`);
-  - `count()` of a `Countable` object is its `count()` method's return type:
-    `count(new Bar())` for a `count()` declared `@return -1` is `int<0, max>`
-    today (nsrt `countable.php`);
-  - `compact()` includes a variable that may be defined as an optional key, and
-    reads the names in an array's values (`compact(['foo' => 'bar'])` names
-    `$bar`); today both are dropped (nsrt `compact.php`, 2);
-  - `array_keys()` of an array that isn't otherwise known is `list<int|string>`
-    (non-empty once a key is known to exist); it is `array<(int|string),
-    int>|array<(int|string), string>` today (nsrt `bug-6859.php`);
-  - an unsealed shape's tail passes through `array_reverse`, `array_values`,
-    `array_keys`, `array_slice`, `array_chunk` and `array_replace`:
-    `array_values()` of `array{1, 2, ...<string>}` is `list<1|2>` today,
-    dropping the tail's values (nsrt `unsealed-derivations.php`, 6);
-  - a return that changed between PHP versions follows the analysed version
-    range (`PhpVersions`, narrowed by `PHP_VERSION_ID`): over a range it is the
-    union of each version's (under `^7.4 || ^8.0`, `bcdiv('10', '0')` returns
-    `null` or throws, so it is `null`), and a file or branch narrowed below 8
-    gets PHP 7's alone: the BcMath functions return `null` or `false` for a zero
-    divisor or a bad operand, `round()`, `ceil()` and `floor()` `false` for an
-    array, the hash functions `false` for an unknown algorithm, `substr()`
-    `false` past the end, the array functions `null` for a non-array,
-    `explode('')` `false`, and `count_chars()`, `get_class()`,
-    `version_compare()` and `trigger_error()` their PHP 7 results; before 8.4
-    `highlight_string()` returns `bool`. Today every call gets PHP 8.5's return
-    (107 nsrt mismatches in files run at 7.4 or 8.3 and in `PHP_VERSION_ID <
-    80000` branches: `bcmath-dynamic-return-php7.php` 32,
-    `hash-functions-74.php` 15, `round.php` 12, `count-chars-7.4.php` 8 and the
-    rest);
-  - `gettype()` of a `resource` is `'resource'|'resource (closed)'`, since a
-    resource may have been closed (D3's `is_resource()` soundness item is the
-    same fact); it is `'resource'` today (nsrt `gettype.php`, 2);
-  - `Throwable::getCode()` is `int`, but a `PDOException`'s code is a
-    string, so `is_string($t->getCode())` reads as always false;
-    `ThrowableReturnTypeExtension` gives `int|string` (benevolent) unless
-    the class narrows it. `Exception::getCode()` is `mixed` today (nsrt
-    `bug-6001.php`);
-  - `trigger_error('…', E_USER_ERROR)` is `true` where it ends the script
-    (`never`), so the code after it is reachable (the rules oracle's
-    `bug-7799.php`); before PHP 8.0 a level
-    other than `E_USER_*` returns `false` (nsrt `trigger-error-php8.php`,
-    `trigger-error-php7.php`);
-  - `strtr()` of literals folds to the result, and of a non-empty string
-    with a pair array is non-empty: `strtr('change {me}', ['{me}' =>
-    'me'])` is `string` today, so passing it to a `non-empty-string`
-    parameter is `argument.type` (the rules oracle's `bug-13708.php`);
-  - `strtolower`, `strtoupper`, `ucfirst` and the other case functions fold
-    each member of a constant-string union: `strtolower($u)` on `'A'|'B'`
-    is `non-falsy-lowercase-string` today where it is `'a'|'b'`, so passing
-    `strtolower($key)` to an `'enabled'|'disabled'` parameter is
-    `argument.type` (the rules oracle's `bug-6987.php`, with the foreach
-    key above);
-  - `mb_strtolower`, `mb_strtoupper` and `mb_convert_case` fold only ASCII in a
-    literal: `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` and `mb_convert_case('Česká
-    republika', MB_CASE_UPPER)` is `'ČESKá REPUBLIKA'`; with a mode that isn't
-    known (`mb_convert_case($s, $mixed)`) the literal comes back unchanged where
-    any case can, and with another encoding (`mb_strtolower($s, 'CP1252')`) the
-    bytes are folded as UTF-8 (nsrt `str-casing.php`, 7);
-  - a call PHP 8 rejects returns `*NEVER*`, so the code after it is unreachable;
-    today each returns its ordinary type. Checked one by one against php 8.5,
-    the 190 in Appendix G throw a `TypeError`, `ValueError`,
-    `DivisionByZeroError` or `Error`: an array function given a non-array
-    (`array_flip`, `array_keys`, `array_values`, `array_reverse`,
-    `array_search`, `array_intersect_key`, `array_fill_keys`) or an invalid
-    callback (`array_filter($a, '')`); `array_combine()` of unequal sizes,
-    `array_chunk()` with a length below 1, `array_fill()` past `PHP_INT_MAX` and
-    `range()` past the largest array; the BcMath functions with a zero divisor
-    or modulus, a non-numeric operand or a negative root (`bcdiv('10', '0')`,
-    `bcpowmod('10', '-2', '1')`, `bcsqrt('-10')`); `explode('')`;
-    `filter_input()` of an invalid input type; `get_class()` without an argument
-    outside a class; the hash functions with an unknown or non-cryptographic
-    algorithm (`hash_hmac('crc32', …)`); `iterator_to_array()` of a generator
-    yielding array keys; `mb_strlen()` and `mb_substitute_character()` with an
-    invalid encoding or character, and `mb_convert_kana()` with an invalid mode;
-    `mt_rand()` and `random_int()` with `$min > $max` (`random_int(10, 1)` is
-    the empty `int<10, 1>` today); under `strict_types`, `abs()`, `mb_strlen()`,
-    `round()`, `ceil()` and `floor()` of a value of the wrong type
-    (`abs('123')`, where PHPStan has `123` too); `str_increment()` and
-    `str_decrement()` of an empty or non-alphanumeric string; `str_repeat()`
-    with a negative count (`''` today); `trigger_error()` with a level other
-    than `E_USER_*`; `version_compare()` with an unknown operator; `count()` of
-    an object that isn't `Countable`; `pow()` of an object or array operand;
-    `preg_split()` with a non-integer limit or flags; and `strval()`,
-    `intval()`, `floatval()` and `boolval()` without an argument or of an object
-    without `__toString()` (`round-php8-strict-types.php` 30,
-    `bcmath-dynamic-return-php8.php` 27, `round-php8.php` 15,
-    `hash-functions-80.php` 11, `mb_substitute_character-php8.php` 9,
-    `mb-strlen-php83.php` 8, `str_decrement.php` 8, `abs.php` 7 and the rest);
-  - the built-in narrowing predicates follow the 2.2.16
-    `*TypeSpecifyingExtension`s; compared one by one, these leave the type
-    wider today: `array_key_exists($k, $a)` doesn't narrow `$k` to the key
-    type nor a `mixed` `$a` to an array (so a second `array_key_exists($b,
-    $o)` is `argument.type`, the rules oracle's `bug-14312.php`; with the
-    folds on constant arrays, the optional key made required and the key
-    removed in the else, Appendix H's `key-exists-fold` is 153 nsrt
-    mismatches in 29 files, `key-exists.php` and `array-key-exists.php`
-    the most),
-    `ctype_digit($s)` doesn't give `numeric-string`, `function_exists($s)`
-    doesn't give `callable-string`, `class_exists($c)` and
-    `is_subclass_of($c, A::class)` on a string don't give
-    `class-string`/`class-string<A>`, `array_search($v, $a, true) !== false`
-    doesn't make `$a` non-empty, and `ReflectionClass::isSubclassOf(A::class)`
-    leaves `ReflectionClass<A|object>`. `count($a)` compared by `===`, `==`
-    or `!==` doesn't make `$a` non-empty (`count($a) === 1`, `!== 0`, and
-    `match (count($a))`'s arms; `>` and `>=` already do), so `reset($a)` in
-    the `1` arm is `string|false` (the rules oracle's `bug-10974.php`).
-    `in_array()` narrows through an enum-case haystack (`in_array($x,
-    [Suit::S], true)` returning leaves `Suit`, `bug-7176.php`) and, loose,
-    an integer subject over an integer haystack (after `if
-    (!in_array($foo, [0, 1, 2])) { exit(); }` on `int<0, 100>`, `$foo` is
-    `0|1|2`, `bug-9436.php`), and a true `in_array()` makes the haystack
-    non-empty and a false one removes the needle from it (Appendix H's
-    `in-array-haystack`, 65 nsrt mismatches: `bug-9662.php`,
-    `bug-9662-enums.php`, `enum-in-array.php`, `bug-3013.php`). A strict
-    `in_array()` intersects the subject
-    with the haystack's value type instead of replacing it: on `int $i`
-    against `array<string>` the true branch is `string` today where it is
-    `*NEVER*`, and `$i` is `string|int` after an empty `if`. `count()` and
-    `strlen()` of a union of
-    constant shapes or strings are the union of their lengths (`count($r)`
-    on `array{'a'}|array{'a', 'b'}` is `1|2`, `int<0, max>` today,
-    `bug-12790.php`; `strlen('ab')` is `2`, `bug-7555.php`).
-    `is_numeric()` drops non-numeric constant strings: on `1|'a'` it keeps
-    `1|'a'` today (the rules oracle's `bug-2550.php`).
-    `is_callable([$this, 'm'])` guards `$this->m()` as `method_exists($this,
-    'm')` does, and both guard a ternary's true branch and a first-class
-    callable (`method_exists($this, 'm') ? $this->m(...) : null`); each is
-    `method.notFound` today (the rules oracle's `bug-13596.php`);
-    `defined('Foo::TEST')` and `defined('static::FIELDS')` guard the class
-    constant (`classConstant.notFound` under them today,
-    `class-const-fetch-defined.php`, `bug-8034.php`);
-    `property_exists(static::class, 'd')` guards `static::$d` and
-    `method_exists(static::class, 'm')` or `method_exists(X::class, 'm')`
-    a static call (each is `staticProperty.notFound`/
-    `staticMethod.notFound` today, `bug-2861.php`, `bug-1267.php`,
-    `static-has-method.php`).
-    `is_callable()` keeps a non-final class as `Class&callable(): mixed`:
-    on `Route|callable(): Route` it leaves `callable(): Route` today (the
-    rules oracle's `bug-5333.php`); on an array it gives `callable-array`,
-    a two-element list with `0|1` keys, `class-string|object` at `[0]`
-    and `non-falsy-string` at `[1]`, which a `callable-array` parameter
-    reads as too (`bug-14549.php`). `is_a($s, A::class, true)` on a
-    string narrows to `class-string<A>`: today it gives the object `A`,
-    a wrong value (on `class-string<Bar>` against `Foo` it gives `Foo`;
-    `is-a.php`, `bug-6404.php`). On an object with a `class-string<A>`
-    variable it gives `A` (`object` today), with a plain string
-    `class-string`, and between class-strings that can't relate it is
-    `false` (`bug-4371.php`); `!is_a($a, B::class, true)` removes
-    `class-string<B>` from a union (`bug-6704.php`). An `is_a` on an
-    unknown class, repeated, isn't deduplicated: `$b` shows as
-    `Bar|Bar|Bar|Bar|Bar|Bar&Foo&Foo&Foo&Foo&Foo&Foo` (`is-a.php:38`, B4).
-    `str_contains`, `str_starts_with` and `str_ends_with` with a
-    non-empty needle make the haystack non-empty, and non-falsy when the
-    needle is non-falsy, keeping its numeric and case accessories; today
-    they leave `string` (29 mismatches,
-    `non-empty-string-str-containing-fns.php`).
-    `is_real` is `is_float`'s alias, `is_array` on `mixed` prints
-    `array<mixed, mixed>` and `is_callable` `callable(): mixed`
-    (`specifiedTypesUsingIsFunctions.php`, 24). `defined`/`define` and
-    the rest of the `is_*` family already match.
+  - `get_parent_class($this)` is `false` in a class with subclasses
+    (`identical.alwaysTrue` today) and on an interface-typed object;
+  - `filter_var()` reads flags and options that aren't constant: `$strict ?
+    FILTER_NULL_ON_FAILURE : 0` gives `bool|null` (`bool` today), a
+    non-constant options array `mixed`, `FILTER_FORCE_ARRAY` an array (35
+    nsrt);
+  - `array_filter` makes a shape's keys optional and removes falsy values,
+    a narrowing callback removes what it rules out (`isFoo(...)` over
+    `array{Foo|int, Foo|int}` keeps the `int`s today; 16 nsrt);
+  - `array_combine($keys, $values)` is keyed by the key array's values as
+    PHP casts them, not by positions (`array_combine(['a', 'b'], …)` is
+    `array{0: …, 1: …}` today; 29 nsrt);
+  - `array_intersect_key($a, [])` and the other intersect functions with
+    `[]` are `array{}`, and a key the other array may lack becomes optional;
+  - `array_map()` over several arrays is a list; a spread argument passes
+    its elements (`array_replace(...$paths)`); `str_replace()` on a string is
+    `string`; `array_reverse()` of a shape reverses it; `array_sum()` of
+    ints is `int`;
+  - a regex built from parts is validated per constant alternative, and
+    `preg_quote()`'s delimiter checked through named arguments (19
+    rules-oracle findings);
+  - `json_decode()` of a constant string and `E::from()`/`tryFrom()` of a
+    constant fold to their values;
+  - the printf and scanf format parsers follow PHP's (`%5%`, `%'%5d`,
+    `%*2$d`; NUL ends a scanf format), and the doubled scanf report becomes
+    one (11 rules-oracle findings);
+  - `Closure::bind()` checks `@param-closure-this` and returns `Closure`
+    for a literal; `XMLReader::open()` is `XMLReader|false` statically and
+    `bool` on an instance;
+  - `class_implements()` of an object has no `false`;
+    `DateInterval::format('%a')` is numeric; `BcMath\Number` supports
+    `++`/`--`; `PDOStatement` is generic; `SimpleXMLElement` compares with
+    scalars and takes appends;
+  - `count()` of a non-empty array is `int<1, max>` (after `$w[] = $v` too);
+    the hash functions return lowercase non-falsy strings; `(int)` of a
+    string past `PHP_INT_MAX` is `PHP_INT_MAX`;
+  - `array_rand($a, $n)` is `int<0, max>|list<…>`, the list kept for a count
+    that isn't known;
+  - `array_map($cb, $l)` with `callable(V): M` over `list<V>` is `list<M>`,
+    `array_filter` keeps its callback's narrowing, and `array_map($cb, [])`
+    is `array{}`;
+  - `array_slice()` may be empty (`array_slice($arr, 0, 0)` is
+    `non-empty-array` today; 22 nsrt);
+  - `array_change_key_case()` follows its mode (`CASE_UPPER` gives
+    lowercase keys today) and changes shape keys and tails (15 nsrt);
+  - `array_flip`, `array_search`, `array_fill_keys` and `array_reverse`,
+    `array_values`, `array_keys`, `array_slice`, `array_chunk` and
+    `array_replace` keep an unsealed shape's tail (the tail's values are
+    dropped today);
+  - `array_key_last`, `array_pop` and `array_shift` on a possibly empty or
+    all-optional array include `null`;
+  - `array_column($rows, null, 'key')` keys whole rows, typed as the column
+    today;
+  - keys built from values are cast as PHP casts them
+    (`array_fill_keys([true, 1.5, '999'], …)` has `1`, `'1.5'`, `999`; an
+    object key is its `__toString()`; 18 nsrt);
+  - `array_merge()` is non-empty only when an argument is;
+  - `explode()` with a negative limit may return `[]` (11 nsrt);
+  - `get_defined_vars()` lists what can be defined (anything at file level,
+    optional keys for one-branch variables, no `this`);
+  - `preg_split()`'s `PREG_SPLIT_OFFSET_CAPTURE` makes each element an
+    `array{string, int<0, max>}` (22 nsrt);
+  - `rand()` takes its bounds in either order (`rand(5, 1)` is the empty
+    `int<5, 1>` today);
+  - `count()` of a `Countable` is its method's return; `compact()` keeps
+    maybe-defined variables and reads names from array values;
+    `array_keys()` of an unknown array is `list<int|string>`;
+  - a return that changed between PHP versions follows the analysed range
+    (the union over a range; PHP 7's `null`/`false` returns in a file or
+    branch narrowed below 8: BcMath, `round()`, hash, `substr()`,
+    `explode('')`, `highlight_string()` before 8.4; 107 nsrt);
+  - `gettype()` of a `resource` includes `'resource (closed)'`;
+    `Throwable::getCode()` is benevolent `int|string`;
+  - `trigger_error('…', E_USER_ERROR)` is `never`;
+  - `strtr()` of literals folds; the case functions fold each member of a
+    constant-string union; `mb_*` case functions fold only ASCII, keep the
+    literal for an unknown mode and don't fold another encoding as UTF-8;
+  - a call PHP 8 rejects returns `*NEVER*`, so the code after it is
+    unreachable: the 190 in Appendix G, each checked in php 8.5 (array
+    functions given non-arrays, `array_fill()` past `PHP_INT_MAX`, BcMath
+    by zero, `explode('')`, invalid hash algorithms, `random_int(10, 1)`,
+    wrong types under `strict_types`, invalid `str_increment()` input,
+    `str_repeat()` with a negative count, …);
+  - the narrowing predicates follow 2.2.16's `*TypeSpecifyingExtension`s:
+    `array_key_exists()` narrows the key and a `mixed` array (Appendix H's
+    `key-exists-fold`, 153); `ctype_digit()`, `function_exists()`,
+    `class_exists()`, `is_subclass_of()` give their string kinds;
+    `array_search() !== false` and `count($a) === 1` make the array
+    non-empty; `in_array()` narrows through enum and integer haystacks and
+    narrows the haystack (`in-array-haystack`, 65), intersecting a strict
+    subject; `count()`/`strlen()` of a union of constants are unions;
+    `is_numeric()` drops non-numeric literals; `is_callable([$this, 'm'])`,
+    `defined('Foo::X')`, `property_exists(static::class, …)` and
+    `method_exists(static::class, …)` guard their members; `is_callable()`
+    keeps `Class&callable` and gives `callable-array`; `is_a($s, A::class,
+    true)` on a string is `class-string<A>` (the object `A` today, a wrong
+    value); `str_contains()` and friends make the haystack non-empty (29
+    nsrt).
 
-  Then the rest, by each function's count in Appendix G (the wrong ones among
-  them are the items above): `filter_var`, `filter_var_array` and `filter_input`
-  (290, 194 of them `mixed`), `min`/`max` (217, 198 `mixed`), `array_column`
-  (211), `sprintf`/`vsprintf` (135), the BcMath functions (134), `count` (114)
-  and `array_slice` (101); beside Appendix G, `settype`'s narrowing
-  (`set-type-type-specifying.php`, 156), the preg `$matches` shapes
-  (`preg_match_shapes.php`, 204, and the 155 variable mismatches of Appendix H's
-  `preg-shapes` in 24 more files: `preg_match_all`, the `/n` flag, group 0
-  non-falsy when the pattern has literals, `> 0` and `=== 1` making groups
-  required) and the `BcMath\Number` operators (170 more in the `bcmath-*.php`
-  files, Appendix J's `bcmath-*` causes). Appendix H's `ext:` entries are the
-  variables these extensions' values flow into, 621 mismatches beyond the
-  calls themselves. Three have no counterpart in phpstan-rs today
-  (`ext:PgDml`, `ext:Randomizer`, `ext:FilterInputArray`), and
-  `getAttributes()` substitutes its template but returns an array, not a
-  list (`ext:ReflectionGetAttributes`).
+  Then the rest, by each function's count in Appendix G: `filter_var` and
+  friends (290, 194 `mixed`), `min`/`max` (217, 198 `mixed`),
+  `array_column` (211), `sprintf`/`vsprintf` (135), BcMath (134), `count`
+  (114), `array_slice` (101); beside Appendix G, `settype`'s narrowing (156),
+  the preg `$matches` shapes (`preg_match_shapes.php` 204, Appendix H's
+  `preg-shapes` 155) and the `BcMath\Number` operators (170, Appendix J's
+  `bcmath-*`). Appendix H's `ext:` entries are the values these extensions
+  flow into (621); `ext:PgDml`, `ext:Randomizer` and `ext:FilterInputArray`
+  have no counterpart yet, and `getAttributes()` returns an array, not a
+  list.
 
 Gate: the analyser's built-in-name allowlist.
 
@@ -2733,1270 +2347,359 @@ Gate: the analyser's built-in-name allowlist.
 
 The prologue, one commit each, before any rule moves:
 
-- `RuleLevelHelper::find_type_to_check` (PHPStan's `findTypeToCheck`): a
-  rule asks it for the operand type to check and gets PHPStan's
-  `FoundTypeResult` (the type with the level's mixed, union and nullable
-  handling applied, plus the unknown-class errors). Today
-  `RuleLevelHelper` only carries the three settings into
-  `types::Relation`, and each rule decides for itself whether a `mixed`
-  operand is reportable. The implicit `mixed` inside a type counts too:
-  at level 10 a plain `array` (or `array<mixed>` from untyped data)
-  passed to `array<string>`, `array<literal-string>` or a shape is
-  `argument.type`, unreported today (`bug-14234.php`, `bug-6443.php`,
-  `vprintf.php`, `discussion-7004.php`, `literal-string.php`,
-  `bug-14549-bis.php`, `call-methods.php:1332`, `invalid-binary.php:127`
-  among the rules oracle's PHPStan-only `argument.type`), and so is an
-  explicit one: `array<int, mixed>` returned under `@return array<int,
-  string>` is `return.type`, unreported today (`bug-8166.php`,
-  `bug-10349.php`, `bug-5218.php`, `compact-variables.php`,
-  `pure-unless-callable-is-impure.php`, `bug-9377.php`, `bug-11386.php`,
-  `bug-5065.php`, `invalid-lexical-variables-in-closure-use.php`);
+- `RuleLevelHelper::find_type_to_check` (PHPStan's `findTypeToCheck`): a rule
+  asks it for the operand type and gets `FoundTypeResult` (the level's
+  mixed, union and nullable handling applied, plus unknown-class errors),
+  where each rule decides for itself today. The implicit `mixed` inside a
+  type counts: at level 10 a plain `array` passed to `array<string>` is
+  `argument.type`, and `array<int, mixed>` returned under `@return
+  array<int, string>` is `return.type`, both unreported today;
 - `RuleLevelHelper::accepts` takes the level-dependent acceptance out of
-  `types::Relation::accepts` (`configured_level`, `strict_mixed_arrays`
-  and `check_benevolent_union_types` leave `types::Relation`);
-- the rule → level table (§3.9), cross-checked against the level neon files,
-  each rule registered at its level, and the level filter in the dispatcher:
-  rules above the level never run. It replaces the CLI's
-  `apply_level_filter` (`MAX_LEVEL = 6`) and the LSP's separate cutoff (§1's
-  level row). It starts from these divergences, measured by
-  running the same probes through PHPStan 2.2.16 and phpstan-rs at every level
-  (first level reporting, PHPStan / phpstan-rs): `isset.variable` and
-  `nullCoalesce.variable` 1 / 0; a maybe-defined or top-level undefined variable
-  1 / 0; `method.notFound` on a receiver other than `$this` 2 / 0; a method or
-  property reached only through `__call`/`__get` 2 / never; a union argument
-  7 / 5 and a union return 7 / 3 (the `.all()` arm in
-  `types::Relation::accepts` below level 7); a maybe-non-offset-accessible
-  7 / 3; a maybe-missing constant-array offset 7 / never; a PHPDoc-only child
-  parameter type conflict 3 / never; `@var array` without a value type
-  6 / never. The approved deltas are these rows.
-- the rest of the diagnostic model (§3.7): AST-node fixes beside text
-  fixes, rendered to diffs through `syntax::printer`, which gains
-  statements and declarations, keeps the surrounding formatting
-  (php-parser's format-preserving printer) and parenthesizes a generated
-  node by precedence (it prints expressions only, as written, and a
-  closure without its body); `accepts` reasons, `Relation::accepts`
-  filling `AcceptsResult.reasons` for the argument, return and property
-  rules to show as tips; PHPStan's standard tip helpers (§3.7:
-  discovering symbols, `treatPhpDocTypesAsCertain`, and the rest);
-  messages name a namespaced function by its namespaced name, as they
-  already name methods: 576 of the rules oracle's phpstan-rs rows print
-  `Function as_array2()` for `Bug13247\as_array2()` (`missingType.*` 522,
-  `return.unusedType` 18, `throws.*` 15, the purity rules 4); an integer
-  shape offset prints as `2`, not `'2'` ("Offset '2' on array{0: string,
-  …} in isset() always exists" today).
+  `types::Relation::accepts`;
+- the rule → level table (§3.9), cross-checked against the level neon
+  files, with the level filter in the dispatcher (rules above the level
+  never run), replacing the CLI's `MAX_LEVEL = 6` filter and the LSP's
+  cutoff. Its approved deltas are the measured divergences (first reporting
+  level, PHPStan / phpstan-rs): `isset.variable`/`nullCoalesce.variable`
+  1/0; maybe-defined or top-level undefined variables 1/0;
+  `method.notFound` off `$this` 2/0; members only through `__call`/`__get`
+  2/never; union arguments 7/5 and returns 7/3; maybe-non-offset-accessible
+  7/3; maybe-missing constant-array offsets 7/never; PHPDoc-only child
+  parameter conflicts 3/never; `@var array` without a value type 6/never;
+- the rest of the diagnostic model (§3.7): AST-node fixes rendered through
+  a format-preserving `syntax::printer` that parenthesizes by precedence;
+  `accepts` reasons as tips; PHPStan's standard tip helpers; messages
+  naming a namespaced function by its namespaced name (576 rules-oracle rows
+  print `as_array2()` for `Bug13247\as_array2()`); an integer shape offset
+  printed as `2`, not `'2'`.
 
 Then the sub-phases, grouped by derived node, each listing its Appendix A
 rows, and each rule's behaviour commits after its move, each with its
 fixture:
 
-- (a) per-file and per-body rules: `keywords` (`break`/`continue` levels, `goto`
-  and labels, `declare` directives: `goto.*`, `label.*`, `declare.*`,
-  `declareStrictTypes.*`), checking every body, property hooks included, where
-  today a hook's `break`/`continue` outside a loop (`break.outOfLoop`,
-  `continue.outOfLoop`, `continue-break-property-hook.php`, 3) and its `goto` to
-  an undefined label (`goto.labelUndefined`) go unreported; `whitespace`
-  (`whitespace.bom`, `whitespace.fileStart`, `whitespace.fileEnd`); and
-  `RequireFileExistsRule` (`includes.rs`), whose lookups go through the
-  session's VFS instead of `Path::is_file`, so a file the editor holds unsaved,
-  or has deleted, counts as the editor has it.
-- (b) expression-level:
-  - every operand check goes through `find_type_to_check`, so at level 10
-    an implicit `mixed` is reported everywhere PHPStan reports it. The
-    corpus oracle's misses, by identifier: `binaryOp.invalid` (652, `.`
-    and `+` on `mixed`), `assignOp.invalid` (223), a `mixed` array key or
-    offset (`offsetAccess.invalidOffset` 954 and `array.invalidKey` 223
-    "Possibly invalid array key type mixed"), `encapsedStringPart.nonString`
-    (356), `foreach.nonIterable` (284), `echo.nonString` (39),
-    `cast.string`/`cast.int` (135), `++`/`--` on `mixed` (55) and
-    `callable.nonCallable` (30);
+- **(a) per-file and per-body rules**: `keywords` (`break`/`continue`
+  levels, `goto` and labels, `declare`), checking every body, property
+  hooks included (a hook's `break` outside a loop and `goto` to a missing
+  label are unreported today); `whitespace` (BOM, leading and trailing
+  output); `RequireFileExistsRule` looking files up through the session's
+  VFS instead of `Path::is_file`.
+- **(b) expression-level**:
+  - every operand check goes through `find_type_to_check`, so level 10
+    reports an implicit `mixed` everywhere PHPStan does (corpus misses:
+    `offsetAccess.invalidOffset` 954, `binaryOp.invalid` 652,
+    `encapsedStringPart.nonString` 356, `foreach.nonIterable` 284,
+    `assignOp.invalid` 223, `array.invalidKey` 223, casts 135, …);
   - the same helper reports an operand with one invalid member ("Possibly
-    invalid", "might not be", at the level `checkUnionTypes` and
-    `checkNullables` set), where today only a wholly invalid operand is:
+    invalid", "might not be", per `checkUnionTypes`/`checkNullables`):
     `echo $a?->foo` on `Foo|null`, `foreach` over `array<int>|null`,
-    `(string)` of `stdClass|null`, `object|string` or a plain `object`,
-    `clone` of `Foo|null` or `mixed` (`clone.nonObject`,
-    `variable-cloning*.php`, 3),
-    `[$a] = $arrayOrNull`,
-    `...$integersOrNull` (`argument.unpackNonIterable`,
-    `arrayUnpacking.nonIterable`), destructuring an `int|list<int>` `foreach`
-    value
-    or a nested `stdClass` (`[[$a]] = [new \stdClass()]`, also definite),
-    `new stdClass instanceof $class` (`instanceof.invalidExprType`) with
-    `string|null`, `$ob < $n` and `$ob == $n` for `stdClass` and `float|null`
-    (`smaller.invalid`, `equal.invalid`), `$string()`
-    and `$o(...)` for a `string` or `object` that may not be callable, an
-    array key of `int|null`, `string|null` or `int|object`, and `.` on
-    `array<string>|string` (with the `mixed` rows above, these are the rules
-    oracle's PHPStan-only `echo.nonString` 375, `binaryOp.invalid` 93,
-    `assignOp.invalid` 77, `offsetAccess.invalidOffset` 79,
-    `foreach.nonIterable` 27, `callable.nonCallable` 25, `cast.*` 42
-    (`cast.string`, `cast.int`, `cast.double`),
-    `unaryOp.invalid` 18, `offsetAccess.nonArray` 16 and smaller rows,
-    `print.nonString` 8 among them, `print` of a closure included);
-    an `object` operand of `+`, `-` or `%` is invalid too (`+$o`, `$o % 3`);
-  - `++`/`--` on `bool`, `null`, a `resource` or a non-numeric string is
-    `postInc.type`/`preDec.type` and the rest (PHP leaves `true` and `false`
-    unchanged, `null` for `--` and a non-numeric string for `--` (`$s = 'a';
-    $s--;`), and throws for a resource), unreported today
-    (`invalid-inc-dec.php`, `inc-non-numeric-string.php`,
-    `dec-non-numeric-string.php`); `[]` for reading inside `isset()`,
-    `empty()` and `??` is `offsetAccess.noDim`, a compile error, unreported
-    today (`offset-access-without-dim-for-reading.php`);
-  - an offset or array key of an invalid type is reported for every
-    type: `$a[$o]` and `$a[$o] = 1` with an object offset and `[$o => 1]`
-    throw a `TypeError` and aren't reported today (an `array` offset and,
-    with a PHP version known, a `float` one already are);
-  - `offsetAccess.notFound` covers every container and offset. A
-    maybe-missing offset (an optional shape key, a union of keys some of
-    which are missing, a nullable offset) is "might not exist" at level
-    7, never reported today (the level table's row). Definite misses
-    beyond a constant shape are unreported today too: a key type disjoint
-    from the array's (`$ss[$int]` on `array<string, string>`, `'b'` on
-    `array<'a', string>`), `null['t']`, a constant string's non-integer
-    offset (`'foo'['foo']`, `'foo'[12.34]`), `'foo'` on an
-    `ArrayAccess<int, …>`, a `foreach` value's destructuring key
-    (`foreach ($rows as ['b' => $v])` over `list<array{a: 0}>`,
-    `bug-8075.php`, 5), and a destructuring past a folded `explode()`
-    (`[$x, $y] = explode(':::', 'a')`, `bug-15013.php`); these are the
-    rules oracle's 47 PHPStan-only;
-  - arithmetic with a `string` operand that isn't `numeric-string` is
-    `binaryOp.invalid` (PHP 8 throws a `TypeError` for a non-numeric
-    string): `$s / 2`, `$s * 2`, `2 / $s` on `string $s` are unreported
-    today (B4's `ErrorType` gives the result);
-  - a non-numeric string offset on a string throws a `TypeError`:
-    `$s['x']` on a `string` isn't reported today, nor `$d['priority']` on
-    `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
-  - the class-access checks cover every receiver and target, each a
-    runtime `Error` unreported today: `$i::X` and `$i::$y` on an `int`,
-    and possibly on `stdClass|null`, `string|null` or `int|string`
-    (`$stdOrNull::class`, `$stringOrInt::FOO`; `classConstant.nonObject`,
-    `staticProperty.nonObject`, 7 each), `T::C` on a
-    trait (`classConstant.onTrait`), and a static property read through
-    `->` (`$p->st`, `staticProperty.nonStaticAccess`, the rules oracle's
-    7); `$m instanceof T` with a trait is always false (`instanceof.trait`);
-    an instance property read statically (`F::$bar`, `static::$bar`,
-    `\stdClass::$foo = …`) is `property.staticAccess` "Static access to
-    instance property", `staticProperty.notFound` today (the rules
-    oracle's 16);
-  - the constant-operand checks of `&&`, `||`, `and`, `or`, `xor` and
-    `?:` fire on each side and on the result (`$b && true` isn't
-    `booleanAnd.rightAlwaysTrue` today): the rules oracle has 164
-    `boolean{And,Or}.*`/`logical{And,Or,Xor}.*` findings and 17
-    `ternary.always{True,False}`, of which phpstan-rs matches 2 and 0, and
-    the corpus oracle 21 `booleanAnd.leftAlwaysTrue` and 23
-    `booleanOr.alwaysFalse` phpstan-rs misses (D3's type-check folding
-    feeds them); and a condition is decided by its
-    truthiness, not only by a `true` type: `if ($std)` on an object, `if
-    (retObj())`, `if ($arr)` after `$arr = [1]`, `if ($one or $i)` on `1`,
-    `if (1 xor 0)` and `if (function_exists('strlen'))` are
-    `if.alwaysTrue` (and in an `elseif` or `while`: `elseif.alwaysTrue`,
-    `while.alwaysTrue`, `while.alwaysFalse`), `!$std` on an object is
-    `booleanNot.alwaysFalse`
-    (in `if`, `elseif` and `?:`; `boolean-not*.php`, `ternary.php`,
-    `elseif-condition.php`), and `!$b` after `if ($b) { return; }` is
-    `booleanNot.alwaysTrue`, and on the falsy side `if ($zero)`, `if ($i
-    and $zero)`, `if ($a xor $b)` on two objects and `if
-    ($this->returnsVoid())` are `if.alwaysFalse` (13), `elseif ($zero)`
-    `elseif.alwaysFalse` (9) and `!$zero` `booleanNot.alwaysTrue` (8), all
-    unreported today (the rules oracle's 37
-    PHPStan-only `if.alwaysTrue`: `if-condition.php`,
-    `if-condition-not-phpdoc.php`, `boolean-logical-*.php`,
-    `logical-xor.php`, `foreach.php`, `bug-6211.php`, `bug-8980.php`);
-  - `instanceof` is reported on a subject already `*NEVER*` (a union an
-    `elseif` chain exhausted: `if ($u instanceof Foo) {} elseif ($u
-    instanceof Bar) {} elseif ($u instanceof Lorem)` on `Foo|Bar`; 12 of
-    the rules oracle's 37 PHPStan-only `instanceof.alwaysFalse`,
-    `impossible-instanceof.php`, `boolean-*.php`, `elseif-condition.php`,
-    `if-condition.php`), and a `callable` is never an instance of a final
-    class without `__invoke()`; both unreported today; where the `if` was
-    `$x instanceof Lorem && $x instanceof Ipsum`, the `elseif`'s `$x
-    instanceof Lorem` is reported `instanceof.alwaysTrue` on
-    `Lorem&Ipsum` today, a wrong verdict (`boolean-and.php:66`,
-    `boolean-logical-and.php:66`, `if-condition.php:61`);
-  - `unset()` of an undefined variable
-    (`unset.variable`), `unset()` of an offset on a non-array
-    (`unset.offset`), and a statement with no effect for `new class {};`
-    (`expr.resultUnused`) are unreported today;
-  - a call to a method declared `@phpstan-impure`, abstract or on an
-    interface has effects: `$x->impureFunc();`, `X::impureFunc();`,
-    `self::fooStaticMethod();`
-    of an interface and `$foo::doFoo();` are `staticMethod.resultUnused`
-    today (8 rules-oracle findings,
-    `call-to-static-method-without-impure-points.php`,
-    `call-interface-methods.php`, `call-static-methods.php`),
-    and an interface or abstract method marked `@phpstan-impure` is not
-    `impureMethod.pure` (it has no body to judge; 7 findings,
-    `bug-5984.php`, `bug-6702.php`, `strict-comparison.php`);
-  - a `match` statement that may throw `UnhandledMatchError` has an effect
-    and isn't `expr.resultUnused` (`last-match-arm-always-true.php:69`);
-  - a statement that only reads is `expr.resultUnused` whatever else the
-    read reports: `$foo->test;` on an unknown class or undefined property,
-    `$mixed?->foo;`, `$null->foo;`, `$resource[42];`,
-    `$arrayDoesNotExist['foo'];`, `isset($string->prop);`, `$this->foo;`
-    are silent today where the read is otherwise reported or its receiver
-    is `mixed` (about 45 rules-oracle findings, `access-properties.php`,
-    `bug-6899.php`, `this.php`, `nullsafe-property-fetch*.php`,
-    `nonexistent-offset.php`); `clone $p;` of a class without `__clone()`,
-    `clone 'abc';` and a first-class callable made from a variable
-    (`$f(...);`) are unreported too (the rules oracle's 168 PHPStan-only
-    `expr.resultUnused` are these, `new class {};`, bare closure calls and
-    `match` statements);
-  - `new static(…);` as a statement is not `new.resultUnused`: a subclass's
-    constructor may have effects (13 of the rules oracle's 19
-    phpstan-rs-only `new.resultUnused`, in `instantiation.php` and
-    `new-static.php`; the other 6, `new self()`/`new parent()` of a
-    constructor with no side effects, stay reported, stricter than
-    PHPStan);
-  - a discarded `new` is `new.resultUnused` whenever constructing has no
-    effect, where today only a user constructor without impure points is:
-    a class without a constructor (`new NoCtor();`, `bug-4002_class.php`,
-    `pure-method.php:389`), a built-in class through
-    `functionMetadata.php` (`new \stdClass()`, `new \Exception('test')`,
-    `new \PDOStatement()`, `new \SimpleXMLElement(…)`, `new
-    \IntlDateFormatter(…)`), `new static()` in a final class, and a
-    constructor whose only impurity is a pure callable argument
-    (`pure-unless-callable-is-impure.php`), `new NoCtor(1)` included (PHP
-    ignores the arguments; it is also `new.noConstructor`); most of the
-    rules oracle's 40 PHPStan-only. Instantiating an abstract class or an
-    interface throws, so it isn't also `new.resultUnused` as PHPStan
-    reports it (approved);
-  - a statement that can throw or runs code is not `expr.resultUnused`
-    (`NoopRule` reads the expression's throw and impure points): `$a /
-    $b;`, `$a % $b;` and `99 / $v;` (`DivisionByZeroError`), a `match`
-    that can miss (`UnhandledMatchError`), `(string) $o;` (it calls
-    `__toString()`), and a pipe (`1 |> 'f';`, `5 |> (fn ($x) => f($x));`,
-    a call) are all reported today (the rules oracle's
-    `noop-error-throws.php`, `bug-6349.php`, `bug-9534.php`,
-    `match-expr.php`, `deprecated-cast.php`, the `*-pipe.php` files: 38
-    findings); `static::$p;` stays reported, stricter than PHPStan;
-  - `yield` outside a function is a compile error
-    (`generator.outOfFunction`), unreported today;
-  - PHP 8.5's `(void)` cast on a call without `#[\NoDiscard]` is
-    pointless ("in (void) cast but function allows discarding return
-    value"; `function.inVoidCast`, `method.inVoidCast`,
-    `staticMethod.inVoidCast`, `callable.inVoidCast`, 10 in the rules
-    oracle), and a discarded pure call as a bare closure call (`$c();`) is
-    `expr.resultUnused`; both unreported today;
-  - `self`/`static`/`parent` outside a class throw an `Error`:
-    `self::class` in a function isn't `outOfClass.self` today, nor are
-    `parent::LOREM`, `$foo instanceof parent` and `parent::$p` outside a
-    class `outOfClass.parent` (3); `outOfClass.static` is reported, but
-    not for `static::LOREM` and `static::$p` (2);
-- (c) calls and member access:
-  - a method call or property read on a plain `object` is
-    `method.notFound`/`property.notFound` (it declares no members):
-    `$o->getItem()` and `$o->x` on `object $o` are unreported today (the
-    oracle finds 59 "undefined method/property object::"), and so is
-    `$p->test()` on a template bounded by `object`
-    (`php-82-dynamic-properties-allow.php`) or a static call `$o::doFoo()`
-    on an `object` (`staticMethod.notFound`, `first-class-callables.php`,
-    4);
-  - a property fetch inside `isset()`, `empty()` and `??` checks its
-    receiver as the offset checks do: on a `string` it is
-    `property.nonObject`, the fetch never finding anything (`isset($s->p)`,
-    `$s?->bar ?? 4`; `bug-6899.php`, `nullsafe-property-fetch.php`,
-    `*-nullsafe-isset.php`, 10), and so it is on `mixed` at level 10
-    (`isset($m->c->d)`; `bug-13539.php`, `bug-4559.php`, `bug-14393.php`,
-    `isset.php`, 10), as is a property write on `mixed` (`$m->w = 1`, an
-    `Error` on a non-object; `bug-9765.php`, `bug-2748.php`); all
-    unreported today;
-  - a missing property is `property.notFound` inside `isset()`, `empty()`
-    and `??` too where nothing can declare it: on a final class or an
-    object known exactly from `new` (`isset($final->dyn)`, `(new
-    Bar())->zz ?? 'no'`; `dynamic-properties.php`, 9,
-    `null-coalesce-new-is-always-final.php`); an object shape's optional
-    property is `property.notFound` read or written outside `isset()`,
-    and a missing one anywhere (`echo $o->bar` on `object{foo: int, bar?:
-    string}`; `properties-object-shapes.php`, `bug-11609.php`,
-    `bug-11424.php`, `isset-object-shapes.php`, 8); and `$o->{$name}` with
-    a constant-string name resolves the property: over `foreach ($data as
-    $property => $value)` on `array{a: int, noop: int}`, `$self->{$property}
-    = $value` writes the undeclared `$noop`
-    (`properties-from-*-into-*object.php`, 6); all unreported today;
-  - a protected method declared in a common ancestor is accessible from a
-    sibling class (PHP checks the prototype's declaring class): `$other->foo()`
-    from a class sharing `Base` with `Other` is `method.protected` today
-    (`sibling-method-prototype.php`); a `private(set)`/`protected(set)`
-    property is writable anywhere in its class, through another instance
-    too (`$self->asymmetricProperty = 1` is `assign.propertyReadOnly`
-    today, `writing-to-read-only-properties.php`); a dynamic class
-    constant name that is a union of string literals is a string
-    (`self::{$name}` on `'FOO'|'BAR'` is `classConstant.nameType` today,
-    `dynamic-constant-access.php`); a class constant read through
-    `static::` can be overridden, so `if (static::FOO)` isn't
-    `if.alwaysTrue` unless the constant or class is final
-    (`if-condition.php:130`);
-  - a call that returns by reference is a valid by-reference argument
-    (`callReturnsByReference`): `useString($a->getString())` for `function
-    &getString()`, `reset($this->getList())` for a by-reference
-    `getList()`, are `argument.byRef` "expects variables only" today (5
-    rules-oracle findings, `bug-757.php`, `bug-13711.php`,
-    `bug-1501.php`);
-  - a call to a method a class doesn't have is `method.notFound`, never
-    `method.nonObject`: `(new stdClass())->foo()` is "call to method foo()
-    on a non-object type stdClass" today (the rules oracle's
-    `bug-12548.php`, `invalid-assign-var.php`);
-  - a method call or property read on a possibly-null receiver is
-    reported from level 8 (`findTypeToCheck`'s `checkNullables`), as a
-    `null` receiver throws an `Error`: `$c->has()` and `$c->p` on `?C` are
-    unreported today at every level, since `method.nonObject` and
-    `property.nonObject` fire only for a receiver that can never be an
-    object (161 `method.nonObject` and 110 `property.nonObject` "on
-    X|null" the corpus oracle finds and phpstan-rs misses; nullable
-    arguments and returns are already reported); once the receiver is
-    reported, the call's arguments aren't checked against either member
-    (`$this->foo->find(1)` on `self|null` is `arguments.count` today, the
-    rules oracle's `call-methods.php:516`). A nullsafe link makes the rest
-    of the chain possibly null: `$h->n()?->n()->m()` calls `m()` on
-    `H|null` (`bug-5868.php`, `bug-4199.php`, `bug-7109.php`);
+    `clone` of `Foo|null`, unpacking or destructuring a nullable, `.` on
+    `array<string>|string`, …; with the `mixed` rows, the rules oracle's
+    PHPStan-only `echo.nonString` 375, `binaryOp.invalid` 93,
+    `offsetAccess.invalidOffset` 79, `assignOp.invalid` 77 and smaller rows;
+    an `object` operand of `+`, `-` or `%` is invalid too;
+  - `++`/`--` on `bool`, `null`, a resource or a non-numeric string is
+    `postInc.type` and the rest (PHP leaves booleans unchanged, `null` for
+    `--` and a non-numeric string for `--`, and throws for a resource);
+    `[]` for reading inside `isset()`/`empty()`/`??` is `offsetAccess.noDim`;
+  - an offset or key of an invalid type is reported for every type (an
+    object offset throws a `TypeError`, unreported today);
+  - `offsetAccess.notFound` covers every container and offset: a
+    maybe-missing offset is "might not exist" at level 7, and definite
+    misses beyond a constant shape (a disjoint key type, `null['t']`,
+    `'foo'['foo']`, a `foreach` destructuring key, a folded `explode()`)
+    are reported (47 rules-oracle findings);
+  - arithmetic on a non-numeric `string` is `binaryOp.invalid` (PHP 8
+    throws); a non-numeric string offset on a string throws;
+  - the class-access checks cover every receiver: `$i::X` on an `int`,
+    `static` access on a nullable or `int|string`, `T::C` on a trait,
+    `instanceof` a trait, a static property read through `->`, an instance
+    property read statically (`property.staticAccess`; 37 findings);
+  - the constant-operand checks of `&&`, `||`, `and`, `or`, `xor` and `?:`
+    fire on each side and on the result (`$b && true` isn't reported today;
+    the rules oracle's 164 `boolean*`/`logical*` and 17 `ternary.always*`,
+    of which phpstan-rs matches 2 and 0; the corpus oracle's 21
+    `booleanAnd.leftAlwaysTrue` and 23 `booleanOr.alwaysFalse`), and a
+    condition is decided by truthiness, not only a `true` type (`if ($std)`
+    on an object is `if.alwaysTrue`; 37 rules-oracle `if.alwaysTrue`);
+  - `instanceof` on an exhausted subject is reported, a `callable` is never
+    an instance of a final class without `__invoke()`, and the `elseif`
+    after `$x instanceof A && $x instanceof B` isn't wrongly always true
+    (12 rules-oracle `instanceof.alwaysFalse`);
+  - `unset()` of an undefined variable or of an offset on a non-array, and
+    `new class {};` as a statement, are reported;
+  - statements with and without effects: a call to a `@phpstan-impure`,
+    abstract or interface method has effects and an abstract
+    `@phpstan-impure` method isn't `impureMethod.pure` (15 findings); a
+    `match` that may throw, a division, a `(string)` cast and a pipe are
+    not `expr.resultUnused` (38); a statement that only reads is, whatever
+    else the read reports (~45; with `clone`, `$f(...);` and bare closure
+    calls, the oracle's 168 `expr.resultUnused`); `new static(…);` isn't
+    `new.resultUnused` (13 of 19 phpstan-rs-only; `new self()` without
+    effects stays reported, stricter than PHPStan), while a discarded `new`
+    of a class without a constructor, a pure built-in or a final `static`
+    is (most of 40); instantiating an abstract class throws and isn't also
+    `new.resultUnused` (approved); `static::$p;` stays reported;
+  - `yield` outside a function is `generator.outOfFunction`; PHP 8.5's
+    `(void)` cast on a call without `#[\NoDiscard]` is pointless (10); a
+    discarded bare closure call is `expr.resultUnused`;
+  - `self`/`static`/`parent` outside a class are `outOfClass.*` in every
+    position (5).
+- **(c) calls and member access**:
+  - a method call or property read on a plain `object`, a template bounded
+    by `object`, or a static call on `object` is `*.notFound` (59 corpus
+    findings);
+  - a property fetch inside `isset()`/`empty()`/`??` checks its receiver
+    (`isset($s->p)` on a string; `mixed` at level 10; 20 findings), and a
+    missing property is `property.notFound` there too where nothing can
+    declare it (a final class, a `new` object, an object shape's missing
+    key; ~23);
+  - visibility follows PHP: a protected method in a common ancestor is
+    accessible from a sibling; a `private(set)` property is writable
+    anywhere in its class; a union of literal constant names is a string;
+    `static::FOO` of a non-final constant isn't always true;
+  - a by-reference-returning call is a valid by-reference argument (5); a
+    missing method is `method.notFound`, never `method.nonObject`;
+  - a method call or property read on a nullable receiver is reported from
+    level 8 (161 `method.nonObject` and 110 `property.nonObject` in the
+    corpus), its arguments then not checked, and a nullsafe link makes the
+    rest of the chain nullable;
   - a method call on a receiver that can't be an object is reported for
-    every receiver type: a template bounded by `mixed` (`$t->foo()` on `T
-    of mixed`, `check-explicit-mixed.php`, `check-implicit-mixed.php`), an
-    `int` in a first-class callable (`$i->doFoo(...)`), an always-`null`
-    receiver of `?->` (`$null?->foo()`, `nullsafe-method-call*.php`,
-    `bug-10729.php`), a `class-string` that `method_exists()` narrowed
-    (`$s->nonExistent()`,
-    `impossible-method-exists-on-generic-class-string.php`, 6), and a
-    `global $pdo` variable, `mixed` at level 10 (`bug-14318.php`, 4), and
-    a static call on `mixed`, `T of mixed` or an `int` (`$m::foo()`,
-    `$i::doFoo(...)`; `staticMethod.nonObject`, 6); all unreported today;
-  - a constant `define()`d in a static or non-constructor method isn't
-    known in another method (only the constructor's scope is remembered,
-    with the value's type; today even the constructor's is forgotten, so
-    each read of `REMEMBERED_FOO` is `constant.notFound` and `mixed`,
-    `remembered-constructor-scope.php:11`, `:18`, `:43`, `:67`):
-    `echo XYZ22;` after `static function s() { define('XYZ22', 1); }` is
-    `constant.notFound`, as is `__COMPILER_HALT_OFFSET__` in a file
-    without `__halt_compiler()`; both unreported today
-    (`remembered-constructor-scope.php`, 3,
-    `compiler-halt-offset-const-not-defined.php`); a `use const` of a
-    constant that doesn't exist is reported where the constant is read,
-    not on the `use` (`group-uses.php:9`);
-  - `filterVar.nullOnFailureAndThrowOnFailure` reads the flags through a
-    named `options:` argument, a variable, `filter_input()` and the
-    per-key options of `filter_var_array()`/`filter_input_array()`;
-    only the positional form is reported today
-    (`filter-functions-null-and-throw.php`, `filter_var_null_and_throw.php`,
-    6);
-  - `static::$p` of a private static property is
-    `staticClassAccess.privateProperty` at every access; today one per
-    line is, and none after an assignment to it in the same method
-    (`bug-3777-static.php`, `bug-8333.php`, 10);
-  - `__TRAIT__` outside a trait is `magicConstant.outOfTrait` in a
-    parameter's or a property's default too (`string $trait =
-    __TRAIT__`, `public $t = __TRAIT__;`), `__CLASS__` outside a class
-    `magicConstant.outOfClass`, `__METHOD__`/`__FUNCTION__` in a property
-    default `magicConstant.outOfFunction`, and `__NAMESPACE__` in the
-    global namespace `magicConstant.outOfNamespace`, unreported today
-    (`magic-constant*.php`, 6, 3, 2 and 1); the rule reads where it is from
-    the scope (a closure, a function, a class, a trait), so
-    `Checker::constant_facts`, a pre-walk of each file marking
-    `__FUNCTION__`/`__METHOD__` inside closures, is deleted;
-  - `null <= $object` is always true (`smallerOrEqual.alwaysTrue`,
-    `bug-13001.php`), and enum cases compared with `<`, `>`, `<=` or `>=`
-    are always false
-    (`Foo::A > Foo::B`; `greater.alwaysFalse`, `smaller.alwaysFalse`,
-    `greaterOrEqual.alwaysFalse`, `smallerOrEqual.alwaysFalse`;
-    `bug-7052.php`), and a ternary as a statement is
-    `ternary.resultUnused` (`isset($d['x']) ? 'foo' : 'bar';`,
-    `access-properties.php:127`, `bug-7109.php`), both unreported today;
-  - a parent's private constant read through a child (`self::PRIVATE_FOO`
-    in `Bar extends P`, `$bar::PRIVATE_FOO`) is `classConstant.notFound`
-    "undefined constant Bar::PRIVATE_FOO", as PHP reports it, not
-    `classConstant.private` as today, and a constant some member of a
-    union or intersection receiver lacks is `classConstant.notFound`
-    (`$fooOrString::DOLOR`; `class-constant-visibility.php`,
-    `class-constant.php:33`), a static property alike
-    (`$foo::$nonexistent` on `Foo&SomeInterface`, `$class::$unknown` on
-    `ClassOrString|string`, and `self::${$property}` over constant names;
-    `staticProperty.notFound`, 3);
+    every receiver (`T of mixed`, an `int` first-class callable, an
+    always-`null` `?->`, a narrowed class-string, a level-10 `global`
+    `mixed`, a static call on `mixed`);
+  - a constant `define()`d in a non-constructor method isn't known
+    elsewhere (the constructor's is, typed; `constant.notFound` everywhere
+    today), `__COMPILER_HALT_OFFSET__` needs `__halt_compiler()`, and a
+    missing `use const` is reported where read;
+  - `filterVar.nullOnFailureAndThrowOnFailure` reads named, variable and
+    per-key options; `staticClassAccess.privateProperty` at every access;
+  - magic constants in the wrong context are reported in parameter and
+    property defaults too (`__TRAIT__` outside a trait, `__CLASS__` outside
+    a class, …; 12), reading the scope, so `Checker::constant_facts` (a
+    pre-walk marking `__FUNCTION__` inside closures) is deleted;
+  - `null <= $object` is always true, enum cases compared by `<` are always
+    false, and a ternary statement is `ternary.resultUnused`;
+  - a parent's private constant through a child, or a member some part of a
+    union or intersection lacks, is `*.notFound` as PHP reports it;
   - named arguments that leave a required parameter unset are
-    `argument.missing`: `$f(i: 1)` for a two-parameter closure or a
-    `callable(int, int)`, `implode(array: [''])` and `join(array: …)`,
-    and `new \DatePeriod(…)` without `start` are unreported today (the
-    rules oracle's 10 PHPStan-only with the `call_user_func` ones,
-    `callables-named-arguments.php`, `implode-named-parameters.php`,
-    `bug-7048.php`), and a name the callee lacks is `argument.unknown`
-    (`$cb(i: 1)` on a `callable(int, int)`, whose parameters have no
-    names, `$cb2(i: 1, j: 2, z: 3)`, `call_user_func($f, j: 1)`, `new
-    \DatePeriod(isostr: …)`; 5);
-  - a private property read from outside is `property.private` under
-    `??` too (`$foo->id ?? 2` always gives `2`, PHP reading it as unset;
-    `bug-12645.php`), and PHP 8.5's `clone($foo, ['priv' => …, 'prot' =>
-    …])` from outside is `property.private`/`property.protected`
-    (`clone-with.php`, `*-clone-with.php`, 4 each); both unreported today;
-  - a dynamic class constant name must be a string: `self::{$mixed}`,
-    `parent::{$mixed}` and `$obj::{$mixed}` are `classConstant.nameType`
-    at level 10, unreported today (`dynamic-constant-stringable-access.php`,
-    5);
-  - invoking a value that isn't callable is `callable.nonCallable`: a
-    constant string naming no function (`$n = 'nonexistent'; $n();`,
-    `''`), `$i(...)` on `1`, `5 |> 'doFoo'` with no function `doFoo`, and
-    a constant array whose class or method union has a member that can't
-    be called (`[CU::class, 'doFoo'|'doBaz']`, `callables.php:188`-`:229`,
-    `maybe-not-callable.php`), all unreported today (with (b)'s
-    might-not-be and `mixed` rows, the rules oracle's 25 PHPStan-only);
-  - a by-reference argument PHP creates on the call is not type-checked
-    against the parameter;
-  - flag parameters are checked against PHPStan's
-    `constantToFunctionParameterMap.php`: a constant the parameter doesn't
-    accept (`RecursiveIteratorIterator::CHILD_FIRST` as its `$flags`,
-    `argument.invalidConstant`), constants that can't be combined
-    (`LOCK_EX | LOCK_SH`, `argument.exclusiveConstants`) and `|` where the
-    parameter takes one constant (`array_unique($a, SORT_STRING |
-    SORT_NUMERIC)`, `argument.bitmaskNotAllowed`), unreported today (33
-    rules-oracle findings), at every call form: functions, constructors
-    (`new \finfo(SORT_REGULAR)`), methods and static methods
-    (`PDOStatement::fetch()`, `IntlDateFormatter::create()`), named
-    arguments (`json_encode('{}', flags: SORT_REGULAR)`), and a closure or
-    `call_user_func()` callable that forwards to a mapped function;
-  - `new DateTime('2020.11.17')` and `new DateTimeImmutable('asdfasdf')`
-    with a literal PHP rejects are `new.dateTime`/`new.dateTimeImmutable`:
-    the rule exists (`date_time.rs`, E2's date parser) and misses both
-    today;
-  - named arguments inside a `PHP_VERSION_ID < 80000` branch are
-    `argument.namedNotSupported` once D5 narrows the version there;
-  - a static closure passed where `@param-closure-this` needs a bindable
-    one (`argument.staticClosure`), a `void` closure's result used or a
-    callable's result discarded (`callable.void`,
-    `callable.resultDiscarded`), and a call whose return or argument type
-    contains an unresolvable type (`method.unresolvableReturnType`,
-    `argument.unresolvableType`) are unreported today;
-  - `@no-named-arguments` forbids named arguments and string-keyed
-    unpacking: `nn(b: 1, a: 2)` for a `@no-named-arguments` function isn't
-    `argument.named` today (11 oracle findings, PHPUnit's
-    `Generator::testDouble()` among them; the rules oracle's 10, a named
-    argument through `call_user_func()` and an unpacked array with a
-    string or possibly-string key included);
-  - a `void` call's result is reported where it is used (`method.void`,
-    `staticMethod.void`, `function.void`): `$x = $o->v();` for `v(): void`
-    isn't reported today (54 oracle findings, e.g. PSR-3
-    `LoggerInterface::debug()` results). Every use counts: an argument, a
-    `foreach` iteratee, an `if`, `switch`/`case`, `match` subject or arm
-    condition, a ternary or `&&`/`||` operand, `??=`/`.=`, a
-    destructuring source, a pipe's left side or result, and the result of
-    `call_user_func()`/`call_user_func_array()` (reported for the function
-    and the callable), `Closure::call()` and an invoked closure or string
-    callable (`callable.void`); the rules oracle's 26, 19 and 4
-    (`call-methods.php:66`-`:91`, `wrong-variable-name-var*.php`,
-    `*-call-pipe.php`, `match-expr-void-used.php`, `call-user-func*.php`);
-  - a discarded pure call is reported for built-ins too
-    (`function.resultUnused`, `staticMethod.resultUnused`): the rule
-    exists (`noop.rs`) but reads purity, and a built-in has none until C5
-    embeds `functionMetadata.php`, so `strlen($s);` and `E::tryFrom($v);`
-    on their own line are unreported today (a `@phpstan-pure` user method
-    already is). User functions are read by their resolved name through
-    the project-wide purity summaries (C9): a function in a namespace, or
-    declared in another file, is never reported today, even one marked
-    `@phpstan-pure` (`N\g();` for `function g(): int { return 1; }` is
-    silent where the global-namespace `g();` in the same file is
-    reported); a first-class callable made as a statement (`foo(...);`,
-    `strlen(...);`, `$this->doFoo(...);`, `Foo::doFoo(...);`) is reported
-    too, as are a nullsafe call (`$e?->getMessage();`), a pipe into a pure
-    callable (`5 |> $foo->doPure(...);`) and the built-in methods
-    `functionMetadata` lists (`Closure::bind()` 20, `Closure::bindTo()`,
-    `finfo::file()`, `ImagickPixel::getColor()`, `Throwable::getCode()`:
-    with the `new` exactness in D3 these are the rules oracle's 109
-    `method.resultUnused` and 61 `staticMethod.resultUnused` PHPStan-only
-    findings). The rules oracle's 518 PHPStan-only
-    `function.resultUnused` are these three shapes: 409 built-ins, 109
-    namespaced or cross-file user functions (`missing-return.php`,
-    `function-with-variadic-parameters.php`, `bug-15168.php`,
-    `first-class-callable-function-without-side-effect.php` and the
-    rest);
-  - arrays passed where PHP casts their values to string are checked for
-    castable values (`ParameterCastableToStringRule` and its sort
-    variant): `array_fill_keys([E::A], …)`, `array_diff`/`array_intersect`
-    and their `_assoc` forms, `array_combine`, `array_count_values`,
-    `array_unique`, `natsort`/`natcasesort`, `sort`/`rsort`/`asort`/
-    `arsort` of enum cases or arrays, and `implode`/`join` of such an
-    array, are unreported today (about 35 rules-oracle findings,
-    `param-castable-to-string-functions*.php`,
-    `sort-param-castable-to-string-functions-enum.php`, `bug-11111.php`,
-    `bug-11141.php`, `bug-3946.php`); phpstan-rs checks the
-    castable-to-number variant already;
-  - `random_int($min, $max)` whose ranges can't satisfy `$min <= $max` is
-    reported (`RandomIntParametersRule`; `random-int.php`, `bug-14468.php`:
-    8 findings, unreported today);
-  - a template the call can't resolve is `argument.templateType`:
-    `make($s)` for `@param class-string<T> $c` with a plain `string` is
-    unreported today (17 oracle findings), nor are a first-class callable
-    or closure of a generic function called with `mixed` (`$f($mixed)`)
-    and `f(1, 2)` binding `A` two incompatible ways (the rules oracle's 9,
-    `call-first-class-callables.php`, `call-generic-function.php`).
-- (d) assignments and properties:
+    `argument.missing`, and a name the callee lacks `argument.unknown`
+    (15);
+  - a private property under `??` is `property.private`, and PHP 8.5's
+    `clone($foo, [...])` checks visibility (8);
+  - `self::{$mixed}` is `classConstant.nameType` at level 10;
+  - invoking a non-callable value is `callable.nonCallable` (a constant
+    string naming no function, a union with an uncallable member);
+  - a by-reference argument PHP creates isn't type-checked;
+  - flag parameters are checked against `constantToFunctionParameterMap.php`
+    at every call form (`argument.invalidConstant`,
+    `argument.exclusiveConstants`, `argument.bitmaskNotAllowed`; 33);
+  - `new DateTime('2020.11.17')` is `new.dateTime` (the rule misses both
+    rows today);
+  - named arguments inside `PHP_VERSION_ID < 80000` are
+    `argument.namedNotSupported` once D5 narrows the version; static
+    closures for `@param-closure-this`, `callable.void`,
+    `callable.resultDiscarded` and unresolvable call types are reported;
+    `@no-named-arguments` forbids named arguments and string-keyed unpacking
+    (11 corpus, 10 rules-oracle);
+  - a `void` call's result is reported wherever it is used (54 corpus
+    findings; 49 rules-oracle across the use forms);
+  - a discarded pure call is reported for built-ins (through
+    `functionMetadata`), namespaced and cross-file user functions (by
+    resolved name through C9's summaries), first-class callables, nullsafe
+    calls, pipes and `functionMetadata`'s methods (409 + 109 rules-oracle
+    `function.resultUnused`, 109 `method.resultUnused`, 61
+    `staticMethod.resultUnused`);
+  - arrays whose values PHP casts to string are checked for castable values
+    (`ParameterCastableToStringRule`; ~35);
+  - `random_int()` with ranges that can't satisfy `$min <= $max` is
+    reported (8); a template the call can't resolve is
+    `argument.templateType` (17 corpus, 9 rules-oracle).
+- **(d) assignments and properties**:
   - `uninitialized` and `uninitialized_dataflow` are rewritten over the
-    ClassPropertiesNode initialization state, with the dataflow walker
-    deleted;
-  - a write to an undeclared property is `property.notFound` as a read
-    is: `$r->missing = 1` is unreported today on any class, though PHP 8.2
-    deprecates creating a dynamic property and a readonly class throws;
-  - a typed static property checks its assigned value: `R::$s = 'q'` on a
-    `static int` is unreported today (PHP throws a `TypeError`);
-  - every write form is checked against the property's type
-    (`TypesAssignedToPropertiesRule` over each `PropertyAssignNode`, which
-    carries the whole new value): an append or
-    offset write (`$this->ints[] = 'foo'` on `array<int>`,
-    `$this->byStr[$n] = 1` on `array<string, int>`, `$this->d['age'] =
-    'x'` on a shape, nested `$foo->bar['a']['b'][] = 'x'`), a
-    by-reference array function (`array_push($this->ints, 'x')`,
-    `array_shift($this->q)` on a `non-empty-list`), a compound assignment
-    (`$this->i .= 'test'` on `int`, `$a->has |= 999` on `int<0, 1>`) and
-    an increment past a range (`$this->r++` on `int<min, 3>`) are all
-    unreported today (most of the rules oracle's 138 PHPStan-only
-    `assign.propertyType`: `appended-array-item.php`,
-    `appended-array-key.php`, `bug-2888.php`, `bug-3703.php`,
-    `bug-6286.php`, `bug-6356b.php`, `bug-13438*.php`, `bug-7912.php`,
-    `properties-assigned-types.php`); the rest are the level-10 implicit
-    `mixed` (31) and the generic and template rows D3 and B4 name;
-  - `unset()` of a readonly property is `unset.readOnlyProperty` and of a
-    hooked one `unset.hookedProperty` (PHP throws an `Error` for both), and
-    of a non-final class's property `unset.possiblyHookedProperty` (a
-    subclass may hook it); all three are unreported today, as is
-    `unset.readOnlyPropertyByPhpDoc` for a `@readonly` one (and every
-    property of a `@readonly` or `@immutable` class; `bug-12421.php`, 3);
-    a `@readonly` property's own set hook writes it without
-    `property.readOnlyByPhpDocAssignNotInConstructor`
-    (`property-hooks-readonly-by-phpdoc-assign.php:18`);
-  - a property that is only appended to is write-only:
-    `$this->only[] = $v` with no read isn't `property.onlyWritten` today,
-    where a plain assignment is; a read through an alias of `$this` counts
-    as a read: `$that = $this; function () use ($that) { return
-    $that->p; }` leaves `$p` `property.onlyWritten` today, a false
-    positive. Only a real read counts: not a read that only feeds the
-    property back through its own class's constructor (`new
-    self($this->test)`, `new static(…)`, named arguments included;
-    `bug-14573.php`, 9, `bug-13440.php`), a read in the property's own
-    hook (`property-hooks-unused-property.php`,
-    `private-final-property-hooks.php`), or a dynamic read whose name
-    can't be the property (`$this->$name` over `['foo', 'bar']` leaves
-    `$baz` write-only, and so does `$x->{$y}` after `$y !== 'isFinal'`;
-    `unused-private-property.php:117`, `bug-11802.php`), where today any
-    dynamic read counts for every property. The writes that count include
-    an offset write
-    (`$this->tuple[$i] = false`, `bug-3339.php`) and a static write
-    through a constant dynamic name (`self::${$name} = …`,
-    `bug-13093c.php`, `bug-13093d.php`);
-  - every write form counts as a write for `property.onlyRead`/
-    `property.neverWritten` (`PropertyWrite` through `PropertyAssignNode`
-    and the by-reference and foreach paths): an offset write, append or
-    `unset()` of an offset (`$this->p[] = 4`, `$this->p['k'] = 5`,
-    `unset($this->p[$k])`), an increment (`$this->bar++`), a by-reference
-    argument (`foo($this->p)`, `exec($c, $this->out)`, `proc_open(…,
-    $this->pipes)`, `uksort($this->keys, …)`), a reference (`$x =
-    &$this->p`), a `foreach` target (`foreach ($c as $this->k =>
-    $this->v)`), destructuring (`[$this->foo] = [1]`) and a chained static
-    write (`self::$p::$p = …`) all leave the property "never written, only
-    read" today (the rules oracle's 64 `property.onlyRead`, among them
-    `appended-array-item.php`, `appended-array-key.php`, `bug-9213.php`,
-    `bug-7119.php`, `uksort.php`, `property-type-after-unset.php`,
-    `properties-assigned-types.php`; Appendix I's `property-write-forms`
-    has 24 more in 13 files, `unused-private-property.php` 6);
-  - a property that can't be written is `assign.propertyReadOnly` for
-    every kind: an enum's `name` and `value` (`$this->name = 'ONE'`, an
-    `Error`), an object shape's property (`$o->foo = 1` on `object{foo:
-    int}`), a `@property-read` tag reached from another class, and a
-    readonly property in PHP 8.5's `clone($f, ['i' => …])` from outside
-    (and a `protected(set)` one, `assign.propertyProtectedSet`,
-    `bug-14063.php`, `clone-with.php`, 5);
-    unreported today (the rules oracle's 11 PHPStan-only,
-    `readonly-assign.php`, `properties-object-shapes.php`,
-    `writing-to-read-only-properties.php`, `bug-11241.php`,
-    `writing-to-readonly-properties-clone-with.php`);
-  - a readonly property assigned twice is `assign.readOnlyProperty`
-    "already assigned" ("Cannot modify readonly property" at runtime): two
-    assignments in the constructor, a child's promoted redeclaration
-    followed by `parent::__construct($myProp)`, and an append after the
-    assignment; unreported today (the rules oracle's 12 PHPStan-only,
-    `missing-readonly-property-assign*.php`, `redeclare-readonly-property.php`,
-    `bug-8101.php`, `bug-9863.php`, `bug-13856.php`);
-  - `$this` is written by every write form, each `assign.this` (a compile
-    error): a `foreach` key, value or by-reference target, `.=` and `??=`,
-    destructuring and a `catch` variable, and an offset write on a class
-    without `ArrayAccess` (an `Error` at runtime rather than at compile
-    time); only a plain `$this = …` is reported today (the
-    rules oracle's 12 PHPStan-only, `bug-3585.php`, `bug-14349.php`,
-    `bug-14351.php`, `bug-3782.php`, `bug-14352.php`);
-  - a readonly property is modified by every write form, so outside the
-    constructor each is `property.readOnlyAssignNotInConstructor` ("Cannot
-    indirectly modify readonly property" at runtime): an offset write or
-    `unset()` of an offset, `++`/`--`, a compound assignment,
-    destructuring, a set hook writing it, and a by-reference argument
-    (also `argument.byRef`); only a plain `=` is reported today (the rules
-    oracle's 16 PHPStan-only, `readonly-assign.php`, `bug-6773.php`,
-    `bug-7198.php`, `readonly-property-hooks.php`,
-    `readonly-property-passed-by-reference.php`,
-    `unset-hooked-property.php`; `ksort($this->a)` on a `@readonly` one
-    is `argument.byRef` too, `bug-12676.php`), and a `@readonly` one alike
-    (`property.readOnlyByPhpDocAssignNotInConstructor`, 7,
-    `readonly-assign-phpdoc.php`); taking a reference to one (`$a =
-    &$this->a`) is `property.readOnlyAssignByRef`/
-    `property.readOnlyByPhpDocAssignByRef`, unreported today
-    (`readonly-assign-ref-phpdoc.php`, 6);
-  - property hooks: the checks that a property overriding a writable or
-    readable one stays so (`property.notWritable`, `property.notReadable`)
-    and that
-    a get hook of a non-virtual property reads its value and a set hook
-    assigns it (`propertyGetHook.noRead`, `propertySetHook.noAssign`)
-    exist and miss the rules oracle's cases (an interface property
-    prototype, a hook inherited through a parent:
-    `property-prototype-from-interface.php`, `bug-14457.php`,
-    `set-non-virtual-property-hook-assign.php`), and report a short set
-    hook (`set => $value + 1`, which assigns its expression) as
-    `propertySetHook.noAssign` (`get-non-virtual-property-hook-read.php`);
-    a `private(set)`/`protected(set)` static property assigned from outside
-    (`assign.staticPropertyPrivateSet`, `assign.staticPropertyProtectedSet`)
-    and a `@readonly`
-    property assigned twice (`assign.readOnlyPropertyByPhpDoc`) are
-    unreported today; a get-only virtual property may narrow the
-    overridden type (`int` over `int|string`, as PHP allows), which is
-    `property.nativeType` "not the same" today, a false positive, while
-    widening it is `property.covariant` and widening a set-only one
-    `property.contravariant` (`bug-12466.php`,
-    `property-prototype-from-interface.php`); a `@readonly` property with a
-    default value is `property.readOnlyByPhpDocDefaultValue`, and so is
-    every property of an `@immutable` class and of its subclasses, which
-    are `@readonly` by inheritance; only a property tagged `@readonly`
-    itself is reported today (`read-only-property-phpdoc.php`, 3);
-  - a readonly property, native or `@readonly`, read before its
-    initialization is reported
-    (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
-    $this->x; $this->x = 1;` in a constructor isn't reported today (12
-    oracle findings in revolt's event loop drivers). A readonly property
-    the constructor doesn't assign on every path is reported on the class
-    ("Class A has an uninitialized readonly property $x. Assign it in the
-    constructor."; `property.uninitializedReadonly`, and
-    `property.uninitializedReadonlyByPhpDoc` for `@readonly`): a class
-    without a constructor, one that assigns it on some paths only, and the
-    properties of an anonymous class, a readonly class, a trait's host and
-    a child whose parent constructor isn't called are unreported today;
-    the rule doesn't exist (all 84 and 30 of the rules oracle's
-    findings, `property-variance-readonly.php`,
-    `missing-readonly-property-assign*.php`, `readonly-assign*.php`,
-    `readonly-property-hooks.php`, `clone-with.php`, `bug-9863.php`);
-  - an offset write into an `ArrayAccess` object checks the key against
-    `offsetSet`'s key type: `$w['str'] = 1` on `WeakMap<stdClass, int>`
-    and `$s[5] = 1` on `SplObjectStorage` are unreported today
-    (`offsetAssign.dimType`), as are `'a'` on an `ArrayAccess<int, int>`,
-    an array key on `SplObjectStorage`, and `$a[] = 5` after the key
-    `PHP_INT_MAX` (no next key; `offset-access-assignment-php-int-max.php`);
-    and the value against its value type (`offsetAssign.valueType`):
-    `$aa[] = 'foo'` and `$aa[1] += 2.5` on `ArrayAccess<int, int>`, `$c[]
-    = 1` on a class declaring `@implements \ArrayAccess<int, string>`,
-    `$a['foo'] ??= $a['foo'] ?? null` on `ArrayAccess<string, string>`,
-    and writes into an `ArrayObject<never, never>` (and `unset()` of such
-    an offset, `unset.offset`, 7) are unreported today
-    (all 20 of the rules oracle's PHPStan-only
-    `offset-access-value-assignment*.php`,
-    `null-coalesce-assign-right-side-scope.php`, `readonly-assign.php`);
-  - an offset write or append checks its container as a read does:
-    `$i['x'] = 3` on an `int` throws at runtime and isn't reported today,
-    and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
-    (383 oracle findings). A read inside `isset()`/`??`/`empty()` and an
-    `unset()` are checked too: they are quiet on a scalar or `null`, but
-    an object without `ArrayAccess` throws "Cannot use object of type
-    stdClass as array" there (`isset($o['a'])`, `$closure['a'] ?? 1`,
-    `unset($iterable['s'])` on an iterable that may be a `Traversable`),
-    so those, and a `mixed` container at level 10, are reported (341
-    PHPStan reports on `mixed`; about 60 of the rules oracle's
-    PHPStan-only `offsetAccess.nonOffsetAccessible`). Also unreported
-    today: `$this[$k]` in a class without `ArrayAccess` (`bug-3782.php`,
-    `bug-14352.php`), `(new parent())[0]`, an offset read on a `resource`,
-    and a container typed by a template bounded by `mixed`
-    (`offset-access-mixed.php`).
-- (e) declarations, generics checks and PHPDoc:
-  - class existence is checked everywhere PHPStan checks it (the rules
-    oracle's 173 PHPStan-only `class.notFound`): at use sites through
-    `find_type_to_check`'s unknown-class errors ("Call to method doFoo()
-    on an unknown class", "Throwing object of an unknown class",
-    "Access to property/offset/constant on an unknown class", "Iterating
-    over", "Cloning", "Invoking callable on", "Creating callable from" an
-    unknown class: about 90, the declaration being reported today but no
-    use); `Unk::class`; `new $a()` for a constant-string `$a`; a template's
-    bound and default (`@template T of Zazzzu`, on classes, interfaces,
-    traits, functions, methods, `@method` tags and callable types);
-    `@param-out`, `@phpstan-self-out`, a conditional return type's
-    branches, generic arguments of a property type (`Foo<Barrrr>` and
-    `WeakMap<stdClass, …>` in a namespace; each class named, not only the
-    first), a `@var` naming `$this`, and both the parameter and the
-    property of a promoted parameter, and a trait named as a type in
-    `@param-out` or `@param-closure-this` (`parameter.trait`,
-    `param-out-classes.php`, `param-closure-this-classes.php`, 4); each is
-    unreported today (a
-    property hook's types and a doc block's several `@var` tags already
-    are); a known class named with the wrong case is `class.nameCase` at
-    the same sites (`FOO::class`, a native `POST` parameter and return,
-    `@param-out fOO`, `@param-closure-this fOO`, `@phpstan-self-out fOO`,
-    a template bound `baz`, and for an interface `interface.nameCase` at an
-    `instanceof` and a `use` import, grouped ones included; the rules
-    oracle's 13 and 3 PHPStan-only);
-  - `by-ref parameter's declared type is never narrower than 'foo'`
-    (`parameterByRef.tooWide`) becomes PHPStan's
-    `TooWideParameterOutTypeCheck`: a union member the function never
-    assigns is reported, not a missing narrowing to a literal (10
-    rules-oracle findings, `too-wide-*-parameter-out.php`), as
-    `parameterByRef.unusedType`, or `paramOut.unusedType` for a
-    `@param-out` type, where it is `parameterByRef.tooWide` today;
-  - an empty array assigned under any array `@var` is widening, not
-    `varTag.type`: `/** @var array{string, int} $a */ $a = [];` is
-    reported today (`var-above-empty-array-widening.php`,
-    `bug-5356.php`);
-  - a generic argument built from a template is checked through its
-    bound: `EnumAsFilterInterface<(int|string)&TOperation>` for
-    `TOperation of scalar`, a conditional `(TKey is object ? TKey :
-    Box<TKey>)` and `FooBoxedArray<T>` inside the class's own `T` are
-    `generics.notSubtype` today (8 rules-oracle findings,
-    `bug-11776.php`, `bug-10622b.php`);
-  - a template referenced inside a callable parameter's signature is in a
-    parameter: `@param callable(T, K): iterable<L, U> $fn` references `L`,
-    `method.templateTypeNotInParameter` today (7 rules-oracle findings,
-    `bug-10297.php`, `bug-8074.php`, `bug-13247.php`, `yield.php`);
-  - an assertion of a template type narrows (`@phpstan-assert T $value` on
-    `mixed` is `assert.alreadyNarrowedType` today,
-    `assert-unresolved-generic.php`, `bug-10573.php`), and so does an
-    array assertion over `mixed` values: `@phpstan-assert string[] $arr`
-    on a `mixed[]` parameter is `assert.alreadyNarrowedType` "does not
-    narrow down the type" today and leaves the argument `array<mixed>`
-    (nsrt `assert-docblock.php`, Appendix J's `assert-array-mixed`);
-  - a covariant template may type a property that can't be written from
-    outside after construction (readonly, `private(set)`, a class marked
-    `@immutable`/`@readonly`): `public $value` typed `Value` in an
-    `@immutable` class is `generics.variance` "input (parameter) position"
-    today, and the message names a property, not a parameter
-    (`bug-13049.php`, `bug-9153.php`, `bug-12964.php`);
-  - class structure errors PHP rejects at compile time: `parent::` in a
-    class without a parent (`class.noParent`; `class-constant-visibility.php`,
-    `bug-12272.php`, `access-static-properties.php`, 3), `implements
-    \iterable` (not an interface; `interface.notFound`, `bug-8889.php`, 2),
-    and an unknown `@phpstan-*` tag above a statement or on a hook
-    (`phpDoc.phpstanTag`, `invalid-phpstan-doc*.php`, 3); all unreported
-    today;
-  - a `@template` named like an existing class is
-    `generics.existingClass` wherever templates are declared: a class
-    template named after the class itself (`bug-10049.php`), an anonymous
-    class's (`new /** @template stdClass */ class`) and a callable
-    type's (`callable<\stdClass of mixed>(T): T`); reported today only on
-    functions and methods (3);
-  - the rules oracle's remaining one- and two-finding gaps, each
-    unreported today: a `private(set)` property is implicitly final (PHP
-    8.4), so redeclaring it is `property.parentPropertyFinal`
-    (`overriding-final-property.php:31`, `:33`); `print_r(return: false,
-    value: …)` in an expression is `function.uselessReturnValue` as the
-    positional form is (`useless-fn-return-php8.php`); `@param-out` on a
-    set hook's `$value` is `parameter.notByRef` as on a function's
-    by-value parameter (`incompatible-property-hook-phpdoc-types.php`);
-    `array != int` is `notEqual.alwaysTrue` beside `notEqual.invalid`
-    (`invalid-comparison.php`, `bug-3364.php`); an `include`/`require` of
-    a stream-wrapper path PHP can't open (`vfs://…` unregistered,
-    `not-a-registered-wrapper://…`) is
-    `include.fileNotFound`/`includeOnce.fileNotFound`/`require.fileNotFound`
-    (`require-file-stream-wrapper.php`); a nullsafe returned from a `&get`
-    hook is `nullsafe.byRef` as from a by-reference function
-    (`return-null-safe-by-ref-property-hooks.php`); a constant overriding
-    a built-in's with a wider native type is `classConstant.nativeType`
-    (`const int|string NONE` in a `Phar` subclass,
-    `overriding-constant-native-types.php:48`); a
-    `@phpstan-require-extends` union naming an unknown class still checks
-    the known member (`class.missingExtends`,
-    `incompatible-require-extends.php:185`-`:198`); `self::doBar(...)` of an
-    instance method from a static method (`method.staticCall`),
-    `Ab::doBaz(...)` of an abstract
-    static method (`staticMethod.callToAbstract`), a trait-typed promoted
-    parameter as a property too (`property.trait`), `$x = yield 1` under a
-    `void` send type (`generator.void`), an enum case whose value is a
-    constant of the wrong type (`case Two = self::S;` with a string
-    `S`, `enum.caseType`; the right type isn't: `case TESTING =
-    self::PREFIX . 'test'` on a string enum is `enum.caseType` "value
-    string does not match the \"string\" type" today, `bug-9005.php`),
-    `new $bar` of a constant class-string naming an
-    interface or abstract class (`new.interface`, `new.abstract`), an
-    append to a `private(set)` array from outside
-    (`assign.propertyPrivateSet`), `array_filter()` without a callback on
-    an array with no falsy values (`arrayFilter.same`), `$a |> $cb` into a
-    by-reference parameter (`pipe.byRef`), `BcMath\Number` compared with a
-    float (`greater.invalid`, `spaceship.invalid`; compared `==` with an
-    object it is `false` at runtime, not `equal.invalid` as today,
-    `bug-13001.php`), a constant overriding
-    a built-in typed one without the native type (`const BZ2` in a `Phar`
-    subclass, `classConstant.missingNativeType`), `do {} while ($arr =
-    [1])` (`doWhile.alwaysTrue`), `@phpstan-assert … $this`
-    on a static method (`parameter.notFound`), an interface binding one
-    ancestor's template two ways through two parents (`TValue` as `Item`
-    via `Traversable` and as `string` via `IteratorAggregate`;
-    `generics.interfaceConflict`), and a `catch (\Exception $p)` writing a
-    by-reference `int &$p` (`parameterByRef.type`);
-  - a template's variance is checked through composition, each parameter
-    on its own (`VarianceCheck`, `TemplateTypeVariance::compose`): a
-    covariant `X` in `Out<X>`, `In<Out<X>>`, `Inv<X>` (an invariant
-    position), a closure's parameter (`\Closure(X): X`) or a `@param-out`
-    type is `generics.variance`; today only a bare `X` parameter is
-    reported, once per method (the rules oracle's 18 PHPStan-only,
-    `method-signature-variance-*.php`, `bug-10609.php`), and on private
-    methods too, which PHPStan skips as they can't be called through the
-    parent type (`method-signature-variance-*.php:74`);
-  - imports are per namespace block: repeating `use X\Y;` in a second
-    `namespace N;` block, and `use \stdClass;` in the global namespace
-    (a PHP warning, "no effect"), are `use.nameInUse` today (7 findings,
-    `repeated-namespaces.php`, `repeated-braced-namespaces.php`,
-    `bug-15215.php`);
-  - an override may put optional parameters before the variadic one:
-    `translate($message, $lang = 'cs', string ...$parameters)` over
-    `translate($message, ...$parameters)` is `parameter.notVariadic`
-    today (`overriding-variadics.php`), and a variadic may absorb the
-    parent's parameters: `doFoo(int ...$everything)` over `doFoo(int $a,
-    int $b)` is `parameter.missing` today, a false positive
-    (`less-parameters-variadics.php`, where `int ...$everything` over
-    `doFoo(int $many, string $parameters, string $here)` is
-    `method.childParameterType` against each `string` parameter);
-  - an override that adds a parameter must make it optional (PHP rejects
-    `doBar(int $i)` over `doBar()` and `doFoo(int $i, int $j)` over
-    `doFoo(int $i)`), and so must a child constructor under
-    `@phpstan-consistent-constructor`; `parameter.notOptional`,
-    unreported today (`overriding-method.php:205`, `:225`,
-    `consistent-constructor.php`), and a required parameter before an
-    inherited variadic is `parameter.notOptional`, where phpstan-rs says
-    `parameter.notVariadic` today (`overriding-variadics.php`);
-  - a parameter is checked for contravariance against a trait's abstract
-    method (private ones included), a built-in parent's native signature
-    (`offsetExists(int $index)` in an `SplFixedArray` subclass, a compile
-    error) and an abstract constructor (`overriding-method.php:110`),
-    unreported today; with the PHPDoc-only conflicts of the level table
-    these are the rules oracle's 12 PHPStan-only
-    `method.childParameterType`;
-  - `new static(…)` is safe under a final constructor (`final private
-    function __construct`) as under a final class or
-    `@phpstan-consistent-constructor`; `new.static` today (`bug-4396.php`,
-    `bug-2861.php`);
-  - a conditional return on a template is decided by its whole bound:
-    `(T is object ? … : …)` under `T of TKey|TValue`, each `of
-    object|array<mixed>`, is only maybe true, `conditionalType.alwaysTrue`
-    today (`bug-10622b.php`), as is `(int is int ? …)` shadowing a
-    parameter (`callable-type-predicate-rule.php`); a bound inside the
-    tested type makes it always true and a disjoint one always false: `(T
-    is int ? …)` under `T of int` is `conditionalType.alwaysTrue` and `(T
-    is string ? …)` under `T of int` `conditionalType.alwaysFalse`, both
-    unreported today (`*-conditional-return-type.php`, 4 each);
-  - `@var` above `global $x;` and `static $x = 1;` sets the variable's
-    type; it is `varTag.nativeType` against the default today
-    (`bug-4500.php`, `invalid-var-tag-type.php`). A `@var` is checked
-    against the native type wherever it applies: a nameless one above
-    `return` (`/** @var list<string> */ return [1 => 'b', 2 => 'c'];`,
-    `bug-12708.php`, 4), above `??=` and `.=` of a `void` call
-    (`wrong-variable-name-var-assign-op.php`), and above a closure
-    (`bug-11535.php`), all unreported today; a named one above a
-    destructuring whose native type decides is `varTag.nativeType`, not
-    `varTag.type` (`wrong-var-native-type.php:109`);
-  - `#[\Override]` on a constructor is `method.override` (PHP: "no
-    matching parent method exists", constructors don't override;
-    `override-attribute.php:42`), unreported today;
-  - `#[\Override]` on a trait member is checked in each host: a trait
-    property overriding the host's parent's is `property.override` "no
-    matching parent property" today (`property-override-attr.php`);
-  - a conditional return type may test `$this` (`($this is self::This ?
-    'here' : 'there')` on an enum) and a callable parameter's own
-    parameter; both are `parameter.notFound` "references unknown
-    parameter" today (`bug-11939.php`, `method-conditional-return-type.php`,
-    `callable-type-predicate-rule.php`); an assertion may name a method
-    call (`@phpstan-assert-if-false non-empty-list<static>
-    $this->getValues()`), `assert.unknownExpr` today (and
-    `assert.impossibleType` against the method's return type)
-    (`incompatible-assert-type-with-method-return-type.php`); a `@var`
-    naming a variable the assignment's right side reads types that
-    variable (`/** @var int $foo */ $bar = $foo + 1;`) at a file's top
-    level, not `varTag.differentVariable` (`bug-3515.php`, 4 findings);
-    inside a function it is `varTag.differentVariable` and the read is
-    `variable.undefined`, unreported today (`bug-3515.php:19`, `:20`);
-  - `static` in `@phpstan-assert static $object` resolves to the called
-    class; `assert.unresolvableType` today (`bug-12548.php`);
-  - `@param-closure-this` is `paramClosureThis.nonClosure` only where the
-    native type can't be a `Closure` (`IncompatiblePhpDocTypeCheck`): on a
-    `callable $cb` it is reported today (15 rules-oracle findings);
-  - a template bound is supported when `TemplateTypeCheck` lists its type:
-    `self` (an object type) and `key-of<…>` are, and are
-    `generics.notSupportedBound` today (15 rules-oracle findings,
-    `bug-4550.php`, `bug-7652.php`, `bug-13652.php`, `bug-10749.php`,
-    `method-assert.php`, `param-out.php`);
-  - a PHPDoc type resolving to `never` (`int&string`, a template whose
-    bound makes it empty) is `return.unresolvableType`/
-    `parameter.unresolvableType`/`assert.unresolvableType`, unreported
-    today (32 oracle findings), and so is one that can't intersect
-    (`array{foo: int}&array{bar: string}`), a set hook's `@param`, a
-    `@param-closure-this` of a non-object (the rules oracle's 7
-    PHPStan-only, `bug-3753.php`, `explain-unresolvable-method-parameter.php`,
-    `param-closure-this.php`, `incompatible-types.php:126`), and a
-    property's `@var never` or `class-string<int>`
-    (`property.unresolvableType`, promoted ones included, 4), and an
-    inline `@var self&\stdClass` inside a class
-    (`varTag.unresolvableType`, `invalid-var-tag-type.php`, 3); a parameter
-    whose PHPDoc type doesn't resolve still has one, so `@param
-    value-of<T> $v` on an untyped `$v` is not also `missingType.parameter`
-    (the rules oracle's `unresolvable-parameter.php`);
-  - a constant's `@var` is checked against its native type (`@var string`
-    on `const int BAZ` is `classConstant.phpDocType`), where today the
-    value is checked against the `@var` instead (`classConstant.value`;
-    `incompatible-class-constant-phpdoc-native-type.php`,
-    `value-assigned-to-class-constant*.php`, 4);
-  - the type-alias checks: a cycle (`@phpstan-type A = B`, `B = A`) is
-    `typeAlias.circular`, and `class.notFound` today; an alias resolving
-    to `never` (`int&string`) is `typeAlias.unresolvableType`; an invalid
-    alias name (`123bad`, or `int`: `typeAlias.invalidName`) and an
-    `@phpstan-import-type` of an alias the class doesn't define
-    (`typeAlias.notFound`) are reported, as is an alias whose definition
-    doesn't parse (`typeAlias.invalidType`); all unreported today (the
-    rules oracle's 10, 4, 2 and 2);
-  - `@method`, `@property` and `@mixin` tags and a constant's `@var` with
-    an unresolvable type are `methodTag.unresolvableType` (a parameter or
-    its default), `propertyTag.unresolvableType`, `mixin.unresolvableType`
-    and `classConstant.unresolvableType`, unreported today (`method-tag*.php`,
-    `property-tag.php`, `mixin*.php`, `incompatible-class-constant-phpdoc.php`;
-    8 in all);
-  - a class constant named `class` is `classConstant.class`, a compile
-    error (`class-as-class-constant.php`, 2), and `$string::class` on a
-    string `classConstant.dynamicString` ("not supported in PHP",
-    `class-constant-on-expr.php`), both unreported today;
-  - `@mixin int` is `mixin.nonObject`, unreported today;
-  - an interface, trait or enum is never an attribute class, even marked
-    `#[\Attribute]` (PHP rejects the mark): using one is
-    `attribute.notAttribute` (`class-attributes.php`,
-    `enum-attributes.php`, 3; a trait is `attribute.trait` today);
-  - a PHPDoc tag a trait can't carry is reported: `@phpstan-self-out`,
-    `@phpstan-sealed`, `@mixin`, `@method`, `@property` and
-    `@phpstan-type` on a trait (`selfOut.trait`, `sealed.onTrait`,
-    `mixin.trait`, `methodTag.trait`, `propertyTag.trait`,
-    `typeAlias.trait`), unreported today, and a type resolving to `never`
-    in `@mixin`, `@method`, `@property` or a class constant's `@var` is
-    `*.unresolvableType` as in parameters and returns;
-  - the purity checks cover property hooks (`impure.propertyHookCall`,
-    `purePropertyHook.void`, `impurePropertyHook.pure`) and a pure
-    function's callable-only redundancy
-    (`pureFunction.redundantUnlessCallable`), unreported today; a pure
-    `void` function or method is `pureFunction.void`/`pureMethod.void`
-    under `@throws void` too, which today exempts it as any `@throws`
-    does (`bug-12224.php`, 2); a method
-    is pure through an ancestor's `@phpstan-pure`, a hook through its own,
-    and a callback a built-in invokes at once (`array_map()`, `array_any()`,
-    `array_find()`) is part of the pure caller's body, so an `echo` in any
-    of them is `impure.echo`, unreported today (the rules oracle's 12
-    PHPStan-only, `pure-method.php`, `pure-property-hook.php`,
-    `pure-unless-callable-is-impure*.php`); an object's implicit
-    `__toString()` (in `echo`, `print`, `.`, `.=`, interpolation and a
-    `(string)` cast) is a call there, `possiblyImpure.methodCall` when
-    that method isn't known pure, as is a call to a method with no purity
-    marker (`$this->returningMethod();`), unreported today
-    (`pure-method.php`, 8); and `array_map()` given an opaque, maybe-null
-    or maybe-non-callable callback is `possiblyImpure.functionCall`, as is
-    the callable itself (`pure-unless-callable-is-impure*.php`, 7);
-    taking a reference to a property (`$value = &$this->p`) is
-    `possiblyImpure.propertyAssignByRef` (`impure-assign-ref.php`); a
-    closure passed to a `@param-immediately-invoked-callable` parameter
-    (or a maybe-callable one) runs there, so its `exit` is `impure.exit`
-    in the pure caller (`pure-function.php`, `bug13288*`, 3); creating a
-    first-class callable (`$foo->pure(...)`, `pureFunction(...)`) is pure
-    and calling it takes the callee's purity, where today both are
-    `possiblyImpure.*` "unknown" (19 rules-oracle findings,
-    `first-class-callable-pure-function.php`); a string literal argument
-    that names a function (`$this->m('random_int')`) isn't a call
-    (`bug-12119.php`); and `impureMethod.pure` needs the method or its
-    class final, since a child may add the side effect
-    (`FunctionPurityCheck`; `bug-12382.php`, `noop-impure-points.php`);
-  - an enum's duplicate case value is found through constant expressions:
-    `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
-    literal duplicate already is, on the later case, where PHPStan reports
-    it once on the enum naming both cases, `enum-sanity.php:86`);
-  - a set hook's parameter type is contravariant with the property's
-    (`propertySetHook.parameterType`/`propertySetHook.nativeParameterType`), a
-    template
-    doesn't reuse a type alias's name (`generics.existingTypeAlias`: the
-    check exists in `generics/bounds.rs` and misses a local alias), an
-    alias doesn't shadow a class (`typeAlias.duplicate`), and
-    `@phpstan-require-extends`/`-implements` sit only where PHPStan allows
-    them (`requireExtends.onClass`, `requireExtends.onEnum`,
-    `requireImplements.onClass`, `requireImplements.onEnum`, …); all
-    unreported today; an enum using a trait that requires an interface is
-    `class.missingImplements` (`incompatible-require-implements.php:52`);
-  - `@phpstan-consistent-constructor` on a class with a private
-    constructor is `consistentConstructor.private`, unreported today;
-  - an overriding property's PHPDoc type is covariant with the
-    overridden one's (contravariant for a set-only hooked property):
-    `@var int` over `@var string`, `@var 4` over `@var 1|2|3`, `array`
-    over `array<class-string>` are `property.phpDocType`, unreported today
-    (the rules oracle's 5 PHPStan-only, `overriding-property*.php`,
-    `bug-12466.php`);
-  - an override's return type is checked in every form (PHPStan's
-    `MethodSignatureRule`), where today only a native type against a
-    native type is: a child without a return type under a parent's native
-    one is a compile error ("must be compatible with A::foo(): array";
-    `bug-8081.php`, `bug-8500.php`, `bug-9014.php`,
-    `overriding-indirect-prototype.php`, `return-type-covariance.php`,
-    `enum-sanity.php`, 8), a PHPDoc return incompatible with the parent's
-    is `method.childReturnType` (`@return string` under `@return int`,
-    `@return Cat` under `@return Dog`; `method-signature*.php`,
-    `merge-inherited-return.php`, `bug-3922-ancestors*.php`,
-    `bug-4003.php`, 12), and an untyped override of a built-in method
-    with a tentative return type is `method.tentativeReturnType` even when
-    that type is `mixed` (PHP 8.1 deprecates it without
-    `#[\ReturnTypeWillChange]`: `current()`, `key()`, `offsetGet()`;
-    `bug-4852.php`, `bug-5288.php`, `bug-7519.php`,
-    `tentative-return-types.php`, and the anonymous classes of
-    `offset-access-legal.php`); the rules oracle's 24 and 22 PHPStan-only;
-  - `#[\NoDiscard]` on a `void` or `never` function, method, closure or
-    arrow function is `attribute.target`, a PHP 8.5 compile error ("A void
-    function does not return a value, but #[\NoDiscard] requires a return
-    value"), magic methods returning `void` included; unreported today (14
-    of the rules oracle's 16 PHPStan-only, `typehints-nodiscard.php`,
-    `closure-typehints-nodiscard.php`,
-    `arrow-function-typehints-nodiscard.php`);
-  - `parameter.requiredAfterOptional`, `parameter.implicitlyNullable`
-    ("Deprecated in PHP 8.4: … implicitly nullable via default value
-    null", 9), `parameter.unresolvableNativeType` (`fn (Lorem&Ipsum
-    $a)`, 4) and `return.unresolvableNativeType` (`: int&mixed`, also
-    unreported on functions and methods, 6) cover closures and arrow
-    functions as they do functions and methods, `requiredAfterOptional`
-    with the same per-version wording
-    (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`),
-    and none for an implicitly nullable `int $foo = null`, which is
-    `parameter.requiredAfterOptional` "Deprecated in PHP 8.0" today (the
-    rules oracle's two `required-parameter-after-optional.php` files);
-    an untyped parameter whose `@param` excludes `null` may default to
-    `null` (`incompatible-default-parameter-type-methods.php:54`);
-    unreported today (all 25 of the rules oracle's PHPStan-only,
-    `required-parameter-after-optional-closures.php`,
-    `required-parameter-after-optional-arrow.php`, `callables.php:151`);
-  - a trait's private constant is checked for use in each host, as a
-    trait's private method and property are: unused in `Bar`, it is
-    `classConstant.unused` for `Bar::PRIVATE_CONSTANT` (the rules oracle's
-    `conflicting-trait-constants.php`, 10, `bug-12011.php`), and a dynamic
-    fetch `static::{$name}` counts only for the names `$name` can be
-    (`unused-private-constant-dynamic-fetch.php`); both unreported today;
-  - a `@throws` of any type that isn't `Throwable` is
-    `throws.notThrowable`: a scalar (`bool`), an unknown class, an
-    interface not extending `Throwable`, an intersection with a
-    non-throwable member, a union with `void`, a conditional with a
-    non-throwable branch, and a statement's `@throws` (`/** @throws
-    \stdClass */ $i = 1;`); only a union with a non-throwable class member
-    is reported today (the rules oracle's 10 PHPStan-only,
-    `incompatible-throws.php`, `throws-with-require.php`,
-    `missing-exception-method-throws.php`);
-  - a template no parameter references is
-    `method.templateTypeNotInParameter` wherever else it appears: today it
-    is reported only when the return type uses it, so a template used
-    nowhere, or only by `@param-out`, a conditional return, a
-    `@phpstan-assert` or a `@throws`, isn't (the rules oracle's 80
-    PHPStan-only, `function-template.php`, `method-template.php`,
-    `*-conditional-return-type.php`, `*-assert.php`, `param-out.php`);
-  - an anonymous class is a declaration like any other: the class, member
-    and constructor rules run on it and calls see its members' signatures.
-    Today `new class() implements F {}` missing `doFoo()`, an untyped or
-    unused property, a method missing its `return`, `new class(1, 2, 3)`
-    against a one-parameter constructor, `new class(1) {}` with no
-    constructor, a `@phpstan-require-extends` trait it uses, `ArrayAccess`
-    methods without tentative return types, an uninitialized readonly
-    property, `echo $o->v()` of a `void` method and an unknown trait it
-    uses (`trait.notFound`) are all unreported (41
-    of the rules oracle's PHPStan-only findings name a `class@anonymous`);
-  - `abstract` on an interface method is a compile error ("Interface
-    method Baz::doBar() must not be abstract", `method.abstract` in
-    `abstract-method.php` and `abstract-private-method.php`), unreported
-    today;
+    ClassPropertiesNode state, the dataflow walker deleted;
+  - a write to an undeclared property is `property.notFound`; a typed
+    static property checks its value;
+  - every write form is checked against the property's type (appends,
+    offsets, nested writes, by-reference array functions, compound
+    assignments, increments past a range; most of 138 rules-oracle
+    `assign.propertyType`);
+  - `unset()` of a readonly, hooked or possibly-hooked property is reported
+    (a `@readonly` one too), and a `@readonly` property's own set hook may
+    write it;
+  - write-only and read-only detection: an append-only property is
+    write-only; a read through a `$this` alias counts, a read feeding the
+    property back through its own constructor or hook doesn't, and a
+    dynamic read counts only for the names it can be; every write form
+    counts as a write for `property.onlyRead`/`neverWritten` (64
+    rules-oracle findings, Appendix I's `property-write-forms` 24 more);
+  - a property that can't be written is `assign.propertyReadOnly` for every
+    kind (enum `name`/`value`, object shapes, `@property-read` from
+    outside, readonly in `clone()` from outside; 11); a readonly assigned
+    twice is `assign.readOnlyProperty` (12); `$this` is written by every
+    write form (12); a readonly property is modified by every write form
+    outside the constructor, and taking a reference to one is reported
+    (~30);
+  - property hooks: overriding keeps writability and readability, a
+    non-virtual hook reads and assigns its value (a short set hook
+    assigns), a get-only virtual property may narrow the overridden type,
+    asymmetric static visibility and `@readonly` twice-assignment are
+    reported, and an `@immutable` class's properties are `@readonly`;
+  - a readonly property read before initialization, or one the constructor
+    doesn't assign on every path, is `property.uninitializedReadonly` (the
+    rule doesn't exist; 84 and 30 rules-oracle findings, 12 corpus);
+  - an `ArrayAccess` offset write checks the key against `offsetSet`
+    (`offsetAssign.dimType`) and the value (`offsetAssign.valueType`; 20);
+  - an offset write or append checks its container as a read does (383
+    corpus findings on `mixed`), and a read inside `isset()`/`??`/`empty()`
+    or an `unset()` on an object without `ArrayAccess` throws and is
+    reported (341 on `mixed`, ~60 rules-oracle).
+- **(e) declarations, generics checks and PHPDoc**:
+  - class existence is checked everywhere PHPStan checks it (173
+    rules-oracle `class.notFound`): use sites through `find_type_to_check`
+    (~90), `Unk::class`, constant-string `new $a()`, template bounds and
+    defaults, `@param-out`, `@phpstan-self-out`, conditional branches,
+    generic arguments, a promoted parameter's property, a trait named as a
+    type; a wrong-case name is `class.nameCase`/`interface.nameCase`;
+  - `parameterByRef.tooWide` becomes PHPStan's
+    `TooWideParameterOutTypeCheck` (`parameterByRef.unusedType`,
+    `paramOut.unusedType`; 10);
+  - an empty array under any array `@var` is widening, not `varTag.type`;
+  - generic arguments built from a template are checked through its bound
+    (8); a template inside a callable parameter's signature is "in a
+    parameter" (7); an assertion of a template type, or of an array over
+    `mixed` values, narrows (`assert.alreadyNarrowedType` today; Appendix
+    J's `assert-array-mixed`);
+  - a covariant template may type a property that can't be written after
+    construction, and the message names a property;
+  - compile-time class errors are reported (`parent::` without a parent,
+    `implements \iterable`, unknown `@phpstan-*` tags);
+    `generics.existingClass` wherever templates are declared;
+  - the remaining one- and two-finding gaps, each named with its identifier:
+    a `private(set)` property is implicitly final; `print_r(return:
+    false)`; `@param-out` on a set hook; `array != int` always true;
+    unopenable stream-wrapper includes; nullsafe from a `&get` hook; built-in
+    constant overrides' native types; union `@phpstan-require-extends`;
+    `self::doBar(...)` from static context; abstract static callables;
+    trait-typed promoted properties; `generator.void`; enum case value
+    types (a string-concatenated case wrongly `enum.caseType` today);
+    `new` of a constant interface class-string; `private(set)` appends;
+    `arrayFilter.same`; `pipe.byRef`; `BcMath\Number` comparisons;
+    `doWhile.alwaysTrue`; `@phpstan-assert` on `$this` in a static method;
+    `generics.interfaceConflict`; a `catch` writing a by-reference
+    parameter;
+  - variance through composition (`VarianceCheck`), each parameter on its
+    own, skipping private methods (18 rules-oracle findings);
+  - imports are per namespace block (`use.nameInUse`, 7);
+  - overrides: optional parameters before a variadic and a variadic
+    absorbing parameters are allowed (false positives today); an added
+    parameter must be optional (`parameter.notOptional`); contravariance
+    against trait abstracts, built-in parents and abstract constructors
+    (12 `method.childParameterType`); `new static()` is safe under a final
+    private constructor;
+  - a conditional return on a template is decided by its whole bound (4 +
+    4);
+  - `@var` above `global` and `static` sets the type, and `@var` is checked
+    against the native type wherever it applies;
+  - `#[\Override]` on a constructor is `method.override`, and on a trait
+    member is checked per host;
+  - conditional returns may test `$this` and a callable's parameter;
+    assertions may name a method call; a `@var` naming a variable the right
+    side reads types it at file level (`varTag.differentVariable` inside a
+    function); `static` in `@phpstan-assert` resolves;
+  - `@param-closure-this` on a `callable` isn't `nonClosure` (15); `self`
+    and `key-of<…>` are supported template bounds (15);
+  - unresolvable types are reported for every tag kind (`never`,
+    non-intersecting shapes, a non-object `@param-closure-this`; 32 corpus,
+    14 rules-oracle), and an unresolvable `@param` still types its
+    parameter;
+  - a constant's `@var` is checked against its native type
+    (`classConstant.phpDocType`);
+  - type-alias checks (`typeAlias.circular`, `unresolvableType`,
+    `invalidName`, `notFound`, `invalidType`; 18) and unresolvable
+    `@method`/`@property`/`@mixin`/constant tags (8);
+  - `classConstant.class` and `classConstant.dynamicString`; `@mixin int`;
+    an interface, trait or enum is never an attribute class; tags a trait
+    can't carry are reported;
+  - purity: property hooks, `pureFunction.redundantUnlessCallable`, `@throws
+    void` no longer exempting `pureFunction.void`, purity through an
+    ancestor's tag, immediately invoked callbacks as part of the pure body,
+    implicit `__toString()` and unmarked methods as possibly impure,
+    references to properties, `exit` in an immediately invoked closure,
+    first-class callables pure and taking the callee's purity (19), a
+    string naming a function isn't a call, and `impureMethod.pure` needing
+    a final method or class;
+  - an enum's duplicate case value is found through constant expressions;
+  - set hook parameter contravariance, `generics.existingTypeAlias` for a
+    local alias, `typeAlias.duplicate`, the `requireExtends.on*` placement
+    checks, `class.missingImplements` through an enum's trait;
+    `consistentConstructor.private`;
+  - an overriding property's PHPDoc type is covariant (5), and an
+    override's return type is checked in every form, tentative types
+    included (24 + 22);
+  - `#[\NoDiscard]` on `void`/`never` is `attribute.target` (14);
+  - `requiredAfterOptional`, `implicitlyNullable` and unresolvable native
+    types cover closures and arrow functions, with per-version wording (25);
+  - a trait's private constant is checked per host, and a dynamic
+    `static::{$name}` counts only for its names;
+  - `throws.notThrowable` for every non-`Throwable` `@throws` form (10);
+    `method.templateTypeNotInParameter` wherever the template appears (80);
+  - an anonymous class is a declaration like any other (41 rules-oracle
+    findings name a `class@anonymous`); `abstract` on an interface method is
+    reported;
   - `missingType.iterableValue` walks every type `MissingTypehintCheck`
-    walks (about 75 of the rules oracle's 118 PHPStan-only): `@var` above
-    an assignment, named or not, a by-reference one and a closure's
-    `\Closure(array): array` included (22); each branch of a conditional
-    return (`($i is positive-int ? non-empty-array : array)`, 23 in
-    `function-`/`method-conditional-return-type.php`); a bare
-    `Traversable` and intersections with it (`\Throwable&\Traversable`),
-    as `iterable` already is (13); class `@method`, `@property` and
-    `@phpstan-type` tags; `@param-out`; generic arguments (`static<array>`,
-    `@phpstan-self-out self<array>`, `@mixin Dolor<array>`); a callable's
-    parameters (`callable(array): int`); a set hook's own wider parameter
-    (`set (int|array $v)` on `int`); and the native type where the PHPDoc
-    doesn't apply (`@param Foo|Bar[]` on `array`, an unresolvable
-    `array<int, int, int>` or `array{foo: int}&array{bar: string}`).
-    The generics checks walk the same sites, `@param-closure-this`, `@use`
-    and a template bound included: `missingType.generics` (18),
-    `generics.notGeneric` (15; `Exception<int>` in an inline `@var`),
-    `generics.lessTypes` (10), `generics.moreTypes` (7; `static<int,
-    string>` in `@return`), `generics.notSubtype` (15; a `mixed` or
-    `string` argument outside the template's bound, as in `@extends
-    FooGeneric<int, mixed>`) and `generics.callSiteVarianceRedundant`/
-    `generics.callSiteVarianceConflict` (7 each; `Covariant<covariant int>`,
-    `<contravariant
-    int>`); each count is the rules oracle's PHPStan-only, at class tags,
-    `@param-out`, `@phpstan-self-out`, an inline `@var`, a conditional
-    return and a set hook's parameter, unreported today.
-- (f) control flow, returns, throws and generators:
-  - an empty body is checked like any other: a function or method with a
-    non-`void` return type and an empty body (or only a comment) throws a
-    `TypeError` ("none returned") and isn't `return.missing` today, and
-    neither is a get hook with an empty body (`get {}`); 507 of the rules
-    oracle's 517 PHPStan-only `return.missing` are this (matched per
-    declaration). An empty body under `@return never` is `return.never`
-    (`bug-5627.php`, `missing-return.php:473`, `:481`,
-    `typehints-nodiscard.php`), one marked `@phpstan-impure` or under
-    `@phpstan-all-methods-impure` is `impureMethod.pure`
-    (`all-methods-are-pure.php`, `pure-constructor.php`, 8), and `fn ():
-    never => 1` is `return.never` ("should never return"), `return.type`
-    today. The
-    same exemption skips the `@param-out` end-of-execution check: `/**
-    @param-out positive-int $i */ function a(int &$i): void {}` isn't
-    reported, while a non-empty body that never assigns `$i` is
-    (`parameterByRef.executionEnd`, PHPStan's `paramOut.type`). The check
-    sits on each end statement (PHPStan's `ExecutionEndNode`), so an
-    `if`/`else` whose branches both fall off is reported twice, not once
-    on the declaration (the rules oracle's `parameter-out-execution-end.php`,
-    7), and it misses two shapes today: `unset($p[1])` on a `list<int>`
-    out-parameter leaves `array<0|int<2, max>, int>`, not a list
-    (`parameter-out-assigned-type.php`), and a template `@param-out S`
-    isn't satisfied by a concrete value (`param-out.php`, `method-assert.php`,
-    `generic-callables-incompatible.php`; 45 `paramOut.type` in all, most
-    of them empty bodies);
-  - a finally block that changes a value returned by reference is
-    `return.byRefFinally` (13 rules-oracle findings), and every exit point
-    a finally block overrides is `finally.exitPoint` (25 of 42 missed);
-  - `return.missing` is reported where execution falls off, the body's
-    last statement (PHPStan's `ExecutionEndNode`), not on the declaration:
-    36 of the rules oracle's 53 phpstan-rs-only `return.missing` are the
-    same finding on the declaration's line, and each end that falls off
-    is reported (an `if` without `else` before the end falls off twice, 7
-    more lines in the oracle);
+    walks (~75 of 118), and the generics checks the same sites
+    (`missingType.generics` 18, `generics.notGeneric` 15, `lessTypes` 10,
+    `moreTypes` 7, `notSubtype` 15, call-site variance 14).
+- **(f) control flow, returns, throws and generators**:
+  - an empty body is checked like any other: a non-`void` function with an
+    empty body is `return.missing` (507 of 517 rules-oracle PHPStan-only),
+    `return.never` under `never`, `impureMethod.pure` under
+    `@phpstan-impure`; the same exemption skips `@param-out`'s end check,
+    which sits on each end statement (45 `paramOut.type`);
+  - `return.byRefFinally` (13) and `finally.exitPoint` (25);
+  - `return.missing` is reported where execution falls off, once per end
+    (36 of 53 phpstan-rs-only are the same finding on another line);
   - `return.unusedType` isn't reported for a union of constants when every
-    return is a constant: `@return 1|2|3` returning `1`, or a
-    `'Test'|'Projekt in Umsetzung'` domain, stays
-    (`TooWideTypeCheck::narrowType`; 10 rules-oracle findings,
-    `bug-11453.php`,
-    `bug-10312*.php`); it is reported where today it is skipped: for
-    closures and arrow functions (`fn (): ?string => 'foo'`,
-    `tooWide*ReturnType.php`, `closure*ReturnTypes.php`,
-    `native-union-types.php`, 8), for a body that can fall off the end,
-    which is a `TypeError` and never a `null` return (`function (): ?string
-    { if (rand()) { return 'foo'; } }` never returns `null`; `dolor2()`,
-    `dolor4()`), and for a conditional return type, whose branches are
-    members (`($flag is 1 ? string : int)` returning `$flag` never returns
-    `string`); the rules oracle's 22 PHPStan-only;
-  - a return type that includes `void` accepts falling off the end (fixed
-    first): `@return void|int` on a function that returns only on some
-    paths is `return.missing` today, 10 of the oracle's 38 phpstan-rs-only
-    `return.missing` (the `php_codesniffer` sniffs' `process()`), and
-    returning `null` under it is accepted: `return rand(0, 1) ? 17 :
-    null;` under `@return void|int` is `return.type` today (the rules
-    oracle's `bug-10291.php`), and a bare `return;` is `return.empty` (4
-    findings, `bug-11980.php`, `returnTypes.php:652`, `bug-13566.php`);
-  - a conditional return type is resolved at each `return` against the
-    scope's parameter types: after `if ($lazy) { return …; }`, nette's
-    `Strings::matchAll` returns a `list` against `($lazy is true ?
-    Generator : list)`, and `return is_int($value);` under `@return ($value
-    is int ? true : false)` returns `bool` (`return $value === null` under
-    `($value is null ? true : false)` too, the rules oracle's
-    `bug-12087b.php`); both are `return.type` today
-    (phpstan-rs reports 12 against a conditional in the corpus; PHPStan
-    reports 1 of the 5 checked, e.g. not
-    `nette/utils/src/Utils/Strings.php:538` or
-    `latte/Essential/Filters.php:728`);
-  - a `yield` is checked against the declared generator or iterable key
-    and value types (`YieldTypeRule`): `yield 1` under `@return
-    Generator<int, string>` or `iterable<int, string>` is unreported today,
-    and so is a key: `yield 1;` and a bare `yield;` produce `int` keys a
-    `Generator<string, …>` rejects (`generator.keyType`, `yield.php`, and
-    a template key `K of int|string` against `(K of int)|string`,
-    `bug-7484.php`);
-    only `yield from` delegation is checked (28 oracle
-    `generator.valueType` findings), and a delegated value mismatch is
-    `generator.valueType`, where phpstan-rs reports it as
-    `generator.keyType` today (`yield-from.php:74`); a `yield` under a
-    return type that isn't a generator is `generator.returnType` at each
-    `yield` and `yield from`, as PHPStan reports it, not once on the declaration
-    (the rules
-    oracle's 10 PHPStan-only, `yield-in-generator.php`, `returnTypes.php`);
-  - a returned value is checked against a template return type:
-    `return 5;` under `@template T @param T $x @return T`, and `return new
-    stdClass();` under `@template T of object @return T`, are unreported
-    today (`T` can be any type the caller picks), and neither are `T|null`
-    or `T|false` returned under `@return T` (`bug-15168.php`, 6) or a
-    concrete class under `T of Field2` (`bug-6589.php`, `bug-6787.php`,
-    `bug-8048.php`, `short-get-property-hook-return.php`, 3);
-  - a concrete function with an empty body still checks its `@throws`:
-    `/** @throws \Exception */ function ex(): void {}` isn't
-    `throws.unusedType` today (the empty-body exemption is for abstract and
-    interface methods; all 44 of the rules oracle's PHPStan-only
-    `throws.unusedType`, each member of a union, intersection, conditional
-    or template tag reported, `incompatible-throws.php`,
-    `throws-with-require.php`, `too-wide-throws-*.php`,
-    `unthrown-exception-multi.php`), while a call to a method without
-    `@throws` is an implicit throw point that satisfies it
-    (`exceptions.implicitThrows`,
-    on by default): `@throws \Exception` over `$this->doBar();` is
-    `throws.unusedType` today, as is one over an immediately called arrow
-    function that throws (5 rules-oracle findings,
-    `too-wide-throws-explicit.php`, `too-wide-throws-method.php`,
-    `immediately-called-arrow-function.php`);
-  - `throw` checks its operand: `throw 123;` ("Can only throw objects"),
-    `throw $nullableException`, `$foo ?? throw 1` and, at level 10, `throw`
-    of `mixed` are `throw.notThrowable`, unreported today (the rules
-    oracle's 6 PHPStan-only, `throw-values*.php`,
-    `wrong-variable-name-var.php:156`);
-  - a conditional `@throws ($x is 0 ? Exception : void)` resolves at each
-    call: `inverse(0)` under `@throws void` is `throws.void`, through
-    function, method, static and constructor calls, nested and inherited
-    ones, unreported today (`conditional-throws-function.php`,
-    `conditional-throws-method.php`, 12), as is `array_combine()` of
-    `mixed` arrays throwing `ValueError` (`bug-13642.php`);
-  - a `catch` its `try` can't reach is `catch.neverThrown` (from D2's
-    throw points): `try { $q = 1; } catch (\Throwable $e) {}` and a
-    `catch (\LogicException)` around a call declared `@throws
-    \RuntimeException` are unreported today; the rule doesn't exist (the
-    rules oracle's 189). The throw points it reads are PHPStan's: a write
-    to a typed property throws `TypeError` only when the value may not fit
-    after coercion (`int` into `?float` doesn't, a PHPDoc-only mismatch
-    doesn't; `bug-6256.php`, `bug-6791.php`, `bug-9146*.php`,
-    `union-type-error.php`); `99 / $v` on `int<min, -1>|int<1, max>`
-    can't throw `DivisionByZeroError` (`bug-6349.php`, 20); a `match` with
-    `default` or exhausted arms can't throw `UnhandledMatchError`
-    (`bug-6115.php`); `echo`/`(string)` of an object and a magic call
-    follow `__toString()`'s and `__call()`'s `@throws void`
-    (`bug-5952.php`, `bug-13806.php`, `dead-catch-magic-methods.php`),
-    `isset()` on an `ArrayAccess` its `offsetExists()`
-    (`bug-11427.php`), `new $class` on a `class-string<T>` the
-    constructor of `T` when final or consistent (`bug-4806.php`,
-    `bug-6574.php`), and a static call its method's conditional `@throws`
-    (`bug-4805.php`); `foreach` over an array, creating a first-class
-    callable and `assert(false)` (an `AssertionError`) throw nothing a
-    `catch (\RuntimeException)` takes (`bug-5903.php`,
-    `dead-catch-first-class-callables.php`, `bug-5650.php`); property
-    hooks are throw points only through their own `@throws` when
-    `exceptions.implicitThrows` is off
-    (`unthrown-exception-property-hooks*.php`); each member of a
-    multi-catch is judged alone (`unthrown-exception-multi.php`); a read
-    of the backing property inside its own hook can't throw, so `try {
-    return $this->i; } catch (…) {}` in a get hook returns on every path
-    (`return.missing` today, `unthrown-exception-property-hooks.php:18`);
-    and a caught
-    class that isn't an exception, or is guarded by `class_exists()`, is
-    judged as well (`catch.php`, `class-exists.php`);
-- (g) the restricted-usage framework: one set of usage sites (function, method
-  and static calls, property and constant reads, `new`, `instanceof`, `catch`,
-  `extends`/`implements`/trait `use`, attributes, native type hints, PHPDoc
-  types, first-class callables and the implicit `__toString()` call), each
-  asking every registered restricted-usage extension (PHPStan's
-  `Restricted*UsageExtension`s), which `@internal` (core), `@deprecated`
+    return is a constant (10), and is for closures, bodies that can fall
+    off and conditional return types (22);
+  - a return type including `void` accepts falling off and `null` (10 of 38
+    phpstan-rs-only `return.missing`, the php_codesniffer sniffs);
+  - a conditional return type resolves at each `return` against the
+    scope's parameter types (12 corpus `return.type`);
+  - `yield` is checked against the declared key and value types
+    (`generator.keyType`/`valueType`; 28), and `generator.returnType` at
+    each `yield`;
+  - a returned value is checked against a template return type (9);
+  - a concrete empty body checks its `@throws` (all 44 PHPStan-only
+    `throws.unusedType`), while a call without `@throws` is an implicit
+    throw point that satisfies it (5);
+  - `throw` checks its operand (`throw.notThrowable`, 6); a conditional
+    `@throws` resolves per call (12);
+  - `catch.neverThrown` from D2's throw points (the rule doesn't exist; 189
+    rules-oracle findings), reading PHPStan's throw points: a typed
+    property write throws only when the value may not fit, a division only
+    by a possible zero, `match` only when inexhaustive, `__toString()` and
+    `__call()` by their `@throws`, `isset()` on `ArrayAccess` by
+    `offsetExists()`, `new $class` by its constructor, hooks by their own
+    `@throws`, each multi-catch member alone.
+- **(g) the restricted-usage framework**: one set of usage sites (calls,
+  property and constant reads, `new`, `instanceof`, `catch`,
+  `extends`/`implements`/`use`, attributes, native and PHPDoc types,
+  first-class callables, implicit `__toString()`), each asking every
+  registered `Restricted*UsageExtension`: `@internal` (core), `@deprecated`
   (ext-deprecation-rules), `restricted_symbols` (ext-disallowed-calls) and
-  PHPStan's `@api` promise (`phpstan_api`) implement. Today each has its own
-  subset: `internal_usage` covers all but attributes, `deprecated_usage` only
-  calls, property and constant reads and `new` (a deprecated class in a type
-  hint, an `extends`, an `instanceof` or a `catch` is unreported),
-  `restricted_symbol_usage` reuses `internal_usage`'s call sites, and
-  `phpstan_api` walks its own.
-- (h) `FileAssertRule` (with the `assertNativeType` and
-  `assertVariableCertainty` support Stage D's oracle added), the dump rules
-  and the four asserts. `\PHPStan\dumpType()`, `dumpNativeType()`,
-  `dumpPhpDocType()` and `debugScope()` report under PHPStan's
-  identifiers (`phpstan.dumpType` and the rest; the rules oracle's 39, 9,
-  27 and 1, none reported today); the asserts' mismatches keep
-  `phpstanRs.*` (approved: PHPStan's `phpstan.type`, `phpstan.nativeType`,
-  `phpstan.superType`, `phpstan.variable`).
-- (i) the "is this usage internal / deprecated from this scope" predicate (§3)
-  exposed from (g)'s framework, so E6's semantic tokens mark every usage site
-  the rules check; today `semantic_tokens.rs` re-derives the gating at function,
-  member and `new` sites only.
+  PHPStan's `@api` (`phpstan_api`). Today each has its own subset:
+  `deprecated_usage` covers only calls, property and constant reads and
+  `new`, so a deprecated class in a type hint, `extends`, `instanceof` or
+  `catch` is unreported.
+- **(h)** `FileAssertRule` with `assertNativeType` and
+  `assertVariableCertainty`, the dump rules and the four asserts:
+  `dumpType()` and friends report under PHPStan's `phpstan.*` identifiers
+  (76 rules-oracle findings, none reported today); the asserts' mismatches
+  keep `phpstanRs.*` (approved).
+- **(i)** the "is this usage internal / deprecated from this scope"
+  predicate (§3) exposed from (g), so E6's semantic tokens mark every usage
+  site the rules check (function, member and `new` sites only today).
 
 Mixed modules are split row by row (Appendix A). Gate: architecture rule 10
 for the analyser.
@@ -4005,73 +2708,37 @@ for the analyser.
 
 - Order:
   1. ext-doctrine's remaining modules (its reflection data extension moved
-     in C8, and E4 fixes its entity metadata: only mapped properties are
-     fields, `#[MappedSuperclass]` and trait fields are included, docblock
-     `@ORM` annotations are read), then phpstan-doctrine's rules, which
-     ext-doctrine has none of today (it only types results; no
-     `doctrine.*` identifier exists). Probed through the corpus's own
-     `phpstan.neon` against `UserEntity`, each of these is unreported
-     today: DQL syntax and semantic errors in `createQuery()` (`SELEC …`,
-     an unknown field) and in a QueryBuilder chain (`doctrine.dql`), an
-     unknown field in `findBy(['nope' => 1])` (`doctrine.findByArgument`),
-     and a magic `findOneByNope()` (`method.notFound`). The entity checks
-     (`doctrine.columnType`, `associationType`, `enumType`, `finalEntity`,
-     `finalConstructor`, `mapping`, `queryBuilderDynamic`) have no
-     counterpart either;
+     in C8; E4 fixes its entity metadata: only mapped properties are fields,
+     `#[MappedSuperclass]` and trait fields included, `@ORM` docblock
+     annotations read), then phpstan-doctrine's rules, which it has none of
+     today (DQL syntax and semantics in `createQuery()` and QueryBuilder
+     chains, `findBy()` fields, magic `findOneBy*()`, the entity checks);
   2. ext-sql;
-  3. ext-phpunit, ext-codeception, ext-mockery and ext-mockstan, after E1.
-     ext-phpunit gains phpstan-phpunit's rules, probed against the
-     vendored package and each unreported today: `@covers`/
-     `#[CoversClass]` naming a missing class or method
-     (`phpunit.covers*`), the assertion simplifications
-     (`assertSame(false, $x)` → `assertFalse`, `assertSame(1, count($a))`
-     → `assertCount`, and `assertTrue`/`assertNull`/`assertEquals`),
-     `->method('nope')` on a mock of a class without it
-     (`phpunit.mockMethod`), and data providers that are missing, private
-     or non-static (`phpunit.dataProvider*`). Its `test.risky` has no
-     phpstan-phpunit counterpart and stays;
-  4. ext-pest (closure-this, the file-set hook, pest risky tests), then
-     pest-plugin-phpstan's rules, none of which exist today (checked
-     against the vendored plugin's 20 identifiers): duplicate test
-     descriptions, invalid group names, static or empty test closures,
-     invalid `->repeat()` values, `beforeAll`/`afterAll` inside `describe`
-     and their `$this` use, `covers()` of a missing class or function,
-     `throws()` of a missing or non-`Throwable` class, `describe()` without
-     tests, the expectation checks (`toBeString()`-style requirements on
-     the value, impossible and redundant expectations) and a redundant
-     local `uses()`;
+  3. ext-phpunit, ext-codeception, ext-mockery and ext-mockstan, after E1;
+     ext-phpunit gains phpstan-phpunit's rules (`@covers` targets,
+     assertion simplifications, `->method()` on mocks, data providers),
+     keeping its own `test.risky`;
+  4. ext-pest, then pest-plugin-phpstan's 20 identifiers (duplicate
+     descriptions, group names, test closures, `repeat()`, hooks in
+     `describe`, `covers()`/`throws()` targets, expectation checks, local
+     `uses()`);
   5. ext-nette-tester;
   6. ext-strict-rules, completing phpstan-strict-rules: today's 11 toggles
-     cover parent-constructor calls, boolean conditions, useless casts,
-     strict `array_filter`, strict function calls, switch case types, loop
-     variable overwrite, dynamic static calls, illegal constructor calls,
-     implicit array creation and arithmetic operands; the package's other
-     groups are missing (each unreported today, checked against the
-     vendored package): `disallowedLooseComparison` (`==`/`!=`),
-     `disallowedBacktick`, `disallowedEmpty`, `disallowedShortTernary`,
-     `noVariableVariables` (with the dynamic method, property, static
-     method and static property names) and `closureUsesThis`, plus the
-     core parameters the package sets (C1's list).
-     `matchingInheritedMethodNames` (through `check_function_name_case`)
-     and `booleansInLoopConditions` already exist;
+     plus the missing `disallowedLooseComparison`, `disallowedBacktick`,
+     `disallowedEmpty`, `disallowedShortTernary`, `noVariableVariables` and
+     `closureUsesThis`, and the core parameters the package sets (C1);
   7. ext-deprecation-rules;
   8. ext-disallowed-calls;
   9. ext-shipmonk, ext-type-perfect, ext-voku, ext-sidz, ext-slam,
      ext-psr3, ext-language-extensions and ext-extras.
 
-  Each crate mirrors its package completely, as §2's table says. Compared
-  rule class by rule class against the packages' current releases
-  (downloaded for the comparison), today's coverage is:
+  Each crate mirrors its package completely (§2). Compared rule class by
+  rule class against the packages' current releases, today's coverage:
 
-  - ext-shipmonk has comparable types, null in binary and assign
-    operations and interpolated strings, and enum match exhaustiveness
-    (`EnforceEnumMatch`, `ForbidMatchDefaultArmForEnums`); ext-extras and
-    `restricted_symbols` cover `ForbidUnusedException`,
-    `RequirePreviousExceptionPass` and `EnforceNativeReturnTypehint`
-    (partly) and `ForbidCustomFunctions`, and ext-strict-rules' strict
-    function calls require `iterator_to_array()`'s `$preserve_keys` as
-    `EnforceIteratorToArrayPreserveKeys` does. Missing: `BackedEnumGenerics`,
-    `ClassSuffixNaming`,
+  - ext-shipmonk has comparable types, null in operations and
+    interpolation, and enum match exhaustiveness (with ext-extras and
+    `restricted_symbols` covering four more); missing:
+    `BackedEnumGenerics`, `ClassSuffixNaming`,
     `EnforceClosureParamNativeTypehint`, `EnforceListReturn`,
     `EnforceReadonlyPublicProperty`, `ForbidArithmeticOperationOnNonNumber`,
     `ForbidCast`, `ForbidCheckedExceptionInCallable`,
@@ -4085,45 +2752,31 @@ for the analyser.
     `ForbidUnsetClassField`, `ForbidUnusedClosureParameters`,
     `ForbidUnusedMatchResult`, `ForbidUselessNullableReturn`,
     `ForbidVariableTypeOverwriting`, `UselessPrivatePropertyDefaultValue`;
-  - ext-type-perfect has `NoIssetOnObject` and `NoEmptyOnObject` (in
-    `strict_idioms`); missing: `NoArrayAccessOnObject`,
-    `NoMixedMethodCaller`, `NoMixedPropertyFetcher`, `NoParamTypeRemoval`,
-    `NarrowPublicClassMethodParamType`, `NarrowPrivateClassMethodParamType`,
-    `NarrowReturnObjectType`, `ReturnNullOverFalse`;
-  - ext-voku has the mixed-operand checks (`ExtendedBinaryOp`,
-    `ExtendedAssignOp`); missing: the eight `IfCondition*` rules,
-    `ElseIfConditionBasic`, `WrongCast` and `DisallowedCallMethodOnNull`;
-  - ext-mockstan has eight of rector/mockstan's ten (`mock_hygiene`);
-    missing: `NoEntityMocking` and `NoDocumentMocking`;
-  - ext-disallowed-calls maps functions, methods and classes onto
-    `restricted_symbols`; missing: namespaces, constants, class
-    constants, properties, superglobals, attributes, enums, `new`, the
-    control-structure and keyword kinds (`if`, `goto`, `eval`, `echo`,
-    `print`, `exit`/`die`, `include`/`require`, …), and the entry fields
-    the ROADMAP lists (`allowInFunctions*`, parameter conditions,
-    `definedIn`, `errorIdentifier`, `errorTip`);
-  - ext-sidz (all thirteen magic-number rules), ext-psr3 (all of
-    staabm/phpstan-psr3 and sfp-phpstan-psr-log) and
-    ext-language-extensions (all eight attributes) are complete;
-    slam/phpstan-extensions and phpstan-mockery have no rules (types and
-    configuration only).
-- Extensions register parse-time visitors of their own (§3.1's
-  annotations), through the registration API.
-- ext-extras' `@see` check (`phpDoc.seeTag`) reads a reference as its
-  author means it: `@see Assert::assertSame` without parentheses names the
-  method when the class has one (phpDocumentor's strict reading is a
-  constant), and free text (`@see RFC 7541 Appendix A` on a class
-  constant) isn't a reference. Today both are "unknown reference/class":
-  241 phpstan-rs-only findings on the corpus oracle's files, 176 of them
-  PHPUnit's `@see Assert::…` in `Framework/Assert/Functions.php`.
-- ext-sql resolves static-schema SQL (SELECT/CTE/derived-table columns
-  against the catalog) and validates parameters through an `sql` API;
-  `sqlparser` leaves the package.
-- The Doctrine QueryBuilder chain becomes extension type data, using
-  method type-specifying (statement-level `$qb->andWhere()`) and an
-  `ExpressionTypeResolverExtension`. This is an approved-delta commit with
-  fixtures for aliasing, statement mutation and arguments that change
-  between assignment and use.
+  - ext-type-perfect has `NoIssetOnObject` and `NoEmptyOnObject`; missing
+    `NoArrayAccessOnObject`, `NoMixedMethodCaller`, `NoMixedPropertyFetcher`,
+    `NoParamTypeRemoval`, `NarrowPublicClassMethodParamType`,
+    `NarrowPrivateClassMethodParamType`, `NarrowReturnObjectType`,
+    `ReturnNullOverFalse`;
+  - ext-voku has the mixed-operand checks; missing the `IfCondition*`
+    rules, `ElseIfConditionBasic`, `WrongCast` and
+    `DisallowedCallMethodOnNull`;
+  - ext-mockstan has eight of ten (missing `NoEntityMocking`,
+    `NoDocumentMocking`);
+  - ext-disallowed-calls maps functions, methods and classes; missing
+    namespaces, constants, properties, superglobals, attributes, enums,
+    `new`, the control-structure kinds and the ROADMAP's entry fields;
+  - ext-sidz, ext-psr3 and ext-language-extensions are complete; slam and
+    phpstan-mockery have no rules.
+- Extensions register their own parse-time visitors (§3.1).
+- ext-extras' `@see` check reads a reference as its author means it
+  (`@see Assert::assertSame` names the method; free text isn't a
+  reference): 241 phpstan-rs-only corpus findings today, 176 in PHPUnit's
+  `Functions.php`.
+- ext-sql resolves static-schema SQL against the catalog and validates
+  parameters through an `sql` API; `sqlparser` leaves the package.
+- The Doctrine QueryBuilder chain becomes extension type data, through
+  method type-specifying and an `ExpressionTypeResolverExtension` (an
+  approved delta, fixtured for aliasing, mutation and changing arguments).
 
 **E5. Levels** (§3.9), after E3 moved every rule at its level: the `max`
 alias, the default level for CLI and LSP, and the replacement consumers for
@@ -4132,8 +2785,8 @@ level-header fixtures, and LevelsTestCase fixtures are added. Gate: for
 every level in 0..=10 plus unset, before == after, except the approved
 deltas E3's table names.
 
-**E6. Observers.** LSP-only presentation (semantic tokens, inlay hints,
-hover, definition probes) on observer events.
+**E6. Observers.** LSP-only presentation (semantic tokens from E3(i), inlay
+hints, hover, definition probes) on observer events.
 
 **E7. Checker decomposition.** Gate: the exact enumerated field sets for
 engine context, file state, function frame and traversal context
