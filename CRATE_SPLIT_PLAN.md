@@ -1040,7 +1040,12 @@ commit); the unsorted corpus comparison starts here.
   `__sleep(): array` are `missingType.return`/`missingType.iterableValue`
   today (the rules oracle's `magic-signatures.php`,
   `magic-serialization.php`, `missing-serialization.php`,
-  `enum-sanity.php`, `bug-15056.php`);
+  `enum-sanity.php`, `bug-15056.php`), and their returns are checked
+  against those types: `__isset()` returning `42`, `__sleep()` returning
+  `[new stdClass()]`, `__serialize()` or `__debugInfo()` returning `''`
+  (a `TypeError` and a fatal error) and `__set_state()` returning an array
+  are unreported
+  today (8 of the rules oracle's PHPStan-only `return.type`);
 - a failing `array_is_list()` proves a non-empty non-list array;
 - a boolean flag set in a branch implies that branch's narrowing, unioned
   over every path that sets it;
@@ -1418,7 +1423,9 @@ Follow-ups:
   `bug-7594.php`), or lacking an unsealed shape's required key
   (`non-empty-array<mixed>` for `array{bar: string, ...}`,
   `bug-2911.php`); and an invariant generic with a `mixed` argument
-  (`Inv<mixed>` for `Inv<int>`, `bug-11935.php`, `bug-3589.php`).
+  (`Inv<mixed>` for `Inv<int>`, `bug-11935.php`, `bug-3589.php`), or with
+  a template bounded by the argument (`Format<O of Output>` for
+  `Format<Output>`, `bug-3028.php`).
 - **Conditional parameter types** resolve per call: `@param ($flags is 256
   ? string : bool) $demoArg` takes a `string` only when `$flags` is `256`;
   `cond('s')` and `cond(true, 256)` are unreported today
@@ -1987,6 +1994,12 @@ Follow-ups:
     `void` applies when it is `never` or a conditional of `void` and
     `never`: `@return ($c is true ? void : never)` makes `callExit(false)`
     `never` where it is `void` today (the rules oracle's `bug-10337.php`).
+    A built-in parent's stub PHPDoc is inherited the same way: an untyped
+    `#[\ReturnTypeWillChange] getChildren()` under
+    `RecursiveFilterIterator` returns `static` and an untyped `key()`
+    under `@extends \IteratorIterator<array-key, …>` returns `array-key`,
+    so `return null;` in them is `return.type`, unreported today
+    (`bug-9615.php`, 3; `bug-6249.php`).
 
   Class constants are typed through the `ConstantResolver` (C2's follow-up,
   which lands first), reading the ancestor level's constant declarations
@@ -2372,6 +2385,12 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
   Option` read `T` as a class named `T` today (`bug-6353.php`);
 - native `TypeHint` nodes are resolved directly, not printed and re-parsed
   (about 85 sites);
+- an array PHPDoc type unioned with an iterable type gives it its value
+  type (`TypeNodeResolver`'s union handling): `string[]|iterable` is
+  `iterable<string>` and `Foo[]|Collection` is `Collection&iterable<Foo>`,
+  where today they are `array<string>|array|Traversable` and a union, so
+  `return [1];` under `@return string[]|iterable` is unreported
+  (`returnTypes-iterable.php`, `returnTypes.php:151`, `:166`);
 - a template name is a template wherever a type is expected, shape keys
   included: `@return array{TKey: int}` under `@template TKey of string`
   has the literal key `'TKey'` today, so `sealed('a')` is
@@ -3022,7 +3041,12 @@ deleted; the file-size gate.
   - **Calls, closures and objects:**
     - `$this`/`static` inside a class body carry their bound class
       (`Type::This`/`StaticRef` bound), displayed `$this(Base)`/
-      `static(Base)`, and `@return $this` rejects a returned `new static()`.
+      `static(Base)`, and `@return $this` rejects a returned `new static()`
+      or `new self()`, and `: static` a returned `new self()` (a
+      `TypeError` when called on a subclass); 17 of the rules oracle's
+      PHPStan-only `return.type` are these (`bug-10580.php`,
+      `returnTypes.php`, `bug-3523.php`, `bug-14150-static.php`,
+      `bug-5946.php`).
       In a generic class `$this` carries the class's own templates as its
       arguments (`D<T>`, where it is plain `D` today), so a property typed
       `T` reads as `T`: `return $this->value;` under `@return T` is
@@ -3115,7 +3139,8 @@ deleted; the file-size gate.
       constant of a non-final class) is its declared type (`mixed` when
       untyped), not its value: `static::KEY` is `'v'` today, so
       `sprintf('%s', static::KEY)` and `array_key_exists(static::KEY, $a)`
-      pass where PHPStan checks `mixed` (`bug-6181.php`).
+      pass where PHPStan checks `mixed` (`bug-6181.php`); `$this::C` and
+      `$self::C` are the same fetch (`bug-6758.php`, 3).
     - **A template's bound** is checked at the call: `g(new
       DateTimeImmutable())` for `@template T of DateTime @param T $a` is
       unreported today (`call-generic-function.php`).
@@ -3197,6 +3222,14 @@ deleted; the file-size gate.
     - **`new` into a generic property**: `$this->c = new Coll();` for a
       `@var Coll<int>` property types the `new` as `Coll<int>`
       (`NewHandler`, `NewAssignedToPropertyVisitor`); it is `Coll` today.
+    - **A `static` variable** starts as its initializer's type unioned
+      with every value the body assigns it (a later call sees the earlier
+      call's last value), and as `mixed` once it escapes by reference:
+      after `static $v = 1; …; $v = 'x';` it is `int` today, and `static
+      $s = 'bar'` in `function &refFunction(): string` stays a string
+      though a caller may store an `int` through the returned reference
+      (`bug-757.php`, `return-type-after-finally.php`; PHPStan has `mixed`
+      for every static variable).
     - **Function scope effects** follow `FuncCallScopeEffectsHelper`:
       - `array_pop`/`array_shift`/`array_push`/`array_unshift` keep a
         constant array's shape: after `array_pop($l)` on `[1, 2, 3]`, `$l` is
@@ -3411,7 +3444,7 @@ building on the previous one:
       and a static call drops `self::$…`/`static::$…` ones: after
       `self::$i = new H(); self::bazz();` where `bazz()` resets it,
       `self::$i?->foo()` is `nullsafe.neverNull` today (the rules oracle's
-      `bug-8523*.php`).
+      `bug-8523*.php`, and `bug-4443.php`'s `return.type`).
       With invalidation in place, the constant-comparison rules' property
       guards that compensate for it are deleted: `expr_reads_a_property`
       (the loose and numeric comparisons in `probe_checks.rs`) and
@@ -4084,7 +4117,12 @@ The prologue, one commit each, before any rule moves:
   `argument.type`, unreported today (`bug-14234.php`, `bug-6443.php`,
   `vprintf.php`, `discussion-7004.php`, `literal-string.php`,
   `bug-14549-bis.php`, `call-methods.php:1332`, `invalid-binary.php:127`
-  among the rules oracle's PHPStan-only `argument.type`);
+  among the rules oracle's PHPStan-only `argument.type`), and so is an
+  explicit one: `array<int, mixed>` returned under `@return array<int,
+  string>` is `return.type`, unreported today (`bug-8166.php`,
+  `bug-10349.php`, `bug-5218.php`, `compact-variables.php`,
+  `pure-unless-callable-is-impure.php`, `bug-9377.php`, `bug-11386.php`,
+  `bug-5065.php`, `invalid-lexical-variables-in-closure-use.php`);
 - `RuleLevelHelper::accepts` takes the level-dependent acceptance out of
   `types::Relation::accepts` (`configured_level`, `strict_mixed_arrays`
   and `check_benevolent_union_types` leave `types::Relation`);
@@ -4638,7 +4676,10 @@ fixture:
   - a returned value is checked against a template return type:
     `return 5;` under `@template T @param T $x @return T`, and `return new
     stdClass();` under `@template T of object @return T`, are unreported
-    today (`T` can be any type the caller picks);
+    today (`T` can be any type the caller picks), and neither are `T|null`
+    or `T|false` returned under `@return T` (`bug-15168.php`, 6) or a
+    concrete class under `T of Field2` (`bug-6589.php`, `bug-6787.php`,
+    `bug-8048.php`, `short-get-property-hook-return.php`, 3);
   - a concrete function with an empty body still checks its `@throws`:
     `/** @throws \Exception */ function ex(): void {}` isn't
     `throws.unusedType` today (the empty-body exemption is for abstract and
