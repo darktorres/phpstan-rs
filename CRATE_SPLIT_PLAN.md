@@ -4656,9 +4656,11 @@ fixture:
     6);
   - `__TRAIT__` outside a trait is `magicConstant.outOfTrait` in a
     parameter's or a property's default too (`string $trait =
-    __TRAIT__`, `public $t = __TRAIT__;`), and `__CLASS__` outside a class
-    `magicConstant.outOfClass`, unreported today (`magic-constant*.php`, 6
-    and 3);
+    __TRAIT__`, `public $t = __TRAIT__;`), `__CLASS__` outside a class
+    `magicConstant.outOfClass`, `__METHOD__`/`__FUNCTION__` in a property
+    default `magicConstant.outOfFunction`, and `__NAMESPACE__` in the
+    global namespace `magicConstant.outOfNamespace`, unreported today
+    (`magic-constant*.php`, 6, 3, 2 and 1);
   - enum cases compared with `<`, `>`, `<=` or `>=` are always false
     (`Foo::A > Foo::B`; `greater.alwaysFalse`/`smaller.alwaysFalse`,
     `bug-7052.php`), and a ternary as a statement is
@@ -5001,6 +5003,25 @@ fixture:
     class's (`new /** @template stdClass */ class`) and a callable
     type's (`callable<\stdClass of mixed>(T): T`); reported today only on
     functions and methods (3);
+  - the rules oracle's remaining one- and two-finding gaps, each
+    unreported today: `self::doBar(...)` of an instance method from a
+    static method (`method.staticCall`), `Ab::doBaz(...)` of an abstract
+    static method (`staticMethod.callToAbstract`), a trait-typed promoted
+    parameter as a property too (`property.trait`), `$x = yield 1` under a
+    `void` send type (`generator.void`), an enum case whose value is a
+    constant of the wrong type (`case Two = self::S;` with a string
+    `S`, `enum.caseType`), `new $bar` of a constant class-string naming an
+    interface or abstract class (`new.interface`, `new.abstract`), an
+    append to a `private(set)` array from outside
+    (`assign.propertyPrivateSet`), `array_filter()` without a callback on
+    an array with no falsy values (`arrayFilter.same`), `$a |> $cb` into a
+    by-reference parameter (`pipe.byRef`), `BcMath\Number` compared with a
+    float (`greater.invalid`, `spaceship.invalid`), a constant overriding
+    a built-in typed one without the native type (`const BZ2` in a `Phar`
+    subclass, `classConstant.missingNativeType`), `do {} while ($arr =
+    [1])` (`doWhile.alwaysTrue`), a `goto` to an undefined label in a
+    property hook (`goto.labelUndefined`), and `@phpstan-assert … $this`
+    on a static method (`parameter.notFound`);
   - a template's variance is checked through composition, each parameter
     on its own (`VarianceCheck`, `TemplateTypeVariance::compose`): a
     covariant `X` in `Out<X>`, `In<Out<X>>`, `Inv<X>` (an invariant
