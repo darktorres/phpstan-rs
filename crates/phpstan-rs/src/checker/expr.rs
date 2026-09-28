@@ -1952,17 +1952,15 @@ impl<'a> Checker<'a> {
                     _ => self.check_expr(rhs, locals, label),
                 };
                 // `offsetAccess.nonArray` - `[$a, $b] = $x;`/
-                // `list($a, $b) = $x;` (both desugar to the same
-                // `ExprKind::ArrayLiteral` target - no separate
-                // `ExprKind::List` variant exists) destructuring a value
-                // confirmed to never be array-like at all.
-                if let ExprKind::ArrayLiteral(items) = &lhs.kind
+                // `list($a, $b) = $x;` destructuring a value confirmed to
+                // never be array-like at all.
+                if let ExprKind::ArrayLiteral(items) | ExprKind::List(items) = &lhs.kind
                     && !self.type_confirmed_not_destructurable(&rhs_ty)
                 {
                     self.check_destructuring_offsets(items, &rhs_ty, locals);
                 }
                 self.check_offset_assignment(lhs, &rhs_ty, false, locals);
-                if matches!(&lhs.kind, ExprKind::ArrayLiteral(_))
+                if matches!(&lhs.kind, ExprKind::ArrayLiteral(_) | ExprKind::List(_))
                     && self.type_confirmed_not_destructurable(&rhs_ty)
                 {
                     self.report(
@@ -2170,6 +2168,16 @@ impl<'a> Checker<'a> {
                     Some(then_ty) => union_types(then_ty, else_ty),
                     None => Type::Mixed(false),
                 }
+            }
+            // Only a destructuring target; as a value it's a parse error in
+            // PHP.
+            ExprKind::List(items) => {
+                for item in items {
+                    if let Some(k) = &item.key {
+                        self.check_expr(k, locals, label);
+                    }
+                }
+                Type::Mixed(false)
             }
             ExprKind::ArrayLiteral(items) => {
                 for item in items {

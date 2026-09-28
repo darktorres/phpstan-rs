@@ -381,7 +381,7 @@ impl<'a> Walker<'a> {
     ) {
         match &e.kind {
             ExprKind::Variable(name) => self.record_var_self(out, e.span, current_class, name),
-            ExprKind::ArrayLiteral(items) => {
+            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
                 for item in items {
                     if let Some(k) = &item.key {
                         self.expr(k, ctx, current_class, out);

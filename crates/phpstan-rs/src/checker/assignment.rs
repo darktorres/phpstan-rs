@@ -21,7 +21,7 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
         | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _) => {
             contains_nullsafe(base)
         }
-        ExprKind::ArrayLiteral(items) => items.iter().any(|item| {
+        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items.iter().any(|item| {
             item.key.as_ref().is_some_and(contains_nullsafe) || contains_nullsafe(&item.value)
         }),
         _ => false,
@@ -57,7 +57,7 @@ pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
         // slot destructuring in a real corpus false-positives here
         // (caught via a live Piwigo corpus measurement: `[, $extension]
         // = explode(...)`).
-        ExprKind::ArrayLiteral(items) => items.iter().any(|item| {
+        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items.iter().any(|item| {
             !matches!(&item.value.kind, ExprKind::Literal(Literal::Null))
                 && is_non_assignable_target(&item.value)
         }),
@@ -156,7 +156,7 @@ impl<'a> Checker<'a> {
     ) {
         match &target.kind {
             ExprKind::Variable(_) => {}
-            ExprKind::ArrayLiteral(items) => {
+            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
                 for item in items {
                     self.check_assignment_target(&item.value, locals, label);
                 }
@@ -238,7 +238,7 @@ impl<'a> Checker<'a> {
     /// destructured `Type::ArrayShape` source still checks each element
     /// against its own real per-slot type, not a blanket `Mixed`.
     pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &Expr, ty: &Type) {
-        let ExprKind::ArrayLiteral(items) = &lhs.kind else {
+        let (ExprKind::ArrayLiteral(items) | ExprKind::List(items)) = &lhs.kind else {
             return;
         };
         match ty {
@@ -347,7 +347,7 @@ impl<'a> Checker<'a> {
                 self.probe_hit_at(lhs.span, &ty);
                 locals.declare(name.to_string(), ty, lhs.span);
             }
-            ExprKind::ArrayLiteral(items) => match &ty {
+            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => match &ty {
                 // A known array shape (from a `@return array{0: int, 1:
                 // string}`-typed source, most commonly) carries real
                 // per-position/per-key types - a plain homogeneous
@@ -702,7 +702,7 @@ impl<'a> Checker<'a> {
             if self.report_missing_offset(container, &dim, span) {
                 continue;
             }
-            if let ExprKind::ArrayLiteral(inner) = &item.value.kind {
+            if let ExprKind::ArrayLiteral(inner) | ExprKind::List(inner) = &item.value.kind {
                 let key = normalized_literal_key(&dim).map(|(k, _)| k);
                 let inner_container =
                     crate::checker::expr::index_result_type(container.clone(), key.as_deref());

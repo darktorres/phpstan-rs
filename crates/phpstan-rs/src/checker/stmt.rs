@@ -1405,7 +1405,7 @@ fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
     fn collect(target: &Expr, out: &mut Vec<String>) {
         match &target.kind {
             ExprKind::Variable(name) => out.push(name.to_string()),
-            ExprKind::ArrayLiteral(items) => {
+            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
                 for item in items {
                     collect(&item.value, out);
                 }
@@ -1454,7 +1454,7 @@ fn static_variable_type(initializer: &Type) -> Type {
 pub(super) fn assigned_variable_names(target: &Expr) -> Vec<String> {
     match &target.kind {
         ExprKind::Variable(v) => vec![v.to_string()],
-        ExprKind::ArrayLiteral(items) => items
+        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items
             .iter()
             .flat_map(|item| assigned_variable_names(&item.value))
             .collect(),

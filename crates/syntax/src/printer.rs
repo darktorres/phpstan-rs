@@ -219,8 +219,9 @@ fn write_expr(out: &mut String, e: &Expr) {
             write_expr(out, inner);
             out.push('}');
         }
-        ExprKind::ArrayLiteral(items) => {
-            out.push('[');
+        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
+            let is_list = matches!(e.kind, ExprKind::List(_));
+            out.push_str(if is_list { "list(" } else { "[" });
             write_list(out, items, |out, item| {
                 if item.spread {
                     out.push_str("...");
@@ -231,7 +232,7 @@ fn write_expr(out: &mut String, e: &Expr) {
                 }
                 write_expr(out, &item.value);
             });
-            out.push(']');
+            out.push(if is_list { ')' } else { ']' });
         }
         ExprKind::Unary(op, operand) => {
             let (prefix, suffix) = match op {

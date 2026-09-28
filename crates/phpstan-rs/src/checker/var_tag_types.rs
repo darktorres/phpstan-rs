@@ -598,7 +598,7 @@ impl<'a> Checker<'a> {
                     out.push((tag.clone(), described));
                 }
             }
-            ExprKind::ArrayLiteral(items) => {
+            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
                 for (i, item) in items.iter().enumerate() {
                     let key = match &item.key {
                         Some(k) => match &k.kind {

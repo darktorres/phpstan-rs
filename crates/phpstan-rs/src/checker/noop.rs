@@ -36,7 +36,7 @@ enum Effects {
 fn is_local_assign_target(target: &Expr) -> bool {
     match &target.kind {
         ExprKind::Variable(name) => name.as_ref() != "this",
-        ExprKind::ArrayLiteral(items) => items.iter().all(|item| {
+        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items.iter().all(|item| {
             item.key
                 .as_ref()
                 .is_none_or(|k| expr_side_effects(k) == Effects::None)

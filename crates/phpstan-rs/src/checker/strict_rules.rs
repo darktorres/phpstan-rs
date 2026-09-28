@@ -807,7 +807,7 @@ fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::token
         ExprKind::Variable(name) if locals.contains_key(name) => {
             vec![(name.to_string(), target.span)]
         }
-        ExprKind::ArrayLiteral(items) => items
+        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items
             .iter()
             .flat_map(|item| defined_targets(&item.value, locals))
             .collect(),
@@ -1107,7 +1107,7 @@ fn bind_targets(target: &Expr, loops: &[syntax::token::Span], out: &mut Vec<Assi
             loops: loops.to_vec(),
         }),
         ExprKind::Index(base, _) => bind_targets(base, loops, out),
-        ExprKind::ArrayLiteral(items) => {
+        ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
             for item in items {
                 bind_targets(&item.value, loops, out);
             }

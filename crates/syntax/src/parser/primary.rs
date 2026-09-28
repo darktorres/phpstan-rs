@@ -130,7 +130,7 @@ impl Parser {
                 self.skip();
                 self.expect(&Token::LParen)?;
                 let items = self.parse_array_items(&Token::RParen)?;
-                self.expr(ExprKind::ArrayLiteral(items), start)
+                self.expr(ExprKind::List(items), start)
             }
             Token::Keyword(Keyword::New) => {
                 self.skip();

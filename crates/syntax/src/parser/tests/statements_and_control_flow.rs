@@ -242,3 +242,20 @@ fn isset_empty_and_unset_are_their_own_nodes() {
     assert!(matches!(&empty.kind, ExprKind::Empty(_)));
     assert!(matches!(&program[1].kind, StmtKind::Unset(targets) if targets.len() == 2));
 }
+
+#[test]
+fn list_is_apart_from_an_array_literal() {
+    let program = parse("<?php\nlist($a, list($b)) = [1, [2]];\n");
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(lhs, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected an assignment, got {:?}", program[0].kind);
+    };
+    let ExprKind::List(items) = &lhs.kind else {
+        panic!("expected a list, got {:?}", lhs.kind);
+    };
+    assert!(matches!(&items[1].value.kind, ExprKind::List(_)));
+    assert!(matches!(&rhs.kind, ExprKind::ArrayLiteral(_)));
+}

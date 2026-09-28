@@ -578,7 +578,7 @@ fn assign_target(
         state.insert(name.to_string());
         return state;
     }
-    if let ExprKind::ArrayLiteral(items) = &lhs.kind {
+    if let ExprKind::ArrayLiteral(items) | ExprKind::List(items) = &lhs.kind {
         for item in items {
             state = assign_target(&item.value, state, ctx, declaring_class);
         }

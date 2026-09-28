@@ -584,7 +584,7 @@ pub struct Arg {
     pub value: Expr,
 }
 
-/// One element of an `ExprKind::ArrayLiteral` (`[...]`) - `key` is
+/// One element of an `ExprKind::ArrayLiteral` (`[...]`) or `ExprKind::List` - `key` is
 /// `Some(...)` for a `key => value` pair, `None` for a plain positional
 /// element. `spread` is `true` for `...$other` (PHP's own array-unpacking
 /// syntax) - a spread inserts an unknown number of elements, shifting
@@ -1117,6 +1117,9 @@ pub enum ExprKind {
     // there's no fixed name here to look up or bind in `locals`.
     DynamicVariable(Box<Expr>),
     ArrayLiteral(Vec<ArrayItem>),
+    // `list(...)`: a destructuring target, as `[...]` on the left of an
+    // assignment is.
+    List(Vec<ArrayItem>),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
