@@ -214,7 +214,7 @@ impl<'a> Checker<'a> {
                 .flat_map(|(param, decl)| {
                     param
                         .ty()
-                        .nested_class_names()
+                        .referenced_class_names()
                         .into_iter()
                         .map(|name| name.to_string())
                         .filter_map(|name| {

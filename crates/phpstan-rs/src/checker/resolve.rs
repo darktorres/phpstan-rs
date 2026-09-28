@@ -567,28 +567,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Walks an already name-resolved `Type` (every `Object` inside it
-    /// already a fully-qualified name, the same shape `check_generic_
-    /// bounds`/`is_type_fully_known` already expect), collecting every
-    /// distinct top-level class name that doesn't actually resolve
-    /// (`class_name_exists`) - recurses through `Union`/`Intersection`/
-    /// `Array`/`ArrayShape`/`ClassString` the same way `resolve_pseudo`
-    /// does, so a typo buried inside e.g. `list<Foo\Bar>` or `Foo|Bar` is
-    /// still caught, not just a bare top-level reference. A real
-    /// `@template T` never reaches the `Object` arm at all - `registry::
-    /// mark_template_params` already rewrites every one of a function's/
-    /// class's own declared template names to template
-    /// before this checker ever sees the signature, so this never
-    /// mistakes a generic placeholder for a missing class.
-    ///
-    /// Deliberately does NOT recurse into a class's own `@template`
-    /// argument list (`Object(name, args)`'s own `args`), mirroring
-    /// `check_generic_bounds`/`is_type_fully_known`'s identical
-    /// leniency: a generic argument referencing a real class this
-    /// project's registry has no data for (e.g. a PHAR-bundled
-    /// `phpstan/phpstan`) is common enough that existence-checking it
-    /// too would trade a missed rare typo for a false positive on the
-    /// ordinary case.
+    /// Each distinct class `ty` refers to, at any depth
+    /// (`Type::referenced_class_names`), that doesn't exist - a typo in
+    /// `list<Foo\Bar>`, `Box<Foo>` or `callable(Foo): void` as much as
+    /// a bare `Foo`. A template never reaches here as a class: the
+    /// registry marks every declared template name first.
     pub(crate) fn collect_unknown_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         for name in ty.referenced_class_names() {
             if !self.class_name_exists(name) && !out.iter().any(|n| n == name) {
@@ -602,10 +585,9 @@ impl<'a> Checker<'a> {
     /// type-hint resolving to a real, indexed class that turns out to be
     /// a `trait` rather than a class/interface/enum. Real PHP itself
     /// rejects this at the engine level, so this is always a real bug,
-    /// never a corpus-noise risk. Mirrors `collect_unknown_class_names`'s
-    /// exact recursive shape (including its non-recursion into a class's
-    /// `@template` argument list) - the two are mutually exclusive per
-    /// name, so no name is ever double-reported under both identifiers.
+    /// never a corpus-noise risk. Walks what `collect_unknown_class_names`
+    /// walks; the two are mutually exclusive per name, so no name is
+    /// reported under both identifiers.
     pub(crate) fn collect_trait_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         for name in ty.referenced_class_names() {
             if self
@@ -715,8 +697,7 @@ impl<'a> Checker<'a> {
 }
 
 /// `collect_unknown_class_names`'s sibling, minus the existence filter
-/// (a prefixed vendor class is almost always a real, indexed one) -
-/// otherwise the identical recursive shape.
+/// (a prefixed vendor class is almost always a real, indexed one).
 fn collect_prefixed_class_names<'b>(ty: &'b Type, out: &mut Vec<(&'b str, &'static str)>) {
     for name in ty.referenced_class_names() {
         if let Some((project, _)) = crate::checker::INTERNAL_CLASS_PREFIXES

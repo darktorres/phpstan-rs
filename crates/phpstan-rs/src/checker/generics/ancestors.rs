@@ -332,7 +332,7 @@ impl<'a> Checker<'a> {
                 );
             }
             let referenced: Vec<String> = ty
-                .nested_class_names()
+                .referenced_class_names()
                 .iter()
                 .map(|n| n.to_string())
                 .collect();

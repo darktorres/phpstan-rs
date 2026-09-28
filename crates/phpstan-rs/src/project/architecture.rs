@@ -363,7 +363,7 @@ impl Project {
         if let Some((_, info)) = self.registry.lookup_class(fqn) {
             let mut names: Vec<String> = Vec::new();
             let mut add = |ty: &Type| {
-                names.extend(ty.nested_class_names().iter().map(|n| n.to_string()));
+                names.extend(ty.referenced_class_names().iter().map(|n| n.to_string()));
             };
             for sig in info.methods().values() {
                 for p in sig.params() {

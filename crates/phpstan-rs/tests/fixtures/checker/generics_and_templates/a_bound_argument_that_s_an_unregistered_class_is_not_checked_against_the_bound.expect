@@ -1,0 +1,2 @@
+7:13-7:30 missingType.return L6 | Function f() has no return type specified.
+7:24-7:26 class.notFound L0 | parameter $c of f() has invalid type UnregisteredArg

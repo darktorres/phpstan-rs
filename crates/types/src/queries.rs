@@ -39,13 +39,13 @@ impl Type {
         }
     }
 
-    /// The class names this type refers to where a class stands for
-    /// itself: an object, and the objects in array keys and values, a
-    /// class-string's class, union and intersection members and shape
-    /// fields - not in generic arguments. Each once, in order.
+    /// The class of every object this type refers to, at any depth:
+    /// union and intersection members, array keys and values, shape
+    /// fields, class-strings, generic arguments and callable signatures.
+    /// Each once, in order.
     pub fn referenced_class_names(&self) -> Vec<&crate::Name> {
         let mut out: Vec<&crate::Name> = Vec::new();
-        self.walk_class_positions(&mut |t| {
+        self.walk_nested(&mut |t| {
             if let Type(Repr::Object(name, _)) = t
                 && !out.contains(&name)
             {
@@ -55,50 +55,18 @@ impl Type {
         out
     }
 
-    /// The class of every object at any depth: generic arguments,
-    /// array and shape values, callable signatures. In order, with
-    /// repeats.
-    pub fn nested_class_names(&self) -> Vec<&crate::Name> {
-        let mut out = Vec::new();
-        self.collect_nested_class_names(&mut out);
-        out
-    }
-
-    fn collect_nested_class_names<'t>(&'t self, out: &mut Vec<&'t crate::Name>) {
-        if let Type(Repr::Object(name, _)) = self {
-            out.push(name);
-        }
-        self.for_each_child(&mut |t| t.collect_nested_class_names(out));
-    }
-
-    /// Whether a `parent` stands in a class position (see
-    /// `referenced_class_names`) unresolved.
+    /// Whether a `parent` stands anywhere in this type unresolved.
     pub fn has_parent_ref(&self) -> bool {
         let mut found = false;
-        self.walk_class_positions(&mut |t| found |= matches!(t, Type(Repr::ParentRef)));
+        self.walk_nested(&mut |t| found |= matches!(t, Type(Repr::ParentRef)));
         found
     }
 
-    fn walk_class_positions<'a>(&'a self, f: &mut impl FnMut(&'a Type)) {
-        syntax::stack::guard(|| match self {
-            Type(Repr::Array(key, value)) => {
-                key.walk_class_positions(f);
-                value.walk_class_positions(f);
-            }
-            Type(Repr::ClassString(inner)) => inner.walk_class_positions(f),
-            Type(Repr::Union(members))
-            | Type(Repr::BenevolentUnion(members))
-            | Type(Repr::Intersection(members)) => {
-                for m in members {
-                    m.walk_class_positions(f);
-                }
-            }
-            Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => {
-                for t in shape.types() {
-                    t.walk_class_positions(f);
-                }
-            }
-            other => f(other),
+    /// `f` on this type and every type nested in it, outermost first.
+    fn walk_nested<'a>(&'a self, f: &mut impl FnMut(&'a Type)) {
+        syntax::stack::guard(|| {
+            f(self);
+            self.for_each_child(&mut |t| t.walk_nested(f));
         })
     }
 

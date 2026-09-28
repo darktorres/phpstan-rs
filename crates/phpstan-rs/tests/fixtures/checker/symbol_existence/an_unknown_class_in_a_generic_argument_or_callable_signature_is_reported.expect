@@ -1,0 +1,5 @@
+11:12-11:14 class.notFound L0 | parameter $a of f() has invalid type NoSuchA
+11:16-11:18 class.notFound L0 | parameter $b of f() has invalid type NoSuchB
+11:20-11:22 class.notFound L0 | parameter $c of f() has invalid type NoSuchC
+11:24-11:26 class.notFound L0 | parameter $d of f() has invalid type NoSuchD
+11:28-11:30 class.notFound L0 | parameter $e of f() has invalid type NoSuchE
