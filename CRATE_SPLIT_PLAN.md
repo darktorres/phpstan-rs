@@ -3394,13 +3394,14 @@ for the analyser.
      `@ORM` annotations are read), then phpstan-doctrine's rules, which
      ext-doctrine has none of today (it only types results; no
      `doctrine.*` identifier exists). Probed through the corpus's own
-     `phpstan.neon` against `UserEntity`, each is unreported today: DQL
-     syntax and semantic errors in `createQuery()` (`SELEC …`, an unknown
-     field) and in a QueryBuilder chain (`doctrine.dql`), an unknown field
-     in `findBy(['nope' => 1])` (`doctrine.*Argument`), a magic
-     `findOneByNope()` (`method.notFound`), and the entity checks
+     `phpstan.neon` against `UserEntity`, each of these is unreported
+     today: DQL syntax and semantic errors in `createQuery()` (`SELEC …`,
+     an unknown field) and in a QueryBuilder chain (`doctrine.dql`), an
+     unknown field in `findBy(['nope' => 1])` (`doctrine.findByArgument`),
+     and a magic `findOneByNope()` (`method.notFound`). The entity checks
      (`doctrine.columnType`, `associationType`, `enumType`, `finalEntity`,
-     `finalConstructor`, `mapping`, `queryBuilderDynamic`);
+     `finalConstructor`, `mapping`, `queryBuilderDynamic`) have no
+     counterpart either;
   2. ext-sql;
   3. ext-phpunit, ext-codeception, ext-mockery and ext-mockstan, after E1.
      ext-phpunit gains phpstan-phpunit's rules, probed against the
