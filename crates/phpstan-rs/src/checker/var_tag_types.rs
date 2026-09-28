@@ -54,14 +54,6 @@ fn is_constant_value(ty: &Type) -> bool {
     }
 }
 
-fn is_array_like(ty: &Type) -> bool {
-    match ty {
-        Type::Array(..) | Type::ArrayShape(_) => true,
-        Type::Intersection(members) => members.iter().any(is_array_like),
-        _ => false,
-    }
-}
-
 fn offset_value_type(ty: &Type, key: &Type) -> Type {
     match ty {
         Type::ArrayShape(shape) => {
@@ -70,23 +62,23 @@ fn offset_value_type(ty: &Type, key: &Type) -> Type {
             };
             shape.field(&key).map_or(Type::mixed(), |f| f.ty.clone())
         }
-        other => Checker::array_element_type(other).unwrap_or(Type::mixed()),
+        other => other.array_value_type().unwrap_or(Type::mixed()),
     }
 }
 
 /// A native iterable's element type - known only for an array; an
 /// object's comes from PHPDoc generics.
 fn native_iterable_value(ty: &Type) -> Type {
-    if is_array_like(ty) {
-        Checker::array_element_type(ty).unwrap_or(Type::mixed())
+    if ty.is_array().yes() {
+        ty.array_value_type().unwrap_or(Type::mixed())
     } else {
         Type::mixed()
     }
 }
 
 fn native_iterable_key(ty: &Type) -> Type {
-    if is_array_like(ty) {
-        Checker::array_key_type(ty).unwrap_or(Type::mixed())
+    if ty.is_array().yes() {
+        ty.array_key_type().unwrap_or(Type::mixed())
     } else {
         Type::mixed()
     }
@@ -621,14 +613,14 @@ impl<'a> Checker<'a> {
     }
 
     fn iterable_value_of(&self, ty: &Type) -> Type {
-        Self::array_element_type(ty)
+        ty.array_value_type()
             .or_else(|| self.iterable_element_type(ty).map(|(_, v)| v))
             .unwrap_or(Type::mixed())
     }
 
     fn iterable_key_of(&self, ty: &Type) -> Type {
-        if is_array_like(ty) {
-            return Self::array_key_type(ty).unwrap_or(Type::mixed());
+        if ty.is_array().yes() {
+            return ty.array_key_type().unwrap_or(Type::mixed());
         }
         self.iterable_element_type(ty)
             .map_or(Type::mixed(), |(k, _)| k)
@@ -727,7 +719,7 @@ impl<'a> Checker<'a> {
             let array = Type::array(Type::unknown_array_key(), Type::mixed());
             return self.at_least_maybe_super_type(&array, tag);
         }
-        if is_array_like(ty) && is_array_like(tag) {
+        if ty.is_array().yes() && tag.is_array().yes() {
             if !self.at_least_maybe_super_type(ty, tag) {
                 return false;
             }

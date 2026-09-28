@@ -543,7 +543,7 @@ impl<'a> Checker<'a> {
                 let array_map_elem_override = (resolved_name.as_deref() == Some("array_map")
                     && args.len() == 2)
                     .then(|| self.infer_expr(&args[1].value, locals))
-                    .and_then(|ty| Self::array_element_type(&ty));
+                    .and_then(|ty| ty.array_value_type());
                 // The same contextual parameter-type injection as
                 // `array_map` above, extended to `array_filter`/`usort`/
                 // `uasort`/`array_walk`/`preg_replace_callback` - each
@@ -563,21 +563,18 @@ impl<'a> Checker<'a> {
                     resolved_name.as_deref().and_then(|name| match name {
                         "array_filter" if args.len() == 2 => {
                             let arr_ty = self.infer_expr(&args[0].value, locals);
-                            Self::array_element_type(&arr_ty).map(|t| (1, vec![t]))
+                            arr_ty.array_value_type().map(|t| (1, vec![t]))
                         }
                         "usort" | "uasort" if args.len() == 2 => {
                             let arr_ty = self.infer_expr(&args[0].value, locals);
-                            Self::array_element_type(&arr_ty).map(|t| (1, vec![t.clone(), t]))
+                            arr_ty.array_value_type().map(|t| (1, vec![t.clone(), t]))
                         }
                         "array_walk" | "array_find" | "array_find_key" | "array_any"
                         | "array_all"
                             if args.len() == 2 =>
                         {
                             let arr_ty = self.infer_expr(&args[0].value, locals);
-                            match (
-                                Self::array_element_type(&arr_ty),
-                                Self::array_key_type(&arr_ty),
-                            ) {
+                            match (arr_ty.array_value_type(), arr_ty.array_key_type()) {
                                 (Some(elem), Some(key)) => Some((1, vec![elem, key])),
                                 _ => None,
                             }
@@ -1078,7 +1075,7 @@ impl<'a> Checker<'a> {
                     })
                     .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals));
                 match array_shift_pop_pre_widen_ty.and_then(|pre_widen_ty| {
-                    Self::array_element_type(&pre_widen_ty).map(|elem_ty| {
+                    pre_widen_ty.array_value_type().map(|elem_ty| {
                         Self::array_pointer_result(&pre_widen_ty, elem_ty, Type::null(), false)
                     })
                 }) {
@@ -5405,16 +5402,16 @@ impl<'a> Checker<'a> {
                 // shapes) - a precision gap for `array{a: int} +
                 // array{b: string}`-shaped operands, not a soundness gap:
                 // the result is still a real, provably-correct supertype.
-                // `is_array_like` sees through a `list<T>`/
+                // `Type::is_array` sees through a `list<T>`/
                 // `non-empty-array<T>`-typed operand too - without it, a
                 // `list<T> + list<T>` would fall through to numeric
                 // addition instead of array union.
                 // One array operand is enough: any other operand than an
                 // array is a `TypeError`, so the value is still an array.
-                if Self::is_array_like(&lt) || Self::is_array_like(&rt) {
+                if lt.is_array().yes() || rt.is_array().yes() {
                     // A non-array operand's keys and values are unknown.
-                    let both_arrays = Self::is_array_like(&lt) && Self::is_array_like(&rt);
-                    let key_of = |t: &Type| both_arrays.then(|| Self::array_key_type(t)).flatten();
+                    let both_arrays = lt.is_array().yes() && rt.is_array().yes();
+                    let key_of = |t: &Type| both_arrays.then(|| t.array_key_type()).flatten();
                     let key_ty = match (key_of(&lt), key_of(&rt)) {
                         _ if !both_arrays => Type::benevolent_array_key(),
                         (Some(lk), Some(rk)) if lk == rk => lk,
@@ -5428,8 +5425,8 @@ impl<'a> Checker<'a> {
                         (None, None) => Type::benevolent_array_key(),
                     };
                     let val_ty = union_types(
-                        Self::array_element_type(&lt).unwrap_or(Type::mixed()),
-                        Self::array_element_type(&rt).unwrap_or(Type::mixed()),
+                        lt.array_value_type().unwrap_or(Type::mixed()),
+                        rt.array_value_type().unwrap_or(Type::mixed()),
                     );
                     let mut result = Type::array(key_ty, val_ty);
                     let has_accessory = |ty: &Type, kind: AccessoryKind| matches!(ty, Type::Intersection(members) if members.contains(&Type::Accessory(kind)));
@@ -5796,7 +5793,7 @@ pub(crate) fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
             has_offset_value.unwrap_or_else(|| {
                 members
                     .into_iter()
-                    .find_map(|m| Checker::array_element_type(&m))
+                    .find_map(|m| m.array_value_type())
                     .unwrap_or(Type::mixed())
             })
         }

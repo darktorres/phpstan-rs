@@ -116,6 +116,12 @@ impl Shape {
         self.is_sealed() && self.fields.is_empty()
     }
 
+    /// PHPStan's `ConstantArrayType::isList()`: sealed, keyed `0..n` in
+    /// order, no required key after an optional one.
+    pub fn is_list(&self) -> bool {
+        crate::shape_fields_are_list_like(self)
+    }
+
     pub fn field(&self, key: &ShapeKey) -> Option<&ShapeField> {
         self.fields.iter().find(|f| f.key == *key)
     }

@@ -426,8 +426,8 @@ impl<'a> Checker<'a> {
             // top-level `Mixed` guard already excused a `Mixed` operand
             // that might itself be an array at runtime).
             BinOp::Add => {
-                let l_arr = Checker::is_array_like(l_ty);
-                let r_arr = Checker::is_array_like(r_ty);
+                let l_arr = l_ty.is_array().yes();
+                let r_arr = r_ty.is_array().yes();
                 if l_arr && r_arr {
                     Some(true)
                 } else if l_arr != r_arr {

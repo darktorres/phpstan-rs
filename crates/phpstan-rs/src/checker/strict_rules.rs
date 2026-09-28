@@ -52,7 +52,7 @@ use crate::registry::FunctionReflection;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use types::TrinaryLogic;
-use types::{AccessoryKind, Type, is_numeric_string_literal};
+use types::{AccessoryKind, Type};
 
 impl<'a> Checker<'a> {
     /// The expression-level ports, before `e` itself is checked.
@@ -202,7 +202,7 @@ impl<'a> Checker<'a> {
         };
         let left_ty = self.infer_expr(left, locals);
         let right_ty = self.infer_expr(right, locals);
-        if *op == BinOp::Add && has_array(&left_ty) && has_array(&right_ty) {
+        if *op == BinOp::Add && !left_ty.arrays().is_empty() && !right_ty.arrays().is_empty() {
             return;
         }
         for (ty, side) in [(&left_ty, "left"), (&right_ty, "right")] {
@@ -223,29 +223,52 @@ impl<'a> Checker<'a> {
     /// `OperatorRuleHelper::isValidForArithmeticOperation`/
     /// `isValidForIncrement`/`isValidForDecrement`.
     fn valid_operand(&self, ty: &Type, operand: Operand) -> bool {
-        if contains_mixed(ty) || is_number(ty) {
+        if contains_mixed(ty) {
             return true;
         }
-        if let Type::BenevolentUnion(members) = ty {
-            return members.iter().any(is_number);
+        let number = Type::union_of(vec![
+            Type::int(),
+            Type::float(),
+            Type::intersection_of(vec![
+                Type::string(),
+                Type::accessory(AccessoryKind::NumericString),
+            ]),
+        ]);
+        let is_number = ty.is_within(&number);
+        if is_number.yes() || (ty.is_benevolent_union() && !is_number.no()) {
+            return true;
         }
-        let members: Vec<&Type> = match ty {
-            Type::Union(members) => members.iter().collect(),
-            other => vec![other],
-        };
         match operand {
-            // Arrays and objects already fail PHP's own number conversion.
-            Operand::Arithmetic => members.iter().any(|m| not_convertible_to_number(m)),
+            // Arrays, objects, resources and callables already fail PHP's
+            // own number conversion.
+            Operand::Arithmetic => {
+                let not_a_number = Type::union_of(vec![
+                    Type::array(Type::mixed(), Type::mixed()),
+                    Type::object_without_class(),
+                    Type::resource(false),
+                    Type::resource(true),
+                    Type::callable(None),
+                ]);
+                ty.union_members()
+                    .iter()
+                    .any(|m| m.is_within(&not_a_number).yes())
+            }
             Operand::Increment | Operand::Decrement => {
-                (operand == Operand::Increment && members.iter().all(|m| is_string(m)))
-                    || members.iter().all(|m| self.overloads_arithmetic(m))
+                (operand == Operand::Increment && ty.is_string().yes())
+                    || ty
+                        .union_members()
+                        .iter()
+                        .all(|m| self.overloads_arithmetic(m))
             }
         }
     }
 
     fn overloads_arithmetic(&self, ty: &Type) -> bool {
-        matches!(ty, Type::Object(class, _)
-            if ["GMP", "BcMath\\Number"].iter().any(|c| self.registry.is_subclass_of(class, c)))
+        let overloading = Type::union_of(vec![
+            Type::object("GMP".into(), Vec::new()),
+            Type::object("BcMath\\Number".into(), Vec::new()),
+        ]);
+        self.relation().is_super_type_of(&overloading, ty).yes()
     }
 
     fn check_comparable_types(
@@ -259,7 +282,7 @@ impl<'a> Checker<'a> {
         let left = self.infer_expr(l, locals);
         let right = self.infer_expr(r, locals);
         let describe = |ty: &Type| {
-            if has_array(ty) {
+            if !ty.arrays().is_empty() {
                 ty.to_string()
             } else {
                 ty.describe_type_only()
@@ -322,13 +345,13 @@ impl<'a> Checker<'a> {
         ) {
             return true;
         }
-        let Some(tuples) = list_tuples(ty) else {
-            return false;
-        };
-        tuples
-            .iter()
-            .flatten()
-            .all(|value| self.is_comparable(value))
+        let tuples = ty.constant_arrays();
+        !tuples.is_empty()
+            && tuples.iter().all(|t| is_tuple(t))
+            && tuples
+                .iter()
+                .flat_map(|t| t.types())
+                .all(|value| self.is_comparable(value))
     }
 
     fn is_comparable_together(&self, left: &Type, right: &Type) -> bool {
@@ -348,16 +371,15 @@ impl<'a> Checker<'a> {
                 return self.contains_only(right, family);
             }
         }
-        let (Some(left_tuples), Some(right_tuples)) =
-            (constant_arrays(left), constant_arrays(right))
-        else {
+        let (left_tuples, right_tuples) = (left.constant_arrays(), right.constant_arrays());
+        if left_tuples.is_empty() || right_tuples.is_empty() {
             return false;
-        };
+        }
         left_tuples.iter().all(|l| {
             right_tuples.iter().all(|r| {
-                l.len() == r.len()
-                    && l.iter()
-                        .zip(r.iter())
+                l.fields.len() == r.fields.len()
+                    && l.types()
+                        .zip(r.types())
                         .all(|(a, b)| self.is_comparable_together(a, b))
             })
         })
@@ -382,26 +404,27 @@ impl<'a> Checker<'a> {
         };
         let prefix = if compound { "assignOp" } else { "binaryOp" };
         for (one, other) in [(&left, &right), (&right, &left)] {
-            let kind = if all_members(one, is_string)
-                && !other.is_mixed()
-                && !is_string_or_nullable_string(other)
-            {
-                if converts_to_string_ok
-                    && !matches!(one, Type::StringLiteral(s) if s.is_empty())
-                    && self.converts_to_string(other)
+            let string_or_null = Type::union_of(vec![Type::string(), Type::null()]);
+            let is_string_or_nullable_string =
+                other.is_within(&string_or_null).yes() && !other.is_null().yes();
+            let kind =
+                if one.is_string().yes() && !other.is_mixed() && !is_string_or_nullable_string {
+                    if converts_to_string_ok
+                        && !matches!(one.constant_strings().as_slice(), [s] if s.is_empty())
+                        && self.converts_to_string(other)
+                    {
+                        continue;
+                    }
+                    "string"
+                } else if one.is_array().yes()
+                    && !other.is_mixed()
+                    && other.arrays().is_empty()
+                    && !contains_mixed(other)
                 {
+                    "array"
+                } else {
                     continue;
-                }
-                "string"
-            } else if all_members(one, is_array)
-                && !other.is_mixed()
-                && !has_array(other)
-                && !contains_mixed(other)
-            {
-                "array"
-            } else {
-                continue;
-            };
+                };
             let (id, capitalized) = if kind == "string" {
                 ("nonStringOperand", "non-string")
             } else {
@@ -467,10 +490,13 @@ impl<'a> Checker<'a> {
             return;
         };
         let callback_ty = self.infer_expr(&callback.value, locals);
-        let level = match &callback_ty {
-            Type::Null => 0,
-            Type::Union(members) if members.iter().any(|m| matches!(m, Type::Null)) => 8,
-            _ => return,
+        let is_null = callback_ty.is_null();
+        let level = if is_null.yes() {
+            0
+        } else if is_null.maybe() {
+            8
+        } else {
+            return;
         };
         self.report(format!(
                 "Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics ({} given).",
@@ -486,36 +512,19 @@ impl<'a> Checker<'a> {
     /// they are all booleans, all arrays, or a union of members each
     /// always truthy or always falsy, with both kinds present.
     fn filters_unambiguously(&self, array: &Type) -> bool {
-        let mut values = Vec::new();
-        if !collect_array_values(array, &mut values) {
-            return false;
-        }
-        let Some(item) = values.into_iter().reduce(types::union_types) else {
+        let Some(item) = array.array_value_type() else {
             return false;
         };
-        if let Type::Union(members) = &item {
-            let mut truthy = false;
-            let mut falsy = false;
-            for member in members {
-                match truthiness(member) {
-                    Some(true) => truthy = true,
-                    Some(false) => falsy = true,
-                    None => {
-                        truthy = false;
-                        falsy = false;
-                        break;
-                    }
-                }
-            }
-            if truthy && falsy {
-                return true;
-            }
-            return members
-                .iter()
-                .all(|m| matches!(m, Type::Bool | Type::True | Type::False))
-                || members.iter().all(is_array);
-        }
-        matches!(item, Type::Bool | Type::True | Type::False) || is_array(&item)
+        let members = item.union_members();
+        let truthiness: Vec<Option<bool>> = members
+            .iter()
+            .map(|m| m.to_boolean().bool_literal_value())
+            .collect();
+        let mixes_truthy_and_falsy = members.len() > 1
+            && truthiness.iter().all(Option::is_some)
+            && truthiness.contains(&Some(true))
+            && truthiness.contains(&Some(false));
+        mixes_truthy_and_falsy || item.is_bool().yes() || item.is_array().yes()
     }
 
     pub(crate) fn check_useless_cast(
@@ -846,172 +855,14 @@ enum Operand {
 }
 
 fn contains_mixed(ty: &Type) -> bool {
-    match ty {
-        Type::Mixed(_) | Type::Never | Type::TemplateParam(_) => true,
-        Type::Union(members) => members.iter().any(contains_mixed),
-        _ => false,
-    }
+    ty.union_members()
+        .iter()
+        .any(|m| m.is_mixed() || m.is_never() || m.is_template())
 }
 
-/// Whether every value of `ty` is an `int`, a `float`, or a
-/// `numeric-string`.
-fn is_number(ty: &Type) -> bool {
-    match ty {
-        Type::Int
-        | Type::IntLiteral(_)
-        | Type::IntRange(..)
-        | Type::Float
-        | Type::FloatLiteral(_) => true,
-        Type::StringLiteral(s) => s.as_str().is_some_and(is_numeric_string_literal),
-        Type::Union(members) => members.iter().all(is_number),
-        Type::Intersection(members) => members.iter().any(|m| {
-            is_number(m)
-                || matches!(
-                    m,
-                    Type::Accessory(
-                        AccessoryKind::NumericString | AccessoryKind::DecimalIntegerString
-                    )
-                )
-        }),
-        _ => false,
-    }
-}
-
-fn is_string(ty: &Type) -> bool {
-    match ty {
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
-            true
-        }
-        Type::Intersection(members) => members.iter().any(is_string),
-        _ => false,
-    }
-}
-
-fn not_convertible_to_number(ty: &Type) -> bool {
-    match ty {
-        Type::Array(..)
-        | Type::ArrayShape(_)
-        | Type::Object(..)
-        | Type::ObjectWithoutClass
-        | Type::Resource { .. }
-        | Type::ObjectShape(_)
-        | Type::EnumCase(..)
-        | Type::Callable(_)
-        | Type::SelfRef(_)
-        | Type::ParentRef
-        | Type::StaticRef(_)
-        | Type::This => true,
-        Type::Intersection(members) => members.iter().any(not_convertible_to_number),
-        _ => false,
-    }
-}
-
-fn has_array(ty: &Type) -> bool {
-    match ty {
-        Type::Array(..) | Type::ArrayShape(_) => true,
-        Type::Union(members) | Type::Intersection(members) => members.iter().any(has_array),
-        _ => false,
-    }
-}
-
-/// Each constant-array member's value types, when every member of `ty` is
-/// a constant array.
-fn constant_arrays(ty: &Type) -> Option<Vec<Vec<Type>>> {
-    match ty {
-        Type::ArrayShape(shape) if shape.is_sealed() => {
-            Some(vec![shape.fields.iter().map(|f| f.ty.clone()).collect()])
-        }
-        Type::Union(members) => {
-            let mut all = Vec::new();
-            for member in members {
-                all.extend(constant_arrays(member)?);
-            }
-            Some(all)
-        }
-        _ => None,
-    }
-}
-
-/// `constant_arrays`, when every member is also a list: keys `0..n` in
-/// order, none optional.
-fn list_tuples(ty: &Type) -> Option<Vec<Vec<Type>>> {
-    let is_list = |ty: &Type| -> bool {
-        match ty {
-            Type::ArrayShape(shape) => {
-                shape.is_sealed()
-                    && shape
-                        .fields
-                        .iter()
-                        .enumerate()
-                        .all(|(i, f)| !f.optional && f.key == types::ShapeKey::Int(i as i64))
-            }
-            _ => false,
-        }
-    };
-    let all_lists = match ty {
-        Type::Union(members) => members.iter().all(is_list),
-        other => is_list(other),
-    };
-    if !all_lists {
-        return None;
-    }
-    constant_arrays(ty)
-}
-
-fn all_members(ty: &Type, f: fn(&Type) -> bool) -> bool {
-    match ty {
-        Type::Union(members) => members.iter().all(f),
-        other => f(other),
-    }
-}
-
-fn is_array(ty: &Type) -> bool {
-    match ty {
-        Type::Array(..) | Type::ArrayShape(_) => true,
-        Type::Intersection(members) => members.iter().any(is_array),
-        _ => false,
-    }
-}
-
-/// `string` or `?string` once literal values are generalized.
-fn is_string_or_nullable_string(ty: &Type) -> bool {
-    match ty {
-        Type::Union(members) => {
-            members
-                .iter()
-                .all(|m| is_string(m) || matches!(m, Type::Null))
-                && members.iter().any(is_string)
-        }
-        other => is_string(other),
-    }
-}
-
-fn truthiness(ty: &Type) -> Option<bool> {
-    match ty {
-        Type::EnumCase(..) | Type::ClassString(_) | Type::ClassKindString(_) => Some(true),
-        other => crate::checker::expr::ranges::type_truthiness(other),
-    }
-}
-
-/// The value types of `ty`'s array members; `false` when some member
-/// isn't an array.
-fn collect_array_values(ty: &Type, out: &mut Vec<Type>) -> bool {
-    match ty {
-        Type::Array(_, value) => {
-            out.push((**value).clone());
-            true
-        }
-        Type::ArrayShape(shape) => {
-            out.extend(shape.types().cloned());
-            true
-        }
-        Type::Union(members) => members.iter().all(|m| collect_array_values(m, out)),
-        Type::Intersection(members) => members
-            .iter()
-            .find(|m| matches!(m, Type::Array(..) | Type::ArrayShape(_)))
-            .is_some_and(|base| collect_array_values(base, out)),
-        _ => false,
-    }
+/// A list with every key required.
+fn is_tuple(shape: &types::Shape) -> bool {
+    shape.is_list() && shape.fields.iter().all(|f| !f.optional)
 }
 
 /// One variable assignment site, with the spans of the loops around it.

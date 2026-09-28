@@ -153,12 +153,12 @@ impl<'a> Checker<'a> {
                 let current = locals.get(name).cloned().unwrap_or(Type::mixed());
                 match fn_name {
                     "sort" | "rsort" | "usort" | "shuffle" => {
-                        if let Some(elem_ty) = Checker::array_element_type(&current) {
+                        if let Some(elem_ty) = current.array_value_type() {
                             let mut members = vec![
                                 Type::array(Type::unknown_array_key(), elem_ty),
                                 Type::accessory(types::AccessoryKind::ArrayList),
                             ];
-                            if Checker::is_known_non_empty_array(&current) {
+                            if current.is_non_empty_array().yes() {
                                 members.push(Type::accessory(types::AccessoryKind::NonEmptyArray));
                             }
                             purge_stale_narrowing_for(locals, name);
@@ -196,7 +196,7 @@ impl<'a> Checker<'a> {
                     // which would otherwise discard `$array`'s real
                     // element/key types (the stub's declared
                     // `array|object &$array` param type fails
-                    // `Checker::is_array_like`'s guard and widens to
+                    // `Type::is_array`'s guard and widens to
                     // `Mixed`).
                     "array_walk" => continue,
                     // `array_push`/`array_unshift` always append/prepend
@@ -206,8 +206,8 @@ impl<'a> Checker<'a> {
                     // was pushed. A non-list-like input keeps its odd key
                     // structure and falls through to the generic
                     // declared-type widening below unchanged.
-                    "array_push" | "array_unshift" if Checker::is_list_like(&current) => {
-                        if let Some(elem_ty) = Checker::array_element_type(&current) {
+                    "array_push" | "array_unshift" if current.is_list().yes() => {
+                        if let Some(elem_ty) = current.array_value_type() {
                             let pushed_ty = args[1..]
                                 .iter()
                                 .map(|a| self.infer_expr(&a.value, locals))
@@ -233,8 +233,8 @@ impl<'a> Checker<'a> {
                     // the one remaining element of a single-element list
                     // leaves `[]`, so any existing non-empty marker is
                     // deliberately dropped rather than carried through.
-                    "array_shift" | "array_pop" if Checker::is_list_like(&current) => {
-                        if let Some(elem_ty) = Checker::array_element_type(&current) {
+                    "array_shift" | "array_pop" if current.is_list().yes() => {
+                        if let Some(elem_ty) = current.array_value_type() {
                             let members = vec![
                                 Type::array(Type::unknown_array_key(), elem_ty),
                                 Type::accessory(types::AccessoryKind::ArrayList),
@@ -257,17 +257,17 @@ impl<'a> Checker<'a> {
                     // identical rule). List-ness survives the same way
                     // `array_push`/`array_shift` already do; the element
                     // type widens to include the replacement's own.
-                    "array_splice" if Checker::is_list_like(&current) => {
-                        if let Some(elem_ty) = Checker::array_element_type(&current) {
+                    "array_splice" if current.is_list().yes() => {
+                        if let Some(elem_ty) = current.array_value_type() {
                             let replacement_ty =
                                 args.get(3).map(|a| self.infer_expr(&a.value, locals));
                             let (combined_elem, non_empty) = match &replacement_ty {
                                 Some(r) => (
                                     union_types(
                                         elem_ty,
-                                        Checker::array_element_type(r).unwrap_or(Type::mixed()),
+                                        r.array_value_type().unwrap_or(Type::mixed()),
                                     ),
-                                    Checker::is_known_non_empty_array(r),
+                                    r.is_non_empty_array().yes(),
                                 ),
                                 None => (elem_ty, false),
                             };
@@ -310,12 +310,12 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let substituted = types::substitute_template(param.ty(), &FxHashMap::default());
-            // `Checker::is_array_like` also trusts a `list<T>`/
+            // `Type::is_array` also trusts a `list<T>`/
             // `non-empty-array<T>`-declared by-ref parameter (an
             // `Intersection`), rather than falling into the "anything
             // else" `Mixed` catch-all a wider declared `Union`/`Object`
             // deliberately does.
-            let widened = if Checker::is_array_like(&substituted) {
+            let widened = if substituted.is_array().yes() {
                 substituted
             } else {
                 Type::mixed()

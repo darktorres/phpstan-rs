@@ -610,11 +610,8 @@ impl<'a> Checker<'a> {
         // before finally giving up to `Mixed`/`Mixed` - see that
         // function's own doc comment for exactly what it covers
         // (`Traversable`/`Iterator`/`Generator`/`IteratorAggregate`).
-        let (key_ty, element_ty) = match Self::array_element_type(&subject_ty) {
-            Some(elem) => (
-                Self::array_key_type(&subject_ty).unwrap_or(Type::mixed()),
-                elem,
-            ),
+        let (key_ty, element_ty) = match subject_ty.array_value_type() {
+            Some(elem) => (subject_ty.array_key_type().unwrap_or(Type::mixed()), elem),
             None => match self.iterable_element_type(&subject_ty) {
                 Some(pair) => pair,
                 None => {
@@ -702,7 +699,7 @@ impl<'a> Checker<'a> {
         // `foreach (explode(',', $order) as $rawEntry)`, where
         // `explode()` on a provably non-empty `$order` is itself
         // already a real `non-empty-list<string>`.
-        let zero_iterations = if Self::is_known_non_empty_array(&subject_ty) {
+        let zero_iterations = if subject_ty.is_non_empty_array().yes() {
             LoopZeroIterations::Impossible
         } else {
             LoopZeroIterations::Possible { subject_exempt }
@@ -725,7 +722,7 @@ impl<'a> Checker<'a> {
         let mut last_field_facts: FxHashMap<String, Type> = FxHashMap::default();
         // Iterating anything but an array runs user code (a generator, an
         // `Iterator`'s methods) before each iteration and after the last.
-        let iteration_throws = Self::array_element_type(&subject_ty).is_none();
+        let iteration_throws = subject_ty.array_value_type().is_none();
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
             declared_return,
@@ -808,7 +805,7 @@ impl<'a> Checker<'a> {
         // precision, never produce a new false positive.
         if by_ref
             && let ExprKind::Variable(subject_name) = &subject.kind
-            && let Some(old_element_ty) = Self::array_element_type(&subject_ty)
+            && let Some(old_element_ty) = subject_ty.array_value_type()
             && let Some(final_value_ty) = last_value_ty
             && let Some(current_subject_ty) = locals.get(subject_name).cloned()
         {

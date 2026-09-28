@@ -1,7 +1,7 @@
 use crate::checker::expr::type_definitely_excludes_null;
 use syntax::ast::*;
 use types::union_types;
-use types::{self, AccessoryKind, Type};
+use types::{self, Type};
 
 /// `ty`'s own `(min, max)` bound pair when it's
 /// range-representable at all - an `IntLiteral` is a degenerate range
@@ -416,52 +416,6 @@ pub(crate) fn numeric_comparison_bounds(ty: &Type) -> Option<(Option<i64>, Optio
     }
 }
 
-/// PHP's own bool-cast truthiness for `ty`, generalized past a bare
-/// literal wherever the answer is still fully unambiguous - `None`
-/// whenever it genuinely isn't (a bare `int`/`string`/`array`, a
-/// variable's widened type, a `Union` whose members disagree, ...).
-/// Real PHP's exact falsy set: `0`, `0.0`, `""`, `"0"`, `null`, `false`,
-/// `[]`; everything else (every object, unconditionally - even one with
-/// no properties) is truthy. `Union`/`Intersection` recurse: a union
-/// needs every member to agree; an intersection only needs one member
-/// with a definite answer, since narrowing only ever adds information.
-/// `ArrayList` is deliberately excluded from the "always truthy"
-/// accessory set below - unlike `NonEmptyArray`/`NonFalsyString`, a bare
-/// `list<T>` doesn't itself exclude the empty list.
-pub(crate) fn type_truthiness(ty: &Type) -> Option<bool> {
-    match ty {
-        Type::True => Some(true),
-        Type::False | Type::Null => Some(false),
-        Type::IntLiteral(n) => Some(*n != 0),
-        Type::FloatLiteral(n) => Some(*n != 0.0),
-        Type::StringLiteral(s) => Some(!s.is_empty() && s != "0"),
-        Type::Object(..) | Type::ObjectWithoutClass | Type::Resource { .. } => Some(true),
-        Type::ArrayShape(shape) => {
-            if shape.fields.iter().any(|f| !f.optional) {
-                // At least one *required* field guarantees the array can
-                // never be empty, sealed or not.
-                Some(true)
-            } else if shape.is_empty_array() {
-                // No fields at all, and sealed - this is exactly `[]`.
-                Some(false)
-            } else {
-                // Every known field is optional (or the shape is
-                // unsealed with no known fields at all) - genuinely
-                // ambiguous, it could be `[]` or not.
-                None
-            }
-        }
-        Type::Accessory(AccessoryKind::NonFalsyString | AccessoryKind::NonEmptyArray) => Some(true),
-        Type::Union(members) => {
-            let mut iter = members.iter().map(type_truthiness);
-            let first = iter.next()??;
-            iter.all(|v| v == Some(first)).then_some(first)
-        }
-        Type::Intersection(members) => members.iter().find_map(type_truthiness),
-        _ => None,
-    }
-}
-
 /// The provable outcome of a loose `==` comparison between two literal
 /// scalar types (`!=` is just its negation), or `None` when not
 /// statically decidable - matches real PHPStan's own
@@ -490,7 +444,7 @@ pub(crate) fn loose_compare_literals(
     if matches!(l, Type::True | Type::False | Type::Null)
         || matches!(r, Type::True | Type::False | Type::Null)
     {
-        return Some(type_truthiness(l)? == type_truthiness(r)?);
+        return Some(l.to_boolean().bool_literal_value()? == r.to_boolean().bool_literal_value()?);
     }
     match (l, r) {
         (Type::IntLiteral(a), Type::IntLiteral(b)) => Some(a == b),
@@ -712,11 +666,9 @@ pub(crate) fn null_probe_verdict(ty: &Type) -> Option<&'static str> {
 /// be unambiguous before it says anything - by the time both are
 /// resolved, the message reduces to exactly one of these two outcomes
 /// (`isNull`-specific wording is provably unreachable once falsiness is
-/// already known). `type_truthiness` already recurses through `Union`/
-/// `Intersection`/`ArrayShape`/accessory kinds, so this is a thin
-/// wrapper, not a separate reimplementation.
+/// already known).
 pub(crate) fn empty_probe_verdict(ty: &Type) -> Option<&'static str> {
-    match type_truthiness(ty) {
+    match ty.to_boolean().bool_literal_value() {
         Some(true) => Some("is not falsy"),
         Some(false) => Some("is always falsy"),
         None => None,

@@ -235,7 +235,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if degraded {
-                    elem_types.push(Self::array_element_type(&value_ty).unwrap_or(Type::mixed()));
+                    elem_types.push(value_ty.array_value_type().unwrap_or(Type::mixed()));
                     // `is_list_like` alone (the original check) wrongly
                     // treats an *unmarked* int-keyed source
                     // (`array<int, int>`, list-ness never proven, only
@@ -257,7 +257,7 @@ impl<'a> Checker<'a> {
                     if !Self::is_list_safe_array_merge_argument(&value_ty) {
                         list_safe = false;
                     }
-                    if Self::is_known_non_empty_array(&value_ty) {
+                    if value_ty.is_non_empty_array().yes() {
                         known_non_empty = true;
                     }
                 }
@@ -343,56 +343,6 @@ impl<'a> Checker<'a> {
         shape.set(ShapeField::new(resolved_key, ty, optional));
     }
 
-    /// Whether `ty` is already provably int-key-sequential from zero - a
-    /// real `list<T>`/`non-empty-list<T>`, or an `ArrayShape` whose own
-    /// keys happen to be canonical and sequential. Shares the exact
-    /// `is_super_type_of`-side rule for an `ArrayShape` against
-    /// `Accessory::ArrayList` rather than re-deriving it.
-    pub(crate) fn is_list_like(ty: &Type) -> bool {
-        match ty {
-            Type::Intersection(members) => {
-                members.contains(&Type::Accessory(AccessoryKind::ArrayList))
-            }
-            Type::ArrayShape(shape) => types::shape_fields_are_list_like(shape),
-            // Every branch of a control-flow-merged `Union` must itself
-            // be list-like - an `ArrayShape([])` branch (the common
-            // "0 iterations" case) already satisfies this vacuously via
-            // the `ArrayShape` arm above.
-            Type::Union(members) => members.iter().all(Self::is_list_like),
-            _ => false,
-        }
-    }
-
-    /// Whether `ty` is already provably non-empty - a real
-    /// `non-empty-array<T>`/`non-empty-list<T>`, or a non-empty
-    /// `ArrayShape` literal.
-    pub(crate) fn is_known_non_empty_array(ty: &Type) -> bool {
-        match ty {
-            Type::Intersection(members) => {
-                members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
-            }
-            Type::ArrayShape(shape) => !shape.fields.is_empty() || !shape.is_sealed(),
-            // Non-empty only if *every* branch is - a possibly-empty
-            // branch (an `ArrayShape([])`, the common "0 iterations"
-            // case) means the merged value isn't provably non-empty.
-            Type::Union(members) => members.iter().all(Self::is_known_non_empty_array),
-            _ => false,
-        }
-    }
-
-    /// The mirror image of `is_known_non_empty_array` just above -
-    /// whether `ty` is provably empty (an empty `ArrayShape` literal;
-    /// nothing else in this project's own type system can prove zero
-    /// elements, the same "don't guess" leniency `is_known_non_empty_
-    /// array` already applies in the other direction).
-    pub(crate) fn is_known_empty_array(ty: &Type) -> bool {
-        match ty {
-            Type::ArrayShape(shape) => shape.is_empty_array(),
-            Type::Union(members) => members.iter().all(Self::is_known_empty_array),
-            _ => false,
-        }
-    }
-
     /// `UselessFunctionReturnValueRule` -
     /// `var_export`/`print_r`/`highlight_string` all share the same
     /// `bool $return = false` last parameter: printing directly and
@@ -462,10 +412,10 @@ impl<'a> Checker<'a> {
             return;
         }
         let arr_ty = self.infer_expr(&args[0].value, locals);
-        if !Self::is_array_like(&arr_ty) {
+        if !arr_ty.is_array().yes() {
             return;
         }
-        if Self::is_known_empty_array(&arr_ty) {
+        if arr_ty.is_empty_array().yes() {
             self.report(
                 format!("call to array_filter() with an empty array ({arr_ty}) has no effect"),
                 span,
@@ -474,7 +424,7 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let Some(element_ty) = Self::array_element_type(&arr_ty) else {
+        let Some(element_ty) = arr_ty.array_value_type() else {
             return;
         };
         match array_filter_element_falsy_verdict(&element_ty) {
@@ -510,17 +460,17 @@ impl<'a> Checker<'a> {
             return;
         }
         let arr_ty = self.infer_expr(&args[0].value, locals);
-        if !Self::is_array_like(&arr_ty) {
+        if !arr_ty.is_array().yes() {
             return;
         }
-        if Self::is_known_empty_array(&arr_ty) {
+        if arr_ty.is_empty_array().yes() {
             self.report(
                 format!("call to array_values() with an empty array ({arr_ty}) has no effect"),
                 span,
                 0,
                 "arrayValues.empty",
             );
-        } else if Self::is_list_like(&arr_ty) {
+        } else if arr_ty.is_list().yes() {
             self.report(
                 format!(
                     "call to array_values() on {arr_ty}, which is already a list, has no effect"
@@ -741,110 +691,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn array_element_type(ty: &Type) -> Option<Type> {
-        match ty {
-            Type::Array(_, elem) => Some((**elem).clone()),
-            Type::ArrayShape(shape) => Some(
-                shape
-                    .fields
-                    .iter()
-                    .map(|f| f.ty.clone())
-                    .reduce(union_types)
-                    .unwrap_or(Type::mixed()),
-            ),
-            // A `list<T>`/`non-empty-array<T>`-typed value is a
-            // real `Intersection([Array(T), Accessory(_)])`, not
-            // plain `Array(T)` - without this, every one of this
-            // function's own callers (`array_map`/`array_reduce`/
-            // `array_chunk`/`array_column`) would silently stop
-            // recognizing such a value as an array at all.
-            Type::Intersection(members) => members.iter().find_map(Self::array_element_type),
-            // A `Union` of array-like branches from a
-            // control-flow merge (`$x = []; if (...) { foreach (...) {
-            // $x[] = ...; } }` - the "0 iterations" branch stays
-            // `array{}`, the "≥1" branch becomes a real list, and an
-            // `if`/loop join leaves `$x` a `Union` of the two). A
-            // genuinely empty `ArrayShape` member contributes no real
-            // element-type constraint (it holds zero elements in that
-            // branch) and is skipped rather than folded in as `Mixed`,
-            // which would otherwise collapse the *whole* merged element
-            // type down to `Mixed` the moment any branch was ever empty.
-            // Only defined when every other member is itself array-like -
-            // a `list<T>|null` union has no sensible single "element
-            // type" to report.
-            Type::Union(members) => {
-                let mut elem_types = Vec::new();
-                for m in members {
-                    if matches!(m, Type::ArrayShape(shape) if shape.is_empty_array()) {
-                        continue;
-                    }
-                    elem_types.push(Self::array_element_type(m)?);
-                }
-                Some(
-                    elem_types
-                        .into_iter()
-                        .reduce(union_types)
-                        .unwrap_or(Type::mixed()),
-                )
-            }
-            _ => None,
-        }
-    }
-
-    /// `array_element_type`'s own key-side
-    /// counterpart. A bare `Type::Array` (or one wrapped in the
-    /// `list<T>`/`non-empty-array<T>` `Intersection` shape) carries a
-    /// real key type directly; an `ArrayShape`'s own key type is
-    /// `types::shape_key_type`, also reused directly by
-    /// `registry::assignability`/`types::subtype` for the identical
-    /// reasoning against a real `Type::Array`'s own declared key type.
-    /// `shape_key_type`'s own `Type::Never` (no field at all; an unsealed
-    /// tail contributes no key) maps back to `None` here, this
-    /// function's own existing "don't know" answer, matching every
-    /// caller's own existing `unwrap_or_else`/`if let Some` handling.
-    pub(crate) fn array_key_type(ty: &Type) -> Option<Type> {
-        match ty {
-            Type::Array(key, _) => Some((**key).clone()),
-            Type::ArrayShape(fields) => match types::shape_key_type(fields) {
-                Type::Never => None,
-                key => Some(key),
-            },
-            Type::Intersection(members) => members.iter().find_map(Self::array_key_type),
-            // A `Union` of array-like branches (the same control-flow-
-            // merge shape `array_element_type`'s own `Union` arm above
-            // handles) has no sensible key type unless every non-empty
-            // member does - without this arm, a container whose type
-            // happened to be a real `Union` (e.g. from an earlier
-            // branch-merge where each branch's own literal-key write
-            // produced a distinctly different `hasOffsetValue(...)`-
-            // carrying type) silently answered "don't know" here even
-            // though every member plainly agreed on the same key type,
-            // which broke `array_merge`'s own `all_string_keyed_or_shape`
-            // eligibility check for such a container - a real corpus
-            // false negative (`SectionPopulator::populate()`'s own
-            // `$page = array_merge($page, ...)`, where `$page`'s
-            // genuinely string-keyed `Union` wrongly disqualified the
-            // *other* argument's own precise `ArrayShape` from being
-            // merged precisely at all).
-            Type::Union(members) => {
-                let mut key_types = Vec::new();
-                for m in members {
-                    if matches!(m, Type::ArrayShape(shape) if shape.is_empty_array()) {
-                        continue;
-                    }
-                    key_types.push(Self::array_key_type(m)?);
-                }
-                Some(
-                    key_types
-                        .into_iter()
-                        .reduce(union_types)
-                        .unwrap_or(Type::mixed()),
-                )
-            }
-            _ => None,
-        }
-    }
-
     /// Whether a key type could genuinely include a `String` member - the
     /// only thing that actually breaks list-ness for a real PHP operation
     /// that renumbers integer keys sequentially and discards their
@@ -889,21 +735,10 @@ impl<'a> Checker<'a> {
     /// factored out since both apply the identical real-PHP renumbering
     /// rule to their own plain-array arguments/spread sources.
     pub(crate) fn is_list_safe_array_merge_argument(ty: &Type) -> bool {
-        Self::is_list_like(ty)
-            || Self::array_key_type(ty).is_some_and(|k| !Self::key_type_could_be_string(&k))
-    }
-
-    /// Whether `ty` is array-shaped at all - for sites that
-    /// only need "is this even an array," not the unwrapped element
-    /// type `array_element_type` above provides. Sees through a
-    /// `list<T>`/`non-empty-array<T>`-typed value the same way, and
-    /// through a `Union` of such values (the same control-flow-merge
-    /// shape `array_element_type`'s own `Union` arm above handles).
-    pub(crate) fn is_array_like(ty: &Type) -> bool {
-        matches!(ty, Type::Array(_, _) | Type::ArrayShape(_))
-            || matches!(ty, Type::Intersection(members)
-                if members.iter().any(|m| matches!(m, Type::Array(_, _) | Type::ArrayShape(_))))
-            || matches!(ty, Type::Union(members) if members.iter().all(Self::is_array_like))
+        ty.is_list().yes()
+            || ty
+                .array_key_type()
+                .is_some_and(|k| !Self::key_type_could_be_string(&k))
     }
 }
 

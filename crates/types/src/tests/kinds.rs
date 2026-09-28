@@ -46,3 +46,73 @@ fn never_is_no_kind() {
     assert_eq!(Type::never().is_null(), TrinaryLogic::No);
     assert_eq!(Type::never().is_string(), TrinaryLogic::No);
 }
+
+#[test]
+fn an_array_answers_its_value_and_key_types() {
+    use crate::{Shape, ShapeField, ShapeKey};
+    let shape = Type::array_shape(Shape::sealed(vec![
+        ShapeField::new(ShapeKey::Int(0), Type::int(), false),
+        ShapeField::new(ShapeKey::Int(1), Type::string(), false),
+    ]));
+    assert_eq!(
+        shape.array_value_type(),
+        Some(Type::union_of(vec![Type::int(), Type::string()]))
+    );
+    let empty = Type::array_shape(Shape::sealed(Vec::new()));
+    assert_eq!(empty.array_value_type(), Some(Type::never()));
+    assert_eq!(
+        Type::union_of(vec![empty, Type::list_of(Type::int())]).array_value_type(),
+        Some(Type::int())
+    );
+    assert_eq!(
+        Type::union_of(vec![Type::list_of(Type::int()), Type::null()]).array_value_type(),
+        None
+    );
+    assert_eq!(
+        Type::list_of(Type::int()).array_key_type(),
+        Some(Type::int_range(Some(0), None))
+    );
+}
+
+#[test]
+fn to_boolean_follows_each_kind() {
+    assert_eq!(
+        Type::string_literal("0".into()).to_boolean(),
+        Type::bool_literal(false)
+    );
+    assert_eq!(
+        Type::int_range(Some(1), None).to_boolean(),
+        Type::bool_literal(true)
+    );
+    assert_eq!(
+        Type::class_string(Type::mixed()).to_boolean(),
+        Type::bool_literal(true)
+    );
+    assert_eq!(
+        Type::intersection_of(vec![
+            Type::string(),
+            Type::accessory(AccessoryKind::NonFalsyString)
+        ])
+        .to_boolean(),
+        Type::bool_literal(true)
+    );
+    assert_eq!(
+        Type::union_of(vec![Type::null(), Type::int_literal(1)]).to_boolean(),
+        Type::bool()
+    );
+}
+
+#[test]
+fn an_all_optional_shape_isnt_surely_non_empty() {
+    use crate::{Shape, ShapeField, ShapeKey};
+    let optional = Type::array_shape(Shape::sealed(vec![ShapeField::new(
+        ShapeKey::Int(0),
+        Type::int(),
+        true,
+    )]));
+    assert_eq!(optional.is_non_empty_array(), TrinaryLogic::Maybe);
+    assert_eq!(
+        Type::array_shape(Shape::sealed(Vec::new())).is_empty_array(),
+        TrinaryLogic::Yes
+    );
+}

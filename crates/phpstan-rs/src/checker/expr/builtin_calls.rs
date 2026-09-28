@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
                     // logic state machine) - a `FILTER_REQUIRE_ARRAY` call
                     // on a not-provably-array input falls through to the
                     // generic stub below, unchanged.
-                    if require_array && !Self::is_array_like(&value_ty) {
+                    if require_array && !value_ty.is_array().yes() {
                         return Type::mixed();
                     }
                     // The fallback is unioned into the *element* type
@@ -257,8 +257,10 @@ impl<'a> Checker<'a> {
                         union_types(element_ty.clone(), fallback.clone())
                     };
                     if require_array || force_array {
-                        let key_ty = if Self::is_array_like(&value_ty) {
-                            Self::array_key_type(&value_ty).unwrap_or_else(Type::unknown_array_key)
+                        let key_ty = if value_ty.is_array().yes() {
+                            value_ty
+                                .array_key_type()
+                                .unwrap_or_else(Type::unknown_array_key)
                         } else {
                             Type::unknown_array_key()
                         };
@@ -331,7 +333,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|a| self.infer_expr(&a.value, locals))
                     .collect();
-                if !arg_types.iter().any(Self::is_array_like) {
+                if !arg_types.iter().any(|t| t.is_array().yes()) {
                     return arg_types
                         .into_iter()
                         .reduce(union_types)
@@ -344,13 +346,13 @@ impl<'a> Checker<'a> {
             // since a "not found" outcome is always real.
             "array_find" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
-                if let Some(elem_ty) = Self::array_element_type(&input_ty) {
+                if let Some(elem_ty) = input_ty.array_value_type() {
                     return union_types(elem_ty, Type::null());
                 }
             }
             "array_find_key" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
-                if let Some(key_ty) = Self::array_key_type(&input_ty) {
+                if let Some(key_ty) = input_ty.array_key_type() {
                     return union_types(key_ty, Type::null());
                 }
             }
@@ -359,7 +361,7 @@ impl<'a> Checker<'a> {
             // through to the generic path below, unchanged.
             "array_map" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[1].value, locals);
-                if let Some(elem_ty) = Self::array_element_type(&input_ty)
+                if let Some(elem_ty) = input_ty.array_value_type()
                     && let Some(mapped) = self.infer_closure_return_with_param_overrides(
                         &args[0].value,
                         &[elem_ty],
@@ -381,7 +383,7 @@ impl<'a> Checker<'a> {
             // indexed into blindly.
             "array_filter" if !args.is_empty() => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if Self::is_array_like(&arr_ty) {
+                if arr_ty.is_array().yes() {
                     // Filtering can both leave gaps in a list's sequential
                     // keys and empty out a non-empty array, so neither
                     // marker survives.
@@ -431,8 +433,7 @@ impl<'a> Checker<'a> {
             // $initial's type (Null when omitted, matching real PHP's
             // default), $item to the array's element type.
             "array_reduce" if args.len() == 2 || args.len() == 3 => {
-                if let Some(item_ty) =
-                    Self::array_element_type(&self.infer_expr(&args[0].value, locals))
+                if let Some(item_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type()
                 {
                     let carry_ty = args
                         .get(2)
@@ -454,7 +455,7 @@ impl<'a> Checker<'a> {
             // array_filter above.
             "array_combine" if args.len() == 2 => {
                 let values_ty = self.infer_expr(&args[1].value, locals);
-                if Self::is_array_like(&values_ty) {
+                if values_ty.is_array().yes() {
                     // The result is keyed by $keys, not $values's own
                     // keys, so any Accessory marker $values carried
                     // doesn't survive.
@@ -471,7 +472,7 @@ impl<'a> Checker<'a> {
                     || (args.len() == 4 && is_false_literal(&args[3].value)) =>
             {
                 let input_ty = self.infer_expr(&args[0].value, locals);
-                if let Some(elem_ty) = Self::array_element_type(&input_ty) {
+                if let Some(elem_ty) = input_ty.array_value_type() {
                     return rewrap_with_accessory_markers(elem_ty, &input_ty);
                 }
             }
@@ -479,7 +480,7 @@ impl<'a> Checker<'a> {
                 if args.len() == 1 || (args.len() == 2 && is_false_literal(&args[1].value)) =>
             {
                 let input_ty = self.infer_expr(&args[0].value, locals);
-                if let Some(elem_ty) = Self::array_element_type(&input_ty) {
+                if let Some(elem_ty) = input_ty.array_value_type() {
                     return rewrap_with_accessory_markers(elem_ty, &input_ty);
                 }
             }
@@ -487,8 +488,7 @@ impl<'a> Checker<'a> {
             // already list-shaped - re-sequencing every key from zero is
             // exactly what array_values does.
             "array_values" if args.len() == 1 => {
-                if let Some(elem_ty) =
-                    Self::array_element_type(&self.infer_expr(&args[0].value, locals))
+                if let Some(elem_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type()
                 {
                     return Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), elem_ty),
@@ -509,9 +509,9 @@ impl<'a> Checker<'a> {
                 // can empty a non-empty input and correctly don't get
                 // this same treatment).
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if Self::is_array_like(&arr_ty) {
+                if arr_ty.is_array().yes() {
                     let stripped = strip_accessory_markers(arr_ty.clone());
-                    return if Self::is_known_non_empty_array(&arr_ty) {
+                    return if arr_ty.is_non_empty_array().yes() {
                         Type::intersection_of(vec![
                             stripped,
                             Type::accessory(AccessoryKind::NonEmptyArray),
@@ -563,11 +563,11 @@ impl<'a> Checker<'a> {
                     && a.spread
                 {
                     let spread_ty = self.infer_expr(&a.value, locals);
-                    Self::array_element_type(&spread_ty).unwrap_or(Type::mixed())
+                    spread_ty.array_value_type().unwrap_or(Type::mixed())
                 } else {
                     self.infer_expr(&args[0].value, locals)
                 };
-                if Self::is_array_like(&arr_ty) {
+                if arr_ty.is_array().yes() {
                     return strip_accessory_markers(arr_ty);
                 }
             }
@@ -604,12 +604,13 @@ impl<'a> Checker<'a> {
                     }
                     return Type::array_shape(flipped);
                 }
-                if Self::is_array_like(&arr_ty) {
-                    let key_ty =
-                        Self::array_key_type(&arr_ty).unwrap_or_else(Type::unknown_array_key);
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::mixed());
+                if arr_ty.is_array().yes() {
+                    let key_ty = arr_ty
+                        .array_key_type()
+                        .unwrap_or_else(Type::unknown_array_key);
+                    let elem_ty = arr_ty.array_value_type().unwrap_or(Type::mixed());
                     let flipped = Type::array(elem_ty, key_ty);
-                    return if Self::is_known_non_empty_array(&arr_ty) {
+                    return if arr_ty.is_non_empty_array().yes() {
                         Type::intersection_of(vec![
                             flipped,
                             Type::accessory(AccessoryKind::NonEmptyArray),
@@ -711,7 +712,7 @@ impl<'a> Checker<'a> {
             // once non-emptiness is already provable (`force_union: false`).
             "array_pop" | "array_shift" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
+                if let Some(elem_ty) = arr_ty.array_value_type() {
                     return Self::array_pointer_result(&arr_ty, elem_ty, Type::null(), false);
                 }
             }
@@ -723,7 +724,7 @@ impl<'a> Checker<'a> {
             // nothing).
             "array_splice" if !args.is_empty() => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
+                if let Some(elem_ty) = arr_ty.array_value_type() {
                     return Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), elem_ty),
                         Type::accessory(AccessoryKind::ArrayList),
@@ -745,11 +746,11 @@ impl<'a> Checker<'a> {
                 let mut val_ty: Option<Type> = None;
                 for a in args {
                     let arg_ty = self.infer_expr(&a.value, locals);
-                    if let Some(k) = Self::array_key_type(&arg_ty) {
+                    if let Some(k) = arg_ty.array_key_type() {
                         key_ty =
                             Some(key_ty.map_or(k.clone(), |existing| union_types(existing, k)));
                     }
-                    if let Some(v) = Self::array_element_type(&arg_ty) {
+                    if let Some(v) = arg_ty.array_value_type() {
                         val_ty =
                             Some(val_ty.map_or(v.clone(), |existing| union_types(existing, v)));
                     }
@@ -769,7 +770,7 @@ impl<'a> Checker<'a> {
             "array_pad" if args.len() == 3 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 let pad_ty = self.infer_expr(&args[2].value, locals);
-                if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
+                if let Some(elem_ty) = arr_ty.array_value_type() {
                     return Type::array(Type::unknown_array_key(), union_types(elem_ty, pad_ty));
                 }
             }
@@ -781,12 +782,12 @@ impl<'a> Checker<'a> {
             // count, non-emptiness matching the input's.
             "array_count_values" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if Self::is_array_like(&arr_ty) {
+                if arr_ty.is_array().yes() {
                     let counted = Type::array(
                         Type::union_of(vec![Type::int(), Type::string()]),
                         Type::int(),
                     );
-                    return if Self::is_known_non_empty_array(&arr_ty) {
+                    return if arr_ty.is_non_empty_array().yes() {
                         Type::intersection_of(vec![
                             counted,
                             Type::accessory(AccessoryKind::NonEmptyArray),
@@ -818,7 +819,7 @@ impl<'a> Checker<'a> {
                         Type::IntLiteral(n) => Some(n),
                         _ => None,
                     });
-                if let Some(key_ty) = Self::array_key_type(&arr_ty) {
+                if let Some(key_ty) = arr_ty.array_key_type() {
                     match num_literal.unwrap_or(1) {
                         1 => return key_ty,
                         n if n > 1 => {
@@ -837,8 +838,8 @@ impl<'a> Checker<'a> {
             // pointer can run off either end regardless of element count.
             "reset" | "current" | "end" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if Self::is_array_like(&arr_ty) {
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::mixed());
+                if arr_ty.is_array().yes() {
+                    let elem_ty = arr_ty.array_value_type().unwrap_or(Type::mixed());
                     return Self::array_pointer_result(
                         &arr_ty,
                         elem_ty,
@@ -849,8 +850,8 @@ impl<'a> Checker<'a> {
             }
             "next" | "prev" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if Self::is_array_like(&arr_ty) {
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::mixed());
+                if arr_ty.is_array().yes() {
+                    let elem_ty = arr_ty.array_value_type().unwrap_or(Type::mixed());
                     return Self::array_pointer_result(
                         &arr_ty,
                         elem_ty,
@@ -869,9 +870,10 @@ impl<'a> Checker<'a> {
             // identical `int|string|null` signature.
             "key" | "array_key_first" | "array_key_last" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
-                if Self::is_array_like(&arr_ty) {
-                    let key_ty =
-                        Self::array_key_type(&arr_ty).unwrap_or_else(Type::unknown_array_key);
+                if arr_ty.is_array().yes() {
+                    let key_ty = arr_ty
+                        .array_key_type()
+                        .unwrap_or_else(Type::unknown_array_key);
                     return Self::array_pointer_result(&arr_ty, key_ty, Type::null(), false);
                 }
             }
@@ -944,7 +946,8 @@ impl<'a> Checker<'a> {
                         // key type that provably excludes `Int` is just
                         // as safe here, not only the bare `Type::String`
                         // variant.
-                        _ => Self::array_key_type(t)
+                        _ => t
+                            .array_key_type()
                             .is_some_and(|k| !Self::key_type_could_be_int(&k)),
                     });
                 if all_string_keyed_or_shape {
@@ -978,8 +981,7 @@ impl<'a> Checker<'a> {
                                 // presence; the plain array can only
                                 // change the *value*, never remove a key
                                 // array_merge never touches).
-                                let elem_ty =
-                                    Self::array_element_type(arg_ty).unwrap_or(Type::mixed());
+                                let elem_ty = arg_ty.array_value_type().unwrap_or(Type::mixed());
                                 for f in merged.fields.iter_mut() {
                                     f.ty = union_types(f.ty.clone(), elem_ty.clone());
                                 }
@@ -1074,33 +1076,33 @@ impl<'a> Checker<'a> {
                         // the spread source's own. The result is non-empty
                         // when at least one array is merged and every one
                         // of them is non-empty.
-                        match Checker::array_element_type(arg_ty) {
+                        match arg_ty.array_value_type() {
                             Some(inner_ty) => {
                                 if !Self::is_list_safe_array_merge_argument(&inner_ty) {
                                     all_list = false;
                                 }
-                                if Self::is_known_non_empty_array(arg_ty)
-                                    && Self::is_known_non_empty_array(&inner_ty)
+                                if arg_ty.is_non_empty_array().yes()
+                                    && inner_ty.is_non_empty_array().yes()
                                 {
                                     any_non_empty = true;
                                 }
-                                note_key_type(Self::array_key_type(&inner_ty));
-                                match Checker::array_element_type(&inner_ty) {
+                                note_key_type(inner_ty.array_key_type());
+                                match inner_ty.array_value_type() {
                                     Some(t) => elem_types.push(t),
                                     None => all_known_array_like = false,
                                 }
                             }
                             None => all_known_array_like = false,
                         }
-                    } else if Self::is_array_like(arg_ty) {
+                    } else if arg_ty.is_array().yes() {
                         if !Self::is_list_safe_array_merge_argument(arg_ty) {
                             all_list = false;
                         }
-                        if Self::is_known_non_empty_array(arg_ty) {
+                        if arg_ty.is_non_empty_array().yes() {
                             any_non_empty = true;
                         }
-                        note_key_type(Self::array_key_type(arg_ty));
-                        if let Some(t) = Checker::array_element_type(arg_ty) {
+                        note_key_type(arg_ty.array_key_type());
+                        if let Some(t) = arg_ty.array_value_type() {
                             elem_types.push(t);
                         }
                     } else {
@@ -1172,16 +1174,16 @@ impl<'a> Checker<'a> {
             // int>`, not a bare `unknown_array_key()`.
             "array_fill_keys" if args.len() == 2 => {
                 let keys_ty = self.infer_expr(&args[0].value, locals);
-                let key_ty =
-                    Self::array_element_type(&keys_ty).unwrap_or_else(Type::unknown_array_key);
+                let key_ty = keys_ty
+                    .array_value_type()
+                    .unwrap_or_else(Type::unknown_array_key);
                 return Type::array(key_ty, self.infer_expr(&args[1].value, locals));
             }
             // Splits one array into several same-shaped ones - the
             // result is an array *of* arrays, each holding the original
             // element type.
             "array_chunk" if args.len() == 2 || args.len() == 3 => {
-                if let Some(elem_ty) =
-                    Self::array_element_type(&self.infer_expr(&args[0].value, locals))
+                if let Some(elem_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type()
                 {
                     return Type::array(
                         Type::unknown_array_key(),
@@ -1215,7 +1217,7 @@ impl<'a> Checker<'a> {
                 // Only an `ArrayShape`'s own key type is trustworthy
                 // enough to propagate.
                 if is_or_wraps_array_shape(&arg_ty)
-                    && let Some(key_ty) = Self::array_key_type(&arg_ty)
+                    && let Some(key_ty) = arg_ty.array_key_type()
                 {
                     return Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), key_ty),
@@ -1225,7 +1227,7 @@ impl<'a> Checker<'a> {
                 // The native stub's own `@return int[]|string[]` is real
                 // but useless without this project's key-type tracking -
                 // falls back to `Mixed` rather than guess beyond it.
-                if Self::is_array_like(&arg_ty) {
+                if arg_ty.is_array().yes() {
                     return Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), Type::mixed()),
                         Type::accessory(AccessoryKind::ArrayList),
@@ -1233,9 +1235,7 @@ impl<'a> Checker<'a> {
                 }
             }
             "array_column" if args.len() == 2 || args.len() == 3 => {
-                if let Some(row_ty) =
-                    Self::array_element_type(&self.infer_expr(&args[0].value, locals))
-                {
+                if let Some(row_ty) = (self.infer_expr(&args[0].value, locals)).array_value_type() {
                     // A shaped row looks up the one named field; an
                     // unshaped row (`array<string, mixed>`, the common
                     // shape for a raw DB-fetch row) has no per-key
@@ -1245,7 +1245,7 @@ impl<'a> Checker<'a> {
                         Type::ArrayShape(shape) => literal_string_key(&args[1].value)
                             .and_then(|key| shape.field(&ShapeKey::from_name(&key)))
                             .map(|f| f.ty.clone()),
-                        _ if Self::is_array_like(&row_ty) => Self::array_element_type(&row_ty),
+                        _ if row_ty.is_array().yes() => row_ty.array_value_type(),
                         _ => None,
                     };
                     if let Some(field_ty) = field_ty {
@@ -1280,7 +1280,7 @@ impl<'a> Checker<'a> {
             // `string`.
             "array_search" if args.len() >= 2 => {
                 let haystack_ty = self.infer_expr(&args[1].value, locals);
-                if Checker::is_list_like(&haystack_ty) {
+                if haystack_ty.is_list().yes() {
                     return union_types(Type::int(), Type::bool_literal(false));
                 }
                 // Same idea, one level less precise - a haystack whose
@@ -1288,7 +1288,7 @@ impl<'a> Checker<'a> {
                 // list") narrows the found-key half the same way, e.g. an
                 // `array<string, V>` haystack can only ever find a
                 // `string` key.
-                if let Some(key_ty) = Self::array_key_type(&haystack_ty)
+                if let Some(key_ty) = haystack_ty.array_key_type()
                     && key_ty != Type::unknown_array_key()
                 {
                     return union_types(key_ty, Type::bool_literal(false));
@@ -1822,10 +1822,10 @@ impl<'a> Checker<'a> {
         empty_marker: Type,
         force_union: bool,
     ) -> Type {
-        if Self::is_known_empty_array(arr_ty) {
+        if arr_ty.is_empty_array().yes() {
             return empty_marker;
         }
-        if Self::is_known_non_empty_array(arr_ty) && !force_union {
+        if arr_ty.is_non_empty_array().yes() && !force_union {
             return result_ty;
         }
         union_types(result_ty, empty_marker)
@@ -2246,7 +2246,7 @@ fn filter_validate_result(
     } else {
         Type::bool_literal(false)
     };
-    let flags_is_options_array = flags_ty.is_some_and(Checker::is_array_like);
+    let flags_is_options_array = flags_ty.is_some_and(|t| t.is_array().yes());
     if !flags_is_options_array {
         return Some((base_ty, implicit_fallback, throw_on_failure));
     }
@@ -2480,10 +2480,10 @@ fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
         }
         Type::Union(_) => {
             let mut result = vec![Type::array(Type::unknown_array_key(), mapped_elem)];
-            if Checker::is_list_like(input_ty) {
+            if input_ty.is_list().yes() {
                 result.push(Type::accessory(AccessoryKind::ArrayList));
             }
-            if Checker::is_known_non_empty_array(input_ty) {
+            if input_ty.is_non_empty_array().yes() {
                 result.push(Type::accessory(AccessoryKind::NonEmptyArray));
             }
             if result.len() > 1 {

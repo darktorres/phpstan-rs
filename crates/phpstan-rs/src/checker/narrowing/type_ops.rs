@@ -238,7 +238,9 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // `upgrade_array_to_non_empty` with `!empty($x)`/`count($x) > 0`
         // so the three
         // "prove this array is non-empty" paths can't drift apart.
-        Type::Array(..) | Type::Intersection(_) if matches!(excluded, Type::ArrayShape(shape) if shape.is_empty_array()) => {
+        Type::Array(..) | Type::ArrayShape(_) | Type::Intersection(_)
+            if excluded.is_empty_array().yes() =>
+        {
             upgrade_array_to_non_empty(original)
         }
         // Real PHP's own `Traversable` is a marker interface userland

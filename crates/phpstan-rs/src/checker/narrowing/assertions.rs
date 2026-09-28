@@ -105,7 +105,7 @@ impl<'a> Checker<'a> {
             };
             return Some((target.clone(), Some(target)));
         }
-        let element = Self::array_element_type(&haystack_ty)?;
+        let element = haystack_ty.array_value_type()?;
         if element.is_mixed() {
             return None;
         }

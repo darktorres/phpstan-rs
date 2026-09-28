@@ -217,7 +217,7 @@ impl<'a> Checker<'a> {
                 let ty = self.infer_expr(&arg.value, locals);
                 let unpacked = Argument {
                     value: &arg.value,
-                    ty: Some(Checker::array_element_type(&ty).unwrap_or(Type::mixed())),
+                    ty: Some(ty.array_value_type().unwrap_or(Type::mixed())),
                     unpack: true,
                     name: None,
                     span: arg.value.span,
@@ -227,7 +227,7 @@ impl<'a> Checker<'a> {
                         arguments.extend(items);
                         // Only when no argument at all precedes it, as in
                         // PHPStan.
-                        if arguments.is_empty() && Checker::is_known_non_empty_array(&ty) {
+                        if arguments.is_empty() && ty.is_non_empty_array().yes() {
                             arguments.push(unpacked);
                         }
                     }

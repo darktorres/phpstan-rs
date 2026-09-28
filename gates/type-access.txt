@@ -1,6 +1,6 @@
 # Paths naming a `types::Type` variant outside crates/types, per file.
 # A count may only fall; `cargo xtask arch --bless-types` records a fall.
-# total 1691: 1608 in patterns, 83 in comparisons, 0 building a type
+# total 1581: 1500 in patterns, 81 in comparisons, 0 building a type
 10	crates/phpstan-rs/src/checker.rs
 6	crates/phpstan-rs/src/checker/access_attributes.rs
 137	crates/phpstan-rs/src/checker/assignment.rs
@@ -20,13 +20,13 @@
 1	crates/phpstan-rs/src/checker/doctrine/query_builder.rs
 12	crates/phpstan-rs/src/checker/doctrine/result_shape.rs
 145	crates/phpstan-rs/src/checker/expr.rs
-69	crates/phpstan-rs/src/checker/expr/array_ops.rs
+42	crates/phpstan-rs/src/checker/expr/array_ops.rs
 104	crates/phpstan-rs/src/checker/expr/builtin_calls.rs
 61	crates/phpstan-rs/src/checker/expr/member_resolution.rs
 11	crates/phpstan-rs/src/checker/expr/mysqli.rs
 3	crates/phpstan-rs/src/checker/expr/preg_shapes.rs
 3	crates/phpstan-rs/src/checker/expr/probe_checks.rs
-42	crates/phpstan-rs/src/checker/expr/ranges.rs
+29	crates/phpstan-rs/src/checker/expr/ranges.rs
 12	crates/phpstan-rs/src/checker/function_decl.rs
 1	crates/phpstan-rs/src/checker/function_like_declarations.rs
 19	crates/phpstan-rs/src/checker/generics/ancestors.rs
@@ -41,7 +41,7 @@
 3	crates/phpstan-rs/src/checker/internal_usage.rs
 31	crates/phpstan-rs/src/checker/missing_typehint.rs
 17	crates/phpstan-rs/src/checker/narrowing.rs
-47	crates/phpstan-rs/src/checker/narrowing/accessory_range.rs
+48	crates/phpstan-rs/src/checker/narrowing/accessory_range.rs
 34	crates/phpstan-rs/src/checker/narrowing/array_shape.rs
 9	crates/phpstan-rs/src/checker/narrowing/assertions.rs
 30	crates/phpstan-rs/src/checker/narrowing/type_ops.rs
@@ -71,7 +71,7 @@
 1	crates/phpstan-rs/src/checker/stmt/new_exception_discarded.rs
 12	crates/phpstan-rs/src/checker/stmt/try_catch.rs
 24	crates/phpstan-rs/src/checker/strict_idioms.rs
-81	crates/phpstan-rs/src/checker/strict_rules.rs
+13	crates/phpstan-rs/src/checker/strict_rules.rs
 1	crates/phpstan-rs/src/checker/tests/accessory_and_refinement_types.rs
 2	crates/phpstan-rs/src/checker/tests/array_literals_and_shapes.rs
 5	crates/phpstan-rs/src/checker/throws.rs
@@ -80,7 +80,7 @@
 1	crates/phpstan-rs/src/checker/throws/too_wide.rs
 1	crates/phpstan-rs/src/checker/type_declarations.rs
 3	crates/phpstan-rs/src/checker/uninitialized_dataflow.rs
-23	crates/phpstan-rs/src/checker/var_tag_types.rs
+20	crates/phpstan-rs/src/checker/var_tag_types.rs
 3	crates/phpstan-rs/src/lsp.rs
 4	crates/phpstan-rs/src/lsp/completion.rs
 1	crates/phpstan-rs/src/lsp/workspace_symbol.rs

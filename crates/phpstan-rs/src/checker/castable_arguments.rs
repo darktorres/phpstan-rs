@@ -177,7 +177,7 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) {
         let array_ty = self.infer_expr(value, locals);
-        let Some(element_ty) = Self::array_element_type(&array_ty) else {
+        let Some(element_ty) = array_ty.array_value_type() else {
             return;
         };
         let castable = match cast {
@@ -247,7 +247,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let Some(key_ty) = Self::array_key_type(value_ty) else {
+        let Some(key_ty) = value_ty.array_key_type() else {
             return;
         };
         let is_string = |t: &Type| matches!(t, Type::String | Type::StringLiteral(_));

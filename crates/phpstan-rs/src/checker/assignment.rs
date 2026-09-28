@@ -261,7 +261,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::Array(..) | Type::Intersection(_) => {
-                let element_ty = Self::array_element_type(ty).unwrap_or(Type::mixed());
+                let element_ty = ty.array_value_type().unwrap_or(Type::mixed());
                 for item in items {
                     self.check_param_out_assignment(&item.value, &element_ty);
                     self.check_by_ref_destructuring(&item.value, &element_ty);
@@ -380,12 +380,12 @@ impl<'a> Checker<'a> {
                         self.bind_assignment_target(&item.value, element_ty, locals);
                     }
                 }
-                // `Self::array_element_type` also sees through an
+                // `Type::array_value_type` also sees through an
                 // `Intersection`-wrapped `list<T>`/`non-empty-array<T>` -
                 // without it, destructuring one (`[$a, $b] = $listTypedVar`)
                 // would lose its real element type down to `Mixed`.
                 Type::Array(..) | Type::Intersection(_) => {
-                    let element_ty = Self::array_element_type(&ty).unwrap_or(Type::mixed());
+                    let element_ty = ty.array_value_type().unwrap_or(Type::mixed());
                     for item in items {
                         self.bind_assignment_target(&item.value, element_ty.clone(), locals);
                     }
@@ -1182,7 +1182,7 @@ fn write_index_into(
                 // dynamic key write falls through this same branch but
                 // must not get the marker - an arbitrary key need not be
                 // sequential.
-                if idx.is_none() && Checker::is_list_like(container_ty) {
+                if idx.is_none() && container_ty.is_list().yes() {
                     Some(Type::intersection_of(vec![
                         Type::array(Type::unknown_array_key(), widened),
                         Type::accessory(AccessoryKind::ArrayList),
@@ -1282,7 +1282,7 @@ fn write_index_into(
             ))
         }
         Type::Intersection(members) => {
-            let inner = members.iter().find_map(Checker::array_element_type)?;
+            let inner = members.iter().find_map(Type::array_value_type)?;
             let widened = union_types(value_ty, inner);
             let key_ty = idx
                 .and(idx_ty)
