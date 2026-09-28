@@ -169,10 +169,7 @@ impl<'a> Checker<'a> {
                         ShapeKey::Int(*n)
                     }
                     _ => {
-                        return Type::Array(
-                            Box::new(Type::unknown_array_key()),
-                            Box::new(Type::Mixed(false)),
-                        );
+                        return Type::array(Type::unknown_array_key(), Type::mixed());
                     }
                 },
             };
@@ -181,7 +178,7 @@ impl<'a> Checker<'a> {
             // real PHP's own array-literal semantics.
             shape.set(ShapeField::new(key, value_ty, false));
         }
-        Type::ArrayShape(shape)
+        Type::array_shape(shape)
     }
 
     /// A spread item (`[...$a, ...$b]`) can be tracked precisely as long
@@ -238,8 +235,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if degraded {
-                    elem_types
-                        .push(Self::array_element_type(&value_ty).unwrap_or(Type::Mixed(false)));
+                    elem_types.push(Self::array_element_type(&value_ty).unwrap_or(Type::mixed()));
                     // `is_list_like` alone (the original check) wrongly
                     // treats an *unmarked* int-keyed source
                     // (`array<int, int>`, list-ness never proven, only
@@ -302,27 +298,24 @@ impl<'a> Checker<'a> {
         }
 
         if !degraded {
-            return Type::ArrayShape(shape);
+            return Type::array_shape(shape);
         }
         elem_types.extend(shape.fields.into_iter().map(|f| f.ty));
         let elem_ty = elem_types
             .into_iter()
             .reduce(union_types)
-            .unwrap_or(Type::Mixed(false));
-        let mut members = vec![Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(elem_ty),
-        )];
+            .unwrap_or(Type::mixed());
+        let mut members = vec![Type::array(Type::unknown_array_key(), elem_ty)];
         if list_safe {
-            members.push(Type::Accessory(AccessoryKind::ArrayList));
+            members.push(Type::accessory(AccessoryKind::ArrayList));
         }
         if known_non_empty {
-            members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+            members.push(Type::accessory(AccessoryKind::NonEmptyArray));
         }
         if members.len() == 1 {
             members.pop().unwrap()
         } else {
-            Type::Intersection(members)
+            Type::intersection_of(members)
         }
     }
 
@@ -623,7 +616,7 @@ impl<'a> Checker<'a> {
         }
         let arg_ty = self.infer_expr(&args[0].value, locals);
         match self.registry.enum_case_for_value(class, &arg_ty) {
-            Some(case) => Type::EnumCase(class.into(), case.into()),
+            Some(case) => Type::enum_case(class.into(), case.into()),
             None => fallback,
         }
     }
@@ -757,7 +750,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|f| f.ty.clone())
                     .reduce(union_types)
-                    .unwrap_or(Type::Mixed(false)),
+                    .unwrap_or(Type::mixed()),
             ),
             // A `list<T>`/`non-empty-array<T>`-typed value is a
             // real `Intersection([Array(T), Accessory(_)])`, not
@@ -791,7 +784,7 @@ impl<'a> Checker<'a> {
                     elem_types
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed(false)),
+                        .unwrap_or(Type::mixed()),
                 )
             }
             _ => None,
@@ -845,7 +838,7 @@ impl<'a> Checker<'a> {
                     key_types
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed(false)),
+                        .unwrap_or(Type::mixed()),
                 )
             }
             _ => None,

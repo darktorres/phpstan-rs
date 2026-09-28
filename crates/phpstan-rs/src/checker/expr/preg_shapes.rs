@@ -10,12 +10,12 @@ use types::{AccessoryKind, Shape, Type};
 /// actually produces at runtime (the match text and its byte offset).
 pub(super) fn preg_leaf_type(offset_capture: bool) -> Type {
     if offset_capture {
-        Type::ArrayShape(Shape::from_named(vec![
-            ("0".to_string(), Type::String, false),
-            ("1".to_string(), Type::Int, false),
+        Type::array_shape(Shape::from_named(vec![
+            ("0".to_string(), Type::string(), false),
+            ("1".to_string(), Type::int(), false),
         ]))
     } else {
-        Type::String
+        Type::string()
     }
 }
 
@@ -31,7 +31,7 @@ fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type
     if let Some(values) = &group.literal_values {
         let literal_ty = values
             .iter()
-            .map(|v| Type::StringLiteral(v.as_str().into()))
+            .map(|v| Type::string_literal(v.as_str().into()))
             .reduce(union_types)
             .expect("literal_values is never Some(empty) by construction");
         return refine_leaf(leaf, literal_ty);
@@ -53,7 +53,7 @@ fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type
 /// regex-derived refinement and a docblock-declared one are
 /// indistinguishable to the rest of the type system.
 fn accessory_string(kind: AccessoryKind) -> Type {
-    Type::Intersection(vec![Type::String, Type::Accessory(kind)])
+    Type::intersection_of(vec![Type::string(), Type::accessory(kind)])
 }
 
 /// Substitutes a group's own refined text type (`refined`, either an
@@ -67,7 +67,7 @@ fn refine_leaf(leaf: &Type, refined: Type) -> Type {
         Type::ArrayShape(shape) if shape.fields.len() == 2 => {
             let mut shape = shape.clone();
             shape.fields[0].ty = refined;
-            Type::ArrayShape(shape)
+            Type::array_shape(shape)
         }
         _ => leaf.clone(),
     }
@@ -112,7 +112,7 @@ pub(crate) fn preg_match_matches_shape(
         // its own - a forced group never unions in what it could have
         // been.
         if g.forced_empty {
-            let ty = Type::StringLiteral(PhpString::default());
+            let ty = Type::string_literal(PhpString::default());
             fields.push((g.number.to_string(), ty.clone(), false));
             if let Some(name) = &g.name
                 && !fields.iter().any(|(n, _, _)| n == name)
@@ -125,7 +125,7 @@ pub(crate) fn preg_match_matches_shape(
         let is_last_group = i == groups.len() - 1;
         let base = group_leaf_type(leaf, g);
         let (leaf_ty, optional) = if g.optional && unmatched_as_null {
-            (union_types(base, Type::Null), false)
+            (union_types(base, Type::null()), false)
         } else if is_trailing_optional {
             (base, g.optional) // today's existing, already-correct behavior
         } else {
@@ -146,7 +146,7 @@ pub(crate) fn preg_match_matches_shape(
         // collapses back to plain `String`) - only observable once
         // literal enumeration narrows `base` below plain `String`.
         let ty = if g.optional && !is_last_group && !unmatched_as_null && leaf == &Type::String {
-            union_types(leaf_ty, Type::StringLiteral(PhpString::default()))
+            union_types(leaf_ty, Type::string_literal(PhpString::default()))
         } else {
             leaf_ty
         };
@@ -157,7 +157,7 @@ pub(crate) fn preg_match_matches_shape(
             fields.push((name.clone(), ty, optional));
         }
     }
-    Type::ArrayShape(Shape::from_named(fields))
+    Type::array_shape(Shape::from_named(fields))
 }
 
 /// Dispatches `preg_match`'s own unconditional `$matches` shape to one of
@@ -342,7 +342,7 @@ pub(super) fn preg_match_all_pattern_order_shape(
 ) -> Type {
     let element_ty = |base: Type, optional: bool| {
         if optional && unmatched_as_null {
-            union_types(base, Type::Null)
+            union_types(base, Type::null())
         } else {
             base
         }
@@ -352,9 +352,9 @@ pub(super) fn preg_match_all_pattern_order_shape(
     // verified via dumpType() that real PHPStan types each as a genuine
     // `list<T>`, not merely `array<T>`.
     let list_of = |elem: Type| {
-        Type::Intersection(vec![
-            Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem)),
-            Type::Accessory(AccessoryKind::ArrayList),
+        Type::intersection_of(vec![
+            Type::array(Type::unknown_array_key(), elem),
+            Type::accessory(AccessoryKind::ArrayList),
         ])
     };
     let mut fields = vec![(
@@ -372,7 +372,7 @@ pub(super) fn preg_match_all_pattern_order_shape(
             fields.push((name.clone(), arr_ty, false));
         }
     }
-    Type::ArrayShape(Shape::from_named(fields))
+    Type::array_shape(Shape::from_named(fields))
 }
 
 /// A bitwise-OR-chain flag collector for `preg_match`/`preg_match_all`'s

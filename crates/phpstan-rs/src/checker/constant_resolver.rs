@@ -14,18 +14,24 @@ use crate::registry::{Registry, resolve_names_in_type};
 /// A value's general type: every literal widened to its base type.
 fn generalize(ty: &Type) -> Type {
     match ty {
-        Type::IntLiteral(_) | Type::IntRange(..) => Type::Int,
-        Type::StringLiteral(_) => Type::String,
-        Type::FloatLiteral(_) => Type::Float,
-        Type::True | Type::False => Type::Bool,
+        Type::IntLiteral(_) | Type::IntRange(..) => Type::int(),
+        Type::StringLiteral(_) => Type::string(),
+        Type::FloatLiteral(_) => Type::float(),
+        Type::True | Type::False => Type::bool(),
         Type::ArrayShape(shape) => {
             let value = shape
                 .fields
                 .iter()
                 .map(|f| generalize(&f.ty))
-                .reduce(|a, b| if a == b { a } else { Type::Union(vec![a, b]) })
-                .unwrap_or(Type::Mixed(false));
-            Type::Array(Box::new(Type::unknown_array_key()), Box::new(value))
+                .reduce(|a, b| {
+                    if a == b {
+                        a
+                    } else {
+                        Type::union_of(vec![a, b])
+                    }
+                })
+                .unwrap_or(Type::mixed());
+            Type::array(Type::unknown_array_key(), value)
         }
         Type::Union(members) => {
             let mut out: Vec<Type> = Vec::new();
@@ -37,7 +43,7 @@ fn generalize(ty: &Type) -> Type {
             if out.len() == 1 {
                 out.remove(0)
             } else {
-                Type::Union(out)
+                Type::union_of(out)
             }
         }
         other => other.clone(),

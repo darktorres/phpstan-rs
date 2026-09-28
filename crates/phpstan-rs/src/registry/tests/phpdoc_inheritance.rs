@@ -40,7 +40,7 @@ fn a_return_type_is_inherited_from_an_interface_when_the_implementor_has_no_own_
             "#,
     );
     let sig = &r.classes["InstallView"].methods["pageAssets"];
-    assert_eq!(*list_item_type(&sig.return_type), Type::String);
+    assert_eq!(*list_item_type(&sig.return_type), Type::string());
 }
 
 #[test]
@@ -57,14 +57,14 @@ fn a_param_type_is_inherited_from_an_interface_and_ty_native_is_left_alone() {
             "#,
     );
     let sig = &r.classes["RealConsumer"].methods["consume"];
-    assert_eq!(*list_item_type(&sig.params[0].ty), Type::Int);
+    assert_eq!(*list_item_type(&sig.params[0].ty), Type::int());
     // The native-only field must never be touched by this pass - it
     // feeds `check_one_method_override`'s Liskov check, which must keep
     // comparing native hints only.
     let Type::Array(_, value) = &sig.params[0].ty_native else {
         panic!("expected Type::Array, got {:?}", sig.params[0].ty_native);
     };
-    assert_eq!(**value, Type::Mixed(false));
+    assert_eq!(**value, Type::mixed());
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn a_parent_class_wins_over_an_implemented_interface_when_both_declare_the_metho
             "#,
     );
     let sig = &r.classes["Child3"].methods["make"];
-    assert_eq!(sig.return_type, Type::Int);
+    assert_eq!(sig.return_type, Type::int());
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn the_first_declared_interface_wins_never_a_union_of_several() {
             "#,
     );
     let sig = &r.classes["Impl4"].methods["value"];
-    assert_eq!(sig.return_type, Type::Int);
+    assert_eq!(sig.return_type, Type::int());
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn a_childs_own_return_doc_is_never_overwritten() {
             "#,
     );
     let sig = &r.classes["Impl6"].methods["make"];
-    assert_eq!(*list_item_type(&sig.return_type), Type::String);
+    assert_eq!(*list_item_type(&sig.return_type), Type::string());
 }
 
 #[test]
@@ -248,7 +248,7 @@ fn an_ancestors_mixed_tag_is_never_inherited() {
     let sig = &r.classes["StringVoType9"].methods["convertToPHPValue"];
     assert_ne!(
         sig.return_type,
-        Type::Mixed(false),
+        Type::mixed(),
         "a Mixed ancestor tag must never overwrite a concrete native return type"
     );
 }
@@ -277,7 +277,7 @@ fn an_ancestors_template_parameterized_type_is_never_inherited() {
     let sig = &r.classes["ConcreteContainer10"].methods["get"];
     assert_eq!(
         sig.return_type,
-        Type::Mixed(false),
+        Type::mixed(),
         "a template-parameterized ancestor type must never be inherited verbatim, got {:?}",
         sig.return_type
     );
@@ -314,7 +314,7 @@ fn an_ancestors_template_parameterized_type_is_inherited_when_a_concrete_binding
     let sig = &r.classes["ConcreteContainer11"].methods["get"];
     assert_eq!(
         sig.return_type,
-        Type::Object("Widget11".into(), Vec::new()),
+        Type::object("Widget11".into(), Vec::new()),
         "expected the ancestor's own scoped TemplateParam to resolve to the concrete bound type immediately, got {:?}",
         sig.return_type
     );
@@ -396,7 +396,7 @@ fn an_ancestors_object_type_naming_a_different_class_than_the_native_hint_is_nev
     let sig = &r.classes["Concrete11"].methods["getFactory"];
     assert_eq!(
         sig.return_type,
-        Type::Object("SpecificFactory11".into(), Vec::new())
+        Type::object("SpecificFactory11".into(), Vec::new())
     );
 }
 
@@ -429,7 +429,7 @@ fn an_ancestors_doc_return_type_incompatible_with_the_native_return_type_is_reco
     let sig = &r.classes["ConstantStringType12"].methods["getValue"];
     assert_eq!(
         sig.return_type,
-        Type::String,
+        Type::string(),
         "the child's own concrete native return type must win over an \
          ancestor's incompatible, broader doc type, got {:?}",
         sig.return_type
@@ -459,7 +459,7 @@ fn an_ancestors_doc_param_type_incompatible_with_the_native_param_type_is_reconc
     let sig = &r.classes["StrC12"].methods["setValue"];
     assert_eq!(
         sig.params[0].ty,
-        Type::String,
+        Type::string(),
         "the child's own concrete native param type must win over an \
          ancestor's incompatible, broader doc type, got {:?}",
         sig.params[0].ty

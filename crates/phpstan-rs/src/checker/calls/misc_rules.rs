@@ -52,7 +52,7 @@ impl<'a> Checker<'a> {
                 )
             }
             ExprKind::MethodCall(recv, method, _, _) => {
-                let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::Null);
+                let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::null());
                 let Some((owner, sig)) = self.find_method_owner(&recv_ty, method) else {
                     return;
                 };

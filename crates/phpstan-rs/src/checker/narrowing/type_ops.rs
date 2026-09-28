@@ -54,7 +54,7 @@ pub(crate) fn narrow_instanceof_true(relation: &Relation, current: &Type, target
     // instead of intersecting down to `Socket&ResourceStream` - so
     // every one of `Socket`'s own members would look confirmed-missing
     // on the resulting bare `ResourceStream`.
-    let non_null = narrow_type_excluding(current, &Type::Null);
+    let non_null = narrow_type_excluding(current, &Type::null());
     // Only combined into a real Intersection when every branch of
     // `current` (once stripped of any nullability, per above) is itself
     // provably object-like - anything else (`Mixed`, or a scalar/array
@@ -216,7 +216,7 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
                 .map(|m| narrow_type_excluding(m, excluded))
                 .collect();
             match kept.len() {
-                0 => Type::Never,
+                0 => Type::never(),
                 1 => kept.into_iter().next().unwrap(),
                 _ => original.with_members(kept),
             }
@@ -227,9 +227,9 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // `!empty($x)` check) - a real gap, but a rare, redundant
         // double-guard pattern this project doesn't attempt yet.
         Type::String if *excluded == Type::StringLiteral(PhpString::default()) => {
-            Type::Intersection(vec![
-                Type::String,
-                Type::Accessory(AccessoryKind::NonEmptyString),
+            Type::intersection_of(vec![
+                Type::string(),
+                Type::accessory(AccessoryKind::NonEmptyString),
             ])
         }
         // `$x !== []` on a plain `array`/`list` - the same idiom as the
@@ -258,13 +258,13 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
             if name == "Traversable"
                 && matches!(excluded, Type::Object(excl, _) if excl == "IteratorAggregate") =>
         {
-            Type::Object("Iterator".into(), Vec::new())
+            Type::object("Iterator".into(), Vec::new())
         }
         Type::Object(name, _)
             if name == "Traversable"
                 && matches!(excluded, Type::Object(excl, _) if excl == "Iterator") =>
         {
-            Type::Object("IteratorAggregate".into(), Vec::new())
+            Type::object("IteratorAggregate".into(), Vec::new())
         }
         // Plain `bool` is exactly the two-element set `{true, false}` -
         // unlike the general "a type covering multiple distinct values
@@ -277,9 +277,9 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // { true => ..., false => ... }` (or a bare `if ($b !== true)`)
         // never narrows `$b` down to `false` at all, since `Type::Bool`
         // isn't itself represented as `Union([True, False])`.
-        Type::Bool if *excluded == Type::True => Type::False,
-        Type::Bool if *excluded == Type::False => Type::True,
-        other if other == excluded => Type::Never,
+        Type::Bool if *excluded == Type::True => Type::bool_literal(false),
+        Type::Bool if *excluded == Type::False => Type::bool_literal(true),
+        other if other == excluded => Type::never(),
         other => other.clone(),
     }
 }

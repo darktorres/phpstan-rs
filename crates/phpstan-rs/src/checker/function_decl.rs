@@ -533,7 +533,7 @@ impl<'a> Checker<'a> {
                     // excludes no longer reaches `ty`, but naming an
                     // unknown class is still wrong.
                     let checked = match &param.doc_ty() {
-                        Some(doc) => Type::Union(vec![ty.clone(), doc.clone()]),
+                        Some(doc) => Type::union_of(vec![ty.clone(), doc.clone()]),
                         None => ty.clone(),
                     };
                     self.check_type_class_names_exist(&checked, &subject, ast_param.span);
@@ -550,7 +550,7 @@ impl<'a> Checker<'a> {
                     // variadic parameter into an `array` from the first
                     // statement onward, never the bare element type.
                     let ty = if param.variadic() {
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+                        Type::array(Type::unknown_array_key(), ty)
                     } else {
                         ty
                     };
@@ -568,7 +568,7 @@ impl<'a> Checker<'a> {
                         None => param.ty_native().clone(),
                     };
                     let native = if param.variadic() {
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(native))
+                        Type::array(Type::unknown_array_key(), native)
                     } else {
                         native
                     };
@@ -679,7 +679,7 @@ impl<'a> Checker<'a> {
                     self.check_type_internal_usage(&case_refs, p.span);
                     resolved_params.push((p.name.to_string(), ty.clone(), p.span));
                     let ty = if p.variadic {
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+                        Type::array(Type::unknown_array_key(), ty)
                     } else {
                         ty
                     };
@@ -703,7 +703,7 @@ impl<'a> Checker<'a> {
                 .get(c)
                 .map(|info| info.own_template_args(c))
                 .unwrap_or_default();
-            locals.insert("this".to_string(), Type::Object(c.into(), own));
+            locals.insert("this".to_string(), Type::object(c.into(), own));
         }
 
         // A signature's return type already defaults to Mixed when nothing
@@ -809,16 +809,16 @@ impl<'a> Checker<'a> {
         // falls-off-the-end check further down builds), same as every
         // other existence check in this function.
         let subject = format!("return type of {label}()");
-        let declared = declared_return.clone().unwrap_or(Type::Mixed(false));
+        let declared = declared_return.clone().unwrap_or(Type::mixed());
         let checked = match sig.and_then(|s| s.return_doc_ty().as_ref()) {
-            Some(doc) => Type::Union(vec![declared, doc.clone()]),
+            Some(doc) => Type::union_of(vec![declared, doc.clone()]),
             None => declared,
         };
         self.check_type_class_names_exist(&checked, &subject, f.span);
         self.check_type_class_name_case(&declared_return_case_refs, f.span);
         self.check_type_internal_usage(&declared_return_case_refs, f.span);
         self.check_type_trait_refs(
-            declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+            declared_return.as_ref().unwrap_or(&Type::mixed()),
             &subject,
             f.span,
             "return.trait",
@@ -830,7 +830,7 @@ impl<'a> Checker<'a> {
         // could meaningfully reference.
         if let Some(c) = class_name {
             let resolved_return =
-                self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed(false)), c);
+                self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::mixed()), c);
             self.check_no_parent_ref(&resolved_return, &subject, f.span, "return.noParent");
         }
         // `@throws` tag validity - see `checker::throws`'s module doc
@@ -915,7 +915,7 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_generic_bounds(
-                declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+                declared_return.as_ref().unwrap_or(&Type::mixed()),
                 "PHPDoc tag @return",
                 &label,
                 f.span,
@@ -1134,9 +1134,9 @@ impl<'a> Checker<'a> {
                 self.record_by_ref_exit_snapshot(&locals);
             }
             if !self.current_function_is_generator && body_falls_off_end {
-                self.current_function_return_points.push(Type::Void);
+                self.current_function_return_points.push(Type::void());
                 if native_return.is_none() {
-                    self.current_function_return_points.push(Type::Null);
+                    self.current_function_return_points.push(Type::null());
                 }
             }
             if let Some(expected) = &declared_return

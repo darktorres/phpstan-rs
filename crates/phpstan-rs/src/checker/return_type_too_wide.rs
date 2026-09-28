@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
             .iter()
             .flat_map(flatten_union)
             .map(|t| match t {
-                Type::Void => Type::Null,
+                Type::Void => Type::null(),
                 other => other.clone(),
             })
             .collect();

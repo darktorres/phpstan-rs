@@ -23,13 +23,13 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // directly-written PHPDoc syntax, so its own type arguments still
         // need ordinary name resolution here - only the outer name itself
         // must stay untouched.
-        Type::Object(name, args) if name == "Traversable" => Type::Object(
+        Type::Object(name, args) if name == "Traversable" => Type::object(
             name,
             args.into_iter()
                 .map(|a| resolve_names_in_type(a, ctx))
                 .collect(),
         ),
-        Type::Object(name, args) => Type::Object(
+        Type::Object(name, args) => Type::object(
             ctx.resolve(&name).into(),
             args.into_iter()
                 .map(|a| resolve_names_in_type(a, ctx))
@@ -47,13 +47,13 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
             let mut members = members;
             let sig = members.pop().unwrap();
             members.push(resolve_names_in_type(sig, ctx));
-            Type::Intersection(members)
+            Type::intersection_of(members)
         }
         // Mirrors `mark_template_params`/`substitute_type_aliases`'s own
         // equivalent arms - a class reference inside a `Closure(...)`
         // shape's own param/return types needs the same namespace
         // resolution as anywhere else.
-        Type::Callable(Some(sig)) => Type::Callable(Some(std::sync::Arc::new(
+        Type::Callable(Some(sig)) => Type::callable(Some(std::sync::Arc::new(
             CallableSig {
                 params: sig
                     .params

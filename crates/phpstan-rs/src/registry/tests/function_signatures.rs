@@ -36,7 +36,7 @@ fn the_object_type_hint_is_not_namespace_qualified() {
     let sig = r
         .lookup_method("App\\Some\\Deep\\Namespace_\\Foo", "bar")
         .unwrap();
-    assert_eq!(sig.return_type, Type::ObjectWithoutClass);
+    assert_eq!(sig.return_type, Type::object_without_class());
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced() {
     let sig = r.lookup_method("App\\Foo", "bar").unwrap();
     assert_eq!(
         sig.params[0].ty,
-        Type::Object(
+        Type::object(
             ("Doctrine\\ORM\\QueryBuilder".to_string()).into(),
             Vec::new()
         )
@@ -78,7 +78,7 @@ fn a_root_anchored_native_closure_type_hint_is_not_namespace_qualified() {
             }"#,
     );
     let sig = r.lookup_method("App\\Foo", "bar").unwrap();
-    assert_eq!(sig.params[0].ty, Type::Object("Closure".into(), Vec::new()));
+    assert_eq!(sig.params[0].ty, Type::object("Closure".into(), Vec::new()));
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn a_bare_unqualified_closure_type_hint_defers_to_a_real_use_import() {
     let sig = r.lookup_method("App\\Foo", "bar").unwrap();
     assert_eq!(
         sig.params[0].ty,
-        Type::Object(
+        Type::object(
             ("Some\\Other\\Namespace_\\Closure".to_string()).into(),
             Vec::new()
         )
@@ -119,8 +119,8 @@ fn phpdoc_types_an_otherwise_untyped_function() {
         "#,
     );
     let sig = &r.functions["double"];
-    assert_eq!(sig.params[0].ty, Type::Int);
-    assert_eq!(sig.return_type, Type::Int);
+    assert_eq!(sig.params[0].ty, Type::int());
+    assert_eq!(sig.return_type, Type::int());
 }
 
 // phpstorm-stubs represents "this parameter changed across PHP versions"
@@ -144,11 +144,11 @@ fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
     assert_eq!(sig.params[0].name, "connection".into());
     assert_eq!(
         sig.params[0].ty,
-        Type::Object(("PgSql\\Connection".to_string()).into(), Vec::new()),
+        Type::object(("PgSql\\Connection".to_string()).into(), Vec::new()),
         "the surviving type must be the modern (second) occurrence's, not the legacy (first, untyped) one"
     );
     assert_eq!(sig.params[1].name, "query".into());
-    assert_eq!(sig.params[1].ty, Type::String);
+    assert_eq!(sig.params[1].ty, Type::string());
 }
 
 // Real shape: `SQLite3::open`'s `$flags`/`$encryptionKey`, two
@@ -169,9 +169,9 @@ fn two_separate_duplicated_parameter_pairs_both_collapse() {
     let sig = &r.functions["sqlite3_open"];
     assert_eq!(sig.params.len(), 3);
     assert_eq!(sig.params[1].name, "flags".into());
-    assert_eq!(sig.params[1].ty, Type::Int);
+    assert_eq!(sig.params[1].ty, Type::int());
     assert_eq!(sig.params[2].name, "encryptionKey".into());
-    assert_eq!(sig.params[2].ty, Type::String);
+    assert_eq!(sig.params[2].ty, Type::string());
 }
 
 // `fsockopen`'s duplicated `$port` - the duplicate breaks argument
@@ -228,12 +228,12 @@ fn a_language_level_type_aware_override_wins_over_a_matching_stale_param_tag() {
     );
     assert_eq!(
         r.functions["ini_set"].params[1].ty,
-        Type::Union(vec![
-            Type::String,
-            Type::Int,
-            Type::Float,
-            Type::Bool,
-            Type::Null,
+        Type::union_of(vec![
+            Type::string(),
+            Type::int(),
+            Type::float(),
+            Type::bool(),
+            Type::null(),
         ]),
         "the modern override must win over the stale '@param string' tag"
     );
@@ -256,7 +256,7 @@ fn a_language_level_type_aware_override_wins_even_when_the_stale_doc_type_is_res
     );
     assert_eq!(
         r.functions["finfo_file"].params[0].ty,
-        Type::Object("finfo".into(), Vec::new())
+        Type::object("finfo".into(), Vec::new())
     );
 }
 
@@ -276,12 +276,12 @@ fn an_override_is_not_spliced_onto_an_unrelated_earlier_declaration_s_docblock()
     );
     assert_eq!(
         r.functions["earlier"].params[0].ty,
-        Type::Resource { closed: false },
+        Type::resource(false),
         "earlier's own docblock must be untouched by later's override"
     );
     assert_eq!(
         r.functions["later"].params[0].ty,
-        Type::Object("finfo".into(), Vec::new()),
+        Type::object("finfo".into(), Vec::new()),
         "later's override must still win via the native-hint-only path"
     );
 }
@@ -298,7 +298,7 @@ fn a_stale_false_member_is_dropped_when_the_native_hint_no_longer_allows_it() {
             function imagesx(): int {}
         "#,
     );
-    assert_eq!(r.functions["imagesx"].return_type, Type::Int);
+    assert_eq!(r.functions["imagesx"].return_type, Type::int());
 }
 
 // A native hint that itself keeps `false` must *not* have it stripped
@@ -314,7 +314,7 @@ fn a_false_member_the_native_hint_still_allows_is_kept() {
     );
     assert_eq!(
         r.functions["f"].return_type,
-        Type::Union(vec![Type::Int, Type::False])
+        Type::union_of(vec![Type::int(), Type::bool_literal(false)])
     );
 }
 
@@ -331,7 +331,7 @@ fn a_stale_object_member_is_dropped_when_the_native_hint_is_void() {
             function make14(): void {}
         "#,
     );
-    assert_eq!(r.functions["make14"].return_type, Type::Void);
+    assert_eq!(r.functions["make14"].return_type, Type::void());
 }
 
 // `Type::Never` must be exempted from the native-`void` exclusion above -
@@ -352,7 +352,7 @@ fn an_explicit_never_doc_survives_reconciliation_against_a_native_void_hint() {
             }
         "#,
     );
-    assert_eq!(r.functions["alwaysThrows15"].return_type, Type::Never);
+    assert_eq!(r.functions["alwaysThrows15"].return_type, Type::never());
 }
 
 // A PHPStan/Psalm callable-shape doc member (`Closure(Tv): bool`) parses
@@ -381,7 +381,7 @@ fn a_callable_shape_doc_member_keeps_its_own_real_signature_alongside_the_closur
     };
     assert_eq!(members.len(), 2);
     assert_eq!(members[0].to_string(), "Closure(mixed): bool");
-    assert_eq!(members[1], Type::Null);
+    assert_eq!(members[1], Type::null());
 }
 
 // A doc union that only narrows *one* member of a native union must keep
@@ -481,10 +481,7 @@ fn an_array_doc_member_with_a_plain_class_key_is_also_kept() {
     let sig = &r.classes["Foo"].methods["f"];
     assert_eq!(
         sig.params[0].ty,
-        Type::Array(
-            Box::new(Type::Object("Bar".into(), Vec::new())),
-            Box::new(Type::String)
-        )
+        Type::array(Type::object("Bar".into(), Vec::new()), Type::string())
     );
 }
 
@@ -501,7 +498,7 @@ fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
     );
     assert_eq!(
         r.functions["f"].return_type,
-        Type::Union(vec![Type::Resource { closed: false }, Type::False])
+        Type::union_of(vec![Type::resource(false), Type::bool_literal(false)])
     );
 }
 
@@ -528,7 +525,7 @@ fn a_doc_type_naming_a_real_subclass_of_the_native_hint_is_not_discarded() {
     );
     assert_eq!(
         r.classes["ActivityService"].methods["getRepository"].return_type,
-        Type::Object("ActivityRepository".into(), Vec::new())
+        Type::object("ActivityRepository".into(), Vec::new())
     );
 }
 
@@ -544,7 +541,7 @@ fn phpdoc_wins_over_a_conflicting_native_hint() {
     );
     assert_eq!(
         r.functions["f"].params[0].ty,
-        Type::Array(Box::new(Type::benevolent_array_key()), Box::new(Type::Int))
+        Type::array(Type::benevolent_array_key(), Type::int())
     );
 }
 
@@ -558,7 +555,7 @@ fn phpdoc_types_an_otherwise_untyped_property() {
             }
         "#,
     );
-    assert_eq!(r.lookup_property("Box", "value").unwrap().ty, Type::Int);
+    assert_eq!(r.lookup_property("Box", "value").unwrap().ty, Type::int());
 }
 
 #[test]
@@ -575,7 +572,7 @@ fn phpdoc_types_a_promoted_constructor_property_via_param_tag() {
     );
     assert_eq!(
         r.lookup_property("Point", "coords").unwrap().ty,
-        Type::Array(Box::new(Type::benevolent_array_key()), Box::new(Type::Int))
+        Type::array(Type::benevolent_array_key(), Type::int())
     );
 }
 
@@ -598,7 +595,7 @@ fn phpdoc_types_a_promoted_constructor_property_via_its_own_inline_var_tag() {
     );
     assert_eq!(
         r.lookup_property("Point93", "coords").unwrap().ty,
-        Type::Array(Box::new(Type::Int), Box::new(Type::Int))
+        Type::array(Type::int(), Type::int())
     );
 }
 
@@ -633,8 +630,8 @@ fn an_inline_var_tag_survives_an_attribute_between_it_and_the_parameter() {
 #[test]
 fn missing_doc_comment_falls_back_to_native_hint() {
     let r = build_registry(r#"<?php function f(string $s): string { return $s; }"#);
-    assert_eq!(r.functions["f"].params[0].ty, Type::String);
-    assert_eq!(r.functions["f"].return_type, Type::String);
+    assert_eq!(r.functions["f"].params[0].ty, Type::string());
+    assert_eq!(r.functions["f"].return_type, Type::string());
 }
 
 // `@phpstan-assert`-family tags - PHPStan's custom-assertion-function
@@ -657,7 +654,7 @@ fn an_assert_if_true_tag_naming_a_this_property_resolves() {
     assert_eq!(sig.assert_if_true.len(), 1);
     let info = &sig.assert_if_true[0];
     assert!(info.negated);
-    assert_eq!(info.ty, Type::Null);
+    assert_eq!(info.ty, Type::null());
     assert_eq!(
         info.target,
         AssertTarget::ThisProp("bar".to_string().into())
@@ -695,7 +692,7 @@ fn an_unconditional_assert_tag_on_the_function_s_own_docblock_resolves() {
     let sig = &r.functions["assertIsString"];
     assert_eq!(sig.assert.len(), 1);
     assert!(!sig.assert[0].negated);
-    assert_eq!(sig.assert[0].ty, Type::String);
+    assert_eq!(sig.assert[0].ty, Type::string());
     assert_eq!(
         sig.assert[0].target,
         AssertTarget::Param("actual".to_string().into())

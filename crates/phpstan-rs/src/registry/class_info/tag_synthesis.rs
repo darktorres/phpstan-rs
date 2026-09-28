@@ -66,7 +66,7 @@ pub(crate) fn method_tag_sig(
                 t.name.clone(),
                 TemplateParam {
                     name: t.name.clone(),
-                    bound: Box::new(t.bound.as_ref().map_or(Type::Mixed(false), resolve_bound)),
+                    bound: Box::new(t.bound.as_ref().map_or(Type::mixed(), resolve_bound)),
                     variance: types::Variance::Invariant,
                     scope: Some(tag.name.clone()),
                     default: t.default.as_ref().map(|d| Box::new(resolve_bound(d))),
@@ -87,7 +87,7 @@ pub(crate) fn method_tag_sig(
         .return_type
         .as_ref()
         .map(resolve)
-        .unwrap_or((Type::Mixed(false), Vec::new()));
+        .unwrap_or((Type::mixed(), Vec::new()));
     let params = tag
         .params
         .iter()
@@ -95,7 +95,7 @@ pub(crate) fn method_tag_sig(
             let (ty, case_refs) =
                 p.ty.as_ref()
                     .map(resolve)
-                    .unwrap_or((Type::Mixed(false), Vec::new()));
+                    .unwrap_or((Type::mixed(), Vec::new()));
             ParameterReflection {
                 attributes: Vec::new(),
                 name: intern(&p.name),

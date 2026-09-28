@@ -841,7 +841,7 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     // not `infer_const_type`'s own float-overflow-affected inference)
     // is the safe, correct level of precision.
     if const_name == "PHP_INT_MIN" {
-        return Some((Arc::from(const_name), Type::Int));
+        return Some((Arc::from(const_name), Type::int()));
     }
     Some((Arc::from(const_name), infer_const_type(&args[1].value)))
 }
@@ -875,7 +875,7 @@ pub(crate) fn register_global_constant(
         }
         Some(existing) if *existing == ty && ty != Type::Mixed(false) => {}
         Some(_) => {
-            map.insert(name, Type::Mixed(false));
+            map.insert(name, Type::mixed());
         }
     }
 }

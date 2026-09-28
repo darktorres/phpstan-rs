@@ -78,19 +78,16 @@ impl GlobalAccumulator {
 
     fn shape_type(&self) -> Type {
         if self.shape_overflowed {
-            Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(Type::Mixed(false)),
-            )
+            Type::array(Type::unknown_array_key(), Type::mixed())
         } else {
-            Type::ArrayShape(Shape::from_named(self.shape_fields.clone()))
+            Type::array_shape(Shape::from_named(self.shape_fields.clone()))
         }
     }
 
     fn finish(self) -> Type {
         let shape_type = self.has_shape().then(|| self.shape_type());
         match (shape_type, self.other) {
-            (None, None) => Type::Mixed(false),
+            (None, None) => Type::mixed(),
             (Some(shape), None) => shape,
             (None, Some(other)) => other,
             (Some(shape), Some(other)) => union_types(shape, other),
@@ -487,7 +484,7 @@ fn handle_assignment_target<'a>(
     match &unwrap_grouping(lhs).kind {
         ExprKind::Variable(name) if is_site(name) => {
             let contribution = if force_mixed {
-                SiteContribution::WholeValue(Type::Mixed(false))
+                SiteContribution::WholeValue(Type::mixed())
             } else if let Some(fields) = array_merge_self_fields(name, rhs, ctx, file_ctx.registry)
             {
                 SiteContribution::ShapeFields(fields)
@@ -509,7 +506,7 @@ fn handle_assignment_target<'a>(
                 // `$name[<key>] = <rhs>;` - a direct, single-level write:
                 // the field's own value is `<rhs>`'s real resolved type.
                 let ty = if force_mixed {
-                    Type::Mixed(false)
+                    Type::mixed()
                 } else {
                     resolve_static_expr_type(rhs, file_ctx.registry, ctx)
                 };
@@ -534,7 +531,7 @@ fn handle_assignment_target<'a>(
                 out.sites.push(StagedSite {
                     gate: gate(),
                     name: Arc::from(name.as_ref()),
-                    contribution: SiteContribution::ShapeField(key_str, Type::Mixed(false)),
+                    contribution: SiteContribution::ShapeField(key_str, Type::mixed()),
                 });
             }
         }
@@ -627,9 +624,9 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
     match &expr.kind {
         ExprKind::New(callee, _args) => {
             if let ExprKind::Name(name) = &unwrap_grouping(callee).kind {
-                return Type::Object(ctx.resolve(name).into(), vec![]);
+                return Type::object(ctx.resolve(name).into(), vec![]);
             }
-            Type::Mixed(false)
+            Type::mixed()
         }
         ExprKind::ArrayLiteral(items) => {
             let mut fields = Vec::new();
@@ -643,11 +640,11 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
                 let ty = resolve_static_expr_type(&item.value, registry, ctx);
                 fields.push((key, ty, false));
             }
-            Type::ArrayShape(Shape::from_named(fields))
+            Type::array_shape(Shape::from_named(fields))
         }
         ExprKind::Call(callee, _args) => {
             let ExprKind::Name(name) = &unwrap_grouping(callee).kind else {
-                return Type::Mixed(false);
+                return Type::mixed();
             };
             let (primary, fallback) = ctx.resolve_function_candidates(name);
             registry
@@ -658,29 +655,29 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
                         .and_then(|f| registry.lookup_function(f))
                 })
                 .map(|sig| sig.return_type.clone())
-                .unwrap_or(Type::Mixed(false))
+                .unwrap_or(Type::mixed())
         }
         ExprKind::StaticCall(target, method, _args) => {
             let fqn = ctx.resolve(target.as_name().unwrap_or("?"));
             registry
                 .lookup_method(&fqn, method)
                 .map(|sig| sig.return_type.clone())
-                .unwrap_or(Type::Mixed(false))
+                .unwrap_or(Type::mixed())
         }
         ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
             let fqn = ctx.resolve(class);
             registry
                 .lookup_const(&fqn, name)
                 .map(|c| c.ty.clone())
-                .unwrap_or(Type::Mixed(false))
+                .unwrap_or(Type::mixed())
         }
         ExprKind::MethodCall(recv, method, _args, _) => {
             match resolve_static_expr_type(recv, registry, ctx) {
                 Type::Object(class, _) => registry
                     .lookup_method(&class, method)
                     .map(|sig| sig.return_type.clone())
-                    .unwrap_or(Type::Mixed(false)),
-                _ => Type::Mixed(false),
+                    .unwrap_or(Type::mixed()),
+                _ => Type::mixed(),
             }
         }
         _ => infer_const_type(expr),

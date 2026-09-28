@@ -33,10 +33,10 @@ pub(crate) fn int_range_bounds(ty: &Type) -> Option<(Option<i64>, Option<i64>)> 
 /// `Never`, absorbed away by the union, correctly leaving bare `float`).
 pub(crate) fn normalize_int_range(min: Option<i64>, max: Option<i64>) -> Type {
     match (min, max) {
-        (None, None) => Type::Int,
-        (Some(a), Some(b)) if a > b => Type::Never,
-        (Some(a), Some(b)) if a == b => Type::IntLiteral(a),
-        (min, max) => Type::IntRange(min, max),
+        (None, None) => Type::int(),
+        (Some(a), Some(b)) if a > b => Type::never(),
+        (Some(a), Some(b)) if a == b => Type::int_literal(a),
+        (min, max) => Type::int_range(min, max),
     }
 }
 
@@ -121,7 +121,7 @@ pub(crate) fn mul_int_range(
     // int-to-float promotion `checked_bound_op` signals for `Add`/`Sub`.
     let all_bounded = l_min.is_some() && l_max.is_some() && r_min.is_some() && r_max.is_some();
     if all_bounded && (min_bound.is_none() || max_bound.is_none()) {
-        union_types(result, Type::Float)
+        union_types(result, Type::float())
     } else {
         result
     }
@@ -227,7 +227,7 @@ pub(crate) fn pow_int_range(
     if min.is_some() || max.is_some() {
         normalize_int_range(min, max)
     } else {
-        Type::Union(vec![Type::Int, Type::Float])
+        Type::union_of(vec![Type::int(), Type::float()])
     }
 }
 
@@ -256,10 +256,10 @@ pub(crate) fn shift_int_range(
     left: bool,
 ) -> Type {
     let Ok(amount) = u32::try_from(amount) else {
-        return Type::Int;
+        return Type::int();
     };
     if amount >= 64 {
-        return Type::Int;
+        return Type::int();
     }
     let shift_bound = |v: Option<i64>| -> Option<i64> {
         v.and_then(|v| {
@@ -544,12 +544,12 @@ pub(crate) fn mod_int_range(
         && let (Some(l), Some(r)) = (l_min, r_min)
         && r != 0
     {
-        return Type::IntLiteral(l % r);
+        return Type::int_literal(l % r);
     }
     // Real PHPStan's own explicit special case: modulo by exactly 1 is
     // always 0, regardless of the dividend.
     if r_min == Some(1) && r_max == Some(1) {
-        return Type::IntLiteral(0);
+        return Type::int_literal(0);
     }
     let range_max = r_max.map(|m| m - 1);
     let left_is_non_negative = l_min.is_some_and(|v| v >= 0);
@@ -669,7 +669,7 @@ pub(crate) fn div_int_range(
     }
 
     if min_i.is_none() && max_i.is_none() {
-        return Type::Union(vec![Type::Int, Type::Float]);
+        return Type::union_of(vec![Type::int(), Type::float()]);
     }
     match normalize_int_range(min_i, max_i) {
         // The rounding step (`ceil`ing the min, `floor`ing the max
@@ -681,8 +681,8 @@ pub(crate) fn div_int_range(
         // ever produces a `Never` member to union away), so this handles
         // it explicitly rather than teach that absorption to every other
         // `union_types` caller for the sake of this one.
-        Type::Never => Type::Float,
-        int_half => union_types(int_half, Type::Float),
+        Type::Never => Type::float(),
+        int_half => union_types(int_half, Type::float()),
     }
 }
 

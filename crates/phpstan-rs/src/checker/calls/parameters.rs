@@ -217,7 +217,7 @@ impl<'a> Checker<'a> {
                 let ty = self.infer_expr(&arg.value, locals);
                 let unpacked = Argument {
                     value: &arg.value,
-                    ty: Some(Checker::array_element_type(&ty).unwrap_or(Type::Mixed(false))),
+                    ty: Some(Checker::array_element_type(&ty).unwrap_or(Type::mixed())),
                     unpack: true,
                     name: None,
                     span: arg.value.span,

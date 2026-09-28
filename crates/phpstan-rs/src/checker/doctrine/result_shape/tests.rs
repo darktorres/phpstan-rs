@@ -78,7 +78,7 @@ fn a_bare_entity_select_is_the_entity_object_directly() {
     };
     let items = parse_select_items(&["t".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
-    assert_eq!(ty, Type::Object("TagEntity".into(), Vec::new()));
+    assert_eq!(ty, Type::object("TagEntity".into(), Vec::new()));
 }
 
 #[test]
@@ -107,13 +107,13 @@ fn count_never_needs_its_operand_to_resolve() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
+        Type::array_shape(Shape::from_named(vec![
             (
                 "0".to_string(),
-                Type::Object("TagEntity".into(), Vec::new()),
+                Type::object("TagEntity".into(), Vec::new()),
                 false
             ),
-            ("counter".to_string(), Type::IntRange(Some(0), None), false),
+            ("counter".to_string(), Type::int_range(Some(0), None), false),
         ]))
     );
 }
@@ -142,9 +142,9 @@ fn sum_falls_back_to_mixed_when_its_operand_alias_never_resolves() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![(
+        Type::array_shape(Shape::from_named(vec![(
             "0".to_string(),
-            Type::Mixed(false),
+            Type::mixed(),
             false
         )]))
     );
@@ -171,13 +171,13 @@ fn an_entity_plus_scalar_field_from_a_real_join_alias() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
+        Type::array_shape(Shape::from_named(vec![
             (
                 "0".to_string(),
-                Type::Object("TagEntity".into(), Vec::new()),
+                Type::object("TagEntity".into(), Vec::new()),
                 false
             ),
-            ("counter".to_string(), Type::IntRange(Some(0), None), false),
+            ("counter".to_string(), Type::int_range(Some(0), None), false),
         ]))
     );
 }
@@ -203,9 +203,9 @@ fn identity_falls_back_to_mixed_never_the_targets_own_id_field_type() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![(
+        Type::array_shape(Shape::from_named(vec![(
             "tagId".to_string(),
-            Type::Mixed(false),
+            Type::mixed(),
             false
         )]))
     );
@@ -227,9 +227,9 @@ fn a_scalar_only_select_keys_each_unaliased_field_by_its_own_name() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
-            ("id".to_string(), Type::Int, false),
-            ("name".to_string(), Type::String, false),
+        Type::array_shape(Shape::from_named(vec![
+            ("id".to_string(), Type::int(), false),
+            ("name".to_string(), Type::string(), false),
         ]))
     );
 }
@@ -255,9 +255,9 @@ fn an_unaliased_aggregate_keys_by_its_own_scalar_counter_not_its_list_position()
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
-            ("n".to_string(), Type::String, false),
-            ("0".to_string(), Type::IntRange(Some(0), None), false),
+        Type::array_shape(Shape::from_named(vec![
+            ("n".to_string(), Type::string(), false),
+            ("0".to_string(), Type::int_range(Some(0), None), false),
         ]))
     );
 }
@@ -278,9 +278,9 @@ fn a_reference_to_an_unknown_alias_falls_back_to_mixed_for_that_field() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![(
+        Type::array_shape(Shape::from_named(vec![(
             "field".to_string(),
-            Type::Mixed(false),
+            Type::mixed(),
             false
         )]))
     );
@@ -300,7 +300,7 @@ fn a_bare_alias_select_on_an_unknown_alias_falls_back_to_plain_mixed() {
     };
     let items = parse_select_items(&["nope".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
-    assert_eq!(ty, Type::Mixed(false));
+    assert_eq!(ty, Type::mixed());
 }
 
 #[test]
@@ -333,7 +333,7 @@ fn single_scalar_column_type_resolves_a_lone_scalar_field() {
     let items = parse_select_items(&["t.name".to_string()]).unwrap();
     assert_eq!(
         single_scalar_column_type(&checker, &chain, &items),
-        Some(Type::String)
+        Some(Type::string())
     );
 }
 
@@ -385,9 +385,9 @@ fn array_result_converts_a_bare_entity_select_into_an_array_shape() {
     let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
-            ("id".to_string(), Type::Int, false),
-            ("name".to_string(), Type::String, false),
+        Type::array_shape(Shape::from_named(vec![
+            ("id".to_string(), Type::int(), false),
+            ("name".to_string(), Type::string(), false),
         ]))
     );
 }
@@ -408,13 +408,13 @@ fn array_result_converts_a_to_one_association_into_an_identifier_only_shape() {
     let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
-            ("imageId".to_string(), Type::Int, false),
+        Type::array_shape(Shape::from_named(vec![
+            ("imageId".to_string(), Type::int(), false),
             (
                 "tag".to_string(),
-                Type::ArrayShape(Shape::from_named(vec![(
+                Type::array_shape(Shape::from_named(vec![(
                     "id".to_string(),
-                    Type::Int,
+                    Type::int(),
                     false
                 )])),
                 false
@@ -439,16 +439,16 @@ fn array_result_converts_an_entity_plus_aggregate_select_field_by_field() {
     let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
+        Type::array_shape(Shape::from_named(vec![
             (
                 "0".to_string(),
-                Type::ArrayShape(Shape::from_named(vec![
-                    ("id".to_string(), Type::Int, false),
-                    ("name".to_string(), Type::String, false),
+                Type::array_shape(Shape::from_named(vec![
+                    ("id".to_string(), Type::int(), false),
+                    ("name".to_string(), Type::string(), false),
                 ])),
                 false
             ),
-            ("cnt".to_string(), Type::IntRange(Some(0), None), false),
+            ("cnt".to_string(), Type::int_range(Some(0), None), false),
         ]))
     );
 }
@@ -469,10 +469,10 @@ fn scalar_result_flattens_entity_fields_under_alias_prefixed_keys() {
     let ty = build_scalar_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
-            ("t_id".to_string(), Type::Int, false),
-            ("t_name".to_string(), Type::String, false),
-            ("cnt".to_string(), Type::IntRange(Some(0), None), false),
+        Type::array_shape(Shape::from_named(vec![
+            ("t_id".to_string(), Type::int(), false),
+            ("t_name".to_string(), Type::string(), false),
+            ("cnt".to_string(), Type::int_range(Some(0), None), false),
         ]))
     );
 }
@@ -498,9 +498,9 @@ fn a_declared_custom_function_resolves_to_its_own_category_type() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![(
+        Type::array_shape(Shape::from_named(vec![(
             "ym".to_string(),
-            Type::String,
+            Type::string(),
             false
         )]))
     );
@@ -522,9 +522,9 @@ fn an_undeclared_custom_function_falls_back_to_mixed() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![(
+        Type::array_shape(Shape::from_named(vec![(
             "x".to_string(),
-            Type::Mixed(false),
+            Type::mixed(),
             false
         )]))
     );
@@ -546,9 +546,9 @@ fn a_polymorphic_from_produces_a_union_across_every_mapped_subclass() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::Union(vec![
-            Type::Object("CatEntity".into(), Vec::new()),
-            Type::Object("DogEntity".into(), Vec::new()),
+        Type::union_of(vec![
+            Type::object("CatEntity".into(), Vec::new()),
+            Type::object("DogEntity".into(), Vec::new()),
         ])
     );
 }
@@ -567,7 +567,7 @@ fn an_ordinary_from_never_produces_a_union() {
     };
     let items = parse_select_items(&["t".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
-    assert_eq!(ty, Type::Object("TagEntity".into(), Vec::new()));
+    assert_eq!(ty, Type::object("TagEntity".into(), Vec::new()));
 }
 
 #[test]
@@ -581,13 +581,13 @@ fn a_scalar_subquery_select_item_resolves_its_own_single_column_type() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(Shape::from_named(vec![
+        Type::array_shape(Shape::from_named(vec![
             (
                 "0".to_string(),
-                Type::Object("TagEntity".into(), Vec::new()),
+                Type::object("TagEntity".into(), Vec::new()),
                 false
             ),
-            ("firstImageId".to_string(), Type::Int, false),
+            ("firstImageId".to_string(), Type::int(), false),
         ]))
     );
 }
@@ -608,15 +608,15 @@ fn array_result_converts_a_polymorphic_row_member_by_member() {
     let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::Union(vec![
-            Type::ArrayShape(Shape::from_named(vec![(
+        Type::union_of(vec![
+            Type::array_shape(Shape::from_named(vec![(
                 "id".to_string(),
-                Type::Int,
+                Type::int(),
                 false
             )])),
-            Type::ArrayShape(Shape::from_named(vec![(
+            Type::array_shape(Shape::from_named(vec![(
                 "id".to_string(),
-                Type::Int,
+                Type::int(),
                 false
             )])),
         ])

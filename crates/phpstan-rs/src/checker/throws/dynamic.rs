@@ -31,7 +31,7 @@ use syntax::ast::{Arg, ExprKind, Literal, UnaryOp};
 use types::Type;
 
 fn throwable(class: &str) -> Type {
-    Type::Object(class.into(), Vec::new())
+    Type::object(class.into(), Vec::new())
 }
 
 /// A literal integer argument's value, or `None` for anything else (a
@@ -76,7 +76,7 @@ impl<'a> Checker<'a> {
                     // "not `intdiv` at all" and fall back to the generic
                     // stub-level `@throws` tag, undoing the proof that
                     // this call with a literal nonzero divisor is safe.
-                    Some(_) => Some(Type::Void),
+                    Some(_) => Some(Type::void()),
                     None => Some(throwable("DivisionByZeroError")),
                 }
             }
@@ -142,7 +142,7 @@ impl<'a> Checker<'a> {
                     // Same `Type::Void` sentinel as `intdiv` above.
                     ExprKind::Literal(Literal::String(spec)) => {
                         if is_valid_date_interval_spec(&spec.to_str_lossy()) {
-                            Some(Type::Void)
+                            Some(Type::void())
                         } else {
                             Some(throwable("Exception"))
                         }
@@ -165,7 +165,7 @@ impl<'a> Checker<'a> {
                             .as_str()
                             .is_some_and(|xml| is_well_formed_xml(xml).is_none())
                         {
-                            Some(Type::Void)
+                            Some(Type::void())
                         } else {
                             Some(throwable("Exception"))
                         }
@@ -199,7 +199,7 @@ impl<'a> Checker<'a> {
             return match &unwrap_grouping(&arg.value).kind {
                 ExprKind::Literal(Literal::String(name)) => {
                     if name.as_str().is_some_and(is_valid_xml_name) {
-                        Some(Type::Void)
+                        Some(Type::void())
                     } else {
                         Some(throwable("DOMException"))
                     }

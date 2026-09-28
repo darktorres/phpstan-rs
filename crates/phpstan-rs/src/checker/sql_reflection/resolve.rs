@@ -120,7 +120,7 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
             }
         })
         .collect();
-    Type::ArrayShape(Shape {
+    Type::array_shape(Shape {
         fields: refined,
         unsealed: fields.unsealed.clone(),
     })
@@ -195,7 +195,7 @@ fn resolve_pure_ast(sql: &str, driver: Option<SqlDriver>) -> Option<Type> {
     if fields.is_empty() {
         return None;
     }
-    Some(Type::ArrayShape(Shape::from_named(fields)))
+    Some(Type::array_shape(Shape::from_named(fields)))
 }
 
 /// Resolves both the unaliased column name real driver metadata reports
@@ -240,7 +240,7 @@ fn pure_ast_expr(expr: &Expr, driver: Option<SqlDriver>) -> Option<(String, Type
                 return None;
             }
             let arg_name = count_argument_name(f, driver)?;
-            Some((format!("COUNT({arg_name})"), Type::Int))
+            Some((format!("COUNT({arg_name})"), Type::int()))
         }
         _ => None,
     }
@@ -291,21 +291,21 @@ fn literal_value_type(value: &Value, driver: Option<SqlDriver>) -> Option<Type> 
         Value::Number(text, _) => {
             if text.contains(['.', 'e', 'E']) {
                 match driver {
-                    Some(SqlDriver::Mysql | SqlDriver::Pgsql) => Some(Type::String),
-                    Some(SqlDriver::Sqlite) => Some(Type::Float),
+                    Some(SqlDriver::Mysql | SqlDriver::Pgsql) => Some(Type::string()),
+                    Some(SqlDriver::Sqlite) => Some(Type::float()),
                     None => None,
                 }
             } else {
-                Some(Type::Int)
+                Some(Type::int())
             }
         }
-        Value::SingleQuotedString(_) | Value::DoubleQuotedString(_) => Some(Type::String),
+        Value::SingleQuotedString(_) | Value::DoubleQuotedString(_) => Some(Type::string()),
         Value::Boolean(_) => match driver {
-            Some(SqlDriver::Pgsql) => Some(Type::Bool),
-            Some(SqlDriver::Mysql | SqlDriver::Sqlite) => Some(Type::Int),
+            Some(SqlDriver::Pgsql) => Some(Type::bool()),
+            Some(SqlDriver::Mysql | SqlDriver::Sqlite) => Some(Type::int()),
             None => None,
         },
-        Value::Null => Some(Type::Null),
+        Value::Null => Some(Type::null()),
         _ => None,
     }
 }
@@ -334,11 +334,11 @@ fn refine_count_columns(sql: &str, row_type: Type) -> Type {
     if let Some(positions) = count_column_positions(sql) {
         for i in positions {
             if let Some(field) = fields.fields.get_mut(i) {
-                field.ty = Type::IntRange(Some(0), None);
+                field.ty = Type::int_range(Some(0), None);
             }
         }
     }
-    Type::ArrayShape(fields)
+    Type::array_shape(fields)
 }
 
 fn count_column_positions(sql: &str) -> Option<Vec<usize>> {
@@ -392,7 +392,7 @@ fn resolve_from_static_schema(schema: &SchemaCatalog, sql: &str) -> Option<Type>
         return None;
     };
     let fields = resolve_select_from_static_schema(schema, &select, &ctes)?;
-    Some(Type::ArrayShape(Shape::from_named(fields)))
+    Some(Type::array_shape(Shape::from_named(fields)))
 }
 
 /// A non-recursive `WITH cte AS (<query>) ...`'s own defining queries,
@@ -458,7 +458,7 @@ impl TypedColumn {
 /// is nullable.
 fn column_value_type(col: &TypedColumn) -> Type {
     if col.nullable {
-        union_types(col.ty.clone(), Type::Null)
+        union_types(col.ty.clone(), Type::null())
     } else {
         col.ty.clone()
     }

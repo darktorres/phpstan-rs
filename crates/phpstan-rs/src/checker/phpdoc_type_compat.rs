@@ -546,7 +546,7 @@ impl<'a> Checker<'a> {
             .as_deref()
             .and_then(|d| docblock::parse(d).self_out);
         let unresolvable = raw.is_some_and(|node| self.type_node_unresolvable(&node, Some(class)));
-        let class_ty = Type::Object(class.into(), Vec::new());
+        let class_ty = Type::object(class.into(), Vec::new());
         let resolved = self.resolve_pseudo(out, class);
         // An unresolvable type is reported as such, not also as a
         // mismatch against the class.

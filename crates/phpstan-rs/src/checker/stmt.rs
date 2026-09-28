@@ -628,7 +628,7 @@ impl<'a> Checker<'a> {
                 // conflate it with an actual `null` value).
                 if !self.current_function_is_generator {
                     self.current_function_saw_explicit_return = true;
-                    self.current_function_return_points.push(Type::Void);
+                    self.current_function_return_points.push(Type::void());
                 }
                 self.record_by_ref_exit_snapshot(locals);
                 // A bare `return;` inside a generator sets
@@ -824,7 +824,7 @@ impl<'a> Checker<'a> {
                             .global_variables
                             .get(&**name)
                             .cloned()
-                            .unwrap_or(Type::Mixed(false));
+                            .unwrap_or(Type::mixed());
                         self.probe_hit_at(stmt.span, &ty);
                         locals.declare(name.to_string(), ty, name.span);
                     }
@@ -849,7 +849,7 @@ impl<'a> Checker<'a> {
                     let ty = default
                         .as_ref()
                         .map(|e| static_variable_type(&self.check_expr(e, locals, label)))
-                        .unwrap_or(Type::Mixed(false));
+                        .unwrap_or(Type::mixed());
                     purge_stale_narrowing_for(locals, name);
                     self.probe_hit_at(stmt.span, &ty);
                     locals.declare(name.to_string(), ty, name.span);
@@ -1417,25 +1417,16 @@ fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
 /// type, with `null` (the "not computed yet" sentinel) unknown.
 fn static_variable_type(initializer: &Type) -> Type {
     match initializer {
-        Type::Null => Type::Mixed(false),
-        Type::IntLiteral(_) | Type::IntRange(..) => Type::Int,
-        Type::StringLiteral(_) => Type::String,
-        Type::FloatLiteral(_) => Type::Float,
-        Type::True | Type::False => Type::Bool,
-        Type::ArrayShape(_) => Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false)),
-        ),
+        Type::Null => Type::mixed(),
+        Type::IntLiteral(_) | Type::IntRange(..) => Type::int(),
+        Type::StringLiteral(_) => Type::string(),
+        Type::FloatLiteral(_) => Type::float(),
+        Type::True | Type::False => Type::bool(),
+        Type::ArrayShape(_) => Type::array(Type::unknown_array_key(), Type::mixed()),
         Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
-            Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(Type::Mixed(false)),
-            )
+            Type::array(Type::unknown_array_key(), Type::mixed())
         }
-        Type::Array(..) => Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false)),
-        ),
+        Type::Array(..) => Type::array(Type::unknown_array_key(), Type::mixed()),
         other => other.clone(),
     }
 }

@@ -399,10 +399,10 @@ pub(crate) fn infer_const_type(value: &syntax::ast::Expr) -> Type {
 /// constant keeps plain `infer_const_type`.
 pub(crate) fn infer_class_const_type(value: &syntax::ast::Expr) -> Type {
     infer_const_type_with(value, &|class, name| {
-        Some(Type::ClassConstant {
-            class: Box::new(types::parse_type_string(class)),
-            pattern: name.to_string(),
-        })
+        Some(Type::class_constant(
+            types::parse_type_string(class),
+            name.to_string(),
+        ))
     })
 }
 
@@ -415,12 +415,12 @@ fn infer_const_type_with(
 ) -> Type {
     use syntax::ast::Literal;
     match &value.kind {
-        ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
-        ExprKind::Literal(Literal::Float(_)) => Type::Float,
-        ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.to_string().into()),
-        ExprKind::Literal(Literal::Bool(true)) => Type::True,
-        ExprKind::Literal(Literal::Bool(false)) => Type::False,
-        ExprKind::Literal(Literal::Null) => Type::Null,
+        ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
+        ExprKind::Literal(Literal::Float(_)) => Type::float(),
+        ExprKind::Literal(Literal::String(s)) => Type::string_literal(s.to_string().into()),
+        ExprKind::Literal(Literal::Bool(true)) => Type::bool_literal(true),
+        ExprKind::Literal(Literal::Bool(false)) => Type::bool_literal(false),
+        ExprKind::Literal(Literal::Null) => Type::null(),
         // `const int OFF = -1;` parses as a literal `1` wrapped
         // in a unary negation, not a single negative-literal token - a
         // negative-valued typed constant (real shape: `Piwigo\Core\
@@ -428,9 +428,9 @@ fn infer_const_type_with(
         // non-negative ones) would otherwise silently fall to `Mixed`
         // below.
         ExprKind::Unary(syntax::ast::UnaryOp::Neg, inner) => match &inner.kind {
-            ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(-n),
-            ExprKind::Literal(Literal::Float(_)) => Type::Float,
-            _ => Type::Mixed(false),
+            ExprKind::Literal(Literal::Int(n)) => Type::int_literal(-n),
+            ExprKind::Literal(Literal::Float(_)) => Type::float(),
+            _ => Type::mixed(),
         },
         // A real, common shape (`AppInfo::URL = 'https://' . self::DOMAIN;`)
         // - a const's own value referencing *another* const via `self::`
@@ -442,12 +442,12 @@ fn infer_const_type_with(
         // - unlike falling back to `Mixed` below, which would silently
         // widen every array literal/argument this const then feeds
         // into.
-        ExprKind::Binary(syntax::ast::BinOp::Concat, ..) => Type::String,
+        ExprKind::Binary(syntax::ast::BinOp::Concat, ..) => Type::string(),
         ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
             infer_const_type_with(inner, class_const_ref)
         }
         ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
-            class_const_ref(class, name).unwrap_or(Type::Mixed(false))
+            class_const_ref(class, name).unwrap_or(Type::mixed())
         }
         // A constant array literal is a real, exact array shape in
         // real PHPStan (`ConstantArrayType`): keys as written, or the
@@ -488,7 +488,7 @@ fn infer_const_type_with(
                 }
             }
             if exact {
-                Type::ArrayShape(Shape::from_named(fields))
+                Type::array_shape(Shape::from_named(fields))
             } else {
                 let mut values: Vec<Type> = Vec::new();
                 for (_, t, _) in fields {
@@ -497,14 +497,14 @@ fn infer_const_type_with(
                     }
                 }
                 let value = match values.len() {
-                    0 => Type::Mixed(false),
+                    0 => Type::mixed(),
                     1 => values.pop().expect("len checked"),
-                    _ => Type::Union(values),
+                    _ => Type::union_of(values),
                 };
-                Type::Array(Box::new(Type::unknown_array_key()), Box::new(value))
+                Type::array(Type::unknown_array_key(), value)
             }
         }
-        _ => Type::Mixed(false),
+        _ => Type::mixed(),
     }
 }
 
@@ -665,7 +665,7 @@ impl FunctionReflection {
                 let ty_native = if shared {
                     ty.clone()
                 } else {
-                    let native_only = native_parsed.unwrap_or(Type::Mixed(false));
+                    let native_only = native_parsed.unwrap_or(Type::mixed());
                     let t = mark_template_params(native_only, &template_params);
                     resolve_names_in_type(t, ctx)
                 };
@@ -742,7 +742,7 @@ impl FunctionReflection {
         let return_type_native = if return_shared {
             return_type.clone()
         } else {
-            let native_only = native_return_parsed.unwrap_or(Type::Mixed(false));
+            let native_only = native_return_parsed.unwrap_or(Type::mixed());
             let t = mark_template_params(native_only, &template_params);
             resolve_names_in_type(t, ctx)
         };

@@ -20,16 +20,16 @@ impl<'a> Checker<'a> {
         match name {
             "self" | "parent" | "static" => {
                 let raw = match name {
-                    "self" => Type::SelfRef(Vec::new()),
-                    "parent" => Type::ParentRef,
-                    _ => Type::StaticRef(Vec::new()),
+                    "self" => Type::self_ref(Vec::new()),
+                    "parent" => Type::parent_ref(),
+                    _ => Type::static_ref(Vec::new()),
                 };
                 match &self.current_class {
                     Some(c) => self.resolve_pseudo(&raw, c),
                     None => raw,
                 }
             }
-            _ => Type::Object(self.resolve_class_name(name).into(), Vec::new()),
+            _ => Type::object(self.resolve_class_name(name).into(), Vec::new()),
         }
     }
 
@@ -112,7 +112,7 @@ impl<'a> Checker<'a> {
     ) -> (Type, Vec<(std::sync::Arc<str>, std::sync::Arc<str>)>) {
         match hint {
             Some(h) => self.resolve_written_type(types::parse_native_type_string(h)),
-            None => (Type::Mixed(false), Vec::new()),
+            None => (Type::mixed(), Vec::new()),
         }
     }
 
@@ -187,7 +187,7 @@ impl<'a> Checker<'a> {
                                 // No `of`/`as` clause at all - explicit
                                 // mixed, matching `TemplateParam::
                                 // unbounded`'s own identical reasoning.
-                                .unwrap_or(Type::Mixed(true)),
+                                .unwrap_or(Type::explicit_mixed()),
                         ),
                         variance,
                         scope: Some(class.clone()),
@@ -398,18 +398,18 @@ impl<'a> Checker<'a> {
         let recurse = |t: &Type| self.resolve_pseudo_at(t, declaring_class, called_class);
         match ty {
             Type::SelfRef(args) => {
-                Type::Object(declaring_class.into(), args.iter().map(recurse).collect())
+                Type::object(declaring_class.into(), args.iter().map(recurse).collect())
             }
             Type::StaticRef(args) => {
-                Type::Object(called_class.into(), args.iter().map(recurse).collect())
+                Type::object(called_class.into(), args.iter().map(recurse).collect())
             }
-            Type::This => Type::Object(called_class.into(), Vec::new()),
+            Type::This => Type::object(called_class.into(), Vec::new()),
             Type::ParentRef => self
                 .registry
                 .classes
                 .get(declaring_class)
                 .and_then(|info| info.extends().first())
-                .map(|p| Type::Object(p.into(), Vec::new()))
+                .map(|p| Type::object(p.into(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
             // Every nested position too: a generic class's own template
             // arguments (`SortEntry<self, string>`), a conditional return

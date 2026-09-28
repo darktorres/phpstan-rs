@@ -581,7 +581,7 @@ impl<'a> Checker<'a> {
             };
             let native_ty = self
                 .resolve_type_hint(param.type_hint.as_ref().map(TypeHint::to_string).as_deref());
-            if !self.param_type_could_satisfy(&native_ty, &Type::Callable(None)) {
+            if !self.param_type_could_satisfy(&native_ty, &Type::callable(None)) {
                 let identifier = if *immediately {
                     "paramImmediatelyInvokedCallable.nonCallable"
                 } else {
@@ -608,7 +608,7 @@ impl<'a> Checker<'a> {
             };
             let native_ty = self
                 .resolve_type_hint(param.type_hint.as_ref().map(TypeHint::to_string).as_deref());
-            let closure_ty = Type::Object("Closure".into(), Vec::new());
+            let closure_ty = Type::object("Closure".into(), Vec::new());
             if !self.param_type_could_satisfy(&native_ty, &closure_ty) {
                 self.report(format!(
                         "PHPDoc tag @param-closure-this is for parameter ${name} with non-Closure type {native_ty}."

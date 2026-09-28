@@ -19,7 +19,7 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
                 if present {
                     ty.clone()
                 } else {
-                    Type::Never
+                    Type::never()
                 }
             }
             Some(field) => {
@@ -29,7 +29,7 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
                 } else {
                     shape.fields.retain(|f| f.key != field.key);
                 }
-                Type::ArrayShape(shape)
+                Type::array_shape(shape)
             }
             // An *unsealed* shape (`array{a: int, ...}`) can carry keys
             // beyond the ones it lists - `key` simply not
@@ -43,7 +43,7 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
             None if !shape.is_sealed() => ty.clone(),
             None => {
                 if present {
-                    Type::Never
+                    Type::never()
                 } else {
                     ty.clone()
                 }
@@ -51,12 +51,12 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
         },
         // A general array now has that key.
         Type::Array(..) if present => {
-            types::intersect_types(vec![ty.clone(), Type::HasOffset(ShapeKey::from_name(key))])
+            types::intersect_types(vec![ty.clone(), Type::has_offset(ShapeKey::from_name(key))])
         }
         Type::Intersection(members)
             if present && members.iter().any(|m| matches!(m, Type::Array(..))) =>
         {
-            types::intersect_types(vec![ty.clone(), Type::HasOffset(ShapeKey::from_name(key))])
+            types::intersect_types(vec![ty.clone(), Type::has_offset(ShapeKey::from_name(key))])
         }
         Type::Union(members) => {
             let kept: Vec<Type> = members
@@ -65,9 +65,9 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
                 .filter(|m| *m != Type::Never)
                 .collect();
             match kept.len() {
-                0 => Type::Never,
+                0 => Type::never(),
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => Type::union_of(kept),
             }
         }
         _ => ty.clone(),
@@ -90,7 +90,7 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
         | Type::IntLiteral(_)
         | Type::IntRange(..)
         | Type::Float
-        | Type::FloatLiteral(_) => Type::Never,
+        | Type::FloatLiteral(_) => Type::never(),
         Type::ArrayShape(_) => {
             let Some(key) = key else {
                 return ty.clone();
@@ -106,22 +106,22 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
                             .unsealed
                             .as_deref()
                             .map(|tail| tail.1.clone())
-                            .unwrap_or(Type::Mixed(false)),
+                            .unwrap_or(Type::mixed()),
                     };
-                    let value = crate::checker::narrow_type_excluding(&held, &Type::Null);
+                    let value = crate::checker::narrow_type_excluding(&held, &Type::null());
                     shape.set(ShapeField::new(key, value, false));
-                    Type::ArrayShape(shape)
+                    Type::array_shape(shape)
                 }
                 other => other,
             }
         }
         // A general array now has that key, with a non-null value.
         Type::Array(_, value) => match key {
-            Some(key) => Type::Intersection(vec![
+            Some(key) => Type::intersection_of(vec![
                 ty.clone(),
-                Type::HasOffsetValue(
+                Type::has_offset_value(
                     ShapeKey::from_name(key),
-                    Box::new(crate::checker::narrow_type_excluding(value, &Type::Null)),
+                    crate::checker::narrow_type_excluding(value, &Type::null()),
                 ),
             ]),
             None => ty.clone(),
@@ -135,11 +135,11 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
             match (key, element) {
                 (Some(key), Some(value)) => {
                     let mut members = members.clone();
-                    members.push(Type::HasOffsetValue(
+                    members.push(Type::has_offset_value(
                         ShapeKey::from_name(key),
-                        Box::new(crate::checker::narrow_type_excluding(value, &Type::Null)),
+                        crate::checker::narrow_type_excluding(value, &Type::null()),
                     ));
-                    Type::Intersection(members)
+                    Type::intersection_of(members)
                 }
                 _ => ty.clone(),
             }
@@ -151,9 +151,9 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
                 .filter(|m| *m != Type::Never)
                 .collect();
             match kept.len() {
-                0 => Type::Never,
+                0 => Type::never(),
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => Type::union_of(kept),
             }
         }
         _ => ty.clone(),
@@ -222,14 +222,14 @@ pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {
                 .filter(|t| *t != Type::Never)
                 .collect();
             match kept.len() {
-                0 => Type::Never,
+                0 => Type::never(),
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => Type::union_of(kept),
             }
         }
-        Type::Null | Type::False | Type::IntLiteral(0) => Type::Never,
-        Type::StringLiteral(s) if s.is_empty() || s == "0" => Type::Never,
-        Type::ArrayShape(shape) if shape.is_empty_array() => Type::Never,
+        Type::Null | Type::False | Type::IntLiteral(0) => Type::never(),
+        Type::StringLiteral(s) if s.is_empty() || s == "0" => Type::never(),
+        Type::ArrayShape(shape) if shape.is_empty_array() => Type::never(),
         Type::Array(_, _) => upgrade_array_to_non_empty(original),
         // Delegates to the same general-purpose "add one more accessory
         // fact onto a string, bare or already-refined" helper the

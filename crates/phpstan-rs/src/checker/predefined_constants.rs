@@ -41,22 +41,22 @@ pub(crate) fn predefined_constant_type(
         "PHP_VERSION_ID" => match php_version {
             Some(version) => {
                 let base = i64::from(version.id());
-                Type::IntRange(Some(base), Some(base + 99))
+                Type::int_range(Some(base), Some(base + 99))
             }
-            None => Type::IntRange(Some(PHP_MIN_ANALYZABLE_VERSION_ID), None),
+            None => Type::int_range(Some(PHP_MIN_ANALYZABLE_VERSION_ID), None),
         },
         "PHP_MAJOR_VERSION" => match php_version {
-            Some(version) => Type::IntLiteral(i64::from(version.major)),
-            None => Type::IntRange(Some(5), None),
+            Some(version) => Type::int_literal(i64::from(version.major)),
+            None => Type::int_range(Some(5), None),
         },
         "PHP_MINOR_VERSION" => match php_version {
-            Some(version) => Type::IntLiteral(i64::from(version.minor)),
-            None => Type::IntRange(Some(0), None),
+            Some(version) => Type::int_literal(i64::from(version.minor)),
+            None => Type::int_range(Some(0), None),
         },
         // A configured version has no patch component.
         "PHP_RELEASE_VERSION" => match php_version {
-            Some(_) => Type::IntRange(Some(0), Some(99)),
-            None => Type::IntRange(Some(0), None),
+            Some(_) => Type::int_range(Some(0), Some(99)),
+            None => Type::int_range(Some(0), None),
         },
         "PHP_ZTS" | "PHP_DEBUG" => parse_type_string("0|1"),
         "PHP_MAXPATHLEN"
@@ -65,9 +65,9 @@ pub(crate) fn predefined_constant_type(
         | "__COMPILER_HALT_OFFSET__"
         | "PHP_WINDOWS_VERSION_BUILD"
         | "LIBXML_VERSION"
-        | "OPENSSL_VERSION_NUMBER" => Type::IntRange(Some(1), None),
-        "PHP_WINDOWS_VERSION_MAJOR" => Type::IntRange(Some(4), None),
-        "PHP_WINDOWS_VERSION_MINOR" => Type::IntRange(Some(0), None),
+        | "OPENSSL_VERSION_NUMBER" => Type::int_range(Some(1), None),
+        "PHP_WINDOWS_VERSION_MAJOR" => Type::int_range(Some(4), None),
+        "PHP_WINDOWS_VERSION_MINOR" => Type::int_range(Some(0), None),
         "PHP_OS_FAMILY" => {
             parse_type_string("'Windows'|'BSD'|'Darwin'|'Solaris'|'Linux'|'Unknown'")
         }
@@ -76,27 +76,27 @@ pub(crate) fn predefined_constant_type(
         ),
         "PHP_EOL" => string_literals(&["\n", "\r\n"]),
         "PHP_INT_MAX" => parse_type_string("2147483647|9223372036854775807"),
-        "PHP_INT_MIN" => Type::Union(vec![
-            Type::IntLiteral(i64::MIN),
-            Type::IntLiteral(i64::from(i32::MIN)),
+        "PHP_INT_MIN" => Type::union_of(vec![
+            Type::int_literal(i64::MIN),
+            Type::int_literal(i64::from(i32::MIN)),
         ]),
         "PHP_INT_SIZE" => parse_type_string("4|8"),
         "PHP_SHLIB_SUFFIX" => parse_type_string("'so'|'dll'"),
         "DIRECTORY_SEPARATOR" => string_literals(&["/", "\\"]),
         "PATH_SEPARATOR" => parse_type_string("':'|';'"),
         "STDIN" | "STDOUT" | "STDERR" => parse_type_string("resource"),
-        "NAN" => Type::FloatLiteral(f64::NAN),
-        "INF" => Type::FloatLiteral(f64::INFINITY),
+        "NAN" => Type::float_literal(f64::NAN),
+        "INF" => Type::float_literal(f64::INFINITY),
         _ => return None,
     };
     Some(ty)
 }
 
 fn string_literals(values: &[&str]) -> Type {
-    Type::Union(
+    Type::union_of(
         values
             .iter()
-            .map(|v| Type::StringLiteral((*v).into()))
+            .map(|v| Type::string_literal((*v).into()))
             .collect(),
     )
 }

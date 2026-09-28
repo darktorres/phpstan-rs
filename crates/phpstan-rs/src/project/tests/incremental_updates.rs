@@ -492,7 +492,7 @@ fn update_file_refreshes_inferred_global_variable_types() {
 
     assert_eq!(
         project.registry().global_variables.get("template"),
-        Some(&types::Type::Object("Template".into(), vec![]))
+        Some(&types::Type::object("Template".into(), vec![]))
     );
 
     // Editing the assigning file to point at a different class must
@@ -513,6 +513,6 @@ fn update_file_refreshes_inferred_global_variable_types() {
 
     assert_eq!(
         project.registry().global_variables.get("template"),
-        Some(&types::Type::Object("Other".into(), vec![]))
+        Some(&types::Type::object("Other".into(), vec![]))
     );
 }

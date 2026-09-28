@@ -69,9 +69,9 @@ fn is_string_shaped(ty: &Type) -> bool {
 /// ...) has no specific value to flip, so it's returned unchanged.
 fn negate_numeric_literal(ty: Type) -> Type {
     match ty {
-        Type::IntLiteral(n) => Type::IntLiteral(-n),
-        Type::FloatLiteral(f) => Type::FloatLiteral(-f),
-        Type::IntRange(min, max) => Type::IntRange(max.map(|m| -m), min.map(|m| -m)),
+        Type::IntLiteral(n) => Type::int_literal(-n),
+        Type::FloatLiteral(f) => Type::float_literal(-f),
+        Type::IntRange(min, max) => Type::int_range(max.map(|m| -m), min.map(|m| -m)),
         other => other,
     }
 }
@@ -90,10 +90,10 @@ fn negate_numeric_literal(ty: Type) -> Type {
 /// `apply_equality_narrowing`'s `target_ty == Type::Mixed(false)` bail-out.
 fn bare_name_literal_type(name: &str) -> Type {
     match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
-        "true" => Type::True,
-        "false" => Type::False,
-        "null" => Type::Null,
-        _ => Type::Mixed(false),
+        "true" => Type::bool_literal(true),
+        "false" => Type::bool_literal(false),
+        "null" => Type::null(),
+        _ => Type::mixed(),
     }
 }
 
@@ -228,7 +228,7 @@ impl<'a> Checker<'a> {
         if let ExprKind::Variable(name) = &operand.kind
             && !locals.contains_key(name)
         {
-            locals.declare(name.to_string(), Type::Mixed(false), operand.span);
+            locals.declare(name.to_string(), Type::mixed(), operand.span);
         }
         self.check_expr_quiet_root(operand, locals, label);
         self.check_pointless_null_probe(
@@ -251,7 +251,7 @@ impl<'a> Checker<'a> {
     fn shell_exec_type(&self) -> Type {
         self.registry
             .lookup_function("shell_exec")
-            .map_or(Type::Mixed(false), |f| f.return_type().clone())
+            .map_or(Type::mixed(), |f| f.return_type().clone())
     }
 
     /// A `new class { ... }` expression's own inferred type - looks its
@@ -265,8 +265,8 @@ impl<'a> Checker<'a> {
     fn anonymous_class_type(&self, span: Span) -> Type {
         self.anonymous_class_names
             .get(&span)
-            .map(|name| Type::Object(name.clone().into(), Vec::new()))
-            .unwrap_or(Type::Mixed(false))
+            .map(|name| Type::object(name.clone().into(), Vec::new()))
+            .unwrap_or(Type::mixed())
     }
 
     /// Thin wrapper over `check_expr_impl` - the real work - so every
@@ -306,7 +306,7 @@ impl<'a> Checker<'a> {
     /// thrown into) or a pipe's call anything. A `match` records its own
     /// throw point, before its arms.
     fn thrown_by(&mut self, e: &Expr, locals: &Locals) -> Option<Type> {
-        let anything = || Type::Object("Throwable".into(), Vec::new());
+        let anything = || Type::object("Throwable".into(), Vec::new());
         match &e.kind {
             ExprKind::Call(..)
             | ExprKind::New(..)
@@ -322,9 +322,9 @@ impl<'a> Checker<'a> {
             ExprKind::Clone(..) | ExprKind::Yield(..) | ExprKind::YieldFrom(_) => Some(anything()),
             ExprKind::Binary(op, _, _) | ExprKind::CompoundAssign(op, _, _) => match op {
                 BinOp::Div | BinOp::Mod => {
-                    Some(Type::Object("DivisionByZeroError".into(), Vec::new()))
+                    Some(Type::object("DivisionByZeroError".into(), Vec::new()))
                 }
-                BinOp::Shl | BinOp::Shr => Some(Type::Object("ArithmeticError".into(), Vec::new())),
+                BinOp::Shl | BinOp::Shr => Some(Type::object("ArithmeticError".into(), Vec::new())),
                 BinOp::Pipe => Some(anything()),
                 _ => None,
             },
@@ -410,7 +410,7 @@ impl<'a> Checker<'a> {
                             ), actual_arg.value.span, 0, "phpstanRs.assertType");
                     }
                     self.check_expr(&actual_arg.value, locals, label);
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 }
                 if let ExprKind::Name(name) = &callee.kind
                     && name == "extract"
@@ -594,10 +594,7 @@ impl<'a> Checker<'a> {
                         // parameter would otherwise get.
                         "preg_replace_callback" if args.len() >= 3 => Some((
                             1,
-                            vec![Type::Array(
-                                Box::new(Type::unknown_array_key()),
-                                Box::new(Type::String),
-                            )],
+                            vec![Type::array(Type::unknown_array_key(), Type::string())],
                         )),
                         _ => None,
                     });
@@ -984,7 +981,7 @@ impl<'a> Checker<'a> {
                     // idiom is recovered by `apply_narrowing`'s
                     // `preg_match_condition` recognizer, not by this
                     // unconditional type itself.
-                    let shape = union_types(matched, Type::ArrayShape(Shape::sealed(Vec::new())));
+                    let shape = union_types(matched, Type::array_shape(Shape::sealed(Vec::new())));
                     purge_stale_narrowing_for(locals, matches_name);
                     // `$matches` is very commonly undeclared before this
                     // exact call - its real first appearance, so
@@ -1020,13 +1017,13 @@ impl<'a> Checker<'a> {
                 {
                     let leaf = preg_leaf_type(flags.offset_capture);
                     let shape = if flags.set_order {
-                        Type::Array(
-                            Box::new(Type::unknown_array_key()),
-                            Box::new(preg_match_matches_shape(
+                        Type::array(
+                            Type::unknown_array_key(),
+                            preg_match_matches_shape(
                                 &parsed.groups,
                                 &leaf,
                                 flags.unmatched_as_null,
-                            )),
+                            ),
                         )
                     } else {
                         preg_match_all_pattern_order_shape(
@@ -1059,10 +1056,7 @@ impl<'a> Checker<'a> {
                     && let Some(pipes_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(pipes_name) = &pipes_arg.kind
                 {
-                    let shape = Type::Array(
-                        Box::new(Type::Int),
-                        Box::new(Type::Resource { closed: false }),
-                    );
+                    let shape = Type::array(Type::int(), Type::resource(false));
                     purge_stale_narrowing_for(locals, pipes_name);
                     if locals.contains_key(pipes_name) {
                         locals.insert(pipes_name.to_string(), shape);
@@ -1085,7 +1079,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals));
                 match array_shift_pop_pre_widen_ty.and_then(|pre_widen_ty| {
                     Self::array_element_type(&pre_widen_ty).map(|elem_ty| {
-                        Self::array_pointer_result(&pre_widen_ty, elem_ty, Type::Null, false)
+                        Self::array_pointer_result(&pre_widen_ty, elem_ty, Type::null(), false)
                     })
                 }) {
                     Some(corrected) => corrected,
@@ -1111,7 +1105,7 @@ impl<'a> Checker<'a> {
                     let this_ty = args
                         .first()
                         .map(|a| self.infer_expr(&a.value, locals))
-                        .unwrap_or(Type::Mixed(false));
+                        .unwrap_or(Type::mixed());
                     let scope_class = args
                         .get(1)
                         .and_then(|a| self.literal_class_name_from_expr(&a.value));
@@ -1184,7 +1178,7 @@ impl<'a> Checker<'a> {
                 // to `null` rather than erroring, while plain
                 // `$x->method()` on the same `$x` is a real bug.
                 let nonobject_ty = if *nullsafe {
-                    narrow_type_excluding(&recv_ty, &Type::Null)
+                    narrow_type_excluding(&recv_ty, &Type::null())
                 } else {
                     recv_ty.clone()
                 };
@@ -1198,7 +1192,7 @@ impl<'a> Checker<'a> {
                     for a in args {
                         self.check_expr(&a.value, locals, label);
                     }
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 }
                 if let Some(level) = self.strict_mixed_receiver_level(&nonobject_ty) {
                     self.report(
@@ -1210,7 +1204,7 @@ impl<'a> Checker<'a> {
                     for a in args {
                         self.check_expr(&a.value, locals, label);
                     }
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 }
                 // `sig` (and every class-name-dependent decision below
                 // it - argument-type checking, visibility/`@internal`/
@@ -1451,7 +1445,7 @@ impl<'a> Checker<'a> {
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
                 if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed(false) {
-                    union_types(result, Type::Null)
+                    union_types(result, Type::null())
                 } else {
                     result
                 }
@@ -1703,7 +1697,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                Type::Bool
+                Type::bool()
             }
             // Real PHP's unary minus/plus convert a numeric string
             // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) - the
@@ -1713,7 +1707,7 @@ impl<'a> Checker<'a> {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_unary_operand_validity(op, &inner_ty, inner.span);
                 if is_string_shaped(&inner_ty) {
-                    Type::Int
+                    Type::int()
                 } else if *op == UnaryOp::Neg {
                     negate_numeric_literal(inner_ty)
                 } else {
@@ -1766,7 +1760,7 @@ impl<'a> Checker<'a> {
                         ("isset", "in isset()", null_probe_verdict),
                     );
                 }
-                Type::Bool
+                Type::bool()
             }
             ExprKind::Empty(operand) => {
                 self.check_existence_probe(
@@ -1775,7 +1769,7 @@ impl<'a> Checker<'a> {
                     label,
                     ("empty", "in empty()", empty_probe_verdict),
                 );
-                Type::Bool
+                Type::bool()
             }
             // The operand must be string-coercible (`print.nonString`) and
             // triggers the implicit `__toString()` call `echo` does.
@@ -1783,20 +1777,20 @@ impl<'a> Checker<'a> {
                 let ty = self.check_expr(inner, locals, label);
                 self.check_print_validity(&ty, inner.span);
                 self.check_implicit_tostring_usage(&ty, inner.span);
-                Type::IntLiteral(1)
+                Type::int_literal(1)
             }
             ExprKind::Exit(_, arg) => {
                 if let Some(arg) = arg {
                     self.check_expr(arg, locals, label);
                 }
-                Type::Never
+                Type::never()
             }
             // The evaluated code can define any variable.
             ExprKind::Eval(code) => {
                 self.check_expr(code, locals, label);
                 self.saw_dynamic_var_construct = true;
                 locals.any_variable_may_exist = true;
-                Type::Mixed(false)
+                Type::mixed()
             }
             // The included file can define any variable.
             ExprKind::Include(kind, path) => {
@@ -1808,7 +1802,7 @@ impl<'a> Checker<'a> {
                     e.span,
                 );
                 locals.any_variable_may_exist = true;
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::ShellExec(cmd) => {
                 self.check_backtick_deprecation(e.span);
@@ -1839,7 +1833,7 @@ impl<'a> Checker<'a> {
                 self.current_function_explicit_throw_points
                     .push((inner_ty.clone(), inner.span));
                 self.current_function_throw_points.push(inner_ty);
-                Type::Never
+                Type::never()
             }
             ExprKind::YieldFrom(inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
@@ -1886,7 +1880,7 @@ impl<'a> Checker<'a> {
                 self.current_declared_return_type
                     .as_ref()
                     .map(|t| generator_template_param(t, self.registry, "TSend"))
-                    .unwrap_or(Type::Mixed(false))
+                    .unwrap_or(Type::mixed())
             }
             ExprKind::Instanceof(inner, target) => {
                 self.check_expr(inner, locals, label);
@@ -1936,7 +1930,7 @@ impl<'a> Checker<'a> {
                     locals,
                     is_exempt_last_condition,
                 );
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
                 self.check_nullsafe_assignment_target(lhs);
@@ -1949,7 +1943,7 @@ impl<'a> Checker<'a> {
                 let rhs_ty = match &rhs.kind {
                     ExprKind::Index(base, None) if matches!(&e.kind, ExprKind::AssignRef(..)) => {
                         self.check_expr(base, locals, label);
-                        Type::Mixed(false)
+                        Type::mixed()
                     }
                     _ => self.check_expr(rhs, locals, label),
                 };
@@ -2095,7 +2089,7 @@ impl<'a> Checker<'a> {
                 if let Some((name, native)) = native {
                     locals.set_native(&name, native);
                 }
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::Ternary(cond, then_, else_) => {
                 self.in_condition_position = true;
@@ -2168,7 +2162,7 @@ impl<'a> Checker<'a> {
                 // `false` member.
                 match then_ty {
                     Some(then_ty) => union_types(then_ty, else_ty),
-                    None => Type::Mixed(false),
+                    None => Type::mixed(),
                 }
             }
             // Only a destructuring target; as a value it's a parse error in
@@ -2179,7 +2173,7 @@ impl<'a> Checker<'a> {
                         self.check_expr(k, locals, label);
                     }
                 }
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::ArrayLiteral(items) => {
                 for item in items {
@@ -2244,7 +2238,7 @@ impl<'a> Checker<'a> {
                     // by-reference argument slot is recorded ahead of it.
                     None => {
                         if self.by_ref_empty_dim_args.borrow().contains(&e.span) {
-                            return Type::Mixed(false);
+                            return Type::mixed();
                         }
                         self.report_builder(
                             DiagnosticBuilder::new(
@@ -2255,7 +2249,7 @@ impl<'a> Checker<'a> {
                             )
                             .non_ignorable(),
                         );
-                        Type::Mixed(false)
+                        Type::mixed()
                     }
                 }
             }
@@ -2591,7 +2585,7 @@ impl<'a> Checker<'a> {
                     let this_ty = args
                         .get(1)
                         .map(|a| self.infer_expr(&a.value, locals))
-                        .unwrap_or(Type::Mixed(false));
+                        .unwrap_or(Type::mixed());
                     let scope_class = args
                         .get(2)
                         .and_then(|a| self.literal_class_name_from_expr(&a.value));
@@ -2791,7 +2785,7 @@ impl<'a> Checker<'a> {
                             None => self.resolve_static_call_return(&resolved_ty, target, class),
                         }
                     }
-                    _ => Type::Mixed(false),
+                    _ => Type::mixed(),
                 }
             }
             ExprKind::DynamicClassConstFetch(target, name) => {
@@ -2821,30 +2815,27 @@ impl<'a> Checker<'a> {
                         .into_iter()
                         .map(|n| self.check_expr(&constant_fetch(target, n, e.span), locals, label))
                         .reduce(types::union_types)
-                        .unwrap_or(Type::Mixed(false)),
+                        .unwrap_or(Type::mixed()),
                     (Some(names), Some(Some(class))) if !names.is_empty() => names
                         .into_iter()
                         .map(|n| {
                             if n == "class" {
-                                Type::ClassString(Box::new(Type::Object(
-                                    class.clone().into(),
-                                    Vec::new(),
-                                )))
+                                Type::class_string(Type::object(class.clone().into(), Vec::new()))
                             } else {
                                 self.static_member_of_class(e, &class, None, &n, false)
                             }
                         })
                         .reduce(types::union_types)
-                        .unwrap_or(Type::Mixed(false)),
+                        .unwrap_or(Type::mixed()),
                     (_, Some(Some(class))) => {
                         if self.collect_member_refs {
                             self.record_member_class_escape(&class);
                         }
-                        Type::Mixed(false)
+                        Type::mixed()
                     }
                     _ => {
                         self.record_dynamic_static_member_escape(target);
-                        Type::Mixed(false)
+                        Type::mixed()
                     }
                 }
             }
@@ -2852,10 +2843,8 @@ impl<'a> Checker<'a> {
                 // `Foo::class` / `$obj::class` is a string naming the
                 // class, not a member.
                 match self.resolve_static_target_class(target, locals, label) {
-                    Some(class) => {
-                        Type::ClassString(Box::new(Type::Object(class.into(), Vec::new())))
-                    }
-                    None => Type::String,
+                    Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
+                    None => Type::string(),
                 }
             }
             ExprKind::DynamicStaticPropertyFetch(target, name) => {
@@ -2870,7 +2859,7 @@ impl<'a> Checker<'a> {
                     self.record_member_class_escape(&class);
                 }
                 self.record_call_throw_point(None, None, e.span);
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::ClassConstFetch(target, name) => {
                 self.check_static_member_fetch(e, target, name, false, locals, label)
@@ -2880,7 +2869,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::DynamicVariable(name_expr) => {
                 self.check_expr(name_expr, locals, label);
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 // Unlike a write (check_property_assignment, and the
@@ -2951,7 +2940,7 @@ impl<'a> Checker<'a> {
                 // it short-circuits before `property.notFound` ever gets
                 // a chance to also fire on the same access.
                 let nonobject_ty = if *nullsafe {
-                    narrow_type_excluding(&base_ty, &Type::Null)
+                    narrow_type_excluding(&base_ty, &Type::null())
                 } else {
                     base_ty.clone()
                 };
@@ -2998,7 +2987,7 @@ impl<'a> Checker<'a> {
                 // `Intersection`, keeping the first member that actually
                 // declares it.
                 let owner_and_sig =
-                    self.find_property_owner(&narrow_type_excluding(&base_ty, &Type::Null), prop);
+                    self.find_property_owner(&narrow_type_excluding(&base_ty, &Type::null()), prop);
                 if let Some((owner, p)) = owner_and_sig {
                     self.check_member_visibility(MemberVisibilityCheck {
                         kind: "property",
@@ -3040,10 +3029,10 @@ impl<'a> Checker<'a> {
                 // `Object` lookup all live in `property_access_type`,
                 // shared with `infer_expr`'s identical arm - see its doc
                 // comment.
-                let result =
-                    self.property_access_type(&narrow_type_excluding(&base_ty, &Type::Null), prop);
+                let result = self
+                    .property_access_type(&narrow_type_excluding(&base_ty, &Type::null()), prop);
                 if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed(false) {
-                    union_types(result, Type::Null)
+                    union_types(result, Type::null())
                 } else {
                     result
                 }
@@ -3077,7 +3066,7 @@ impl<'a> Checker<'a> {
                         self.record_member_class_escape(&class);
                     }
                 }
-                Type::Mixed(false)
+                Type::mixed()
             }
             // Same literal-name-is-real-usage/genuinely-dynamic-name-
             // escapes split as `DynamicPropertyAccess` just above.
@@ -3101,7 +3090,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 self.record_call_throw_point(None, callee, e.span);
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
                 let name_ty = self.check_expr(name, locals, label);
@@ -3124,7 +3113,7 @@ impl<'a> Checker<'a> {
                     self.record_member_class_escape(&class);
                 }
                 self.record_call_throw_point(None, None, e.span);
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::Interpolated(parts) => {
                 // Mirrors real PHPStan's `InvalidPartOfEncapsedStringRule`
@@ -3150,7 +3139,7 @@ impl<'a> Checker<'a> {
                     part_types.push(
                         part_ty
                             .to_string_type(self.registry)
-                            .unwrap_or(Type::String),
+                            .unwrap_or(Type::string()),
                     );
                     if matches!(&p.kind, ExprKind::Literal(Literal::String(_))) {
                         continue;
@@ -3253,7 +3242,7 @@ impl<'a> Checker<'a> {
                 // itself is skipped, not the surrounding arm processing.
                 let mut next_arm_is_dead = false;
                 let mut remaining_subject_ty = if match_true {
-                    Type::True
+                    Type::bool_literal(true)
                 } else {
                     self.expand_enum_cases(&self.infer_expr(subject, locals))
                 };
@@ -3464,7 +3453,7 @@ impl<'a> Checker<'a> {
                 result_types
                     .into_iter()
                     .reduce(union_types)
-                    .unwrap_or(Type::Never)
+                    .unwrap_or(Type::never())
             }
             ExprKind::Closure {
                 params,
@@ -3540,7 +3529,7 @@ impl<'a> Checker<'a> {
                             "variable.undefined",
                         );
                     }
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed(false));
+                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::mixed());
                     // A captured variable's real declaration is wherever
                     // the outer scope already says it is - copied across,
                     // not fabricated fresh at this `use (...)` clause.
@@ -3626,7 +3615,7 @@ impl<'a> Checker<'a> {
                     );
                     self.check_type_class_name_case(&case_refs, p.span);
                     let ty = if p.variadic {
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+                        Type::array(Type::unknown_array_key(), ty)
                     } else {
                         ty
                     };
@@ -3639,12 +3628,12 @@ impl<'a> Checker<'a> {
                     );
                 let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
-                    declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+                    declared_return.as_ref().unwrap_or(&Type::mixed()),
                     "return type of anonymous function",
                     e.span,
                 );
                 self.check_type_trait_refs(
-                    declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+                    declared_return.as_ref().unwrap_or(&Type::mixed()),
                     "return type of anonymous function",
                     e.span,
                     "return.trait",
@@ -3658,10 +3647,8 @@ impl<'a> Checker<'a> {
                 // closure has no signature of its own) is needed here
                 // too.
                 if let Some(c) = self.current_class.clone() {
-                    let resolved_return = self.resolve_pseudo(
-                        declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
-                        &c,
-                    );
+                    let resolved_return =
+                        self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::mixed()), &c);
                     self.check_no_parent_ref(
                         &resolved_return,
                         "return type of anonymous function",
@@ -3883,7 +3870,7 @@ impl<'a> Checker<'a> {
                             closure_locals
                                 .get(&u.name)
                                 .cloned()
-                                .unwrap_or(Type::Mixed(false))
+                                .unwrap_or(Type::mixed())
                         });
                     if !locals.contains_key(&u.name) {
                         // Real PHP auto-vivifies `$x` in the outer/
@@ -3960,7 +3947,7 @@ impl<'a> Checker<'a> {
                     );
                     self.check_type_class_name_case(&case_refs, p.span);
                     let ty = if p.variadic {
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+                        Type::array(Type::unknown_array_key(), ty)
                     } else {
                         ty
                     };
@@ -4354,15 +4341,15 @@ impl<'a> Checker<'a> {
                         self.check_expr(inner, locals, label);
                     }
                 }
-                Type::Object("Closure".into(), Vec::new())
+                Type::object("Closure".into(), Vec::new())
             }
             ExprKind::Literal(lit) => match lit {
-                Literal::Int(n) => Type::IntLiteral(*n),
-                Literal::Float(_) => Type::Float,
-                Literal::String(s) => Type::StringLiteral(s.clone()),
-                Literal::Bool(true) => Type::True,
-                Literal::Bool(false) => Type::False,
-                Literal::Null => Type::Null,
+                Literal::Int(n) => Type::int_literal(*n),
+                Literal::Float(_) => Type::float(),
+                Literal::String(s) => Type::string_literal(s.clone()),
+                Literal::Bool(true) => Type::bool_literal(true),
+                Literal::Bool(false) => Type::bool_literal(false),
+                Literal::Null => Type::null(),
             },
             ExprKind::Name(name) => {
                 self.check_magic_constant_context(name, e.span);
@@ -4380,12 +4367,12 @@ impl<'a> Checker<'a> {
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::Literal(lit) => match lit {
-                Literal::Int(n) => Type::IntLiteral(*n),
-                Literal::Float(_) => Type::Float,
-                Literal::String(s) => Type::StringLiteral(s.clone()),
-                Literal::Bool(true) => Type::True,
-                Literal::Bool(false) => Type::False,
-                Literal::Null => Type::Null,
+                Literal::Int(n) => Type::int_literal(*n),
+                Literal::Float(_) => Type::float(),
+                Literal::String(s) => Type::string_literal(s.clone()),
+                Literal::Bool(true) => Type::bool_literal(true),
+                Literal::Bool(false) => Type::bool_literal(false),
+                Literal::Null => Type::null(),
             },
             ExprKind::Variable(name) => locals
                 .get(name)
@@ -4403,7 +4390,7 @@ impl<'a> Checker<'a> {
             // `Closure`-typed parameter correctly accepts it. A closure/
             // arrow-fn literal additionally carries its own signature
             // (`closure_literal_type`).
-            ExprKind::FirstClassCallable(_) => Type::Object("Closure".into(), Vec::new()),
+            ExprKind::FirstClassCallable(_) => Type::object("Closure".into(), Vec::new()),
             ExprKind::Closure {
                 params,
                 uses,
@@ -4473,23 +4460,23 @@ impl<'a> Checker<'a> {
                 result_types
                     .into_iter()
                     .reduce(union_types)
-                    .unwrap_or(Type::Never)
+                    .unwrap_or(Type::never())
             }
             // A throw expression never actually produces a value - Never
             // is exactly the right type for it, the same way it's used for
             // a function that always throws or exits.
-            ExprKind::Throw(_) => Type::Never,
+            ExprKind::Throw(_) => Type::never(),
             ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
             ExprKind::ShellExec(_) => self.shell_exec_type(),
-            ExprKind::Print(_) => Type::IntLiteral(1),
-            ExprKind::Isset(_) | ExprKind::Empty(_) => Type::Bool,
-            ExprKind::Exit(..) => Type::Never,
-            ExprKind::Eval(_) | ExprKind::Include(..) => Type::Mixed(false),
+            ExprKind::Print(_) => Type::int_literal(1),
+            ExprKind::Isset(_) | ExprKind::Empty(_) => Type::bool(),
+            ExprKind::Exit(..) => Type::never(),
+            ExprKind::Eval(_) | ExprKind::Include(..) => Type::mixed(),
             ExprKind::Cast(cast, inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
                 self.cast_type(cast.kind(), &inner_ty)
             }
-            ExprKind::Unary(UnaryOp::Not, _) => Type::Bool,
+            ExprKind::Unary(UnaryOp::Not, _) => Type::bool(),
             // Real PHP's unary minus/plus convert a numeric string
             // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) -
             // the same implicit-numeric-coercion rule arithmetic
@@ -4497,7 +4484,7 @@ impl<'a> Checker<'a> {
             ExprKind::Unary(op @ (UnaryOp::Neg | UnaryOp::Plus), inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
                 if is_string_shaped(&inner_ty) {
-                    Type::Int
+                    Type::int()
                 } else if *op == UnaryOp::Neg {
                     negate_numeric_literal(inner_ty)
                 } else {
@@ -4519,9 +4506,9 @@ impl<'a> Checker<'a> {
                 ExprKind::Name(name) => match name.written.as_ref() {
                     "self" | "parent" | "static" => {
                         let raw = match name.written.as_ref() {
-                            "self" => Type::SelfRef(Vec::new()),
-                            "parent" => Type::ParentRef,
-                            _ => Type::StaticRef(Vec::new()),
+                            "self" => Type::self_ref(Vec::new()),
+                            "parent" => Type::parent_ref(),
+                            _ => Type::static_ref(Vec::new()),
                         };
                         match &self.current_class {
                             Some(c) => self.resolve_pseudo(&raw, c),
@@ -4552,7 +4539,7 @@ impl<'a> Checker<'a> {
                             .map(|info| info.templates().as_slice())
                             .unwrap_or(&[]);
                         if templates.is_empty() {
-                            Type::Object(canonical.into(), Vec::new())
+                            Type::object(canonical.into(), Vec::new())
                         } else {
                             let mut bindings: TemplateBindings = TemplateBindings::default();
                             if let Some(sig) =
@@ -4606,18 +4593,13 @@ impl<'a> Checker<'a> {
                                 .unwrap_or(0);
                             let bound_args = templates[..last_bound]
                                 .iter()
-                                .map(|t| {
-                                    bindings
-                                        .get(t.as_ref())
-                                        .cloned()
-                                        .unwrap_or(Type::Mixed(false))
-                                })
+                                .map(|t| bindings.get(t.as_ref()).cloned().unwrap_or(Type::mixed()))
                                 .collect();
-                            Type::Object(canonical.into(), bound_args)
+                            Type::object(canonical.into(), bound_args)
                         }
                     }
                 },
-                _ => Type::Mixed(false),
+                _ => Type::mixed(),
             },
             ExprKind::Call(callee, args) => match &callee.kind {
                 ExprKind::Name(name) => {
@@ -4645,14 +4627,14 @@ impl<'a> Checker<'a> {
                 // Null])`, not a bare `Object` - strip `Null` out before
                 // matching, the same real class the method is actually
                 // being looked up on either way.
-                let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::Null);
+                let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::null());
                 let result = self.method_call_return_type(recv, &recv_ty, method, args, locals);
                 // `$x?->method()` short-circuits to `null` when `$x` is
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
                 if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed(false) {
-                    union_types(result, Type::Null)
+                    union_types(result, Type::null())
                 } else {
                     result
                 }
@@ -4709,7 +4691,7 @@ impl<'a> Checker<'a> {
                                 self.resolve_static_call_return(&resolved, target, &class)
                             })
                     })
-                    .unwrap_or(Type::Mixed(false))
+                    .unwrap_or(Type::mixed())
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
                 match self.infer_expr(name, locals) {
@@ -4717,7 +4699,7 @@ impl<'a> Checker<'a> {
                         &static_call(target, method.to_string(), args, e.span),
                         locals,
                     ),
-                    _ => Type::Mixed(false),
+                    _ => Type::mixed(),
                 }
             }
             ExprKind::DynamicClassConstFetch(target, name) => {
@@ -4737,21 +4719,19 @@ impl<'a> Checker<'a> {
                     .flatten()
                     .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
                     .reduce(types::union_types)
-                    .unwrap_or(Type::Mixed(false))
+                    .unwrap_or(Type::mixed())
             }
             ExprKind::ClassNameFetch(target) => {
                 match self.infer_static_target_class(target, locals) {
-                    Some(class) => {
-                        Type::ClassString(Box::new(Type::Object(class.into(), Vec::new())))
-                    }
-                    None => Type::String,
+                    Some(class) => Type::class_string(Type::object(class.into(), Vec::new())),
+                    None => Type::string(),
                 }
             }
             ExprKind::DynamicStaticPropertyFetch(target, _) => {
                 if self.collect_member_refs {
                     self.record_dynamic_static_member_escape(target);
                 }
-                Type::Mixed(false)
+                Type::mixed()
             }
             ExprKind::StaticPropertyFetch(target, prop_name) => {
                 // A static property (`self::$prop`) can be narrowed the
@@ -4765,7 +4745,7 @@ impl<'a> Checker<'a> {
                     return narrowed.clone();
                 }
                 let Some(class) = self.infer_static_target_class(target, locals) else {
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 };
                 if self.collect_member_refs
                     && let Some((owner, _)) =
@@ -4776,11 +4756,11 @@ impl<'a> Checker<'a> {
                 self.registry
                     .lookup_property(&class, prop_name)
                     .map(|p| self.resolve_pseudo(p.ty(), &class))
-                    .unwrap_or(Type::Mixed(false))
+                    .unwrap_or(Type::mixed())
             }
             ExprKind::ClassConstFetch(target, member) => {
                 let Some(class) = self.infer_static_target_class(target, locals) else {
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 };
                 if self.collect_member_refs
                     && let Some((owner, _)) = self.registry.lookup_const_with_owner(&class, member)
@@ -4796,7 +4776,7 @@ impl<'a> Checker<'a> {
                                 .class_constant_type(&owner, member, cs.ty());
                         self.resolve_pseudo(&ty, &class)
                     })
-                    .unwrap_or(Type::Mixed(false))
+                    .unwrap_or(Type::mixed())
             }
             ExprKind::Ternary(cond, then_, else_) => {
                 let mut else_locals = locals.clone();
@@ -4812,7 +4792,7 @@ impl<'a> Checker<'a> {
                         // `Type::Union(vec![...])`.
                         union_types(then_ty, else_ty)
                     }
-                    None => Type::Mixed(false),
+                    None => Type::mixed(),
                 }
             }
             ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
@@ -4831,7 +4811,7 @@ impl<'a> Checker<'a> {
                     .map(|p| {
                         self.infer_expr(p, locals)
                             .to_string_type(self.registry)
-                            .unwrap_or(Type::String)
+                            .unwrap_or(Type::string())
                     })
                     .collect(),
             ),
@@ -4842,14 +4822,14 @@ impl<'a> Checker<'a> {
                 {
                     return narrowed.clone();
                 }
-                let base_ty = narrow_type_excluding(&self.infer_expr(base, locals), &Type::Null);
+                let base_ty = narrow_type_excluding(&self.infer_expr(base, locals), &Type::null());
                 // See `property_access_type`'s doc comment - shared
                 // with `check_expr`'s identical arm.
                 let result = self.property_access_type(&base_ty, prop);
                 // Same implicit nullability as `?->method()` just above,
                 // for `$x?->prop`.
                 if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed(false) {
-                    union_types(result, Type::Null)
+                    union_types(result, Type::null())
                 } else {
                     result
                 }
@@ -4888,11 +4868,11 @@ impl<'a> Checker<'a> {
                 .current_declared_return_type
                 .as_ref()
                 .map(|t| generator_template_param(t, self.registry, "TSend"))
-                .unwrap_or(Type::Mixed(false)),
+                .unwrap_or(Type::mixed()),
             ExprKind::YieldFrom(inner) => {
                 generator_template_param(&self.infer_expr(inner, locals), self.registry, "TReturn")
             }
-            _ => Type::Mixed(false),
+            _ => Type::mixed(),
         }
     }
 
@@ -4984,7 +4964,7 @@ impl<'a> Checker<'a> {
                 }
                 let mut closure_locals: Locals = locals.closure_scope();
                 for u in uses {
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed(false));
+                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::mixed());
                     closure_locals.insert(u.name.to_string(), ty);
                 }
                 if !*is_static && let Some(this_ty) = locals.get("this") {
@@ -5226,10 +5206,10 @@ impl<'a> Checker<'a> {
             return if matches!(l.kind, ExprKind::Variable(_)) {
                 l_ty
             } else {
-                union_types(l_ty, Type::Null)
+                union_types(l_ty, Type::null())
             };
         }
-        let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::Null);
+        let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::null());
         // `$x ?? throw new Foo();` (or any other never-returning right
         // side: `exit`, a `never`-typed call) - falling through to the
         // generic `_ => r_ty` fallback below would make the whole
@@ -5291,33 +5271,33 @@ impl<'a> Checker<'a> {
             BinOp::And | BinOp::LogicalAnd => {
                 let l_ty = self.infer_expr(l, locals);
                 if matches!(l_ty, Type::False) {
-                    return Type::False;
+                    return Type::bool_literal(false);
                 }
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
                 let r_ty = self.infer_expr(r, &narrowed);
                 if matches!(r_ty, Type::False) {
-                    Type::False
+                    Type::bool_literal(false)
                 } else if matches!(l_ty, Type::True) && matches!(r_ty, Type::True) {
-                    Type::True
+                    Type::bool_literal(true)
                 } else {
-                    Type::Bool
+                    Type::bool()
                 }
             }
             BinOp::Or | BinOp::LogicalOr => {
                 let l_ty = self.infer_expr(l, locals);
                 if matches!(l_ty, Type::True) {
-                    return Type::True;
+                    return Type::bool_literal(true);
                 }
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
                 let r_ty = self.infer_expr(r, &narrowed);
                 if matches!(r_ty, Type::True) {
-                    Type::True
+                    Type::bool_literal(true)
                 } else if matches!(l_ty, Type::False) && matches!(r_ty, Type::False) {
-                    Type::False
+                    Type::bool_literal(false)
                 } else {
-                    Type::Bool
+                    Type::bool()
                 }
             }
             // `xor` doesn't short-circuit, so both sides are always
@@ -5325,11 +5305,11 @@ impl<'a> Checker<'a> {
             // against `BinaryOpHandler::resolveType`'s own
             // `BinaryOp\LogicalXor` arm.
             BinOp::LogicalXor => match (self.infer_expr(l, locals), self.infer_expr(r, locals)) {
-                (Type::True, Type::True) | (Type::False, Type::False) => Type::False,
-                (Type::True, Type::False) | (Type::False, Type::True) => Type::True,
-                _ => Type::Bool,
+                (Type::True, Type::True) | (Type::False, Type::False) => Type::bool_literal(false),
+                (Type::True, Type::False) | (Type::False, Type::True) => Type::bool_literal(true),
+                _ => Type::bool(),
             },
-            BinOp::Identical | BinOp::NotIdentical => Type::Bool,
+            BinOp::Identical | BinOp::NotIdentical => Type::bool(),
             // Mirrors real PHPStan's `ConstantLooseComparisonRule` -
             // `loose_compare_literals`'s doc comment has the full
             // scope/version-gating reasoning.
@@ -5346,9 +5326,13 @@ impl<'a> Checker<'a> {
                         } else {
                             !equal
                         };
-                        if outcome { Type::True } else { Type::False }
+                        if outcome {
+                            Type::bool_literal(true)
+                        } else {
+                            Type::bool_literal(false)
+                        }
                     }
-                    None => Type::Bool,
+                    None => Type::bool(),
                 }
             }
             // Mirrors real PHPStan's
@@ -5372,9 +5356,13 @@ impl<'a> Checker<'a> {
                     numeric_comparison_bounds(&rt),
                 ) && let Some(outcome) = compare_range_outcome(op, l_bounds, r_bounds)
                 {
-                    if outcome { Type::True } else { Type::False }
+                    if outcome {
+                        Type::bool_literal(true)
+                    } else {
+                        Type::bool_literal(false)
+                    }
                 } else {
-                    Type::Bool
+                    Type::bool()
                 }
             }
             // The spaceship operator returns -1/0/1 (an int), not a bool -
@@ -5391,7 +5379,7 @@ impl<'a> Checker<'a> {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
                 self.binary_operator_overload_result(op, &lt, &rt)
-                    .unwrap_or(Type::Int)
+                    .unwrap_or(Type::int())
             }
             BinOp::Add => {
                 let lt = self.infer_expr(l, locals);
@@ -5440,31 +5428,31 @@ impl<'a> Checker<'a> {
                         (None, None) => Type::benevolent_array_key(),
                     };
                     let val_ty = union_types(
-                        Self::array_element_type(&lt).unwrap_or(Type::Mixed(false)),
-                        Self::array_element_type(&rt).unwrap_or(Type::Mixed(false)),
+                        Self::array_element_type(&lt).unwrap_or(Type::mixed()),
+                        Self::array_element_type(&rt).unwrap_or(Type::mixed()),
                     );
-                    let mut result = Type::Array(Box::new(key_ty), Box::new(val_ty));
+                    let mut result = Type::array(key_ty, val_ty);
                     let has_accessory = |ty: &Type, kind: AccessoryKind| matches!(ty, Type::Intersection(members) if members.contains(&Type::Accessory(kind)));
                     let mut accessories = Vec::new();
                     if has_accessory(&lt, AccessoryKind::ArrayList)
                         && has_accessory(&rt, AccessoryKind::ArrayList)
                     {
-                        accessories.push(Type::Accessory(AccessoryKind::ArrayList));
+                        accessories.push(Type::accessory(AccessoryKind::ArrayList));
                     }
                     if has_accessory(&lt, AccessoryKind::NonEmptyArray)
                         || has_accessory(&rt, AccessoryKind::NonEmptyArray)
                     {
-                        accessories.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                        accessories.push(Type::accessory(AccessoryKind::NonEmptyArray));
                     }
                     if !accessories.is_empty() {
                         let mut members = vec![result];
                         members.extend(accessories);
-                        result = Type::Intersection(members);
+                        result = Type::intersection_of(members);
                     }
                     return result;
                 }
                 if lt == Type::Float || rt == Type::Float {
-                    return Type::Float;
+                    return Type::float();
                 }
                 // Real, if narrow, `int<min,max>` arithmetic, mirroring
                 // real PHPStan's `InitializerExprTypeResolver::
@@ -5487,12 +5475,12 @@ impl<'a> Checker<'a> {
                     let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
                     let result = normalize_int_range(min, max);
                     return if min_overflow || max_overflow {
-                        union_types(result, Type::Float)
+                        union_types(result, Type::float())
                     } else {
                         result
                     };
                 }
-                Type::Int
+                Type::int()
             }
             BinOp::Sub => {
                 let lt = self.infer_expr(l, locals);
@@ -5501,7 +5489,7 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
                 if lt == Type::Float || rt == Type::Float {
-                    return Type::Float;
+                    return Type::float();
                 }
                 // A *constant* right operand (`$x - 1`) shifts both bounds
                 // by the same amount with no swap ever needed - kept as
@@ -5519,7 +5507,7 @@ impl<'a> Checker<'a> {
                     let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
                     let result = normalize_int_range(min, max);
                     return if min_overflow || max_overflow {
-                        union_types(result, Type::Float)
+                        union_types(result, Type::float())
                     } else {
                         result
                     };
@@ -5533,7 +5521,7 @@ impl<'a> Checker<'a> {
                 {
                     return sub_int_range_full(l_min, l_max, r_min, r_max);
                 }
-                Type::Int
+                Type::int()
             }
             BinOp::Mul => {
                 let lt = self.infer_expr(l, locals);
@@ -5542,7 +5530,7 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
                 if lt == Type::Float || rt == Type::Float {
-                    return Type::Float;
+                    return Type::float();
                 }
                 // Real, narrow range-arithmetic, the `Add`/`Sub` arms'
                 // own family - `mul_int_range`'s own doc comment has the
@@ -5553,7 +5541,7 @@ impl<'a> Checker<'a> {
                 {
                     return mul_int_range(l_min, l_max, r_min, r_max);
                 }
-                Type::Int
+                Type::int()
             }
             BinOp::Pow => {
                 let lt = self.infer_expr(l, locals);
@@ -5562,13 +5550,13 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
                 if lt == Type::Float || rt == Type::Float {
-                    Type::Float
+                    Type::float()
                 } else if let (Some((l_min, l_max)), Some((r_min, r_max))) =
                     (int_range_bounds(&lt), int_range_bounds(&rt))
                 {
                     pow_int_range(l_min, l_max, r_min, r_max)
                 } else {
-                    Type::Int
+                    Type::int()
                 }
             }
             // `%` and the bitwise/shift operators always cast both
@@ -5587,7 +5575,7 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
                     return ty;
                 }
-                fold_bitwise_int_literals(op, &lt, &rt).unwrap_or(Type::Int)
+                fold_bitwise_int_literals(op, &lt, &rt).unwrap_or(Type::int())
             }
             BinOp::Shl | BinOp::Shr => {
                 let lt = self.infer_expr(l, locals);
@@ -5605,7 +5593,7 @@ impl<'a> Checker<'a> {
                 {
                     return shift_int_range(l_min, l_max, amount, matches!(op, BinOp::Shl));
                 }
-                Type::Int
+                Type::int()
             }
             BinOp::Mod => {
                 let lt = self.infer_expr(l, locals);
@@ -5622,7 +5610,7 @@ impl<'a> Checker<'a> {
                 {
                     mod_int_range(l_min, l_max, r_min, r_max)
                 } else {
-                    Type::Int
+                    Type::int()
                 }
             }
             // `/` gives `int|float` unconditionally whenever it can't
@@ -5639,13 +5627,13 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
                 if lt == Type::Float || rt == Type::Float {
-                    Type::Float
+                    Type::float()
                 } else if let (Some((l_min, l_max)), Some((r_min, r_max))) =
                     (int_range_bounds(&lt), int_range_bounds(&rt))
                 {
                     div_int_range(l_min, l_max, r_min, r_max)
                 } else {
-                    Type::Union(vec![Type::Int, Type::Float])
+                    Type::union_of(vec![Type::int(), Type::float()])
                 }
             }
             BinOp::Coalesce => {
@@ -5656,7 +5644,7 @@ impl<'a> Checker<'a> {
             // type depends on resolving whatever expression `callable` is
             // (a string, a closure, a first-class callable reference...)
             // to a real signature, which this checker doesn't attempt.
-            BinOp::Pipe => Type::Mixed(false),
+            BinOp::Pipe => Type::mixed(),
         }
     }
 }
@@ -5718,7 +5706,7 @@ fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
 /// either member alone always produces a real number.
 fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
     match ty {
-        Type::Null if is_increment => Type::Int,
+        Type::Null if is_increment => Type::int(),
         // A literal/range-typed operand must not pass straight through
         // unchanged: `++$x`/`--$x` on `IntLiteral(0)` needs to actually
         // advance, the same "value never applied" bug class
@@ -5727,17 +5715,17 @@ fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
         // (`$n = 0; foreach (...) { ...; $n++; } if ($n > 0)`) would
         // otherwise look "always false" against a check that only fires
         // once anything actually consumes the literal's exact value.
-        Type::IntLiteral(n) => Type::IntLiteral(if is_increment { n + 1 } else { n - 1 }),
-        Type::FloatLiteral(f) => Type::FloatLiteral(if is_increment { f + 1.0 } else { f - 1.0 }),
+        Type::IntLiteral(n) => Type::int_literal(if is_increment { n + 1 } else { n - 1 }),
+        Type::FloatLiteral(f) => Type::float_literal(if is_increment { f + 1.0 } else { f - 1.0 }),
         Type::IntRange(min, max) => {
             let shift = |b: Option<i64>| b.map(|v| if is_increment { v + 1 } else { v - 1 });
-            Type::IntRange(shift(*min), shift(*max))
+            Type::int_range(shift(*min), shift(*max))
         }
         Type::Union(members) => members
             .iter()
             .map(|m| advance_incdec_type(m, is_increment))
             .reduce(union_types)
-            .unwrap_or(Type::Mixed(false)),
+            .unwrap_or(Type::mixed()),
         other => other.clone(),
     }
 }
@@ -5774,16 +5762,16 @@ pub(crate) fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
         // has its own "key not found" diagnostic path
         // (`check_offset_existence`) regardless of what this function
         // returns.
-        Type::ArrayShape(shape) if shape.is_empty_array() && key.is_none() => Type::Null,
+        Type::ArrayShape(shape) if shape.is_empty_array() && key.is_none() => Type::null(),
         Type::ArrayShape(shape) => key
             .and_then(|k| shape.field(&ShapeKey::from_name(k)))
             .map(|f| f.ty.clone())
-            .unwrap_or(Type::Mixed(false)),
+            .unwrap_or(Type::mixed()),
         Type::Union(members) => members
             .into_iter()
             .map(|m| index_result_type(m, key))
             .reduce(union_types)
-            .unwrap_or(Type::Mixed(false)),
+            .unwrap_or(Type::mixed()),
         // A `list<T>`/`non-empty-array<T>`-typed value is a real
         // `Intersection([Array(T), Accessory(_)])`, not plain
         // `Array(T)` - without this, indexing into one (`$listArg[0]`)
@@ -5809,10 +5797,10 @@ pub(crate) fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
                 members
                     .into_iter()
                     .find_map(|m| Checker::array_element_type(&m))
-                    .unwrap_or(Type::Mixed(false))
+                    .unwrap_or(Type::mixed())
             })
         }
-        _ => Type::Mixed(false),
+        _ => Type::mixed(),
     }
 }
 
@@ -5910,7 +5898,7 @@ impl<'a> Checker<'a> {
     fn call_fallback_return_type(&self, callee: &Expr, args: &[Arg], locals: &Locals) -> Type {
         self.infer_expr(callee, locals)
             .callable_sig()
-            .map_or(Type::Mixed(false), |sig| {
+            .map_or(Type::mixed(), |sig| {
                 if sig.templates.is_empty() {
                     return (*sig.return_type).clone();
                 }
@@ -5949,10 +5937,10 @@ impl<'a> Checker<'a> {
     /// type. `set()` returns nothing.
     fn parent_hook_call_type(&self, property: &str, hook: &str) -> Type {
         if !hook.eq_ignore_ascii_case("get") {
-            return Type::Void;
+            return Type::void();
         }
         let Some(current) = &self.current_class else {
-            return Type::Mixed(false);
+            return Type::mixed();
         };
         self.registry
             .classes
@@ -5962,7 +5950,7 @@ impl<'a> Checker<'a> {
                 let (owner, sig) = self.registry.lookup_property_with_owner(parent, property)?;
                 Some(self.resolve_pseudo(sig.ty(), &owner))
             })
-            .unwrap_or(Type::Mixed(false))
+            .unwrap_or(Type::mixed())
     }
 
     /// The method a static call on `class` reaches, with its declaring
@@ -6095,7 +6083,7 @@ impl<'a> Checker<'a> {
         for (i, p) in params.iter().enumerate() {
             let ty = self.closure_param_type(p, i, overrides);
             let ty = if p.variadic {
-                Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+                Type::array(Type::unknown_array_key(), ty)
             } else {
                 ty
             };
@@ -6122,7 +6110,7 @@ impl<'a> Checker<'a> {
             saw_explicit_return = true;
             points.push(match &s.kind {
                 StmtKind::Return(Some(value)) => self.infer_expr(value, &scope),
-                _ => Type::Void,
+                _ => Type::void(),
             });
         }
         let falls_off_end = !body
@@ -6152,7 +6140,7 @@ impl<'a> Checker<'a> {
         for (i, p) in params.iter().enumerate() {
             let ty = self.closure_param_type(p, i, overrides);
             let ty = if p.variadic {
-                Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+                Type::array(Type::unknown_array_key(), ty)
             } else {
                 ty
             };
@@ -6173,7 +6161,7 @@ impl<'a> Checker<'a> {
                 self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref())
             }
             (None, Some(expected)) => expected.clone(),
-            (None, None) => Type::Mixed(false),
+            (None, None) => Type::mixed(),
         }
     }
 
@@ -6267,7 +6255,7 @@ fn is_true_literal(e: &Expr) -> bool {
 /// A synthetic `target::method(args)` call, for a computed method name
 /// whose value is known.
 fn unhandled_match_error() -> Type {
-    Type::Object("UnhandledMatchError".into(), Vec::new())
+    Type::object("UnhandledMatchError".into(), Vec::new())
 }
 
 /// Whether a static call's target is `parent`, `self` or `static`.
@@ -6332,17 +6320,14 @@ impl Checker<'_> {
 /// The type a cast of this kind produces, whatever it casts.
 fn cast_result_type(kind: CastKind) -> Type {
     match kind {
-        CastKind::Int => Type::Int,
-        CastKind::Float => Type::Float,
-        CastKind::String => Type::String,
-        CastKind::Bool => Type::Bool,
-        CastKind::Array => Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false)),
-        ),
-        CastKind::Object => Type::ObjectWithoutClass,
-        CastKind::Unset => Type::Null,
-        CastKind::Void => Type::Mixed(false),
+        CastKind::Int => Type::int(),
+        CastKind::Float => Type::float(),
+        CastKind::String => Type::string(),
+        CastKind::Bool => Type::bool(),
+        CastKind::Array => Type::array(Type::unknown_array_key(), Type::mixed()),
+        CastKind::Object => Type::object_without_class(),
+        CastKind::Unset => Type::null(),
+        CastKind::Void => Type::mixed(),
     }
 }
 
@@ -6356,7 +6341,7 @@ fn cast_result_type(kind: CastKind) -> Type {
 /// project's pre-Phase-168 fallback exactly, so an undecidable chain
 /// regresses nothing).
 pub(crate) fn doctrine_query_result_list_type() -> Type {
-    Type::list_of(Type::Mixed(false))
+    Type::list_of(Type::mixed())
 }
 
 impl<'a> Checker<'a> {
@@ -6377,7 +6362,7 @@ impl<'a> Checker<'a> {
             // `$obj::X` / `$obj::$x`: the class of the receiver's value.
             StaticTarget::Expr(receiver) => {
                 let Some(class) = receiver_class(self.check_expr(receiver, locals, label)) else {
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 };
                 return self.static_member_of_class(e, &class, None, member, is_property);
             }
@@ -6393,10 +6378,10 @@ impl<'a> Checker<'a> {
             return narrowed.clone();
         }
         let Some(class) = self.resolve_static_class_name(class_name) else {
-            return Type::Mixed(false);
+            return Type::mixed();
         };
         if Self::class_guarded(&class, locals) && self.registry.lookup_class(&class).is_none() {
-            return Type::Mixed(false);
+            return Type::mixed();
         }
         self.static_member_of_class(e, &class, Some(class_name), member, is_property)
     }
@@ -6440,7 +6425,7 @@ impl<'a> Checker<'a> {
                 0,
                 "class.notFound",
             );
-            return Type::Mixed(false);
+            return Type::mixed();
         }
         // `class.nameCase`, against the class name as written.
         if let Some(written) = written {
@@ -6502,7 +6487,7 @@ impl<'a> Checker<'a> {
             }
             prop_with_owner
                 .map(|(_, p)| self.resolve_pseudo(p.ty(), &class))
-                .unwrap_or(Type::Mixed(false))
+                .unwrap_or(Type::mixed())
         } else {
             let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
             let const_ty = const_with_owner.as_ref().map(|(owner, cs)| {
@@ -6545,7 +6530,7 @@ impl<'a> Checker<'a> {
             }
             const_ty
                 .map(|ty| self.resolve_pseudo(&ty, &class))
-                .unwrap_or(Type::Mixed(false))
+                .unwrap_or(Type::mixed())
         }
     }
 
@@ -6614,7 +6599,7 @@ impl<'a> Checker<'a> {
     /// containing either - counts too, not just the exact
     /// `UnhandledMatchError` class name.
     fn match_unhandled_error_is_exempted(&self) -> bool {
-        let unhandled_match_error = Type::Object("UnhandledMatchError".into(), Vec::new());
+        let unhandled_match_error = Type::object("UnhandledMatchError".into(), Vec::new());
         self.current_catch_types
             .iter()
             .any(|caught| self.accepts(caught, &unhandled_match_error).yes())
@@ -6697,9 +6682,9 @@ impl<'a> Checker<'a> {
                     }
                 }
                 match expanded.len() {
-                    0 => Type::Never,
+                    0 => Type::never(),
                     1 => expanded.into_iter().next().unwrap(),
-                    _ => Type::Union(expanded),
+                    _ => Type::union_of(expanded),
                 }
             }
             Type::Object(class_name, _) => {
@@ -6711,7 +6696,7 @@ impl<'a> Checker<'a> {
                     .values()
                     .filter_map(|c| match c.ty() {
                         Type::EnumCase(cls, case) if cls == class_name => {
-                            Some(Type::EnumCase(cls.clone(), case.clone()))
+                            Some(Type::enum_case(cls.clone(), case.clone()))
                         }
                         _ => None,
                     })
@@ -6719,7 +6704,7 @@ impl<'a> Checker<'a> {
                 match cases.len() {
                     0 => ty.clone(),
                     1 => cases.into_iter().next().unwrap(),
-                    _ => Type::Union(cases),
+                    _ => Type::union_of(cases),
                 }
             }
             other => other.clone(),
@@ -6794,7 +6779,7 @@ fn intersect_but_not_never(relation: &Relation, native: &Type, inferred: Type) -
         return native.clone();
     }
     if native_members.iter().any(|n| matches!(n, Type::Null)) {
-        kept.push(Type::Null);
+        kept.push(Type::null());
     }
     kept.sort_by_key(|m| *m == Type::Null);
     kept.into_iter()
@@ -6816,18 +6801,18 @@ fn closure_inferred_return_type(
     falls_off_end: bool,
 ) -> Type {
     if !saw_explicit_return {
-        return Type::Void;
+        return Type::void();
     }
     let mut members = points;
     if falls_off_end {
-        members.push(Type::Void);
+        members.push(Type::void());
     }
     let has_value = members.iter().any(|m| *m != Type::Void);
     let mut members: Vec<Type> = members
         .into_iter()
         .map(|m| {
             if has_value && m == Type::Void {
-                Type::Null
+                Type::null()
             } else {
                 m
             }
@@ -6839,7 +6824,7 @@ fn closure_inferred_return_type(
     members
         .into_iter()
         .reduce(union_types)
-        .unwrap_or(Type::Void)
+        .unwrap_or(Type::void())
 }
 
 /// A bitwise `&`/`|`/`^` over int literals, folded to its exact values
@@ -6872,14 +6857,14 @@ fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
                 .collect();
             values.sort_unstable();
             values.dedup();
-            let mut members = values.into_iter().map(Type::IntLiteral);
+            let mut members = values.into_iter().map(Type::int_literal);
             let first = members.next()?;
             Some(members.fold(first, union_types))
         }
         (_, Some(ks)) | (Some(ks), _)
             if matches!(op, BinOp::BitAnd) && ks.len() == 1 && ks[0] >= 0 =>
         {
-            Some(Type::IntRange(Some(0), Some(ks[0])))
+            Some(Type::int_range(Some(0), Some(ks[0])))
         }
         _ => None,
     }
@@ -6888,11 +6873,11 @@ fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
 /// `static` as `class`, everywhere in `ty`.
 fn bind_static_ref(ty: &Type, class: &str) -> Type {
     match ty {
-        Type::StaticRef(args) => Type::Object(
+        Type::StaticRef(args) => Type::object(
             class.into(),
             args.iter().map(|a| bind_static_ref(a, class)).collect(),
         ),
-        Type::This => Type::Object(class.into(), Vec::new()),
+        Type::This => Type::object(class.into(), Vec::new()),
         other => other.map_children(&mut |t| bind_static_ref(t, class)),
     }
 }
@@ -6902,9 +6887,9 @@ fn bind_static_ref(ty: &Type, class: &str) -> Type {
 pub(crate) fn unseal_array_shapes(ty: &Type) -> Type {
     match ty {
         Type::ArrayShape(shape) if shape.is_sealed() => {
-            Type::ArrayShape(Shape::unsealed(shape.fields.clone()))
+            Type::array_shape(Shape::unsealed(shape.fields.clone()))
         }
-        Type::Union(members) => Type::Union(members.iter().map(unseal_array_shapes).collect()),
+        Type::Union(members) => Type::union_of(members.iter().map(unseal_array_shapes).collect()),
         other => other.clone(),
     }
 }
@@ -6924,5 +6909,5 @@ fn concat_string_parts(parts: Vec<Type>) -> Type {
     parts
         .into_iter()
         .reduce(|acc, part| resolve_concat_type(&acc, &part))
-        .unwrap_or(Type::String)
+        .unwrap_or(Type::string())
 }

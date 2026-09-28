@@ -14,15 +14,15 @@ fn is_assignable_uses_class_hierarchy() {
     );
     assert!(
         r.accepts(
-            &Type::Object("Shape".into(), Vec::new()),
-            &Type::Object("Circle".into(), Vec::new())
+            &Type::object("Shape".into(), Vec::new()),
+            &Type::object("Circle".into(), Vec::new())
         )
         .yes()
     );
     assert!(
         !r.accepts(
-            &Type::Object("Circle".into(), Vec::new()),
-            &Type::Object("Shape".into(), Vec::new())
+            &Type::object("Circle".into(), Vec::new()),
+            &Type::object("Shape".into(), Vec::new())
         )
         .yes()
     );
@@ -37,7 +37,7 @@ fn class_string_is_assignable_follows_class_hierarchy_not_name_equality() {
             class Square {}
         "#,
     );
-    let cs = |name: &str| Type::ClassString(Box::new(Type::Object(name.into(), Vec::new())));
+    let cs = |name: &str| Type::class_string(Type::object(name.into(), Vec::new()));
     assert!(r.accepts(&cs("Shape"), &cs("Circle")).yes());
     assert!(!r.accepts(&cs("Shape"), &cs("Square")).yes());
 }
@@ -47,8 +47,8 @@ fn any_class_instance_is_assignable_to_the_native_object_type() {
     let r = build_registry("<?php class Foo {}");
     assert!(
         r.accepts(
-            &Type::ObjectWithoutClass,
-            &Type::Object("Foo".into(), Vec::new())
+            &Type::object_without_class(),
+            &Type::object("Foo".into(), Vec::new())
         )
         .yes()
     );
@@ -56,8 +56,8 @@ fn any_class_instance_is_assignable_to_the_native_object_type() {
     // any particular class.
     assert!(
         !r.accepts(
-            &Type::Object("Foo".into(), Vec::new()),
-            &Type::ObjectWithoutClass
+            &Type::object("Foo".into(), Vec::new()),
+            &Type::object_without_class()
         )
         .yes()
     );
@@ -66,37 +66,31 @@ fn any_class_instance_is_assignable_to_the_native_object_type() {
 #[test]
 fn is_assignable_treats_unknown_array_element_type_as_compatible() {
     let r = Registry::default();
-    let unknown_elements = Type::Array(
-        Box::new(Type::unknown_array_key()),
-        Box::new(Type::Mixed(false)),
-    );
-    let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
+    let unknown_elements = Type::array(Type::unknown_array_key(), Type::mixed());
+    let ints = Type::array(Type::unknown_array_key(), Type::int());
     // The lenient direction that Relation::is_super_type_of deliberately does
     // NOT take (see its own array-covariance test) - accepts is
     // the practical, checker-facing layer where "we don't know" must
     // not read as "definitely incompatible".
     assert!(r.accepts(&ints, &unknown_elements).yes());
     // A genuinely known, different element type is still caught.
-    let strings = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String));
+    let strings = Type::array(Type::unknown_array_key(), Type::string());
     assert!(!r.accepts(&ints, &strings).yes());
 }
 
 #[test]
 fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
     let r = Registry::default();
-    let unknown = Type::Array(
-        Box::new(Type::unknown_array_key()),
-        Box::new(Type::Mixed(false)),
-    );
-    let shape = Type::ArrayShape(Shape::from_named(vec![(
+    let unknown = Type::array(Type::unknown_array_key(), Type::mixed());
+    let shape = Type::array_shape(Shape::from_named(vec![(
         "name".to_string(),
-        Type::String,
+        Type::string(),
         false,
     )]));
     assert!(r.accepts(&shape, &unknown).yes());
     // A genuinely known, homogeneous array still doesn't satisfy an
     // arbitrary shape.
-    let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
+    let ints = Type::array(Type::unknown_array_key(), Type::int());
     assert!(!r.accepts(&shape, &ints).yes());
 }
 
@@ -108,18 +102,22 @@ fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
 #[test]
 fn a_string_keyed_array_type_is_not_assignable_to_an_int_keyed_shape() {
     let r = Registry::default();
-    let strings = Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)));
-    let shape = Type::ArrayShape(Shape::from_named(vec![("0".to_string(), Type::Int, false)]));
+    let strings = Type::array(Type::string(), Type::mixed());
+    let shape = Type::array_shape(Shape::from_named(vec![(
+        "0".to_string(),
+        Type::int(),
+        false,
+    )]));
     assert!(!r.accepts(&shape, &strings).yes());
 }
 
 #[test]
 fn an_int_keyed_array_type_is_not_assignable_to_a_string_keyed_shape() {
     let r = Registry::default();
-    let ints = Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(false)));
-    let shape = Type::ArrayShape(Shape::from_named(vec![(
+    let ints = Type::array(Type::int(), Type::mixed());
+    let shape = Type::array_shape(Shape::from_named(vec![(
         "name".to_string(),
-        Type::String,
+        Type::string(),
         false,
     )]));
     assert!(!r.accepts(&shape, &ints).yes());
@@ -128,24 +126,24 @@ fn an_int_keyed_array_type_is_not_assignable_to_a_string_keyed_shape() {
 #[test]
 fn a_string_keyed_shape_is_not_assignable_to_an_int_keyed_array_type() {
     let r = Registry::default();
-    let shape = Type::ArrayShape(Shape::from_named(vec![(
+    let shape = Type::array_shape(Shape::from_named(vec![(
         "name".to_string(),
-        Type::String,
+        Type::string(),
         false,
     )]));
-    let ints = Type::Array(Box::new(Type::Int), Box::new(Type::String));
+    let ints = Type::array(Type::int(), Type::string());
     assert!(!r.accepts(&ints, &shape).yes());
 }
 
 #[test]
 fn an_int_keyed_shape_is_still_assignable_to_a_matching_int_keyed_array_type() {
     let r = Registry::default();
-    let shape = Type::ArrayShape(Shape::from_named(vec![(
+    let shape = Type::array_shape(Shape::from_named(vec![(
         "0".to_string(),
-        Type::String,
+        Type::string(),
         false,
     )]));
-    let ints = Type::Array(Box::new(Type::Int), Box::new(Type::String));
+    let ints = Type::array(Type::int(), Type::string());
     assert!(r.accepts(&ints, &shape).yes());
 }
 
@@ -156,10 +154,10 @@ fn is_assignable_accepts_a_value_matching_any_union_member_on_the_supertype_side
     // well covered by ordinary nullable-param tests) had zero
     // executions. Manually verified correct against real code first.
     let r = Registry::default();
-    let int_or_string = Type::Union(vec![Type::Int, Type::String]);
-    assert!(r.accepts(&int_or_string, &Type::Int).yes());
-    assert!(r.accepts(&int_or_string, &Type::String).yes());
-    assert!(!r.accepts(&int_or_string, &Type::Bool).yes());
+    let int_or_string = Type::union_of(vec![Type::int(), Type::string()]);
+    assert!(r.accepts(&int_or_string, &Type::int()).yes());
+    assert!(r.accepts(&int_or_string, &Type::string()).yes());
+    assert!(!r.accepts(&int_or_string, &Type::bool()).yes());
 }
 
 #[test]
@@ -177,11 +175,11 @@ fn is_assignable_handles_intersection_types_on_either_side() {
             interface Iterator2 {}
         "#,
     );
-    let both = Type::Intersection(vec![
-        Type::Object("Countable2".into(), Vec::new()),
-        Type::Object("Iterator2".into(), Vec::new()),
+    let both = Type::intersection_of(vec![
+        Type::object("Countable2".into(), Vec::new()),
+        Type::object("Iterator2".into(), Vec::new()),
     ]);
-    let countable_only = Type::Object("Countable2".into(), Vec::new());
+    let countable_only = Type::object("Countable2".into(), Vec::new());
 
     // sub is the intersection: satisfies a supertype matching any one
     // of its members.
@@ -199,18 +197,18 @@ fn a_real_enum_class_string_satisfies_enum_string() {
             class Foo {}
         "#,
     );
-    let enum_string = Type::ClassString(Box::new(Type::Object("UnitEnum".into(), vec![])));
+    let enum_string = Type::class_string(Type::object("UnitEnum".into(), vec![]));
     assert!(
         r.accepts(
             &enum_string,
-            &Type::ClassString(Box::new(Type::Object("Suit".into(), vec![])))
+            &Type::class_string(Type::object("Suit".into(), vec![]))
         )
         .yes()
     );
     assert!(
         !r.accepts(
             &enum_string,
-            &Type::ClassString(Box::new(Type::Object("Foo".into(), vec![])))
+            &Type::class_string(Type::object("Foo".into(), vec![]))
         )
         .yes()
     );
@@ -225,34 +223,34 @@ fn interface_string_and_trait_string_check_the_real_class_kind() {
             class Plain2 {}
         "#,
     );
-    let interface_string = Type::ClassKindString(types::ClassKind::Interface);
-    let trait_string = Type::ClassKindString(types::ClassKind::Trait);
+    let interface_string = Type::class_kind_string(types::ClassKind::Interface);
+    let trait_string = Type::class_kind_string(types::ClassKind::Trait);
 
     assert!(
         r.accepts(
             &interface_string,
-            &Type::ClassString(Box::new(Type::Object("Shape2".into(), vec![])))
+            &Type::class_string(Type::object("Shape2".into(), vec![]))
         )
         .yes()
     );
     assert!(
         !r.accepts(
             &interface_string,
-            &Type::ClassString(Box::new(Type::Object("Plain2".into(), vec![])))
+            &Type::class_string(Type::object("Plain2".into(), vec![]))
         )
         .yes()
     );
     assert!(
         r.accepts(
             &trait_string,
-            &Type::ClassString(Box::new(Type::Object("Helper2".into(), vec![])))
+            &Type::class_string(Type::object("Helper2".into(), vec![]))
         )
         .yes()
     );
     assert!(
         !r.accepts(
             &trait_string,
-            &Type::ClassString(Box::new(Type::Object("Plain2".into(), vec![])))
+            &Type::class_string(Type::object("Plain2".into(), vec![]))
         )
         .yes()
     );
@@ -270,8 +268,8 @@ fn variance_composes_through_a_nested_covariant_generic_argument() {
             class Cat extends Animal {}
         "#,
     );
-    let producer_of = |name: &str| Type::Object("Producer".into(), vec![obj(name)]);
-    let container_of = |t: Type| Type::Object("Container".into(), vec![t]);
+    let producer_of = |name: &str| Type::object("Producer".into(), vec![obj(name)]);
+    let container_of = |t: Type| Type::object("Container".into(), vec![t]);
     assert!(
         r.accepts(
             &container_of(producer_of("Animal")),
@@ -300,8 +298,8 @@ fn variance_flips_through_a_nested_contravariant_generic_argument() {
             class Cat extends Animal {}
         "#,
     );
-    let consumer_of = |name: &str| Type::Object("Consumer".into(), vec![obj(name)]);
-    let container_of = |t: Type| Type::Object("Container".into(), vec![t]);
+    let consumer_of = |name: &str| Type::object("Consumer".into(), vec![obj(name)]);
+    let container_of = |t: Type| Type::object("Container".into(), vec![t]);
     // Consumer<Animal> <: Consumer<Cat> (contravariant), so
     // Container<Consumer<Animal>> <: Container<Consumer<Cat>> too, once
     // the inner slot's own contravariance is composed through the outer
@@ -323,7 +321,7 @@ fn variance_flips_through_a_nested_contravariant_generic_argument() {
 }
 
 fn obj(name: &str) -> Type {
-    Type::Object(name.into(), Vec::new())
+    Type::object(name.into(), Vec::new())
 }
 
 #[test]
@@ -361,7 +359,7 @@ fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() 
     let Type::Object(_, args) = &r.classes["ProbeTb\\Shape"].extends_args[0] else {
         panic!("expected a generic parent");
     };
-    let case = |c: &str| Type::EnumCase("ProbeTb\\Id".into(), c.into());
+    let case = |c: &str| Type::enum_case("ProbeTb\\Id".into(), c.into());
     assert!(r.accepts(&case("ARRAY"), &case("ARRAY")).yes());
     assert!(!r.accepts(&case("ITERABLE"), &case("ARRAY")).yes());
     assert!(
@@ -376,19 +374,19 @@ fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() 
 #[test]
 fn has_method_and_has_property_are_read_off_the_class() {
     let r = build_registry("<?php class Foo { public int $x = 0; public function bar(): void {} }");
-    let foo = Type::Object("Foo".into(), vec![]);
-    assert!(r.accepts(&Type::HasMethod("bar".into()), &foo).yes());
-    assert!(r.accepts(&Type::HasMethod("BAR".into()), &foo).yes());
-    assert!(!r.accepts(&Type::HasMethod("baz".into()), &foo).yes());
-    assert!(r.accepts(&Type::HasProperty("x".into()), &foo).yes());
-    assert!(!r.accepts(&Type::HasProperty("y".into()), &foo).yes());
+    let foo = Type::object("Foo".into(), vec![]);
+    assert!(r.accepts(&Type::has_method("bar".into()), &foo).yes());
+    assert!(r.accepts(&Type::has_method("BAR".into()), &foo).yes());
+    assert!(!r.accepts(&Type::has_method("baz".into()), &foo).yes());
+    assert!(r.accepts(&Type::has_property("x".into()), &foo).yes());
+    assert!(!r.accepts(&Type::has_property("y".into()), &foo).yes());
 }
 
 #[test]
 fn a_shape_has_the_offsets_it_requires() {
     let r = build_registry("<?php");
     let shape = types::parse_type_string("array{a: int, b?: string}");
-    let has = |key: &str| Type::HasOffset(types::ShapeKey::from_name(key));
+    let has = |key: &str| Type::has_offset(types::ShapeKey::from_name(key));
     assert!(r.accepts(&has("a"), &shape).yes());
     assert!(!r.accepts(&has("b"), &shape).yes());
     assert!(!r.accepts(&has("c"), &shape).yes());
@@ -400,7 +398,7 @@ struct Joins(u32);
 
 impl types::ExtensionTypeData for Joins {
     fn base(&self) -> Type {
-        Type::Object("Builder".into(), vec![])
+        Type::object("Builder".into(), vec![])
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -434,8 +432,8 @@ impl types::ExtensionTypeData for Joins {
 fn an_extension_payload_relates_through_its_hooks_and_its_base() {
     use types::TrinaryLogic;
     let r = build_registry("<?php class Builder {}");
-    let joins = |n| Type::Extension(std::sync::Arc::new(Joins(n)));
-    let builder = Type::Object("Builder".into(), vec![]);
+    let joins = |n| Type::extension(std::sync::Arc::new(Joins(n)));
+    let builder = Type::object("Builder".into(), vec![]);
     assert_eq!(joins(1), joins(1));
     assert_ne!(joins(1), joins(2));
     assert_eq!(joins(2).to_string(), "Builder<joins=2>");

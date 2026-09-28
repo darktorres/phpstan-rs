@@ -255,10 +255,10 @@ impl<'a> Checker<'a> {
                 // catch-type order, which real PHP itself doesn't
                 // care about at all.
                 let ty = match c.types.as_slice() {
-                    [] => Type::Mixed(false),
+                    [] => Type::mixed(),
                     [single] => self.resolve_name_expr(single),
                     multiple => {
-                        Type::Union(multiple.iter().map(|t| self.resolve_name_expr(t)).collect())
+                        Type::union_of(multiple.iter().map(|t| self.resolve_name_expr(t)).collect())
                     }
                 };
                 purge_stale_narrowing_for(&mut catch_locals, var);

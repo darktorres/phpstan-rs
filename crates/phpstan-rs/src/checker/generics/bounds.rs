@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
                         .zip(args.iter().map(|a| {
                             types::strip_call_site_variance(a)
                                 .cloned()
-                                .unwrap_or(Type::Mixed(false))
+                                .unwrap_or(Type::mixed())
                         }))
                         .collect();
                     for (name, arg) in info.templates().iter().zip(args.iter()) {
@@ -205,7 +205,7 @@ impl<'a> Checker<'a> {
                 // The own PHPDoc type too: a member the native hint
                 // excludes no longer reaches `ty`.
                 let checked = match prop_sig.doc_ty() {
-                    Some(doc) => Type::Union(vec![prop_sig.ty().clone(), doc.clone()]),
+                    Some(doc) => Type::union_of(vec![prop_sig.ty().clone(), doc.clone()]),
                     None => prop_sig.ty().clone(),
                 };
                 self.check_type_class_names_exist(
@@ -477,7 +477,7 @@ impl<'a> Checker<'a> {
             return;
         };
         let kind = class_kind_identifier(&info.kind());
-        let ty = Type::Object(class.into(), args.to_vec());
+        let ty = Type::object(class.into(), args.to_vec());
         for (i, arg) in args.iter().enumerate() {
             let call_site = match arg {
                 Type::VarianceArg(types::CallSiteVariance::Covariant, _) => {

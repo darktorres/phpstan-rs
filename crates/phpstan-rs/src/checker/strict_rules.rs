@@ -304,7 +304,7 @@ impl<'a> Checker<'a> {
         let allowed = if allowed.len() == 1 {
             allowed[0].clone()
         } else {
-            Type::Union(allowed.to_vec())
+            Type::union_of(allowed.to_vec())
         };
         self.registry.is_super_type_of(&allowed, ty) == TrinaryLogic::Yes
     }
@@ -313,11 +313,11 @@ impl<'a> Checker<'a> {
         if self.contains_only(
             ty,
             &[
-                Type::Int,
-                Type::Float,
-                Type::String,
-                Type::Object("DateTimeInterface".into(), Vec::new()),
-                Type::Object(("BcMath\\Number".to_string()).into(), Vec::new()),
+                Type::int(),
+                Type::float(),
+                Type::string(),
+                Type::object("DateTimeInterface".into(), Vec::new()),
+                Type::object(("BcMath\\Number".to_string()).into(), Vec::new()),
             ],
         ) {
             return true;
@@ -332,14 +332,18 @@ impl<'a> Checker<'a> {
     }
 
     fn is_comparable_together(&self, left: &Type, right: &Type) -> bool {
-        let number = Type::Object(("BcMath\\Number".to_string()).into(), Vec::new());
-        let date = Type::Object("DateTimeInterface".into(), Vec::new());
-        if self.contains_only(left, &[number.clone(), Type::Int])
-            && self.contains_only(right, &[number, Type::Int])
+        let number = Type::object(("BcMath\\Number".to_string()).into(), Vec::new());
+        let date = Type::object("DateTimeInterface".into(), Vec::new());
+        if self.contains_only(left, &[number.clone(), Type::int()])
+            && self.contains_only(right, &[number, Type::int()])
         {
             return true;
         }
-        for family in [&[Type::Int, Type::Float][..], &[Type::String], &[date]] {
+        for family in [
+            &[Type::int(), Type::float()][..],
+            &[Type::string()],
+            &[date],
+        ] {
             if self.contains_only(left, family) {
                 return self.contains_only(right, family);
             }

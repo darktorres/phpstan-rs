@@ -35,7 +35,7 @@ pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) 
     if already_nullable {
         ty
     } else {
-        Type::Union(vec![ty, Type::Null])
+        Type::union_of(vec![ty, Type::null()])
     }
 }
 
@@ -67,7 +67,7 @@ pub(crate) fn resolve_type_with_parsed_native(
     template_params: &FxHashMap<String, TemplateParam>,
 ) -> Type {
     let Some(doc) = doc_type else {
-        return native_ty.cloned().unwrap_or(Type::Mixed(false));
+        return native_ty.cloned().unwrap_or(Type::mixed());
     };
     let ty = mark_template_params(parse_type_node(doc), template_params);
     // A docblock type is trusted as the complete picture and otherwise
@@ -89,7 +89,7 @@ pub(crate) fn resolve_type_with_parsed_native(
         _ => false,
     };
     let ty = if native_is_nullable && !already_nullable {
-        Type::Union(vec![ty, Type::Null])
+        Type::union_of(vec![ty, Type::null()])
     } else {
         ty
     };
@@ -200,7 +200,7 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
     match kept.len() {
         0 => native_ty,
         1 => kept.into_iter().next().unwrap(),
-        _ => Type::Union(kept),
+        _ => Type::union_of(kept),
     }
 }
 

@@ -9,20 +9,32 @@ use types::Shape;
 
 #[test]
 fn array_key_exists_makes_an_optional_key_required_or_drops_it() {
-    let shape = Type::ArrayShape(Shape::from_named(vec![("a".to_string(), Type::Int, true)]));
+    let shape = Type::array_shape(Shape::from_named(vec![(
+        "a".to_string(),
+        Type::int(),
+        true,
+    )]));
     assert_eq!(
         narrowing::narrow_array_shape_by_key_presence(&shape, "a", true),
-        Type::ArrayShape(Shape::from_named(vec![("a".to_string(), Type::Int, false)]))
+        Type::array_shape(Shape::from_named(vec![(
+            "a".to_string(),
+            Type::int(),
+            false
+        )]))
     );
     assert_eq!(
         narrowing::narrow_array_shape_by_key_presence(&shape, "a", false),
-        Type::ArrayShape(Shape::sealed(Vec::new()))
+        Type::array_shape(Shape::sealed(Vec::new()))
     );
 }
 
 #[test]
 fn array_value_type_for_key_returns_none_for_a_missing_shape_key() {
-    let shape = Type::ArrayShape(Shape::from_named(vec![("a".to_string(), Type::Int, false)]));
+    let shape = Type::array_shape(Shape::from_named(vec![(
+        "a".to_string(),
+        Type::int(),
+        false,
+    )]));
     assert_eq!(
         narrowing::array_value_type_for_key(&shape, "b"),
         None,

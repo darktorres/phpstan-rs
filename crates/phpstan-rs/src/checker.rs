@@ -1351,7 +1351,7 @@ impl<'a> Checker<'a> {
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,
-            pest_this_type: Type::Mixed(false),
+            pest_this_type: Type::mixed(),
             pest_hook_properties: FxHashSet::default(),
             anonymous_class_names: FxHashMap::default(),
             current_anonymous_class: None,

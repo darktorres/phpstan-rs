@@ -101,7 +101,7 @@ impl<'a> Checker<'a> {
             let target = if values.len() == 1 {
                 values.pop().unwrap()
             } else {
-                Type::Union(values)
+                Type::union_of(values)
             };
             return Some((target.clone(), Some(target)));
         }
@@ -125,7 +125,7 @@ impl<'a> Checker<'a> {
             let ty = match &item.value.kind {
                 ExprKind::Literal(_) => self.infer_expr(&item.value, locals),
                 ExprKind::ArrayLiteral(inner) if inner.is_empty() => {
-                    Type::ArrayShape(types::Shape::sealed(Vec::new()))
+                    Type::array_shape(types::Shape::sealed(Vec::new()))
                 }
                 _ => return None,
             };
@@ -136,7 +136,7 @@ impl<'a> Checker<'a> {
         match member_types.len() {
             0 => None,
             1 => member_types.into_iter().next(),
-            _ => Some(Type::Union(member_types)),
+            _ => Some(Type::union_of(member_types)),
         }
     }
 
@@ -172,7 +172,7 @@ impl<'a> Checker<'a> {
                 && let Some(receiver_key) = narrowing_key(receiver)
             {
                 let current = self.current_narrowed_type(receiver, &receiver_key, locals);
-                locals.insert(receiver_key, narrow_type_excluding(&current, &Type::Null));
+                locals.insert(receiver_key, narrow_type_excluding(&current, &Type::null()));
             }
         }
         let Some((key, narrowed_expr, target_ty)) = pair else {
@@ -241,7 +241,7 @@ impl<'a> Checker<'a> {
             let current = self.current_narrowed_type(receiver, alias_target, locals);
             locals.insert(
                 alias_target.clone(),
-                narrow_type_excluding(&current, &Type::Null),
+                narrow_type_excluding(&current, &Type::null()),
             );
         }
         locals.insert(key, narrowed);
@@ -330,27 +330,24 @@ impl<'a> Checker<'a> {
             }
         };
         match method {
-            "assertIsString" => narrow_to(locals, 0, &Type::String),
+            "assertIsString" => narrow_to(locals, 0, &Type::string()),
             "assertIsArray" => narrow_to(
                 locals,
                 0,
-                &Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(Type::Mixed(false)),
-                ),
+                &Type::array(Type::unknown_array_key(), Type::mixed()),
             ),
-            "assertIsInt" | "assertIsInteger" => narrow_to(locals, 0, &Type::Int),
-            "assertIsFloat" => narrow_to(locals, 0, &Type::Float),
-            "assertIsBool" | "assertIsBoolean" => narrow_to(locals, 0, &Type::Bool),
+            "assertIsInt" | "assertIsInteger" => narrow_to(locals, 0, &Type::int()),
+            "assertIsFloat" => narrow_to(locals, 0, &Type::float()),
+            "assertIsBool" | "assertIsBoolean" => narrow_to(locals, 0, &Type::bool()),
             "assertIsResource" => {
-                narrow_to(locals, 0, &Type::Resource { closed: false });
+                narrow_to(locals, 0, &Type::resource(false));
             }
-            "assertNull" => narrow_to(locals, 0, &Type::Null),
-            "assertTrue" => narrow_to(locals, 0, &Type::True),
-            "assertFalse" => narrow_to(locals, 0, &Type::False),
-            "assertNotNull" => narrow_excluding(locals, 0, &Type::Null),
-            "assertNotFalse" => narrow_excluding(locals, 0, &Type::False),
-            "assertNotTrue" => narrow_excluding(locals, 0, &Type::True),
+            "assertNull" => narrow_to(locals, 0, &Type::null()),
+            "assertTrue" => narrow_to(locals, 0, &Type::bool_literal(true)),
+            "assertFalse" => narrow_to(locals, 0, &Type::bool_literal(false)),
+            "assertNotNull" => narrow_excluding(locals, 0, &Type::null()),
+            "assertNotFalse" => narrow_excluding(locals, 0, &Type::bool_literal(false)),
+            "assertNotTrue" => narrow_excluding(locals, 0, &Type::bool_literal(true)),
             // `assertInstanceOf(string $expected, mixed $actual)` - note
             // the argument order (expected class first, actual value
             // second), the reverse of `instanceof`'s own left-to-right
@@ -481,6 +478,6 @@ fn single_values_of(target: &Type) -> Option<Type> {
     match members.len() {
         0 => None,
         1 => members.into_iter().next(),
-        _ => Some(Type::Union(members)),
+        _ => Some(Type::union_of(members)),
     }
 }

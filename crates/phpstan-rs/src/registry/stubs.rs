@@ -128,7 +128,7 @@ fn patch_usleep(stubs: &mut [(Arc<str>, FunctionReflection)]) {
     for (name, sig) in stubs.iter_mut() {
         if name.as_ref() == "usleep" {
             for param in &mut sig.params {
-                param.ty = Type::Int;
+                param.ty = Type::int();
             }
         }
     }
@@ -172,12 +172,9 @@ fn patch_array_callback_family(stubs: &mut [(Arc<str>, FunctionReflection)]) {
             continue;
         }
         if let Some(rest) = sig.params.iter_mut().find(|p| p.variadic()) {
-            let ty = Type::Union(vec![
-                Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(Type::Mixed(false)),
-                ),
-                Type::Callable(None),
+            let ty = Type::union_of(vec![
+                Type::array(Type::unknown_array_key(), Type::mixed()),
+                Type::callable(None),
             ]);
             rest.ty = ty.clone();
             rest.ty_native = ty.clone();
@@ -431,7 +428,7 @@ fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassRe
             info.template_bounds
                 .get("T")
                 .cloned()
-                .unwrap_or(Type::Mixed(true)),
+                .unwrap_or(Type::explicit_mixed()),
         ),
         variance: if info.covariant_templates.contains("T") {
             types::Variance::Covariant
@@ -449,9 +446,9 @@ fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassRe
     let Some(param) = ctor.params.first_mut() else {
         return;
     };
-    param.ty = Type::Union(vec![
-        Type::ClassString(Box::new(Type::TemplateParam(tp.clone()))),
-        Type::TemplateParam(tp.clone()),
+    param.ty = Type::union_of(vec![
+        Type::class_string(Type::template_param(tp.clone())),
+        Type::template_param(tp.clone()),
     ]);
     // `ReflectionClass::newInstanceArgs()` is the one instance-producing
     // method phpstorm-stubs (`vendor/phpstorm-stubs/Reflection/
@@ -470,7 +467,7 @@ fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassRe
     // more proportionate than standing up a second stub-source
     // ingestion pipeline for one missing tag in one file.
     if let Some(new_instance_args) = info.methods.get_mut("newInstanceArgs") {
-        new_instance_args.return_type = Type::TemplateParam(tp);
+        new_instance_args.return_type = Type::template_param(tp);
     }
 }
 
@@ -517,16 +514,16 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
         info.templates.push(Arc::from("TClass"));
         info.covariant_templates.insert(Arc::from("TClass"));
         info.template_bounds
-            .insert(Arc::from("TClass"), Type::ObjectWithoutClass);
+            .insert(Arc::from("TClass"), Type::object_without_class());
         let tp = TemplateParam {
             name: "TClass".to_string(),
-            bound: Box::new(Type::ObjectWithoutClass),
+            bound: Box::new(Type::object_without_class()),
             variance: types::Variance::Covariant,
             scope: Some(class_name.to_string()),
             default: None,
         };
         if let Some(m) = info.methods.get_mut("getDeclaringClass") {
-            m.return_type = Type::Object("ReflectionClass".into(), vec![Type::TemplateParam(tp)]);
+            m.return_type = Type::object("ReflectionClass".into(), vec![Type::template_param(tp)]);
         }
     }
 
@@ -542,13 +539,13 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
             if !info.templates.iter().any(|t| t.as_ref() == "T") {
                 return None;
             }
-            Some(Type::TemplateParam(TemplateParam {
+            Some(Type::template_param(TemplateParam {
                 name: "T".to_string(),
                 bound: Box::new(
                     info.template_bounds
                         .get("T")
                         .cloned()
-                        .unwrap_or(Type::Mixed(true)),
+                        .unwrap_or(Type::explicit_mixed()),
                 ),
                 variance: if info.covariant_templates.contains("T") {
                     types::Variance::Covariant
@@ -572,21 +569,21 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
         return;
     };
     if let Some(m) = rc_info.methods.get_mut("getMethod") {
-        m.return_type = Type::Object("ReflectionMethod".into(), vec![t_ty.clone()]);
+        m.return_type = Type::object("ReflectionMethod".into(), vec![t_ty.clone()]);
     }
     if let Some(m) = rc_info.methods.get_mut("getMethods") {
-        m.return_type = Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Object("ReflectionMethod".into(), vec![t_ty.clone()])),
+        m.return_type = Type::array(
+            Type::unknown_array_key(),
+            Type::object("ReflectionMethod".into(), vec![t_ty.clone()]),
         );
     }
     if let Some(m) = rc_info.methods.get_mut("getProperty") {
-        m.return_type = Type::Object("ReflectionProperty".into(), vec![t_ty.clone()]);
+        m.return_type = Type::object("ReflectionProperty".into(), vec![t_ty.clone()]);
     }
     if let Some(m) = rc_info.methods.get_mut("getProperties") {
-        m.return_type = Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Object("ReflectionProperty".into(), vec![t_ty])),
+        m.return_type = Type::array(
+            Type::unknown_array_key(),
+            Type::object("ReflectionProperty".into(), vec![t_ty]),
         );
     }
 }
@@ -598,39 +595,36 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
 /// dynamic-return-type extensions, not from either function's own bare
 /// `array`-returning stub text).
 fn backtrace_frame_list_type() -> Type {
-    let frame_shape = Type::ArrayShape(Shape::from_named(vec![
-        ("function".to_string(), Type::String, false),
-        ("line".to_string(), Type::Int, true),
-        ("file".to_string(), Type::String, true),
+    let frame_shape = Type::array_shape(Shape::from_named(vec![
+        ("function".to_string(), Type::string(), false),
+        ("line".to_string(), Type::int(), true),
+        ("file".to_string(), Type::string(), true),
         // A bare (non-generic) `class-string` is already plain `Type::
         // String` in this project's own PHPDoc parser (`types/parse.rs`'s
         // own `"class-string" => ... [] => Type::String`) - matched here
         // for consistency, not a simplification specific to this patch.
-        ("class".to_string(), Type::String, true),
+        ("class".to_string(), Type::string(), true),
         (
             "type".to_string(),
-            Type::Union(vec![
-                Type::StringLiteral("->".into()),
-                Type::StringLiteral("::".into()),
+            Type::union_of(vec![
+                Type::string_literal("->".into()),
+                Type::string_literal("::".into()),
             ]),
             true,
         ),
         (
             "args".to_string(),
-            Type::Intersection(vec![
-                Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(Type::Mixed(false)),
-                ),
-                Type::Accessory(AccessoryKind::ArrayList),
+            Type::intersection_of(vec![
+                Type::array(Type::unknown_array_key(), Type::mixed()),
+                Type::accessory(AccessoryKind::ArrayList),
             ]),
             true,
         ),
-        ("object".to_string(), Type::ObjectWithoutClass, true),
+        ("object".to_string(), Type::object_without_class(), true),
     ]));
-    Type::Intersection(vec![
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(frame_shape)),
-        Type::Accessory(AccessoryKind::ArrayList),
+    Type::intersection_of(vec![
+        Type::array(Type::unknown_array_key(), frame_shape),
+        Type::accessory(AccessoryKind::ArrayList),
     ])
 }
 
@@ -649,12 +643,12 @@ fn patch_reflection_and_exception_list_types(classes: &mut [(Arc<str>, ClassRefl
         .find(|(name, _)| name.as_ref() == "ReflectionFunctionAbstract")
         && let Some(m) = info.methods.get_mut("getParameters")
     {
-        m.return_type = Type::Intersection(vec![
-            Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(Type::Object("ReflectionParameter".into(), Vec::new())),
+        m.return_type = Type::intersection_of(vec![
+            Type::array(
+                Type::unknown_array_key(),
+                Type::object("ReflectionParameter".into(), Vec::new()),
             ),
-            Type::Accessory(AccessoryKind::ArrayList),
+            Type::accessory(AccessoryKind::ArrayList),
         ]);
     }
     // Both `Exception`/`Error`'s own real phpstorm-stubs `getTrace()`
@@ -904,11 +898,11 @@ fn patch_datetime_fluent_returns(classes: &mut [(Arc<str>, ClassReflection)]) {
                 continue;
             };
             let to_static = |ty: &Type| match ty {
-                Type::Object(n, _) if *n == class => Type::StaticRef(Vec::new()),
+                Type::Object(n, _) if *n == class => Type::static_ref(Vec::new()),
                 other => other.clone(),
             };
             sig.return_type = match &sig.return_type {
-                Type::Union(members) => Type::Union(members.iter().map(to_static).collect()),
+                Type::Union(members) => Type::union_of(members.iter().map(to_static).collect()),
                 other => to_static(other),
             };
         }

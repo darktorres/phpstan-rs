@@ -1138,7 +1138,7 @@ impl ClassReflection {
                 let ty_native = if shared {
                     ty.clone()
                 } else {
-                    let native_only = native_parsed.unwrap_or(Type::Mixed(false));
+                    let native_only = native_parsed.unwrap_or(Type::mixed());
                     let t = mark_template_params(native_only, &template_params);
                     resolve_names_in_type(t, ctx)
                 };
@@ -1250,7 +1250,7 @@ impl ClassReflection {
                 let ty_native = if shared {
                     ty.clone()
                 } else {
-                    let native_only = native_parsed.unwrap_or(Type::Mixed(false));
+                    let native_only = native_parsed.unwrap_or(Type::mixed());
                     let t = mark_template_params(native_only, &template_params);
                     resolve_names_in_type(t, ctx)
                 };
@@ -1344,7 +1344,7 @@ impl ClassReflection {
                         // declaration to check against - `false`,
                         // matching every other synthetic-property field
                         // here.
-                        ty_native: Type::Mixed(false),
+                        ty_native: Type::mixed(),
                         has_native_type: false,
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,
@@ -1776,18 +1776,15 @@ impl ClassReflection {
         // (`BackedEnum`) likewise - none declared in source. Without
         // these, undefined-static-method detection would flag every real
         // `Enum::cases()`/`::tryFrom()` call.
-        let self_ty = Type::Object(fqn.clone().into(), Vec::new());
+        let self_ty = Type::object(fqn.clone().into(), Vec::new());
         // Real PHPStan's own `functionMap.php` declares
         // `UnitEnum::cases()` as `list<static>` outright - a bare,
         // unmarked `Array` here would leave every caller's result
         // (e.g. `array_merge(['none'], HistoryImageType::cases())`)
         // unable to prove list-ness itself.
-        let cases_return_ty = Type::Intersection(vec![
-            Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(self_ty.clone()),
-            ),
-            Type::Accessory(AccessoryKind::ArrayList),
+        let cases_return_ty = Type::intersection_of(vec![
+            Type::array(Type::unknown_array_key(), self_ty.clone()),
+            Type::accessory(AccessoryKind::ArrayList),
         ]);
         methods.insert(
             intern("cases"),
@@ -1872,7 +1869,7 @@ impl ClassReflection {
                     // `from()` throws a real `ValueError` when no case
                     // matches - unlike `tryFrom()`, which returns `null`
                     // instead.
-                    throws: Some(Type::Object("ValueError".into(), Vec::new())),
+                    throws: Some(Type::object("ValueError".into(), Vec::new())),
                     assert_if_true: Vec::new(),
                     assert_if_false: Vec::new(),
                     assert: Vec::new(),
@@ -1887,8 +1884,8 @@ impl ClassReflection {
                 FunctionReflection {
                     provenance: Provenance::default(),
                     params: vec![value_param],
-                    return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
-                    return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
+                    return_type: Type::union_of(vec![self_ty.clone(), Type::null()]),
+                    return_type_native: Type::union_of(vec![self_ty.clone(), Type::null()]),
                     return_has_own_doc: true,
                     return_doc_ty: None,
                     self_out: None,
@@ -1948,12 +1945,12 @@ impl ClassReflection {
                 ConstantReflection {
                     attributes: ReflectionAttribute::all(&case.attrs, ctx),
                     provenance: Provenance::default(),
-                    ty: Type::EnumCase(Name::from(&*fqn), Name::from(&*case.name)),
+                    ty: Type::enum_case(Name::from(&*fqn), Name::from(&*case.name)),
                     visibility: Visibility::Public,
                     is_final: true,
                     native_ty: None,
                     has_phpdoc_type: false,
-                    value_ty: Type::EnumCase(Name::from(&*fqn), Name::from(&*case.name)),
+                    value_ty: Type::enum_case(Name::from(&*fqn), Name::from(&*case.name)),
                     // A case has no doc-comment/`@internal`/`@deprecated`
                     // convention of its own in real PHP either - same
                     // reasoning as its always-`Visibility::Public` above.
@@ -1990,8 +1987,8 @@ impl ClassReflection {
             .filter_map(|c| {
                 let v = c.value.as_ref()?;
                 let ty = match &v.kind {
-                    ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
-                    ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
+                    ExprKind::Literal(Literal::String(s)) => Type::string_literal(s.clone()),
+                    ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
                     _ => return None,
                 };
                 Some((intern(&c.name), ty))
@@ -2012,14 +2009,14 @@ impl ClassReflection {
                 attributes: Vec::new(),
                 provenance: Provenance::default(),
                 doc_ty: None,
-                ty: Type::String,
+                ty: Type::string(),
                 // Every enum case's `->name` is language-guaranteed to
                 // be a real, natively-`string`-typed property - matching
                 // `has_default` below's "language-guaranteed, not a
                 // guess" reasoning. Enums can't be extended, so no
                 // override check ever actually reads this, but a
                 // correct value costs nothing to provide.
-                ty_native: Type::String,
+                ty_native: Type::string(),
                 has_native_type: true,
                 is_static: false,
                 is_readonly: false,
@@ -2066,7 +2063,7 @@ impl ClassReflection {
             let value_ty = if !case_values.is_empty() && case_values.len() == e.enum_cases.len() {
                 match case_values.len() {
                     1 => case_values.into_iter().next().unwrap(),
-                    _ => Type::Union(case_values),
+                    _ => Type::union_of(case_values),
                 }
             } else {
                 types::parse_type_string(&backing)

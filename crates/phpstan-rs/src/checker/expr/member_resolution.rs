@@ -304,13 +304,13 @@ impl<'a> Checker<'a> {
                     // `MyXml|null`, not a hardcoded `SimpleXMLElement|null`)
                     // rather than degrading all the way to `Mixed`.
                     if self.registry.is_subclass_of(class, "SimpleXMLElement") {
-                        union_types(Type::Object(class.clone(), Vec::new()), Type::Null)
+                        union_types(Type::object(class.clone(), Vec::new()), Type::null())
                     } else {
-                        Type::Mixed(false)
+                        Type::mixed()
                     }
                 }),
             Type::EnumCase(_, case) if prop == "name" => {
-                Type::StringLiteral(case.clone().to_string().into())
+                Type::string_literal(case.clone().to_string().into())
             }
             Type::EnumCase(fqn, case) if prop == "value" => self
                 .registry
@@ -321,16 +321,16 @@ impl<'a> Checker<'a> {
                         .lookup_property(fqn, "value")
                         .map(|p| p.ty().clone())
                 })
-                .unwrap_or(Type::Mixed(false)),
+                .unwrap_or(Type::mixed()),
             Type::EnumCase(fqn, _) => self
                 .registry
                 .lookup_property_with_owner(fqn, prop)
                 .map(|(owner, p)| self.resolve_pseudo(p.ty(), &owner))
-                .unwrap_or(Type::Mixed(false)),
+                .unwrap_or(Type::mixed()),
             Type::ObjectShape(shape) => shape
                 .field(&ShapeKey::from_name(prop))
                 .map(|f| f.ty.clone())
-                .unwrap_or(Type::Mixed(false)),
+                .unwrap_or(Type::mixed()),
             // An `Intersection` value genuinely is every member type
             // simultaneously, so the first member whose declaration
             // actually resolves the property names its one real type
@@ -367,14 +367,14 @@ impl<'a> Checker<'a> {
                     let ty = self.property_access_type(m, prop);
                     (ty != Type::Mixed(false)).then_some(ty)
                 })
-                .unwrap_or(Type::Mixed(false)),
+                .unwrap_or(Type::mixed()),
             Type::Union(members) => members
                 .iter()
                 .map(|m| self.property_access_type(m, prop))
                 .filter(|ty| *ty != Type::Mixed(false))
                 .reduce(union_types)
-                .unwrap_or(Type::Mixed(false)),
-            _ => Type::Mixed(false),
+                .unwrap_or(Type::mixed()),
+            _ => Type::mixed(),
         }
     }
 
@@ -418,7 +418,7 @@ impl<'a> Checker<'a> {
             _ => return None,
         };
         let (canonical, _) = self.registry.lookup_class(&named)?;
-        let object = Type::Object(canonical.into(), Vec::new());
+        let object = Type::object(canonical.into(), Vec::new());
         if entry.intersect.is_empty() {
             return Some(object);
         }
@@ -427,9 +427,9 @@ impl<'a> Checker<'a> {
             entry
                 .intersect
                 .iter()
-                .map(|t| Type::Object((t.trim_start_matches('\\').to_string()).into(), Vec::new())),
+                .map(|t| Type::object((t.trim_start_matches('\\').to_string()).into(), Vec::new())),
         );
-        Some(Type::Intersection(members))
+        Some(Type::intersection_of(members))
     }
 
     pub(crate) fn method_call_return_type(
@@ -521,7 +521,7 @@ impl<'a> Checker<'a> {
                 args.first()
                     .and_then(|a| literal_string_value(&a.value))
                     .and_then(|fmt| date_format_return_type(&fmt))
-                    .unwrap_or(Type::String)
+                    .unwrap_or(Type::string())
             }
             // `DateInterval::format()`'s own hand-rolled
             // specifier table - see `date_interval_format_return_type`'s
@@ -534,7 +534,7 @@ impl<'a> Checker<'a> {
                 args.first()
                     .and_then(|a| literal_string_value(&a.value))
                     .and_then(|fmt| date_interval_format_return_type(&fmt))
-                    .unwrap_or(Type::String)
+                    .unwrap_or(Type::string())
             }
             // `DateTimeInterface::diff()` narrows the stub's own
             // plain `DateInterval` return type to also carry a real,
@@ -546,9 +546,9 @@ impl<'a> Checker<'a> {
             Type::Object(class, _)
                 if method == "diff" && self.registry.is_subclass_of(class, "DateTimeInterface") =>
             {
-                Type::Intersection(vec![
-                    Type::Object("DateInterval".into(), Vec::new()),
-                    Type::ObjectShape(Shape::from_named([("days", Type::Int, false)])),
+                Type::intersection_of(vec![
+                    Type::object("DateInterval".into(), Vec::new()),
+                    Type::object_shape(Shape::from_named([("days", Type::int(), false)])),
                 ])
             }
             // `SimpleXMLElement::asXML()`'s 0-arg/1-arg overload split
@@ -564,9 +564,9 @@ impl<'a> Checker<'a> {
                 if method == "asXML" && self.registry.is_subclass_of(class, "SimpleXMLElement") =>
             {
                 if args.len() == 1 {
-                    Type::Bool
+                    Type::bool()
                 } else {
-                    Type::Union(vec![Type::String, Type::False])
+                    Type::union_of(vec![Type::string(), Type::bool_literal(false)])
                 }
             }
             // Phase 77's reflected-member-binding stretch item:
@@ -609,10 +609,9 @@ impl<'a> Checker<'a> {
                         },
                     });
                 match (owner_ty, name) {
-                    (Some(owner_ty), Some(name)) => Type::Intersection(vec![
-                        base,
-                        Type::ReflectedMember(Box::new(owner_ty), name),
-                    ]),
+                    (Some(owner_ty), Some(name)) => {
+                        Type::intersection_of(vec![base, Type::reflected_member(owner_ty, name)])
+                    }
                     _ => base,
                 }
             }
@@ -634,7 +633,7 @@ impl<'a> Checker<'a> {
                     Type::Object(class, type_args) => {
                         self.generic_object_property_type(class, type_args, name)
                     }
-                    _ => Type::Mixed(false),
+                    _ => Type::mixed(),
                 }
             }
             Type::ReflectedMember(owner_ty, name) if method == "invoke" => {
@@ -645,7 +644,7 @@ impl<'a> Checker<'a> {
                             class, type_args, name, forwarded, locals,
                         )
                     }
-                    _ => Type::Mixed(false),
+                    _ => Type::mixed(),
                 }
             }
             // Sub-phase D of the live SQL query reflection phase (see
@@ -766,11 +765,11 @@ impl<'a> Checker<'a> {
                         )
                     });
                 match row_type {
-                    Some(row_type) => Type::Object(
+                    Some(row_type) => Type::object(
                         ("Doctrine\\DBAL\\Result".to_string()).into(),
                         vec![row_type],
                     ),
-                    None => Type::Object(("Doctrine\\DBAL\\Result".to_string()).into(), Vec::new()),
+                    None => Type::object(("Doctrine\\DBAL\\Result".to_string()).into(), Vec::new()),
                 }
             }
             Type::Object(class, _)
@@ -804,7 +803,7 @@ impl<'a> Checker<'a> {
                     let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
                     self.resolve_pseudo(&resolved, &owner)
                 })
-                .unwrap_or(Type::Mixed(false)),
+                .unwrap_or(Type::mixed()),
             // The same shape as `property_access_type`'s own
             // identical handling: the narrower, just-`instanceof`-checked
             // type is always the last member `narrow_instanceof_true`
@@ -818,14 +817,14 @@ impl<'a> Checker<'a> {
                     let ty = self.method_call_return_type(recv, m, method, args, locals);
                     (ty != Type::Mixed(false)).then_some(ty)
                 })
-                .unwrap_or(Type::Mixed(false)),
+                .unwrap_or(Type::mixed()),
             Type::Union(members) => members
                 .iter()
                 .map(|m| self.method_call_return_type(recv, m, method, args, locals))
                 .filter(|ty| *ty != Type::Mixed(false))
                 .reduce(union_types)
-                .unwrap_or(Type::Mixed(false)),
-            _ => Type::Mixed(false),
+                .unwrap_or(Type::mixed()),
+            _ => Type::mixed(),
         }
     }
 
@@ -853,7 +852,7 @@ impl<'a> Checker<'a> {
                 let resolved = self.infer_call_return_type(&sig, &resolved_args, locals);
                 self.resolve_pseudo_at(&resolved, &owner, class)
             })
-            .unwrap_or(Type::Mixed(false))
+            .unwrap_or(Type::mixed())
     }
 
     /// `generic_object_method_return_type`'s property-typed sibling -
@@ -871,7 +870,7 @@ impl<'a> Checker<'a> {
                 );
                 self.resolve_pseudo_at(&ty, &owner, class)
             })
-            .unwrap_or(Type::Mixed(false))
+            .unwrap_or(Type::mixed())
     }
 
     /// The SQL text a DBAL fetch*/`executeQuery` call actually runs -
@@ -934,7 +933,7 @@ fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<T
     };
     let fields = &shape.fields;
     let numeric_shape = || {
-        Type::ArrayShape(Shape::sealed(
+        Type::array_shape(Shape::sealed(
             fields
                 .iter()
                 .enumerate()
@@ -943,30 +942,34 @@ fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<T
         ))
     };
     let traversable_of =
-        |key: Type, value: Type| Type::Object("Traversable".into(), vec![key, value]);
+        |key: Type, value: Type| Type::object("Traversable".into(), vec![key, value]);
     match method {
-        "fetchAssociative" => Some(Type::Union(vec![
-            Type::ArrayShape(shape.clone()),
-            Type::False,
+        "fetchAssociative" => Some(Type::union_of(vec![
+            Type::array_shape(shape.clone()),
+            Type::bool_literal(false),
         ])),
-        "fetchAllAssociative" => Some(Type::list_of(Type::ArrayShape(shape.clone()))),
-        "iterateAssociative" => Some(traversable_of(Type::Int, Type::ArrayShape(shape.clone()))),
-        "fetchNumeric" => Some(Type::Union(vec![numeric_shape(), Type::False])),
+        "fetchAllAssociative" => Some(Type::list_of(Type::array_shape(shape.clone()))),
+        "iterateAssociative" => Some(traversable_of(
+            Type::int(),
+            Type::array_shape(shape.clone()),
+        )),
+        "fetchNumeric" => Some(Type::union_of(vec![
+            numeric_shape(),
+            Type::bool_literal(false),
+        ])),
         "fetchAllNumeric" => Some(Type::list_of(numeric_shape())),
-        "iterateNumeric" => Some(traversable_of(Type::Int, numeric_shape())),
-        "fetchOne" if !fields.is_empty() => {
-            Some(Type::Union(vec![fields[0].ty.clone(), Type::False]))
-        }
+        "iterateNumeric" => Some(traversable_of(Type::int(), numeric_shape())),
+        "fetchOne" if !fields.is_empty() => Some(Type::union_of(vec![
+            fields[0].ty.clone(),
+            Type::bool_literal(false),
+        ])),
         "fetchFirstColumn" if !fields.is_empty() => Some(Type::list_of(fields[0].ty.clone())),
         "iterateColumn" if !fields.is_empty() => {
-            Some(traversable_of(Type::Int, fields[0].ty.clone()))
+            Some(traversable_of(Type::int(), fields[0].ty.clone()))
         }
         "fetchAllKeyValue" if fields.len() >= 2 => {
             let key_ty = dynamic_write_key_type(&fields[0].ty);
-            Some(Type::Array(
-                Box::new(key_ty),
-                Box::new(fields[1].ty.clone()),
-            ))
+            Some(Type::array(key_ty, fields[1].ty.clone()))
         }
         "iterateKeyValue" if fields.len() >= 2 => {
             let key_ty = dynamic_write_key_type(&fields[0].ty);
@@ -974,12 +977,12 @@ fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<T
         }
         "fetchAllAssociativeIndexed" if !fields.is_empty() => {
             let key_ty = dynamic_write_key_type(&fields[0].ty);
-            let rest = Type::ArrayShape(Shape::sealed(fields[1..].to_vec()));
-            Some(Type::Array(Box::new(key_ty), Box::new(rest)))
+            let rest = Type::array_shape(Shape::sealed(fields[1..].to_vec()));
+            Some(Type::array(key_ty, rest))
         }
         "iterateAssociativeIndexed" if !fields.is_empty() => {
             let key_ty = dynamic_write_key_type(&fields[0].ty);
-            let rest = Type::ArrayShape(Shape::sealed(fields[1..].to_vec()));
+            let rest = Type::array_shape(Shape::sealed(fields[1..].to_vec()));
             Some(traversable_of(key_ty, rest))
         }
         _ => None,
@@ -1095,18 +1098,18 @@ impl<'a> Checker<'a> {
     fn doctrine_query_type(&self, source: Option<DoctrineQuerySource>) -> Type {
         let query = "Doctrine\\ORM\\Query".to_string();
         let Some((chain, items)) = source else {
-            return Type::Object(query.into(), Vec::new());
+            return Type::object(query.into(), Vec::new());
         };
         let key = crate::checker::doctrine::result_shape::index_key_type(self, &chain)
-            .unwrap_or(Type::Null);
+            .unwrap_or(Type::null());
         let row = if chain.dml {
-            Some(Type::Never)
+            Some(Type::never())
         } else {
             crate::checker::doctrine::result_shape::build_result_row_type(self, &chain, &items)
         };
         match row {
-            Some(row) => Type::Object(query.into(), vec![key, row]),
-            None => Type::Object(query.into(), Vec::new()),
+            Some(row) => Type::object(query.into(), vec![key, row]),
+            None => Type::object(query.into(), Vec::new()),
         }
     }
 
@@ -1149,12 +1152,12 @@ impl<'a> Checker<'a> {
         let dml = matches!(object_row, Some(Type::Never))
             || source.as_ref().is_some_and(|(chain, _)| chain.dml);
         if dml && method != "toIterable" {
-            return Type::IntRange(Some(0), None);
+            return Type::int_range(Some(0), None);
         }
         let key = key.or_else(|| {
             source
                 .as_ref()
-                .map(|(chain, _)| shape::index_key_type(self, chain).unwrap_or(Type::Null))
+                .map(|(chain, _)| shape::index_key_type(self, chain).unwrap_or(Type::null()))
         });
         let element = match mode {
             HydrationMode::Object | HydrationMode::SimpleObject => object_row.or_else(|| {
@@ -1174,9 +1177,9 @@ impl<'a> Checker<'a> {
             HydrationMode::SingleScalar => source
                 .as_ref()
                 .and_then(|(chain, items)| shape::single_scalar_column_type(self, chain, items)),
-            HydrationMode::Unknown => return Type::Mixed(false),
+            HydrationMode::Unknown => return Type::mixed(),
         };
-        let element_or_mixed = element.clone().unwrap_or(Type::Mixed(false));
+        let element_or_mixed = element.clone().unwrap_or(Type::mixed());
         let collection = || {
             // `fetchFirstColumn()` always yields a list.
             let keyed = mode != HydrationMode::ScalarColumn;
@@ -1192,11 +1195,11 @@ impl<'a> Checker<'a> {
                         | HydrationMode::SimpleObject
                 )
             {
-                return Type::Mixed(false);
+                return Type::mixed();
             }
             match (&element, &key) {
                 (Some(el), Some(key)) if keyed && *key != Type::Null => {
-                    Type::Array(Box::new(key.clone()), Box::new(el.clone()))
+                    Type::array(key.clone(), el.clone())
                 }
                 (Some(el), _) => Type::list_of(el.clone()),
                 (None, _) => doctrine_query_result_list_type(),
@@ -1205,16 +1208,14 @@ impl<'a> Checker<'a> {
         let single_scalar = mode == HydrationMode::SingleScalar;
         match method {
             "getSingleScalarResult" | "getSingleResult" => element_or_mixed,
-            "getOneOrNullResult" => union_types(element_or_mixed, Type::Null),
-            "toIterable" => Type::Union(vec![
-                Type::Array(
-                    Box::new(
-                        key.filter(|k| *k != Type::Null)
-                            .unwrap_or_else(Type::unknown_array_key),
-                    ),
-                    Box::new(element_or_mixed),
+            "getOneOrNullResult" => union_types(element_or_mixed, Type::null()),
+            "toIterable" => Type::union_of(vec![
+                Type::array(
+                    key.filter(|k| *k != Type::Null)
+                        .unwrap_or_else(Type::unknown_array_key),
+                    element_or_mixed,
                 ),
-                Type::Object("Traversable".into(), Vec::new()),
+                Type::object("Traversable".into(), Vec::new()),
             ]),
             // `getResult(HYDRATE_SINGLE_SCALAR)` hands back the scalar
             // itself, not a collection.

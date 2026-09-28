@@ -12,6 +12,7 @@ pub use syntax::php_string::PhpString;
 
 mod coercion;
 mod conditional;
+mod constructors;
 mod display;
 mod extension;
 mod hierarchy;

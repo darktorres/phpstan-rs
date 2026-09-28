@@ -12,11 +12,11 @@ fn column(ty: ColumnType, nullable: bool) -> Column {
 fn a_nullable_column_adds_null_to_its_type() {
     assert_eq!(
         column_value_type(&column(ColumnType::Int, true)),
-        Type::Union(vec![Type::Int, Type::Null])
+        Type::union_of(vec![Type::int(), Type::null()])
     );
     assert_eq!(
         column_value_type(&column(ColumnType::Int, false)),
-        Type::Int
+        Type::int()
     );
 }
 
@@ -24,7 +24,7 @@ fn a_nullable_column_adds_null_to_its_type() {
 fn a_nullable_number_column_is_one_flat_union() {
     assert_eq!(
         column_value_type(&column(ColumnType::Number, true)),
-        Type::Union(vec![Type::Int, Type::Float, Type::Null])
+        Type::union_of(vec![Type::int(), Type::float(), Type::null()])
     );
 }
 
@@ -32,9 +32,9 @@ fn a_nullable_number_column_is_one_flat_union() {
 fn an_enum_column_is_the_union_of_its_labels() {
     assert_eq!(
         column_php_type(&ColumnType::Enum(vec!["a".to_string(), "b".to_string()])),
-        Type::Union(vec![
-            Type::StringLiteral("a".into()),
-            Type::StringLiteral("b".into()),
+        Type::union_of(vec![
+            Type::string_literal("a".into()),
+            Type::string_literal("b".into()),
         ])
     );
 }
@@ -46,10 +46,10 @@ fn a_nullable_enum_column_is_one_flat_union() {
             ColumnType::Enum(vec!["a".to_string(), "b".to_string()]),
             true
         )),
-        Type::Union(vec![
-            Type::StringLiteral("a".into()),
-            Type::StringLiteral("b".into()),
-            Type::Null,
+        Type::union_of(vec![
+            Type::string_literal("a".into()),
+            Type::string_literal("b".into()),
+            Type::null(),
         ])
     );
 }

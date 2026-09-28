@@ -91,7 +91,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let actual = if is_null_default(&p.default) {
-                union_types(actual, Type::Null)
+                union_types(actual, Type::null())
             } else {
                 actual
             };

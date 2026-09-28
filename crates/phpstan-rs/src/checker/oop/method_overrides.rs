@@ -97,7 +97,7 @@ impl<'a> Checker<'a> {
         let Some(own_sig) = info.methods().get(method_name) else {
             return;
         };
-        let throwable = || Type::Object("Throwable".into(), Vec::new());
+        let throwable = || Type::object("Throwable".into(), Vec::new());
         let own_throws = own_sig.throws().clone().unwrap_or_else(throwable);
         if own_throws == Type::Void {
             return;

@@ -206,7 +206,7 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
                     tp.default
                         .as_ref()
                         .map(|d| substitute_scoped(d, bindings, scope))
-                        .unwrap_or(Type::Mixed(false))
+                        .unwrap_or(Type::mixed())
                 })
             } else {
                 ty.clone()

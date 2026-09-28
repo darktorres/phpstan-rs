@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
                 ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _) => {
                     if let Some(base_key) = narrowing_key(base) {
                         let current = self.current_narrowed_type(base, &base_key, locals);
-                        locals.insert(base_key, narrow_type_excluding(&current, &Type::Null));
+                        locals.insert(base_key, narrow_type_excluding(&current, &Type::null()));
                     }
                     e = unwrap_grouping(base);
                     continue;
@@ -328,7 +328,11 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         branch_true: bool,
     ) {
-        let marker = if branch_true { Type::True } else { Type::False };
+        let marker = if branch_true {
+            Type::bool_literal(true)
+        } else {
+            Type::bool_literal(false)
+        };
         if let Some(implied) = locals
             .branch_implied_facts
             .get(&discriminant_canonical_key(subject, &marker))
@@ -418,8 +422,16 @@ impl<'a> Checker<'a> {
                 )
             })
         } else {
-            truthiness_discriminant_subject(cond)
-                .map(|key| (key, if branch_true { Type::True } else { Type::False }))
+            truthiness_discriminant_subject(cond).map(|key| {
+                (
+                    key,
+                    if branch_true {
+                        Type::bool_literal(true)
+                    } else {
+                        Type::bool_literal(false)
+                    },
+                )
+            })
         }
     }
 
@@ -647,11 +659,11 @@ impl<'a> Checker<'a> {
                     &parsed.groups,
                     &parsed.alternation_branch_counts,
                     &parsed.alternation_wrapped_in_optional_quantifier,
-                    &Type::String,
+                    &Type::string(),
                     false,
                 )
             } else {
-                Type::ArrayShape(types::Shape::sealed(Vec::new()))
+                Type::array_shape(types::Shape::sealed(Vec::new()))
             };
             purge_stale_narrowing_for(locals, matches_name);
             locals.insert(matches_name.to_string(), narrowed);
@@ -939,7 +951,7 @@ impl<'a> Checker<'a> {
                     for operand in operands {
                         if let Some(key) = narrowing_key(operand) {
                             let current = self.current_narrowed_type(operand, &key, locals);
-                            locals.insert(key, narrow_type_excluding(&current, &Type::Null));
+                            locals.insert(key, narrow_type_excluding(&current, &Type::null()));
                         }
                         self.narrow_isset_containers(operand, locals);
                     }
@@ -1015,17 +1027,22 @@ impl<'a> Checker<'a> {
                             // `string $x` under is_numeric($x) narrows
                             // to plain numeric-string, `mixed $x`
                             // narrows to int|float|numeric-string.
-                            let excluded = [Type::Bool, Type::True, Type::False, Type::Null]
-                                .into_iter()
-                                .fold(current.into_owned(), |acc, excluded| {
-                                    narrow_type_excluding(&acc, &excluded)
-                                });
+                            let excluded = [
+                                Type::bool(),
+                                Type::bool_literal(true),
+                                Type::bool_literal(false),
+                                Type::null(),
+                            ]
+                            .into_iter()
+                            .fold(current.into_owned(), |acc, excluded| {
+                                narrow_type_excluding(&acc, &excluded)
+                            });
                             upgrade_string_to_numeric(&excluded)
                         } else {
                             // Int/Float are unconditionally numeric, so
                             // failing is_numeric proves the value wasn't
                             // one - nothing else can be dropped this way.
-                            [Type::Int, Type::Float]
+                            [Type::int(), Type::float()]
                                 .into_iter()
                                 .fold(current.into_owned(), |acc, excluded| {
                                     narrow_type_excluding(&acc, &excluded)

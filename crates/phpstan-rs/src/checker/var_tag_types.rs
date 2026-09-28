@@ -66,13 +66,11 @@ fn offset_value_type(ty: &Type, key: &Type) -> Type {
     match ty {
         Type::ArrayShape(shape) => {
             let Some(key) = types::ShapeKey::from_type(key) else {
-                return Type::Mixed(false);
+                return Type::mixed();
             };
-            shape
-                .field(&key)
-                .map_or(Type::Mixed(false), |f| f.ty.clone())
+            shape.field(&key).map_or(Type::mixed(), |f| f.ty.clone())
         }
-        other => Checker::array_element_type(other).unwrap_or(Type::Mixed(false)),
+        other => Checker::array_element_type(other).unwrap_or(Type::mixed()),
     }
 }
 
@@ -80,28 +78,28 @@ fn offset_value_type(ty: &Type, key: &Type) -> Type {
 /// object's comes from PHPDoc generics.
 fn native_iterable_value(ty: &Type) -> Type {
     if is_array_like(ty) {
-        Checker::array_element_type(ty).unwrap_or(Type::Mixed(false))
+        Checker::array_element_type(ty).unwrap_or(Type::mixed())
     } else {
-        Type::Mixed(false)
+        Type::mixed()
     }
 }
 
 fn native_iterable_key(ty: &Type) -> Type {
     if is_array_like(ty) {
-        Checker::array_key_type(ty).unwrap_or(Type::Mixed(false))
+        Checker::array_key_type(ty).unwrap_or(Type::mixed())
     } else {
-        Type::Mixed(false)
+        Type::mixed()
     }
 }
 
 /// `ty` with `static` bound to `class`.
 fn bind_static(ty: &Type, class: &str) -> Type {
     match ty {
-        Type::StaticRef(args) => Type::Object(
+        Type::StaticRef(args) => Type::object(
             class.into(),
             args.iter().map(|a| bind_static(a, class)).collect(),
         ),
-        Type::This => Type::Object(class.into(), Vec::new()),
+        Type::This => Type::object(class.into(), Vec::new()),
         other => other.map_children(&mut |c| bind_static(c, class)),
     }
 }
@@ -123,7 +121,7 @@ impl<'a> Checker<'a> {
     /// a `= null` default's implicit nullability.
     pub(crate) fn closure_param_native(&self, p: &Param) -> Type {
         if p.type_hint.is_none() {
-            return Type::Mixed(false);
+            return Type::mixed();
         }
         let ty = self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref());
         let ty = match &self.current_class {
@@ -132,7 +130,7 @@ impl<'a> Checker<'a> {
         };
         let ty = registry::apply_implicit_nullable_default(ty, p.default.as_ref());
         if p.variadic {
-            Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+            Type::array(Type::unknown_array_key(), ty)
         } else {
             ty
         }
@@ -144,17 +142,17 @@ impl<'a> Checker<'a> {
     pub(crate) fn native_expr_type(&self, e: &Expr, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::Literal(_) => self.infer_expr(e, locals),
-            ExprKind::Interpolated(_) => Type::String,
+            ExprKind::Interpolated(_) => Type::string(),
             ExprKind::Grouping(inner)
             | ExprKind::ErrorSuppress(inner)
             | ExprKind::Clone(inner, _) => self.native_expr_type(inner, locals),
             ExprKind::Assign(_, rhs) => self.native_expr_type(rhs, locals),
-            ExprKind::CompoundAssign(BinOp::Concat, ..) => Type::String,
+            ExprKind::CompoundAssign(BinOp::Concat, ..) => Type::string(),
             ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
                 let l = self.native_expr_type(lhs, locals);
                 let r = self.native_expr_type(rhs, locals);
                 if matches!(l, Type::Mixed(_)) || matches!(r, Type::Mixed(_)) {
-                    Type::Mixed(false)
+                    Type::mixed()
                 } else {
                     union_types(l, r)
                 }
@@ -166,7 +164,7 @@ impl<'a> Checker<'a> {
                 let mut value: Option<Type> = None;
                 for item in items {
                     let item_ty = if item.spread {
-                        Type::Mixed(false)
+                        Type::mixed()
                     } else {
                         self.native_expr_type(&item.value, locals)
                     };
@@ -175,10 +173,7 @@ impl<'a> Checker<'a> {
                         Some(prev) => union_types(prev, item_ty),
                     });
                 }
-                Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(value.unwrap_or(Type::Mixed(false))),
-                )
+                Type::array(Type::unknown_array_key(), value.unwrap_or(Type::mixed()))
             }
             ExprKind::Variable(name) if &**name == "this" => self.infer_expr(e, locals),
             ExprKind::Variable(name) => match (locals.native(name), locals.get(name)) {
@@ -189,30 +184,27 @@ impl<'a> Checker<'a> {
                 {
                     native.clone()
                 }
-                _ => Type::Mixed(false),
+                _ => Type::mixed(),
             },
             ExprKind::Cast(cast, _) => match cast.kind() {
-                CastKind::Int => Type::Int,
-                CastKind::Float => Type::Float,
-                CastKind::String => Type::String,
-                CastKind::Bool => Type::Bool,
-                CastKind::Array => Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(Type::Mixed(false)),
-                ),
-                CastKind::Unset => Type::Null,
-                CastKind::Object | CastKind::Void => Type::Mixed(false),
+                CastKind::Int => Type::int(),
+                CastKind::Float => Type::float(),
+                CastKind::String => Type::string(),
+                CastKind::Bool => Type::bool(),
+                CastKind::Array => Type::array(Type::unknown_array_key(), Type::mixed()),
+                CastKind::Unset => Type::null(),
+                CastKind::Object | CastKind::Void => Type::mixed(),
             },
             ExprKind::New(..) => match self.infer_expr(e, locals) {
-                Type::Object(class, _) => Type::Object(class, Vec::new()),
-                _ => Type::Mixed(false),
+                Type::Object(class, _) => Type::object(class, Vec::new()),
+                _ => Type::mixed(),
             },
             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {
-                Type::Object("Closure".into(), Vec::new())
+                Type::object("Closure".into(), Vec::new())
             }
-            ExprKind::Instanceof(..) | ExprKind::Unary(UnaryOp::Not, _) => Type::Bool,
+            ExprKind::Instanceof(..) | ExprKind::Unary(UnaryOp::Not, _) => Type::bool(),
             ExprKind::Binary(op, lhs, rhs) => match op {
-                BinOp::Concat => Type::String,
+                BinOp::Concat => Type::string(),
                 BinOp::Eq
                 | BinOp::Identical
                 | BinOp::NotEq
@@ -225,31 +217,31 @@ impl<'a> Checker<'a> {
                 | BinOp::Or
                 | BinOp::LogicalAnd
                 | BinOp::LogicalOr
-                | BinOp::LogicalXor => Type::Bool,
-                BinOp::Spaceship => Type::Int,
+                | BinOp::LogicalXor => Type::bool(),
+                BinOp::Spaceship => Type::int(),
                 BinOp::Coalesce => {
                     let l = self.native_expr_type(lhs, locals);
                     let r = self.native_expr_type(rhs, locals);
                     if matches!(l, Type::Mixed(_)) || matches!(r, Type::Mixed(_)) {
-                        Type::Mixed(false)
+                        Type::mixed()
                     } else {
                         union_types(l, r)
                     }
                 }
-                _ => Type::Mixed(false),
+                _ => Type::mixed(),
             },
             ExprKind::Ternary(cond, then, otherwise) => {
                 let t = self.native_expr_type(then.as_deref().unwrap_or(cond), locals);
                 let o = self.native_expr_type(otherwise, locals);
                 if matches!(t, Type::Mixed(_)) || matches!(o, Type::Mixed(_)) {
-                    Type::Mixed(false)
+                    Type::mixed()
                 } else {
                     union_types(t, o)
                 }
             }
             ExprKind::Call(callee, _) => {
                 let ExprKind::Name(name) = &callee.kind else {
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 };
                 let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
                 let sig = self.registry.lookup_function(&primary).or_else(|| {
@@ -259,16 +251,16 @@ impl<'a> Checker<'a> {
                 });
                 match sig {
                     Some(sig) if !sig.is_magic() => sig.return_type_native().clone(),
-                    _ => Type::Mixed(false),
+                    _ => Type::mixed(),
                 }
             }
             ExprKind::MethodCall(receiver, method, _, nullsafe) => {
                 let Type::Object(class, _) = self.native_expr_type(receiver, locals) else {
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 };
                 let ty = self.native_method_return(&class, method);
                 if *nullsafe && !matches!(ty, Type::Mixed(_)) {
-                    union_types(ty, Type::Null)
+                    union_types(ty, Type::null())
                 } else {
                     ty
                 }
@@ -283,16 +275,16 @@ impl<'a> Checker<'a> {
                 };
                 match class {
                     Some(class) => self.native_method_return(&class, method),
-                    None => Type::Mixed(false),
+                    None => Type::mixed(),
                 }
             }
             ExprKind::PropertyAccess(receiver, prop, nullsafe) => {
                 let Type::Object(class, _) = self.native_expr_type(receiver, locals) else {
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 };
                 let ty = self.native_property_type(&class, prop, false);
                 if *nullsafe && !matches!(ty, Type::Mixed(_)) {
-                    union_types(ty, Type::Null)
+                    union_types(ty, Type::null())
                 } else {
                     ty
                 }
@@ -303,10 +295,10 @@ impl<'a> Checker<'a> {
                     .and_then(|n| self.resolve_static_class_name(n))
                 {
                     Some(class) => self.native_property_type(&class, prop, true),
-                    None => Type::Mixed(false),
+                    None => Type::mixed(),
                 }
             }
-            _ => Type::Mixed(false),
+            _ => Type::mixed(),
         }
     }
 
@@ -314,10 +306,10 @@ impl<'a> Checker<'a> {
     /// `self` to the declaring class. `mixed` for a `@method` tag.
     fn native_method_return(&self, class: &str, method: &str) -> Type {
         let Some((owner, sig)) = self.registry.lookup_method_with_owner(class, method) else {
-            return Type::Mixed(false);
+            return Type::mixed();
         };
         if sig.is_magic() {
-            return Type::Mixed(false);
+            return Type::mixed();
         }
         self.resolve_pseudo(&bind_static(sig.return_type_native(), class), &owner)
     }
@@ -331,7 +323,7 @@ impl<'a> Checker<'a> {
             {
                 self.resolve_pseudo(sig.ty_native(), &owner)
             }
-            _ => Type::Mixed(false),
+            _ => Type::mixed(),
         }
     }
 
@@ -602,11 +594,13 @@ impl<'a> Checker<'a> {
                 for (i, item) in items.iter().enumerate() {
                     let key = match &item.key {
                         Some(k) => match &k.kind {
-                            ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
-                            ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
-                            _ => Type::Mixed(false),
+                            ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
+                            ExprKind::Literal(Literal::String(s)) => {
+                                Type::string_literal(s.clone())
+                            }
+                            _ => Type::mixed(),
                         },
-                        None => Type::IntLiteral(i as i64),
+                        None => Type::int_literal(i as i64),
                     };
                     let item_described = Described {
                         native: offset_value_type(&described.native, &key),
@@ -629,15 +623,15 @@ impl<'a> Checker<'a> {
     fn iterable_value_of(&self, ty: &Type) -> Type {
         Self::array_element_type(ty)
             .or_else(|| self.iterable_element_type(ty).map(|(_, v)| v))
-            .unwrap_or(Type::Mixed(false))
+            .unwrap_or(Type::mixed())
     }
 
     fn iterable_key_of(&self, ty: &Type) -> Type {
         if is_array_like(ty) {
-            return Self::array_key_type(ty).unwrap_or(Type::Mixed(false));
+            return Self::array_key_type(ty).unwrap_or(Type::mixed());
         }
         self.iterable_element_type(ty)
-            .map_or(Type::Mixed(false), |(k, _)| k)
+            .map_or(Type::mixed(), |(k, _)| k)
     }
 
     /// `VarTagTypeRuleHelper::checkExprType`: `varTag.nativeType` when
@@ -716,10 +710,7 @@ impl<'a> Checker<'a> {
             ValueShape::Literal => self.at_least_maybe_super_type(ty, tag),
             ValueShape::ArrayLiteral { empty } => {
                 let ty = if empty {
-                    Type::Array(
-                        Box::new(Type::unknown_array_key()),
-                        Box::new(Type::Mixed(false)),
-                    )
+                    Type::array(Type::unknown_array_key(), Type::mixed())
                 } else {
                     ty.clone()
                 };
@@ -735,10 +726,7 @@ impl<'a> Checker<'a> {
             return true;
         }
         if matches!(ty, Type::ArrayShape(shape) if shape.is_empty_array()) {
-            let array = Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(Type::Mixed(false)),
-            );
+            let array = Type::array(Type::unknown_array_key(), Type::mixed());
             return self.at_least_maybe_super_type(&array, tag);
         }
         if is_array_like(ty) && is_array_like(tag) {

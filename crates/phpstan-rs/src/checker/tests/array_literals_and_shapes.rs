@@ -23,8 +23,12 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
     // real field types together, not just picks one arbitrarily.
     let members: Vec<Type> = (0..13)
         .map(|i| {
-            let value = if i % 2 == 0 { Type::True } else { Type::False };
-            Type::ArrayShape(Shape::from_named(vec![("x".to_string(), value, false)]))
+            let value = if i % 2 == 0 {
+                Type::bool_literal(true)
+            } else {
+                Type::bool_literal(false)
+            };
+            Type::array_shape(Shape::from_named(vec![("x".to_string(), value, false)]))
         })
         .collect();
     let result = generalize_by_key_set(members);
@@ -41,7 +45,7 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
             assert!(!fields[0].2, "the merged field must not be optional");
             assert_eq!(
                 fields[0].1,
-                Type::Bool,
+                Type::bool(),
                 "expected the alternating true and false values to fold into bool"
             );
         }
@@ -56,15 +60,21 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
 fn generalize_by_key_set_only_merges_the_matching_subset() {
     let mut members: Vec<Type> = (0..13)
         .map(|i| {
-            let value = if i % 2 == 0 { Type::True } else { Type::False };
-            Type::ArrayShape(Shape::from_named(vec![("x".to_string(), value, false)]))
+            let value = if i % 2 == 0 {
+                Type::bool_literal(true)
+            } else {
+                Type::bool_literal(false)
+            };
+            Type::array_shape(Shape::from_named(vec![("x".to_string(), value, false)]))
         })
         .collect();
-    members.extend(
-        (0..5).map(|i| {
-            Type::ArrayShape(Shape::from_named(vec![(format!("y{i}"), Type::Int, false)]))
-        }),
-    );
+    members.extend((0..5).map(|i| {
+        Type::array_shape(Shape::from_named(vec![(
+            format!("y{i}"),
+            Type::int(),
+            false,
+        )]))
+    }));
     let result = generalize_by_key_set(members);
     // The 13 same-key-set ("x") shapes merge into 1; the 5
     // different-key-set ("y0".."y4") shapes each stay distinct and

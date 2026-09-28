@@ -44,8 +44,8 @@ fn an_entity_records_its_id_field_scalar_fields_and_repository_class() {
         .as_ref()
         .unwrap();
     assert_eq!(entity.id_field.as_deref(), Some("id"));
-    assert_eq!(entity.fields.get("id"), Some(&Type::Int));
-    assert_eq!(entity.fields.get("name"), Some(&Type::String));
+    assert_eq!(entity.fields.get("id"), Some(&Type::int()));
+    assert_eq!(entity.fields.get("name"), Some(&Type::string()));
     assert_eq!(
         entity.repository_class.as_deref(),
         Some("App\\TagRepository")

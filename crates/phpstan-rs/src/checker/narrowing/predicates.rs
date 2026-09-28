@@ -334,59 +334,53 @@ pub(crate) fn propagate_container_field_facts(
 
 pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
     match name {
-        "is_string" => Some(Type::String),
-        "is_int" | "is_integer" | "is_long" => Some(Type::Int),
-        "is_float" | "is_double" => Some(Type::Float),
-        "is_bool" | "is_boolean" => Some(Type::Bool),
+        "is_string" => Some(Type::string()),
+        "is_int" | "is_integer" | "is_long" => Some(Type::int()),
+        "is_float" | "is_double" => Some(Type::float()),
+        "is_bool" | "is_boolean" => Some(Type::bool()),
         // Real PHPStan's own `IsArrayFunctionTypeSpecifyingExtension`
         // narrows to `ArrayType(MixedType(true), MixedType(true))` -
         // explicit, not implicit: this is a deliberate "the narrowed type
         // really is array-of-anything" answer, not a "we don't know"
         // fallback (confirmed reading `vendor/phpstan-src` directly).
-        "is_array" => Some(Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(true)),
+        "is_array" => Some(Type::array(
+            Type::unknown_array_key(),
+            Type::explicit_mixed(),
         )),
         // `is_countable($x)` is true for exactly
         // `array|Countable` - guards `count($x)` in a correct PHP 8+
         // idiom (`count()` on anything else is a `TypeError`).
-        "is_countable" => Some(Type::Union(vec![
-            Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(Type::Mixed(false)),
-            ),
-            Type::Object("Countable".into(), Vec::new()),
+        "is_countable" => Some(Type::union_of(vec![
+            Type::array(Type::unknown_array_key(), Type::mixed()),
+            Type::object("Countable".into(), Vec::new()),
         ])),
         // Real PHP's own native `iterable` type hint, defined
         // as exactly `array|Traversable` - the same target `types::
         // parse_type_string`'s own dedicated `"iterable"` arm resolves
         // the native type hint to, kept in sync deliberately (both are
         // "what does `iterable` actually mean" in one place each).
-        "is_iterable" => Some(Type::Union(vec![
-            Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(Type::Mixed(false)),
-            ),
-            Type::Object("Traversable".into(), Vec::new()),
+        "is_iterable" => Some(Type::union_of(vec![
+            Type::array(Type::unknown_array_key(), Type::mixed()),
+            Type::object("Traversable".into(), Vec::new()),
         ])),
-        "is_null" => Some(Type::Null),
-        "is_object" => Some(Type::ObjectWithoutClass),
-        "is_callable" => Some(Type::Callable(None)),
+        "is_null" => Some(Type::null()),
+        "is_object" => Some(Type::object_without_class()),
+        "is_callable" => Some(Type::callable(None)),
         // `proc_open()`/`fsockopen()` return
         // `resource|false`, commonly guarded with
         // `if (! is_resource($x)) { throw ...; }` before `fclose`/
         // `fwrite`/`fread`/`proc_close`/etc.
-        "is_resource" => Some(Type::Resource { closed: false }),
+        "is_resource" => Some(Type::resource(false)),
         // `is_scalar($x)` is true for exactly `int|float|string|bool` -
         // unlike `is_numeric` (its own dedicated arm above, not a plain
         // table entry here, since a string only *sometimes* qualifies),
         // `is_scalar`'s real set is exactly these four concrete types
         // with no such conditional gap.
-        "is_scalar" => Some(Type::Union(vec![
-            Type::Int,
-            Type::Float,
-            Type::String,
-            Type::Bool,
+        "is_scalar" => Some(Type::union_of(vec![
+            Type::int(),
+            Type::float(),
+            Type::string(),
+            Type::bool(),
         ])),
         _ => None,
     }

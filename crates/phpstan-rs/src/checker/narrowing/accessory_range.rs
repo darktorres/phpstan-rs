@@ -34,16 +34,16 @@ pub(crate) fn upgrade_string_to_numeric(ty: &Type) -> Type {
 /// un-upgraded.
 pub(crate) fn upgrade_string_with_accessory(ty: &Type, kind: AccessoryKind) -> Type {
     match ty {
-        Type::String => Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
+        Type::String => Type::intersection_of(vec![Type::string(), Type::accessory(kind)]),
         Type::Intersection(members)
             if members.iter().any(|m| matches!(m, Type::String))
                 && !members.contains(&Type::Accessory(kind)) =>
         {
             let mut members = members.clone();
-            members.push(Type::Accessory(kind));
-            Type::Intersection(members)
+            members.push(Type::accessory(kind));
+            Type::intersection_of(members)
         }
-        Type::Union(members) => Type::Union(
+        Type::Union(members) => Type::union_of(
             members
                 .iter()
                 .map(|m| upgrade_string_with_accessory(m, kind))
@@ -59,7 +59,7 @@ pub(crate) fn upgrade_string_with_accessory(ty: &Type, kind: AccessoryKind) -> T
 pub(crate) fn string_type_has_accessory(ty: &Type, kind: AccessoryKind) -> bool {
     types::Relation::structural()
         .is_super_type_of(
-            &Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
+            &Type::intersection_of(vec![Type::string(), Type::accessory(kind)]),
             ty,
         )
         .yes()
@@ -83,7 +83,7 @@ fn strip_empty_string_member(ty: &Type) -> Type {
             match filtered.len() {
                 0 => ty.clone(),
                 1 => filtered.into_iter().next().unwrap(),
-                _ => Type::Union(filtered),
+                _ => Type::union_of(filtered),
             }
         }
         other => other.clone(),
@@ -102,30 +102,32 @@ pub(crate) fn concat_operand_to_string(ty: &Type) -> Type {
     match ty {
         Type::StringLiteral(_) | Type::String => ty.clone(),
         Type::Intersection(members) if members.contains(&Type::String) => ty.clone(),
-        Type::IntLiteral(n) => Type::StringLiteral(n.to_string().into()),
-        Type::FloatLiteral(f) => Type::StringLiteral(format_php_float(*f).into()),
-        Type::True => Type::StringLiteral("1".into()),
-        Type::False | Type::Null => Type::StringLiteral(PhpString::default()),
-        Type::Bool => Type::Union(vec![
-            Type::StringLiteral(PhpString::default()),
-            Type::StringLiteral("1".into()),
+        Type::IntLiteral(n) => Type::string_literal(n.to_string().into()),
+        Type::FloatLiteral(f) => Type::string_literal(format_php_float(*f).into()),
+        Type::True => Type::string_literal("1".into()),
+        Type::False | Type::Null => Type::string_literal(PhpString::default()),
+        Type::Bool => Type::union_of(vec![
+            Type::string_literal(PhpString::default()),
+            Type::string_literal("1".into()),
         ]),
-        Type::Int | Type::IntRange(_, _) => Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::DecimalIntegerString),
+        Type::Int | Type::IntRange(_, _) => Type::intersection_of(vec![
+            Type::string(),
+            Type::accessory(AccessoryKind::DecimalIntegerString),
         ]),
-        Type::Float => Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::UppercaseString),
-            Type::Accessory(AccessoryKind::NumericString),
+        Type::Float => Type::intersection_of(vec![
+            Type::string(),
+            Type::accessory(AccessoryKind::UppercaseString),
+            Type::accessory(AccessoryKind::NumericString),
         ]),
-        Type::Union(members) => Type::Union(members.iter().map(concat_operand_to_string).collect()),
+        Type::Union(members) => {
+            Type::union_of(members.iter().map(concat_operand_to_string).collect())
+        }
         // Every other shape (`Mixed`, an object without `__toString()` -
         // already flagged separately by this project's own implicit-
         // `__toString()`/array-to-string checks, not this function's
         // concern) has no more precise "as a string" projection than
         // plain `string`.
-        _ => Type::String,
+        _ => Type::string(),
     }
 }
 
@@ -171,7 +173,7 @@ pub(crate) fn resolve_concat_type(l: &Type, r: &Type) -> Type {
     }
     // Full constant fold when both sides are single literals.
     if let (Type::StringLiteral(a), Type::StringLiteral(b)) = (&l_str, &r_str) {
-        return Type::StringLiteral(a.concat(b));
+        return Type::string_literal(a.concat(b));
     }
 
     // Bounded constant-string cross product - covers a `Union` of
@@ -199,9 +201,9 @@ pub(crate) fn resolve_concat_type(l: &Type, r: &Type) -> Type {
         combos.dedup();
         if !combos.is_empty() {
             return if combos.len() == 1 {
-                Type::StringLiteral(combos.into_iter().next().unwrap())
+                Type::string_literal(combos.into_iter().next().unwrap())
             } else {
-                Type::Union(combos.into_iter().map(Type::StringLiteral).collect())
+                Type::union_of(combos.into_iter().map(Type::string_literal).collect())
             };
         }
     }
@@ -261,27 +263,27 @@ pub(crate) fn resolve_concat_type(l: &Type, r: &Type) -> Type {
     }
 
     if accessories.is_empty() {
-        Type::String
+        Type::string()
     } else {
-        let mut members = vec![Type::String];
-        members.extend(accessories.into_iter().map(Type::Accessory));
-        Type::Intersection(members)
+        let mut members = vec![Type::string()];
+        members.extend(accessories.into_iter().map(Type::accessory));
+        Type::intersection_of(members)
     }
 }
 
 pub(crate) fn upgrade_array_to_non_empty(ty: &Type) -> Type {
     match ty {
-        Type::Array(key, inner) => Type::Intersection(vec![
-            Type::Array(key.clone(), inner.clone()),
-            Type::Accessory(AccessoryKind::NonEmptyArray),
+        Type::Array(key, inner) => Type::intersection_of(vec![
+            Type::array((**key).clone(), (**inner).clone()),
+            Type::accessory(AccessoryKind::NonEmptyArray),
         ]),
         Type::Intersection(members)
             if members.iter().any(|m| matches!(m, Type::Array(_, _)))
                 && !members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray)) =>
         {
             let mut members = members.clone();
-            members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
-            Type::Intersection(members)
+            members.push(Type::accessory(AccessoryKind::NonEmptyArray));
+            Type::intersection_of(members)
         }
         // A genuinely empty `ArrayShape` is a real contradiction once
         // `count() > 0`/truthy is known - collapses to `Never` (the same
@@ -289,7 +291,7 @@ pub(crate) fn upgrade_array_to_non_empty(ty: &Type) -> Type {
         // falsy`'s own identical arm already uses) rather than staying
         // unchanged, so a `Union` member that's provably empty gets
         // dropped below instead of surviving as a spurious alternative.
-        Type::ArrayShape(shape) if shape.is_empty_array() => Type::Never,
+        Type::ArrayShape(shape) if shape.is_empty_array() => Type::never(),
         // A loop-built array whose own entry might still be its
         // pre-loop `[]` is a real `Union` including that empty-shape
         // alternative, which a `count($x) > 0` guard immediately
@@ -303,9 +305,9 @@ pub(crate) fn upgrade_array_to_non_empty(ty: &Type) -> Type {
                 .filter(|m| *m != Type::Never)
                 .collect();
             match kept.len() {
-                0 => Type::Never,
+                0 => Type::never(),
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => Type::union_of(kept),
             }
         }
         _ => ty.clone(),
@@ -438,19 +440,19 @@ pub(crate) fn comparison_narrowed_bounds(
 /// everywhere.
 pub(crate) fn upgrade_array_to_list(ty: &Type) -> Type {
     match ty {
-        Type::Array(key, inner) => Type::Intersection(vec![
-            Type::Array(key.clone(), inner.clone()),
-            Type::Accessory(AccessoryKind::ArrayList),
+        Type::Array(key, inner) => Type::intersection_of(vec![
+            Type::array((**key).clone(), (**inner).clone()),
+            Type::accessory(AccessoryKind::ArrayList),
         ]),
         Type::Intersection(members)
             if members.iter().any(|m| matches!(m, Type::Array(_, _)))
                 && !members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
         {
             let mut members = members.clone();
-            members.push(Type::Accessory(AccessoryKind::ArrayList));
-            Type::Intersection(members)
+            members.push(Type::accessory(AccessoryKind::ArrayList));
+            Type::intersection_of(members)
         }
-        Type::Union(members) => Type::Union(members.iter().map(upgrade_array_to_list).collect()),
+        Type::Union(members) => Type::union_of(members.iter().map(upgrade_array_to_list).collect()),
         _ => ty.clone(),
     }
 }
@@ -462,7 +464,7 @@ pub(crate) fn narrow_array_to_non_list(ty: &Type) -> Type {
         Type::Intersection(members)
             if members.contains(&Type::Accessory(AccessoryKind::ArrayList)) =>
         {
-            Type::Never
+            Type::never()
         }
         Type::Union(members) => {
             let kept: Vec<Type> = members
@@ -471,9 +473,9 @@ pub(crate) fn narrow_array_to_non_list(ty: &Type) -> Type {
                 .filter(|m| *m != Type::Never)
                 .collect();
             match kept.len() {
-                0 => Type::Never,
+                0 => Type::never(),
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => Type::union_of(kept),
             }
         }
         _ => upgrade_array_to_non_empty(ty),
@@ -493,38 +495,38 @@ mod resolve_concat_type_tests {
         // to plain `Type::Float`), so this is exercised directly rather
         // than through an end-to-end checker test.
         assert_eq!(
-            concat_operand_to_string(&Type::FloatLiteral(1.5)),
-            Type::StringLiteral("1.5".into())
+            concat_operand_to_string(&Type::float_literal(1.5)),
+            Type::string_literal("1.5".into())
         );
         let result = resolve_concat_type(
-            &Type::FloatLiteral(1.5),
-            &Type::StringLiteral("-suffix".into()),
+            &Type::float_literal(1.5),
+            &Type::string_literal("-suffix".into()),
         );
-        assert_eq!(result, Type::StringLiteral("1.5-suffix".into()));
+        assert_eq!(result, Type::string_literal("1.5-suffix".into()));
     }
 
     #[test]
     fn two_literal_strings_fully_constant_fold() {
         assert_eq!(
             resolve_concat_type(
-                &Type::StringLiteral("a".into()),
-                &Type::StringLiteral("b".into())
+                &Type::string_literal("a".into()),
+                &Type::string_literal("b".into())
             ),
-            Type::StringLiteral("ab".into())
+            Type::string_literal("ab".into())
         );
     }
 
     #[test]
     fn an_empty_string_operand_is_dropped_via_the_identity_shortcut() {
         assert_eq!(
-            resolve_concat_type(&Type::StringLiteral(PhpString::default()), &Type::Int),
-            concat_operand_to_string(&Type::Int)
+            resolve_concat_type(&Type::string_literal(PhpString::default()), &Type::int()),
+            concat_operand_to_string(&Type::int())
         );
     }
 
     #[test]
     fn an_int_typed_left_operand_concatenated_with_a_pure_digit_right_literal_is_numeric() {
-        let result = resolve_concat_type(&Type::Int, &Type::StringLiteral("5".into()));
+        let result = resolve_concat_type(&Type::int(), &Type::string_literal("5".into()));
         assert!(string_type_has_accessory(
             &result,
             AccessoryKind::NumericString
@@ -534,7 +536,7 @@ mod resolve_concat_type_tests {
     #[test]
     fn an_int_typed_left_operand_concatenated_with_a_negative_signed_right_literal_is_not_numeric()
     {
-        let result = resolve_concat_type(&Type::Int, &Type::StringLiteral("-5".into()));
+        let result = resolve_concat_type(&Type::int(), &Type::string_literal("-5".into()));
         assert!(!string_type_has_accessory(
             &result,
             AccessoryKind::NumericString

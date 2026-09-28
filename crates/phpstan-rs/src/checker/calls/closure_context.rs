@@ -233,7 +233,7 @@ impl<'a> Checker<'a> {
                             "variable.undefined",
                         );
                     }
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed(false));
+                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::mixed());
                     let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
                     if self.probe_span.get() == Some(u.span) {
                         *self.probe_var_provenance.borrow_mut() =
@@ -279,22 +279,20 @@ impl<'a> Checker<'a> {
                     );
                 let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
-                    declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+                    declared_return.as_ref().unwrap_or(&Type::mixed()),
                     "return type of anonymous function",
                     closure_expr.span,
                 );
                 self.check_type_trait_refs(
-                    declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+                    declared_return.as_ref().unwrap_or(&Type::mixed()),
                     "return type of anonymous function",
                     closure_expr.span,
                     "return.trait",
                 );
                 self.check_type_class_name_case(&declared_return_case_refs, closure_expr.span);
                 if let Some(c) = self.current_class.clone() {
-                    let resolved_return = self.resolve_pseudo(
-                        declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
-                        &c,
-                    );
+                    let resolved_return =
+                        self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::mixed()), &c);
                     self.check_no_parent_ref(
                         &resolved_return,
                         "return type of anonymous function",
@@ -364,7 +362,7 @@ impl<'a> Checker<'a> {
                     let mutated = closure_locals
                         .get(&u.name)
                         .cloned()
-                        .unwrap_or(Type::Mixed(false));
+                        .unwrap_or(Type::mixed());
                     if !locals.contains_key(&u.name) {
                         // See the identical fix's own comment at
                         // `checker::expr`'s `ExprKind::Closure` arm.

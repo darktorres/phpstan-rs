@@ -113,7 +113,7 @@ fn string_literals(ty: &Type) -> Option<Vec<&str>> {
 
 impl<'a> Checker<'a> {
     fn is_psr3_logger(&self, ty: &Type) -> bool {
-        let logger = Type::Object(("Psr\\Log\\LoggerInterface".to_string()).into(), Vec::new());
+        let logger = Type::object(("Psr\\Log\\LoggerInterface".to_string()).into(), Vec::new());
         !matches!(ty, Type::Mixed(_))
             && self.registry.is_super_type_of(&logger, ty) == types::TrinaryLogic::Yes
     }
@@ -335,7 +335,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if key == "exception" {
-                let throwable = Type::Object("Throwable".into(), Vec::new());
+                let throwable = Type::object("Throwable".into(), Vec::new());
                 if !matches!(value, Type::Mixed(_))
                     && self.registry.is_super_type_of(&throwable, value) != types::TrinaryLogic::Yes
                 {

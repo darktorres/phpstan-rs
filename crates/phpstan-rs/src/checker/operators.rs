@@ -59,11 +59,11 @@ impl<'a> Checker<'a> {
             Type::ClassString(_) | Type::ClassKindString(_) => false,
             Type::String => false,
             Type::StringLiteral(_) => types::Relation::structural()
-                .is_super_type_of(&Type::Accessory(AccessoryKind::NumericString), ty)
+                .is_super_type_of(&Type::accessory(AccessoryKind::NumericString), ty)
                 .yes(),
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
                 types::Relation::structural()
-                    .is_super_type_of(&Type::Accessory(AccessoryKind::NumericString), ty)
+                    .is_super_type_of(&Type::accessory(AccessoryKind::NumericString), ty)
                     .yes()
             }
             Type::Resource { .. } => false,
@@ -112,11 +112,11 @@ impl<'a> Checker<'a> {
         match ty {
             Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => true,
             Type::StringLiteral(_) => types::Relation::structural()
-                .is_super_type_of(&Type::Accessory(AccessoryKind::NumericString), ty)
+                .is_super_type_of(&Type::accessory(AccessoryKind::NumericString), ty)
                 .yes(),
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
                 types::Relation::structural()
-                    .is_super_type_of(&Type::Accessory(AccessoryKind::NumericString), ty)
+                    .is_super_type_of(&Type::accessory(AccessoryKind::NumericString), ty)
                     .yes()
             }
             Type::Object(name, _) => self.registry.is_subclass_of(name, class),
@@ -187,11 +187,11 @@ impl<'a> Checker<'a> {
                 return None;
             }
             if *op == BinOp::Spaceship {
-                return Some(Type::IntRange(Some(-1), Some(1)));
+                return Some(Type::int_range(Some(-1), Some(1)));
             }
             let other = if l_is { r_ty } else { l_ty };
             return if self.is_valid_overload_operand(other, class) {
-                Some(Type::Object(class.into(), Vec::new()))
+                Some(Type::object(class.into(), Vec::new()))
             } else {
                 None
             };
@@ -607,7 +607,7 @@ impl<'a> Checker<'a> {
     /// precedent everywhere else in this file/`coercion.rs`.
     fn is_strictly_number(&self, ty: &Type) -> bool {
         types::Relation::structural()
-            .is_super_type_of(&Type::Union(vec![Type::Int, Type::Float]), ty)
+            .is_super_type_of(&Type::union_of(vec![Type::int(), Type::float()]), ty)
             .yes()
             || matches!(ty, Type::Object(name, _) if
                 self.registry.is_subclass_of(name, "SimpleXMLElement")

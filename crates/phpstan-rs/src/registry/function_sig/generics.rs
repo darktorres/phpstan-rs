@@ -105,7 +105,7 @@ fn expand_type_alias(
         return ty.clone();
     }
     if visiting.contains(name) {
-        return Type::Mixed(false);
+        return Type::mixed();
     }
     visiting.push(name.clone());
     let expanded = expand_alias_uses(raw[name].clone(), raw, done, visiting);
@@ -149,7 +149,7 @@ fn expand_alias_uses(
 pub(crate) fn mark_template_params(ty: Type, params: &FxHashMap<String, TemplateParam>) -> Type {
     match ty {
         Type::Object(name, _) if params.contains_key(name.as_str()) => {
-            Type::TemplateParam(params[name.as_str()].clone())
+            Type::template_param(params[name.as_str()].clone())
         }
         // Every nested position - without this, a template written
         // inside a generic argument, `object{key: T}`, `Closure(self): T`
@@ -204,7 +204,7 @@ pub(crate) fn build_template_params(
                 .template_bounds
                 .get(name)
                 .map(resolve)
-                .unwrap_or(Type::Mixed(true));
+                .unwrap_or(Type::explicit_mixed());
             let default = doc.template_defaults.get(name).map(resolve);
             let variance = if doc.covariant_templates.contains(name) {
                 types::Variance::Covariant

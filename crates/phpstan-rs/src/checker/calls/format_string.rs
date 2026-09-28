@@ -487,9 +487,9 @@ impl<'a> Checker<'a> {
             return;
         }
         let values_ty = self.infer_expr(&values.value, locals);
-        let expected = Type::Array(
-            Box::new(Type::Union(vec![Type::Int, Type::String])),
-            Box::new(format_value_type()),
+        let expected = Type::array(
+            Type::union_of(vec![Type::int(), Type::string()]),
+            format_value_type(),
         );
         if self.rule_level_accepts(&expected, &values_ty).yes() {
             return;
@@ -607,21 +607,21 @@ impl<'a> Checker<'a> {
         }
         Some(match members.len() {
             1 => members.remove(0),
-            _ => Type::Union(members),
+            _ => Type::union_of(members),
         })
     }
 
     /// `PrintfPlaceholder::doesArgumentTypeMatchPlaceholder`.
     fn matches_placeholder(&self, ty: &Type, accepting: Accepting, strict: bool) -> bool {
         match accepting {
-            Accepting::StrictInt => self.accepts(&Type::Int, ty).yes(),
+            Accepting::StrictInt => self.accepts(&Type::int(), ty).yes(),
             Accepting::Int if strict => self
                 .accepts(
-                    &Type::Union(vec![
-                        Type::Int,
-                        Type::Intersection(vec![
-                            Type::String,
-                            Type::Accessory(AccessoryKind::DecimalIntegerString),
+                    &Type::union_of(vec![
+                        Type::int(),
+                        Type::intersection_of(vec![
+                            Type::string(),
+                            Type::accessory(AccessoryKind::DecimalIntegerString),
                         ]),
                     ]),
                     ty,
@@ -629,12 +629,12 @@ impl<'a> Checker<'a> {
                 .yes(),
             Accepting::Float if strict => self
                 .accepts(
-                    &Type::Union(vec![
-                        Type::Float,
-                        Type::Int,
-                        Type::Intersection(vec![
-                            Type::String,
-                            Type::Accessory(AccessoryKind::NumericString),
+                    &Type::union_of(vec![
+                        Type::float(),
+                        Type::int(),
+                        Type::intersection_of(vec![
+                            Type::string(),
+                            Type::accessory(AccessoryKind::NumericString),
                         ]),
                     ]),
                     ty,
@@ -646,12 +646,12 @@ impl<'a> Checker<'a> {
                 !strict
                     || self
                         .accepts(
-                            &Type::Union(vec![
-                                Type::String,
-                                Type::Object("Stringable".into(), Vec::new()),
-                                Type::Float,
-                                Type::Int,
-                                Type::Null,
+                            &Type::union_of(vec![
+                                Type::string(),
+                                Type::object("Stringable".into(), Vec::new()),
+                                Type::float(),
+                                Type::int(),
+                                Type::null(),
                             ]),
                             ty,
                         )
@@ -682,13 +682,13 @@ impl<'a> Checker<'a> {
 /// A printf value's `functionMap.php` type, `__stringAndStringable|int|
 /// float|null|bool`.
 fn format_value_type() -> Type {
-    Type::Union(vec![
-        Type::String,
-        Type::Object("Stringable".into(), Vec::new()),
-        Type::Int,
-        Type::Float,
-        Type::Bool,
-        Type::Null,
+    Type::union_of(vec![
+        Type::string(),
+        Type::object("Stringable".into(), Vec::new()),
+        Type::int(),
+        Type::float(),
+        Type::bool(),
+        Type::null(),
     ])
 }
 

@@ -37,11 +37,11 @@ fn is_finite(ty: &Type) -> bool {
 /// `Type::generalize(lessSpecific)` for a finite value.
 fn generalize(ty: &Type) -> Type {
     match ty {
-        Type::IntLiteral(_) => Type::Int,
-        Type::StringLiteral(_) => Type::String,
-        Type::FloatLiteral(_) => Type::Float,
-        Type::True | Type::False => Type::Bool,
-        Type::EnumCase(class, _) => Type::Object(class.clone(), Vec::new()),
+        Type::IntLiteral(_) => Type::int(),
+        Type::StringLiteral(_) => Type::string(),
+        Type::FloatLiteral(_) => Type::float(),
+        Type::True | Type::False => Type::bool(),
+        Type::EnumCase(class, _) => Type::object(class.clone(), Vec::new()),
         other => other.clone(),
     }
 }

@@ -119,11 +119,11 @@ fn class_consts_are_registered_and_typed_from_their_literal_value() {
     );
     assert_eq!(
         r.lookup_const("Config", "NAME").map(|cs| &cs.ty),
-        Some(&Type::StringLiteral("app".into()))
+        Some(&Type::string_literal("app".into()))
     );
     assert_eq!(
         r.lookup_const("Config", "MAX").map(|cs| &cs.ty),
-        Some(&Type::IntLiteral(10))
+        Some(&Type::int_literal(10))
     );
     assert!(r.lookup_const("Config", "MISSING").is_none());
 }
@@ -137,7 +137,7 @@ fn class_consts_are_inherited_through_extends() {
     );
     assert_eq!(
         r.lookup_const("Derived", "KIND").map(|cs| &cs.ty),
-        Some(&Type::StringLiteral("base".into()))
+        Some(&Type::string_literal("base".into()))
     );
 }
 
@@ -188,7 +188,7 @@ fn declared_property_type_is_tracked() {
             class Box { public int $value = 0; }
         "#,
     );
-    assert_eq!(r.lookup_property("Box", "value").unwrap().ty, Type::Int);
+    assert_eq!(r.lookup_property("Box", "value").unwrap().ty, Type::int());
 }
 
 #[test]
@@ -200,10 +200,10 @@ fn constructor_promotion_registers_a_property() {
             }
         "#,
     );
-    assert_eq!(r.lookup_property("Point", "x").unwrap().ty, Type::Int);
+    assert_eq!(r.lookup_property("Point", "x").unwrap().ty, Type::int());
     assert_eq!(
         r.lookup_property("Point", "label").unwrap().ty,
-        Type::String
+        Type::string()
     );
 }
 
@@ -222,11 +222,11 @@ fn trait_methods_and_properties_are_flattened_in() {
     );
     assert_eq!(
         r.lookup_method("Person", "greet").unwrap().return_type,
-        Type::String
+        Type::string()
     );
     assert_eq!(
         r.lookup_property("Person", "greeting").unwrap().ty,
-        Type::String
+        Type::string()
     );
 }
 
@@ -249,7 +249,7 @@ fn trait_constants_are_flattened_in() {
     );
     assert_eq!(
         r.lookup_const("Person", "GREETING").unwrap().ty,
-        Type::StringLiteral("hi".into())
+        Type::string_literal("hi".into())
     );
 }
 
@@ -274,11 +274,11 @@ fn trait_flattening_works_across_namespaced_classes() {
     );
     assert_eq!(
         r.lookup_method("App\\Person", "greet").unwrap().return_type,
-        Type::String
+        Type::string()
     );
     assert_eq!(
         r.lookup_property("App\\Person", "greeting").unwrap().ty,
-        Type::String
+        Type::string()
     );
 }
 
@@ -301,7 +301,7 @@ fn trait_flattening_also_works_for_enums_not_just_classes() {
     );
     assert_eq!(
         r.lookup_method("Status", "greet").unwrap().return_type,
-        Type::String
+        Type::string()
     );
 }
 
@@ -337,7 +337,7 @@ fn class_method_overrides_trait_method_of_same_name() {
     );
     assert_eq!(
         r.lookup_method("Person", "greet").unwrap().return_type,
-        Type::Int
+        Type::int()
     );
 }
 
@@ -349,7 +349,7 @@ fn property_lookup_walks_up_extends_chain() {
             class Sub extends Base {}
         "#,
     );
-    assert_eq!(r.lookup_property("Sub", "name").unwrap().ty, Type::String);
+    assert_eq!(r.lookup_property("Sub", "name").unwrap().ty, Type::string());
 }
 
 // `is_intersection_possible` - real PHPStan's own `UnresolvableTypeHelper`

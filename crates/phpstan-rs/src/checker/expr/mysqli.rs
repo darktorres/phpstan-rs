@@ -40,7 +40,7 @@ fn widen_for_text_protocol(ty: &Type) -> Type {
             .iter()
             .map(widen_for_text_protocol)
             .reduce(union_types)
-            .unwrap_or(Type::Never),
+            .unwrap_or(Type::never()),
         other => other.clone(),
     }
 }
@@ -58,7 +58,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn mysqli_query_type(&self, sql_arg: Option<&Expr>, locals: &Locals) -> Type {
         let sql = sql_arg.and_then(|e| self.foldable_sql_string(e, locals));
         let success = match &sql {
-            Some(sql) if !returns_result_set(sql) => Type::True,
+            Some(sql) if !returns_result_set(sql) => Type::bool_literal(true),
             Some(sql) => {
                 let row = crate::checker::sql_reflection::resolve::resolve_sql_row_type(
                     self.doctrine_entities(),
@@ -68,20 +68,20 @@ impl<'a> Checker<'a> {
                 match row {
                     Some(Type::ArrayShape(shape)) => {
                         let widened = shape.map_types(&mut widen_for_text_protocol);
-                        Type::Object("mysqli_result".into(), vec![Type::ArrayShape(widened)])
+                        Type::object("mysqli_result".into(), vec![Type::array_shape(widened)])
                     }
-                    _ => Type::Object("mysqli_result".into(), Vec::new()),
+                    _ => Type::object("mysqli_result".into(), Vec::new()),
                 }
             }
-            None => Type::Union(vec![
-                Type::Object("mysqli_result".into(), Vec::new()),
-                Type::True,
+            None => Type::union_of(vec![
+                Type::object("mysqli_result".into(), Vec::new()),
+                Type::bool_literal(true),
             ]),
         };
         if self.mysqli_throws_exceptions() {
             success
         } else {
-            union_types(success, Type::False)
+            union_types(success, Type::bool_literal(false))
         }
     }
 
@@ -100,9 +100,9 @@ impl<'a> Checker<'a> {
             return None;
         };
         let fields = &shape.fields;
-        let assoc = || Type::ArrayShape(shape.clone());
+        let assoc = || Type::array_shape(shape.clone());
         let numeric = || {
-            Type::ArrayShape(Shape::sealed(
+            Type::array_shape(Shape::sealed(
                 fields
                     .iter()
                     .enumerate()
@@ -122,13 +122,13 @@ impl<'a> Checker<'a> {
                 ));
                 merged.push(f.clone());
             }
-            Type::ArrayShape(Shape::sealed(merged))
+            Type::array_shape(Shape::sealed(merged))
         };
         // `false` only reports a failure the exception mode throws for.
         let end = if self.mysqli_throws_exceptions() {
-            Type::Null
+            Type::null()
         } else {
-            Type::Union(vec![Type::Null, Type::False])
+            Type::union_of(vec![Type::null(), Type::bool_literal(false)])
         };
         let mode = |default: &str| -> Option<String> {
             match arg {
@@ -161,7 +161,7 @@ impl<'a> Checker<'a> {
                 };
                 let field = fields.get(index)?;
                 // No more rows is `false` here, not `null`.
-                union_types(field.ty.clone(), Type::False)
+                union_types(field.ty.clone(), Type::bool_literal(false))
             }
             _ => return None,
         })

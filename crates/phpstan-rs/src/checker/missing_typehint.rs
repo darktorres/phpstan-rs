@@ -727,7 +727,7 @@ impl<'a> Checker<'a> {
             Some(s) => s.return_explicit_mixed_hint(),
             None => mentions_mixed(native_return, doc_return),
         };
-        let return_ty = declared_return.cloned().unwrap_or(Type::Mixed(false));
+        let return_ty = declared_return.cloned().unwrap_or(Type::mixed());
         if return_ty == Type::Mixed(false) && !return_explicit_mixed {
             self.report(
                 format!("{kind_word} {label}() has no return type specified."),

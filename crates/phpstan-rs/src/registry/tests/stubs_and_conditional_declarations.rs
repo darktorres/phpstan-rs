@@ -151,22 +151,19 @@ fn two_unconditional_function_declarations_with_different_arities_merge() {
         "str".into(),
         "later declaration's name wins"
     );
-    assert_eq!(sig.params[0].ty, Type::String);
+    assert_eq!(sig.params[0].ty, Type::string());
     assert!(!sig.params[0].has_default);
     assert_eq!(sig.params[1].name, "replace_pairs".into());
     assert_eq!(
         sig.params[1].ty,
-        Type::Union(vec![
-            Type::String,
-            Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(Type::Mixed(false))
-            )
+        Type::union_of(vec![
+            Type::string(),
+            Type::array(Type::unknown_array_key(), Type::mixed())
         ])
     );
     assert!(!sig.params[1].has_default);
     assert_eq!(sig.params[2].name, "to".into());
-    assert_eq!(sig.params[2].ty, Type::String);
+    assert_eq!(sig.params[2].ty, Type::string());
     assert!(
         sig.params[2].has_default,
         "a position only the first overload has can't be required in the merged callable"
@@ -183,8 +180,14 @@ fn two_unconditional_function_declarations_with_a_disjoint_type_at_one_position_
     );
     let sig = &r.functions["f"];
     assert_eq!(sig.params.len(), 1);
-    assert_eq!(sig.params[0].ty, Type::Union(vec![Type::Int, Type::String]));
-    assert_eq!(sig.return_type, Type::Union(vec![Type::Int, Type::String]));
+    assert_eq!(
+        sig.params[0].ty,
+        Type::union_of(vec![Type::int(), Type::string()])
+    );
+    assert_eq!(
+        sig.return_type,
+        Type::union_of(vec![Type::int(), Type::string()])
+    );
 }
 
 #[test]
@@ -193,13 +196,13 @@ fn re_indexing_an_unconditional_function_after_removal_does_not_panic() {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     let mut r = Registry::build(&program);
-    assert_eq!(r.functions["f"].params[0].ty, Type::Int);
+    assert_eq!(r.functions["f"].params[0].ty, Type::int());
 
     r.remove_declarations(&["f".to_string()], &[]);
     assert!(!r.functions.contains_key("f"));
 
     r.index(&program, &Origin::Unknown, false);
-    assert_eq!(r.functions["f"].params[0].ty, Type::Int);
+    assert_eq!(r.functions["f"].params[0].ty, Type::int());
 }
 
 #[test]
@@ -228,8 +231,8 @@ fn merge_stubs_does_not_override_user_functions() {
         FunctionReflection {
             provenance: crate::registry::provenance::Provenance::default(),
             params: vec![],
-            return_type: Type::Bool,
-            return_type_native: Type::Bool,
+            return_type: Type::bool(),
+            return_type_native: Type::bool(),
             return_has_own_doc: true,
             return_doc_ty: None,
             self_out: None,
@@ -253,7 +256,7 @@ fn merge_stubs_does_not_override_user_functions() {
             is_magic: false,
         },
     )]);
-    assert_eq!(r.functions["strlen"].return_type, Type::Int);
+    assert_eq!(r.functions["strlen"].return_type, Type::int());
 }
 
 // `Project::new` merges stubs before any project file is indexed (the
@@ -275,7 +278,7 @@ fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
 
     let mut r = Registry::default();
     r.merge_stubs(vec![("str_contains", stub_sig)]);
-    assert_eq!(r.functions["str_contains"].params[0].ty, Type::String);
+    assert_eq!(r.functions["str_contains"].params[0].ty, Type::string());
 
     let tokens = Lexer::new(
         r#"<?php
@@ -290,7 +293,7 @@ fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
 
     assert_eq!(
         r.functions["str_contains"].params[0].ty,
-        Type::Union(vec![Type::String, Type::Null]),
+        Type::union_of(vec![Type::string(), Type::null()]),
         "the polyfill's own nullable native param type must win over the stub's non-nullable one"
     );
 }
@@ -446,7 +449,7 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     r.index(&program, &Origin::Unknown, false);
     assert_eq!(
         r.functions["ctype_punct"].return_type,
-        Type::Bool,
+        Type::bool(),
         "the untyped variant must not have displaced the stub's own bool return type"
     );
 
@@ -461,8 +464,8 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     .tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, &Origin::Unknown, false);
-    assert_eq!(r.functions["ctype_punct"].return_type, Type::Bool);
-    assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::Mixed(false));
+    assert_eq!(r.functions["ctype_punct"].return_type, Type::bool());
+    assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::mixed());
 }
 
 // A vendored, unconditional, bare (guard-free) duplicate of a stub
@@ -505,7 +508,7 @@ fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
 
     assert_eq!(
         r.functions["str_contains"].params[0].ty,
-        Type::Union(vec![Type::String, Type::Null]),
+        Type::union_of(vec![Type::string(), Type::null()]),
         "the real polyfill's own nullable params must still win despite the intervening unconditional duplicate"
     );
 }

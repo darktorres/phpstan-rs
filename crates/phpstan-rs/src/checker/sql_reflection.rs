@@ -24,19 +24,19 @@ use types::{Shape, Type, union_types};
 /// The PHP type of the value a raw fetch of a column returns.
 pub(crate) fn column_php_type(ty: &ColumnType) -> Type {
     match ty {
-        ColumnType::Int => Type::Int,
-        ColumnType::Float => Type::Float,
-        ColumnType::Bool => Type::Bool,
-        ColumnType::String => Type::String,
-        ColumnType::Number => Type::Union(vec![Type::Int, Type::Float]),
-        ColumnType::Enum(labels) => Type::Union(
+        ColumnType::Int => Type::int(),
+        ColumnType::Float => Type::float(),
+        ColumnType::Bool => Type::bool(),
+        ColumnType::String => Type::string(),
+        ColumnType::Number => Type::union_of(vec![Type::int(), Type::float()]),
+        ColumnType::Enum(labels) => Type::union_of(
             labels
                 .iter()
-                .map(|label| Type::StringLiteral(label.as_str().into()))
+                .map(|label| Type::string_literal(label.as_str().into()))
                 .collect(),
         ),
-        ColumnType::Null => Type::Null,
-        ColumnType::Unknown => Type::Mixed(false),
+        ColumnType::Null => Type::null(),
+        ColumnType::Unknown => Type::mixed(),
     }
 }
 
@@ -45,7 +45,7 @@ pub(crate) fn column_php_type(ty: &ColumnType) -> Type {
 pub(crate) fn column_value_type(column: &Column) -> Type {
     let ty = column_php_type(&column.ty);
     if column.nullable {
-        union_types(ty, Type::Null)
+        union_types(ty, Type::null())
     } else {
         ty
     }
@@ -53,7 +53,7 @@ pub(crate) fn column_value_type(column: &Column) -> Type {
 
 /// The row a result set with these columns fetches as.
 pub(crate) fn row_type(columns: &[Column]) -> Type {
-    Type::ArrayShape(Shape::from_named(
+    Type::array_shape(Shape::from_named(
         columns
             .iter()
             .map(|c| (c.name.as_str(), column_value_type(c), false)),

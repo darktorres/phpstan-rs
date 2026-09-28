@@ -508,14 +508,8 @@ impl<'a> Checker<'a> {
                     }
                     if !agg_bindings.is_empty() {
                         return Some((
-                            agg_bindings
-                                .get("TKey")
-                                .cloned()
-                                .unwrap_or(Type::Mixed(false)),
-                            agg_bindings
-                                .get("TValue")
-                                .cloned()
-                                .unwrap_or(Type::Mixed(false)),
+                            agg_bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
+                            agg_bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
                         ));
                     }
                 }
@@ -526,11 +520,8 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 Some((
-                    bindings.get("TKey").cloned().unwrap_or(Type::Mixed(false)),
-                    bindings
-                        .get("TValue")
-                        .cloned()
-                        .unwrap_or(Type::Mixed(false)),
+                    bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
+                    bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
                 ))
             }
             Type::Union(members) => {
@@ -544,11 +535,11 @@ impl<'a> Checker<'a> {
                 Some((
                     keys.into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed(false)),
+                        .unwrap_or(Type::mixed()),
                     values
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed(false)),
+                        .unwrap_or(Type::mixed()),
                 ))
             }
             _ => None,
@@ -621,7 +612,7 @@ impl<'a> Checker<'a> {
         // (`Traversable`/`Iterator`/`Generator`/`IteratorAggregate`).
         let (key_ty, element_ty) = match Self::array_element_type(&subject_ty) {
             Some(elem) => (
-                Self::array_key_type(&subject_ty).unwrap_or(Type::Mixed(false)),
+                Self::array_key_type(&subject_ty).unwrap_or(Type::mixed()),
                 elem,
             ),
             None => match self.iterable_element_type(&subject_ty) {
@@ -645,7 +636,7 @@ impl<'a> Checker<'a> {
                             "foreach.nonIterable",
                         );
                     }
-                    (Type::Mixed(false), Type::Mixed(false))
+                    (Type::mixed(), Type::mixed())
                 }
             },
         };
@@ -743,7 +734,7 @@ impl<'a> Checker<'a> {
             |this, pass_locals, declared_return, label, _pass| {
                 if iteration_throws {
                     this.record_throw_state(
-                        Type::Object("Throwable".into(), Vec::new()),
+                        Type::object("Throwable".into(), Vec::new()),
                         pass_locals,
                     );
                 }
@@ -850,14 +841,14 @@ impl<'a> Checker<'a> {
 /// untouched.
 fn replace_array_element_type(ty: &Type, new_elem: &Type) -> Type {
     match ty {
-        Type::Array(key, _) => Type::Array(key.clone(), Box::new(new_elem.clone())),
-        Type::Union(members) => Type::Union(
+        Type::Array(key, _) => Type::array((**key).clone(), new_elem.clone()),
+        Type::Union(members) => Type::union_of(
             members
                 .iter()
                 .map(|m| replace_array_element_type(m, new_elem))
                 .collect(),
         ),
-        Type::Intersection(members) => Type::Intersection(
+        Type::Intersection(members) => Type::intersection_of(
             members
                 .iter()
                 .map(|m| replace_array_element_type(m, new_elem))

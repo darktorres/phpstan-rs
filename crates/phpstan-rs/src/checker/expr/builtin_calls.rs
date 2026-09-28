@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
             // PHPStan additionally refines a literal or known-non-empty-
             // string argument's exact/minimum length; not modeled here.
             "strlen" if args.len() == 1 => {
-                return Type::IntRange(Some(0), None);
+                return Type::int_range(Some(0), None);
             }
             // Narrows to `non-falsy-string` whenever the format string is
             // a literal whose non-specifier literal text (with every real
@@ -59,11 +59,11 @@ impl<'a> Checker<'a> {
             "sprintf" | "vsprintf" if !args.is_empty() => {
                 if let Some(fmt) = literal_string_value(&args[0].value)
                     && let Some(remainder) = sprintf_literal_remainder(&fmt)
-                    && is_non_falsy_string(&Type::StringLiteral(remainder.into()))
+                    && is_non_falsy_string(&Type::string_literal(remainder.into()))
                 {
-                    return Type::Intersection(vec![
-                        Type::String,
-                        Type::Accessory(AccessoryKind::NonFalsyString),
+                    return Type::intersection_of(vec![
+                        Type::string(),
+                        Type::accessory(AccessoryKind::NonFalsyString),
                     ]);
                 }
             }
@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
                 if let Some(literal) = literal_string_value(&args[0].value)
                     && crate::php_date_parser::validate_relative_delta(&literal) == Some(true)
                 {
-                    return Type::Int;
+                    return Type::int();
                 }
             }
             // The stub declares `?string` unconditionally (`$return`
@@ -97,7 +97,7 @@ impl<'a> Checker<'a> {
             // instead. Scoped to that exact 2-argument, literal-`true`
             // form - anything else keeps the stub's nullable return type.
             "var_export" if args.len() == 2 && is_true_literal(&args[1].value) => {
-                return Type::String;
+                return Type::string();
             }
             // Narrowed to the plain 1-argument form (no `$mode`, i.e.
             // always `COUNT_NORMAL`). A known `ArrayShape` with no
@@ -109,9 +109,9 @@ impl<'a> Checker<'a> {
                     && shape.is_sealed()
                     && shape.fields.iter().all(|f| !f.optional)
                 {
-                    return Type::IntLiteral(shape.fields.len() as i64);
+                    return Type::int_literal(shape.fields.len() as i64);
                 }
-                return Type::IntRange(Some(0), None);
+                return Type::int_range(Some(0), None);
             }
             // `random_int`/`rand`/`mt_rand($min, $max)` always produce a
             // value within `[$min, $max]` inclusive; a non-literal,
@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
             "random_int" | "rand" | "mt_rand" if args.len() == 2 => {
                 let min = int_bound(&self.infer_expr(&args[0].value, locals), true);
                 let max = int_bound(&self.infer_expr(&args[1].value, locals), false);
-                return Type::IntRange(min, max);
+                return Type::int_range(min, max);
             }
             // `hrtime()`/`hrtime(false)` return a 2-element list
             // `[seconds, nanoseconds]`; `hrtime(true)` instead collapses
@@ -171,20 +171,20 @@ impl<'a> Checker<'a> {
                     &self.infer_expr(&args[1].value, locals),
                 ) {
                     (Type::Int | Type::IntLiteral(_), Type::Int | Type::IntLiteral(_)) => {
-                        Some(Type::Int)
+                        Some(Type::int())
                     }
                     (Type::StringLiteral(a), Type::StringLiteral(b))
                         if a.len() == 1 && b.len() == 1 =>
                     {
-                        Some(Type::String)
+                        Some(Type::string())
                     }
                     _ => None,
                 };
                 if let Some(elem) = elem {
-                    return Type::Intersection(vec![
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem)),
-                        Type::Accessory(AccessoryKind::ArrayList),
-                        Type::Accessory(AccessoryKind::NonEmptyArray),
+                    return Type::intersection_of(vec![
+                        Type::array(Type::unknown_array_key(), elem),
+                        Type::accessory(AccessoryKind::ArrayList),
+                        Type::accessory(AccessoryKind::NonEmptyArray),
                     ]);
                 }
             }
@@ -203,18 +203,18 @@ impl<'a> Checker<'a> {
                     .get(3)
                     .is_some_and(|a| contains_flag_name(&a.value, "PREG_SPLIT_NO_EMPTY"));
                 let elem = if no_empty {
-                    Type::Intersection(vec![
-                        Type::String,
-                        Type::Accessory(AccessoryKind::NonEmptyString),
+                    Type::intersection_of(vec![
+                        Type::string(),
+                        Type::accessory(AccessoryKind::NonEmptyString),
                     ])
                 } else {
-                    Type::String
+                    Type::string()
                 };
-                let list_ty = Type::Intersection(vec![
-                    Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem)),
-                    Type::Accessory(AccessoryKind::ArrayList),
+                let list_ty = Type::intersection_of(vec![
+                    Type::array(Type::unknown_array_key(), elem),
+                    Type::accessory(AccessoryKind::ArrayList),
                 ]);
-                return union_types(list_ty, Type::False);
+                return union_types(list_ty, Type::bool_literal(false));
             }
             // Mirrors real PHPStan's `FilterFunctionReturnTypeHelper`,
             // scoped to what's statically provable - see
@@ -245,7 +245,7 @@ impl<'a> Checker<'a> {
                     // on a not-provably-array input falls through to the
                     // generic stub below, unchanged.
                     if require_array && !Self::is_array_like(&value_ty) {
-                        return Type::Mixed(false);
+                        return Type::mixed();
                     }
                     // The fallback is unioned into the *element* type
                     // first, and only that gets wrapped in the array -
@@ -262,7 +262,7 @@ impl<'a> Checker<'a> {
                         } else {
                             Type::unknown_array_key()
                         };
-                        return Type::Array(Box::new(key_ty), Box::new(unioned));
+                        return Type::array(key_ty, unioned);
                     }
                     return unioned;
                 }
@@ -296,7 +296,7 @@ impl<'a> Checker<'a> {
                     contains_flag_name_with_options(e, "FILTER_REQUIRE_ARRAY")
                         || contains_flag_name_with_options(e, "FILTER_FORCE_ARRAY")
                 }) {
-                    return Type::Mixed(false);
+                    return Type::mixed();
                 }
                 if let Some(filter) = args.get(2)
                     && let ExprKind::Name(filter_name) = &filter.value.kind
@@ -311,11 +311,11 @@ impl<'a> Checker<'a> {
                     // `False` matches this project's established
                     // convention for this three-way union.
                     let mut result = element_ty;
-                    result = union_types(result, Type::Null);
+                    result = union_types(result, Type::null());
                     if !throw_on_failure {
                         result = union_types(result, fallback);
                     }
-                    return union_types(result, Type::False);
+                    return union_types(result, Type::bool_literal(false));
                 }
             }
             // Real PHPStan's `MinMaxFunctionReturnTypeExtension`
@@ -335,7 +335,7 @@ impl<'a> Checker<'a> {
                     return arg_types
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed(false));
+                        .unwrap_or(Type::mixed());
                 }
             }
             // PHP 8.4's `array_find`/`array_find_key`, mirroring real
@@ -345,13 +345,13 @@ impl<'a> Checker<'a> {
             "array_find" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = Self::array_element_type(&input_ty) {
-                    return union_types(elem_ty, Type::Null);
+                    return union_types(elem_ty, Type::null());
                 }
             }
             "array_find_key" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(key_ty) = Self::array_key_type(&input_ty) {
-                    return union_types(key_ty, Type::Null);
+                    return union_types(key_ty, Type::null());
                 }
             }
             // Scoped to the common 2-arg single-array form - the real
@@ -437,7 +437,7 @@ impl<'a> Checker<'a> {
                     let carry_ty = args
                         .get(2)
                         .map(|initial| self.infer_expr(&initial.value, locals))
-                        .unwrap_or(Type::Null);
+                        .unwrap_or(Type::null());
                     if let Some(reduced) = self.infer_closure_return_with_param_overrides(
                         &args[1].value,
                         &[carry_ty, item_ty],
@@ -490,9 +490,9 @@ impl<'a> Checker<'a> {
                 if let Some(elem_ty) =
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
                 {
-                    return Type::Intersection(vec![
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem_ty)),
-                        Type::Accessory(AccessoryKind::ArrayList),
+                    return Type::intersection_of(vec![
+                        Type::array(Type::unknown_array_key(), elem_ty),
+                        Type::accessory(AccessoryKind::ArrayList),
                     ]);
                 }
             }
@@ -512,9 +512,9 @@ impl<'a> Checker<'a> {
                 if Self::is_array_like(&arr_ty) {
                     let stripped = strip_accessory_markers(arr_ty.clone());
                     return if Self::is_known_non_empty_array(&arr_ty) {
-                        Type::Intersection(vec![
+                        Type::intersection_of(vec![
                             stripped,
-                            Type::Accessory(AccessoryKind::NonEmptyArray),
+                            Type::accessory(AccessoryKind::NonEmptyArray),
                         ])
                     } else {
                         stripped
@@ -563,7 +563,7 @@ impl<'a> Checker<'a> {
                     && a.spread
                 {
                     let spread_ty = self.infer_expr(&a.value, locals);
-                    Self::array_element_type(&spread_ty).unwrap_or(Type::Mixed(false))
+                    Self::array_element_type(&spread_ty).unwrap_or(Type::mixed())
                 } else {
                     self.infer_expr(&args[0].value, locals)
                 };
@@ -602,17 +602,17 @@ impl<'a> Checker<'a> {
                             None => unseal(&mut flipped),
                         }
                     }
-                    return Type::ArrayShape(flipped);
+                    return Type::array_shape(flipped);
                 }
                 if Self::is_array_like(&arr_ty) {
                     let key_ty =
                         Self::array_key_type(&arr_ty).unwrap_or_else(Type::unknown_array_key);
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed(false));
-                    let flipped = Type::Array(Box::new(elem_ty), Box::new(key_ty));
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::mixed());
+                    let flipped = Type::array(elem_ty, key_ty);
                     return if Self::is_known_non_empty_array(&arr_ty) {
-                        Type::Intersection(vec![
+                        Type::intersection_of(vec![
                             flipped,
-                            Type::Accessory(AccessoryKind::NonEmptyArray),
+                            Type::accessory(AccessoryKind::NonEmptyArray),
                         ])
                     } else {
                         flipped
@@ -658,7 +658,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if resolvable {
-                    return Type::ArrayShape(shape);
+                    return Type::array_shape(shape);
                 }
             }
             // Every currently-tracked entry in `locals`, the identical
@@ -691,14 +691,14 @@ impl<'a> Checker<'a> {
             }
             "get_defined_vars" if args.is_empty() => {
                 if locals.any_variable_may_exist {
-                    return Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)));
+                    return Type::array(Type::string(), Type::mixed());
                 }
                 let fields: Vec<ShapeField> = locals
                     .iter()
                     .filter(|(name, _)| is_real_variable_key(name))
                     .map(|(name, ty)| ShapeField::new(ShapeKey::from_name(name), ty.clone(), false))
                     .collect();
-                return Type::ArrayShape(Shape::sealed(fields));
+                return Type::array_shape(Shape::sealed(fields));
             }
             // `array_pop`/`array_shift` remove and return the last/first
             // element (by reference - the caller's argument shrinks by
@@ -712,7 +712,7 @@ impl<'a> Checker<'a> {
             "array_pop" | "array_shift" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
-                    return Self::array_pointer_result(&arr_ty, elem_ty, Type::Null, false);
+                    return Self::array_pointer_result(&arr_ty, elem_ty, Type::null(), false);
                 }
             }
             // `array_splice` returns an array of the removed elements (or
@@ -724,9 +724,9 @@ impl<'a> Checker<'a> {
             "array_splice" if !args.is_empty() => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
-                    return Type::Intersection(vec![
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem_ty)),
-                        Type::Accessory(AccessoryKind::ArrayList),
+                    return Type::intersection_of(vec![
+                        Type::array(Type::unknown_array_key(), elem_ty),
+                        Type::accessory(AccessoryKind::ArrayList),
                     ]);
                 }
             }
@@ -755,7 +755,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let (Some(k), Some(v)) = (key_ty, val_ty) {
-                    return Type::Array(Box::new(k), Box::new(v));
+                    return Type::array(k, v);
                 }
             }
             // `array_pad` pads (or truncates, negative `$size`) `$array`
@@ -770,10 +770,7 @@ impl<'a> Checker<'a> {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 let pad_ty = self.infer_expr(&args[2].value, locals);
                 if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
-                    return Type::Array(
-                        Box::new(Type::unknown_array_key()),
-                        Box::new(union_types(elem_ty, pad_ty)),
-                    );
+                    return Type::array(Type::unknown_array_key(), union_types(elem_ty, pad_ty));
                 }
             }
             // The result's keys are the values of `$array` (only
@@ -785,14 +782,14 @@ impl<'a> Checker<'a> {
             "array_count_values" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
-                    let counted = Type::Array(
-                        Box::new(Type::Union(vec![Type::Int, Type::String])),
-                        Box::new(Type::Int),
+                    let counted = Type::array(
+                        Type::union_of(vec![Type::int(), Type::string()]),
+                        Type::int(),
                     );
                     return if Self::is_known_non_empty_array(&arr_ty) {
-                        Type::Intersection(vec![
+                        Type::intersection_of(vec![
                             counted,
-                            Type::Accessory(AccessoryKind::NonEmptyArray),
+                            Type::accessory(AccessoryKind::NonEmptyArray),
                         ])
                     } else {
                         counted
@@ -825,10 +822,7 @@ impl<'a> Checker<'a> {
                     match num_literal.unwrap_or(1) {
                         1 => return key_ty,
                         n if n > 1 => {
-                            return Type::Array(
-                                Box::new(Type::unknown_array_key()),
-                                Box::new(key_ty),
-                            );
+                            return Type::array(Type::unknown_array_key(), key_ty);
                         }
                         _ => {}
                     }
@@ -844,15 +838,25 @@ impl<'a> Checker<'a> {
             "reset" | "current" | "end" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed(false));
-                    return Self::array_pointer_result(&arr_ty, elem_ty, Type::False, false);
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::mixed());
+                    return Self::array_pointer_result(
+                        &arr_ty,
+                        elem_ty,
+                        Type::bool_literal(false),
+                        false,
+                    );
                 }
             }
             "next" | "prev" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed(false));
-                    return Self::array_pointer_result(&arr_ty, elem_ty, Type::False, true);
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::mixed());
+                    return Self::array_pointer_result(
+                        &arr_ty,
+                        elem_ty,
+                        Type::bool_literal(false),
+                        true,
+                    );
                 }
             }
             // `key()` (the current pointer's own key) and
@@ -868,7 +872,7 @@ impl<'a> Checker<'a> {
                 if Self::is_array_like(&arr_ty) {
                     let key_ty =
                         Self::array_key_type(&arr_ty).unwrap_or_else(Type::unknown_array_key);
-                    return Self::array_pointer_result(&arr_ty, key_ty, Type::Null, false);
+                    return Self::array_pointer_result(&arr_ty, key_ty, Type::null(), false);
                 }
             }
             // Merging only list-safe arguments stays a list (a literal,
@@ -975,7 +979,7 @@ impl<'a> Checker<'a> {
                                 // change the *value*, never remove a key
                                 // array_merge never touches).
                                 let elem_ty =
-                                    Self::array_element_type(arg_ty).unwrap_or(Type::Mixed(false));
+                                    Self::array_element_type(arg_ty).unwrap_or(Type::mixed());
                                 for f in merged.fields.iter_mut() {
                                     f.ty = union_types(f.ty.clone(), elem_ty.clone());
                                 }
@@ -1010,7 +1014,7 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    return Type::ArrayShape(merged);
+                    return Type::array_shape(merged);
                 }
                 if !has_spread && arg_types.iter().all(|t| matches!(t, Type::ArrayShape(_))) {
                     let mut merged = Shape::sealed(Vec::new());
@@ -1031,7 +1035,7 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    return Type::ArrayShape(merged);
+                    return Type::array_shape(merged);
                 }
                 let mut elem_types: Vec<Type> = Vec::new();
                 let mut all_list = true;
@@ -1107,26 +1111,26 @@ impl<'a> Checker<'a> {
                     let elem_ty = elem_types
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed(false));
+                        .unwrap_or(Type::mixed());
                     let key_ty = match (key_could_be_int, key_could_be_string) {
-                        (true, false) => Type::Int,
-                        (false, true) => Type::String,
+                        (true, false) => Type::int(),
+                        (false, true) => Type::string(),
                         // Both possible, or (shouldn't happen given the
                         // `None` fallback above) neither resolved -
                         // today's existing safe default.
                         _ => Type::unknown_array_key(),
                     };
-                    let mut members = vec![Type::Array(Box::new(key_ty), Box::new(elem_ty))];
+                    let mut members = vec![Type::array(key_ty, elem_ty)];
                     if all_list {
-                        members.push(Type::Accessory(AccessoryKind::ArrayList));
+                        members.push(Type::accessory(AccessoryKind::ArrayList));
                     }
                     if any_non_empty {
-                        members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                        members.push(Type::accessory(AccessoryKind::NonEmptyArray));
                     }
                     return if members.len() == 1 {
                         members.pop().unwrap()
                     } else {
-                        Type::Intersection(members)
+                        Type::intersection_of(members)
                     };
                 }
             }
@@ -1139,9 +1143,9 @@ impl<'a> Checker<'a> {
             // caller merging this result back with a loop's pre-loop `[]`
             // sees a needlessly bare `array<V>`).
             "array_fill" if args.len() == 3 => {
-                let base = Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(self.infer_expr(&args[2].value, locals)),
+                let base = Type::array(
+                    Type::unknown_array_key(),
+                    self.infer_expr(&args[2].value, locals),
                 );
                 let start_is_zero =
                     matches!(self.infer_expr(&args[0].value, locals), Type::IntLiteral(0));
@@ -1152,15 +1156,15 @@ impl<'a> Checker<'a> {
                 };
                 let mut members = vec![base];
                 if start_is_zero {
-                    members.push(Type::Accessory(AccessoryKind::ArrayList));
+                    members.push(Type::accessory(AccessoryKind::ArrayList));
                 }
                 if count_is_non_empty {
-                    members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                    members.push(Type::accessory(AccessoryKind::NonEmptyArray));
                 }
                 return if members.len() == 1 {
                     members.pop().unwrap()
                 } else {
-                    Type::Intersection(members)
+                    Type::intersection_of(members)
                 };
             }
             // `$keys`' own elements become the result's real keys -
@@ -1170,10 +1174,7 @@ impl<'a> Checker<'a> {
                 let keys_ty = self.infer_expr(&args[0].value, locals);
                 let key_ty =
                     Self::array_element_type(&keys_ty).unwrap_or_else(Type::unknown_array_key);
-                return Type::Array(
-                    Box::new(key_ty),
-                    Box::new(self.infer_expr(&args[1].value, locals)),
-                );
+                return Type::array(key_ty, self.infer_expr(&args[1].value, locals));
             }
             // Splits one array into several same-shaped ones - the
             // result is an array *of* arrays, each holding the original
@@ -1182,12 +1183,9 @@ impl<'a> Checker<'a> {
                 if let Some(elem_ty) =
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
                 {
-                    return Type::Array(
-                        Box::new(Type::unknown_array_key()),
-                        Box::new(Type::Array(
-                            Box::new(Type::unknown_array_key()),
-                            Box::new(elem_ty),
-                        )),
+                    return Type::array(
+                        Type::unknown_array_key(),
+                        Type::array(Type::unknown_array_key(), elem_ty),
                     );
                 }
             }
@@ -1219,21 +1217,18 @@ impl<'a> Checker<'a> {
                 if is_or_wraps_array_shape(&arg_ty)
                     && let Some(key_ty) = Self::array_key_type(&arg_ty)
                 {
-                    return Type::Intersection(vec![
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(key_ty)),
-                        Type::Accessory(AccessoryKind::ArrayList),
+                    return Type::intersection_of(vec![
+                        Type::array(Type::unknown_array_key(), key_ty),
+                        Type::accessory(AccessoryKind::ArrayList),
                     ]);
                 }
                 // The native stub's own `@return int[]|string[]` is real
                 // but useless without this project's key-type tracking -
                 // falls back to `Mixed` rather than guess beyond it.
                 if Self::is_array_like(&arg_ty) {
-                    return Type::Intersection(vec![
-                        Type::Array(
-                            Box::new(Type::unknown_array_key()),
-                            Box::new(Type::Mixed(false)),
-                        ),
-                        Type::Accessory(AccessoryKind::ArrayList),
+                    return Type::intersection_of(vec![
+                        Type::array(Type::unknown_array_key(), Type::mixed()),
+                        Type::accessory(AccessoryKind::ArrayList),
                     ]);
                 }
             }
@@ -1254,8 +1249,7 @@ impl<'a> Checker<'a> {
                         _ => None,
                     };
                     if let Some(field_ty) = field_ty {
-                        let arr_ty =
-                            Type::Array(Box::new(Type::unknown_array_key()), Box::new(field_ty));
+                        let arr_ty = Type::array(Type::unknown_array_key(), field_ty);
                         // The 2-argument form (no `$index_key`) always
                         // builds a brand-new array with fresh sequential
                         // integer keys starting at 0, regardless of the
@@ -1265,9 +1259,9 @@ impl<'a> Checker<'a> {
                         // generally aren't sequential integers, so it
                         // keeps a plain, unmarked `Array`.
                         return if args.len() == 2 {
-                            Type::Intersection(vec![
+                            Type::intersection_of(vec![
                                 arr_ty,
-                                Type::Accessory(AccessoryKind::ArrayList),
+                                Type::accessory(AccessoryKind::ArrayList),
                             ])
                         } else {
                             arr_ty
@@ -1287,7 +1281,7 @@ impl<'a> Checker<'a> {
             "array_search" if args.len() >= 2 => {
                 let haystack_ty = self.infer_expr(&args[1].value, locals);
                 if Checker::is_list_like(&haystack_ty) {
-                    return union_types(Type::Int, Type::False);
+                    return union_types(Type::int(), Type::bool_literal(false));
                 }
                 // Same idea, one level less precise - a haystack whose
                 // key type is confidently known (not just "definitely a
@@ -1297,7 +1291,7 @@ impl<'a> Checker<'a> {
                 if let Some(key_ty) = Self::array_key_type(&haystack_ty)
                     && key_ty != Type::unknown_array_key()
                 {
-                    return union_types(key_ty, Type::False);
+                    return union_types(key_ty, Type::bool_literal(false));
                 }
             }
             // The real stub declares `version_compare(string, string,
@@ -1307,7 +1301,7 @@ impl<'a> Checker<'a> {
             // `bool`, absent means always exactly one of `-1`/`0`/`1`.
             // Scoped to the 2-argument form; the 3-argument form falls
             // through to the generic `int|bool` stub type unchanged.
-            "version_compare" if args.len() == 2 => return Type::Int,
+            "version_compare" if args.len() == 2 => return Type::int(),
             // The real stub declares `microtime(bool $as_float = false):
             // string|float` unconditionally; a literal `true` argument
             // narrows to plain `float`, a literal `false` (or no
@@ -1316,20 +1310,20 @@ impl<'a> Checker<'a> {
             // narrowed from a wider type) should narrow the same way a
             // bare `True`/`False` would.
             "microtime" => match args.first().map(|a| self.infer_expr(&a.value, locals)) {
-                None => return Type::String,
+                None => return Type::string(),
                 Some(ty)
                     if types::Relation::structural()
                         .is_super_type_of(&Type::True, &ty)
                         .yes() =>
                 {
-                    return Type::Float;
+                    return Type::float();
                 }
                 Some(ty)
                     if types::Relation::structural()
                         .is_super_type_of(&Type::False, &ty)
                         .yes() =>
                 {
-                    return Type::String;
+                    return Type::string();
                 }
                 _ => {}
             },
@@ -1343,10 +1337,10 @@ impl<'a> Checker<'a> {
             // silently fail to match a bare `== Type::String`.
             "str_replace" | "str_ireplace" if args.len() == 3 || args.len() == 4 => {
                 if types::Relation::structural()
-                    .is_super_type_of(&Type::String, &self.infer_expr(&args[2].value, locals))
+                    .is_super_type_of(&Type::string(), &self.infer_expr(&args[2].value, locals))
                     .yes()
                 {
-                    return Type::String;
+                    return Type::string();
                 }
             }
             // Same subject-dependent shape as above, but these can also
@@ -1372,10 +1366,10 @@ impl<'a> Checker<'a> {
             // Never returns `null`, so a plain early return suffices.
             "substr_replace" if args.len() == 3 || args.len() == 4 => {
                 if types::Relation::structural()
-                    .is_super_type_of(&Type::String, &self.infer_expr(&args[0].value, locals))
+                    .is_super_type_of(&Type::string(), &self.infer_expr(&args[0].value, locals))
                     .yes()
                 {
-                    return Type::String;
+                    return Type::string();
                 }
             }
             // The real stub declares `getenv(?string $name = null, bool
@@ -1389,10 +1383,7 @@ impl<'a> Checker<'a> {
             // plain-`array` answer.
             "getenv" => {
                 if args.is_empty() {
-                    return Type::Array(
-                        Box::new(Type::unknown_array_key()),
-                        Box::new(Type::String),
-                    );
+                    return Type::array(Type::unknown_array_key(), Type::string());
                 }
                 let resolved = resolve_call_args(args, sig.params());
                 if let Some(name_ty) = resolved
@@ -1401,22 +1392,22 @@ impl<'a> Checker<'a> {
                     .flatten()
                     .map(|e| self.infer_expr(e, locals))
                     && types::Relation::structural()
-                        .is_super_type_of(&Type::String, &name_ty)
+                        .is_super_type_of(&Type::string(), &name_ty)
                         .yes()
                 {
-                    return Type::Union(vec![Type::String, Type::False]);
+                    return Type::union_of(vec![Type::string(), Type::bool_literal(false)]);
                 }
             }
             // The native stub declares a plain `string|false`, but a
             // successful call always returns a real non-falsy-string,
             // never `''`/`'0'`.
             "tempnam" if args.len() == 2 => {
-                return Type::Union(vec![
-                    Type::Intersection(vec![
-                        Type::String,
-                        Type::Accessory(AccessoryKind::NonFalsyString),
+                return Type::union_of(vec![
+                    Type::intersection_of(vec![
+                        Type::string(),
+                        Type::accessory(AccessoryKind::NonFalsyString),
                     ]),
-                    Type::False,
+                    Type::bool_literal(false),
                 ]);
             }
             // Constant-folds a small literal-input/literal-count call
@@ -1430,23 +1421,23 @@ impl<'a> Checker<'a> {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 let count_ty = self.infer_expr(&args[1].value, locals);
                 if matches!(count_ty, Type::IntLiteral(n) if n <= 0) {
-                    return Type::StringLiteral(PhpString::default());
+                    return Type::string_literal(PhpString::default());
                 }
                 if let (Type::StringLiteral(s), Type::IntLiteral(n)) = (&input_ty, &count_ty)
                     && *n >= 0
                     && s.len().saturating_mul(*n as usize) < 100
                 {
-                    return Type::StringLiteral(s.repeat(*n as usize));
+                    return Type::string_literal(s.repeat(*n as usize));
                 }
                 let count_is_at_least_one = matches!(count_ty, Type::IntLiteral(n) if n >= 1)
                     || matches!(count_ty, Type::IntRange(Some(min), _) if min >= 1);
                 if count_is_at_least_one && is_non_falsy_string(&input_ty) {
-                    return Type::Intersection(vec![
-                        Type::String,
-                        Type::Accessory(AccessoryKind::NonFalsyString),
+                    return Type::intersection_of(vec![
+                        Type::string(),
+                        Type::accessory(AccessoryKind::NonFalsyString),
                     ]);
                 }
-                return Type::String;
+                return Type::string();
             }
             // Mirrors real PHPStan's `StrCaseFunctionsReturnTypeExtension` -
             // a literal argument is constant-folded outright (ASCII-only,
@@ -1521,22 +1512,22 @@ impl<'a> Checker<'a> {
             // `$separator` (there's no other way `explode()` can return
             // fewer than 1 element).
             "explode" if matches!(args.len(), 2..=3) => {
-                return Type::Intersection(vec![
-                    Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String)),
-                    Type::Accessory(AccessoryKind::ArrayList),
-                    Type::Accessory(AccessoryKind::NonEmptyArray),
+                return Type::intersection_of(vec![
+                    Type::array(Type::unknown_array_key(), Type::string()),
+                    Type::accessory(AccessoryKind::ArrayList),
+                    Type::accessory(AccessoryKind::NonEmptyArray),
                 ]);
             }
             // Same family as tempnam() above - the native stub declares a
             // bare `array|false`, but a successful call always returns a
             // real `list<string>`.
             "glob" if matches!(args.len(), 1..=2) => {
-                return Type::Union(vec![
-                    Type::Intersection(vec![
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String)),
-                        Type::Accessory(AccessoryKind::ArrayList),
+                return Type::union_of(vec![
+                    Type::intersection_of(vec![
+                        Type::array(Type::unknown_array_key(), Type::string()),
+                        Type::accessory(AccessoryKind::ArrayList),
                     ]),
-                    Type::False,
+                    Type::bool_literal(false),
                 ]);
             }
             // Same family, subject at index 1 (`preg_replace_callback_array
@@ -1575,7 +1566,7 @@ impl<'a> Checker<'a> {
             "json_encode" if args.len() >= 2 && contains_json_throw_on_error(&args[1].value) => {
                 let resolved = resolve_call_args(args, sig.params());
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
-                return strip_type_member(generic, &Type::False);
+                return strip_type_member(generic, &Type::bool_literal(false));
             }
             // The real stub declares `curl_getinfo` unconditionally
             // `mixed` - maps a literal `CURLINFO_*` option constant to a
@@ -1599,7 +1590,7 @@ impl<'a> Checker<'a> {
             // to plain `string`, unchanged.
             "get_class" if args.len() == 1 => {
                 if let Type::Object(class, _) = self.infer_expr(&args[0].value, locals) {
-                    return Type::ClassString(Box::new(Type::Object(class, Vec::new())));
+                    return Type::class_string(Type::object(class, Vec::new()));
                 }
             }
             // `get_called_class()`'s stub is unconditionally
@@ -1613,9 +1604,9 @@ impl<'a> Checker<'a> {
             "get_called_class" if args.is_empty() => {
                 return match &self.current_class {
                     Some(class) => {
-                        Type::ClassString(Box::new(Type::Object(class.clone().into(), Vec::new())))
+                        Type::class_string(Type::object(class.clone().into(), Vec::new()))
                     }
-                    None => Type::False,
+                    None => Type::bool_literal(false),
                 };
             }
             // `get_parent_class($object_or_class)`'s stub is
@@ -1683,7 +1674,7 @@ impl<'a> Checker<'a> {
                     && let Some(c) = single_char(format)
                     && let Some((min, max)) = idate_format_char_range(c)
                 {
-                    return Type::IntRange(Some(min), Some(max));
+                    return Type::int_range(Some(min), Some(max));
                 }
             }
             // The real stub is unconditionally `array` (the 2-arg
@@ -1711,9 +1702,9 @@ impl<'a> Checker<'a> {
                     let path_ty = self.infer_expr(&args[0].value, locals);
                     return match flag_name.trim_start_matches('\\') {
                         "PATHINFO_DIRNAME" | "PATHINFO_BASENAME" | "PATHINFO_EXTENSION"
-                        | "PATHINFO_FILENAME" => Type::String,
+                        | "PATHINFO_FILENAME" => Type::string(),
                         "PATHINFO_ALL" => pathinfo_array_shape(&path_ty),
-                        _ => Type::Union(vec![pathinfo_array_shape(&path_ty), Type::String]),
+                        _ => Type::union_of(vec![pathinfo_array_shape(&path_ty), Type::string()]),
                     };
                 }
             }
@@ -1727,7 +1718,10 @@ impl<'a> Checker<'a> {
             // way PHP's C implementation does isn't worth it for the
             // precision gained here.
             "parse_url" if args.len() == 1 => {
-                return Type::Union(vec![parse_url_components_array_shape(), Type::False]);
+                return Type::union_of(vec![
+                    parse_url_components_array_shape(),
+                    Type::bool_literal(false),
+                ]);
             }
             "parse_url" if args.len() == 2 => {
                 if let ExprKind::Name(component_name) = &args[1].value.kind
@@ -1753,7 +1747,7 @@ impl<'a> Checker<'a> {
                     && let Some(format) = format.as_str()
                     && let Some(fields) = sscanf_result_fields(format)
                 {
-                    return Type::Union(vec![Type::ArrayShape(fields), Type::Null]);
+                    return Type::union_of(vec![Type::array_shape(fields), Type::null()]);
                 }
             }
             // `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()` share one
@@ -1764,10 +1758,10 @@ impl<'a> Checker<'a> {
             // same shape under different key names, nullable rather than
             // `false`-able on failure.
             "stat" | "lstat" | "fstat" | "ssh2_sftp_stat" if args.len() == 1 => {
-                return Type::Union(vec![stat_array_shape(), Type::False]);
+                return Type::union_of(vec![stat_array_shape(), Type::bool_literal(false)]);
             }
             "dio_stat" if args.len() == 1 => {
-                return Type::Union(vec![dio_stat_array_shape(), Type::Null]);
+                return Type::union_of(vec![dio_stat_array_shape(), Type::null()]);
             }
             // `hash_algos()`/`openssl_get_cipher_methods()`/
             // `mb_list_encodings()`'s stubs are unconditionally a bare
@@ -1800,8 +1794,8 @@ impl<'a> Checker<'a> {
     fn find_declared_parent_class(&self, class: &str) -> Option<Type> {
         let info = self.registry.classes.get(class)?;
         Some(match info.extends().first() {
-            Some(parent) => Type::ClassString(Box::new(Type::Object(parent.into(), Vec::new()))),
-            None => Type::False,
+            Some(parent) => Type::class_string(Type::object(parent.into(), Vec::new())),
+            None => Type::bool_literal(false),
         })
     }
 
@@ -1935,7 +1929,7 @@ impl<'a> Checker<'a> {
             } else {
                 s.clone()
             };
-            return Type::StringLiteral(folded);
+            return Type::string_literal(folded);
         }
 
         let mut accessories = Vec::new();
@@ -1958,11 +1952,11 @@ impl<'a> Checker<'a> {
         }
 
         if accessories.is_empty() {
-            Type::String
+            Type::string()
         } else {
-            let mut members: Vec<Type> = vec![Type::String];
-            members.extend(accessories.into_iter().map(Type::Accessory));
-            Type::Intersection(members)
+            let mut members: Vec<Type> = vec![Type::string()];
+            members.extend(accessories.into_iter().map(Type::accessory));
+            Type::intersection_of(members)
         }
     }
 }
@@ -2087,7 +2081,7 @@ fn is_null_filter_callback(e: &Expr) -> bool {
 /// element type, not just the accessory markers every `array_filter`
 /// call already loses (`strip_accessory_markers`).
 fn strip_null_from_array_element(ty: Type) -> Type {
-    filter_array_elements(ty, &|elem| narrow_type_excluding(elem, &Type::Null))
+    filter_array_elements(ty, &|elem| narrow_type_excluding(elem, &Type::null()))
 }
 
 /// An `array_filter` whose callback keeps exactly the elements `keep`
@@ -2096,8 +2090,8 @@ fn strip_null_from_array_element(ty: Type) -> Type {
 /// survive and makes one that only might survive optional.
 fn filter_array_elements(ty: Type, keep: &dyn Fn(&Type) -> Type) -> Type {
     match ty {
-        Type::Array(key, elem) => Type::Array(key, Box::new(keep(&elem))),
-        Type::ArrayShape(shape) => Type::ArrayShape(Shape {
+        Type::Array(key, elem) => Type::array(*key, keep(&elem)),
+        Type::ArrayShape(shape) => Type::array_shape(Shape {
             fields: shape
                 .fields
                 .into_iter()
@@ -2116,7 +2110,7 @@ fn filter_array_elements(ty: Type, keep: &dyn Fn(&Type) -> Type) -> Type {
                 .collect(),
             unsealed: shape.unsealed,
         }),
-        Type::Union(members) => Type::Union(
+        Type::Union(members) => Type::union_of(
             members
                 .into_iter()
                 .map(|m| filter_array_elements(m, keep))
@@ -2173,8 +2167,8 @@ fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
     fn type_for_predicate(name: &str) -> Option<Type> {
         let name = name.trim_start_matches('\\').to_ascii_lowercase();
         match name.as_str() {
-            "is_null" => Some(Type::Null),
-            "is_real" => Some(Type::Float),
+            "is_null" => Some(Type::null()),
+            "is_real" => Some(Type::float()),
             _ => narrowing_type_for_predicate(&name),
         }
     }
@@ -2248,9 +2242,9 @@ fn filter_validate_result(
     let throw_on_failure =
         flags_expr.is_some_and(|e| contains_flag_name_with_options(e, "FILTER_THROW_ON_FAILURE"));
     let implicit_fallback = if null_on_failure {
-        Type::Null
+        Type::null()
     } else {
-        Type::False
+        Type::bool_literal(false)
     };
     let flags_is_options_array = flags_ty.is_some_and(Checker::is_array_like);
     if !flags_is_options_array {
@@ -2315,19 +2309,19 @@ fn filter_var_option(options: &Shape, name: &str) -> Option<Type> {
 
 fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
     match name {
-        "FILTER_VALIDATE_BOOLEAN" | "FILTER_VALIDATE_BOOL" => Some(Type::Bool),
-        "FILTER_VALIDATE_INT" => Some(Type::Int),
-        "FILTER_VALIDATE_FLOAT" => Some(Type::Float),
-        "FILTER_VALIDATE_DOMAIN" | "FILTER_VALIDATE_REGEXP" => Some(Type::String),
+        "FILTER_VALIDATE_BOOLEAN" | "FILTER_VALIDATE_BOOL" => Some(Type::bool()),
+        "FILTER_VALIDATE_INT" => Some(Type::int()),
+        "FILTER_VALIDATE_FLOAT" => Some(Type::float()),
+        "FILTER_VALIDATE_DOMAIN" | "FILTER_VALIDATE_REGEXP" => Some(Type::string()),
         // These can never come back as the empty string on success (a
         // validated IP/email/MAC address is never `''`), so it's
         // `non-falsy-string`, not plain `string`.
         "FILTER_VALIDATE_IP"
         | "FILTER_VALIDATE_EMAIL"
         | "FILTER_VALIDATE_MAC"
-        | "FILTER_VALIDATE_URL" => Some(Type::Intersection(vec![
-            Type::String,
-            Type::Accessory(AccessoryKind::NonFalsyString),
+        | "FILTER_VALIDATE_URL" => Some(Type::intersection_of(vec![
+            Type::string(),
+            Type::accessory(AccessoryKind::NonFalsyString),
         ])),
         _ => None,
     }
@@ -2383,7 +2377,7 @@ fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
 fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) -> Type {
     filter_array_elements(ty, &|elem| {
         if relation.disjoint(elem, target) {
-            Type::Never
+            Type::never()
         } else {
             narrow_type_to(relation, elem, target)
         }
@@ -2395,14 +2389,14 @@ fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) ->
 /// `!empty($x)`'s narrowing already uses.
 fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
     match ty {
-        Type::Array(key, elem) => Type::Array(key, Box::new(narrow_type_excluding_falsy(&elem))),
+        Type::Array(key, elem) => Type::array(*key, narrow_type_excluding_falsy(&elem)),
         // A fixed-position `ArrayShape` input needs the identical
         // narrowing applied per field, not just per homogeneous element
         // type - real PHP's no-callback filtering can drop a specific
         // field entirely when it's provably always-falsy, and can no
         // longer guarantee a field's presence when it's merely possibly
         // falsy.
-        Type::ArrayShape(shape) => Type::ArrayShape(Shape {
+        Type::ArrayShape(shape) => Type::array_shape(Shape {
             fields: shape
                 .fields
                 .into_iter()
@@ -2450,12 +2444,12 @@ fn strip_accessory_markers(ty: Type) -> Type {
         Type::Intersection(members) => members
             .into_iter()
             .find(|m| !matches!(m, Type::Accessory(_)))
-            .unwrap_or(Type::Mixed(false)),
+            .unwrap_or(Type::mixed()),
         Type::Union(members) => members
             .into_iter()
             .map(strip_accessory_markers)
             .reduce(union_types)
-            .unwrap_or(Type::Mixed(false)),
+            .unwrap_or(Type::mixed()),
         other => other,
     }
 }
@@ -2475,36 +2469,30 @@ fn strip_accessory_markers(ty: Type) -> Type {
 fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
     match input_ty {
         Type::Intersection(members) => {
-            let mut result = vec![Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(mapped_elem),
-            )];
+            let mut result = vec![Type::array(Type::unknown_array_key(), mapped_elem)];
             result.extend(
                 members
                     .iter()
                     .filter(|m| matches!(m, Type::Accessory(_)))
                     .cloned(),
             );
-            Type::Intersection(result)
+            Type::intersection_of(result)
         }
         Type::Union(_) => {
-            let mut result = vec![Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(mapped_elem),
-            )];
+            let mut result = vec![Type::array(Type::unknown_array_key(), mapped_elem)];
             if Checker::is_list_like(input_ty) {
-                result.push(Type::Accessory(AccessoryKind::ArrayList));
+                result.push(Type::accessory(AccessoryKind::ArrayList));
             }
             if Checker::is_known_non_empty_array(input_ty) {
-                result.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                result.push(Type::accessory(AccessoryKind::NonEmptyArray));
             }
             if result.len() > 1 {
-                Type::Intersection(result)
+                Type::intersection_of(result)
             } else {
                 result.remove(0)
             }
         }
-        _ => Type::Array(Box::new(Type::unknown_array_key()), Box::new(mapped_elem)),
+        _ => Type::array(Type::unknown_array_key(), mapped_elem),
     }
 }
 
@@ -2523,12 +2511,12 @@ fn strip_array_member(ty: Type) -> Type {
                 .filter(|m| !matches!(m, Type::Array(_, _) | Type::ArrayShape(_)))
                 .collect();
             match kept.len() {
-                0 => Type::Mixed(false),
+                0 => Type::mixed(),
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => Type::union_of(kept),
             }
         }
-        Type::Array(_, _) | Type::ArrayShape(_) => Type::Mixed(false),
+        Type::Array(_, _) | Type::ArrayShape(_) => Type::mixed(),
         other => other,
     }
 }
@@ -2545,12 +2533,12 @@ fn strip_type_member(ty: Type, target: &Type) -> Type {
         Type::Union(members) => {
             let kept: Vec<Type> = members.into_iter().filter(|m| m != target).collect();
             match kept.len() {
-                0 => Type::Mixed(false),
+                0 => Type::mixed(),
                 1 => kept.into_iter().next().unwrap(),
-                _ => Type::Union(kept),
+                _ => Type::union_of(kept),
             }
         }
-        other if other == *target => Type::Mixed(false),
+        other if other == *target => Type::mixed(),
         other => other,
     }
 }
@@ -2578,31 +2566,28 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
 /// table, including its RTSP/proxy/microsecond/bignum/`_T`-suffixed
 /// variants. `None` falls through to the generic `mixed` behavior.
 fn curl_getinfo_component_type(name: &str) -> Option<Type> {
-    let string_false = Type::Union(vec![Type::String, Type::False]);
-    let int_false = Type::Union(vec![Type::Int, Type::False]);
+    let string_false = Type::union_of(vec![Type::string(), Type::bool_literal(false)]);
+    let int_false = Type::union_of(vec![Type::int(), Type::bool_literal(false)]);
     // `list<string>` - `CURLINFO_SSL_ENGINES`/`CURLINFO_COOKIELIST`'s own
     // real type.
-    let string_list = Type::Intersection(vec![
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String)),
-        Type::Accessory(AccessoryKind::ArrayList),
+    let string_list = Type::intersection_of(vec![
+        Type::array(Type::unknown_array_key(), Type::string()),
+        Type::accessory(AccessoryKind::ArrayList),
     ]);
     // `list<array<string, string>>` - `CURLINFO_CERTINFO`'s own real type.
-    let nested_array_in_list = Type::Intersection(vec![
-        Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Array(
-                Box::new(Type::unknown_array_key()),
-                Box::new(Type::String),
-            )),
+    let nested_array_in_list = Type::intersection_of(vec![
+        Type::array(
+            Type::unknown_array_key(),
+            Type::array(Type::unknown_array_key(), Type::string()),
         ),
-        Type::Accessory(AccessoryKind::ArrayList),
+        Type::accessory(AccessoryKind::ArrayList),
     ]);
     Some(match name {
         "CURLINFO_EFFECTIVE_URL"
         | "CURLINFO_PRIMARY_IP"
         | "CURLINFO_LOCAL_IP"
         | "CURLINFO_SCHEME"
-        | "CURLINFO_EFFECTIVE_METHOD" => Type::String,
+        | "CURLINFO_EFFECTIVE_METHOD" => Type::string(),
         "CURLINFO_REDIRECT_URL"
         | "CURLINFO_HEADER_OUT"
         | "CURLINFO_CONTENT_TYPE"
@@ -2623,7 +2608,7 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
         | "CURLINFO_SPEED_UPLOAD"
         | "CURLINFO_CONTENT_LENGTH_DOWNLOAD"
         | "CURLINFO_CONTENT_LENGTH_UPLOAD"
-        | "CURLINFO_APPCONNECT_TIME" => Type::Float,
+        | "CURLINFO_APPCONNECT_TIME" => Type::float(),
         "CURLINFO_FILETIME"
         | "CURLINFO_REDIRECT_COUNT"
         | "CURLINFO_PRIMARY_PORT"
@@ -2660,7 +2645,7 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
         | "CURLINFO_STARTTRANSFER_TIME_T"
         | "CURLINFO_TOTAL_TIME_T"
         | "CURLINFO_PROXY_ERROR"
-        | "CURLINFO_RETRY_AFTER" => Type::Int,
+        | "CURLINFO_RETRY_AFTER" => Type::int(),
         "CURLINFO_SSL_ENGINES" | "CURLINFO_COOKIELIST" => string_list,
         "CURLINFO_CERTINFO" => nested_array_in_list,
         "CURLINFO_POSTTRANSFER_TIME_T"
@@ -2669,7 +2654,7 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
         | "CURLINFO_HTTPAUTH_USED"
         | "CURLINFO_PROXYAUTH_USED"
         | "CURLINFO_CONN_ID" => int_false,
-        "CURLINFO_PRIVATE" => Type::Mixed(false),
+        "CURLINFO_PRIVATE" => Type::mixed(),
         _ => return None,
     })
 }
@@ -2679,30 +2664,30 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
 /// it once per member without fighting the borrow checker over `&self`.
 fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
     match ty {
-        Type::Null => Some(Type::StringLiteral("null".into())),
-        Type::Bool | Type::True | Type::False => Some(Type::StringLiteral("bool".into())),
+        Type::Null => Some(Type::string_literal("null".into())),
+        Type::Bool | Type::True | Type::False => Some(Type::string_literal("bool".into())),
         Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => {
-            Some(Type::StringLiteral("int".into()))
+            Some(Type::string_literal("int".into()))
         }
-        Type::Float | Type::FloatLiteral(_) => Some(Type::StringLiteral("float".into())),
-        Type::String | Type::StringLiteral(_) => Some(Type::StringLiteral("string".into())),
-        Type::Array(_, _) | Type::ArrayShape(_) => Some(Type::StringLiteral("array".into())),
+        Type::Float | Type::FloatLiteral(_) => Some(Type::string_literal("float".into())),
+        Type::String | Type::StringLiteral(_) => Some(Type::string_literal("string".into())),
+        Type::Array(_, _) | Type::ArrayShape(_) => Some(Type::string_literal("array".into())),
         Type::Object(class, _) => Some(
             if registry
                 .classes
                 .get(class.as_str())
                 .is_some_and(|info| info.is_final())
             {
-                Type::StringLiteral(class.clone().to_string().into())
+                Type::string_literal(class.clone().to_string().into())
             } else {
-                Type::String
+                Type::string()
             },
         ),
         // An enum is always implicitly final (real PHP forbids `extends`
         // on one entirely), so a specific case's class name is always the
         // exact runtime answer - same rule as the `Object` arm's
         // `is_final` branch above, just unconditional.
-        Type::EnumCase(fqn, _) => Some(Type::StringLiteral(fqn.clone().to_string().into())),
+        Type::EnumCase(fqn, _) => Some(Type::string_literal(fqn.clone().to_string().into())),
         Type::Intersection(members) => members.iter().find_map(|m| get_debug_type_for(m, registry)),
         Type::Union(members) => {
             let mut iter = members.iter();
@@ -2741,13 +2726,13 @@ fn gettype_result(ty: &Type) -> Option<Type> {
     match ty {
         Type::Union(members) => {
             let mut iter = members.iter();
-            let mut acc = Type::StringLiteral(gettype_string_for(iter.next()?)?.into());
+            let mut acc = Type::string_literal(gettype_string_for(iter.next()?)?.into());
             for m in iter {
-                acc = union_types(acc, Type::StringLiteral(gettype_string_for(m)?.into()));
+                acc = union_types(acc, Type::string_literal(gettype_string_for(m)?.into()));
             }
             Some(acc)
         }
-        other => gettype_string_for(other).map(|s| Type::StringLiteral(s.to_string().into())),
+        other => gettype_string_for(other).map(|s| Type::string_literal(s.to_string().into())),
     }
 }
 
@@ -2856,11 +2841,14 @@ pub(crate) fn date_format_return_type(format: &str) -> Option<Type> {
             false => all_numeric = false,
         }
     }
-    let mut members = vec![Type::String, Type::Accessory(AccessoryKind::NonEmptyString)];
+    let mut members = vec![
+        Type::string(),
+        Type::accessory(AccessoryKind::NonEmptyString),
+    ];
     if all_numeric {
-        members.push(Type::Accessory(AccessoryKind::NumericString));
+        members.push(Type::accessory(AccessoryKind::NumericString));
     }
-    Some(Type::Intersection(members))
+    Some(Type::intersection_of(members))
 }
 
 /// `DateInterval::format($format)`'s per-specifier substitution value for
@@ -2929,19 +2917,19 @@ fn date_interval_format_literal(format: &str) -> Option<String> {
 /// contribute no extra accessory guarantee there.
 pub(crate) fn date_interval_format_return_type(format: &str) -> Option<Type> {
     let value = date_interval_format_literal(format)?;
-    let mut members = vec![Type::String];
+    let mut members = vec![Type::string()];
     if types::is_numeric_string_literal(&value) {
-        members.push(Type::Accessory(AccessoryKind::NumericString));
+        members.push(Type::accessory(AccessoryKind::NumericString));
     }
     if !value.is_empty() && value != "0" {
-        members.push(Type::Accessory(AccessoryKind::NonFalsyString));
+        members.push(Type::accessory(AccessoryKind::NonFalsyString));
     } else if !value.is_empty() {
-        members.push(Type::Accessory(AccessoryKind::NonEmptyString));
+        members.push(Type::accessory(AccessoryKind::NonEmptyString));
     }
     if members.len() == 1 {
         return None;
     }
-    Some(Type::Intersection(members))
+    Some(Type::intersection_of(members))
 }
 
 /// `pathinfo($path)`'s 1-arg array shape - `basename`/`filename` always
@@ -2954,11 +2942,11 @@ pub(crate) fn date_interval_format_return_type(format: &str) -> Option<Type> {
 /// present.
 fn pathinfo_array_shape(path_ty: &Type) -> Type {
     let dirname_optional = !string_type_has_accessory(path_ty, AccessoryKind::NonEmptyString);
-    Type::ArrayShape(Shape::from_named(vec![
-        ("dirname".to_string(), Type::String, dirname_optional),
-        ("basename".to_string(), Type::String, false),
-        ("extension".to_string(), Type::String, true),
-        ("filename".to_string(), Type::String, false),
+    Type::array_shape(Shape::from_named(vec![
+        ("dirname".to_string(), Type::string(), dirname_optional),
+        ("basename".to_string(), Type::string(), false),
+        ("extension".to_string(), Type::string(), true),
+        ("filename".to_string(), Type::string(), false),
     ]))
 }
 
@@ -2966,19 +2954,19 @@ fn pathinfo_array_shape(path_ty: &Type) -> Type {
 /// genuinely optional, `port` alone typed `IntRange(0, 65535)` rather
 /// than plain `String` like the rest.
 fn parse_url_components_array_shape() -> Type {
-    Type::ArrayShape(Shape::from_named(vec![
-        ("scheme".to_string(), Type::String, true),
-        ("host".to_string(), Type::String, true),
+    Type::array_shape(Shape::from_named(vec![
+        ("scheme".to_string(), Type::string(), true),
+        ("host".to_string(), Type::string(), true),
         (
             "port".to_string(),
-            Type::IntRange(Some(0), Some(65535)),
+            Type::int_range(Some(0), Some(65535)),
             true,
         ),
-        ("user".to_string(), Type::String, true),
-        ("pass".to_string(), Type::String, true),
-        ("path".to_string(), Type::String, true),
-        ("query".to_string(), Type::String, true),
-        ("fragment".to_string(), Type::String, true),
+        ("user".to_string(), Type::string(), true),
+        ("pass".to_string(), Type::string(), true),
+        ("path".to_string(), Type::string(), true),
+        ("query".to_string(), Type::string(), true),
+        ("fragment".to_string(), Type::string(), true),
     ]))
 }
 
@@ -2987,11 +2975,15 @@ fn parse_url_components_array_shape() -> Type {
 /// table, minus its `AccessoryLowercaseStringType` refinement for a
 /// lowercase `$url` (this project has no equivalent accessory kind).
 fn parse_url_component_type(name: &str) -> Option<Type> {
-    let string_false_null = Type::Union(vec![Type::String, Type::False, Type::Null]);
-    let port_false_null = Type::Union(vec![
-        Type::IntRange(Some(0), Some(65535)),
-        Type::False,
-        Type::Null,
+    let string_false_null = Type::union_of(vec![
+        Type::string(),
+        Type::bool_literal(false),
+        Type::null(),
+    ]);
+    let port_false_null = Type::union_of(vec![
+        Type::int_range(Some(0), Some(65535)),
+        Type::bool_literal(false),
+        Type::null(),
     ]);
     Some(match name {
         "PHP_URL_SCHEME" | "PHP_URL_HOST" | "PHP_URL_USER" | "PHP_URL_PASS" | "PHP_URL_PATH"
@@ -3150,21 +3142,21 @@ fn parse_sscanf_format(format: &str) -> Option<Vec<(Option<u32>, SscanfSpecifier
 /// unmatched specifier leaves that slot `null`.
 fn sscanf_field_type(length: Option<u32>, specifier: &SscanfSpecifier) -> Type {
     let base = match specifier {
-        SscanfSpecifier::Char('d' | 'o' | 'u' | 'x' | 'i') => Type::Int,
-        SscanfSpecifier::Char('e' | 'E' | 'f') => Type::Float,
+        SscanfSpecifier::Char('d' | 'o' | 'u' | 'x' | 'i') => Type::int(),
+        SscanfSpecifier::Char('e' | 'E' | 'f') => Type::float(),
         SscanfSpecifier::Char(_) | SscanfSpecifier::Bracket => match length {
-            Some(n) if n > 1 => Type::Intersection(vec![
-                Type::String,
-                Type::Accessory(AccessoryKind::NonFalsyString),
+            Some(n) if n > 1 => Type::intersection_of(vec![
+                Type::string(),
+                Type::accessory(AccessoryKind::NonFalsyString),
             ]),
-            Some(_) => Type::Intersection(vec![
-                Type::String,
-                Type::Accessory(AccessoryKind::NonEmptyString),
+            Some(_) => Type::intersection_of(vec![
+                Type::string(),
+                Type::accessory(AccessoryKind::NonEmptyString),
             ]),
-            None => Type::String,
+            None => Type::string(),
         },
     };
-    Type::Union(vec![base, Type::Null])
+    Type::union_of(vec![base, Type::null()])
 }
 
 /// `sscanf($string, $format)`'s numeric-keyed result-array fields, one
@@ -3194,11 +3186,11 @@ fn sscanf_result_fields(format: &str) -> Option<Shape> {
 /// never returns `0` in practice); `nanoseconds` is always a sub-second
 /// remainder, `0` to `999_999_999` inclusive.
 fn hrtime_array_shape() -> Type {
-    Type::ArrayShape(Shape::from_named(vec![
-        ("0".to_string(), Type::IntRange(Some(1), None), false),
+    Type::array_shape(Shape::from_named(vec![
+        ("0".to_string(), Type::int_range(Some(1), None), false),
         (
             "1".to_string(),
-            Type::IntRange(Some(0), Some(999_999_999)),
+            Type::int_range(Some(0), Some(999_999_999)),
             false,
         ),
     ]))
@@ -3206,7 +3198,7 @@ fn hrtime_array_shape() -> Type {
 
 /// `hrtime(true)`'s single-number nanosecond-count form.
 fn hrtime_number_type() -> Type {
-    Type::Union(vec![Type::IntRange(Some(1), None), Type::Float])
+    Type::union_of(vec![Type::int_range(Some(1), None), Type::float()])
 }
 
 /// `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()`'s shared 13-key shape,
@@ -3215,20 +3207,20 @@ fn hrtime_number_type() -> Type {
 /// its string name; only the string-keyed half is modeled here, the way
 /// real code actually reads it (`$stat['size']`, not `$stat[7]`).
 fn stat_array_shape() -> Type {
-    Type::ArrayShape(Shape::from_named(
+    Type::array_shape(Shape::from_named(
         [
             "dev", "ino", "mode", "nlink", "uid", "gid", "rdev", "size", "atime", "mtime", "ctime",
             "blksize", "blocks",
         ]
         .into_iter()
-        .map(|key| (key, Type::Int, false)),
+        .map(|key| (key, Type::int(), false)),
     ))
 }
 
 /// `dio_stat()`'s 13-key shape - the same values-are-all-`int` shape as
 /// `stat_array_shape` above, under `dio_stat`'s own distinct key names.
 fn dio_stat_array_shape() -> Type {
-    Type::ArrayShape(Shape::from_named(
+    Type::array_shape(Shape::from_named(
         [
             "device",
             "inode",
@@ -3245,7 +3237,7 @@ fn dio_stat_array_shape() -> Type {
             "ctime",
         ]
         .into_iter()
-        .map(|key| (key, Type::Int, false)),
+        .map(|key| (key, Type::int(), false)),
     ))
 }
 
@@ -3253,15 +3245,15 @@ fn dio_stat_array_shape() -> Type {
 /// `mb_list_encodings()`'s evidenced return shape regardless of host/PHP
 /// version/installed extensions.
 fn list_of_non_empty_strings() -> Type {
-    Type::Intersection(vec![
-        Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Intersection(vec![
-                Type::String,
-                Type::Accessory(AccessoryKind::NonEmptyString),
-            ])),
+    Type::intersection_of(vec![
+        Type::array(
+            Type::unknown_array_key(),
+            Type::intersection_of(vec![
+                Type::string(),
+                Type::accessory(AccessoryKind::NonEmptyString),
+            ]),
         ),
-        Type::Accessory(AccessoryKind::ArrayList),
-        Type::Accessory(AccessoryKind::NonEmptyArray),
+        Type::accessory(AccessoryKind::ArrayList),
+        Type::accessory(AccessoryKind::NonEmptyArray),
     ])
 }

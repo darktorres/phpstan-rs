@@ -255,13 +255,13 @@ impl<'a> Checker<'a> {
                     let element_ty = field_key
                         .and_then(|k| shape.field(&k))
                         .map(|f| f.ty.clone())
-                        .unwrap_or(Type::Mixed(false));
+                        .unwrap_or(Type::mixed());
                     self.check_param_out_assignment(&item.value, &element_ty);
                     self.check_by_ref_destructuring(&item.value, &element_ty);
                 }
             }
             Type::Array(..) | Type::Intersection(_) => {
-                let element_ty = Self::array_element_type(ty).unwrap_or(Type::Mixed(false));
+                let element_ty = Self::array_element_type(ty).unwrap_or(Type::mixed());
                 for item in items {
                     self.check_param_out_assignment(&item.value, &element_ty);
                     self.check_by_ref_destructuring(&item.value, &element_ty);
@@ -269,8 +269,8 @@ impl<'a> Checker<'a> {
             }
             _ => {
                 for item in items {
-                    self.check_param_out_assignment(&item.value, &Type::Mixed(false));
-                    self.check_by_ref_destructuring(&item.value, &Type::Mixed(false));
+                    self.check_param_out_assignment(&item.value, &Type::mixed());
+                    self.check_by_ref_destructuring(&item.value, &Type::mixed());
                 }
             }
         }
@@ -376,7 +376,7 @@ impl<'a> Checker<'a> {
                         let element_ty = field_key
                             .and_then(|k| shape.field(&k))
                             .map(|f| f.ty.clone())
-                            .unwrap_or(Type::Mixed(false));
+                            .unwrap_or(Type::mixed());
                         self.bind_assignment_target(&item.value, element_ty, locals);
                     }
                 }
@@ -385,14 +385,14 @@ impl<'a> Checker<'a> {
                 // without it, destructuring one (`[$a, $b] = $listTypedVar`)
                 // would lose its real element type down to `Mixed`.
                 Type::Array(..) | Type::Intersection(_) => {
-                    let element_ty = Self::array_element_type(&ty).unwrap_or(Type::Mixed(false));
+                    let element_ty = Self::array_element_type(&ty).unwrap_or(Type::mixed());
                     for item in items {
                         self.bind_assignment_target(&item.value, element_ty.clone(), locals);
                     }
                 }
                 _ => {
                     for item in items {
-                        self.bind_assignment_target(&item.value, Type::Mixed(false), locals);
+                        self.bind_assignment_target(&item.value, Type::mixed(), locals);
                     }
                 }
             },
@@ -463,7 +463,7 @@ impl<'a> Checker<'a> {
                             if is_superglobal(name) {
                                 superglobal_default_type(name)
                             } else {
-                                Type::ArrayShape(Shape::sealed(Vec::new()))
+                                Type::array_shape(Shape::sealed(Vec::new()))
                             }
                         });
                         // `Checker::in_range_index_writes`'s own doc
@@ -503,7 +503,7 @@ impl<'a> Checker<'a> {
                                 .discriminant_array_facts
                                 .get(&key)
                                 .cloned()
-                                .unwrap_or_else(|| Type::ArrayShape(Shape::sealed(Vec::new())));
+                                .unwrap_or_else(|| Type::array_shape(Shape::sealed(Vec::new())));
                             if let Some(new_slot_ty) = write_index_into(
                                 &prior,
                                 None,
@@ -650,7 +650,7 @@ impl<'a> Checker<'a> {
             },
         };
         if absent {
-            Type::ArrayShape(Shape::sealed(Vec::new()))
+            Type::array_shape(Shape::sealed(Vec::new()))
         } else {
             self.infer_expr(e, locals)
         }
@@ -702,7 +702,7 @@ impl<'a> Checker<'a> {
                 Some(k) => (self.infer_expr(k, locals), k.span),
                 None => {
                     position += 1;
-                    (Type::IntLiteral(position - 1), item.value.span)
+                    (Type::int_literal(position - 1), item.value.span)
                 }
             };
             if self.report_missing_offset(container, &dim, span) {
@@ -1005,12 +1005,11 @@ impl<'a> Checker<'a> {
 /// really is unconstrained" answer, not "we don't know."
 pub(crate) fn superglobal_default_type(name: &str) -> Type {
     match name {
-        "argc" => Type::Int,
-        _ if is_superglobal(name) => Type::Array(
-            Box::new(Type::benevolent_array_key()),
-            Box::new(Type::Mixed(true)),
-        ),
-        _ => Type::Mixed(false),
+        "argc" => Type::int(),
+        _ if is_superglobal(name) => {
+            Type::array(Type::benevolent_array_key(), Type::explicit_mixed())
+        }
+        _ => Type::mixed(),
     }
 }
 
@@ -1113,15 +1112,15 @@ fn literal_keys_from_type(ty: &Type) -> Vec<String> {
 /// of a write's own index expression.
 pub(crate) fn dynamic_write_key_type(idx_ty: &Type) -> Type {
     if types::Relation::structural()
-        .is_super_type_of(&Type::Int, idx_ty)
+        .is_super_type_of(&Type::int(), idx_ty)
         .yes()
     {
-        Type::Int
+        Type::int()
     } else if types::Relation::structural()
-        .is_super_type_of(&Type::String, idx_ty)
+        .is_super_type_of(&Type::string(), idx_ty)
         .yes()
     {
-        Type::String
+        Type::string()
     } else {
         // Mirrors real PHPStan's own `MixedType::toArrayKey()`/
         // `UnionType::toArrayKey()` (confirmed reading `vendor/
@@ -1155,7 +1154,7 @@ fn write_index_into(
         // provably `Null` doesn't sink the whole write via `Union`'s
         // "all or nothing" `?`.
         Type::Null => write_index_into(
-            &Type::ArrayShape(Shape::sealed(Vec::new())),
+            &Type::array_shape(Shape::sealed(Vec::new())),
             idx,
             idx_ty,
             value_ty,
@@ -1171,7 +1170,7 @@ fn write_index_into(
                 // A written key is present afterwards, even one the shape
                 // only had as optional.
                 shape.set(ShapeField::new(ShapeKey::from_name(&key), value_ty, false));
-                Some(Type::ArrayShape(shape))
+                Some(Type::array_shape(shape))
             }
             None => {
                 let widened = shape
@@ -1184,17 +1183,17 @@ fn write_index_into(
                 // must not get the marker - an arbitrary key need not be
                 // sequential.
                 if idx.is_none() && Checker::is_list_like(container_ty) {
-                    Some(Type::Intersection(vec![
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(widened)),
-                        Type::Accessory(AccessoryKind::ArrayList),
-                        Type::Accessory(AccessoryKind::NonEmptyArray),
+                    Some(Type::intersection_of(vec![
+                        Type::array(Type::unknown_array_key(), widened),
+                        Type::accessory(AccessoryKind::ArrayList),
+                        Type::accessory(AccessoryKind::NonEmptyArray),
                     ]))
                 } else {
                     let key_ty = idx
                         .and(idx_ty)
                         .map(dynamic_write_key_type)
                         .unwrap_or_else(Type::unknown_array_key);
-                    Some(Type::Array(Box::new(key_ty), Box::new(widened)))
+                    Some(Type::array(key_ty, widened))
                 }
             }
         },
@@ -1234,7 +1233,7 @@ fn write_index_into(
                 updated
                     .into_iter()
                     .reduce(union_types)
-                    .unwrap_or(Type::Mixed(false)),
+                    .unwrap_or(Type::mixed()),
             )
         }
         // A `list<T>`/`non-empty-array<T>` container is an
@@ -1294,15 +1293,15 @@ fn write_index_into(
                 && members.contains(&Type::Accessory(AccessoryKind::ArrayList))
             {
                 let mut new_members = vec![
-                    Type::Array(Box::new(key_ty), Box::new(widened)),
-                    Type::Accessory(AccessoryKind::ArrayList),
+                    Type::array(key_ty, widened),
+                    Type::accessory(AccessoryKind::ArrayList),
                 ];
                 if is_append || members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray)) {
-                    new_members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                    new_members.push(Type::accessory(AccessoryKind::NonEmptyArray));
                 }
-                Some(Type::Intersection(new_members))
+                Some(Type::intersection_of(new_members))
             } else {
-                Some(Type::Array(Box::new(key_ty), Box::new(widened)))
+                Some(Type::array(key_ty, widened))
             }
         }
         _ => None,
@@ -1350,10 +1349,7 @@ fn write_literal_key_aware(
         Some(new_key_ty) => union_types(key.clone(), new_key_ty),
         None => key.clone(),
     };
-    let base = Type::Array(
-        Box::new(key_ty),
-        Box::new(union_types(value_ty.clone(), inner.clone())),
-    );
+    let base = Type::array(key_ty, union_types(value_ty.clone(), inner.clone()));
     let literal_key = idx
         .and_then(literal_string_key)
         .or_else(|| literal_key_from_type(idx_ty));
@@ -1365,9 +1361,9 @@ fn write_literal_key_aware(
                 .filter(|m| !matches!(m, Type::HasOffsetValue(k, _) if *k == key))
                 .cloned()
                 .collect();
-            members.push(Type::HasOffsetValue(key, Box::new(value_ty)));
+            members.push(Type::has_offset_value(key, value_ty));
             members.insert(0, base);
-            Type::Intersection(members)
+            Type::intersection_of(members)
         }
         // A dynamic key, or a write now happening inside a loop, can't
         // extend the tracked-keys set precisely - same "give up

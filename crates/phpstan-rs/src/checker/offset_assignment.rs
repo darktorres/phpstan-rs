@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
         let [offset_param, value_param, ..] = offset_set.params().as_slice() else {
             return None;
         };
-        let offset_ty = dim.cloned().unwrap_or(Type::Null);
+        let offset_ty = dim.cloned().unwrap_or(Type::null());
         if !matches!(offset_ty, Type::Mixed(_))
             && !self.accepts(offset_param.ty(), &offset_ty).yes()
         {

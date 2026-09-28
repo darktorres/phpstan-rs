@@ -108,7 +108,7 @@ impl<'a> Checker<'a> {
                 // `declare`, not `insert`, matching
                 // `bind_assignment_target`'s own index-write treatment.
                 if !locals.contains_key(name) {
-                    locals.declare(name.to_string(), Type::Mixed(false), arg.value.span);
+                    locals.declare(name.to_string(), Type::mixed(), arg.value.span);
                 }
                 locals.clear_native(name);
             }
@@ -136,7 +136,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !locals.contains_key(name) {
-                locals.declare(name.to_string(), Type::Mixed(false), arg_expr.span);
+                locals.declare(name.to_string(), Type::mixed(), arg_expr.span);
                 continue;
             }
             // The callee may write anything its own native type allows.
@@ -150,19 +150,19 @@ impl<'a> Checker<'a> {
             // known); asort/arsort/ksort/krsort/uasort/uksort/natsort/
             // natcasesort preserve the exact key structure unchanged.
             if let Some(fn_name) = call_name {
-                let current = locals.get(name).cloned().unwrap_or(Type::Mixed(false));
+                let current = locals.get(name).cloned().unwrap_or(Type::mixed());
                 match fn_name {
                     "sort" | "rsort" | "usort" | "shuffle" => {
                         if let Some(elem_ty) = Checker::array_element_type(&current) {
                             let mut members = vec![
-                                Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem_ty)),
-                                Type::Accessory(types::AccessoryKind::ArrayList),
+                                Type::array(Type::unknown_array_key(), elem_ty),
+                                Type::accessory(types::AccessoryKind::ArrayList),
                             ];
                             if Checker::is_known_non_empty_array(&current) {
-                                members.push(Type::Accessory(types::AccessoryKind::NonEmptyArray));
+                                members.push(Type::accessory(types::AccessoryKind::NonEmptyArray));
                             }
                             purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.to_string(), Type::Intersection(members));
+                            locals.insert(name.to_string(), Type::intersection_of(members));
                             continue;
                         }
                     }
@@ -217,15 +217,12 @@ impl<'a> Checker<'a> {
                                 None => elem_ty,
                             };
                             let members = vec![
-                                Type::Array(
-                                    Box::new(Type::unknown_array_key()),
-                                    Box::new(combined_elem),
-                                ),
-                                Type::Accessory(types::AccessoryKind::ArrayList),
-                                Type::Accessory(types::AccessoryKind::NonEmptyArray),
+                                Type::array(Type::unknown_array_key(), combined_elem),
+                                Type::accessory(types::AccessoryKind::ArrayList),
+                                Type::accessory(types::AccessoryKind::NonEmptyArray),
                             ];
                             purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.to_string(), Type::Intersection(members));
+                            locals.insert(name.to_string(), Type::intersection_of(members));
                             continue;
                         }
                     }
@@ -239,11 +236,11 @@ impl<'a> Checker<'a> {
                     "array_shift" | "array_pop" if Checker::is_list_like(&current) => {
                         if let Some(elem_ty) = Checker::array_element_type(&current) {
                             let members = vec![
-                                Type::Array(Box::new(Type::unknown_array_key()), Box::new(elem_ty)),
-                                Type::Accessory(types::AccessoryKind::ArrayList),
+                                Type::array(Type::unknown_array_key(), elem_ty),
+                                Type::accessory(types::AccessoryKind::ArrayList),
                             ];
                             purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.to_string(), Type::Intersection(members));
+                            locals.insert(name.to_string(), Type::intersection_of(members));
                             continue;
                         }
                     }
@@ -268,25 +265,21 @@ impl<'a> Checker<'a> {
                                 Some(r) => (
                                     union_types(
                                         elem_ty,
-                                        Checker::array_element_type(r)
-                                            .unwrap_or(Type::Mixed(false)),
+                                        Checker::array_element_type(r).unwrap_or(Type::mixed()),
                                     ),
                                     Checker::is_known_non_empty_array(r),
                                 ),
                                 None => (elem_ty, false),
                             };
                             let mut members = vec![
-                                Type::Array(
-                                    Box::new(Type::unknown_array_key()),
-                                    Box::new(combined_elem),
-                                ),
-                                Type::Accessory(types::AccessoryKind::ArrayList),
+                                Type::array(Type::unknown_array_key(), combined_elem),
+                                Type::accessory(types::AccessoryKind::ArrayList),
                             ];
                             if non_empty {
-                                members.push(Type::Accessory(types::AccessoryKind::NonEmptyArray));
+                                members.push(Type::accessory(types::AccessoryKind::NonEmptyArray));
                             }
                             purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.to_string(), Type::Intersection(members));
+                            locals.insert(name.to_string(), Type::intersection_of(members));
                             continue;
                         }
                     }
@@ -325,7 +318,7 @@ impl<'a> Checker<'a> {
             let widened = if Checker::is_array_like(&substituted) {
                 substituted
             } else {
-                Type::Mixed(false)
+                Type::mixed()
             };
             // A by-ref call argument is exactly as much a "this variable
             // now holds something else" event as a direct assignment -

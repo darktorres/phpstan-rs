@@ -472,7 +472,7 @@ impl Registry {
             let resolve = |ty: &mut Type, native: &Type, classes: &_| {
                 if type_contains_deferred_value_of(ty) {
                     let bound = bind_class_const_self(
-                        std::mem::replace(ty, Type::Mixed(false)),
+                        std::mem::replace(ty, Type::mixed()),
                         &class_name,
                         &own_consts,
                     );
@@ -499,13 +499,13 @@ impl Registry {
                     resolve(doc_ty, &sig.return_type_native, &self.classes);
                 }
                 if let Some(out) = &mut sig.self_out {
-                    resolve(out, &Type::Mixed(false), &self.classes);
+                    resolve(out, &Type::mixed(), &self.classes);
                 }
             }
             for prop in info.properties.values_mut() {
                 if type_contains_deferred_value_of(&prop.ty) {
                     let ty = bind_class_const_self(
-                        std::mem::replace(&mut prop.ty, Type::Mixed(false)),
+                        std::mem::replace(&mut prop.ty, Type::mixed()),
                         &class_name,
                         &own_consts,
                     );
@@ -515,7 +515,7 @@ impl Registry {
                     && type_contains_deferred_value_of(doc)
                 {
                     let ty = bind_class_const_self(
-                        std::mem::replace(doc, Type::Mixed(false)),
+                        std::mem::replace(doc, Type::mixed()),
                         &class_name,
                         &own_consts,
                     );
@@ -535,7 +535,7 @@ impl Registry {
             for c in info.consts.values_mut() {
                 if type_contains_deferred_value_of(&c.ty) {
                     let ty = bind_class_const_self(
-                        std::mem::replace(&mut c.ty, Type::Mixed(false)),
+                        std::mem::replace(&mut c.ty, Type::mixed()),
                         &class_name,
                         &own_consts,
                     );
@@ -545,7 +545,7 @@ impl Registry {
             for bound in info.template_bounds.values_mut() {
                 if type_contains_deferred_value_of(bound) {
                     let ty = bind_class_const_self(
-                        std::mem::replace(bound, Type::Mixed(false)),
+                        std::mem::replace(bound, Type::mixed()),
                         &class_name,
                         &own_consts,
                     );
@@ -560,7 +560,7 @@ impl Registry {
             for arg in ancestor_args {
                 if type_contains_deferred_value_of(arg) {
                     let ty = bind_class_const_self(
-                        std::mem::replace(arg, Type::Mixed(false)),
+                        std::mem::replace(arg, Type::mixed()),
                         &class_name,
                         &own_consts,
                     );
@@ -571,7 +571,7 @@ impl Registry {
         }
         let resolve = |ty: &mut Type, native: &Type, classes: &_| {
             if type_contains_deferred_value_of(ty) {
-                let taken = std::mem::replace(ty, Type::Mixed(false));
+                let taken = std::mem::replace(ty, Type::mixed());
                 *ty = resolve_deferred_value_of_with_native_fallback(taken, native, classes);
             }
         };
@@ -650,7 +650,7 @@ impl Registry {
                 if type_contains_deferred_value_of(&sig.ty) {
                     sig.ty = unresolved_class_const_to_mixed(std::mem::replace(
                         &mut sig.ty,
-                        Type::Mixed(false),
+                        Type::mixed(),
                     ));
                 }
             }
@@ -726,7 +726,7 @@ impl Registry {
             // every `substitute_type_aliases` call below a no-op.
             let aliases = by_class.remove(&class_name).unwrap_or_default();
             let substitute = |ty: &mut Type| {
-                let taken = std::mem::replace(ty, Type::Mixed(false));
+                let taken = std::mem::replace(ty, Type::mixed());
                 *ty = substitute_type_aliases(taken, &aliases);
             };
             for sig in info.methods.values_mut() {
@@ -745,7 +745,7 @@ impl Registry {
                 }
             }
             for prop in info.properties.values_mut() {
-                let ty = std::mem::replace(&mut prop.ty, Type::Mixed(false));
+                let ty = std::mem::replace(&mut prop.ty, Type::mixed());
                 prop.ty = substitute_type_aliases(ty, &aliases);
                 if let Some(doc) = &mut prop.doc_ty {
                     substitute(doc);
@@ -755,7 +755,7 @@ impl Registry {
                 }
             }
             for c in info.consts.values_mut() {
-                let ty = std::mem::replace(&mut c.ty, Type::Mixed(false));
+                let ty = std::mem::replace(&mut c.ty, Type::mixed());
                 c.ty = substitute_type_aliases(ty, &aliases);
             }
             info.type_aliases.extend(aliases);
@@ -1307,7 +1307,7 @@ fn resolve_deferred_value_of_in_type(
                 value_of_type(resolve_deferred_value_of_in_type(target, classes))
             }
             Type::Object(target_fqn, _) => resolve_value_of_target(&target_fqn, classes),
-            _ => Type::Mixed(false),
+            _ => Type::mixed(),
         },
         Type::ClassConstant { class, pattern } => {
             resolve_class_const_type(&class, &pattern, classes)
@@ -1336,11 +1336,11 @@ fn resolve_class_const_type(
     classes: &FxHashMap<Arc<str>, ClassReflection>,
 ) -> Type {
     let Type::Object(fqn, _) = class else {
-        return Type::Mixed(false);
+        return Type::mixed();
     };
     let fqn = fqn.trim_start_matches('\\');
     if !classes.contains_key(fqn) {
-        return Type::Mixed(false);
+        return Type::mixed();
     }
     matching_class_const_type(&visible_class_consts(fqn, classes), pattern)
 }
@@ -1434,9 +1434,9 @@ fn matching_class_const_type(
         }
     }
     match members.len() {
-        0 => Type::Mixed(false),
+        0 => Type::mixed(),
         1 => members.pop().expect("len checked"),
-        _ => Type::Union(members),
+        _ => Type::union_of(members),
     }
 }
 
@@ -1472,7 +1472,7 @@ fn value_of_type(ty: Type) -> Type {
         Type::Intersection(members) => members
             .into_iter()
             .find(|m| matches!(m, Type::Array(..)))
-            .map_or(Type::Mixed(false), value_of_type),
+            .map_or(Type::mixed(), value_of_type),
         Type::ArrayShape(shape) => {
             let mut members: Vec<Type> = Vec::new();
             for f in shape.fields {
@@ -1481,12 +1481,12 @@ fn value_of_type(ty: Type) -> Type {
                 }
             }
             match members.len() {
-                0 => Type::Never,
+                0 => Type::never(),
                 1 => members.pop().expect("len checked"),
-                _ => Type::Union(members),
+                _ => Type::union_of(members),
             }
         }
-        _ => Type::Mixed(false),
+        _ => Type::mixed(),
     }
 }
 
@@ -1527,17 +1527,14 @@ fn bind_class_const_self_at(
                 _ => false,
             };
             match names_self {
-                true if depth >= MAX_DEPTH => Type::Mixed(false),
+                true if depth >= MAX_DEPTH => Type::mixed(),
                 true => bind_class_const_self_at(
                     matching_class_const_type(own_consts, &pattern),
                     class,
                     own_consts,
                     depth + 1,
                 ),
-                false => Type::ClassConstant {
-                    class: owner,
-                    pattern,
-                },
+                false => Type::class_constant(*owner, pattern),
             }
         }
         other => other.map_children(&mut |t| recurse(t.clone())),
@@ -1548,7 +1545,7 @@ fn bind_class_const_self_at(
 /// `Mixed` - see `resolve_class_constant_references`.
 fn unresolved_class_const_to_mixed(ty: Type) -> Type {
     match ty {
-        Type::ClassConstant { .. } => Type::Mixed(false),
+        Type::ClassConstant { .. } => Type::mixed(),
         other => other.map_children(&mut |t| unresolved_class_const_to_mixed(t.clone())),
     }
 }
@@ -1567,14 +1564,14 @@ fn resolve_value_of_target(
     classes: &FxHashMap<Arc<str>, ClassReflection>,
 ) -> Type {
     let Some(info) = classes.get(target_fqn) else {
-        return Type::Mixed(false);
+        return Type::mixed();
     };
     if info.kind != ClassKind::Enum {
-        return Type::Mixed(false);
+        return Type::mixed();
     }
     match info.properties.get("value") {
         Some(sig) => sig.ty.clone(),
-        None => Type::Never,
+        None => Type::never(),
     }
 }
 
@@ -1620,13 +1617,13 @@ impl ClassReflection {
                 } else {
                     types::Variance::Invariant
                 };
-                Type::TemplateParam(types::TemplateParam {
+                Type::template_param(types::TemplateParam {
                     name: name.to_string(),
                     bound: Box::new(
                         self.template_bounds
                             .get(name)
                             .cloned()
-                            .unwrap_or(Type::Mixed(false)),
+                            .unwrap_or(Type::mixed()),
                     ),
                     variance,
                     scope: Some(class_name.to_string()),
@@ -1642,7 +1639,7 @@ impl ClassReflection {
 /// its late binding.
 fn bind_self_ref(ty: &Type, owner: &str) -> Type {
     match ty {
-        Type::SelfRef(args) => Type::Object(
+        Type::SelfRef(args) => Type::object(
             owner.into(),
             args.iter().map(|a| bind_self_ref(a, owner)).collect(),
         ),
@@ -1783,7 +1780,7 @@ impl Registry {
         Some(match kept.len() {
             0 => unbound_native.clone(),
             1 => kept.into_iter().next().unwrap(),
-            _ => Type::Union(kept),
+            _ => Type::union_of(kept),
         })
     }
 }
@@ -1812,11 +1809,11 @@ impl Registry {
 /// the stored type keeps its late-bound `static`.
 fn bind_pseudo_refs(ty: &Type, class: &str) -> Type {
     match ty {
-        Type::SelfRef(args) | Type::StaticRef(args) => Type::Object(
+        Type::SelfRef(args) | Type::StaticRef(args) => Type::object(
             class.into(),
             args.iter().map(|a| bind_pseudo_refs(a, class)).collect(),
         ),
-        Type::This => Type::Object(class.into(), Vec::new()),
+        Type::This => Type::object(class.into(), Vec::new()),
         other => other.map_children(&mut |t| bind_pseudo_refs(t, class)),
     }
 }
@@ -1978,7 +1975,7 @@ impl Registry {
     ) -> FunctionReflection {
         let resolve = |ty: &mut Type, native: &Type| {
             if type_contains_deferred_value_of(ty) {
-                let taken = std::mem::replace(ty, Type::Mixed(false));
+                let taken = std::mem::replace(ty, Type::mixed());
                 *ty = resolve_deferred_value_of_with_native_fallback(taken, native, &self.classes);
             }
         };

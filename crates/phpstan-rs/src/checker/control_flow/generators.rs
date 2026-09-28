@@ -61,15 +61,15 @@ pub(crate) fn generator_template_param(ty: &Type, registry: &Registry, param: &s
             .class_template_bindings(name, args, "Generator")
             .get(param)
             .cloned()
-            .unwrap_or(Type::Mixed(false)),
+            .unwrap_or(Type::mixed()),
         Type::Union(members) | Type::Intersection(members) => members
             .iter()
             .find_map(|m| match generator_template_param(m, registry, param) {
                 Type::Mixed(_) => None,
                 found => Some(found),
             })
-            .unwrap_or(Type::Mixed(false)),
-        _ => Type::Mixed(false),
+            .unwrap_or(Type::mixed()),
+        _ => Type::mixed(),
     }
 }
 
@@ -126,18 +126,15 @@ impl<'a> Checker<'a> {
         if inner_bindings.is_empty() {
             return;
         }
-        let inner_key = inner_bindings
-            .get("TKey")
-            .cloned()
-            .unwrap_or(Type::Mixed(false));
+        let inner_key = inner_bindings.get("TKey").cloned().unwrap_or(Type::mixed());
         let inner_value = inner_bindings
             .get("TYield")
             .cloned()
-            .unwrap_or(Type::Mixed(false));
+            .unwrap_or(Type::mixed());
         let inner_send = inner_bindings
             .get("TSend")
             .cloned()
-            .unwrap_or(Type::Mixed(false));
+            .unwrap_or(Type::mixed());
         let enclosing_key = generator_template_param(&enclosing, self.registry, "TKey");
         let enclosing_value = generator_template_param(&enclosing, self.registry, "TYield");
         let enclosing_send = generator_template_param(&enclosing, self.registry, "TSend");
