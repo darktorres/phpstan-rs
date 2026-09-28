@@ -73,7 +73,7 @@ use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::{NameContext, for_each_in_context};
 use syntax::token::Span;
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{any_child_expr, any_child_stmt};
 
 /// `$variable-name -> resolved fully-qualified class name` for whichever
 /// of the enclosing function/method/closure/arrow-fn's own parameters (or
@@ -1067,7 +1067,7 @@ impl<'a> Walker<'a> {
 
     /// Mirrors `deps::collect_stmt`'s exact shape - see that function's
     /// own doc comment for why the recursion is split this way
-    /// (`child_stmts` for nested *statements*, this match for a
+    /// (`any_child_stmt` for nested *statements*, this match for a
     /// variant's own non-statement fields, with `FunctionDecl`/
     /// `ClassDecl`/`ClassDecl` needing both since they have their own
     /// dedicated declaration-walker instead of being flattened into an
@@ -1157,17 +1157,18 @@ impl<'a> Walker<'a> {
             }
             StmtKind::Try { .. } => {}
         }
-        for child in child_stmts(stmt) {
+        any_child_stmt(stmt, |child| {
             self.check_stmt(child, ctx, param_types, label);
-        }
+            false
+        });
     }
 
     /// Mirrors `deps::collect_expr`'s exact shape - see that function's
     /// own doc comment. Each name-bearing reference kind is checked
     /// directly against `self.registry`'s `@api`/`@api-do-not-implement`
-    /// state (never generically recursed into via `child_exprs` a
+    /// state (never generically recursed into via `any_child_expr` a
     /// second time for the same span - every arm below either fully
-    /// covers its own children by hand, matching what `child_exprs`
+    /// covers its own children by hand, matching what `any_child_expr`
     /// would otherwise return, or falls through to the catch-all).
     fn check_expr(&mut self, e: &Expr, ctx: &NameContext, param_types: &ParamTypes, label: &str) {
         match &e.kind {
@@ -1339,9 +1340,10 @@ impl<'a> Walker<'a> {
                 self.check_expr(body, ctx, &nested, label);
             }
             _ => {
-                for child in child_exprs(e) {
+                any_child_expr(e, |child| {
                     self.check_expr(child, ctx, param_types, label);
-                }
+                    false
+                });
             }
         }
     }

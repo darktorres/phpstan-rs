@@ -2,22 +2,19 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::visit::{child_exprs, child_stmts, stmt_exprs};
+use crate::visit::{Visitor, walk_expr, walk_stmt};
 
-fn collect_stmt(stmt: &Stmt, ids: &mut Vec<NodeId>) {
-    ids.push(stmt.id);
-    for e in stmt_exprs(stmt) {
-        collect_expr(e, ids);
-    }
-    for s in child_stmts(stmt) {
-        collect_stmt(s, ids);
-    }
-}
+/// Every statement's and expression's id.
+struct Ids(Vec<NodeId>);
 
-fn collect_expr(e: &Expr, ids: &mut Vec<NodeId>) {
-    ids.push(e.id);
-    for child in child_exprs(e) {
-        collect_expr(child, ids);
+impl<'ast> Visitor<'ast> for Ids {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        self.0.push(stmt.id);
+        walk_stmt(self, stmt);
+    }
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        self.0.push(e.id);
+        walk_expr(self, e);
     }
 }
 
@@ -31,10 +28,9 @@ fn every_statement_and_expression_has_a_distinct_id() {
             foreach ([1, 2] as $k => $v) { $a += $v; }
         "#,
     );
-    let mut ids = Vec::new();
-    for stmt in &program {
-        collect_stmt(stmt, &mut ids);
-    }
+    let mut ids = Ids(Vec::new());
+    crate::visit::walk_stmts(&mut ids, &program);
+    let mut ids = ids.0;
     let count = ids.len();
     ids.sort();
     ids.dedup();

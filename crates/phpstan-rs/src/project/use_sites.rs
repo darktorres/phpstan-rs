@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{any_child_expr, any_child_stmt};
 
 /// What a reference site points at - no local-variable variant (see
 /// this item's own edge-case notes: local-variable rename/references is
@@ -291,9 +291,10 @@ impl<'a> ClassFnRefWalker<'a> {
             }
             _ => {}
         }
-        for child in child_stmts(stmt) {
+        any_child_stmt(stmt, |child| {
             self.stmt(child, ctx, current_class, out);
-        }
+            false
+        });
     }
 
     fn expr(
@@ -355,7 +356,7 @@ impl<'a> ClassFnRefWalker<'a> {
             // A genuinely dynamic receiver has no class-name text to
             // record a reference for here at all - any name reference
             // buried inside it is still picked up by the generic
-            // `child_exprs` walk below (it's a real child of this
+            // `any_child_expr` walk below (it's a real child of this
             // node now, not a discarded `"?"` sentinel).
             ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
                 if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
@@ -395,9 +396,10 @@ impl<'a> ClassFnRefWalker<'a> {
             }
             _ => {}
         }
-        for child in child_exprs(expr) {
+        any_child_expr(expr, |child| {
             self.expr(child, ctx, current_class, out);
-        }
+            false
+        });
     }
 
     fn function(

@@ -2,7 +2,7 @@
 //! typing inside a call's parens. Structured after (not sharing code
 //! with) `navigation::Walker`: the same exhaustive per-`StmtKind` field
 //! extraction is unavoidable here too (a call can appear inside any
-//! statement's own condition/subject/return-value/... - `child_stmts`
+//! statement's own condition/subject/return-value/... - `any_child_stmt`
 //! alone only reaches nested *statements*, never a statement's own
 //! `Expr` fields - see `visit`'s own doc comment), but the payload at
 //! each call-shaped `Expr` is different: not "what does this resolve
@@ -46,7 +46,7 @@ use syntax::ast::{
     Arg, ClassDecl, ClassKind, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
 };
 use syntax::token::{Position, Span};
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{any_child_expr, any_child_stmt};
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
 use syntax::name_resolution::NameContext;
@@ -210,9 +210,10 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        for child in child_stmts(stmt) {
+        any_child_stmt(stmt, |child| {
             self.stmt(child, ctx, current_class, best);
-        }
+            false
+        });
     }
 
     fn param(
@@ -458,9 +459,10 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        for child in child_exprs(expr) {
+        any_child_expr(expr, |child| {
             self.expr(child, ctx, current_class, best);
-        }
+            false
+        });
     }
 
     /// The args-region gate (see this module's own doc comment) -

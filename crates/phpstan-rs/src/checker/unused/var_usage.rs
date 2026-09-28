@@ -2,7 +2,7 @@ use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use syntax::ast::*;
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{any_child_expr, any_child_stmt};
 
 // ---------------------------------------------------------------------
 // Variable-name usage (constructor parameters / closure `use(...)`)
@@ -110,9 +110,10 @@ fn walk_stmt_for_vars(stmt: &Stmt, names: &mut FxHashSet<Arc<str>>, escaped: &mu
         }
         _ => {}
     }
-    for child in child_stmts(stmt) {
+    any_child_stmt(stmt, |child| {
         walk_stmt_for_vars(child, names, escaped);
-    }
+        false
+    });
 }
 
 fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mut bool) {
@@ -146,7 +147,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
         // name - its `params`/`body` have their own, independent scope,
         // and naively recursing into them risks reading a same-named but
         // unrelated inner parameter/local as if it were a use of the
-        // outer one. `child_exprs` already excludes `Closure`'s
+        // outer one. `any_child_expr` already excludes `Closure`'s
         // children entirely (see `visit`'s own module doc comment), so
         // this is the only place its variables are ever collected from.
         ExprKind::Closure { uses, .. } => {
@@ -157,7 +158,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
         // Unlike `Closure`, an arrow function implicitly captures every
         // outer variable it references by value - so, unlike above, its
         // `params`/`body` genuinely do need a normal recursive walk here.
-        // `child_exprs` excludes `ArrowFn`'s children too, so this is
+        // `any_child_expr` excludes `ArrowFn`'s children too, so this is
         // the only place they're walked from.
         ExprKind::ArrowFn { params, body, .. } => {
             for p in params {
@@ -170,7 +171,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
         // Real PHP anonymous classes don't implicitly capture the
         // enclosing scope's variables at all - only the constructor
         // arguments (evaluated in the enclosing scope before being passed
-        // in) can reference an outer variable. `child_exprs` excludes
+        // in) can reference an outer variable. `any_child_expr` excludes
         // `NewAnonymousClass`'s children entirely, so the constructor args
         // need an explicit walk here; the class's own method bodies
         // deliberately aren't recursed into (a separate, unrelated scope).
@@ -181,9 +182,10 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
         }
         _ => {}
     }
-    for child in child_exprs(expr) {
+    any_child_expr(expr, |child| {
         walk_expr_for_vars(child, names, escaped);
-    }
+        false
+    });
 }
 
 /// `compact('a', 'b')` / `compact(['a', 'b'])` reads the named variables

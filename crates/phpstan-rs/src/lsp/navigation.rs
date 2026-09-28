@@ -21,7 +21,7 @@
 //! Structured after (not sharing code with) `deps.rs`'s own
 //! `collect_stmt`/`collect_expr`/`collect_function`/`collect_class`/
 //! `collect_enum` - the same proven-exhaustive traversal shape (including
-//! `visit`'s own documented `child_stmts`/`child_exprs`
+//! `visit`'s own documented `any_child_stmt`/`any_child_expr`
 //! exclusions: `FunctionDecl`/`ClassDecl`/`ClassDecl` bodies and
 //! `Closure`/`ArrowFn`/`NewAnonymousClass`), reused here for a different
 //! purpose (checking spans against a cursor, not collecting names into a
@@ -50,7 +50,7 @@ use std::path::Path;
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
 use syntax::token::{Position, Span};
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{any_child_expr, any_child_stmt};
 
 #[derive(Debug, Clone)]
 pub(crate) enum Resolved {
@@ -540,9 +540,10 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        for child in child_stmts(stmt) {
+        any_child_stmt(stmt, |child| {
             self.stmt(child, ctx, current_class, out);
-        }
+            false
+        });
     }
 
     fn expr(
@@ -750,11 +751,12 @@ impl<'a> Walker<'a> {
                         ));
                     }
                 }
-                for a in child_exprs(expr) {
+                any_child_expr(expr, |a| {
                     if !std::ptr::eq(a, recv.as_ref()) {
                         self.expr(a, ctx, current_class, out);
                     }
-                }
+                    false
+                });
                 return;
             }
             ExprKind::NewAnonymousClass(decl, args) => {
@@ -821,9 +823,10 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        for child in child_exprs(expr) {
+        any_child_expr(expr, |child| {
             self.expr(child, ctx, current_class, out);
-        }
+            false
+        });
     }
 
     fn param(

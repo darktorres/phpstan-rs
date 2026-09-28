@@ -4,7 +4,7 @@ use std::sync::Arc;
 use syntax::ast::*;
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{any_child_expr, any_child_stmt};
 
 // ---------------------------------------------------------------------
 // Private-member usage (consts / methods / properties)
@@ -171,9 +171,10 @@ fn walk_stmt_for_members(stmt: &Stmt, fqn: &str, ctx: &NameContext, usage: &mut 
         }
         _ => {}
     }
-    for child in child_stmts(stmt) {
+    any_child_stmt(stmt, |child| {
         walk_stmt_for_members(child, fqn, ctx, usage);
-    }
+        false
+    });
 }
 
 pub(crate) fn walk_expr_for_members(
@@ -184,7 +185,7 @@ pub(crate) fn walk_expr_for_members(
 ) {
     match &expr.kind {
         // Handled explicitly (and `return`s below, skipping the generic
-        // `child_exprs` recursion at the bottom of this function)
+        // `any_child_expr` recursion at the bottom of this function)
         // specifically so a pure write target - `$this->x = ...` - is
         // recorded as a write only, not *also* as a read the way falling
         // through to the generic `PropertyAccess`/`ClassConstFetch`/`StaticPropertyFetch` arms
@@ -282,7 +283,7 @@ pub(crate) fn walk_expr_for_members(
                 usage.methods.insert(Arc::from(&*name.to_str_lossy()));
             }
         }
-        // `child_exprs` deliberately returns no children for these
+        // `any_child_expr` deliberately returns no children for these
         // three (see `visit`'s own module doc comment - each consumer
         // needs its own explicit handling since they don't fit the
         // generic `Vec<&Expr>` shape). Without these arms, a private
@@ -326,9 +327,10 @@ pub(crate) fn walk_expr_for_members(
         }
         _ => {}
     }
-    for child in child_exprs(expr) {
+    any_child_expr(expr, |child| {
         walk_expr_for_members(child, fqn, ctx, usage);
-    }
+        false
+    });
 }
 
 pub(crate) fn walk_property_hooks_for_members(

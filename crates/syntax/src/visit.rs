@@ -669,16 +669,6 @@ pub fn any_child_expr<'ast>(expr: &'ast Expr, f: impl FnMut(&'ast Expr) -> bool)
     children.found
 }
 
-/// The expressions directly inside `expr`; see [`any_child_expr`].
-pub fn child_exprs(expr: &Expr) -> Vec<&Expr> {
-    let mut out = Vec::new();
-    any_child_expr(expr, |e| {
-        out.push(e);
-        false
-    });
-    out
-}
-
 /// Calls `f` on each statement directly inside `stmt` in the same function
 /// body, in order, until `f` returns true. A function, class or enum
 /// declaration has none, and statements inside expressions (closure
@@ -702,48 +692,6 @@ pub fn any_child_stmt<'ast>(stmt: &'ast Stmt, f: impl FnMut(&'ast Stmt) -> bool)
     let mut children = Children { f, found: false };
     walk_stmt(&mut children, stmt);
     children.found
-}
-
-/// The statements directly inside `stmt`; see [`any_child_stmt`].
-pub fn child_stmts(stmt: &Stmt) -> Vec<&Stmt> {
-    let mut out = Vec::new();
-    any_child_stmt(stmt, |s| {
-        out.push(s);
-        false
-    });
-    out
-}
-
-/// The expressions a statement holds itself (a condition, a subject, a
-/// returned value, constant and static-variable initializers), not those
-/// of its nested statements, nor a declaration's.
-pub fn stmt_exprs(stmt: &Stmt) -> Vec<&Expr> {
-    struct Own<'ast> {
-        out: Vec<&'ast Expr>,
-    }
-    impl<'ast> Visitor<'ast> for Own<'ast> {
-        fn visit_stmt(&mut self, _: &'ast Stmt) {}
-        fn visit_expr(&mut self, expr: &'ast Expr) {
-            self.out.push(expr);
-        }
-        fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
-        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
-        fn visit_switch_case(&mut self, case: &'ast SwitchCase) {
-            if let Some(test) = &case.test {
-                self.out.push(test);
-            }
-        }
-        fn visit_catch_clause(&mut self, _: &'ast CatchClause) {}
-        fn visit_class_const(&mut self, constant: &'ast ClassConst) {
-            self.out.push(&constant.value);
-        }
-    }
-    if matches!(stmt.kind, StmtKind::Declare { .. }) {
-        return Vec::new();
-    }
-    let mut own = Own { out: Vec::new() };
-    walk_stmt(&mut own, stmt);
-    own.out
 }
 
 /// Whether a function, method or closure body contains a `yield` or
