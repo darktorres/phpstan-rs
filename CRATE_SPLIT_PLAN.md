@@ -1340,8 +1340,7 @@ diagnostics 2, composer 2).
 
 A bug below that sits in code a later Stage C phase rewrites gets a fixture
 first and is fixed in that phase, as its own behaviour commit after the
-structural one (Appendix F). Every approved delta and behaviour fix is
-noted in `CHANGELOG.md` with its commit.
+structural one (Appendix F).
 
 **C1. config.**
 - Schema, owner sections, the shim, `--set`, deletion of per-rule flags
@@ -1455,8 +1454,8 @@ Follow-ups, one commit each, each with its test:
 - **Docs.** A config reference generated from the section doc comments.
   `check-project` help corrected: `--php-version` (defaults from composer),
   `--level` (unset caps at `DEFAULT_REPORT_LEVEL`, 6), `--stub-path` and
-  `--format` (references to deleted flags and `config.rs`). CHANGELOG: the
-  unknown-key claim and C3a's output change. `declared_php_versions` gets
+  `--format` (references to deleted flags and `config.rs`).
+  `declared_php_versions` gets
   its own doc comment (`project/session.rs`).
 
 **C2. Settings leave `Registry`**, following Appendix B:
