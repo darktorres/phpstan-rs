@@ -22,48 +22,29 @@ use crate::checker::{Checker, Locals};
 use syntax::ast::*;
 use types::Type;
 
+/// Whether `ty` is `null` joined with something known.
 fn is_nullable(ty: &Type) -> bool {
-    matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Null))
-        && members.iter().any(|m| !matches!(m, Type::Null | Type::Mixed(_))))
+    let members = ty.union_members();
+    members.iter().any(|m| m.is_null().yes())
+        && members.iter().any(|m| !m.is_null().yes() && !m.is_mixed())
 }
 
+/// Whether every value of `ty` is an object, or `null`.
 fn is_object_like(ty: &Type) -> bool {
-    match ty {
-        Type::Object(..) | Type::ObjectWithoutClass => true,
-        Type::Union(members) => {
-            members
-                .iter()
-                .any(|m| matches!(m, Type::Object(..) | Type::ObjectWithoutClass))
-                && members.iter().all(|m| {
-                    m.is_null().yes() || matches!(m, Type::Object(..) | Type::ObjectWithoutClass)
-                })
-        }
-        Type::Intersection(members) => members
+    !ty.is_null().yes()
+        && ty
+            .union_members()
             .iter()
-            .all(|m| matches!(m, Type::Object(..) | Type::ObjectWithoutClass)),
-        _ => false,
-    }
+            .all(|m| m.is_null().yes() || m.is_object().yes())
 }
 
 impl<'a> Checker<'a> {
     fn enum_of(&self, ty: &Type) -> Option<String> {
-        let class = match ty {
-            Type::Object(name, _) => name.clone(),
-            Type::EnumCase(class, _) => class.clone(),
-            Type::Union(members) => {
-                let mut classes = members.iter().filter_map(|m| match m {
-                    Type::Object(name, _) | Type::EnumCase(name, _) => Some(name.clone()),
-                    _ => None,
-                });
-                let first = classes.next()?;
-                if classes.all(|c| c == first) {
-                    first
-                } else {
-                    return None;
-                }
-            }
-            _ => return None,
-        };
+        let classes = ty.object_class_names();
+        let (&class, rest) = classes.split_first()?;
+        if rest.iter().any(|c| *c != class) {
+            return None;
+        }
         self.registry
             .classes
             .get(class.as_str())
@@ -76,10 +57,8 @@ impl<'a> Checker<'a> {
     /// inside that class's own `equals()`, which may use identity as its
     /// fast path.
     fn equals_method_owner(&self, ty: &Type, other: &Type) -> Option<String> {
-        let Type::Object(class, _) = ty else {
-            return None;
-        };
-        if !matches!(other, Type::Object(..) | Type::ObjectWithoutClass) {
+        let (class, _) = ty.object_class_and_args()?;
+        if !other.is_object().yes() {
             return None;
         }
         let info = self.registry.classes.get(class.as_str())?;
@@ -150,7 +129,7 @@ impl<'a> Checker<'a> {
             }
             let ty = self.infer_expr(operand, locals);
             if is_object_like(&ty) {
-                let instead = if matches!(ty, Type::Union(_)) {
+                let instead = if ty.is_null().maybe() {
                     "a !== null check"
                 } else {
                     "instanceof"

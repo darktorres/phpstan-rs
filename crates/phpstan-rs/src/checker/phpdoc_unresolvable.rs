@@ -197,7 +197,10 @@ impl<'a> Checker<'a> {
             TypeNode::Intersection(members) => {
                 let types: Vec<Type> = members.iter().map(|m| self.node_type(m, class)).collect();
                 // A class the registry never saw proves nothing either way.
-                let unknown_class = |t: &Type| matches!(t, Type::Object(n, _) if self.registry.lookup_class(n).is_none());
+                let unknown_class = |t: &Type| {
+                    t.object_class_and_args()
+                        .is_some_and(|(n, _)| self.registry.lookup_class(n).is_none())
+                };
                 if types.iter().any(unknown_class) {
                     return false;
                 }
@@ -241,8 +244,9 @@ impl<'a> Checker<'a> {
                 // empty-foo`) - PHPStan's `str_contains($name, '-')` rule.
                 name.contains('-')
                     && !name.trim_start_matches('\\').starts_with("OCI-")
-                    && matches!(types::parse_type_string(name),
-                        Type::Object(n, _) if n.contains('-'))
+                    && types::parse_type_string(name)
+                        .object_class_and_args()
+                        .is_some_and(|(n, _)| n.contains('-'))
             }
         }
     }
@@ -290,34 +294,20 @@ impl<'a> Checker<'a> {
     ) -> bool {
         let base = self.node_type(base, class);
         let key = match offset.unwrap_paren() {
-            TypeNode::IntLiteral(n) => Some(n.to_string()),
-            TypeNode::StringLiteral(s) => Some(s.clone()),
+            TypeNode::IntLiteral(n) => Some(Type::int_literal(*n)),
+            TypeNode::StringLiteral(s) => Some(Type::string_literal(s.as_str().into())),
             _ => None,
         };
-        let int_key = matches!(offset.unwrap_paren(), TypeNode::IntLiteral(_));
-        match &base {
-            Type::ArrayShape(shape) => match &key {
-                Some(k) => {
-                    shape.is_sealed() && shape.field(&types::ShapeKey::from_name(k)).is_none()
-                }
-                None => false,
-            },
-            Type::Array(..) | Type::Intersection(_) => {
-                key.is_none() && is_class_name_offset(offset)
-            }
-            Type::String | Type::StringLiteral(_) => !int_key,
-            Type::Int
-            | Type::IntLiteral(_)
-            | Type::IntRange(..)
-            | Type::Float
-            | Type::FloatLiteral(_)
-            | Type::Bool
-            | Type::True
-            | Type::False
-            | Type::Null
-            | Type::Void => true,
-            _ => false,
+        if base.is_array().yes() {
+            return match &key {
+                Some(key) => base.has_offset_value_type(key).no(),
+                None => is_class_name_offset(offset),
+            };
         }
+        if base.is_string().yes() {
+            return key.as_ref().is_none_or(|key| key.is_int().no());
+        }
+        base.is_scalar().yes() || base.is_null().yes() || base.is_void()
     }
 
     /// `node`'s type, resolved in the current name scope - for the
@@ -341,8 +331,11 @@ impl<'a> Checker<'a> {
 /// A bare name used as an array offset (`string[optional]`): a class
 /// reference there, never a key.
 fn is_class_name_offset(offset: &TypeNode) -> bool {
-    matches!(offset.unwrap_paren(), TypeNode::Identifier(name)
-        if !matches!(types::parse_type_string(name), Type::Int | Type::String | Type::Mixed(_)))
+    let TypeNode::Identifier(name) = offset.unwrap_paren() else {
+        return false;
+    };
+    let ty = types::parse_type_string(name);
+    !(ty.is_mixed() || ty == Type::int() || ty == Type::string())
 }
 
 /// Too many type arguments for a built-in generic PHPStan resolves

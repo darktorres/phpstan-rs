@@ -139,54 +139,36 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether reading property `name` of `receiver` runs no code: a
+    /// declared property without a get hook on a class without `__get`,
+    /// or an enum case's; `null` may join a union.
     fn property_read_is_plain(&self, receiver: &Type, name: &str) -> bool {
-        match receiver {
-            Type::Object(class, _) => {
-                if self.registry.lookup_method(class, "__get").is_some() {
-                    return false;
-                }
-                match self.registry.lookup_property(class, name) {
-                    Some(prop) => !prop.has_get_hook(),
-                    None => self.registry.lookup_class(class).is_some(),
-                }
-            }
-            Type::EnumCase(..) => true,
-            Type::Union(members) => members
-                .iter()
-                .all(|m| m.is_null().yes() || self.property_read_is_plain(m, name)),
-            _ => false,
-        }
+        !receiver.is_null().yes()
+            && receiver.union_members().iter().all(|m| {
+                m.is_null().yes()
+                    || m.is_enum_case()
+                    || m.object_class_and_args().is_some_and(|(class, _)| {
+                        if self.registry.lookup_method(class, "__get").is_some() {
+                            return false;
+                        }
+                        match self.registry.lookup_property(class, name) {
+                            Some(prop) => !prop.has_get_hook(),
+                            None => self.registry.lookup_class(class).is_some(),
+                        }
+                    })
+            })
     }
 
+    /// Whether reading an offset of `base` runs no code: no member is an
+    /// object, which may implement `ArrayAccess`.
     fn offset_read_is_plain(&self, base: &Type) -> bool {
-        match base {
-            Type::Union(members) => members.iter().all(|m| self.offset_read_is_plain(m)),
-            Type::Array(..)
-            | Type::ArrayShape(..)
-            | Type::String
-            | Type::StringLiteral(_)
-            | Type::ClassString(_)
-            | Type::ClassKindString(_)
-            | Type::Accessory(_)
-            | Type::Null
-            | Type::Bool
-            | Type::True
-            | Type::False
-            | Type::Int
-            | Type::IntLiteral(_)
-            | Type::IntRange(..)
-            | Type::Float
-            | Type::FloatLiteral(_) => true,
-            _ => false,
-        }
+        base.union_members()
+            .iter()
+            .all(|m| m.is_array().yes() || m.is_scalar().yes() || m.is_null().yes())
     }
 
     fn may_be_stringable_object(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Union(members) => members.iter().any(|m| self.may_be_stringable_object(m)),
-            Type::Object(..) | Type::ObjectWithoutClass | Type::Intersection(..) => true,
-            _ => false,
-        }
+        ty.union_members().iter().any(|m| m.is_object().yes())
     }
 
     /// Called from `StmtKind::Expression` after `e` itself was checked.
@@ -297,7 +279,7 @@ impl<'a> Checker<'a> {
                 // scope (a `Union`/`Intersection` receiver is treated
                 // conservatively - not flagged - the same "don't guess"
                 // default everywhere else in this feature).
-                let Type::Object(recv_class, _) = &recv_ty else {
+                let Some((recv_class, _)) = recv_ty.object_class_and_args() else {
                     return;
                 };
                 if !crate::registry::is_non_overridable(
@@ -348,7 +330,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::New(_, _) => {
                 let new_ty = self.infer_expr(e, locals);
-                let Type::Object(class, _) = &new_ty else {
+                let Some((class, _)) = new_ty.object_class_and_args() else {
                     return;
                 };
                 let Some(sig) = self.registry.lookup_method(class, "__construct") else {
@@ -622,7 +604,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether `ty` could ever satisfy `target` - deliberately not a
-    /// direct `self.accepts(target, ty).yes()` call. `Type::Mixed(false)`
+    /// direct `self.accepts(target, ty).yes()` call. `mixed`
     /// (an untyped parameter) must satisfy anything (real PHPStan's own
     /// `mixed.isCallable()`/`isSuperTypeOf()` is always `maybe`, never
     /// `no`) - `subtype(Mixed, _)` has no such arm and would wrongly
@@ -635,12 +617,10 @@ impl<'a> Checker<'a> {
     /// callable/Closure. Both guards protect against real false-positive
     /// classes, not hypothetical ones.
     pub(crate) fn param_type_could_satisfy(&self, ty: &Type, target: &Type) -> bool {
-        match ty {
-            Type::Mixed(_) => true,
-            Type::Union(members) => members
+        ty.is_mixed()
+            || ty
+                .union_members()
                 .iter()
-                .any(|m| self.param_type_could_satisfy(m, target)),
-            _ => self.accepts(target, ty).yes(),
-        }
+                .any(|m| self.accepts(target, m).yes())
     }
 }

@@ -23,28 +23,6 @@ const SUPERGLOBALS: [&str; 9] = [
     "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV",
 ];
 
-/// Whether `ty` mentions banned type `name` (a keyword from
-/// `banned::BANNABLE_KEYWORD_TYPES`, or a class name).
-fn type_mentions(ty: &Type, name: &str) -> bool {
-    let direct = match (name, ty) {
-        ("float", Type::Float | Type::FloatLiteral(_)) => true,
-        ("int", Type::Int | Type::IntLiteral(_) | Type::IntRange(..)) => true,
-        (
-            "string",
-            Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_),
-        ) => true,
-        ("bool", Type::Bool | Type::True | Type::False) => true,
-        ("array", Type::Array(..) | Type::ArrayShape(_)) => true,
-        ("mixed", Type::Mixed(_)) => true,
-        ("object", Type::ObjectWithoutClass) => true,
-        ("callable", Type::Callable(_)) => true,
-        ("iterable", Type::Object(n, _)) if n.eq_ignore_ascii_case("Traversable") => true,
-        (class, Type::Object(n, _)) => n.trim_start_matches('\\').eq_ignore_ascii_case(class),
-        _ => false,
-    };
-    direct || ty.any_child(|t| type_mentions(t, name))
-}
-
 struct Walker<'a> {
     constructs: &'a FxHashSet<BannedConstruct>,
     types: &'a [String],
@@ -70,7 +48,7 @@ impl<'a> Walker<'a> {
 
     fn ban_type(&mut self, span: Span, subject: String, ty: &Type) {
         for name in self.types {
-            if type_mentions(ty, name) {
+            if ty.mentions(name) {
                 self.out.push(
                     DiagnosticBuilder::new(
                         format!("{subject} uses banned type {name}."),

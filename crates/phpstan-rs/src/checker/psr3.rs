@@ -30,7 +30,7 @@ use crate::checker::{Checker, Locals};
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
-use types::{ShapeKey, Type};
+use types::{AccessoryKind, ShapeKey, Type};
 
 const LEVELS: [&str; 8] = [
     "emergency",
@@ -93,17 +93,9 @@ fn invalid_braces(message: &str) -> (bool, Vec<String>) {
 
 /// Whether some value of `ty` is a string not known to be literal.
 fn may_be_non_literal_string(ty: &Type) -> bool {
-    match ty {
-        Type::String | Type::ClassString(_) | Type::ClassKindString(_) => true,
-        Type::Union(members) => members.iter().any(may_be_non_literal_string),
-        Type::Intersection(members) => {
-            members.iter().any(|m| matches!(m, Type::String))
-                && !members
-                    .iter()
-                    .any(|m| matches!(m, Type::Accessory(types::AccessoryKind::LiteralString)))
-        }
-        _ => false,
-    }
+    ty.union_members()
+        .iter()
+        .any(|m| m.is_string().yes() && !m.is_refined_string(AccessoryKind::LiteralString).yes())
 }
 
 fn string_literals(ty: &Type) -> Option<Vec<&str>> {
@@ -167,10 +159,11 @@ impl<'a> Checker<'a> {
         if self.settings.psr3.check_psr3_exception_context && !levels.is_empty() {
             let has_exception_key = match &context_ty {
                 None => false,
-                Some(Type::ArrayShape(shape)) => shape
-                    .field(&ShapeKey::from_name("exception"))
-                    .is_some_and(|f| !f.optional),
-                Some(_) => true,
+                Some(ty) => ty.shape().is_none_or(|shape| {
+                    shape
+                        .field(&ShapeKey::from_name("exception"))
+                        .is_some_and(|f| !f.optional)
+                }),
             };
             if !has_exception_key
                 && let Some(name) = locals
@@ -178,7 +171,7 @@ impl<'a> Checker<'a> {
                     .filter(|(key, _)| crate::checker::narrowing::is_real_variable_key(key))
                     .filter(|(_, ty)| {
                         self.registry
-                            .is_super_type_of(&Type::Object("Throwable".into(), Vec::new()), ty)
+                            .is_super_type_of(&Type::object("Throwable".into(), Vec::new()), ty)
                             == types::TrinaryLogic::Yes
                     })
                     .map(|(name, _)| name.clone())
@@ -275,7 +268,7 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let Type::ArrayShape(shape) = context_ty else {
+            let Some(shape) = context_ty.shape() else {
                 continue;
             };
             let missing: Vec<String> = names
@@ -307,7 +300,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_psr3_context(&mut self, context: &Type, span: Span) {
-        let Type::ArrayShape(shape) = context else {
+        let Some(shape) = context.shape() else {
             return;
         };
         for field in &shape.fields {
@@ -348,17 +341,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn is_literal_string(&self, ty: &Type) -> bool {
-        match ty {
-            Type::StringLiteral(_) => true,
-            Type::Intersection(members) => members
-                .iter()
-                .any(|m| matches!(m, Type::Accessory(types::AccessoryKind::LiteralString))),
-            Type::Union(members) => members.iter().all(|m| self.is_literal_string(m)),
-            _ => false,
-        }
-    }
-
     fn is_risky_log_expr(&self, e: &Expr, locals: &Locals) -> bool {
         match &e.kind {
             ExprKind::Binary(BinOp::Concat, l, r) => {
@@ -393,25 +375,18 @@ impl<'a> Checker<'a> {
     }
 
     fn is_safe_log_value(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Int
-            | Type::IntLiteral(_)
-            | Type::IntRange(..)
-            | Type::Float
-            | Type::FloatLiteral(_)
-            | Type::Bool
-            | Type::True
-            | Type::False
-            | Type::StringLiteral(_)
-            | Type::EnumCase(..) => true,
-            Type::Object(class, _) => self
-                .registry
-                .classes
-                .get(class.as_str())
-                .is_some_and(|info| info.kind() == ClassKind::Enum),
-            Type::Union(members) => members.iter().all(|m| self.is_safe_log_value(m)),
-            Type::Intersection(_) => self.is_literal_string(ty),
-            _ => false,
-        }
+        ty.union_members().iter().all(|m| {
+            m.is_int().yes()
+                || m.is_float().yes()
+                || m.is_bool().yes()
+                || m.is_refined_string(AccessoryKind::LiteralString).yes()
+                || m.is_enum_case()
+                || m.object_class_and_args().is_some_and(|(class, _)| {
+                    self.registry
+                        .classes
+                        .get(class.as_str())
+                        .is_some_and(|info| info.kind() == ClassKind::Enum)
+                })
+        })
     }
 }
