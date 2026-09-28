@@ -377,8 +377,8 @@ through `check-project`.
     sealed shapes, dropping non-emptiness for a shape with optional fields.
 
   (`3af64337` area; parse.rs final state)
-- [ ] **F41. Union arguments are checked with level 7 rules at every
-  level.** `takesInt($b ? 1 : 'a')` is reported at levels 5 and 6 as at 7.
+- [x] **F41. Union arguments are checked with level 7 rules at every
+  level.** (`04e500b3`) `takesInt($b ? 1 : 'a')` is reported at levels 5 and 6 as at 7.
   `UNION_TYPES_CHECK_LEVEL` gates nothing (it appears in a `debug_assert`);
   `rule_level_accepts_rec` requires every member at every level. Below
   `checkUnionTypes`' level a union given is accepted when some member is,
