@@ -2677,7 +2677,19 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
   node. Functions, classes and labels after it are still processed, and
   an empty statement (`;`) or a closing inline-HTML tag isn't reported
   (`deadCode.unreachable` today, the rules oracle's `unreachable.php:50`,
-  `bug-7531.php`); a loop condition after an always-terminating body
+  `bug-7531.php`). A file's top level is checked too (`exit(0); echo 1;`
+  is unreported today; `bug-11179-no-namespace.php`, `bug-8966.php`,
+  `unreachable-top-level.php`), so is the statement after a `goto`
+  (`goto-undefined-label*.php`, `unused-label*.php`, `bug-11731.php`, 7),
+  and an expression terminates when any part it evaluates does: `echo
+  nr();`, `'a' . nr()`, `[nr()]`, `f(nr())`, `Foo::s(nr())->t()`, a
+  dynamic name `$foo->{exit()}()`, `(exit())->m(...)` and `$t ??= throw`
+  on an always-`null` `$t` end the statement, where only a statement
+  `nr();` does today (`bug-13232*.php`, `bug-14328.php`, `bug-11909.php`,
+  `bug-14369.php`, `dynamic-name-always-terminating.php`,
+  `first-class-callable-terminating-var.php`; about 20 of the rules
+  oracle's 54 PHPStan-only `deadCode.unreachable`). A loop condition
+  after an always-terminating body
   isn't evaluated (`do { exit; } while (true);` is `doWhile.alwaysTrue`
   today, `do-while-loop.php:145`).
 - Each end statement gets its own `ExecutionEndNode`.
@@ -2732,7 +2744,13 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
     today. A ternary's and a `&&`/`||` operand's dead side is pruned the
     same way: in `isset($array['string']) ? $array['string'] : 0` on
     `array{1, 2, 3}`, the read is `offsetAccess.notFound` today (the rules
-    oracle's `isset.php`).
+    oracle's `isset.php`). The code after an `if` that returns under an
+    always-true condition is unreachable, `if (true) { return; }`
+    included (about 25 of the rules oracle's PHPStan-only
+    `deadCode.unreachable`: `bug-4505.php`, `bug-3632.php`,
+    `bug-11903.php`, `strict-comparison-71.php`, `true-typehint.php`,
+    `multiple_unreachable*.php`), and so is the code after `do { … }
+    while (true);` without a `break` (`call-methods.php:1028`).
   - **A nameless `@var`** above `throw` applies to the thrown expression as
     it does above `return`: `/** @var \Exception */ throw $foo;` on a
     `stdClass $foo` is `throw.notThrowable` today (the rules oracle's
@@ -3412,14 +3430,6 @@ building on the previous one:
       at level 1 as "Variable $x might not be defined."
     - A merge keeps a Maybe holder only for variables, function calls and
       virtual keys, and drops superglobals.
-    - What may not run defines only Maybe: the right side of `&&`/`||`
-      and a nullsafe call's arguments. In the `else` of `if ($a &&
-      preg_match($p, $s, $m))`, under `if (rand(0, 1) || f($str))`, and
-      after `$d?->format($f = 'Y')`, the variable is Maybe (undefined when
-      `$d` is always `null`), and a loop condition first runs on the
-      scope before the loop (`while ($w && $w = 1)` reads `$w` undefined);
-      all unreported today (`boolean-op-truthy-falsey.php`,
-      `bug-10729.php`, 5; `defined-variables.php:356`, `:360`, `:428`).
     - A by-reference argument defines the variable only where the
       parameter creates it (`PassedByReference::createsNewVariable()`):
       `reset($u)`, `array_shift($argv)` in a function and the first,
@@ -3694,7 +3704,11 @@ building on the previous one:
       `if ($c && ($z = 2) > 1) {}` leaves `$z` as `2`, and after `$r =
       $c[$k] ??= ($new = count($c) + 1);`, `isset($new)` is
       `isset.variable` "always exists" (the rules oracle's
-      `bug-10151.php`);
+      `bug-10151.php`); in the `else` of `if ($a && preg_match($p, $s,
+      $m))` and under `if (rand(0, 1) || f($str))` a read is unreported
+      today, as is `$w` in `while ($w && $w = 1)`, whose condition first
+      runs on the scope before the loop (`boolean-op-truthy-falsey.php`,
+      `defined-variables.php:356`, `:360`, `:428`);
     - an increment on the right of `&&` counts: `$j = 0; $foo && $j++;`
       leaves `$j` as `0` today, a wrong value, and in a loop `$i` stays `0`
       on every pass (nsrt `foreach-loop-variables.php`);
@@ -3703,7 +3717,10 @@ building on the previous one:
       today (`$x !== null || throw` already narrows);
     - a nullsafe call's arguments are evaluated only when the receiver
       isn't null: after `$q?->m($e ??= new E())`, `$e ?? …` is
-      `nullCoalesce.variable` today (`amphp/http-server/Http2Driver.php:726`).
+      `nullCoalesce.variable` today (`amphp/http-server/Http2Driver.php:726`),
+      and after `$d?->format($f = 'Y')` a read of `$f` is unreported (Maybe,
+      or undefined when `$d` is always `null`; the rules oracle's
+      `bug-10729.php`, 5);
   - **Switch** follows `SwitchHandler`:
     - each case body is entered with `$subject == $case` true, merged with
       the previous case's fall-through;
@@ -4094,7 +4111,8 @@ the rest), which the gate excludes and lists.
     the class narrows it. `Exception::getCode()` is `mixed` today (nsrt
     `bug-6001.php`);
   - `trigger_error('…', E_USER_ERROR)` is `true` where it ends the script
-    (`never`), so the code after it is reachable; before PHP 8.0 a level
+    (`never`), so the code after it is reachable (the rules oracle's
+    `bug-7799.php`); before PHP 8.0 a level
     other than `E_USER_*` returns `false` (nsrt `trigger-error-php8.php`,
     `trigger-error-php7.php`);
   - `strtr()` of literals folds to the result, and of a non-empty string
