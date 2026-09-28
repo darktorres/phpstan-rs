@@ -4504,8 +4504,12 @@ fixture:
     runtime `Error` unreported today: `$i::X` and `$i::$y` on an `int`
     (`classConstant.nonObject`, `staticProperty.nonObject`), `T::C` on a
     trait (`classConstant.onTrait`), and a static property read through
-    `->` (`$p->st`, `property.staticAccess`); `$m instanceof T` with a
-    trait is always false (`instanceof.trait`);
+    `->` (`$p->st`, `staticProperty.nonStaticAccess`, the rules oracle's
+    7); `$m instanceof T` with a trait is always false (`instanceof.trait`);
+    an instance property read statically (`F::$bar`, `static::$bar`,
+    `\stdClass::$foo = …`) is `property.staticAccess` "Static access to
+    instance property", `staticProperty.notFound` today (the rules
+    oracle's 16);
   - the constant-operand checks of `&&`, `||`, `and`, `or`, `xor` and
     `?:` fire on each side and on the result: the rules oracle has 164
     `boolean{And,Or}.*`/`logical{And,Or,Xor}.*` findings and 17
