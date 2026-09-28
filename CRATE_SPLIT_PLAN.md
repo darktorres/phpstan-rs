@@ -4401,10 +4401,11 @@ fixture:
     `new \PDOStatement()`, `new \SimpleXMLElement(…)`, `new
     \IntlDateFormatter(…)`), `new static()` in a final class, and a
     constructor whose only impurity is a pure callable argument
-    (`pure-unless-callable-is-impure.php`); most of the rules oracle's 40
-    PHPStan-only. An instantiation that is itself an error (`new Ab()` of
-    an abstract class, an interface, `new NoCtor(1)`) throws, so it isn't
-    also `new.resultUnused` as PHPStan reports it (approved);
+    (`pure-unless-callable-is-impure.php`), `new NoCtor(1)` included (PHP
+    ignores the arguments; it is also `new.noConstructor`); most of the
+    rules oracle's 40 PHPStan-only. Instantiating an abstract class or an
+    interface throws, so it isn't also `new.resultUnused` as PHPStan
+    reports it (approved);
   - a statement that can throw or runs code is not `expr.resultUnused`
     (`NoopRule` reads the expression's throw and impure points): `$a /
     $b;`, `$a % $b;` and `99 / $v;` (`DivisionByZeroError`), a `match`
