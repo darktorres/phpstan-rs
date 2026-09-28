@@ -4475,7 +4475,19 @@ fixture:
     arguments and returns are already reported); once the receiver is
     reported, the call's arguments aren't checked against either member
     (`$this->foo->find(1)` on `self|null` is `arguments.count` today, the
-    rules oracle's `call-methods.php:516`);
+    rules oracle's `call-methods.php:516`). A nullsafe link makes the rest
+    of the chain possibly null: `$h->n()?->n()->m()` calls `m()` on
+    `H|null` (`bug-5868.php`, `bug-4199.php`, `bug-7109.php`);
+  - a method call on a receiver that can't be an object is reported for
+    every receiver type: a template bounded by `mixed` (`$t->foo()` on `T
+    of mixed`, `check-explicit-mixed.php`, `check-implicit-mixed.php`), an
+    `int` in a first-class callable (`$i->doFoo(...)`), an always-`null`
+    receiver of `?->` (`$null?->foo()`, `nullsafe-method-call*.php`,
+    `bug-10729.php`), a `class-string` that `method_exists()` narrowed
+    (`$s->nonExistent()`,
+    `impossible-method-exists-on-generic-class-string.php`, 6), and a
+    `global $pdo` variable, `mixed` at level 10 (`bug-14318.php`, 4); all
+    unreported today;
   - a by-reference argument PHP creates on the call is not type-checked
     against the parameter;
   - flag parameters are checked against PHPStan's
