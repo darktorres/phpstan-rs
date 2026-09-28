@@ -1460,6 +1460,13 @@ positive-int ? 1 : T is negative-int ? -1 : 0)`, `bug-8609.php`); and
 plain `callable` today, so it is `parameter.phpDocType` "callable is not
 subtype of native type Closure", `bug-9009.php`).
 
+Follow-up: **a tag's diagnostics sit on the tag's line**: an invalid
+`@param`, `@var` or `@return` is `phpDoc.parseError` on its own line, not
+the declaration's, so an `@phpstan-ignore-line` or `-next-line` inside the
+doc block applies to it (the rules oracle's `ignore-line-within-phpdoc.php`,
+`invalid-phpdoc.php`: 12 phpstan-rs-only findings that PHPStan reports on
+the tag lines or ignores). `DocBlock` keeps each tag's line for this.
+
 Follow-up: **shape keys follow phpdoc-parser's identifier token**, which
 takes `-` and `\` anywhere after the first character: `array{psr-4?:
 list<string>}` and `array{x-1: int}` report `phpDoc.parseError` today (a
@@ -3694,7 +3701,20 @@ rules-oracle findings).
 
 - the reference-site collector (a built-in collector, consumed by the dead
   code rules and, later, the LSP);
-- dead code / members / enum cases / abstract classes;
+- dead code / members / enum cases / abstract classes, with every use
+  site the reference-site collector sees: a private constant read in an
+  enum case value (`case One = self::MY_CONST`), an attribute argument
+  (`#[Table(self::TABLE_NAME)]`), through `$this::C`/`$self::C` or a
+  class-string (`$class::C`) and from a used trait's method is
+  `classConstant.unused` today (16 rules-oracle findings: `bug-9402.php`,
+  `bug-9005.php`, `bug-5651.php`, `bug-12011.php`, `bug-6758.php`,
+  `bug-4570.php`, `class-constant-attribute.php`); a property read through
+  `?->`, `get_object_vars($this)`, `$this::$p`, a hooked property's own
+  get or set, a trait method of the host, and a PHP 8.5 `clone($o, ['p'
+  => …])` write are uses too, `property.unused`/`property.onlyWritten`
+  today (the rules oracle's 30: `nullsafe-property-fetch.php`,
+  `bug-3654.php`, `bug-9409.php`, `bug-12702.php`, `bug-7198.php`,
+  `clone-with.php`);
 - duplicates;
 - circular namespaces;
 - architecture;
@@ -4106,6 +4126,11 @@ fixture:
     (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
     fail and stays unreported (341 PHPStan reports on `mixed`).
 - (e) declarations, generics checks and PHPDoc:
+  - a template bound is supported when `TemplateTypeCheck` lists its type:
+    `self` (an object type) and `key-of<…>` are, and are
+    `generics.notSupportedBound` today (15 rules-oracle findings,
+    `bug-4550.php`, `bug-7652.php`, `bug-13652.php`, `bug-10749.php`,
+    `method-assert.php`, `param-out.php`);
   - a PHPDoc type resolving to `never` (`int&string`, a template whose
     bound makes it empty) is `return.unresolvableType`/
     `parameter.unresolvableType`/`assert.unresolvableType`, unreported
@@ -4159,6 +4184,11 @@ fixture:
     last statement (PHPStan's `ExecutionEndNode`), not on the declaration:
     36 of the rules oracle's 53 phpstan-rs-only `return.missing` are the
     same finding on the declaration's line;
+  - `return.unusedType` isn't reported for a union of constants when every
+    return is a constant: `@return 1|2|3` returning `1`, or a
+    `'Test'|'Projekt in Umsetzung'` domain, stays (`TooWideTypeCheck::
+    narrowType`; 10 rules-oracle findings, `bug-11453.php`,
+    `bug-10312*.php`);
   - a return type that includes `void` accepts falling off the end (fixed
     first): `@return void|int` on a function that returns only on some
     paths is `return.missing` today, 10 of the oracle's 38 phpstan-rs-only
