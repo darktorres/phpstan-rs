@@ -4512,6 +4512,8 @@ fixture:
     `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
   - the class-access checks cover every receiver and target, each a
     runtime `Error` unreported today: `$i::X` and `$i::$y` on an `int`
+    (and, possibly, on `stdClass|null`, `string|null` or `int|string`:
+    `$stdOrNull::class`, `$stringOrInt::FOO`)
     (`classConstant.nonObject`, `staticProperty.nonObject`), `T::C` on a
     trait (`classConstant.onTrait`), and a static property read through
     `->` (`$p->st`, `staticProperty.nonStaticAccess`, the rules oracle's
@@ -4840,7 +4842,10 @@ fixture:
     8 findings, unreported today);
   - a template the call can't resolve is `argument.templateType`:
     `make($s)` for `@param class-string<T> $c` with a plain `string` is
-    unreported today (17 oracle findings).
+    unreported today (17 oracle findings), nor are a first-class callable
+    or closure of a generic function called with `mixed` (`$f($mixed)`)
+    and `f(1, 2)` binding `A` two incompatible ways (the rules oracle's 9,
+    `call-first-class-callables.php`, `call-generic-function.php`).
 - (d) assignments and properties:
   - `uninitialized` and `uninitialized_dataflow` are rewritten over the
     ClassPropertiesNode initialization state, with the dataflow walker
@@ -4993,7 +4998,8 @@ fixture:
     `$aa[] = 'foo'` and `$aa[1] += 2.5` on `ArrayAccess<int, int>`, `$c[]
     = 1` on a class declaring `@implements \ArrayAccess<int, string>`,
     `$a['foo'] ??= $a['foo'] ?? null` on `ArrayAccess<string, string>`,
-    and writes into an `ArrayObject<never, never>` are unreported today
+    and writes into an `ArrayObject<never, never>` (and `unset()` of such
+    an offset, `unset.offset`, 7) are unreported today
     (all 20 of the rules oracle's PHPStan-only
     `offset-access-value-assignment*.php`,
     `null-coalesce-assign-right-side-scope.php`, `readonly-assign.php`);
