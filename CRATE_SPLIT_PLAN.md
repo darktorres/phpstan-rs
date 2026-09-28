@@ -7149,7 +7149,11 @@ on.
   (`PHPSTAN_RS_BUILD_COMMIT`), else `+dev` with the build ID; no build script
   reads `git rev-parse`, whose output changing on every commit would recompile
   the crate and everything above it (`CRASH_REPORTING_PLAN.md` §4.2). It is the
-    identity F2's cache key records. `-v` is verbosity (above), so today's `-v`
+  identity F2's cache key records. The release workflow's smoke check, which
+  requires `--version` to print exactly `phpstan-rs X.Y.Z`
+  (`release.yml`'s `grep -Eq '^phpstan-rs [0-9]+\.[0-9]+\.[0-9]+$'`), matches
+  the new shape and checks the commit is the tag's, and `tests/version.rs`'s
+  exact-shape case follows. `-v` is verbosity (above), so today's `-v`
   alias of `--version` goes, and `tests/version.rs`'s
   `dash_v_behaves_identically_to_dash_dash_version` becomes the `-V` case.
 - The `format_signature` test moves to `reflection`.
@@ -7946,7 +7950,7 @@ its owner. Non-Registry keys follow the table.
 | sqlparser, mysql, postgres, rusqlite, r2d2, r2d2_postgres, r2d2_sqlite | sql (sqlparser also in ext-sql only if it keeps checker-side parsing; the target is an `sql` API) |
 | arbitrary | syntax (`fuzzing`) |
 | criterion, proptest (dev) | crates with benches / property tests |
-| libtest-mimic (new, dev) | testing and every fixture-owning crate |
+| libtest-mimic (new) | testing (its runner is the library's; a fixtures target calls `testing::run`) |
 
 ## Appendix F: decisions
 
