@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "minimumReleaseAge": "3 days",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
+  "packageRules": [
+    {
+      "description": "One PR per ecosystem for non-breaking updates; majors stay separate.",
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "{{manager}} non-major updates"
+    },
+    {
+      "description": "engines.vscode is the oldest supported VS Code, and @types/vscode may not be newer than it.",
+      "matchDepTypes": ["engines"],
+      "enabled": false
+    },
+    {
+      "matchPackageNames": ["@types/vscode"],
+      "enabled": false
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "mold, installed by rui314/setup-mold.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["mold-version: (?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "rui314/mold",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "description": "Cargo tools installed by taiki-e/install-action.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["(?<depName>cargo-[a-z-]+)@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "crate"
+    }
+  ]
+}
