@@ -991,7 +991,21 @@ commit); the unsorted corpus comparison starts here.
   `stdClass`, `object` today (`bug-12755.php`);
 - the `array_udiff()` family's trailing callbacks are accepted;
 - `list<int>&non-empty-array` is one intersected type;
-- a method called on an intersection uses its most visible declaration;
+- a method called on an intersection uses its most visible declaration,
+  and its parameters don't depend on the members' order: `render($foo)`
+  on `ViewB&ViewA` (`render(string $foo = '')` and `render()`) is
+  `arguments.count` today while `ViewA&ViewB` passes (the rules oracle's
+  `bug-11978.php`);
+- a function or method whose body calls `func_get_args()` (or
+  `func_get_arg()`/`func_num_args()`) is variadic, as PHPStan's
+  `isVariadic()` reads it: `some_variadic_function('a', 'b')` for
+  `function some_variadic_function() { $v = func_get_args(); }` is
+  `arguments.count` today (the rules oracle's `bug-11559.php`,
+  `bug-11559c.php`, `bug-3448.php`, `call-variadic-methods.php`,
+  `function-with-variadic-parameters.php`, `instantiation.php:35`);
+- `new static()` isn't checked against the constructor (a subclass may
+  change it): `new static()` is `arguments.count` today where the
+  constructor takes one (`instantiation.php:17`);
 - `@param-out` may be wider than the native by-reference type, and holds
   after the call;
 - an invalid inline `@var` is not applied;
@@ -1374,7 +1388,10 @@ Follow-ups:
   `:1714`). A shape is accepted by a general array whose key type is a
   union of literals covering its keys: `['a' => 4, 'b' => 52]` returned
   under `@return array<'a'|'b', int>` is `return.type` "got array{a: 4, b:
-  52}" today (the rules oracle's `bug-8683.php`).
+  52}" today (the rules oracle's `bug-8683.php`). An integer range is
+  accepted by a union of the constants it spans: `int<0, 3>` by `0|1|2|3`
+  is `assign.propertyType` today (`bug-3383.php`,
+  `int-ranges-and-constants.php`).
 - **Class-aware unions.** With C8's hierarchy, a union drops members another
   member covers (`A|B` for `B extends A` stays two members). Identical
   members collapse too: a closure parameter today reaches
@@ -2403,7 +2420,14 @@ Fixes, each its own behaviour commit:
   dynamic return types) and binds `self::`;
 - purity: shell-exec and `throw` expressions are impure, a class-constant
   read is pure, calls and `new` resolve through parse-time names, and
-  method dependencies follow inheritance.
+  method dependencies follow inheritance. A static call's purity is its
+  method's: `PC::p()` on a `@phpstan-pure` method, `$class::pure()` on a
+  `class-string`, `E::from('a')` and `$d->format('Y')` on a
+  `DateTimeImmutable` are "Possibly impure call to unknown method" today,
+  as are calls through a `pure-callable`/`pure-Closure` parameter (`$cb()`)
+  and a user function taking a pure callback; the rules oracle's 79
+  `possiblyImpure.*` phpstan-rs-only findings are these and the built-ins
+  `functionMetadata` decides (`is_string`, `array_key_exists`).
 
 **C10. Extract `reflection`.** No module-graph edge remains; `cargo machete`
 checks Appendix E's rows for it.
@@ -2798,6 +2822,9 @@ deleted; the file-size gate.
       `int<-3, 3>` and on a non-negative `int<0, 3>`, `int` today, so a
       `match` over its values is `match.unhandled` (the rules oracle's
       `bug-8900.php`, `bug-9879.php`).
+    - **Bitwise operators on ranges** stay in range: `$a | $b` on two
+      `int<0, 1>` is `int<0, 1>`, `int` today (the rules oracle's
+      `bug-7912.php`).
     - **`<=>`** is `-1|0|1`, `int` today, so it doesn't satisfy `@return
       -1|0|1` (the rules oracle's `bug-5008.php`). `+` with a `mixed`
       operand is `array|float|int`, `int` today (`bug-3759.php`).
@@ -2977,6 +3004,10 @@ deleted; the file-size gate.
       `$who` `mixed` and is `argument.type` "expects callable(A): array,
       Closure(static): array{} given" today (the rules oracle's
       `bug-11591.php`, `bug-14893.php`).
+    - **A variadic parameter** is `list<T>` in the body under
+      `@no-named-arguments` and `array<int|string, T>` otherwise; it is
+      `array<T>` today, so `$this->b = $b` into `list<B>` is
+      `assign.propertyType` (the rules oracle's `bug-11275.php`).
     - **Unpacked constant arrays** bind their elements to the parameters
       they reach: `$c->access(...['view', null, true])` for `@return
       ($return_as_object is true ? AccessResultInterface : bool)` is
@@ -3646,7 +3677,12 @@ rules-oracle findings).
   default starts as `null`: `/** @var string|null */ private $debug;`
   assigned a string only under `PHP_SAPI === 'cli'` is "never assigned
   null" today (composer/xdebug-handler's `XdebugHandler.php:57`, one of 46
-  phpstan-rs-only `property.unusedType` on the corpus oracle's files);
+  phpstan-rs-only `property.unusedType` on the corpus oracle's files, and
+  11 of the rules oracle's 16). A default counts as an assignment, a
+  constant-expression one included (`= self::NUMBER_TYPE_OFF`), and an
+  assigned range covers each constant it spans: `@var 0|1|2|3` with `=
+  0` and `$this->c = random_int(0, 3)` is "never assigned 0/1/2/3" today
+  (the rules oracle's `bug-4174.php`);
 - renamed named arguments;
 - the trait-host constant-condition verdict as a collector plus rule;
 - the (span, message) dedup moved to the finalizer;
@@ -3921,7 +3957,10 @@ fixture:
     `property.nonObject` fire only for a receiver that can never be an
     object (161 `method.nonObject` and 110 `property.nonObject` "on
     X|null" the corpus oracle finds and phpstan-rs misses; nullable
-    arguments and returns are already reported);
+    arguments and returns are already reported); once the receiver is
+    reported, the call's arguments aren't checked against either member
+    (`$this->foo->find(1)` on `self|null` is `arguments.count` today, the
+    rules oracle's `call-methods.php:516`);
   - a by-reference argument PHP creates on the call is not type-checked
     against the parameter;
   - flag parameters are checked against PHPStan's
