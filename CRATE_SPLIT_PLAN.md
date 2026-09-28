@@ -1458,7 +1458,22 @@ Follow-ups, one commit each, each with its test:
   through Composer stays loaded), `file_extensions`,
   `report_ignores_without_comments`,
   `use_path_constants_as_constant_string`,
-  `check_internal_class_case_sensitivity`.
+  `check_internal_class_case_sensitivity`, and the rest of PHPStan 2.2.16's
+  `parametersSchema.neon` that changes analysis, checked one by one
+  against the code: `polluteScopeWithBlock` and
+  `inferPrivatePropertyTypeFromConstructor` (D5),
+  `checkExplicitMixedMissingReturn` (E3f),
+  `checkMissingOverrideMethodAttribute`/`PropertyAttribute`,
+  `reportMaybesInMethodSignatures`, `reportStaticMethodSignatures`,
+  `reportMaybesInPropertyPhpDocTypes`, `reportWrongPhpDocTypeInVarTag` and
+  `reportAnyTypeWideningInVarTag` (E3e), `reportNonIntStringArrayKey`,
+  `reportUnsafeArrayStringKeyCasting` and
+  `reportPossiblyNonexistent{Constant,General}ArrayOffset` (E3b),
+  `editorUrl`/`editorUrlTitle` (F3). phpstan-strict-rules turns several of
+  these on (`polluteScopeWithBlock: false` among them), so E4's
+  ext-strict-rules reads them. PHPStan's runtime parameters (`tmpDir`,
+  `resultCache*`, `productionMode`, `bootstrapFiles`, the playground and
+  CLI ones) have no phpstan-rs meaning; the shim reports them as ignored.
 - **One settings assembly.** `lsp/workspace_config.rs` stops assembling
   `ProjectSettings` itself and uses `Session::resolve`'s function: the same
   validation (overlays, architecture, banned constructs, psr3 pattern), the
@@ -3226,6 +3241,10 @@ fixture:
     type: `$a[$o]` and `$a[$o] = 1` with an object offset and `[$o => 1]`
     throw a `TypeError` and aren't reported today (an `array` offset and,
     with a PHP version known, a `float` one already are);
+  - arithmetic with a `string` operand that isn't `numeric-string` is
+    `binaryOp.invalid` (PHP 8 throws a `TypeError` for a non-numeric
+    string): `$s / 2`, `$s * 2`, `2 / $s` on `string $s` are unreported
+    today (B4's `ErrorType` gives the result);
   - `++`/`--` check their operand (`postInc.type` and the rest): `$b++` on
     a `bool` does nothing at runtime and isn't reported today;
   - a non-numeric string offset on a string throws a `TypeError`:
@@ -3377,7 +3396,18 @@ for the analyser.
   3. ext-phpunit, ext-codeception, ext-mockery and ext-mockstan, after E1;
   4. ext-pest (closure-this, the file-set hook, pest risky tests);
   5. ext-nette-tester;
-  6. ext-strict-rules, which also completes the port;
+  6. ext-strict-rules, completing phpstan-strict-rules: today's 11 toggles
+     cover parent-constructor calls, boolean conditions, useless casts,
+     strict `array_filter`, strict function calls, switch case types, loop
+     variable overwrite, dynamic static calls, illegal constructor calls,
+     implicit array creation and arithmetic operands; the package's other
+     groups are missing (each unreported today, checked against the
+     vendored package): `disallowedLooseComparison` (`==`/`!=`),
+     `disallowedBacktick`, `disallowedEmpty`, `disallowedShortTernary`,
+     `noVariableVariables` (with the dynamic method, property, static
+     method and static property names), `closureUsesThis`,
+     `matchingInheritedMethodNames` and `booleansInLoopConditions`, plus the
+     core parameters the package sets (C1's list);
   7. ext-deprecation-rules;
   8. ext-disallowed-calls;
   9. ext-shipmonk, ext-type-perfect, ext-voku, ext-sidz, ext-slam,
