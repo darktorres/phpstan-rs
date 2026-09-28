@@ -272,7 +272,9 @@ fn eval_concat(
             left.push_str(&right);
             Some(left)
         }
-        ExprKind::Grouping(inner) => eval_concat(inner, vendor_dir, base_dir, generated_dir),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+            eval_concat(inner, vendor_dir, base_dir, generated_dir)
+        }
         _ => None,
     }
 }

@@ -91,12 +91,8 @@ impl<'a> Checker<'a> {
         label: &str,
     ) -> bool {
         match &closure_expr.kind {
-            ExprKind::Grouping(inner) => self.check_closure_literal_with_param_overrides(
-                inner,
-                param_overrides,
-                locals,
-                label,
-            ),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => self
+                .check_closure_literal_with_param_overrides(inner, param_overrides, locals, label),
             ExprKind::ArrowFn {
                 params,
                 body,

@@ -1731,7 +1731,9 @@ impl<'a> Checker<'a> {
                 self.check_unary_operand_validity(op, &inner_ty, inner.span);
                 inner_ty.to_bitwise_not().unwrap_or(inner_ty)
             }
-            ExprKind::Grouping(inner) => self.check_expr(inner, locals, label),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                self.check_expr(inner, locals, label)
+            }
             ExprKind::Cast(cast, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_cast_validity(cast.kind(), &inner_ty, inner.span);
@@ -4380,7 +4382,9 @@ impl<'a> Checker<'a> {
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| superglobal_default_type(name)),
-            ExprKind::Grouping(inner) | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
+            ExprKind::Grouping(inner)
+            | ExprKind::ErrorSuppress(inner)
+            | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
             // First-class-callable syntax (`strlen(...)`, `$obj->
             // method(...)`) produces a real `Closure` instance at runtime
             // - infer the same `Object("Closure", ...)` the native
@@ -6720,7 +6724,9 @@ pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
         ExprKind::MethodCall(inner, _, _, nullsafe) => {
             *nullsafe || postfix_chain_has_nullsafe(inner)
         }
-        ExprKind::Grouping(inner) => postfix_chain_has_nullsafe(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+            postfix_chain_has_nullsafe(inner)
+        }
         _ => false,
     }
 }

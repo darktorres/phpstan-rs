@@ -2330,7 +2330,9 @@ pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
         ExprKind::Binary(BinOp::BitOr, l, r) => {
             contains_flag_name(l, target) || contains_flag_name(r, target)
         }
-        ExprKind::Grouping(inner) => contains_flag_name(inner, target),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+            contains_flag_name(inner, target)
+        }
         _ => false,
     }
 }
@@ -2549,7 +2551,9 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
         ExprKind::Binary(BinOp::BitOr, l, r) => {
             contains_json_throw_on_error(l) || contains_json_throw_on_error(r)
         }
-        ExprKind::Grouping(inner) => contains_json_throw_on_error(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+            contains_json_throw_on_error(inner)
+        }
         _ => false,
     }
 }

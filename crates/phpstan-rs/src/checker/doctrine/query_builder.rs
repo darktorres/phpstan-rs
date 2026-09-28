@@ -30,7 +30,9 @@ fn looks_like_query_builder_chain(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
         ExprKind::MethodCall(inner, _, _, _) => looks_like_query_builder_chain(inner),
-        ExprKind::Grouping(inner) => looks_like_query_builder_chain(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+            looks_like_query_builder_chain(inner)
+        }
         _ => false,
     }
 }
@@ -163,7 +165,7 @@ impl<'a> Checker<'a> {
                     });
                     cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
                 }
-                ExprKind::Grouping(inner) => {
+                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
                     cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()))
                 }
                 // `$qb = $this->createQueryBuilder(...)->...; ...; $qb->

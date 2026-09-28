@@ -419,6 +419,10 @@ fn write_expr(out: &mut String, e: &Expr) {
             write_expr(out, inner);
             out.push(')');
         }
+        ExprKind::ErrorSuppress(inner) => {
+            out.push('@');
+            write_expr(out, inner);
+        }
         ExprKind::Clone(object, overrides) => match overrides {
             Some(overrides) => {
                 out.push_str("clone(");

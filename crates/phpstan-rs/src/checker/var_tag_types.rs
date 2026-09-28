@@ -23,7 +23,7 @@ enum ValueShape {
 
 fn value_shape(e: &Expr) -> ValueShape {
     match &e.kind {
-        ExprKind::Grouping(inner) => value_shape(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => value_shape(inner),
         ExprKind::Literal(_) | ExprKind::Interpolated(_) | ExprKind::Name(_) => ValueShape::Literal,
         ExprKind::ArrayLiteral(items) => ValueShape::ArrayLiteral {
             empty: items.is_empty(),
@@ -145,9 +145,9 @@ impl<'a> Checker<'a> {
         match &e.kind {
             ExprKind::Literal(_) => self.infer_expr(e, locals),
             ExprKind::Interpolated(_) => Type::String,
-            ExprKind::Grouping(inner) | ExprKind::Clone(inner, _) => {
-                self.native_expr_type(inner, locals)
-            }
+            ExprKind::Grouping(inner)
+            | ExprKind::ErrorSuppress(inner)
+            | ExprKind::Clone(inner, _) => self.native_expr_type(inner, locals),
             ExprKind::Assign(_, rhs) => self.native_expr_type(rhs, locals),
             ExprKind::CompoundAssign(BinOp::Concat, ..) => Type::String,
             ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {

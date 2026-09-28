@@ -22,7 +22,7 @@ use types::Type;
 /// (`int|null`), not the coalesce result's already-narrower one.
 pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
     match &e.kind {
-        ExprKind::Grouping(inner) => narrowing_infer_target(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => narrowing_infer_target(inner),
         ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
             if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
         {
@@ -128,7 +128,7 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         // `Assign` node directly as the comparison's own operand - but
         // plenty of real code still writes the parens out of habit, so
         // both arms stay.
-        ExprKind::Grouping(inner) => narrowing_key(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => narrowing_key(inner),
         // `is_int($decoded['status'] ?? null)` - a
         // common defensive-coding idiom (json_decode results,
         // `$_SERVER`/`$_GET` reads, ...). Scoped to a literal `null`
@@ -208,7 +208,7 @@ pub(crate) fn preg_match_condition(cond: &Expr) -> Option<(&Expr, &Expr, bool)> 
                 ExprKind::Name(name) if name.trim_start_matches('\\') == "preg_match" => Some(args),
                 _ => None,
             },
-            ExprKind::Grouping(inner) => as_preg_match_args(inner),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => as_preg_match_args(inner),
             _ => None,
         }
     }
@@ -415,7 +415,9 @@ impl<'a> Checker<'a> {
                 let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
                 (lk == rk).then(|| (lk, union_types(lt, rt), le))
             }
-            ExprKind::Grouping(inner) => self.or_chain_narrowing_target(inner, locals),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                self.or_chain_narrowing_target(inner, locals)
+            }
             ExprKind::Call(callee, args) => {
                 let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice()) else {
                     return None;
@@ -480,7 +482,9 @@ impl<'a> Checker<'a> {
                 let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
                 (lk == rk).then(|| (lk, union_types(lt, rt), le))
             }
-            ExprKind::Grouping(inner) => self.and_chain_narrowing_target(inner, locals),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                self.and_chain_narrowing_target(inner, locals)
+            }
             ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner, locals),
             _ => None,
         }

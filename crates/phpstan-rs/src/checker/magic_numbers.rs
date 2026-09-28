@@ -47,7 +47,9 @@ impl<'a> Checker<'a> {
             ExprKind::Cast(cast, inner) if cast.kind() == CastKind::String => {
                 self.numeric_literal_value(inner)
             }
-            ExprKind::Grouping(inner) => self.numeric_literal_value(inner),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                self.numeric_literal_value(inner)
+            }
             _ => None,
         }
     }

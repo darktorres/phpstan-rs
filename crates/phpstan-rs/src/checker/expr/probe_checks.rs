@@ -659,7 +659,7 @@ fn expr_reads_a_mutable_property(e: &Expr) -> bool {
         ExprKind::Binary(_, l, r) => {
             expr_reads_a_mutable_property(l) || expr_reads_a_mutable_property(r)
         }
-        ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) => {
+        ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
             expr_reads_a_mutable_property(inner)
         }
         ExprKind::Index(base, idx) => {

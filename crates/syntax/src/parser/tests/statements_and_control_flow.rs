@@ -259,3 +259,20 @@ fn list_is_apart_from_an_array_literal() {
     assert!(matches!(&items[1].value.kind, ExprKind::List(_)));
     assert!(matches!(&rhs.kind, ExprKind::ArrayLiteral(_)));
 }
+
+#[test]
+fn error_suppression_is_kept_as_a_node() {
+    let program = parse("<?php\n$f = @fopen('x', 'r');\n");
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected an assignment, got {:?}", program[0].kind);
+    };
+    let ExprKind::ErrorSuppress(inner) = &rhs.kind else {
+        panic!("expected an error suppression, got {:?}", rhs.kind);
+    };
+    assert!(matches!(&inner.kind, ExprKind::Call(..)));
+    assert!(matches!(&unwrap_grouping(rhs).kind, ExprKind::Call(..)));
+}

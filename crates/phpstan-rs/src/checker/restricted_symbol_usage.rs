@@ -159,7 +159,9 @@ impl<'a> Checker<'a> {
         match &e.kind {
             ExprKind::Literal(Literal::Int(n)) => Some(*n),
             ExprKind::Unary(UnaryOp::Neg, inner) => self.fold_int_flags(inner).map(|n| -n),
-            ExprKind::Grouping(inner) => self.fold_int_flags(inner),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                self.fold_int_flags(inner)
+            }
             ExprKind::Name(name) => match self.global_constant_type(name) {
                 Some(Type::IntLiteral(n)) => Some(n),
                 _ => None,

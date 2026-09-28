@@ -200,7 +200,7 @@ fn cond_references_variable(e: &Expr, name: &str) -> bool {
 fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
     let inner = match &e.kind {
         ExprKind::Cast(cast, inner) if cast.kind() == CastKind::Bool => inner,
-        ExprKind::Grouping(inner) => inner,
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => inner,
         _ => e,
     };
     match &inner.kind {
@@ -890,7 +890,9 @@ impl<'a> Checker<'a> {
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 self.apply_narrowing(inner, locals, !branch_true);
             }
-            ExprKind::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                self.apply_narrowing(inner, locals, branch_true)
+            }
             // `(bool) $x`'s own truthiness is exactly `$x`'s -
             // PHP's cast doesn't change which values are truthy/falsy, it
             // just makes the check explicit (a common, idiomatic style:

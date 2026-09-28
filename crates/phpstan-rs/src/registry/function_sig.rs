@@ -443,7 +443,9 @@ fn infer_const_type_with(
         // widen every array literal/argument this const then feeds
         // into.
         ExprKind::Binary(syntax::ast::BinOp::Concat, ..) => Type::String,
-        ExprKind::Grouping(inner) => infer_const_type_with(inner, class_const_ref),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+            infer_const_type_with(inner, class_const_ref)
+        }
         ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
             class_const_ref(class, name).unwrap_or(Type::Mixed(false))
         }

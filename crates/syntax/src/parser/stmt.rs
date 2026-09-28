@@ -470,7 +470,7 @@ impl Parser {
 fn const_fold_level(e: &Expr) -> Option<i64> {
     match &e.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
-        ExprKind::Grouping(inner) => const_fold_level(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => const_fold_level(inner),
         ExprKind::Unary(UnaryOp::Neg, inner) => const_fold_level(inner).map(|n| -n),
         _ => None,
     }

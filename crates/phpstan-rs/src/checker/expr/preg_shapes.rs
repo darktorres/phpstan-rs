@@ -406,7 +406,7 @@ pub(super) fn parse_preg_flags(e: &Expr, allow_order: bool) -> Option<PregFlags>
                 true
             }
             ExprKind::Binary(BinOp::BitOr, l, r) => collect(l, out) && collect(r, out),
-            ExprKind::Grouping(inner) => collect(inner, out),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => collect(inner, out),
             _ => false,
         }
     }

@@ -162,7 +162,7 @@ fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
             }
             AttributeValue::BitOr(operands)
         }
-        ExprKind::Grouping(inner) => value(inner, ctx),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => value(inner, ctx),
         _ => AttributeValue::Unsupported,
     }
 }

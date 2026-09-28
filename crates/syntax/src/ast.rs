@@ -1117,6 +1117,9 @@ pub enum ExprKind {
     // there's no fixed name here to look up or bind in `locals`.
     DynamicVariable(Box<Expr>),
     ArrayLiteral(Vec<ArrayItem>),
+    // `@expr`: the error-control operator, which silences the warnings
+    // evaluating `expr` raises. Its value is `expr`'s.
+    ErrorSuppress(Box<Expr>),
     // `list(...)`: a destructuring target, as `[...]` on the left of an
     // assignment is.
     List(Vec<ArrayItem>),
@@ -1269,7 +1272,7 @@ pub enum ExprKind {
 /// `function () {...}`.
 pub fn unwrap_grouping(e: &Expr) -> &Expr {
     match &e.kind {
-        ExprKind::Grouping(inner) => unwrap_grouping(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => unwrap_grouping(inner),
         _ => e,
     }
 }
@@ -1286,7 +1289,7 @@ pub fn unwrap_grouping(e: &Expr) -> &Expr {
 pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => s.as_str().map(std::borrow::Cow::Borrowed),
-        ExprKind::Grouping(inner) => literal_string_value(inner),
+        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => literal_string_value(inner),
         ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
             let l = literal_string_value(lhs)?;
             let r = literal_string_value(rhs)?;

@@ -369,7 +369,9 @@ impl<'a> Checker<'a> {
                 !matches!(part.kind, ExprKind::Literal(Literal::String(_)))
                     && self.is_risky_value(part, locals)
             }),
-            ExprKind::Grouping(inner) => self.is_risky_log_expr(inner, locals),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                self.is_risky_log_expr(inner, locals)
+            }
             _ => false,
         }
     }

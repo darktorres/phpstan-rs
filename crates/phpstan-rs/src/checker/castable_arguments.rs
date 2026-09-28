@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
                 cast.expectation()
             ),
             match &value.kind {
-                ExprKind::Grouping(inner) => inner.span,
+                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => inner.span,
                 _ => value.span,
             },
             5,

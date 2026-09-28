@@ -178,7 +178,7 @@ impl<'a> Checker<'a> {
     /// Called from `StmtKind::Expression` after `e` itself was checked.
     pub(crate) fn check_noop_statement(&mut self, e: &Expr, locals: &Locals) {
         let e = match &e.kind {
-            ExprKind::Grouping(inner) => inner.as_ref(),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => inner.as_ref(),
             _ => e,
         };
         let effects = expr_side_effects(e);

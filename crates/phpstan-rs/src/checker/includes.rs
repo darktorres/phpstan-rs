@@ -177,7 +177,9 @@ impl<'a> Checker<'a> {
                 .flatten();
         }
         match &e.kind {
-            ExprKind::Grouping(inner) => self.resolve_paths_at(inner, locals, depth),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                self.resolve_paths_at(inner, locals, depth)
+            }
             // The platform's own separators - the paths are checked
             // against this machine's filesystem.
             ExprKind::Name(n) if n.trim_start_matches('\\') == "PATH_SEPARATOR" => {

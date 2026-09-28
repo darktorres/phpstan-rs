@@ -406,8 +406,8 @@ impl Parser {
             return Ok(self.expr(ExprKind::Unary(op, Box::new(operand)), start));
         }
         if self.eat(&Token::At) {
-            // error-suppression operator: not modeled, transparent wrapper
-            return self.parse_unary();
+            let operand = self.parse_unary()?;
+            return Ok(self.expr(ExprKind::ErrorSuppress(Box::new(operand)), start));
         }
         self.parse_pow()
     }
