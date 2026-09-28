@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::name::Name;
+use crate::php_string::PhpString;
 use crate::token::Span;
 
 /// A syntax node's identity within one parsed file: the parser numbers
@@ -602,7 +603,7 @@ pub enum Literal {
     // would make the latter, explicitly-interned path a wash (the
     // interned value immediately re-copied into a fresh `String` at its
     // very next - and only - consumer).
-    String(Arc<str>),
+    String(PhpString),
     Bool(bool),
     Null,
 }
@@ -1220,7 +1221,7 @@ pub fn unwrap_grouping(e: &Expr) -> &Expr {
 /// value, since this function only sees the raw `Expr`.
 pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
     match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(std::borrow::Cow::Borrowed(s.as_ref())),
+        ExprKind::Literal(Literal::String(s)) => s.as_str().map(std::borrow::Cow::Borrowed),
         ExprKind::Grouping(inner) => literal_string_value(inner),
         ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
             let l = literal_string_value(lhs)?;

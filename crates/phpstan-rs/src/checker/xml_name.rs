@@ -37,7 +37,7 @@ impl<'a> Checker<'a> {
         let ExprKind::Literal(Literal::String(name)) = &unwrap_grouping(&arg.value).kind else {
             return;
         };
-        if is_valid_xml_name(name) {
+        if name.as_str().is_none_or(is_valid_xml_name) {
             return;
         }
         self.report(format!("DOMDocument::createElement() name '{name}' is not a valid XML element name and will throw at runtime"),

@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
                             next_index = next_index.max(n + 1);
                             n.to_string()
                         }
-                        Type::StringLiteral(s) => s,
+                        Type::StringLiteral(s) => s.to_string(),
                         Type::True => {
                             next_index = next_index.max(2);
                             "1".to_string()
@@ -158,7 +158,7 @@ impl<'a> Checker<'a> {
                 }
                 Some(k) => match &k.kind {
                     ExprKind::Literal(Literal::String(s)) => {
-                        let key = ShapeKey::from_name(s);
+                        let key = ShapeKey::from_name(&s.to_str_lossy());
                         if let ShapeKey::Int(n) = key {
                             next_index = next_index.max(n + 1);
                         }
@@ -275,7 +275,7 @@ impl<'a> Checker<'a> {
                         }
                         Some(k) => match &k.kind {
                             ExprKind::Literal(Literal::String(s)) => {
-                                let key = ShapeKey::from_name(s);
+                                let key = ShapeKey::from_name(&s.to_str_lossy());
                                 if let ShapeKey::Int(n) = key {
                                     next_index = next_index.max(n + 1);
                                 }
@@ -939,7 +939,7 @@ fn array_key_cast_description(expr: &Expr, ty: &Type) -> Option<(String, String)
         Type::False => Some(("false".to_string(), "0".to_string())),
         Type::Null => Some(("null".to_string(), "''".to_string())),
         Type::StringLiteral(s) => {
-            types::canonical_int_key(s).map(|n| (format!("'{s}'"), n.to_string()))
+            types::canonical_int_key(&s.to_str_lossy()).map(|n| (format!("'{s}'"), n.to_string()))
         }
         _ => None,
     }

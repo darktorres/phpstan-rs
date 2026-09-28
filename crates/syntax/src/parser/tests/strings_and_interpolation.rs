@@ -73,7 +73,7 @@ fn bareword_index_interpolation_parses_as_an_index_with_a_string_literal_key() {
     assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
     assert!(matches!(
         &key.kind,
-        ExprKind::Literal(Literal::String(s)) if **s == *"key"
+        ExprKind::Literal(Literal::String(s)) if *s == "key"
     ));
 }
 
@@ -219,7 +219,7 @@ fn braced_index_interpolation_parses_as_an_index() {
     assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
     assert!(matches!(
         &key.kind,
-        ExprKind::Literal(Literal::String(s)) if **s == *"key"
+        ExprKind::Literal(Literal::String(s)) if *s == "key"
     ));
 }
 
@@ -273,7 +273,7 @@ fn a_malformed_index_key_falls_back_to_complex_expr_re_lexing() {
     assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
     assert!(matches!(
         &key.kind,
-        ExprKind::Literal(Literal::String(s)) if **s == *"1a"
+        ExprKind::Literal(Literal::String(s)) if *s == "1a"
     ));
 }
 

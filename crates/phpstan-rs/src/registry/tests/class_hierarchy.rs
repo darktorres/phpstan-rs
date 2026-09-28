@@ -119,7 +119,7 @@ fn class_consts_are_registered_and_typed_from_their_literal_value() {
     );
     assert_eq!(
         r.lookup_const("Config", "NAME").map(|cs| &cs.ty),
-        Some(&Type::StringLiteral("app".to_string()))
+        Some(&Type::StringLiteral("app".into()))
     );
     assert_eq!(
         r.lookup_const("Config", "MAX").map(|cs| &cs.ty),
@@ -137,7 +137,7 @@ fn class_consts_are_inherited_through_extends() {
     );
     assert_eq!(
         r.lookup_const("Derived", "KIND").map(|cs| &cs.ty),
-        Some(&Type::StringLiteral("base".to_string()))
+        Some(&Type::StringLiteral("base".into()))
     );
 }
 
@@ -249,7 +249,7 @@ fn trait_constants_are_flattened_in() {
     );
     assert_eq!(
         r.lookup_const("Person", "GREETING").unwrap().ty,
-        Type::StringLiteral("hi".to_string())
+        Type::StringLiteral("hi".into())
     );
 }
 

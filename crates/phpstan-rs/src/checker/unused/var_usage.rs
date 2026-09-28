@@ -124,7 +124,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
         }
         ExprKind::DynamicVariable(inner) => {
             if let ExprKind::Literal(Literal::String(s)) = &inner.kind {
-                names.insert(s.clone());
+                names.insert(Arc::from(&*s.to_str_lossy()));
             } else {
                 *escaped = true;
             }
@@ -201,7 +201,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mu
 fn collect_compact_names(e: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mut bool) {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
-            names.insert(s.clone());
+            names.insert(Arc::from(&*s.to_str_lossy()));
         }
         ExprKind::ArrayLiteral(items) => {
             for item in items {

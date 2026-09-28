@@ -96,7 +96,7 @@ fn string_literals(values: &[&str]) -> Type {
     Type::Union(
         values
             .iter()
-            .map(|v| Type::StringLiteral((*v).to_string()))
+            .map(|v| Type::StringLiteral((*v).into()))
             .collect(),
     )
 }

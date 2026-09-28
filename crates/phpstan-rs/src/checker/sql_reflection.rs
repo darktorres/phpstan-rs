@@ -32,7 +32,7 @@ pub(crate) fn column_php_type(ty: &ColumnType) -> Type {
         ColumnType::Enum(labels) => Type::Union(
             labels
                 .iter()
-                .map(|label| Type::StringLiteral(label.clone()))
+                .map(|label| Type::StringLiteral(label.as_str().into()))
                 .collect(),
         ),
         ColumnType::Null => Type::Null,

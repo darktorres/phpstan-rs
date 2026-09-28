@@ -9,7 +9,7 @@ use crate::token::StringPart;
 fn nowdoc_strips_the_closing_markers_indentation_with_no_interpolation() {
     let src = "<?php\n$x = <<<'EOT'\n    hello\n    world\n    EOT;\n";
     let toks = Lexer::new(src).tokenize();
-    assert_eq!(toks[2], Token::StringLit("hello\nworld".to_string()));
+    assert_eq!(toks[2], Token::StringLit("hello\nworld".into()));
 }
 
 #[test]

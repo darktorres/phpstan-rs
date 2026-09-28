@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::lexer::Lexer;
 use crate::parser::{ParseError, Parser};
+use crate::php_string::PhpString;
 use crate::token::{Position, SimpleIndexKey, Span, StringPart};
 
 impl Parser {
@@ -101,7 +102,9 @@ impl Parser {
                     let key_kind = match key {
                         SimpleIndexKey::Var(name) => ExprKind::Variable(name),
                         SimpleIndexKey::Int(n) => ExprKind::Literal(Literal::Int(n)),
-                        SimpleIndexKey::Str(s) => ExprKind::Literal(Literal::String(s)),
+                        SimpleIndexKey::Str(s) => {
+                            ExprKind::Literal(Literal::String(PhpString::from(s)))
+                        }
                     };
                     let key_expr = Expr {
                         id: self.node_id(),

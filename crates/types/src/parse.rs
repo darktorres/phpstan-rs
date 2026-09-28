@@ -662,10 +662,10 @@ fn parse_type_atom(s: &str) -> Type {
     // themselves treated as part of a literal class name, then
     // nonsensically namespace-qualified into e.g. `Piwigo\Db\'ASC'`.
     if let Some(inner) = s.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
-        return Type::StringLiteral(inner.to_string());
+        return Type::StringLiteral(inner.into());
     }
     if let Some(inner) = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-        return Type::StringLiteral(inner.to_string());
+        return Type::StringLiteral(inner.into());
     }
 
     // Same idea as the quoted-string case just above: a bare integer

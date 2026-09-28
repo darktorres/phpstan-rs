@@ -310,7 +310,7 @@ impl<'a> Checker<'a> {
                     }
                 }),
             Type::EnumCase(_, case) if prop == "name" => {
-                Type::StringLiteral(case.clone().to_string())
+                Type::StringLiteral(case.clone().to_string().into())
             }
             Type::EnumCase(fqn, case) if prop == "value" => self
                 .registry
@@ -414,7 +414,7 @@ impl<'a> Checker<'a> {
                 Type::Object(name, _) => name.to_string(),
                 _ => return None,
             },
-            Type::StringLiteral(name) => name.trim_start_matches('\\').to_string(),
+            Type::StringLiteral(name) => name.as_str()?.trim_start_matches('\\').to_string(),
             _ => return None,
         };
         let (canonical, _) = self.registry.lookup_class(&named)?;
@@ -604,7 +604,7 @@ impl<'a> Checker<'a> {
                     .and_then(|a| match literal_string_value(&a.value) {
                         Some(s) => Some(s.into_owned()),
                         None => match self.infer_expr(&a.value, locals) {
-                            Type::StringLiteral(s) => Some(s),
+                            Type::StringLiteral(s) => Some(s.to_string()),
                             _ => None,
                         },
                     });
@@ -1060,7 +1060,7 @@ impl<'a> Checker<'a> {
         let dql = match literal_string_value(dql) {
             Some(s) => s.into_owned(),
             None => match self.infer_expr(dql, locals) {
-                Type::StringLiteral(s) => s,
+                Type::StringLiteral(s) => s.to_string(),
                 _ => return None,
             },
         };

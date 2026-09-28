@@ -608,7 +608,7 @@ fn class_attribute_with_a_named_argument_parses() {
     assert_eq!(c.attrs[0].args[0].name.as_deref(), Some("table"));
     assert!(matches!(
         &c.attrs[0].args[0].value.kind,
-        ExprKind::Literal(Literal::String(s)) if **s == *"users"
+        ExprKind::Literal(Literal::String(s)) if *s == "users"
     ));
 }
 

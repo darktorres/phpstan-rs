@@ -6,6 +6,7 @@ use crate::checker::{
 use crate::registry::{FunctionReflection, Registry};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::PhpString;
 use types::{self, AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
 use types::{has_offset_value_parts, union_types};
 
@@ -58,7 +59,7 @@ impl<'a> Checker<'a> {
             "sprintf" | "vsprintf" if !args.is_empty() => {
                 if let Some(fmt) = literal_string_value(&args[0].value)
                     && let Some(remainder) = sprintf_literal_remainder(&fmt)
-                    && is_non_falsy_string(&Type::StringLiteral(remainder))
+                    && is_non_falsy_string(&Type::StringLiteral(remainder.into()))
                 {
                     return Type::Intersection(vec![
                         Type::String,
@@ -173,7 +174,7 @@ impl<'a> Checker<'a> {
                         Some(Type::Int)
                     }
                     (Type::StringLiteral(a), Type::StringLiteral(b))
-                        if a.chars().count() == 1 && b.chars().count() == 1 =>
+                        if a.len() == 1 && b.len() == 1 =>
                     {
                         Some(Type::String)
                     }
@@ -1416,7 +1417,7 @@ impl<'a> Checker<'a> {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 let count_ty = self.infer_expr(&args[1].value, locals);
                 if matches!(count_ty, Type::IntLiteral(n) if n <= 0) {
-                    return Type::StringLiteral(String::new());
+                    return Type::StringLiteral(PhpString::default());
                 }
                 if let (Type::StringLiteral(s), Type::IntLiteral(n)) = (&input_ty, &count_ty)
                     && *n >= 0
@@ -1650,7 +1651,8 @@ impl<'a> Checker<'a> {
             // through to plain `string`, unchanged.
             "date" if !args.is_empty() => {
                 if let Type::StringLiteral(format) = self.infer_expr(&args[0].value, locals)
-                    && let Some(ty) = date_format_return_type(&format)
+                    && let Some(format) = format.as_str()
+                    && let Some(ty) = date_format_return_type(format)
                 {
                     return ty;
                 }
@@ -1662,7 +1664,8 @@ impl<'a> Checker<'a> {
             // anything else falls through to plain `int|false`, unchanged.
             "idate" if !args.is_empty() => {
                 if let Type::StringLiteral(format) = self.infer_expr(&args[0].value, locals)
-                    && let Some(c) = single_char(&format)
+                    && let Some(format) = format.as_str()
+                    && let Some(c) = single_char(format)
                     && let Some((min, max)) = idate_format_char_range(c)
                 {
                     return Type::IntRange(Some(min), Some(max));
@@ -1732,7 +1735,8 @@ impl<'a> Checker<'a> {
             // modeled here.
             "sscanf" if args.len() == 2 => {
                 if let Type::StringLiteral(format) = self.infer_expr(&args[1].value, locals)
-                    && let Some(fields) = sscanf_result_fields(&format)
+                    && let Some(format) = format.as_str()
+                    && let Some(fields) = sscanf_result_fields(format)
                 {
                     return Type::Union(vec![Type::ArrayShape(fields), Type::Null]);
                 }
@@ -1903,10 +1907,16 @@ impl<'a> Checker<'a> {
                 s.to_ascii_lowercase()
             } else if force_upper {
                 s.to_ascii_uppercase()
-            } else if keep_lower {
-                lowercase_first_char(s)
-            } else if keep_upper {
-                uppercase_first_char(s)
+            } else if keep_lower || keep_upper {
+                let mut bytes = s.as_bytes().to_vec();
+                if let Some(first) = bytes.first_mut() {
+                    if keep_lower {
+                        first.make_ascii_lowercase();
+                    } else {
+                        first.make_ascii_uppercase();
+                    }
+                }
+                PhpString::from(bytes)
             } else {
                 s.clone()
             };
@@ -1939,22 +1949,6 @@ impl<'a> Checker<'a> {
             members.extend(accessories.into_iter().map(Type::Accessory));
             Type::Intersection(members)
         }
-    }
-}
-
-fn lowercase_first_char(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
-fn uppercase_first_char(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
     }
 }
 
@@ -2182,7 +2176,7 @@ fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
     }
     match &e.kind {
         // `'is_int'` - a callable string naming the predicate.
-        ExprKind::Literal(Literal::String(name)) => type_for_predicate(name),
+        ExprKind::Literal(Literal::String(name)) => type_for_predicate(name.as_str()?),
         ExprKind::FirstClassCallable(inner) => match &inner.kind {
             ExprKind::Call(callee, args) if args.is_empty() => match &callee.kind {
                 ExprKind::Name(name) => type_for_predicate(name),
@@ -2666,21 +2660,21 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
 /// it once per member without fighting the borrow checker over `&self`.
 fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
     match ty {
-        Type::Null => Some(Type::StringLiteral("null".to_string())),
-        Type::Bool | Type::True | Type::False => Some(Type::StringLiteral("bool".to_string())),
+        Type::Null => Some(Type::StringLiteral("null".into())),
+        Type::Bool | Type::True | Type::False => Some(Type::StringLiteral("bool".into())),
         Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => {
-            Some(Type::StringLiteral("int".to_string()))
+            Some(Type::StringLiteral("int".into()))
         }
-        Type::Float | Type::FloatLiteral(_) => Some(Type::StringLiteral("float".to_string())),
-        Type::String | Type::StringLiteral(_) => Some(Type::StringLiteral("string".to_string())),
-        Type::Array(_, _) | Type::ArrayShape(_) => Some(Type::StringLiteral("array".to_string())),
+        Type::Float | Type::FloatLiteral(_) => Some(Type::StringLiteral("float".into())),
+        Type::String | Type::StringLiteral(_) => Some(Type::StringLiteral("string".into())),
+        Type::Array(_, _) | Type::ArrayShape(_) => Some(Type::StringLiteral("array".into())),
         Type::Object(class, _) => Some(
             if registry
                 .classes
                 .get(class.as_str())
                 .is_some_and(|info| info.is_final())
             {
-                Type::StringLiteral(class.clone().to_string())
+                Type::StringLiteral(class.clone().to_string().into())
             } else {
                 Type::String
             },
@@ -2689,7 +2683,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
         // on one entirely), so a specific case's class name is always the
         // exact runtime answer - same rule as the `Object` arm's
         // `is_final` branch above, just unconditional.
-        Type::EnumCase(fqn, _) => Some(Type::StringLiteral(fqn.clone().to_string())),
+        Type::EnumCase(fqn, _) => Some(Type::StringLiteral(fqn.clone().to_string().into())),
         Type::Intersection(members) => members.iter().find_map(|m| get_debug_type_for(m, registry)),
         Type::Union(members) => {
             let mut iter = members.iter();
@@ -2728,13 +2722,13 @@ fn gettype_result(ty: &Type) -> Option<Type> {
     match ty {
         Type::Union(members) => {
             let mut iter = members.iter();
-            let mut acc = Type::StringLiteral(gettype_string_for(iter.next()?)?.to_string());
+            let mut acc = Type::StringLiteral(gettype_string_for(iter.next()?)?.into());
             for m in iter {
-                acc = union_types(acc, Type::StringLiteral(gettype_string_for(m)?.to_string()));
+                acc = union_types(acc, Type::StringLiteral(gettype_string_for(m)?.into()));
             }
             Some(acc)
         }
-        other => gettype_string_for(other).map(|s| Type::StringLiteral(s.to_string())),
+        other => gettype_string_for(other).map(|s| Type::StringLiteral(s.to_string().into())),
     }
 }
 

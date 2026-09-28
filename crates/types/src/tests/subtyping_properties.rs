@@ -34,7 +34,7 @@ fn leaf_type() -> impl Strategy<Value = Type> {
         // exactly the case the reflexivity fix in `subtype` exists
         // for.
         any::<f64>().prop_map(Type::FloatLiteral),
-        "[a-z]{0,5}".prop_map(Type::StringLiteral),
+        "[a-z]{0,5}".prop_map(|s| Type::StringLiteral(s.into())),
         "[A-Z][a-zA-Z]{0,5}".prop_map(|n| Type::Object(n.into(), Vec::new())),
     ]
 }

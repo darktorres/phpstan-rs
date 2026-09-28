@@ -41,7 +41,7 @@ impl<'a> Checker<'a> {
                     return;
                 }
                 match target_ty {
-                    Type::StringLiteral(name) => (name, false),
+                    Type::StringLiteral(name) => (name.to_string(), false),
                     Type::ClassString(inner_ty) => match *inner_ty {
                         Type::Object(name, _) => (name.to_string(), true),
                         _ => return,

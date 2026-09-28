@@ -121,7 +121,8 @@ pub fn promote_class_string_literals(
     resolve_class: &impl Fn(&str) -> Option<String>,
 ) -> Type {
     match (param_ty, arg_ty) {
-        (Type::ClassString(_), Type::StringLiteral(s)) => match resolve_class(s) {
+        (Type::ClassString(_), Type::StringLiteral(s)) => match s.as_str().and_then(&resolve_class)
+        {
             Some(canonical) => {
                 Type::ClassString(Box::new(Type::Object(canonical.into(), Vec::new())))
             }

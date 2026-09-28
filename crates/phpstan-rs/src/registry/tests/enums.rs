@@ -31,14 +31,14 @@ fn enum_case_value_and_its_reverse_lookup_agree() {
     );
     assert_eq!(
         r.enum_case_value("Suit", "Hearts"),
-        Some(&Type::StringLiteral("H".to_string()))
+        Some(&Type::StringLiteral("H".into()))
     );
     assert_eq!(
-        r.enum_case_for_value("Suit", &Type::StringLiteral("S".to_string())),
+        r.enum_case_for_value("Suit", &Type::StringLiteral("S".into())),
         Some("Spades")
     );
     assert_eq!(
-        r.enum_case_for_value("Suit", &Type::StringLiteral("Z".to_string())),
+        r.enum_case_for_value("Suit", &Type::StringLiteral("Z".into())),
         None
     );
 }
@@ -56,7 +56,7 @@ fn a_non_literal_case_value_never_appears_in_enum_case_values() {
     assert_eq!(r.enum_case_value("WithConst", "Foo"), None);
     assert_eq!(
         r.enum_case_value("WithConst", "Bar"),
-        Some(&Type::StringLiteral("BAR".to_string()))
+        Some(&Type::StringLiteral("BAR".into()))
     );
 }
 
@@ -71,7 +71,7 @@ fn enum_consts_are_registered_too() {
     );
     assert_eq!(
         r.lookup_const("Suit", "KIND").map(|cs| &cs.ty),
-        Some(&Type::StringLiteral("hearts".to_string()))
+        Some(&Type::StringLiteral("hearts".into()))
     );
 }
 
@@ -129,8 +129,8 @@ fn a_backed_enum_s_value_property_is_the_union_of_its_case_literals() {
     assert_eq!(
         r.lookup_property("SortOrder", "value").unwrap().ty,
         Type::Union(vec![
-            Type::StringLiteral("ASC".to_string()),
-            Type::StringLiteral("DESC".to_string()),
+            Type::StringLiteral("ASC".into()),
+            Type::StringLiteral("DESC".into()),
         ])
     );
 }
@@ -146,7 +146,7 @@ fn a_single_case_backed_enum_s_value_is_the_bare_literal_not_a_one_member_union(
     );
     assert_eq!(
         r.lookup_property("OnlyOne", "value").unwrap().ty,
-        Type::StringLiteral("ONLY".to_string())
+        Type::StringLiteral("ONLY".into())
     );
 }
 

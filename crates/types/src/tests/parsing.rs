@@ -58,13 +58,13 @@ fn quoted_literal_string_union_members_are_string_literals_not_class_names() {
     assert_eq!(
         parse_type_string("'ASC'|'DESC'"),
         Type::Union(vec![
-            Type::StringLiteral("ASC".to_string()),
-            Type::StringLiteral("DESC".to_string()),
+            Type::StringLiteral("ASC".into()),
+            Type::StringLiteral("DESC".into()),
         ])
     );
     assert_eq!(
         parse_type_string("\"foo\""),
-        Type::StringLiteral("foo".to_string())
+        Type::StringLiteral("foo".into())
     );
 }
 
@@ -581,7 +581,7 @@ fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
     };
     assert!(!template_subject);
     assert_eq!(subject, "action");
-    assert_eq!(*target, Type::StringLiteral("send".to_string()));
+    assert_eq!(*target, Type::StringLiteral("send".into()));
     assert_eq!(*if_true, parse_type_string("list<string>"));
     assert_eq!(*if_false, parse_type_string("list<int>"));
     assert!(!negated);
@@ -759,8 +759,8 @@ fn a_quoted_literal_containing_a_bracket_shaped_character_does_not_corrupt_the_u
     assert_eq!(
         parse_type_string("'->'|'::'"),
         Type::Union(vec![
-            Type::StringLiteral("->".to_string()),
-            Type::StringLiteral("::".to_string()),
+            Type::StringLiteral("->".into()),
+            Type::StringLiteral("::".into()),
         ])
     );
 }
@@ -772,8 +772,8 @@ fn a_quoted_literal_containing_a_bracket_shaped_character_inside_an_array_shape(
         Type::ArrayShape(Shape::from_named(vec![(
             "type".to_string(),
             Type::Union(vec![
-                Type::StringLiteral("->".to_string()),
-                Type::StringLiteral("::".to_string()),
+                Type::StringLiteral("->".into()),
+                Type::StringLiteral("::".into()),
             ]),
             true,
         )]))

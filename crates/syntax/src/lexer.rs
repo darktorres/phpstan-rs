@@ -107,7 +107,12 @@ pub type SpannedToken = (Token, Span, Option<String>);
 
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
-        let bytes = src.as_bytes();
+        Lexer::from_bytes(src.as_bytes())
+    }
+
+    /// A file's source as its bytes, which need not be UTF-8: a string
+    /// literal keeps them as written.
+    pub fn from_bytes(bytes: &'a [u8]) -> Self {
         Lexer {
             src: bytes,
             pos: 0,

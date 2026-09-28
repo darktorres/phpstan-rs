@@ -119,7 +119,7 @@ fn scalar_value_matches(ty: &Type, value: &ParamScalarValue, case_insensitive: b
         (Type::FloatLiteral(f), ParamScalarValue::Float(v)) => f == v,
         (Type::StringLiteral(s), ParamScalarValue::Str(v)) => {
             if case_insensitive {
-                s.eq_ignore_ascii_case(v)
+                s.as_bytes().eq_ignore_ascii_case(v.as_bytes())
             } else {
                 s == v
             }

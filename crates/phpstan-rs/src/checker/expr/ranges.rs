@@ -496,26 +496,25 @@ pub(crate) fn loose_compare_literals(
         (Type::IntLiteral(a), Type::FloatLiteral(b))
         | (Type::FloatLiteral(b), Type::IntLiteral(a)) => Some(*a as f64 == *b),
         (Type::StringLiteral(a), Type::StringLiteral(b)) => {
-            if types::is_numeric_string_literal(a) && types::is_numeric_string_literal(b) {
-                Some(a.trim().parse::<f64>().ok()? == b.trim().parse::<f64>().ok()?)
-            } else {
-                Some(a == b)
+            match (numeric_string_value(a), numeric_string_value(b)) {
+                (Some(x), Some(y)) => Some(x == y),
+                _ => Some(a == b),
             }
         }
         (Type::IntLiteral(n), Type::StringLiteral(s))
         | (Type::StringLiteral(s), Type::IntLiteral(n)) => {
-            if types::is_numeric_string_literal(s) {
-                Some(*n as f64 == s.trim().parse::<f64>().ok()?)
+            if let Some(x) = numeric_string_value(s) {
+                Some(*n as f64 == x)
             } else if php_version.is_some_and(|v| v >= types::PhpVersion::new(8, 0)) {
-                Some(n.to_string() == *s)
+                Some(*s == n.to_string())
             } else {
                 None
             }
         }
         (Type::FloatLiteral(n), Type::StringLiteral(s))
         | (Type::StringLiteral(s), Type::FloatLiteral(n)) => {
-            if types::is_numeric_string_literal(s) {
-                Some(*n == s.trim().parse::<f64>().ok()?)
+            if let Some(x) = numeric_string_value(s) {
+                Some(*n == x)
             } else {
                 None
             }
@@ -724,4 +723,13 @@ pub(crate) fn empty_probe_verdict(ty: &Type) -> Option<&'static str> {
         Some(false) => Some("is always falsy"),
         None => None,
     }
+}
+
+/// A numeric string literal's value, `None` for any other string.
+fn numeric_string_value(s: &types::PhpString) -> Option<f64> {
+    let text = s.as_str()?;
+    if !types::is_numeric_string_literal(text) {
+        return None;
+    }
+    text.trim().parse::<f64>().ok()
 }

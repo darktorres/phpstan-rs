@@ -6,7 +6,7 @@
 //! (PHPStan's `ObjectType::toInteger()`/`toFloat()`/`toString()`) and in
 //! `ArrayTypeTrait`'s always-`ErrorType` `toString()`.
 
-use crate::{AccessoryKind, ClassHierarchy, Type, union_types};
+use crate::{AccessoryKind, ClassHierarchy, PhpString, Type, union_types};
 
 /// The built-in classes PHPStan's `ObjectType::toInteger()`/`toFloat()`
 /// special-case as numeric-castable; every other object is illegal for
@@ -96,15 +96,15 @@ impl Type {
             return Some(self.clone());
         }
         match self {
-            Type::IntLiteral(n) => Some(Type::StringLiteral(n.to_string())),
+            Type::IntLiteral(n) => Some(Type::StringLiteral(n.to_string().into())),
             Type::Int | Type::IntRange(..) => Some(decimal_int_string()),
             Type::FloatLiteral(f) if f.is_finite() => Some(numeric_string()),
             Type::Float | Type::FloatLiteral(_) => Some(non_empty_string()),
-            Type::True => Some(Type::StringLiteral("1".to_string())),
-            Type::False | Type::Null => Some(Type::StringLiteral(String::new())),
+            Type::True => Some(Type::StringLiteral("1".into())),
+            Type::False | Type::Null => Some(Type::StringLiteral(PhpString::default())),
             Type::Bool => Some(Type::Union(vec![
-                Type::StringLiteral("1".to_string()),
-                Type::StringLiteral(String::new()),
+                Type::StringLiteral("1".into()),
+                Type::StringLiteral(PhpString::default()),
             ])),
             Type::Array(..) | Type::ArrayShape(_) => None,
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {

@@ -1,0 +1,2 @@
+3:9-3:28 identical.alwaysFalse L4 | Strict comparison using === between '�' and 'ÿ' will always evaluate to false.
+6:9-6:23 identical.alwaysTrue L4 | Strict comparison using === between 'A' and 'A' will always evaluate to true.

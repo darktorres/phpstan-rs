@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 pub use syntax::ast::ClassKind;
 pub use syntax::name::Name;
+pub use syntax::php_string::PhpString;
 
 mod coercion;
 mod conditional;
@@ -87,7 +88,7 @@ pub enum Type {
     IntLiteral(i64),
     Float,
     String,
-    StringLiteral(String),
+    StringLiteral(PhpString),
     // Key type alongside value type. Construction sites with no more
     // precise key generally pass `Type::unknown_array_key()`
     // (`int|string`).
@@ -614,7 +615,7 @@ impl Type {
     /// anything else.
     pub fn constant_strings(&self) -> Vec<&str> {
         match self {
-            Type::StringLiteral(s) => vec![s.as_str()],
+            Type::StringLiteral(s) => s.as_str().into_iter().collect(),
             Type::Intersection(members) => {
                 members.iter().flat_map(Type::constant_strings).collect()
             }

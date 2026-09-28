@@ -26,7 +26,7 @@ impl ShapeKey {
     pub fn to_type(&self) -> Type {
         match self {
             ShapeKey::Int(n) => Type::IntLiteral(*n),
-            ShapeKey::Str(s) => Type::StringLiteral(s.clone()),
+            ShapeKey::Str(s) => Type::StringLiteral(s.as_str().into()),
         }
     }
 
@@ -34,7 +34,7 @@ impl ShapeKey {
     pub fn from_type(ty: &Type) -> Option<ShapeKey> {
         match ty {
             Type::IntLiteral(n) => Some(ShapeKey::Int(*n)),
-            Type::StringLiteral(s) => Some(ShapeKey::from_name(s)),
+            Type::StringLiteral(s) => Some(ShapeKey::from_name(&s.to_str_lossy())),
             _ => None,
         }
     }

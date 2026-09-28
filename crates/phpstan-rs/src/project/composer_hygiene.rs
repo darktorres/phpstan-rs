@@ -215,13 +215,17 @@ fn collect_facts_in_expr(e: &Expr, facts: &mut FileFacts) {
             {
                 match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
                     "extension_loaded" => {
-                        facts.probed_extensions.insert(arg.to_ascii_lowercase());
+                        facts
+                            .probed_extensions
+                            .insert(arg.to_str_lossy().to_ascii_lowercase());
                     }
                     "function_exists" | "class_exists" | "interface_exists" | "enum_exists"
                     | "is_callable" => {
-                        facts
-                            .probed_symbols
-                            .insert(arg.trim_start_matches('\\').to_ascii_lowercase());
+                        facts.probed_symbols.insert(
+                            arg.to_str_lossy()
+                                .trim_start_matches('\\')
+                                .to_ascii_lowercase(),
+                        );
                     }
                     _ => {}
                 }

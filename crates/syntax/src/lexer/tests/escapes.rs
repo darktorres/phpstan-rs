@@ -1,5 +1,6 @@
 //! String escape sequence decoding.
 use super::super::*;
+use crate::php_string::PhpString;
 use crate::token::StringPart;
 
 // All of PHP's real double-quoted escape sequences must decode, not
@@ -39,7 +40,7 @@ fn a_multi_byte_utf8_character_in_a_single_quoted_string_survives_intact() {
     // batched literal path needing the same handling.
     let src = "<?php 'caf\u{e9} \u{2764}';";
     let toks = Lexer::new(src).tokenize();
-    assert_eq!(toks[0], Token::StringLit("caf\u{e9} \u{2764}".to_string()));
+    assert_eq!(toks[0], Token::StringLit("caf\u{e9} \u{2764}".into()));
 }
 
 #[test]
@@ -93,5 +94,33 @@ fn the_original_six_escapes_still_decode_correctly() {
         Token::InterpString(vec![StringPart::Literal(
             "a\nb\tc\r\"d\\e$f".to_string().into()
         )])
+    );
+}
+
+#[test]
+fn a_hex_or_octal_escape_is_one_byte_not_a_codepoint() {
+    let toks = Lexer::new(r#"<?php "\xff\377";"#).tokenize();
+    assert_eq!(
+        toks[0],
+        Token::InterpString(vec![StringPart::Literal(PhpString::from(vec![0xff, 0xff]))])
+    );
+}
+
+#[test]
+fn a_non_utf8_source_byte_stays_as_written() {
+    let src: &[u8] = b"<?php '\xe9t\xe9';";
+    let toks = Lexer::from_bytes(src).tokenize();
+    assert_eq!(
+        toks[0],
+        Token::StringLit(PhpString::from(vec![0xe9, b't', 0xe9]))
+    );
+}
+
+#[test]
+fn a_heredoc_keeps_a_backslash_before_a_double_quote() {
+    let toks = Lexer::new("<?php <<<EOT\nsay \\\"hi\\\"\nEOT;\n").tokenize();
+    assert_eq!(
+        toks[0],
+        Token::InterpString(vec![StringPart::Literal("say \\\"hi\\\"".into())])
     );
 }

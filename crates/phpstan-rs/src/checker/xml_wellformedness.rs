@@ -34,7 +34,9 @@ impl<'a> Checker<'a> {
         let ExprKind::Literal(Literal::String(xml)) = &unwrap_grouping(&arg.value).kind else {
             return;
         };
-        if let Some(detail) = is_well_formed_xml(xml) {
+        if let Some(xml) = xml.as_str()
+            && let Some(detail) = is_well_formed_xml(xml)
+        {
             self.report(format!("SimpleXMLElement constructor argument is not well-formed XML ({detail}) and will throw at runtime"),
                 span,
                 0,
@@ -58,7 +60,9 @@ impl<'a> Checker<'a> {
         let ExprKind::Literal(Literal::String(xml)) = &unwrap_grouping(&arg.value).kind else {
             return;
         };
-        if let Some(detail) = is_well_formed_xml(xml) {
+        if let Some(xml) = xml.as_str()
+            && let Some(detail) = is_well_formed_xml(xml)
+        {
             self.report(format!("simplexml_load_string() argument is not well-formed XML ({detail}) and will return false at runtime"),
                 span,
                 0,

@@ -611,8 +611,8 @@ fn backtrace_frame_list_type() -> Type {
         (
             "type".to_string(),
             Type::Union(vec![
-                Type::StringLiteral("->".to_string()),
-                Type::StringLiteral("::".to_string()),
+                Type::StringLiteral("->".into()),
+                Type::StringLiteral("::".into()),
             ]),
             true,
         ),

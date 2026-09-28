@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Literal(Literal::String(name)) => self
                 .registry
-                .lookup_function(name)
+                .lookup_function(&name.to_str_lossy())
                 .map(|sig| sig.params().first().is_some_and(|p| p.by_ref())),
             // `[$obj, 'method']` / `['Class', 'method']` array callable -
             // a plain two-element list, no string key on either item.
@@ -85,7 +85,7 @@ impl<'a> Checker<'a> {
                         },
                     };
                     self.registry
-                        .lookup_method(&class, method)
+                        .lookup_method(&class, &method.to_str_lossy())
                         .map(|sig| sig.params().first().is_some_and(|p| p.by_ref()))
                 }
                 _ => None,

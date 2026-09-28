@@ -1,4 +1,5 @@
 use crate::checker::narrowing::accessory_range::upgrade_array_to_non_empty;
+use types::PhpString;
 use types::{AccessoryKind, Relation, Type};
 
 /// Narrows `original` to `target` along the branch where a check for
@@ -221,7 +222,7 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // `non-empty-string` to `non-falsy-string` inside a nested
         // `!empty($x)` check) - a real gap, but a rare, redundant
         // double-guard pattern this project doesn't attempt yet.
-        Type::String if *excluded == Type::StringLiteral(String::new()) => {
+        Type::String if *excluded == Type::StringLiteral(PhpString::default()) => {
             Type::Intersection(vec![
                 Type::String,
                 Type::Accessory(AccessoryKind::NonEmptyString),

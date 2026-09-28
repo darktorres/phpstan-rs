@@ -1,5 +1,6 @@
 use crate::regex_groups;
 use syntax::ast::*;
+use types::PhpString;
 use types::{AccessoryKind, Shape, Type};
 use types::{union_types, union_types_keep_shapes_distinct};
 
@@ -30,8 +31,7 @@ fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type
     if let Some(values) = &group.literal_values {
         let literal_ty = values
             .iter()
-            .cloned()
-            .map(Type::StringLiteral)
+            .map(|v| Type::StringLiteral(v.as_str().into()))
             .reduce(union_types)
             .expect("literal_values is never Some(empty) by construction");
         return refine_leaf(leaf, literal_ty);
@@ -112,7 +112,7 @@ pub(crate) fn preg_match_matches_shape(
         // its own - a forced group never unions in what it could have
         // been.
         if g.forced_empty {
-            let ty = Type::StringLiteral(String::new());
+            let ty = Type::StringLiteral(PhpString::default());
             fields.push((g.number.to_string(), ty.clone(), false));
             if let Some(name) = &g.name
                 && !fields.iter().any(|(n, _, _)| n == name)
@@ -146,7 +146,7 @@ pub(crate) fn preg_match_matches_shape(
         // collapses back to plain `String`) - only observable once
         // literal enumeration narrows `base` below plain `String`.
         let ty = if g.optional && !is_last_group && !unmatched_as_null && leaf == &Type::String {
-            union_types(leaf_ty, Type::StringLiteral(String::new()))
+            union_types(leaf_ty, Type::StringLiteral(PhpString::default()))
         } else {
             leaf_ty
         };

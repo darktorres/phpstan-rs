@@ -58,7 +58,7 @@ fn class_names(args: &[Expr], ctx: &NameContext, out: &mut Vec<Arc<str>>) {
                 out.push(intern(ctx.resolve(class).trim_start_matches('\\')));
             }
             ExprKind::Literal(Literal::String(s)) => {
-                out.push(intern(s.trim_start_matches('\\')));
+                out.push(intern(s.to_str_lossy().trim_start_matches('\\')));
             }
             ExprKind::ArrayLiteral(items) => {
                 let values: Vec<Expr> = items.iter().map(|i| i.value.clone()).collect();
@@ -105,13 +105,13 @@ pub(crate) fn access_attributes(attrs: &[Attribute], ctx: &NameContext) -> Acces
                         (Some(name), ExprKind::Literal(Literal::String(s)))
                             if name == "namespace" =>
                         {
-                            visibility.namespace = s.trim_matches('\\').to_string()
+                            visibility.namespace = s.to_str_lossy().trim_matches('\\').to_string()
                         }
                         (None, ExprKind::Literal(Literal::Bool(b))) => {
                             visibility.exclude_sub_namespaces = *b
                         }
                         (None, ExprKind::Literal(Literal::String(s))) => {
-                            visibility.namespace = s.trim_matches('\\').to_string()
+                            visibility.namespace = s.to_str_lossy().trim_matches('\\').to_string()
                         }
                         _ => {}
                     }

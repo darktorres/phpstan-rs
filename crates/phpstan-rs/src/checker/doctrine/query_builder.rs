@@ -341,7 +341,7 @@ impl<'a> Checker<'a> {
             return Some(s.into_owned());
         }
         match self.infer_expr(&arg.value, locals) {
-            Type::StringLiteral(s) => Some(s),
+            Type::StringLiteral(s) => Some(s.to_string()),
             _ => None,
         }
     }

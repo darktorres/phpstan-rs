@@ -25,6 +25,7 @@ impl<'a> Checker<'a> {
     fn resolve_named_callable(&self, ty: &Type) -> Option<NamedCallable<'a>> {
         match ty {
             Type::StringLiteral(s) => {
+                let s = s.as_str()?;
                 if let Some((class, method)) = s.split_once("::") {
                     return self.resolve_callable_method(class, method, format!("callable '{s}'"));
                 }
@@ -45,6 +46,7 @@ impl<'a> Checker<'a> {
                 let (Type::StringLiteral(method), true) = (&second.ty, shape.is_sealed()) else {
                     return None;
                 };
+                let method = method.as_str()?;
                 if first.key != ShapeKey::Int(0)
                     || second.key != ShapeKey::Int(1)
                     || first.optional
@@ -59,7 +61,7 @@ impl<'a> Checker<'a> {
                         Type::Object(class, _) => class.to_string(),
                         _ => return None,
                     },
-                    Type::StringLiteral(class) => class.clone(),
+                    Type::StringLiteral(class) => class.as_str()?.to_string(),
                     _ => return None,
                 };
                 self.resolve_callable_method(&class, method, format!("callable {ty}"))

@@ -12,7 +12,7 @@ use types::Shape;
 #[test]
 fn union_types_collapses_a_string_literal_into_an_already_present_string() {
     assert_eq!(
-        union_types(Type::String, Type::StringLiteral("".to_string())),
+        union_types(Type::String, Type::StringLiteral("".into())),
         Type::String
     );
 }

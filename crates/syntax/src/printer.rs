@@ -5,6 +5,7 @@
 //! anonymous classes, `match` arms) on their own lines.
 
 use crate::ast::*;
+use crate::php_string::PhpString;
 
 pub fn print_expr(e: &Expr) -> String {
     let mut out = String::new();
@@ -52,6 +53,40 @@ fn binary_operator(op: &BinOp) -> &'static str {
         BinOp::Shr => ">>",
         BinOp::Coalesce => "??",
         BinOp::Pipe => "|>",
+    }
+}
+
+/// A string literal: single-quoted when it is text, double-quoted with
+/// `\xNN` escapes for the bytes that aren't UTF-8.
+fn write_php_string(out: &mut String, s: &PhpString) {
+    match s.as_str() {
+        Some(text) => write_single_quoted(out, text),
+        None => {
+            out.push('"');
+            write_double_quoted_bytes(out, s.as_bytes());
+            out.push('"');
+        }
+    }
+}
+
+/// The body of a double-quoted string: valid UTF-8 as text, every other
+/// byte as `\xNN`.
+fn write_double_quoted_bytes(out: &mut String, bytes: &[u8]) {
+    for chunk in bytes.utf8_chunks() {
+        for c in chunk.valid().chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '$' => out.push_str("\\$"),
+                '\n' => out.push_str("\\n"),
+                '\t' => out.push_str("\\t"),
+                '\r' => out.push_str("\\r"),
+                c => out.push(c),
+            }
+        }
+        for b in chunk.invalid() {
+            out.push_str(&format!("\\x{b:02x}"));
+        }
     }
 }
 
@@ -148,19 +183,7 @@ fn write_member_name(out: &mut String, name: &Expr) {
 fn write_interpolated_parts(out: &mut String, parts: &[Expr]) {
     for part in parts {
         match &part.kind {
-            ExprKind::Literal(Literal::String(s)) => {
-                for c in s.chars() {
-                    match c {
-                        '"' => out.push_str("\\\""),
-                        '\\' => out.push_str("\\\\"),
-                        '$' => out.push_str("\\$"),
-                        '\n' => out.push_str("\\n"),
-                        '\t' => out.push_str("\\t"),
-                        '\r' => out.push_str("\\r"),
-                        c => out.push(c),
-                    }
-                }
-            }
+            ExprKind::Literal(Literal::String(s)) => write_double_quoted_bytes(out, s.as_bytes()),
             _ => {
                 out.push('{');
                 write_expr(out, part);
@@ -182,7 +205,7 @@ fn write_expr(out: &mut String, e: &Expr) {
         ExprKind::Literal(lit) => match lit {
             Literal::Int(n) => out.push_str(&n.to_string()),
             Literal::Float(f) => write_float(out, *f),
-            Literal::String(s) => write_single_quoted(out, s),
+            Literal::String(s) => write_php_string(out, s),
             Literal::Bool(true) => out.push_str("true"),
             Literal::Bool(false) => out.push_str("false"),
             Literal::Null => out.push_str("null"),
@@ -407,7 +430,9 @@ fn write_expr(out: &mut String, e: &Expr) {
             {
                 match &arg.value.kind {
                     ExprKind::Interpolated(parts) => write_interpolated_parts(out, parts),
-                    ExprKind::Literal(Literal::String(s)) => out.push_str(s),
+                    ExprKind::Literal(Literal::String(s)) => {
+                        out.push_str(&s.to_str_lossy());
+                    }
                     _ => write_expr(out, &arg.value),
                 }
             }

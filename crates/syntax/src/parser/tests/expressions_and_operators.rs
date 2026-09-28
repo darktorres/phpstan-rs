@@ -203,7 +203,7 @@ fn an_assignment_nested_as_a_concat_rhs_parses_as_real_php_does() {
     assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"v"));
     assert!(matches!(
         &inner_value.kind,
-        ExprKind::Literal(Literal::String(s)) if **s == *"y"
+        ExprKind::Literal(Literal::String(s)) if *s == "y"
     ));
 }
 

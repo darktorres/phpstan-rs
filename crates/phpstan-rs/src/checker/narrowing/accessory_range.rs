@@ -1,6 +1,7 @@
 use crate::checker::int_range_bounds;
 use crate::checker::narrowing::predicates::narrowing_key;
 use syntax::ast::*;
+use types::PhpString;
 use types::format_php_float;
 use types::{self, AccessoryKind, Type};
 
@@ -74,7 +75,7 @@ fn strip_empty_string_member(ty: &Type) -> Type {
         Type::Union(members) => {
             let filtered: Vec<Type> = members
                 .iter()
-                .filter(|m| **m != Type::StringLiteral(String::new()))
+                .filter(|m| **m != Type::StringLiteral(PhpString::default()))
                 .cloned()
                 .collect();
             match filtered.len() {
@@ -99,13 +100,13 @@ pub(crate) fn concat_operand_to_string(ty: &Type) -> Type {
     match ty {
         Type::StringLiteral(_) | Type::String => ty.clone(),
         Type::Intersection(members) if members.contains(&Type::String) => ty.clone(),
-        Type::IntLiteral(n) => Type::StringLiteral(n.to_string()),
-        Type::FloatLiteral(f) => Type::StringLiteral(format_php_float(*f)),
-        Type::True => Type::StringLiteral("1".to_string()),
-        Type::False | Type::Null => Type::StringLiteral(String::new()),
+        Type::IntLiteral(n) => Type::StringLiteral(n.to_string().into()),
+        Type::FloatLiteral(f) => Type::StringLiteral(format_php_float(*f).into()),
+        Type::True => Type::StringLiteral("1".into()),
+        Type::False | Type::Null => Type::StringLiteral(PhpString::default()),
         Type::Bool => Type::Union(vec![
-            Type::StringLiteral(String::new()),
-            Type::StringLiteral("1".to_string()),
+            Type::StringLiteral(PhpString::default()),
+            Type::StringLiteral("1".into()),
         ]),
         Type::Int | Type::IntRange(_, _) => Type::Intersection(vec![
             Type::String,
@@ -129,7 +130,7 @@ pub(crate) fn concat_operand_to_string(ty: &Type) -> Type {
 /// Every literal string value `ty` could concretely be, when it's a
 /// `StringLiteral` or a `Union` of one - `vec![]` for anything else
 /// (never guessed at for a bare `String`/accessoried `Intersection`).
-fn constant_strings(ty: &Type) -> Vec<String> {
+fn constant_strings(ty: &Type) -> Vec<PhpString> {
     match ty {
         Type::StringLiteral(s) => vec![s.clone()],
         Type::Union(members) => members.iter().flat_map(constant_strings).collect(),
@@ -168,7 +169,7 @@ pub(crate) fn resolve_concat_type(l: &Type, r: &Type) -> Type {
     }
     // Full constant fold when both sides are single literals.
     if let (Type::StringLiteral(a), Type::StringLiteral(b)) = (&l_str, &r_str) {
-        return Type::StringLiteral(format!("{a}{b}"));
+        return Type::StringLiteral(a.concat(b));
     }
 
     // Bounded constant-string cross product - covers a `Union` of
@@ -178,7 +179,7 @@ pub(crate) fn resolve_concat_type(l: &Type, r: &Type) -> Type {
     let r_consts = constant_strings(&r_str);
     let combined_count = l_consts.len() * r_consts.len();
     if combined_count > 0 && combined_count <= CALCULATE_SCALARS_LIMIT {
-        let mut combos: Vec<String> = Vec::new();
+        let mut combos: Vec<PhpString> = Vec::new();
         for a in &l_consts {
             if a.is_empty() {
                 combos.extend(r_consts.iter().cloned());
@@ -189,7 +190,7 @@ pub(crate) fn resolve_concat_type(l: &Type, r: &Type) -> Type {
                     combos.push(a.clone());
                     continue;
                 }
-                combos.push(format!("{a}{b}"));
+                combos.push(a.concat(b));
             }
         }
         combos.sort();
@@ -248,10 +249,10 @@ pub(crate) fn resolve_concat_type(l: &Type, r: &Type) -> Type {
         let right_is_non_negative_int_range =
             int_range_bounds(r).is_some_and(|(min, _)| min.is_some_and(|m| m >= 0));
         let all_right_constants_zero_or_more = !r_consts.is_empty()
-            && r_consts
-                .iter()
-                .filter(|v| !v.is_empty())
-                .all(|v| types::is_numeric_string_literal(v) && validate(v));
+            && r_consts.iter().filter(|v| !v.is_empty()).all(|v| {
+                v.as_str()
+                    .is_some_and(|v| types::is_numeric_string_literal(v) && validate(v))
+            });
         if all_right_constants_zero_or_more || right_is_non_negative_int_range {
             accessories.push(AccessoryKind::NumericString);
         }
@@ -491,37 +492,37 @@ mod resolve_concat_type_tests {
         // than through an end-to-end checker test.
         assert_eq!(
             concat_operand_to_string(&Type::FloatLiteral(1.5)),
-            Type::StringLiteral("1.5".to_string())
+            Type::StringLiteral("1.5".into())
         );
         let result = resolve_concat_type(
             &Type::FloatLiteral(1.5),
-            &Type::StringLiteral("-suffix".to_string()),
+            &Type::StringLiteral("-suffix".into()),
         );
-        assert_eq!(result, Type::StringLiteral("1.5-suffix".to_string()));
+        assert_eq!(result, Type::StringLiteral("1.5-suffix".into()));
     }
 
     #[test]
     fn two_literal_strings_fully_constant_fold() {
         assert_eq!(
             resolve_concat_type(
-                &Type::StringLiteral("a".to_string()),
-                &Type::StringLiteral("b".to_string())
+                &Type::StringLiteral("a".into()),
+                &Type::StringLiteral("b".into())
             ),
-            Type::StringLiteral("ab".to_string())
+            Type::StringLiteral("ab".into())
         );
     }
 
     #[test]
     fn an_empty_string_operand_is_dropped_via_the_identity_shortcut() {
         assert_eq!(
-            resolve_concat_type(&Type::StringLiteral(String::new()), &Type::Int),
+            resolve_concat_type(&Type::StringLiteral(PhpString::default()), &Type::Int),
             concat_operand_to_string(&Type::Int)
         );
     }
 
     #[test]
     fn an_int_typed_left_operand_concatenated_with_a_pure_digit_right_literal_is_numeric() {
-        let result = resolve_concat_type(&Type::Int, &Type::StringLiteral("5".to_string()));
+        let result = resolve_concat_type(&Type::Int, &Type::StringLiteral("5".into()));
         assert!(string_type_has_accessory(
             &result,
             AccessoryKind::NumericString
@@ -531,7 +532,7 @@ mod resolve_concat_type_tests {
     #[test]
     fn an_int_typed_left_operand_concatenated_with_a_negative_signed_right_literal_is_not_numeric()
     {
-        let result = resolve_concat_type(&Type::Int, &Type::StringLiteral("-5".to_string()));
+        let result = resolve_concat_type(&Type::Int, &Type::StringLiteral("-5".into()));
         assert!(!string_type_has_accessory(
             &result,
             AccessoryKind::NumericString

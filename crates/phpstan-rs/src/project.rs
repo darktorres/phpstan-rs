@@ -606,7 +606,7 @@ impl Project {
         // concept at all (that's a batch `check-project`-only config key,
         // wired through `read_and_parse_file` instead) and no way to
         // enable `check_duplicate_class_declarations` in the first place.
-        let parsed = parse_file(&path, source, false, &self.interner)?;
+        let parsed = parse_file(&path, source.as_bytes(), false, &self.interner)?;
         self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
         Ok(())
     }
@@ -915,7 +915,7 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let (ast, ignores, _) = parse_with_ignores(new_source, &self.interner)?;
+        let (ast, ignores, _) = parse_with_ignores(new_source.as_bytes(), &self.interner)?;
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
@@ -2002,8 +2002,8 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
 /// lexing.
 type Parsed = (Vec<Stmt>, ignore_comments::IgnoreComments, Vec<LexWarning>);
 
-fn parse_with_ignores(source: &str, interner: &Arc<Interner>) -> Result<Parsed, ParseError> {
-    let (tokens, comments, warnings) = Lexer::new(source)
+fn parse_with_ignores(source: &[u8], interner: &Arc<Interner>) -> Result<Parsed, ParseError> {
+    let (tokens, comments, warnings) = Lexer::from_bytes(source)
         .with_interner(interner)
         .tokenize_with_comments();
     let ignores = ignore_comments::scan_tokens(&tokens, &comments);
@@ -2086,7 +2086,7 @@ pub struct ParsedFile {
 #[hotpath::measure]
 pub fn parse_file(
     path: &Path,
-    source: &str,
+    source: &[u8],
     is_stub: bool,
     interner: &Arc<Interner>,
 ) -> Result<ParsedFile, ParseError> {

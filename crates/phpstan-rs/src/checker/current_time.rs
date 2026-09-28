@@ -34,7 +34,9 @@ impl<'a> Checker<'a> {
         };
         match self.infer_expr(&arg.value, locals) {
             Type::Null => Some("null".to_string()),
-            Type::StringLiteral(s) if depends_on_current_time(&s) == Some(true) => {
+            Type::StringLiteral(s)
+                if s.as_str().and_then(depends_on_current_time) == Some(true) =>
+            {
                 Some(format!("\"{s}\""))
             }
             _ => None,
@@ -127,6 +129,9 @@ impl<'a> Checker<'a> {
         let Type::StringLiteral(text) = self.infer_expr(&format.value, locals) else {
             return;
         };
+        let Some(text) = text.as_str() else {
+            return;
+        };
         let mut escaped = false;
         let mut resets = false;
         for c in text.chars() {
@@ -184,7 +189,7 @@ impl<'a> Checker<'a> {
             ExprKind::Index(base, Some(key)) => {
                 if matches!(&base.kind, ExprKind::Variable(name) if name.as_ref() == "_SERVER")
                     && let ExprKind::Literal(Literal::String(key)) = &key.kind
-                    && matches!(key.as_ref(), "REQUEST_TIME" | "REQUEST_TIME_FLOAT")
+                    && matches!(key.as_str(), Some("REQUEST_TIME" | "REQUEST_TIME_FLOAT"))
                 {
                     self.report_current_time(
                         format!("Reading $_SERVER['{key}'] depends on the current request's time; {CLOCK_TIP}."),

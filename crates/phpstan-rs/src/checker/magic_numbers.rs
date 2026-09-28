@@ -40,7 +40,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(Literal::String(s))
                 if !self.settings.sidz.magic_numbers_ignore_numeric_strings =>
             {
-                php_numeric_string(s)
+                php_numeric_string(&s.to_str_lossy())
             }
             ExprKind::Unary(UnaryOp::Neg, inner) => self.numeric_literal_value(inner).map(|v| -v),
             ExprKind::Unary(UnaryOp::Plus, inner) => self.numeric_literal_value(inner),

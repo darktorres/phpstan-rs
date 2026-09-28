@@ -245,7 +245,9 @@ impl<'a> Checker<'a> {
             Type::ArrayShape(shape) => {
                 for (position, item) in items.iter().enumerate() {
                     let field_key = match item.key.as_ref().map(|k| &k.kind) {
-                        Some(ExprKind::Literal(Literal::String(s))) => Some(ShapeKey::from_name(s)),
+                        Some(ExprKind::Literal(Literal::String(s))) => {
+                            Some(ShapeKey::from_name(&s.to_str_lossy()))
+                        }
                         Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
                         Some(_) => None,
                         None => Some(ShapeKey::Int(position as i64)),
@@ -359,7 +361,7 @@ impl<'a> Checker<'a> {
                     for (position, item) in items.iter().enumerate() {
                         let field_key = match item.key.as_ref().map(|k| &k.kind) {
                             Some(ExprKind::Literal(Literal::String(s))) => {
-                                Some(ShapeKey::from_name(s))
+                                Some(ShapeKey::from_name(&s.to_str_lossy()))
                             }
                             Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
                             Some(_) => None,
@@ -1088,7 +1090,7 @@ fn literal_key_from_type(idx_ty: Option<&Type>) -> Option<String> {
 /// pass). Empty for anything else, never a guess.
 fn literal_keys_from_type(ty: &Type) -> Vec<String> {
     match ty {
-        Type::StringLiteral(s) => vec![s.clone()],
+        Type::StringLiteral(s) => vec![s.to_string()],
         Type::IntLiteral(n) => vec![n.to_string()],
         Type::Union(members) => members.iter().flat_map(literal_keys_from_type).collect(),
         _ => Vec::new(),
@@ -1370,10 +1372,13 @@ fn write_literal_key_aware(
 fn normalized_literal_key(dim: &Type) -> Option<(String, bool)> {
     match dim {
         Type::IntLiteral(n) => Some((n.to_string(), true)),
-        Type::StringLiteral(s) if s.parse::<i64>().is_ok_and(|n| n.to_string() == *s) => {
-            Some((s.clone(), true))
+        Type::StringLiteral(s)
+            if s.as_str()
+                .is_some_and(|t| t.parse::<i64>().is_ok_and(|n| n.to_string() == t)) =>
+        {
+            Some((s.to_string(), true))
         }
-        Type::StringLiteral(s) => Some((s.clone(), false)),
+        Type::StringLiteral(s) => Some((s.to_string(), false)),
         Type::True => Some(("1".to_string(), true)),
         Type::False => Some(("0".to_string(), true)),
         Type::Null => Some((String::new(), false)),

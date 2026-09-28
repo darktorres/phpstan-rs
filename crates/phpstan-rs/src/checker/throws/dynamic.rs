@@ -141,7 +141,7 @@ impl<'a> Checker<'a> {
                 match &unwrap_grouping(&arg.value).kind {
                     // Same `Type::Void` sentinel as `intdiv` above.
                     ExprKind::Literal(Literal::String(spec)) => {
-                        if is_valid_date_interval_spec(spec) {
+                        if is_valid_date_interval_spec(&spec.to_str_lossy()) {
                             Some(Type::Void)
                         } else {
                             Some(throwable("Exception"))
@@ -161,7 +161,10 @@ impl<'a> Checker<'a> {
                 }
                 match &unwrap_grouping(&arg.value).kind {
                     ExprKind::Literal(Literal::String(xml)) => {
-                        if is_well_formed_xml(xml).is_none() {
+                        if xml
+                            .as_str()
+                            .is_some_and(|xml| is_well_formed_xml(xml).is_none())
+                        {
                             Some(Type::Void)
                         } else {
                             Some(throwable("Exception"))
@@ -195,7 +198,7 @@ impl<'a> Checker<'a> {
             }
             return match &unwrap_grouping(&arg.value).kind {
                 ExprKind::Literal(Literal::String(name)) => {
-                    if is_valid_xml_name(name) {
+                    if name.as_str().is_some_and(is_valid_xml_name) {
                         Some(Type::Void)
                     } else {
                         Some(throwable("DOMException"))

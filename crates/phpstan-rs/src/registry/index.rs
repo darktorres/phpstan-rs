@@ -782,6 +782,7 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     let ExprKind::Literal(Literal::String(const_name)) = &args[0].value.kind else {
         return None;
     };
+    let const_name = const_name.as_str()?;
     if ["true", "false", "null"]
         .iter()
         .any(|kw| const_name.eq_ignore_ascii_case(kw))
@@ -815,7 +816,7 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
         "__NAMESPACE__",
         "__PROPERTY__",
     ]
-    .contains(&const_name.as_ref())
+    .contains(&const_name)
     {
         return None;
     }
@@ -843,10 +844,10 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     // `constant.notFound`. `Type::Int` (not a literal, and deliberately
     // not `infer_const_type`'s own float-overflow-affected inference)
     // is the safe, correct level of precision.
-    if **const_name == *"PHP_INT_MIN" {
-        return Some((const_name.clone(), Type::Int));
+    if const_name == "PHP_INT_MIN" {
+        return Some((Arc::from(const_name), Type::Int));
     }
-    Some((const_name.clone(), infer_const_type(&args[1].value)))
+    Some((Arc::from(const_name), infer_const_type(&args[1].value)))
 }
 
 /// Records one `const`/`define()` declaration site for `name`,

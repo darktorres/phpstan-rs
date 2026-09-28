@@ -392,7 +392,7 @@ impl<'a> Checker<'a> {
                     && let ExprKind::Literal(Literal::String(expected)) = &expected_arg.value.kind
                 {
                     let actual = self.infer_expr(&actual_arg.value, locals).to_string();
-                    if *actual != **expected {
+                    if *actual != *expected.to_str_lossy() {
                         self.report(format!(
                                 "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
                             ), actual_arg.value.span, 0, "phpstanRs.assertType");
@@ -2812,11 +2812,11 @@ impl<'a> Checker<'a> {
                 let name_ty = self.check_expr(name, locals, label);
                 self.check_dynamic_class_constant_fetch(&name_ty, e.span);
                 let literal_names: Option<Vec<String>> = match &name_ty {
-                    Type::StringLiteral(s) => Some(vec![s.clone()]),
+                    Type::StringLiteral(s) => Some(vec![s.to_string()]),
                     Type::Union(members) => members
                         .iter()
                         .map(|m| match m {
-                            Type::StringLiteral(s) => Some(s.clone()),
+                            Type::StringLiteral(s) => Some(s.to_string()),
                             _ => None,
                         })
                         .collect(),
@@ -3066,7 +3066,9 @@ impl<'a> Checker<'a> {
             ExprKind::DynamicPropertyAccess(base, name_expr) => {
                 let base_ty = self.check_expr(base, locals, label);
                 self.check_expr(name_expr, locals, label);
-                if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind {
+                if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind
+                    && let Some(name) = name.as_str()
+                {
                     if let Some((owner, _)) = self.find_property_owner(&base_ty, name) {
                         self.record_member_ref(e.span, &owner, name);
                     }
@@ -3092,7 +3094,9 @@ impl<'a> Checker<'a> {
                     self.check_expr(&a.value, locals, label);
                 }
                 let mut callee = None;
-                if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind {
+                if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind
+                    && let Some(name) = name.as_str()
+                {
                     if let Some((owner, _)) = self.find_method_owner(&recv_ty, name) {
                         self.record_member_ref(e.span, &owner, name);
                         callee = self.registry.lookup_method(&owner, name);
@@ -3109,8 +3113,10 @@ impl<'a> Checker<'a> {
                 let name_ty = self.check_expr(name, locals, label);
                 // `Foo::{'bar'}()`, or a name variable holding one known
                 // string: a call to that method.
-                if let Type::StringLiteral(method) = name_ty {
-                    let call = static_call(target, method, args, e.span);
+                if let Type::StringLiteral(method) = name_ty
+                    && let Some(method) = method.as_str()
+                {
+                    let call = static_call(target, method.to_string(), args, e.span);
                     return self.check_expr(&call, locals, label);
                 }
                 let class = self.resolve_static_target_class(target, locals, label);
@@ -4358,7 +4364,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::IntLiteral(*n),
                 Literal::Float(_) => Type::Float,
-                Literal::String(s) => Type::StringLiteral(s.to_string()),
+                Literal::String(s) => Type::StringLiteral(s.clone()),
                 Literal::Bool(true) => Type::True,
                 Literal::Bool(false) => Type::False,
                 Literal::Null => Type::Null,
@@ -4381,7 +4387,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::IntLiteral(*n),
                 Literal::Float(_) => Type::Float,
-                Literal::String(s) => Type::StringLiteral(s.to_string()),
+                Literal::String(s) => Type::StringLiteral(s.clone()),
                 Literal::Bool(true) => Type::True,
                 Literal::Bool(false) => Type::False,
                 Literal::Null => Type::Null,
@@ -4709,19 +4715,20 @@ impl<'a> Checker<'a> {
             }
             ExprKind::DynamicStaticCall(target, name, args) => {
                 match self.infer_expr(name, locals) {
-                    Type::StringLiteral(method) => {
-                        self.infer_expr(&static_call(target, method, args, e.span), locals)
-                    }
+                    Type::StringLiteral(method) if method.as_str().is_some() => self.infer_expr(
+                        &static_call(target, method.to_string(), args, e.span),
+                        locals,
+                    ),
                     _ => Type::Mixed(false),
                 }
             }
             ExprKind::DynamicClassConstFetch(target, name) => {
                 let names: Option<Vec<String>> = match self.infer_expr(name, locals) {
-                    Type::StringLiteral(s) => Some(vec![s]),
+                    Type::StringLiteral(s) => Some(vec![s.to_string()]),
                     Type::Union(members) => members
                         .into_iter()
                         .map(|m| match m {
-                            Type::StringLiteral(s) => Some(s),
+                            Type::StringLiteral(s) => Some(s.to_string()),
                             _ => None,
                         })
                         .collect(),

@@ -1,5 +1,6 @@
 use crate::lexer::{Lexer, is_ident_continue, is_ident_start, skip_string_literal_bytes};
 use crate::name::Interner;
+use crate::php_string::PhpString;
 use crate::token::{SimpleIndexKey, StringPart, Token};
 
 /// Whether `s` is a full, well-formed PHP identifier (not just that it
@@ -137,21 +138,21 @@ impl<'a> Lexer<'a> {
         // its own pre-scan, not worth it for what's normally a short
         // literal - let `String::new()` grow via ordinary amortized
         // doubling.
-        let mut s = String::new();
+        let mut s = Vec::new();
         let mut run_start = self.pos;
         while self.pos < self.src.len() && self.peek() != b'\'' {
             if self.peek() == b'\\' && (self.peek_at(1) == b'\'' || self.peek_at(1) == b'\\') {
-                s.push_str(&String::from_utf8_lossy(&self.src[run_start..self.pos]));
-                s.push(self.peek_at(1) as char);
+                s.extend_from_slice(&self.src[run_start..self.pos]);
+                s.push(self.peek_at(1));
                 self.pos += 2;
                 run_start = self.pos;
             } else {
                 self.pos += 1;
             }
         }
-        s.push_str(&String::from_utf8_lossy(&self.src[run_start..self.pos]));
+        s.extend_from_slice(&self.src[run_start..self.pos]);
         self.pos += 1; // closing '
-        Token::StringLit(s)
+        Token::StringLit(PhpString::from(s))
     }
 
     pub(crate) fn lex_double_quoted(&mut self) -> Token {
@@ -208,7 +209,7 @@ impl<'a> Lexer<'a> {
             }
         }
         let raw = &self.src[start..self.pos];
-        let parts = self.scan_interpolated(raw, start);
+        let parts = self.scan_interpolated(raw, start, false);
         self.pos = (self.pos + 1).min(self.src.len()); // closing delimiter
         parts
     }
@@ -299,10 +300,10 @@ impl<'a> Lexer<'a> {
         if raw_body.last() == Some(&b'\r') {
             raw_body = &raw_body[..raw_body.len() - 1];
         }
-        let content = strip_heredoc_indent(&String::from_utf8_lossy(raw_body), closing_indent);
+        let content = strip_heredoc_indent(raw_body, closing_indent);
 
         if nowdoc {
-            Token::StringLit(content)
+            Token::StringLit(PhpString::from(content))
         } else {
             // `content` has already had its per-line indentation stripped
             // (PHP 7.3+ flexible heredoc syntax), so a byte offset within
@@ -312,7 +313,7 @@ impl<'a> Lexer<'a> {
             // start is an honest, coarser approximation for this one
             // case (still the right heredoc, not a precise per-occurrence
             // position within it).
-            Token::InterpString(self.scan_interpolated(content.as_bytes(), body_start))
+            Token::InterpString(self.scan_interpolated(&content, body_start, true))
         }
     }
 }
@@ -327,20 +328,25 @@ impl<'a> Lexer<'a> {
     /// used to give each `ComplexExpr` a real file position via
     /// `line_col_at`, not one relative to a throwaway fragment
     /// `parser::build_interpolated` re-lexes in isolation.
-    fn scan_interpolated(&mut self, bytes: &[u8], abs_base: usize) -> Vec<StringPart> {
+    fn scan_interpolated(
+        &mut self,
+        bytes: &[u8],
+        abs_base: usize,
+        heredoc: bool,
+    ) -> Vec<StringPart> {
         let mut parts = Vec::new();
         // Upper-bound capacity hint - avoids repeated reallocation while
         // pushing long plain-text runs (SQL, translation strings, HTML in
         // a heredoc, ...).
-        let mut literal = String::with_capacity(bytes.len());
+        let mut literal: Vec<u8> = Vec::with_capacity(bytes.len());
         let mut i = 0;
 
         macro_rules! flush {
             () => {
                 if !literal.is_empty() {
-                    parts.push(StringPart::Literal(
-                        self.interner.str(&std::mem::take(&mut literal)),
-                    ));
+                    parts.push(StringPart::Literal(PhpString::from(std::mem::take(
+                        &mut literal,
+                    ))));
                 }
             };
         }
@@ -351,39 +357,44 @@ impl<'a> Lexer<'a> {
             if b == b'\\' && i + 1 < bytes.len() {
                 match bytes[i + 1] {
                     b'n' => {
-                        literal.push('\n');
+                        literal.push(b'\n');
                         i += 2;
                     }
                     b't' => {
-                        literal.push('\t');
+                        literal.push(b'\t');
                         i += 2;
                     }
                     b'r' => {
-                        literal.push('\r');
+                        literal.push(b'\r');
                         i += 2;
                     }
                     b'v' => {
-                        literal.push('\u{0B}');
+                        literal.push(0x0B);
                         i += 2;
                     }
                     b'e' => {
-                        literal.push('\u{1B}');
+                        literal.push(0x1B);
                         i += 2;
                     }
                     b'f' => {
-                        literal.push('\u{0C}');
+                        literal.push(0x0C);
+                        i += 2;
+                    }
+                    // A heredoc has no `\"` escape.
+                    b'"' if heredoc => {
+                        literal.extend_from_slice(b"\\\"");
                         i += 2;
                     }
                     b'"' => {
-                        literal.push('"');
+                        literal.push(b'"');
                         i += 2;
                     }
                     b'\\' => {
-                        literal.push('\\');
+                        literal.push(b'\\');
                         i += 2;
                     }
                     b'$' => {
-                        literal.push('$');
+                        literal.push(b'$');
                         i += 2;
                     }
                     // Octal (`\0`-`\777`, 1-3 digits in `0`-`7`) and hex
@@ -400,7 +411,7 @@ impl<'a> Lexer<'a> {
                             value = value * 8 + (bytes[j] - b'0') as u32;
                             j += 1;
                         }
-                        literal.push((value % 256) as u8 as char);
+                        literal.push((value % 256) as u8);
                         i = j;
                     }
                     b'x' if bytes.get(i + 2).is_some_and(|c| c.is_ascii_hexdigit()) => {
@@ -410,7 +421,7 @@ impl<'a> Lexer<'a> {
                             value = value * 16 + (bytes[j] as char).to_digit(16).unwrap();
                             j += 1;
                         }
-                        literal.push(value as u8 as char);
+                        literal.push(value as u8);
                         i = j;
                     }
                     // `\u{...}` decodes a full Unicode codepoint (not
@@ -429,19 +440,18 @@ impl<'a> Lexer<'a> {
                         let decoded = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32);
                         match decoded {
                             Some(c) if j < bytes.len() => {
-                                literal.push(c);
+                                literal.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
                                 i = j + 1;
                             }
                             _ => {
-                                literal.push('\\');
-                                literal.push('u');
+                                literal.extend_from_slice(b"\\u");
                                 i += 2;
                             }
                         }
                     }
                     other => {
-                        literal.push('\\');
-                        literal.push(other as char);
+                        literal.push(b'\\');
+                        literal.push(other);
                         i += 2;
                     }
                 }
@@ -671,12 +681,12 @@ impl<'a> Lexer<'a> {
             {
                 i += 1;
             }
-            literal.push_str(&String::from_utf8_lossy(&bytes[run_start..i]));
+            literal.extend_from_slice(&bytes[run_start..i]);
         }
         flush!();
 
         if parts.is_empty() {
-            parts.push(StringPart::Literal(self.interner.str("")));
+            parts.push(StringPart::Literal(PhpString::default()));
         }
         parts
     }
@@ -685,21 +695,20 @@ impl<'a> Lexer<'a> {
 /// Flexible heredoc (PHP 7.3+): every content line has up to `indent`
 /// leading space/tab characters stripped, matching the closing marker's
 /// own indentation.
-fn strip_heredoc_indent(text: &str, indent: usize) -> String {
+fn strip_heredoc_indent(text: &[u8], indent: usize) -> Vec<u8> {
     if indent == 0 {
-        return text.to_string();
+        return text.to_vec();
     }
-    text.split('\n')
+    let lines: Vec<&[u8]> = text
+        .split(|&b| b == b'\n')
         .map(|line| {
-            let mut cut = 0;
-            for (i, c) in line.chars().enumerate() {
-                if i >= indent || !(c == ' ' || c == '\t') {
-                    break;
-                }
-                cut += c.len_utf8();
-            }
+            let cut = line
+                .iter()
+                .take(indent)
+                .take_while(|&&b| b == b' ' || b == b'\t')
+                .count();
             &line[cut..]
         })
-        .collect::<Vec<&str>>()
-        .join("\n")
+        .collect();
+    lines.join(&b'\n')
 }

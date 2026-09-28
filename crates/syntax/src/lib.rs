@@ -10,6 +10,7 @@ pub mod lexer;
 pub mod name;
 pub mod name_resolution;
 pub mod parser;
+pub mod php_string;
 pub mod printer;
 pub mod token;
 pub mod visit;

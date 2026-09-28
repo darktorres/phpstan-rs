@@ -231,7 +231,10 @@ impl<'a> Checker<'a> {
             return;
         };
         let value = self.infer_expr(&value_arg.value, locals);
-        self.check_configured_constant_value(None, &name, &value, "constant.defineValue", span);
+        let Some(name) = name.as_str() else {
+            return;
+        };
+        self.check_configured_constant_value(None, name, &value, "constant.defineValue", span);
     }
 
     /// `DynamicClassConstantFetchRule`: `Foo::{$expr}` needs PHP 8.3+

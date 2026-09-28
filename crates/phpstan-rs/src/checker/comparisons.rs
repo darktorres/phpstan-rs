@@ -192,7 +192,9 @@ fn loose_kinds(ty: &Type, out: &mut Vec<LooseKind>) -> bool {
     let kind = match ty {
         Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => LooseKind::Int,
         Type::Float | Type::FloatLiteral(_) => LooseKind::Float,
-        Type::StringLiteral(s) if is_numeric_string_literal(s) => LooseKind::NumericString,
+        Type::StringLiteral(s) if s.as_str().is_some_and(is_numeric_string_literal) => {
+            LooseKind::NumericString
+        }
         Type::StringLiteral(_) => LooseKind::NonNumericString,
         Type::String => LooseKind::String,
         Type::Bool | Type::True | Type::False => LooseKind::Bool,

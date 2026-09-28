@@ -50,7 +50,7 @@ fn pattern_arg_shape(name: &str) -> Option<PatternArgShape> {
 
 fn as_string_literal(e: &Expr) -> Option<&str> {
     match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.as_ref()),
+        ExprKind::Literal(Literal::String(s)) => s.as_str(),
         _ => None,
     }
 }

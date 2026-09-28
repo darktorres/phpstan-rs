@@ -178,7 +178,7 @@ impl Relation<'_> {
             }
             (Type::StringLiteral(_), Type::Accessory(AccessoryKind::LiteralString)) => true,
             (Type::StringLiteral(s), Type::Accessory(AccessoryKind::NumericString)) => {
-                is_numeric_string_literal(s)
+                s.as_str().is_some_and(is_numeric_string_literal)
             }
             // Mirrors real `ConstantStringType::isLowercaseString`/
             // `isUppercaseString` (`strtolower($v) === $v`/`strtoupper($v) ===
@@ -186,10 +186,10 @@ impl Relation<'_> {
             // `strtolower`/`strtoupper` (this project's only supported PHP
             // version range).
             (Type::StringLiteral(s), Type::Accessory(AccessoryKind::LowercaseString)) => {
-                s.bytes().all(|b| !b.is_ascii_uppercase())
+                s.as_bytes().iter().all(|b| !b.is_ascii_uppercase())
             }
             (Type::StringLiteral(s), Type::Accessory(AccessoryKind::UppercaseString)) => {
-                s.bytes().all(|b| !b.is_ascii_lowercase())
+                s.as_bytes().iter().all(|b| !b.is_ascii_lowercase())
             }
             // Mirrors real `ConstantStringType::isDecimalIntegerString`
             // (`(string) (int) $v === $v`) - round-trips through `i64`, so a
@@ -197,7 +197,7 @@ impl Relation<'_> {
             // empty string, or a non-integer numeric string (`"1.0"`) are all
             // correctly excluded.
             (Type::StringLiteral(s), Type::Accessory(AccessoryKind::DecimalIntegerString)) => {
-                is_decimal_integer_string_literal(s)
+                s.as_str().is_some_and(is_decimal_integer_string_literal)
             }
             // Every non-falsy string is non-empty, and so is every numeric
             // one (`""` isn't numeric).

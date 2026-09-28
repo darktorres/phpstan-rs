@@ -277,7 +277,7 @@ fn coalesce_assign_contributes_the_rhs_type_but_compound_concat_assign_is_mixed(
             let fields = fields.named_fields();
             let a = &fields.iter().find(|(k, _, _)| k == "a").expect("a field").1;
             let b = &fields.iter().find(|(k, _, _)| k == "b").expect("b field").1;
-            assert_eq!(a, &Type::StringLiteral("default".to_string()));
+            assert_eq!(a, &Type::StringLiteral("default".into()));
             assert_eq!(b, &Type::Mixed(false));
         }
         other => panic!("expected an ArrayShape, got: {other:?}"),

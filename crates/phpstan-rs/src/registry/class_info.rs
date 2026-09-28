@@ -1971,7 +1971,7 @@ impl ClassReflection {
             .filter_map(|c| {
                 let v = c.value.as_ref()?;
                 let ty = match &v.kind {
-                    ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.to_string()),
+                    ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
                     ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
                     _ => return None,
                 };

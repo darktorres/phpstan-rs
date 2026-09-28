@@ -118,7 +118,9 @@ fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
         ExprKind::Literal(Literal::Bool(b)) => AttributeValue::Bool(*b),
         ExprKind::Literal(Literal::Int(i)) => AttributeValue::Int(*i),
         ExprKind::Literal(Literal::Float(f)) => AttributeValue::Float(*f),
-        ExprKind::Literal(Literal::String(s)) => AttributeValue::String(s.clone()),
+        ExprKind::Literal(Literal::String(s)) => {
+            AttributeValue::String(Arc::from(&*s.to_str_lossy()))
+        }
         ExprKind::Unary(UnaryOp::Neg, inner) => match value(inner, ctx) {
             AttributeValue::Int(i) => AttributeValue::Int(i.wrapping_neg()),
             AttributeValue::Float(f) => AttributeValue::Float(-f),

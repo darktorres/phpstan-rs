@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::php_string::PhpString;
+
 /// A single point in a source file, 1-indexed (matching editor convention).
 /// `col` counts UTF-8 characters, not raw bytes - real PHP source can and
 /// does contain multi-byte content inside actual code, not just comments
@@ -293,7 +295,7 @@ impl Keyword {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum StringPart {
-    Literal(Arc<str>),
+    Literal(PhpString),
     SimpleVar(Arc<str>),
     // The fragment's own source text, plus the real file position it
     // starts at - `parser::build_interpolated` re-lexes the fragment on
@@ -365,7 +367,7 @@ pub enum Token {
     // (real, distinct message/SQL/template text almost every time), so
     // interning it would pay a real lookup/lock cost for little to no
     // dedup benefit.
-    StringLit(String),
+    StringLit(PhpString),
     InterpString(Vec<StringPart>),
     // `` `shell command $with $interpolation` `` - same interpolation
     // rules as a double-quoted string, different delimiter and runtime

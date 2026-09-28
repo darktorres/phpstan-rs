@@ -858,7 +858,7 @@ fn is_number(ty: &Type) -> bool {
         | Type::IntRange(..)
         | Type::Float
         | Type::FloatLiteral(_) => true,
-        Type::StringLiteral(s) => is_numeric_string_literal(s),
+        Type::StringLiteral(s) => s.as_str().is_some_and(is_numeric_string_literal),
         Type::Union(members) => members.iter().all(is_number),
         Type::Intersection(members) => members.iter().any(|m| {
             is_number(m)

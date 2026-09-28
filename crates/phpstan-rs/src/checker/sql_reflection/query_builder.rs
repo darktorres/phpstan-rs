@@ -661,7 +661,7 @@ fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<S
         _ => {}
     }
     match checker.infer_expr(expr, locals) {
-        Type::StringLiteral(s) => Some(s),
+        Type::StringLiteral(s) => Some(s.to_string()),
         _ => None,
     }
 }
@@ -781,7 +781,7 @@ pub(crate) fn is_integer_parameter_type(checker: &Checker, expr: &Expr) -> bool 
 /// mismatch.
 pub(crate) fn value_is_confidently_not_an_integer(value_ty: &Type) -> bool {
     match value_ty {
-        Type::StringLiteral(s) => !is_php_numeric_string(s),
+        Type::StringLiteral(s) => !s.as_str().is_some_and(is_php_numeric_string),
         _ => false,
     }
 }

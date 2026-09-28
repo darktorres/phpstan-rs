@@ -575,7 +575,7 @@ impl Session {
         let bytes = std::fs::read(self.root.join(path)).ok()?;
         let source = String::from_utf8_lossy(&bytes).into_owned();
         let parsed =
-            std::panic::catch_unwind(|| super::parse_file(path, &source, is_stub, interner))
+            std::panic::catch_unwind(|| super::parse_file(path, &bytes, is_stub, interner))
                 .ok()?
                 .ok()?;
         Some((source, parsed))

@@ -9,7 +9,7 @@ fn class_string_is_interchangeable_with_plain_string_both_ways() {
     // A plain string may name a class: accepted, never provably one.
     assert!(!is_subtype(&Type::String, &cs));
     assert!(accepts(&cs, &Type::String));
-    assert!(accepts(&cs, &Type::StringLiteral("Foo".to_string())));
+    assert!(accepts(&cs, &Type::StringLiteral("Foo".into())));
     assert!(is_subtype(&cs, &cs));
     let cs_other = Type::ClassString(Box::new(Type::Object("Bar".into(), Vec::new())));
     assert!(!is_subtype(&cs, &cs_other));
@@ -206,23 +206,14 @@ fn string_accessory_subtype_rules() {
         Type::String,
         Type::Accessory(AccessoryKind::NonFalsyString),
     ]);
-    assert!(is_subtype(
-        &Type::StringLiteral("a".to_string()),
-        &non_empty
-    ));
-    assert!(!is_subtype(&Type::StringLiteral(String::new()), &non_empty));
-    assert!(is_subtype(
-        &Type::StringLiteral("0".to_string()),
-        &non_empty
-    ));
+    assert!(is_subtype(&Type::StringLiteral("a".into()), &non_empty));
     assert!(!is_subtype(
-        &Type::StringLiteral("0".to_string()),
-        &non_falsy
+        &Type::StringLiteral(PhpString::default()),
+        &non_empty
     ));
-    assert!(is_subtype(
-        &Type::StringLiteral("a".to_string()),
-        &non_falsy
-    ));
+    assert!(is_subtype(&Type::StringLiteral("0".into()), &non_empty));
+    assert!(!is_subtype(&Type::StringLiteral("0".into()), &non_falsy));
+    assert!(is_subtype(&Type::StringLiteral("a".into()), &non_falsy));
     // Every non-falsy string is non-empty, not vice versa.
     assert!(is_subtype(&non_falsy, &non_empty));
     assert!(!is_subtype(&non_empty, &non_falsy));
@@ -232,7 +223,7 @@ fn string_accessory_subtype_rules() {
         Type::Accessory(AccessoryKind::LiteralString),
     ]);
     assert!(is_subtype(
-        &Type::StringLiteral("anything".to_string()),
+        &Type::StringLiteral("anything".into()),
         &literal
     ));
     assert!(!is_subtype(&Type::String, &literal));
@@ -241,18 +232,12 @@ fn string_accessory_subtype_rules() {
         Type::String,
         Type::Accessory(AccessoryKind::NumericString),
     ]);
+    assert!(is_subtype(&Type::StringLiteral("123".into()), &numeric));
     assert!(is_subtype(
-        &Type::StringLiteral("123".to_string()),
+        &Type::StringLiteral(" -1.5e3 ".into()),
         &numeric
     ));
-    assert!(is_subtype(
-        &Type::StringLiteral(" -1.5e3 ".to_string()),
-        &numeric
-    ));
-    assert!(!is_subtype(
-        &Type::StringLiteral("abc".to_string()),
-        &numeric
-    ));
+    assert!(!is_subtype(&Type::StringLiteral("abc".into()), &numeric));
 
     // A plain, unprovable String never satisfies any of these.
     assert!(!is_subtype(&Type::String, &non_empty));
@@ -405,21 +390,21 @@ fn decimal_int_string() -> Type {
 #[test]
 fn a_lowercase_literal_proves_lowercase_string() {
     assert!(is_subtype(
-        &Type::StringLiteral("abc".to_string()),
+        &Type::StringLiteral("abc".into()),
         &lowercase_string()
     ));
     assert!(is_subtype(
-        &Type::StringLiteral("abc123".to_string()),
+        &Type::StringLiteral("abc123".into()),
         &lowercase_string()
     ));
     assert!(!is_subtype(
-        &Type::StringLiteral("Abc".to_string()),
+        &Type::StringLiteral("Abc".into()),
         &lowercase_string()
     ));
     // No letters at all - vacuously lowercase, matching real
     // `strtolower($v) === $v`.
     assert!(is_subtype(
-        &Type::StringLiteral("123".to_string()),
+        &Type::StringLiteral("123".into()),
         &lowercase_string()
     ));
 }
@@ -427,15 +412,15 @@ fn a_lowercase_literal_proves_lowercase_string() {
 #[test]
 fn an_uppercase_literal_proves_uppercase_string() {
     assert!(is_subtype(
-        &Type::StringLiteral("ABC".to_string()),
+        &Type::StringLiteral("ABC".into()),
         &uppercase_string()
     ));
     assert!(!is_subtype(
-        &Type::StringLiteral("Abc".to_string()),
+        &Type::StringLiteral("Abc".into()),
         &uppercase_string()
     ));
     assert!(is_subtype(
-        &Type::StringLiteral("123".to_string()),
+        &Type::StringLiteral("123".into()),
         &uppercase_string()
     ));
 }
@@ -444,7 +429,10 @@ fn an_uppercase_literal_proves_uppercase_string() {
 fn a_canonical_decimal_integer_literal_proves_decimal_integer_string() {
     for s in ["0", "1", "1234", "-1"] {
         assert!(
-            is_subtype(&Type::StringLiteral(s.to_string()), &decimal_int_string()),
+            is_subtype(
+                &Type::StringLiteral(s.to_string().into()),
+                &decimal_int_string()
+            ),
             "{s} should be a decimal-int-string"
         );
     }
@@ -453,7 +441,10 @@ fn a_canonical_decimal_integer_literal_proves_decimal_integer_string() {
     // isDecimalIntegerString`'s own confirmed edge cases.
     for s in ["007", "+1", "-0", "", "1.0", "1,3", "foo"] {
         assert!(
-            !is_subtype(&Type::StringLiteral(s.to_string()), &decimal_int_string()),
+            !is_subtype(
+                &Type::StringLiteral(s.to_string().into()),
+                &decimal_int_string()
+            ),
             "{s} should NOT be a decimal-int-string"
         );
     }

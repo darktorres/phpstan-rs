@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
             return Some(s.into_owned());
         }
         match self.infer_expr(e, locals) {
-            Type::StringLiteral(s) => Some(s),
+            Type::StringLiteral(s) => Some(s.to_string()),
             _ => None,
         }
     }
@@ -603,9 +603,7 @@ impl<'a> Checker<'a> {
                     let key = match &item.key {
                         Some(k) => match &k.kind {
                             ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
-                            ExprKind::Literal(Literal::String(s)) => {
-                                Type::StringLiteral(s.to_string())
-                            }
+                            ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
                             _ => Type::Mixed(false),
                         },
                         None => Type::IntLiteral(i as i64),

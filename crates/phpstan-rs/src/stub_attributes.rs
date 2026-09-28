@@ -87,7 +87,7 @@ fn ends_superseded(attrs: &[Attribute], aliases: &Aliases) -> bool {
 
 fn string_literal(e: &Expr) -> Option<&str> {
     match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s),
+        ExprKind::Literal(Literal::String(s)) => s.as_str(),
         _ => None,
     }
 }

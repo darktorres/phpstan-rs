@@ -13,7 +13,7 @@ fn a_general_attribute_group_is_not_fooled_by_an_unbalanced_bracket_in_a_string_
             Token::Backslash,
             Token::Identifier("Regex".to_string().into()),
             Token::LParen,
-            Token::StringLit("/[^\\]]+/".to_string()),
+            Token::StringLit("/[^\\]]+/".into()),
             Token::RParen,
             Token::RBracket,
             Token::Keyword(Keyword::Class),

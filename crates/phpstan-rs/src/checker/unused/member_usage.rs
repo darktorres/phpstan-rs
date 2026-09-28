@@ -247,7 +247,7 @@ pub(crate) fn walk_expr_for_members(
         ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
             ExprKind::Literal(Literal::String(member)) => {
                 if target_is_self(target, fqn, ctx) {
-                    usage.consts.insert(Arc::from(member.as_ref()));
+                    usage.consts.insert(Arc::from(&*member.to_str_lossy()));
                 }
             }
             _ => usage.escaped = true,
@@ -279,7 +279,7 @@ pub(crate) fn walk_expr_for_members(
                 && is_this_or_aliased(&a.value, usage)
                 && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
             {
-                usage.methods.insert(name.clone());
+                usage.methods.insert(Arc::from(&*name.to_str_lossy()));
             }
         }
         // `child_exprs` deliberately returns no children for these

@@ -78,7 +78,7 @@ pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, 
                         && let [name, value, ..] = args.as_slice()
                         && let ExprKind::Literal(Literal::String(name)) = &name.value.kind
                     {
-                        add(short_name(name).to_string(), &value.value);
+                        add(short_name(&name.to_str_lossy()).to_string(), &value.value);
                     }
                 }
                 stack.extend(child_stmts(stmt).into_iter().rev());
@@ -240,11 +240,11 @@ impl<'a> Checker<'a> {
                 )
             }
             _ => match self.infer_expr(e, locals) {
-                Type::StringLiteral(s) => Some(vec![s]),
+                Type::StringLiteral(s) => Some(vec![s.to_string()]),
                 Type::Union(members) => members
                     .iter()
                     .map(|m| match m {
-                        Type::StringLiteral(s) => Some(s.clone()),
+                        Type::StringLiteral(s) => Some(s.to_string()),
                         _ => None,
                     })
                     .collect(),
@@ -385,7 +385,7 @@ fn visit_guard_args_in_expr(e: &Expr, out: &mut dyn FnMut(IncludeCall)) {
         match (name.as_str(), args.as_slice()) {
             (n, [arg, ..]) if GUARD_FUNCTIONS.contains(&n) => out(IncludeCall::Guard(&arg.value)),
             ("set_include_path", [arg]) => out(IncludeCall::SetIncludePath(&arg.value)),
-            ("ini_set", [key, value]) if matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if k.as_ref() == "include_path") => {
+            ("ini_set", [key, value]) if matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") => {
                 out(IncludeCall::SetIncludePath(&value.value))
             }
             _ => {}

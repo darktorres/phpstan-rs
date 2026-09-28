@@ -713,9 +713,10 @@ impl<'a> Checker<'a> {
         let Type::StringLiteral(method) = method_ty else {
             return None;
         };
+        let method = method.as_str()?;
         let class_ty = &shape.field(&types::ShapeKey::Int(0))?.ty;
         let class = match class_ty {
-            Type::StringLiteral(c) => c.as_str(),
+            Type::StringLiteral(c) => c.as_str()?,
             Type::ClassString(inner) => match inner.as_ref() {
                 Type::Object(c, _) => c.as_str(),
                 _ => return None,

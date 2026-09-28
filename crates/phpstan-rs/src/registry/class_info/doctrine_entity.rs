@@ -135,7 +135,7 @@ fn string_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
             return None;
         }
         match &arg.value.kind {
-            ExprKind::Literal(Literal::String(s)) => Some(s.as_ref()),
+            ExprKind::Literal(Literal::String(s)) => s.as_str(),
             _ => None,
         }
     })
