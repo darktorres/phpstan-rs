@@ -74,7 +74,7 @@ impl<'a> Checker<'a> {
         let skip_always_true = stmt_contains_break(body)
             || stmt_contains_escaping_exit(body)
             || body_contains_yield(std::slice::from_ref(body))
-            || declared_return == Some(&Type::Never);
+            || declared_return.is_some_and(Type::is_never);
         // On top of the above: moving the diagnostic-bearing condition
         // check into the convergence closure means it only runs against
         // per-pass *copies* of the entry (`pass_locals`), never mutating
@@ -486,64 +486,58 @@ impl<'a> Checker<'a> {
     /// since the interface's declared generics are still a likely-correct
     /// answer in that case.
     pub(crate) fn iterable_element_type(&self, ty: &Type) -> Option<(Type, Type)> {
-        match ty {
-            Type::Object(name, args) => {
-                if self.registry.is_subclass_of(name, "IteratorAggregate") {
-                    let agg_bindings =
-                        self.registry
-                            .class_template_bindings(name, args, "IteratorAggregate");
-                    if let Some(sig) = self.registry.lookup_method(name, "getIterator") {
-                        let declared = self.resolve_pseudo(sig.return_type(), name);
-                        // Avoid infinite recursion on a (real but
-                        // pathological) `getIterator(): static`-shaped
-                        // declaration that resolved right back to this
-                        // same class.
-                        let recurses_into_self =
-                            matches!(&declared, Type::Object(inner, _) if inner == name);
-                        if !recurses_into_self
-                            && let Some(result) = self.iterable_element_type(&declared)
-                        {
-                            return Some(result);
-                        }
-                    }
-                    if !agg_bindings.is_empty() {
-                        return Some((
-                            agg_bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
-                            agg_bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
-                        ));
-                    }
-                }
-                let bindings = self
-                    .registry
-                    .class_template_bindings(name, args, "Iterator");
-                if bindings.is_empty() {
-                    return None;
-                }
-                Some((
-                    bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
-                    bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
-                ))
+        let members = ty.union_members();
+        if members.len() > 1 {
+            let mut keys = Vec::new();
+            let mut values = Vec::new();
+            for m in members {
+                let (k, v) = self.iterable_element_type(m)?;
+                keys.push(k);
+                values.push(v);
             }
-            Type::Union(members) => {
-                let mut keys = Vec::new();
-                let mut values = Vec::new();
-                for m in members {
-                    let (k, v) = self.iterable_element_type(m)?;
-                    keys.push(k);
-                    values.push(v);
-                }
-                Some((
-                    keys.into_iter()
-                        .reduce(union_types)
-                        .unwrap_or(Type::mixed()),
-                    values
-                        .into_iter()
-                        .reduce(union_types)
-                        .unwrap_or(Type::mixed()),
-                ))
-            }
-            _ => None,
+            return Some((
+                keys.into_iter()
+                    .reduce(union_types)
+                    .unwrap_or(Type::mixed()),
+                values
+                    .into_iter()
+                    .reduce(union_types)
+                    .unwrap_or(Type::mixed()),
+            ));
         }
+        let (name, args) = ty.object_class_and_args()?;
+        if self.registry.is_subclass_of(name, "IteratorAggregate") {
+            let agg_bindings =
+                self.registry
+                    .class_template_bindings(name, args, "IteratorAggregate");
+            if let Some(sig) = self.registry.lookup_method(name, "getIterator") {
+                let declared = self.resolve_pseudo(sig.return_type(), name);
+                // Avoid infinite recursion on a `getIterator(): static`
+                // that resolved right back to this same class.
+                let recurses_into_self = declared
+                    .object_class_and_args()
+                    .is_some_and(|(inner, _)| inner == name);
+                if !recurses_into_self && let Some(result) = self.iterable_element_type(&declared) {
+                    return Some(result);
+                }
+            }
+            if !agg_bindings.is_empty() {
+                return Some((
+                    agg_bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
+                    agg_bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
+                ));
+            }
+        }
+        let bindings = self
+            .registry
+            .class_template_bindings(name, args, "Iterator");
+        if bindings.is_empty() {
+            return None;
+        }
+        Some((
+            bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
+            bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -574,7 +568,7 @@ impl<'a> Checker<'a> {
         let subject_ty = self.check_expr(subject, locals, label);
         // `DeadForeachRule` - skipped inside an enclosing loop, whose
         // earlier convergence passes can still see a not-yet-grown array.
-        if self.loop_depth == 0 && type_is_always_empty_array(&subject_ty) {
+        if self.loop_depth == 0 && subject_ty.is_empty_array().yes() {
             self.report(
                 "Empty array passed to foreach.".to_string(),
                 subject.span,
@@ -821,42 +815,8 @@ impl<'a> Checker<'a> {
                 .insert(subject_name.to_string(), Rc::new(last_field_facts));
             locals.insert(
                 subject_name.to_string(),
-                replace_array_element_type(&current_subject_ty, &widened_element_ty),
+                current_subject_ty.with_general_array_value(&widened_element_ty),
             );
         }
-    }
-}
-
-/// Rebuilds `ty` with its homogeneous element type replaced by
-/// `new_elem`, recursing through `Union`/`Intersection` the same way
-/// `array_element_type` looks through them to find one - leaves an
-/// `ArrayShape` (each field its own, independently meaningful type, not
-/// a single "the element type" to overwrite) and anything else
-/// untouched.
-fn replace_array_element_type(ty: &Type, new_elem: &Type) -> Type {
-    match ty {
-        Type::Array(key, _) => Type::array((**key).clone(), new_elem.clone()),
-        Type::Union(members) => Type::union_of(
-            members
-                .iter()
-                .map(|m| replace_array_element_type(m, new_elem))
-                .collect(),
-        ),
-        Type::Intersection(members) => Type::intersection_of(
-            members
-                .iter()
-                .map(|m| replace_array_element_type(m, new_elem))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
-/// `array{}`, or a union made only of it.
-fn type_is_always_empty_array(ty: &Type) -> bool {
-    match ty {
-        Type::ArrayShape(shape) => shape.is_empty_array(),
-        Type::Union(members) => members.iter().all(type_is_always_empty_array),
-        _ => false,
     }
 }

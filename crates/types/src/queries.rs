@@ -189,8 +189,8 @@ impl Type {
     }
 
     /// Whether every value is a single, known value: a literal, `null`,
-    /// an enum case or a sealed array shape (PHPStan's
-    /// `isConstantValue()`, with enum cases counted).
+    /// an enum case, or a sealed array shape of required fields that are
+    /// (PHPStan's `isConstantValue()`, with enum cases counted).
     pub fn is_constant_value(&self) -> TrinaryLogic {
         match self {
             Type::IntLiteral(_)
@@ -200,7 +200,13 @@ impl Type {
             | Type::False
             | Type::Null
             | Type::EnumCase(..) => TrinaryLogic::Yes,
-            Type::ArrayShape(shape) => TrinaryLogic::from_bool(shape.is_sealed()),
+            Type::ArrayShape(shape) => TrinaryLogic::from_bool(
+                shape.is_sealed()
+                    && shape
+                        .fields
+                        .iter()
+                        .all(|f| !f.optional && f.ty.is_constant_value().yes()),
+            ),
             Type::Union(members) => members
                 .iter()
                 .map(Type::is_constant_value)
@@ -346,6 +352,23 @@ impl Type {
     /// Whether this is a `@template` type.
     pub fn is_template(&self) -> bool {
         matches!(self, Type::TemplateParam(_))
+    }
+
+    /// A `class-string<Foo>`'s class; `None` for any other type, or a
+    /// class-string of anything but one named class.
+    pub fn class_string_class(&self) -> Option<&crate::Name> {
+        match self {
+            Type::ClassString(inner) => inner.object_class_and_args().map(|(class, _)| class),
+            _ => None,
+        }
+    }
+
+    /// A template's bound; `None` for any other type.
+    pub fn template_bound(&self) -> Option<&Type> {
+        match self {
+            Type::TemplateParam(param) => Some(&param.bound),
+            _ => None,
+        }
     }
 
     /// Whether this is a benevolent union.

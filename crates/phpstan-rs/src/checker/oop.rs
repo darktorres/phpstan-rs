@@ -948,8 +948,10 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let definitely =
-            value_type_is_constant(value_ty) || self.relation().disjoint(value_ty, phpdoc_ty);
+        // A single known value's relation to another type is never "maybe".
+        let definitely = (value_ty.is_constant_value().yes()
+            && value_ty.union_members().len() == 1)
+            || self.relation().disjoint(value_ty, phpdoc_ty);
         let relation = if definitely {
             "is incompatible with"
         } else {
@@ -1988,22 +1990,6 @@ pub(crate) fn signatures_compatible(a: &FunctionReflection, b: &FunctionReflecti
         .iter()
         .zip(b.params())
         .all(|(pa, pb)| pa.ty() == pb.ty())
-}
-
-/// A value type fully known down to its value (a literal, or a shape of
-/// them), whose supertype relation to another type is never "maybe".
-fn value_type_is_constant(ty: &Type) -> bool {
-    match ty {
-        Type::IntLiteral(_)
-        | Type::StringLiteral(_)
-        | Type::FloatLiteral(_)
-        | Type::True
-        | Type::False
-        | Type::Null
-        | Type::EnumCase(..) => true,
-        Type::ArrayShape(shape) => shape.types().all(value_type_is_constant),
-        _ => false,
-    }
 }
 
 /// Where and what to insert so `ctor`'s body starts with

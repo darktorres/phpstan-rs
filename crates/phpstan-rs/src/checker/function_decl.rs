@@ -1193,7 +1193,9 @@ impl<'a> Checker<'a> {
                 && !self.current_function_is_generator
                 && !body_falls_off_end
                 && !self.current_function_saw_explicit_return
-                && matches!(declared_return, Some(Type::Void) | Some(Type::Mixed(_)))
+                && declared_return
+                    .as_ref()
+                    .is_some_and(|t| t.is_void() || t.is_mixed())
             {
                 self.report(
                     "could be declared to return never - it never returns normally".to_string(),
@@ -1448,12 +1450,14 @@ impl<'a> Checker<'a> {
         if !hint.contains('&') {
             return;
         }
-        let Type::Intersection(members) = self.resolve_type_hint(Some(hint)) else {
+        let resolved = self.resolve_type_hint(Some(hint));
+        let members = resolved.intersection_members();
+        if members.len() < 2 {
             return;
-        };
+        }
         let mut names = Vec::with_capacity(members.len());
-        for m in &members {
-            let Type::Object(name, _) = m else {
+        for m in members {
+            let Some((name, _)) = m.object_class_and_args() else {
                 return;
             };
             names.push(name.to_string());
@@ -1605,10 +1609,7 @@ impl<'a> Checker<'a> {
             let Some(param_sig) = sig.params().get(i) else {
                 continue;
             };
-            let param_ty = match &param_sig.ty() {
-                Type::TemplateParam(tp) => tp.bound.as_ref(),
-                other => other,
-            };
+            let param_ty = param_sig.ty().template_bound().unwrap_or(param_sig.ty());
             let default_ty = self.infer_expr(default, &Locals::default());
             if default_ty.is_mixed() || self.accepts(param_ty, &default_ty).yes() {
                 continue;
@@ -1699,11 +1700,7 @@ pub(crate) fn missing_return_level(
     if expected.is_mixed() && (!has_native_hint || is_generator_treturn) {
         return None;
     }
-    let contains_null = match expected {
-        Type::Null => true,
-        Type::Union(members) => members.contains(&Type::Null),
-        _ => false,
-    };
+    let contains_null = expected.union_members().iter().any(|m| m.is_null().yes());
     if is_generator_treturn || (!has_native_hint && contains_null) {
         Some(2)
     } else {

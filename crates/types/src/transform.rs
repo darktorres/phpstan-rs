@@ -1,7 +1,12 @@
 //! Types rewritten into related types: `static` bound, shapes unsealed,
 //! a value stepped by `++`/`--`.
 
-use crate::{AccessoryKind, Shape, ShapeField, Type, union_types};
+use std::sync::Arc;
+
+use crate::{
+    AccessoryKind, CallableParam, CallableSig, Name, Shape, ShapeField, TemplateParam, Type,
+    union_types,
+};
 
 impl Type {
     /// This type with `static` and `$this` as `class`, at any depth.
@@ -24,6 +29,63 @@ impl Type {
                 args.iter().map(|a| a.bind_self(class)).collect(),
             ),
             other => other.map_children(&mut |t| t.bind_self(class)),
+        }
+    }
+
+    /// This type with `parent` as `class`, at any depth.
+    pub fn bind_parent(&self, class: &str) -> Type {
+        match self {
+            Type::ParentRef => Type::Object(class.into(), Vec::new()),
+            other => other.map_children(&mut |t| t.bind_parent(class)),
+        }
+    }
+
+    /// This type with each object's class renamed by `rename`, at any
+    /// depth: generic arguments, and callable signatures with their
+    /// templates' bounds and defaults. The `Closure` of a `Closure(...)`
+    /// shape is PHP's own and keeps its name.
+    pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
+        match self {
+            Type::Object(name, args) => Type::Object(
+                rename(name),
+                args.iter().map(|a| a.map_class_names(rename)).collect(),
+            ),
+            Type::Intersection(members)
+                if matches!(
+                    members.as_slice(),
+                    [Type::Object(name, args), Type::Callable(Some(_))]
+                        if name == "Closure" && args.is_empty()
+                ) =>
+            {
+                Type::Intersection(vec![members[0].clone(), members[1].map_class_names(rename)])
+            }
+            Type::Callable(Some(sig)) => {
+                let mut map = |t: &Type| t.map_class_names(rename);
+                Type::Callable(Some(Arc::new(
+                    CallableSig {
+                        params: sig
+                            .params
+                            .iter()
+                            .map(|p| CallableParam {
+                                ty: map(&p.ty),
+                                ..p.clone()
+                            })
+                            .collect(),
+                        return_type: Box::new(map(&sig.return_type)),
+                        templates: sig
+                            .templates
+                            .iter()
+                            .map(|t| TemplateParam {
+                                bound: Box::new(map(&t.bound)),
+                                default: t.default.as_deref().map(|d| Box::new(map(d))),
+                                ..t.clone()
+                            })
+                            .collect(),
+                    }
+                    .rebind_templates(),
+                )))
+            }
+            _ => self.map_children(&mut |t| t.map_class_names(rename)),
         }
     }
 
@@ -77,6 +139,19 @@ impl Type {
             Type::ArrayShape(shape) => Type::ArrayShape(shape.map_types(&mut |t| f(t))),
             Type::Union(_) | Type::BenevolentUnion(_) | Type::Intersection(_) => {
                 self.map_children(&mut |m| m.map_array_values(&mut *f))
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// This type with each general array's value type replaced by
+    /// `value`, in union and intersection members too; an array shape
+    /// keeps its fields.
+    pub fn with_general_array_value(&self, value: &Type) -> Type {
+        match self {
+            Type::Array(key, _) => Type::Array(key.clone(), Box::new(value.clone())),
+            Type::Union(_) | Type::BenevolentUnion(_) | Type::Intersection(_) => {
+                self.map_children(&mut |m| m.with_general_array_value(value))
             }
             other => other.clone(),
         }

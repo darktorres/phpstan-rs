@@ -38,13 +38,12 @@ impl<'a> Checker<'a> {
                     );
                     return;
                 }
-                match target_ty {
-                    Type::StringLiteral(name) => (name.to_string(), false),
-                    Type::ClassString(inner_ty) => match *inner_ty {
-                        Type::Object(name, _) => (name.to_string(), true),
-                        _ => return,
-                    },
-                    _ => return,
+                if let Some(name) = target_ty.string_literal_value() {
+                    (name.to_string(), false)
+                } else if let Some(name) = target_ty.class_string_class() {
+                    (name.to_string(), true)
+                } else {
+                    return;
                 }
             }
             // `static` names the current class or any subclass of it.
@@ -55,7 +54,8 @@ impl<'a> Checker<'a> {
                 (class, true)
             }
             InstanceofTarget::Name(name, _) => {
-                let Type::Object(class, _) = self.resolve_name_expr(name) else {
+                let resolved = self.resolve_name_expr(name);
+                let Some((class, _)) = resolved.object_class_and_args() else {
                     return;
                 };
                 (class.to_string(), false)
@@ -92,31 +92,39 @@ impl<'a> Checker<'a> {
     /// (`Some(false)`), or only sometimes (`None`) an instance of the
     /// registered class-like `target`.
     fn instanceof_verdict(&self, ty: &Type, target: &str) -> Option<bool> {
-        match ty {
-            Type::Object(class, _) => self.class_instanceof_verdict(class, target),
-            Type::Union(members) => {
-                let mut verdicts = members.iter().map(|m| self.instanceof_verdict(m, target));
-                let first = verdicts.next()??;
-                verdicts.all(|v| v == Some(first)).then_some(first)
-            }
-            Type::Intersection(members) => {
-                let verdicts: Vec<_> = members
-                    .iter()
-                    .filter_map(|m| self.instanceof_verdict(m, target))
-                    .collect();
-                if verdicts.contains(&true) {
-                    Some(true)
-                } else if verdicts.contains(&false) {
-                    Some(false)
-                } else {
-                    None
-                }
-            }
-            Type::TemplateParam(param) => self.instanceof_verdict(&param.bound, target),
-            Type::Never => None,
-            other if self.relation().can_access_properties(other).no() => Some(false),
-            _ => None,
+        if ty.is_never() {
+            return None;
         }
+        if let Some((class, _)) = ty.object_class_and_args() {
+            return self.class_instanceof_verdict(class, target);
+        }
+        if let Some(bound) = ty.template_bound() {
+            return self.instanceof_verdict(bound, target);
+        }
+        let members = ty.union_members();
+        if members.len() > 1 {
+            let mut verdicts = members.iter().map(|m| self.instanceof_verdict(m, target));
+            let first = verdicts.next()??;
+            return verdicts.all(|v| v == Some(first)).then_some(first);
+        }
+        let parts = ty.intersection_members();
+        if parts.len() > 1 {
+            let verdicts: Vec<_> = parts
+                .iter()
+                .filter_map(|m| self.instanceof_verdict(m, target))
+                .collect();
+            return if verdicts.contains(&true) {
+                Some(true)
+            } else if verdicts.contains(&false) {
+                Some(false)
+            } else {
+                None
+            };
+        }
+        self.relation()
+            .can_access_properties(ty)
+            .no()
+            .then_some(false)
     }
 
     fn class_instanceof_verdict(&self, class: &str, target: &str) -> Option<bool> {

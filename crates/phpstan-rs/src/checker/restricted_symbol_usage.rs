@@ -112,31 +112,27 @@ fn resolve_arg<'a>(args: &'a [Arg], position: Option<u32>, name: Option<&str>) -
 /// the docs confirm this doesn't extend to `typeString`/`classPattern`
 /// matching, which never reach this function at all.
 fn scalar_value_matches(ty: &Type, value: &ParamScalarValue, case_insensitive: bool) -> bool {
-    match (ty, value) {
-        (Type::True, ParamScalarValue::Bool(true)) => true,
-        (Type::False, ParamScalarValue::Bool(false)) => true,
-        (Type::IntLiteral(n), ParamScalarValue::Int(v)) => n == v,
-        (Type::FloatLiteral(f), ParamScalarValue::Float(v)) => f == v,
-        (Type::StringLiteral(s), ParamScalarValue::Str(v)) => {
+    match value {
+        ParamScalarValue::Bool(v) => ty.bool_literal_value() == Some(*v),
+        ParamScalarValue::Int(v) => ty.int_literal_value() == Some(*v),
+        ParamScalarValue::Float(v) => *ty == Type::float_literal(*v),
+        ParamScalarValue::Str(v) => ty.string_literal_value().is_some_and(|s| {
             if case_insensitive {
                 s.as_bytes().eq_ignore_ascii_case(v.as_bytes())
             } else {
                 s == v
             }
-        }
-        _ => false,
+        }),
     }
 }
 
-/// Every `Type::IntLiteral`-shaped member reachable from `ty` - a bare
-/// literal, or each member of a `Union` (real `typeString: 1 | 2`'s own
-/// parsed shape). Anything else contributes nothing, never a guess.
+/// The value of each integer literal among `ty`'s union members (a
+/// `typeString: 1 | 2`); anything else contributes nothing.
 fn int_literal_members(ty: &Type) -> Vec<i64> {
-    match ty {
-        Type::IntLiteral(n) => vec![*n],
-        Type::Union(members) => members.iter().flat_map(int_literal_members).collect(),
-        _ => Vec::new(),
-    }
+    ty.union_members()
+        .iter()
+        .filter_map(Type::int_literal_value)
+        .collect()
 }
 
 impl<'a> Checker<'a> {
@@ -162,10 +158,7 @@ impl<'a> Checker<'a> {
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
                 self.fold_int_flags(inner)
             }
-            ExprKind::Name(name) => match self.global_constant_type(name) {
-                Some(Type::IntLiteral(n)) => Some(n),
-                _ => None,
-            },
+            ExprKind::Name(name) => self.global_constant_type(name)?.int_literal_value(),
             ExprKind::Binary(syntax::ast::BinOp::BitOr, l, r) => {
                 Some(self.fold_int_flags(l)? | self.fold_int_flags(r)?)
             }
@@ -235,7 +228,9 @@ impl<'a> Checker<'a> {
         };
         let ty = self.infer_expr(expr, locals);
         if let Some(pattern) = &cond.class_pattern {
-            return matches!(&ty, Type::Object(name, _) if glob_matches(&pattern.to_lowercase(), &name.to_lowercase()));
+            return ty.object_class_and_args().is_some_and(|(name, _)| {
+                glob_matches(&pattern.to_lowercase(), &name.to_lowercase())
+            });
         }
         if let Some(type_string) = &cond.type_string {
             let configured = types::parse_type_string(type_string);

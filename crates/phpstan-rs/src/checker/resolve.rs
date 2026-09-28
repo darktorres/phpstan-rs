@@ -273,12 +273,7 @@ impl<'a> Checker<'a> {
         // A non-negated conditional return type on a parameter
         // (`($params is array{wrapperClass: class-string<T>} ? T : X)`)
         // references its templates through that parameter.
-        if let Type::Conditional {
-            negated: false,
-            template_subject: false,
-            ..
-        } = sig.return_type()
-        {
+        if let Some((_, _, false, false)) = sig.return_type().conditional_condition() {
             collect_scoped_template_params(sig.return_type(), bare_name, &mut in_params);
         }
         let mut in_signature = in_params.clone();
@@ -316,10 +311,9 @@ impl<'a> Checker<'a> {
         if class_name == "?" {
             return None;
         }
-        match self.resolve_name_expr(class_name) {
-            Type::Object(class, _) => Some(class.to_string()),
-            _ => None,
-        }
+        self.resolve_name_expr(class_name)
+            .object_class_and_args()
+            .map(|(class, _)| class.to_string())
     }
 
     /// `StaticCall`'s own full `StaticTarget` resolution, for a
@@ -395,26 +389,15 @@ impl<'a> Checker<'a> {
         declaring_class: &str,
         called_class: &str,
     ) -> Type {
-        let recurse = |t: &Type| self.resolve_pseudo_at(t, declaring_class, called_class);
-        match ty {
-            Type::SelfRef(args) => {
-                Type::object(declaring_class.into(), args.iter().map(recurse).collect())
-            }
-            Type::StaticRef(args) => {
-                Type::object(called_class.into(), args.iter().map(recurse).collect())
-            }
-            Type::This => Type::object(called_class.into(), Vec::new()),
-            Type::ParentRef => self
-                .registry
-                .classes
-                .get(declaring_class)
-                .and_then(|info| info.extends().first())
-                .map(|p| Type::object(p.into(), Vec::new()))
-                .unwrap_or_else(|| ty.clone()),
-            // Every nested position too: a generic class's own template
-            // arguments (`SortEntry<self, string>`), a conditional return
-            // type's branches, a `Closure(self): static` shape.
-            _ => ty.map_children(&mut |t| recurse(t)),
+        let bound = ty.bind_self(declaring_class).bind_static(called_class);
+        match self
+            .registry
+            .classes
+            .get(declaring_class)
+            .and_then(|info| info.extends().first())
+        {
+            Some(parent) => bound.bind_parent(parent),
+            None => bound,
         }
     }
 
@@ -757,25 +740,16 @@ fn collect_scoped_template_params(
     scope: &str,
     out: &mut rustc_hash::FxHashMap<String, types::TemplateParam>,
 ) {
-    match ty {
-        Type::TemplateParam(tp) if tp.scope.as_deref() == Some(scope) => {
+    for tp in ty.nested_templates() {
+        if tp.scope.as_deref() == Some(scope) {
             out.entry(tp.name.clone()).or_insert_with(|| tp.clone());
         }
-        // Every nested position - a template only reachable inside a
-        // `Closure(...)`-shaped parameter's return-type slot (real shape:
-        // `php-standard-library`'s own `Psl\Dict\group_by()`,
-        // `@template Tk of array-key`/`@param (Closure(Tv): ?Tk) $keyFunc`)
-        // is exactly as real an inference source as one reachable through
-        // an ordinary class's generic argument list.
-        _ => ty.for_each_child(&mut |t| collect_scoped_template_params(t, scope, out)),
     }
 }
 
 /// The class a receiver's value is an instance of, when its type names
 /// one.
 pub(crate) fn receiver_class(ty: Type) -> Option<String> {
-    match ty {
-        Type::Object(class, _) => Some(class.to_string()),
-        _ => None,
-    }
+    ty.object_class_and_args()
+        .map(|(class, _)| class.to_string())
 }

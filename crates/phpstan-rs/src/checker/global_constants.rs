@@ -221,7 +221,8 @@ impl<'a> Checker<'a> {
         let [name_arg, value_arg, ..] = args else {
             return;
         };
-        let types::Type::StringLiteral(name) = self.infer_expr(&name_arg.value, locals) else {
+        let name_ty = self.infer_expr(&name_arg.value, locals);
+        let Some(name) = name_ty.string_literal_value() else {
             return;
         };
         let value = self.infer_expr(&value_arg.value, locals);
@@ -253,21 +254,15 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let is_string = |t: &Type| {
-            matches!(
-                t,
-                Type::String
-                    | Type::StringLiteral(_)
-                    | Type::ClassString(_)
-                    | Type::ClassKindString(_)
-            ) || matches!(t, Type::Intersection(ms) if ms.iter().any(|m| matches!(m, Type::String)))
-        };
+        let is_string = |t: &Type| t.is_string().yes();
         let is_unknown = |t: &Type| t.is_mixed() || (t.is_never() || t.is_template());
-        let level = match name_ty {
-            t if is_string(t) || is_unknown(t) => return,
-            Type::Union(members) if members.iter().any(is_unknown) => return,
-            Type::Union(members) if members.iter().any(is_string) => 7,
-            _ => 0,
+        let members = name_ty.union_members();
+        let level = if is_string(name_ty) || members.iter().any(is_unknown) {
+            return;
+        } else if members.iter().any(is_string) {
+            7
+        } else {
+            0
         };
         self.report(
             format!("Class constant name in dynamic fetch can only be a string, {name_ty} given."),

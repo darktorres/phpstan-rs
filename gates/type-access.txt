@@ -1,10 +1,9 @@
 # Paths naming a `types::Type` variant outside crates/types, per file.
 # A count may only fall; `cargo xtask arch --bless-types` records a fall.
-# total 274: 264 in patterns, 10 in comparisons, 0 building a type
+# total 181: 175 in patterns, 6 in comparisons, 0 building a type
 4	crates/phpstan-rs/src/checker.rs
 6	crates/phpstan-rs/src/checker/access_attributes.rs
 1	crates/phpstan-rs/src/checker/by_ref_params.rs
-8	crates/phpstan-rs/src/checker/callable_values.rs
 7	crates/phpstan-rs/src/checker/calls.rs
 7	crates/phpstan-rs/src/checker/calls/format_string.rs
 2	crates/phpstan-rs/src/checker/calls/misc_rules.rs
@@ -15,28 +14,20 @@
 59	crates/phpstan-rs/src/checker/expr/member_resolution.rs
 3	crates/phpstan-rs/src/checker/expr/preg_shapes.rs
 2	crates/phpstan-rs/src/checker/expr/probe_checks.rs
-8	crates/phpstan-rs/src/checker/function_decl.rs
 1	crates/phpstan-rs/src/checker/function_like_declarations.rs
-9	crates/phpstan-rs/src/checker/global_constants.rs
-9	crates/phpstan-rs/src/checker/impossible_instanceof.rs
 3	crates/phpstan-rs/src/checker/includes.rs
 2	crates/phpstan-rs/src/checker/ini_directives.rs
 1	crates/phpstan-rs/src/checker/instantiation.rs
 3	crates/phpstan-rs/src/checker/internal_usage.rs
-8	crates/phpstan-rs/src/checker/narrowing/assertions.rs
-8	crates/phpstan-rs/src/checker/oop.rs
 3	crates/phpstan-rs/src/checker/oop/enums.rs
 5	crates/phpstan-rs/src/checker/oop/method_overrides.rs
 2	crates/phpstan-rs/src/checker/pipe_operator.rs
 1	crates/phpstan-rs/src/checker/property_type_too_wide.rs
-8	crates/phpstan-rs/src/checker/resolve.rs
-9	crates/phpstan-rs/src/checker/restricted_symbol_usage.rs
 4	crates/phpstan-rs/src/checker/return_type_too_wide.rs
 2	crates/phpstan-rs/src/checker/sql_reflection/parameter_validation.rs
 6	crates/phpstan-rs/src/checker/sql_reflection/query_builder.rs
 2	crates/phpstan-rs/src/checker/sql_reflection/resolve.rs
 1	crates/phpstan-rs/src/checker/static_call_context.rs
-9	crates/phpstan-rs/src/checker/stmt/loops.rs
 1	crates/phpstan-rs/src/checker/stmt/new_exception_discarded.rs
 3	crates/phpstan-rs/src/checker/strict_rules.rs
 3	crates/phpstan-rs/src/checker/throws.rs
@@ -54,8 +45,6 @@
 2	crates/phpstan-rs/src/registry/class_info/doctrine_entity.rs
 2	crates/phpstan-rs/src/registry/class_info/tag_synthesis.rs
 3	crates/phpstan-rs/src/registry/function_sig/generics.rs
-9	crates/phpstan-rs/src/registry/function_sig/type_resolution.rs
 1	crates/phpstan-rs/src/registry/generics.rs
 3	crates/phpstan-rs/src/registry/global_vars.rs
-8	crates/phpstan-rs/src/registry/name_context.rs
 2	crates/phpstan-rs/src/registry/stubs.rs

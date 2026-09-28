@@ -85,9 +85,8 @@ impl<'a> Checker<'a> {
             return Some((target, excluded));
         }
         let haystack_ty = self.infer_expr(haystack, locals);
-        if let Type::ArrayShape(shape) = &haystack_ty
+        if let [shape] = haystack_ty.constant_arrays()[..]
             && !shape.fields.is_empty()
-            && shape.is_sealed()
             && shape.fields.iter().all(|f| is_known_single_value(&f.ty))
         {
             let mut values: Vec<Type> = Vec::new();
@@ -162,8 +161,8 @@ impl<'a> Checker<'a> {
         // being reached only through `narrowed_expr`.
         if !matches_when_true {
             let nullsafe_side = match (super::nullsafe_receiver(l), super::nullsafe_receiver(r)) {
-                (Some(receiver), _) if self.infer_expr(r, locals) == Type::Null => Some(receiver),
-                (_, Some(receiver)) if self.infer_expr(l, locals) == Type::Null => Some(receiver),
+                (Some(receiver), _) if self.infer_expr(r, locals).is_null().yes() => Some(receiver),
+                (_, Some(receiver)) if self.infer_expr(l, locals).is_null().yes() => Some(receiver),
                 _ => None,
             };
             if let Some(receiver) = nullsafe_side
@@ -263,23 +262,21 @@ impl<'a> Checker<'a> {
         ty: &Type,
         has_member: impl Fn(&str) -> bool + Copy,
     ) -> bool {
-        match ty {
-            Type::Object(class, _) => {
-                self.registry.classes.contains_key(class.as_str()) && !has_member(class)
-            }
-            // A specific enum case is still a real instance of
-            // its enum for member-lookup purposes - only its own case
-            // identity (narrowing, `->name`/`->value`) cares which case,
-            // never whether some *other* method/property exists.
-            Type::EnumCase(fqn, _) => {
-                self.registry.classes.contains_key(fqn.as_str()) && !has_member(fqn)
-            }
-            Type::Union(members) => members
+        let members = ty.union_members();
+        if members.len() > 1 {
+            return members
                 .iter()
-                .any(|m| self.member_confirmed_missing(m, has_member)),
-            Type::Intersection(members) => members
+                .any(|m| self.member_confirmed_missing(m, has_member));
+        }
+        let parts = ty.intersection_members();
+        if parts.len() > 1 {
+            return parts
                 .iter()
-                .all(|m| self.member_confirmed_missing(m, has_member)),
+                .all(|m| self.member_confirmed_missing(m, has_member));
+        }
+        // An enum case is an instance of its enum for member lookup.
+        match ty.object_class_names()[..] {
+            [class] => self.registry.classes.contains_key(class.as_str()) && !has_member(class),
             _ => false,
         }
     }
@@ -464,15 +461,12 @@ impl<'a> Checker<'a> {
 /// member like `float` (the type of `0.0`) stands for more values than the
 /// one the haystack holds.
 fn single_values_of(target: &Type) -> Option<Type> {
-    let members: Vec<Type> = match target {
-        Type::Union(members) => members
-            .iter()
-            .filter(|m| is_known_single_value(m))
-            .cloned()
-            .collect(),
-        single if is_known_single_value(single) => return Some(single.clone()),
-        _ => return None,
-    };
+    let members: Vec<Type> = target
+        .union_members()
+        .iter()
+        .filter(|m| is_known_single_value(m))
+        .cloned()
+        .collect();
     match members.len() {
         0 => None,
         1 => members.into_iter().next(),

@@ -23,60 +23,51 @@ struct NamedCallable<'r> {
 
 impl<'a> Checker<'a> {
     fn resolve_named_callable(&self, ty: &Type) -> Option<NamedCallable<'a>> {
-        match ty {
-            Type::StringLiteral(s) => {
-                let s = s.as_str()?;
-                if let Some((class, method)) = s.split_once("::") {
-                    return self.resolve_callable_method(class, method, format!("callable '{s}'"));
-                }
-                let (_, sig) = self
-                    .registry
-                    .lookup_function_with_name(s.trim_start_matches('\\'))?;
-                Some(NamedCallable {
-                    description: format!("callable '{s}'"),
-                    sig,
-                    method: None,
-                    defining_class: None,
-                })
+        if let Some(s) = ty.string_literal_value() {
+            let s = s.as_str()?;
+            if let Some((class, method)) = s.split_once("::") {
+                return self.resolve_callable_method(class, method, format!("callable '{s}'"));
             }
-            Type::ArrayShape(shape) => {
-                let [first, second] = shape.fields.as_slice() else {
-                    return None;
-                };
-                let (Type::StringLiteral(method), true) = (&second.ty, shape.is_sealed()) else {
-                    return None;
-                };
-                let method = method.as_str()?;
-                if first.key != ShapeKey::Int(0)
-                    || second.key != ShapeKey::Int(1)
-                    || first.optional
-                    || second.optional
-                {
-                    return None;
-                }
-                let target = &first.ty;
-                let class = match target {
-                    Type::Object(class, _) => class.to_string(),
-                    Type::ClassString(inner) => match inner.as_ref() {
-                        Type::Object(class, _) => class.to_string(),
-                        _ => return None,
-                    },
-                    Type::StringLiteral(class) => class.as_str()?.to_string(),
-                    _ => return None,
-                };
-                self.resolve_callable_method(&class, method, format!("callable {ty}"))
-            }
-            Type::Object(class, _) => {
-                let (owner, sig) = self.registry.lookup_method_with_owner(class, "__invoke")?;
-                Some(NamedCallable {
-                    description: format!("callable {ty}"),
-                    sig,
-                    method: Some((owner.to_string(), "__invoke".to_string())),
-                    defining_class: Some(class.clone().to_string()),
-                })
-            }
-            _ => None,
+            let (_, sig) = self
+                .registry
+                .lookup_function_with_name(s.trim_start_matches('\\'))?;
+            return Some(NamedCallable {
+                description: format!("callable '{s}'"),
+                sig,
+                method: None,
+                defining_class: None,
+            });
         }
+        if let [shape] = ty.constant_arrays()[..] {
+            let [first, second] = shape.fields.as_slice() else {
+                return None;
+            };
+            let method = second.ty.string_literal_value()?.as_str()?;
+            if first.key != ShapeKey::Int(0)
+                || second.key != ShapeKey::Int(1)
+                || first.optional
+                || second.optional
+            {
+                return None;
+            }
+            let target = &first.ty;
+            let class = if let Some((class, _)) = target.object_class_and_args() {
+                class.to_string()
+            } else if let Some(class) = target.class_string_class() {
+                class.to_string()
+            } else {
+                target.string_literal_value()?.as_str()?.to_string()
+            };
+            return self.resolve_callable_method(&class, method, format!("callable {ty}"));
+        }
+        let (class, _) = ty.object_class_and_args()?;
+        let (owner, sig) = self.registry.lookup_method_with_owner(class, "__invoke")?;
+        Some(NamedCallable {
+            description: format!("callable {ty}"),
+            sig,
+            method: Some((owner.to_string(), "__invoke".to_string())),
+            defining_class: Some(class.to_string()),
+        })
     }
 
     fn resolve_callable_method(

@@ -26,11 +26,7 @@ pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) 
     if !is_bare_null_default {
         return ty;
     }
-    let already_nullable = match &ty {
-        Type::Null | Type::Mixed(_) => true,
-        Type::Union(members) => members.contains(&Type::Null),
-        _ => false,
-    };
+    let already_nullable = !ty.is_null().no();
     if already_nullable {
         ty
     } else {
@@ -82,11 +78,7 @@ pub(crate) fn resolve_type_with_parsed_native(
     // A conditional return type states its nullability per branch
     // (`($p is non-empty-array ? T : T|null)`), so a native `?` must not
     // be unioned onto every resolution of it.
-    let already_nullable = match &ty {
-        Type::Null | Type::Mixed(_) | Type::Conditional { .. } => true,
-        Type::Union(members) => members.contains(&Type::Null),
-        _ => false,
-    };
+    let already_nullable = ty.conditional_condition().is_some() || !ty.is_null().no();
     let ty = if native_is_nullable && !already_nullable {
         Type::union_of(vec![ty, Type::null()])
     } else {
