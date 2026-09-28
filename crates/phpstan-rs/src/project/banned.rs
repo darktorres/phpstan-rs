@@ -12,7 +12,7 @@ use crate::registry::Registry;
 use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::{Position, Span};
-use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
+use syntax::visit::{Visitor, any_child_expr, walk_stmt};
 use types::Type;
 
 use super::Project;
@@ -236,12 +236,7 @@ impl<'a> Walker<'a> {
                     ),
                     _ => {}
                 }
-                for e in stmt_exprs(stmt) {
-                    self.expr(e);
-                }
-                for child in child_stmts(stmt) {
-                    self.stmt(child, ctx);
-                }
+                walk_stmt(&mut Children { walker: self, ctx }, stmt);
             }
         }
     }
@@ -428,10 +423,29 @@ impl<'a> Walker<'a> {
                 "A dynamic member name".to_string(),
             );
         }
-        for child in child_exprs(e) {
+        any_child_expr(e, |child| {
             self.expr(child);
-        }
+            false
+        });
     }
+}
+
+/// Hands a statement's own expressions and the statements directly in it
+/// back to the walker.
+struct Children<'w, 'a, 'c> {
+    walker: &'w mut Walker<'a>,
+    ctx: &'c mut NameContext,
+}
+
+impl<'ast> Visitor<'ast> for Children<'_, '_, '_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        self.walker.stmt(stmt, self.ctx);
+    }
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        self.walker.expr(e);
+    }
+    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
 }
 
 impl Project {

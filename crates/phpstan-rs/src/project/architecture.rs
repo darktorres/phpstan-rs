@@ -13,7 +13,7 @@ use crate::registry::class_decl_name;
 use crate::registry::stubs;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
+use syntax::visit::{Visitor, walk_expr, walk_stmts};
 use types::Type;
 
 use super::Project;
@@ -38,25 +38,6 @@ fn collect_declared<'a>(
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                out.insert(
-                    ctx.declared_name(class_decl_name(e)).to_ascii_lowercase(),
-                    Declared {
-                        name_span: e.name_span,
-                        span: stmt.span,
-                        attributes: e.attrs.iter().map(|a| ctx.resolve(&a.name)).collect(),
-                        public_methods: e
-                            .methods
-                            .iter()
-                            .filter(|m| {
-                                m.visibility == Visibility::Public
-                                    && !m.function.name.eq_ignore_ascii_case("__construct")
-                            })
-                            .map(|m| m.function.name.as_ref())
-                            .collect(),
-                    },
-                );
-            }
             StmtKind::ClassDecl(c) => {
                 out.insert(
                     ctx.declared_name(class_decl_name(c)).to_ascii_lowercase(),
@@ -90,62 +71,19 @@ fn contains(outer: Span, inner: Span) -> bool {
         && (inner.end.line, inner.end.col) <= (outer.end.line, outer.end.col)
 }
 
-/// Spans of the class operand of every `new` in `stmts`.
+/// Spans of the class operand of every `new` in `stmts`, wherever it is:
+/// parameter defaults, property hooks and constants included.
 fn new_class_spans(stmts: &[Stmt], out: &mut FxHashSet<Span>) {
-    for stmt in stmts {
-        new_class_spans_in_stmt(stmt, out);
-    }
-}
-
-fn new_class_spans_in_stmt(stmt: &Stmt, out: &mut FxHashSet<Span>) {
-    match &stmt.kind {
-        StmtKind::FunctionDecl(f) => new_class_spans(&f.body, out),
-        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-            for m in &e.methods {
-                new_class_spans(&m.function.body, out);
+    struct News<'o>(&'o mut FxHashSet<Span>);
+    impl<'ast> Visitor<'ast> for News<'_> {
+        fn visit_expr(&mut self, e: &'ast Expr) {
+            if let ExprKind::New(class, _) = &e.kind {
+                self.0.insert(class.span);
             }
-        }
-        StmtKind::ClassDecl(c) => {
-            for m in &c.methods {
-                new_class_spans(&m.function.body, out);
-            }
-            for p in &c.properties {
-                if let Some(d) = &p.default {
-                    new_class_spans_in_expr(d, out);
-                }
-            }
-        }
-        _ => {
-            for e in stmt_exprs(stmt) {
-                new_class_spans_in_expr(e, out);
-            }
-            for child in child_stmts(stmt) {
-                new_class_spans_in_stmt(child, out);
-            }
+            walk_expr(self, e);
         }
     }
-}
-
-fn new_class_spans_in_expr(e: &Expr, out: &mut FxHashSet<Span>) {
-    match &e.kind {
-        ExprKind::New(class, _) => {
-            out.insert(class.span);
-        }
-        ExprKind::Closure { body, .. } => new_class_spans(body, out),
-        ExprKind::ArrowFn { body, .. } => new_class_spans_in_expr(body, out),
-        ExprKind::NewAnonymousClass(decl, args) => {
-            for a in args {
-                new_class_spans_in_expr(&a.value, out);
-            }
-            for m in &decl.methods {
-                new_class_spans(&m.function.body, out);
-            }
-        }
-        _ => {}
-    }
-    for child in child_exprs(e) {
-        new_class_spans_in_expr(child, out);
-    }
+    walk_stmts(&mut News(out), stmts);
 }
 
 fn type_class_names(ty: &Type, out: &mut Vec<String>) {

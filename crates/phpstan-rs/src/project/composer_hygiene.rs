@@ -32,7 +32,7 @@ use composer::constraint;
 use composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use syntax::ast::*;
 use syntax::token::{Position, Span};
-use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
+use syntax::visit::{Visitor, walk_expr, walk_stmts};
 
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use super::{FileState, Project};
@@ -164,48 +164,25 @@ struct FileFacts {
 }
 
 fn collect_facts_in_stmts(stmts: &[Stmt], facts: &mut FileFacts) {
-    for stmt in stmts {
-        collect_facts_in_stmt(stmt, facts);
-    }
+    walk_stmts(&mut Facts(facts), stmts);
 }
 
-fn collect_facts_in_stmt(stmt: &Stmt, facts: &mut FileFacts) {
-    match &stmt.kind {
-        StmtKind::FunctionDecl(f) => collect_facts_in_stmts(&f.body, facts),
-        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-            for m in &e.methods {
-                collect_facts_in_stmts(&m.function.body, facts);
-            }
-            for k in &e.consts {
-                collect_facts_in_expr(&k.value, facts);
-            }
-        }
-        StmtKind::ClassDecl(c) => collect_facts_in_class(c, facts),
-        _ => {
-            for e in stmt_exprs(stmt) {
-                collect_facts_in_expr(e, facts);
-            }
-            for child in child_stmts(stmt) {
-                collect_facts_in_stmt(child, facts);
-            }
-        }
+/// Every expression in the file, closures and declarations included, but
+/// not parameter defaults, attributes, property hooks or enum case values.
+struct Facts<'f>(&'f mut FileFacts);
+
+impl<'ast> Visitor<'ast> for Facts<'_> {
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        collect_facts_in_expr(e, self.0);
+        walk_expr(self, e);
     }
+    fn visit_param(&mut self, _: &'ast Param) {}
+    fn visit_attribute(&mut self, _: &'ast Attribute) {}
+    fn visit_property_hooks(&mut self, _: &'ast PropertyHooks) {}
+    fn visit_enum_case(&mut self, _: &'ast EnumCase) {}
 }
 
-fn collect_facts_in_class(c: &ClassDecl, facts: &mut FileFacts) {
-    for m in &c.methods {
-        collect_facts_in_stmts(&m.function.body, facts);
-    }
-    for p in &c.properties {
-        if let Some(d) = &p.default {
-            collect_facts_in_expr(d, facts);
-        }
-    }
-    for k in &c.consts {
-        collect_facts_in_expr(&k.value, facts);
-    }
-}
-
+/// `e`'s own facts, not its operands'.
 fn collect_facts_in_expr(e: &Expr, facts: &mut FileFacts) {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => facts.strings.push(s.to_string()),
@@ -232,18 +209,7 @@ fn collect_facts_in_expr(e: &Expr, facts: &mut FileFacts) {
                 }
             }
         }
-        ExprKind::Closure { body, .. } => collect_facts_in_stmts(body, facts),
-        ExprKind::ArrowFn { body, .. } => collect_facts_in_expr(body, facts),
-        ExprKind::NewAnonymousClass(decl, args) => {
-            for a in args {
-                collect_facts_in_expr(&a.value, facts);
-            }
-            collect_facts_in_class(decl, facts);
-        }
         _ => {}
-    }
-    for child in child_exprs(e) {
-        collect_facts_in_expr(child, facts);
     }
 }
 

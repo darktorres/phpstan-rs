@@ -1,0 +1,28 @@
+paths = ["domain.php", "infra.php"]
+
+[[rules.architecture]]
+excluding = []
+should_not_depend_on = []
+should_depend_on = []
+should_extend = []
+should_not_extend = []
+should_implement = []
+should_not_implement = []
+should_use_trait = []
+should_not_use_trait = []
+
+[[rules.architecture.classes]]
+namespace = 'App\Domain'
+excluding = []
+
+[[rules.architecture.can_only_depend_on]]
+classname = 'App\Infra\Db'
+excluding = []
+
+[[rules.architecture.can_only_depend_on]]
+classname = "/Cache$/"
+excluding = []
+
+[[rules.architecture.should_not_construct]]
+namespace = 'App\Infra'
+excluding = []
