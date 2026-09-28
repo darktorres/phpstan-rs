@@ -4458,7 +4458,11 @@ the rest), which the gate excludes and lists.
     `*TypeSpecifyingExtension`s; compared one by one, these leave the type
     wider today: `array_key_exists($k, $a)` doesn't narrow `$k` to the key
     type nor a `mixed` `$a` to an array (so a second `array_key_exists($b,
-    $o)` is `argument.type`, the rules oracle's `bug-14312.php`),
+    $o)` is `argument.type`, the rules oracle's `bug-14312.php`; with the
+    folds on constant arrays, the optional key made required and the key
+    removed in the else, Appendix H's `key-exists-fold` is 148 nsrt
+    mismatches in 23 files, `key-exists.php` and `array-key-exists.php`
+    the most),
     `ctype_digit($s)` doesn't give `numeric-string`, `function_exists($s)`
     doesn't give `callable-string`, `class_exists($c)` and
     `is_subclass_of($c, A::class)` on a string don't give
@@ -4472,7 +4476,11 @@ the rest), which the gate excludes and lists.
     [Suit::S], true)` returning leaves `Suit`, `bug-7176.php`) and, loose,
     an integer subject over an integer haystack (after `if
     (!in_array($foo, [0, 1, 2])) { exit(); }` on `int<0, 100>`, `$foo` is
-    `0|1|2`, `bug-9436.php`). A strict `in_array()` intersects the subject
+    `0|1|2`, `bug-9436.php`), and a true `in_array()` makes the haystack
+    non-empty and a false one removes the needle from it (Appendix H's
+    `in-array-haystack`, 68 nsrt mismatches: `bug-9662.php`,
+    `bug-9662-enums.php`, `enum-in-array.php`, `bug-3013.php`). A strict
+    `in_array()` intersects the subject
     with the haystack's value type instead of replacing it: on `int $i`
     against `array<string>` the true branch is `string` today where it is
     `*NEVER*`, and `$i` is `string|int` after an empty `if`. `count()` and
@@ -4525,8 +4533,16 @@ the rest), which the gate excludes and lists.
   `array_column` (215), `min`/`max` (217, 198 `mixed`), `count` (115),
   `array_slice` (102), `sprintf`/`vsprintf` (136), `settype`'s narrowing
   (`set-type-type-specifying.php`, 156), the preg `$matches` shapes
-  (`preg_match_shapes.php`, 218) and the BcMath functions and
-  `BcMath\Number` operators (`bcmath-*.php`, 304).
+  (`preg_match_shapes.php`, 218, and the 160 variable mismatches of
+  Appendix H's `preg-shapes` in 23 more files: `preg_match_all`, the `/n`
+  flag, group 0 non-falsy when the pattern has literals, `> 0` and `=== 1`
+  making groups required) and the BcMath functions and `BcMath\Number`
+  operators (`bcmath-*.php`, 304). Appendix H's `ext:` entries are the
+  variables these extensions' values flow into, 666 mismatches beyond the
+  calls themselves. Three have no counterpart in phpstan-rs today
+  (`ext:PgDml`, `ext:Randomizer`, `ext:FilterInputArray`), and
+  `getAttributes()` substitutes its template but returns an array, not a
+  list (`ext:ReflectionGetAttributes`).
 
 Gate: the analyser's built-in-name allowlist.
 
