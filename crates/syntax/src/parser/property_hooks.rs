@@ -10,6 +10,7 @@ impl Parser {
     pub(crate) fn parse_property_hooks(&mut self) -> Result<PropertyHooks, ParseError> {
         self.expect(&Token::LBrace)?;
         let mut get = None;
+        let mut get_by_ref = false;
         let mut set = None;
         let mut get_attrs = Vec::new();
         let mut set_attrs = Vec::new();
@@ -49,9 +50,7 @@ impl Parser {
                 self.skip();
             }
             // `&get => ...` - the hook returns its value by reference.
-            // Aliasing isn't modeled anywhere in this checker, so it's
-            // just consumed.
-            self.eat(&Token::Amp);
+            let hook_by_ref = self.eat(&Token::Amp);
             let is_set =
                 matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("set"));
             self.skip(); // `get` or `set`
@@ -76,6 +75,7 @@ impl Parser {
                     by_ref,
                     variadic: false,
                     promoted_visibility: None,
+                    promoted_set_visibility: None,
                     promoted_readonly: false,
                     promoted_final: false,
                     hooks: None,
@@ -113,6 +113,7 @@ impl Parser {
                 set_final = hook_final;
             } else {
                 get = body;
+                get_by_ref = hook_by_ref;
                 get_attrs = hook_attrs;
                 get_doc = hook_doc;
                 get_final = hook_final;
@@ -121,6 +122,7 @@ impl Parser {
         self.expect(&Token::RBrace)?;
         Ok(PropertyHooks {
             get,
+            get_by_ref,
             set,
             get_attrs,
             set_attrs,

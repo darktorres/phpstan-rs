@@ -740,3 +740,49 @@ fn a_declaration_with_no_attributes_has_an_empty_attrs_list() {
     assert!(c.methods[0].function.attrs.is_empty());
     assert!(c.consts[0].attrs.is_empty());
 }
+
+#[test]
+fn a_promoted_parameter_keeps_its_set_visibility() {
+    let program = parse(
+        r#"<?php
+            class C {
+                public function __construct(public private(set) string $a, protected(set) int $b) {}
+            }
+            "#,
+    );
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    let params = &c.methods[0].function.params;
+    assert!(matches!(
+        params[0].promoted_visibility,
+        Some(Visibility::Public)
+    ));
+    assert!(matches!(
+        params[0].promoted_set_visibility,
+        Some(Visibility::Private)
+    ));
+    assert!(matches!(
+        params[1].promoted_visibility,
+        Some(Visibility::Public)
+    ));
+    assert!(matches!(
+        params[1].promoted_set_visibility,
+        Some(Visibility::Protected)
+    ));
+}
+
+#[test]
+fn a_by_reference_get_hook_is_recorded() {
+    let program = parse(
+        r#"<?php
+            class C {
+                public array $items { &get => $this->items; }
+            }
+            "#,
+    );
+    let StmtKind::ClassDecl(c) = &program[0].kind else {
+        panic!("expected ClassDecl");
+    };
+    assert!(c.properties[0].hooks.as_ref().unwrap().get_by_ref);
+}

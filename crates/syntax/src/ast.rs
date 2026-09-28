@@ -190,6 +190,9 @@ pub struct Param {
     // Some(visibility) for constructor property promotion, e.g.
     // `public function __construct(private int $id) {}`.
     pub promoted_visibility: Option<Visibility>,
+    // `private(set)` on a promoted constructor parameter: who may write the
+    // property. `None` without one.
+    pub promoted_set_visibility: Option<Visibility>,
     // `public readonly int $id` in a promoted constructor parameter.
     // Meaningless when promoted_visibility is None.
     pub promoted_readonly: bool,
@@ -326,6 +329,8 @@ pub enum PropertyHookBody {
 #[derive(Debug, Clone)]
 pub struct PropertyHooks {
     pub get: Option<PropertyHookBody>,
+    // `&get`: the hook returns its value by reference.
+    pub get_by_ref: bool,
     // The optional `(Type $value)` parameter list is just the one param
     // PHP allows there; None when the hook omits it (`set { ... }` uses an
     // implicit $value).

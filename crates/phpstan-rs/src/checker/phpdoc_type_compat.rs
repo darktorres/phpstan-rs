@@ -291,6 +291,7 @@ impl<'a> Checker<'a> {
                         by_ref: false,
                         variadic: false,
                         promoted_visibility: None,
+                        promoted_set_visibility: None,
                         promoted_readonly: false,
                         promoted_final: false,
                         hooks: None,

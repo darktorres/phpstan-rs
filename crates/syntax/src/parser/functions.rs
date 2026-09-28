@@ -30,7 +30,7 @@ impl Parser {
             let mut promoted_visibility = None;
             let mut promoted_readonly = false;
             let mut promoted_final = false;
-            let mut saw_set_visibility = false;
+            let mut promoted_set_visibility = None;
             loop {
                 // PHP 8.4 asymmetric visibility on a promoted property
                 // (`public public(set) string $a`) - see the identical
@@ -40,11 +40,15 @@ impl Parser {
                     Token::Keyword(Keyword::Public | Keyword::Private | Keyword::Protected)
                 ) && self.peek_is_set_visibility_marker()
                 {
+                    promoted_set_visibility = match self.peek() {
+                        Token::Keyword(Keyword::Private) => Some(Visibility::Private),
+                        Token::Keyword(Keyword::Protected) => Some(Visibility::Protected),
+                        _ => Some(Visibility::Public),
+                    };
                     self.skip();
                     self.skip();
                     self.expect_ident()?;
                     self.expect(&Token::RParen)?;
-                    saw_set_visibility = true;
                     continue;
                 }
                 match self.peek() {
@@ -71,7 +75,7 @@ impl Parser {
             // (`private(set) string $a`) still promotes, with implicit
             // `public` visibility.
             if promoted_visibility.is_none()
-                && (saw_set_visibility || promoted_readonly || promoted_final)
+                && (promoted_set_visibility.is_some() || promoted_readonly || promoted_final)
             {
                 promoted_visibility = Some(Visibility::Public);
             }
@@ -107,6 +111,7 @@ impl Parser {
                 by_ref,
                 variadic,
                 promoted_visibility,
+                promoted_set_visibility,
                 promoted_readonly,
                 promoted_final,
                 hooks,
