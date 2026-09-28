@@ -4874,8 +4874,9 @@ fixture:
     today (`overriding-variadics.php`), and a variadic may absorb the
     parent's parameters: `doFoo(int ...$everything)` over `doFoo(int $a,
     int $b)` is `parameter.missing` today, a false positive
-    (`less-parameters-variadics.php`, where its `int` against the parent's
-    untyped parameters is `method.childParameterType`);
+    (`less-parameters-variadics.php`, where `int ...$everything` over
+    `doFoo(int $many, string $parameters, string $here)` is
+    `method.childParameterType` against each `string` parameter);
   - a parameter is checked for contravariance against a trait's abstract
     method (private ones included), a built-in parent's native signature
     (`offsetExists(int $index)` in an `SplFixedArray` subclass, a compile
