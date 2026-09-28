@@ -393,8 +393,8 @@ through `check-project`.
   (`property.onlyWritten`); `new $this->map['m'](1)` likewise, and the
   constructed type is lost. A common factory idiom. (syntax final state,
   probed)
-- [ ] **F55. An anonymous class's constructor arguments are taken as its
-  own scope.** `opens_scope` (`visit.rs`) counts `NewAnonymousClass`, "its
+- [x] **F55. An anonymous class's constructor arguments are taken as its
+  own scope.** (`1c301f1b`) `opens_scope` (`visit.rs`) counts `NewAnonymousClass`, "its
   constructor arguments included", but PHP evaluates `new class(ARGS)`'s
   arguments in the enclosing scope. `body_contains_yield` misses `new
   class(yield 1) {…}`, so a `\Generator` function holding it reports
