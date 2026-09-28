@@ -2952,6 +2952,12 @@ latency for the dominant editing case.
 
 **Effort: large.**
 
+**Depends on:** crate-split F1's `update` and F2's per-name fingerprints:
+`Project::update_file`, `run_probe_scope` and the whole-registry passes it cites
+are gone by then, and the per-function re-check becomes the edited function's
+statements rechecked against F1's snapshot when every exported fingerprint
+holds.
+
 #### G2. Per-symbol signature-shape fingerprinting to skip re-checking unaffected dependents
 
 Give every declared symbol a cheap fingerprint covering only its
@@ -2988,6 +2994,10 @@ drive re-check scheduling.
 
 **Effort: large.**
 
+**Carried by:** crate-split F2 ("Fingerprints": kept per exported name, so an
+edit that changes one class's signature rechecks that class's readers alone;
+`transitive_affected_files` and `dependents` are deleted there).
+
 ---
 
 ### Phase 107 — `textDocument/codeLens` reference-count annotations (§AH)
@@ -3010,6 +3020,9 @@ persisted cross-file use-site index and no channel to push
 editor-rendered annotations without modifying the analyzed source.
 
 **Effort: medium.**
+
+**Carried by:** crate-split F5 (reference-count code lenses, from E1's
+reference-site collector, which replaces the use-site index this item names).
 
 ---
 
@@ -3040,6 +3053,10 @@ depending on two things: R1's PSR-4 prefix-map access (not yet built) and
 the use-site span index the now-shipped `rename` support already built.
 
 **Effort: large.**
+
+**Carried by:** crate-split F5 ("Rename produces code that still resolves": a
+PSR-4 class's file rename, and `workspace/willRenameFiles` offering the class
+rename as its edit).
 
 ---
 
@@ -3081,6 +3098,8 @@ populates).
 
 **Effort: large.**
 
+**Depends on:** crate-split E6's observers and F5's position query.
+
 #### T2. Per-pass loop-convergence widening trace, for a diagnostic whose type came from fixed-point iteration rather than branch narrowing
 
 `Checker::converge_loop_body` (`control_flow.rs:331-384`) runs up to
@@ -3114,6 +3133,9 @@ before/after diff there is retaining data that already exists for one more
 statement's worth of scope, not computing anything new.
 
 **Effort: medium.**
+
+**Depends on:** crate-split E6's observers, which record what narrowed or
+widened a type as events, and F5's position query.
 
 ---
 
