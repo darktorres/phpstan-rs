@@ -4056,13 +4056,17 @@ cause, a plan item citing the file and count. Each E3 sub-phase ends when its
 identifiers have no PHPStan-only findings left, or each remaining one is an
 approved deviation (an identifier named differently, such as
 `class.abstractMethodNotImplemented` for `method.abstract`, or a
-PHPStan-specific check: `void.pure`, `phpstan.*`, `phpParser.*`,
+PHPStan-specific check: `phpstan.*`, `phpParser.*`,
 `phpstanApi.*` outside a PHPStan extension's package, `function.inner`,
 PHPStan's "inner named functions are not supported", and `class.prefixed`
 for a `_PHPStan_` prefix; the Rector, PHP-Scoper, PHPUnit PHAR and Box
 prefixes it also reports name classes that change with each release of
 those tools and ship opt-in in ext-extras, the rules oracle's other 4 of
-9). A certain impure
+9). `void.pure` ("returns void but does not have any side effects") is a
+real dead-code check, not PHPStan-specific: it ships opt-in in ext-extras,
+the rules oracle's 81 being mostly test scaffolding
+(`filter-var-throw-on-failure.php`, `goto-undefined-label.php`,
+`inc-dec-gmp.php`). A certain impure
 point PHPStan names `impure.*` is `possiblyImpure.*` in phpstan-rs until
 C5's `functionMetadata.php` says which built-ins have side effects (42
 rules-oracle findings).
