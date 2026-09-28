@@ -2885,7 +2885,14 @@ deleted; the file-size gate.
       (nsrt `loose-comparisons.php:325`, `:460`; the table's other 192
       verdicts in the suite agree). The table follows the analysed PHP
       version: before 8.0, `0 == 'php'` is `true`, and it is `bool` at 7.4
-      today (nsrt `loose-comparisons-php7.php`);
+      today (nsrt `loose-comparisons-php7.php`). Beyond two constants,
+      `==` is decided by each type's `looseCompare`: `int<10, 20>` against
+      `3`, `null`, `false`, `' 3'` or `'13foo'`, a `non-falsy-string`
+      against `''`, `[]` or `false|null`, `0|1|false` against `2`, an enum
+      against another enum's case, and `array == int` are
+      `equal.alwaysFalse`, unreported today (the rules oracle's 25
+      PHPStan-only: `bug-11694.php`, 14, `bug-14606.php`, `bug-8485.php`,
+      `bug-8800.php`, `invalid-comparison.php`);
     - a string offset write doesn't change the string: `$s[6] = 'b'` on
       `'foo   '` leaves `'foo'`;
     - late static binding of a constant in an inherited method:
