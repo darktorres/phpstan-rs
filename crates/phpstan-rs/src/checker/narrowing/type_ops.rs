@@ -96,11 +96,27 @@ fn is_object_like(ty: &Type) -> bool {
 pub(crate) fn narrow_type_to(relation: &Relation, original: &Type, target: &Type) -> Type {
     match original {
         Type::Union(members) | Type::BenevolentUnion(members) => {
-            let kept: Vec<Type> = members
-                .iter()
-                .filter(|m| relation.accepts(target, m).yes())
-                .cloned()
-                .collect();
+            // A member the target covers stays; one it doesn't gives way
+            // to the target's members inside it (`?string` narrowed to
+            // `'a'|null` is `'a'|null`).
+            let target_members: &[Type] = match target {
+                Type::Union(ms) | Type::BenevolentUnion(ms) => ms,
+                other => std::slice::from_ref(other),
+            };
+            let mut kept: Vec<Type> = Vec::new();
+            for m in members {
+                if relation.accepts(target, m).yes() {
+                    if !kept.contains(m) {
+                        kept.push(m.clone());
+                    }
+                    continue;
+                }
+                for t in target_members {
+                    if relation.accepts(m, t).yes() && !kept.contains(t) {
+                        kept.push(t.clone());
+                    }
+                }
+            }
             match kept.len() {
                 0 => target.clone(),
                 1 => kept.into_iter().next().unwrap(),
