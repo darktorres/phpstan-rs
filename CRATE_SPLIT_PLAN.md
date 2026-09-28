@@ -22,7 +22,8 @@ once its API is final. So:
 - no test is stranded behind a dev-dependency cycle.
 
 Lower layers (syntax, types, phpdoc, stub-sources, sql, diagnostics,
-composer, config, reflection) are extracted as soon as they're finished.
+composer, config, reflection, php-regex) are extracted as soon as they're
+finished.
 The engine and everything above it is redesigned in the package and
 extracted in one final wave.
 
@@ -84,6 +85,9 @@ L1  phpdoc        the single PHPDoc grammar -> TypeNode AST; DocBlock  (syntax)
     composer      composer.json / installed.json model, package context
                                                                   (syntax)
     neon          NEON decoder (ROADMAP Phase 183)                (no deps)
+    php-regex     PHP's pattern syntax (delimiters, modifiers, php_pcre.c's
+                  rules) compiled through pcre, or regex without
+                  `pcre-validate`                                 (pcre)
 L2  config        loader and section-owner registry with schema
                   validation; each settings type lives with its owner
                   module                                          (diagnostics)
@@ -101,8 +105,8 @@ L4  analyser      engine: holder scope, ExprHandlers, results, TypeSpecifier,
                   Emits nothing
                                     (reflection and below; no composer, no I/O)
 L5  builtins      = phpstan-src/src/Type/Php: always registered, can't be
-                  switched off; incl. regex + PCRE validation (`pcre-validate`,
-                  over `pcre`) and the date parser                (analyser)
+                  switched off; incl. regex group typing and PCRE validation
+                  (over `php-regex`) and the date parser          (analyser)
     rules         phpstan-src/src/Rules equivalents + project-level
                   collector rules                                 (analyser,
                   builtins)
@@ -123,9 +127,11 @@ L8  phpstan-rs    bin: clap global flags + `--set`, calls app::run, or
 
 `crash-context`, `pcre` and `crash-sys` come from the sibling plans
 (`CRASH_REPORTING_PLAN.md` §5, `UNSAFE_PLAN.md`): the engine crates and
-`project` call `crash-context`, `builtins` alone links `pcre` (optionally, under
-`pcre-validate`), and `app` alone links `crash-sys` (under its
-`crash-reporting` feature).
+`project` call `crash-context`, `php-regex` alone links `pcre` (optionally,
+under `pcre-validate`), and `app` alone links `crash-sys` (under its
+`crash-reporting` feature). `php-regex` sits low because a PHP pattern is read
+below `builtins` too: `project` compiles `ignore_errors` messages at load (C1)
+and matches them in the finalizer, and `project` doesn't depend on `builtins`.
 
 **L5 sub-DAG.** `builtins ← rules ← ext-*`. An `ext-*` crate may depend on
 `analyser`, `builtins`, `rules`, `reflection` and `sql`, and never on
@@ -205,8 +211,9 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
     `TypeNodeResolverExtension`, `diagnostics`' builders, `config`'s section
     trait, `reflection`).
 - **Features.**
-  - `pcre-validate` lives in `builtins` with no default, and links `pcre`.
-    The bin declares `default = ["pcre-validate"]` and forwards it. Tests that
+  - `pcre-validate` lives in `php-regex` with no default, and links `pcre`;
+    `builtins` and `project` forward it, and the bin declares
+    `default = ["pcre-validate"]` and forwards it. Tests that
     need real PCRE2 are `#[cfg(feature = "pcre-validate")]`, with complements
     for the disabled path.
   - `fuzzing` lives in `syntax`.
@@ -4683,7 +4690,11 @@ the rest), which the gate excludes and lists.
   `array_ops` returns, `preg_shapes`, `date_time`, the contextual-callback
   block, preg `$matches` out-types, GMP / BcMath operators, the built-in
   narrowing predicates, the date / xml / DateInterval validators (as
-  throw-type extensions), regex / PCRE, and the date parser.
+  throw-type extensions), regex / PCRE, and the date parser. PHP's pattern
+  syntax (`parse_php_pattern`, the options, compiling through `pcre` or
+  `regex`) is extracted as `php-regex`, as the finished lower layers are, since
+  `project`'s ignore messages and ext-psr3's context-key pattern read it too;
+  `builtins::regex` keeps group typing and the validation diagnostics over it.
 - `builtins` is always registered, including by the testing harness.
 - Every return-type extension in Appendix G reaches the most precise type that
   holds at runtime in the nsrt suite (3,015 mismatches over 93 extensions
@@ -7415,18 +7426,18 @@ held to the previous commit's:
 
 Stage G starts when F is done. The lower layers are crates already: `syntax`,
 `types`, `phpdoc`, `stub-sources`, `sql`, `diagnostics`, `composer`, `config`
-and `reflection` (B, C10), with the sibling plans' `crash-context`, `pcre` and
-`crash-sys`, and `neon` once Phase 183 lands. Everything from `analyser` up is
-still modules of the one `phpstan-rs` package (`crates/phpstan-rs/src`), each
-assigned its crate by Appendix A and held to it by the module-graph gate, whose
-`allow` list is empty: every edge and misplaced `impl` it listed (235 edges
-today) named a phase up to F, and each phase removed its own. The package's
-library is used by its binary, its integration tests (`tests/cli.rs`,
-`version.rs`, `lsp_exit_code.rs`, the fixture harness `tests/fixtures.rs` over
-8,347 fixture files in `tests/fixtures/{checker,project}`), its bench
-(`benches/vendored_corpus.rs`), `tools/gate-runner` and `tools/crash-repro`
-(`CRASH_REPORTING_PLAN.md` §5), and the fuzz package's `structured_php` target,
-all through `phpstan_rs::…` paths.
+`reflection` and `php-regex` (B, C10, E2), with the sibling plans'
+`crash-context`, `pcre` and `crash-sys`, and `neon` once Phase 183 lands.
+Everything from `analyser` up is still modules of the one `phpstan-rs` package
+(`crates/phpstan-rs/src`), each assigned its crate by Appendix A and held to it
+by the module-graph gate, whose `allow` list is empty: every edge and misplaced
+`impl` it listed (235 edges today) named a phase up to F, and each phase removed
+its own. The package's library is used by its binary, its integration tests
+(`tests/cli.rs`, `version.rs`, `lsp_exit_code.rs`, the fixture harness
+`tests/fixtures.rs` over 8,347 fixture files in
+`tests/fixtures/{checker,project}`), its bench (`benches/vendored_corpus.rs`),
+`tools/gate-runner` and `tools/crash-repro` (`CRASH_REPORTING_PLAN.md` §5), and
+the fuzz package's `structured_php` target, all through `phpstan_rs::…` paths.
 
 ROADMAP Phase 184 renames the project between two crate-split phases, and
 every `Cargo.toml` changes in it. When the name is chosen before G, the rename
@@ -7526,7 +7537,8 @@ What an extraction checks:
   is.
 - **Features.** A feature the crate's code tests is declared by the crate and
   forwarded by the bin (§2: `hotpath` for `analyser`'s `measure_outermost!`,
-  `crash-injection` for `project`'s hook, `pcre-validate` for `builtins`); a
+  `crash-injection` for `project`'s hook, `pcre-validate` through `builtins`
+  and `project` to `php-regex`); a
   `cfg(feature)` naming a feature its crate lacks is an `unexpected_cfgs` error
   under clippy's `-D warnings`.
 - **The public API** is snapshotted from the extraction commit on (gate 14), and
@@ -7578,9 +7590,9 @@ Per crate:
   `RuleLevelHelper`, `AnalysisContext` and the summaries API, the
   reference-site collector (§3.8). No `composer` dependency and no I/O (its
   module-graph row, and gate 10's rules, already hold it to both).
-- **`builtins`**: the `pcre-validate` feature, off by default, linking `pcre`;
-  the bin's `default = ["pcre-validate"]` forwards `builtins/pcre-validate`, and
-  the tests gated on it move with their modules. `roxmltree` moves here.
+- **`builtins`**: forwards `pcre-validate` to `php-regex` (E2), the bin's
+  `default = ["pcre-validate"]` reaching it through `builtins` and `project`,
+  and the tests gated on it move with their modules. `roxmltree` moves here.
 - **`rules`**, with the `[rules]` section's settings type (`rules_settings`).
 - **Each `ext-*`**: its rules, collectors, extensions, config section and
   settings, and the composer packages whose installation activates it (C1),
@@ -7863,7 +7875,7 @@ moves in the phase named.
 | php_version | types | B4 |
 | php_float_format | types | B4 |
 | php_date_parser | builtins | E2 |
-| regex_groups, pcre_validate | builtins::regex | E2 |
+| regex_groups, pcre_validate | pattern syntax and compiling → php-regex; group typing and validation → builtins::regex | E2 |
 | checker/preg_pattern_validity | rules (`RegularExpressionPatternRule`, over builtins::regex) | E3c |
 | php_stubs + build.rs | stub-sources (sources, index) + reflection::stubs (layer) | B9/C5 |
 | stub_attributes | reflection::stubs (the version layer applies them per `PhpVersions` range) | C5 |
@@ -8088,11 +8100,11 @@ its owner. Non-Registry keys follow the table.
 | imbl | syntax (name resolution's `use` map); analyser (holder maps); reflection only if its snapshots use it |
 | indexmap | reflection |
 | md5 | reflection (anonymous-class naming) |
-| pcre2-sys | pcre, which `builtins` links under `pcre-validate` (`UNSAFE_PLAN.md`) |
+| pcre2-sys | pcre, which `php-regex` links under `pcre-validate` (`UNSAFE_PLAN.md`) |
 | backtrace | crash-context |
 | the crash reporter's (sentry and the rest `CRASH_REPORTING_PLAN.md` lists) | app, under `crash-reporting`; crash-sys |
-| rayon | project; reflection while it indexes stubs and runs purity in parallel (decided in C5) |
-| regex | config (globs), app, lsp (reflection uses none) |
+| rayon | project (the worker pool, behind a type of its own, so `app` and `lsp`, which pass `rayon::ThreadPool` today, name no `rayon`); reflection while its hierarchy, resolution and stub indexing run in parallel (decided in C5); analyser for the purity summaries C9 moves there |
+| regex | php-regex (the fallback without `pcre-validate`); rules (format-string placeholders, architecture patterns); config uses none (C1's matcher is fnmatch), nor reflection |
 | roxmltree | builtins (xml validators) |
 | rustc-hash | wherever used |
 | serde | every crate with a config section or serialized output |
