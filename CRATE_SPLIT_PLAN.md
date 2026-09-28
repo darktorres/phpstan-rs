@@ -4961,7 +4961,15 @@ fixture:
     `'Test'|'Projekt in Umsetzung'` domain, stays
     (`TooWideTypeCheck::narrowType`; 10 rules-oracle findings,
     `bug-11453.php`,
-    `bug-10312*.php`);
+    `bug-10312*.php`); it is reported where today it is skipped: for
+    closures and arrow functions (`fn (): ?string => 'foo'`,
+    `tooWide*ReturnType.php`, `closure*ReturnTypes.php`,
+    `native-union-types.php`, 8), for a body that can fall off the end,
+    which is a `TypeError` and never a `null` return (`function (): ?string
+    { if (rand()) { return 'foo'; } }` never returns `null`; `dolor2()`,
+    `dolor4()`), and for a conditional return type, whose branches are
+    members (`($flag is 1 ? string : int)` returning `$flag` never returns
+    `string`); the rules oracle's 22 PHPStan-only;
   - a return type that includes `void` accepts falling off the end (fixed
     first): `@return void|int` on a function that returns only on some
     paths is `return.missing` today, 10 of the oracle's 38 phpstan-rs-only
