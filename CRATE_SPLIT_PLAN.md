@@ -1345,8 +1345,9 @@ Follow-ups:
   nowhere else: a missing member on a union or intersection, GMP operators
   with a non-numeric string, a PHPDoc for a missing parameter, `$this` in a
   static closure). D3's handlers produce it.
-- **Subtracted types.** `mixed~T` and `object~T`/`Foo~Bar` (PHPStan's
-  `subtractedType`) are variants: narrowing `mixed` away from a type keeps
+- **Subtracted types.** `mixed~T`, `object~T`, `Foo~Bar` and
+  `$this(Foo~Bar)` (PHPStan's `SubtractableType`): narrowing a type away
+  from `mixed`, `object`, a class, `static`/`$this` or a template keeps
   what was removed. Today `$m !== null`, `isset($m)` and `!is_int($m)` on a
   `mixed` all leave plain `mixed`, so a level-9/10 check can't see that
   `null` is gone, and after `if ($o instanceof \Exception) { return; }` a
@@ -1356,6 +1357,26 @@ Follow-ups:
   75 nsrt mismatches: `mixed~null` after `isset`, `mixed~bool` after
   `!is_bool`, `$this(Foo~(Bar|Baz))`, `mixed~object`,
   `bug-15060.php`, `mixed-subtract.php`, `this-subtractable.php`).
+  - The subtraction is a field of the subtractable variants, not a
+    wrapper: `Mixed { explicit, subtracted }`, `Object { class, args,
+    subtracted }`, `ObjectWithoutClass { subtracted }`, and the same on
+    `This`/`StaticRef` and `TemplateParam`. `mixed~null` stays a `mixed`
+    to every arm that asks, and each pattern over these variants is
+    rewritten, not left to a `_` arm.
+  - `==` on `Type` is structural, every field included; PHPStan's
+    `equals()` (which ignores `explicit`) is `Type::equals`. Each `==` on
+    types today is audited into one or the other, and each `==
+    Type::Mixed(false)` into `is_mixed()` or an exact comparison.
+  - One set of `Type` methods (`subtracted`, `subtract`,
+    `with_subtracted`, `without_subtracted`) carries display
+    (`mixed~null`, `Foo~(Bar|Baz)`), the relations, union
+    (`mixed~null|null` is `mixed`) and intersection.
+  - Narrowing is `Relation::intersect` on the true branch and
+    `Relation::remove` (`TypeCombinator::remove`) on the false one, in
+    `crates/types`: `narrow_type_to` and `narrow_type_excluding` become
+    calls to them, and their special cases (`string` less `''`, `bool`
+    less `true`, `Traversable` less `Iterator`) become rules of `remove`.
+    Removing an enum case and truthiness below are further rules of it.
   A `@phpstan-sealed a|b|c`
   class is its permitted subclasses for narrowing (validated today,
   oop.rs and `sealed()`, but never read by inference): after `if ($s
@@ -1554,15 +1575,27 @@ Follow-ups:
   `iterable_value_of`/`iterable_key_of` (`var_tag_types`), and
   `is_string`/`is_string_type`/`is_exactly_string_operand`/
   `is_string_shaped`/`is_string_or_nullable_string` across `strict_rules`,
-  `offset_assignment`, `operators` and `expr`. Each question becomes one
-  `Type` method (a trinary one where PHPStan's is: `is_array()` of
-  `array|int` is `Maybe`), or a `Relation` method where it needs the class
-  hierarchy, in `crates/types`. The checker's helpers are deleted and their
-  callers read the method; where two copies disagreed, the method follows
-  PHPStan and the difference is fixtured. Subtraction, `Relation::remove`
-  and the coercions already moving in follow the same shape. Member
-  lookup (`getMethod`/`getProperty`/`getConstant`) waits for C8's
-  reflection.
+  `offset_assignment`, `operators` and `expr`. Measured: 373 functions in
+  `crates/phpstan-rs/src` take a `Type` (204 free, 169 methods; 50 of them
+  rules that report, the rest questions: 32 offset and key, 22 iteration,
+  41 template binding, 28 constant values, 32 `is_*`/`has_*`, 21
+  narrowing, 15 coercion, 14 union flattening, 7 comparison, 22 name
+  resolution, 85 unsorted), and 108 files hold about 1,055 inline
+  inspections (`matches!(.., Type::..)`, `if let Type::..`, match arms).
+  - Each question becomes one `Type` method (a trinary one where PHPStan's
+    is: `is_array()` of `array|int` is `Maybe`), or a `Relation` method
+    where it needs the class hierarchy, in `crates/types`.
+  - The checker's helpers are deleted, and every inline inspection that
+    asks one of these questions calls the method. What stays in the
+    checker is building types from syntax and deciding what to report.
+  - Where two copies disagreed, the method follows PHPStan and the
+    difference is fixtured.
+  - A gate holds it: xtask counts `Type::` patterns outside
+    `crates/types` and fails when the count grows, ratcheting down as
+    sites move.
+  - Subtraction, `Relation::remove` and the coercions already moving in
+    follow the same shape. Member lookup (`getMethod`/`getProperty`/
+    `getConstant`) moves once C8's reflection exists.
 - **Tests move in.** `checker/tests/accessory_and_refinement_types.rs`
   (12 tests of `types::union_types`) and
   `checker/tests/array_literals_and_shapes.rs` (2 of
