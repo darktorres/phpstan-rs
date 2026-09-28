@@ -4775,7 +4775,9 @@ fixture:
   - `@no-named-arguments` forbids named arguments and string-keyed
     unpacking: `nn(b: 1, a: 2)` for a `@no-named-arguments` function isn't
     `argument.named` today (11 oracle findings, PHPUnit's
-    `Generator::testDouble()` among them);
+    `Generator::testDouble()` among them; the rules oracle's 10, a named
+    argument through `call_user_func()` and an unpacked array with a
+    string or possibly-string key included);
   - a `void` call's result is reported where it is used (`method.void`,
     `staticMethod.void`, `function.void`): `$x = $o->v();` for `v(): void`
     isn't reported today (54 oracle findings, e.g. PSR-3
