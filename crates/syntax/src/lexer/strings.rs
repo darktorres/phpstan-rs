@@ -519,6 +519,7 @@ impl<'a> Lexer<'a> {
                             var_start: base,
                             var_end,
                             prop,
+                            nullsafe: false,
                             end,
                         });
                     }
@@ -617,12 +618,18 @@ impl<'a> Lexer<'a> {
                 // the whole thing at its real starting position.
                 let base = self.line_col_at(off(name_start - 1));
 
-                if bytes.get(i) == Some(&b'-')
-                    && bytes.get(i + 1) == Some(&b'>')
-                    && bytes.get(i + 2).is_some_and(|&c| is_ident_start(c))
+                // `->` or PHP 8's nullsafe `?->`.
+                let arrow_len = match (bytes.get(i), bytes.get(i + 1), bytes.get(i + 2)) {
+                    (Some(b'-'), Some(b'>'), _) => Some(2),
+                    (Some(b'?'), Some(b'-'), Some(b'>')) => Some(3),
+                    _ => None,
+                };
+                if let Some(arrow_len) = arrow_len
+                    && bytes.get(i + arrow_len).is_some_and(|&c| is_ident_start(c))
                 {
                     let var_end = self.line_col_at(off(i));
-                    i += 2;
+                    let nullsafe = arrow_len == 3;
+                    i += arrow_len;
                     let prop_start = i;
                     while i < bytes.len() && is_ident_continue(bytes[i]) {
                         i += 1;
@@ -636,6 +643,7 @@ impl<'a> Lexer<'a> {
                         var_start: base,
                         var_end,
                         prop,
+                        nullsafe,
                         end,
                     });
                 } else if bytes.get(i) == Some(&b'[') {

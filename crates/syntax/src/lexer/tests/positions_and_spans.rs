@@ -71,6 +71,7 @@ fn complex_interpolation_gets_a_real_base_position_on_a_later_line() {
                 var_end,
                 prop,
                 end,
+                ..
             } => Some((var.clone(), *var_start, *var_end, prop.clone(), *end)),
             _ => None,
         })
@@ -108,6 +109,7 @@ fn shorthand_property_interpolation_base_points_at_the_dollar_sign() {
                 var_end,
                 prop,
                 end,
+                ..
             } => Some((var.clone(), *var_start, *var_end, prop.clone(), *end)),
             _ => None,
         })

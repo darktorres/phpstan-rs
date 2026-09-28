@@ -310,14 +310,15 @@ pub enum StringPart {
     // compared/deduplicated again, with no downstream `Arc<str>` field to
     // carry the saved allocation into anyway.
     ComplexExpr(String, Position),
-    // `$var->prop` simple syntax. `var_start` is the `$`'s own position,
-    // `var_end` the position right after the variable name (where `->`
-    // starts), `end` the position right after `prop`.
+    // `$var->prop` (or `$var?->prop`) simple syntax. `var_start` is the
+    // `$`'s own position, `var_end` the position right after the variable
+    // name (where the arrow starts), `end` the position right after `prop`.
     PropertyAccess {
         var: Arc<str>,
         var_start: Position,
         var_end: Position,
         prop: Arc<str>,
+        nullsafe: bool,
         end: Position,
     },
     // `$var[key]` simple syntax, `key` restricted to `SimpleIndexKey`'s

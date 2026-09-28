@@ -29,6 +29,7 @@ fn heredoc_strips_indentation_and_still_interpolates_variables() {
                 var_start: at(4, 8),
                 var_end: at(4, 10),
                 prop: "p".into(),
+                nullsafe: false,
                 end: at(4, 13),
             },
         ])

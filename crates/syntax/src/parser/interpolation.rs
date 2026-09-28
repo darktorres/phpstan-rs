@@ -49,6 +49,7 @@ impl Parser {
                     var_start,
                     var_end,
                     prop,
+                    nullsafe,
                     end,
                 } => {
                     let var_expr = Expr {
@@ -59,24 +60,23 @@ impl Parser {
                             end: var_end,
                         },
                     };
+                    let arrow_len = if nullsafe { 3 } else { 2 };
                     exprs.push(Expr {
                         id: self.node_id(),
-                        // Real PHP's simple interpolation syntax has no
-                        // `?->` form - always non-nullsafe.
                         kind: ExprKind::PropertyAccess(
                             Box::new(var_expr),
                             Ident {
                                 name: self.interner.name(&prop),
-                                // Past the `->`, on the variable's line.
+                                // Past the arrow, on the variable's line.
                                 span: Span {
                                     start: Position {
                                         line: var_end.line,
-                                        col: var_end.col + 2,
+                                        col: var_end.col + arrow_len,
                                     },
                                     end,
                                 },
                             },
-                            false,
+                            nullsafe,
                         ),
                         span: Span {
                             start: var_start,
