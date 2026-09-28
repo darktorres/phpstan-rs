@@ -2260,6 +2260,14 @@ Follow-ups:
     `instanceof.alwaysTrue`, unreported today, `bug-13469.php`), the
     magic-method comparisons; the exact method accessors are deleted;
   - member resolution follows PHP: the class chain first, then interfaces;
+    an enum's native `cases()`, `from()` and `tryFrom()` implement an
+    interface declaring them (`class.abstractMethodNotImplemented` today,
+    the rules oracle's `bug-11592.php`, 6); a `@property` tag over a
+    private property makes it readable from outside through `__get`
+    (`private-property-with-allowed-property-tag-is-public.php`), and
+    inside the class the native property wins over a child's tag, so
+    `$this->attributes = [...]` on the native `array` isn't
+    `assign.propertyType` against `@property stdClass` (`bug-13537.php`);
   - trait composition: `insteadof`, visibility-changing `as` (`hello as
     private somethingElse` makes `$bar->somethingElse()` from outside
     `method.private`, unreported today; `bug-12544.php`), a trait's
@@ -2575,6 +2583,10 @@ closer hierarchy distance than the native member wins, as in
 `PhpClassReflectionExtension`. Behaviour fixes, one commit each after the
 structural one, each fixtured:
 
+- `@mixin` on a trait applies to the classes that use it, besides being
+  `mixin.trait` (E3e): `$u->get()` and `$u->a` through `@mixin Foo<static>`
+  on a used trait are `method.notFound`/`property.notFound` today (the
+  rules oracle's two `trait-mixin.php`);
 - a mixin member never shadows a native one, inherited ones included
   (`@mixin Mx` on a class whose parent declares `m()` types `$h->m()` by
   `Mx::m()` today);
@@ -4824,6 +4836,8 @@ fixture:
     and an interface or abstract method marked `@phpstan-impure` is not
     `impureMethod.pure` (it has no body to judge; 7 findings,
     `bug-5984.php`, `bug-6702.php`, `strict-comparison.php`);
+  - a `match` statement that may throw `UnhandledMatchError` has an effect
+    and isn't `expr.resultUnused` (`last-match-arm-always-true.php:69`);
   - a statement that only reads is `expr.resultUnused` whatever else the
     read reports: `$foo->test;` on an unknown class or undefined property,
     `$mixed?->foo;`, `$null->foo;`, `$resource[42];`,
@@ -4965,7 +4979,9 @@ fixture:
     `constant.notFound`, as is `__COMPILER_HALT_OFFSET__` in a file
     without `__halt_compiler()`; both unreported today
     (`remembered-constructor-scope.php`, 3,
-    `compiler-halt-offset-const-not-defined.php`);
+    `compiler-halt-offset-const-not-defined.php`); a `use const` of a
+    constant that doesn't exist is reported where the constant is read,
+    not on the `use` (`group-uses.php:9`);
   - `filterVar.nullOnFailureAndThrowOnFailure` reads the flags through a
     named `options:` argument, a variable, `filter_input()` and the
     per-key options of `filter_var_array()`/`filter_input_array()`;
@@ -5149,6 +5165,9 @@ fixture:
     subclass may hook it); all three are unreported today, as is
     `unset.readOnlyPropertyByPhpDoc` for a `@readonly` one (and every
     property of a `@readonly` or `@immutable` class; `bug-12421.php`, 3);
+    a `@readonly` property's own set hook writes it without
+    `property.readOnlyByPhpDocAssignNotInConstructor`
+    (`property-hooks-readonly-by-phpdoc-assign.php:18`);
   - a property that is only appended to is write-only:
     `$this->only[] = $v` with no read isn't `property.onlyWritten` today,
     where a plain assignment is; a read through an alias of `$this` counts
