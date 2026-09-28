@@ -3,7 +3,7 @@
   "displayName": "phpstan-rs",
   "description": "Language Server Protocol client for phpstan-rs, a Rust reimplementation of PHPStan's static analysis engine.",
   "version": "0.0.1",
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.2",
   "private": true,
   "publisher": "phpstan-rs",
   "engines": {
