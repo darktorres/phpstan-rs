@@ -265,7 +265,7 @@ With a DSN set, a run involves up to five roles of the same binary, told apart
 by `_PHPSTAN_RS_CRASH_ROLE`:
 
 | Role | Started by | Does |
-|---|---|---|
+| --- | --- | --- |
 | supervisor | the user (CLI commands only) | starts the worker, relays its exit status, waits for its finishers (§4.11) |
 | worker / app | the supervisor, or the editor for `lsp` | the real run, with the client and the minidump integration |
 | reporter | `sentry-minidump`, from the app's `init` | waits for a native crash, turns it into a pending report (§4.9) |
@@ -525,11 +525,11 @@ moves it onto the pool; its panics are reported through `entry` (§4.3).
   and starts the finisher (§4.2, §4.10).
 - **Across runs:** `<cache>/crash-reports/sent.json` records a bundle key,
   `(release, panic location, crashing file's content hash)` for a panic and
-  `(release, signal or exception code, in-progress files' content hashes)` for
-  a native crash, for each bundle the server accepted (§4.2). A repeat within 30 days still sends the event, so
-  Sentry's counts stay true, but tagged `bundle = already_sent` and without
-  the bundle. The file is updated under `File::lock` (std) and replaced by
-  rename, so concurrent runs don't lose entries.
+  `(release, signal or exception code, in-progress files' content hashes)` for a
+  native crash, for each bundle the server accepted (§4.2). A repeat within 30
+  days still sends the event, so Sentry's counts stay true, but tagged
+  `bundle = already_sent` and without the bundle. The file is updated under `File::lock`
+  (std) and replaced by rename, so concurrent runs don't lose entries.
 
 ### 4.7 Tags, context, breadcrumbs and focus
 
@@ -569,7 +569,7 @@ moves it onto the pool; its panics are reported through `entry` (§4.3).
 One `repro.tar.gz` attachment per event, built by one function
 (`bundle::build`) for every kind of crash:
 
-```
+```text
 manifest.json
 phpstan-rs.toml          the effective config, rewritten (below)
 project/<path>           files at their paths under the project root
@@ -639,21 +639,21 @@ external/<n>/<name>      files outside the root, mapped in the manifest
 
 ### 4.9 Crash state and minidumps
 
-- **Crash state:** the directory `<cache>/crash-state/<run id>/`, created
-  by the supervisor when there is one (so it knows the path) and by the app
-  otherwise, passed down in `_PHPSTAN_RS_CRASH_STATE`. The app writes
-  `state.json`: a format version, the role, command line, working directory,
-  project root, config path and effective config table, secret keys dropped
-  (§4.8); in the LSP the workspace folders, each folder's config path and
-  table, the client's `initializationOptions` and `PhpstanRsSettings`, and
-  `clientInfo`. The app holds `app.lock` in it for its whole life
-  (`File::lock`), and the reporter holds `reporter.lock` for its own; a
-  directory whose `app.lock` can be taken belongs to no live process. The LSP writes an
-  overlay into `overlays/` when `didOpen` brings text that differs from the
-  file on disk (an editor restoring an unsaved buffer) and whenever the
-  debounce worker takes a change, and removes it on `didSave` and `didClose`.
-  The app deletes the directory on a normal exit; the outbox drain (§4.12)
-  removes directories whose `app.lock` and `reporter.lock` are both free.
+- **Crash state:** the directory `<cache>/crash-state/<run id>/`, created by the
+  supervisor when there is one (so it knows the path) and by the app otherwise,
+  passed down in `_PHPSTAN_RS_CRASH_STATE`. The app writes `state.json`: a
+  format version, the role, command line, working directory, project root,
+  config path and effective config table, secret keys dropped (§4.8); in the LSP
+  the workspace folders, each folder's config path and table, the client's
+  `initializationOptions` and `PhpstanRsSettings`, and `clientInfo`. The app
+  holds `app.lock` in it for its whole life (`File::lock`), and the reporter
+  holds `reporter.lock` for its own; a directory whose `app.lock` can be taken
+  belongs to no live process. The LSP writes an overlay into `overlays/` when
+  `didOpen` brings text that differs from the file on disk (an editor restoring
+  an unsaved buffer) and whenever the debounce worker takes a change, and
+  removes it on `didSave` and `didClose`. The app deletes the directory on a
+  normal exit; the outbox drain (§4.12) removes directories whose `app.lock` and
+  `reporter.lock` are both free.
 - **Integration:** `MinidumpIntegration` with `server_env_var`
   `_PHPSTAN_RS_CRASH_REPORTER`, `process_name` `phpstan-rs crash reporter`,
   `crashes_dir` `<cache>/crashes`, and `on_process` nulling the reporter's
@@ -707,16 +707,17 @@ no minidump integration and records nothing about its own crashes.
 
 ### 4.11 Supervisor
 
-Every command but `lsp` runs under a supervisor when a DSN is set. The process the user started re-executes itself
-(`std::env::current_exe`) as the worker with the same arguments
-(`std::env::args_os`, so non-UTF-8 arguments pass through exactly), inherited
-stdio, and a run id in the environment. It waits for the worker, then:
+Every command but `lsp` runs under a supervisor when a DSN is set. The process
+the user started re-executes itself (`std::env::current_exe`) as the worker with
+the same arguments (`std::env::args_os`, so non-UTF-8 arguments pass through
+exactly), inherited stdio, and a run id in the environment. It waits for the
+worker, then:
 
 - on a normal exit, exits with the worker's code;
 - after an abnormal end that left no pending report for the run (on Windows,
   a `__fastfail` abort, exit code `0xC0000409`; anywhere, a crash the
   reporter missed), creates one itself: a fatal event
-  "worker terminated by <signal or exception code>" with `unit = native` and
+  "worker terminated by `<signal or exception code>`" with `unit = native` and
   the run's crash state, finished like any other (§4.10), with no focus, so
   its bundle is the manifest and config alone. Terminations from outside
   (`SIGKILL`, `SIGTERM`, `SIGINT`, `SIGHUP`) are not reported: they are a
@@ -754,7 +755,7 @@ editor restarts it, and its detached finishers run on the same machine.
 `<cache>/crash-outbox/` holds `ready/` (envelopes waiting to be sent) and
 `pending/` (reports waiting for their finisher). Each entry is a directory:
 
-```
+```text
 envelope        the serialised envelope
 meta.json       format version, DSN hash, created, attempts, not_before, run id, bundle key
 entry.lock      empty; held by whoever is writing, sending or finishing it
@@ -764,19 +765,20 @@ finisher.log    pending entries only
 
 Every lock in this plan is a dedicated empty `*.lock` file, never the data it
 guards: Windows locks are mandatory, so locking `envelope` itself would stop
-another process from reading it. A sender takes `entry.lock`
-with `try_lock` before sending and skips the entry when it can't, so two runs
-draining at once never send one report twice; the transport holds it from
-writing the entry until it is sent or left for later. An entry is sent only
-by a client with the same DSN hash, so switching servers never sends old
-reports to the new one. An entry whose `meta.json` format version is newer
-than the running binary's is left alone (a downgrade); an older one is read
-by the version's own rules, which each format change keeps. At start, the app and the LSP drain
-it on a background thread: `ready/` entries are sent, `pending/` entries whose
-lock is free are handed to a finisher, stale crash-state directories are
-removed, and dumps older than a day in `<cache>/crashes` (left by a reporter
-killed mid-upload) are deleted. Entries older than 30 days are deleted, and
-the oldest go first once the outbox passes 100 MiB.
+another process from reading it. A sender takes `entry.lock` with `try_lock`
+before sending and skips the entry when it can't, so two runs draining at once
+never send one report twice; the transport holds it from writing the entry until
+it is sent or left for later. An entry is sent only by a client with the same
+DSN hash, so switching servers never sends old reports to the new one. An entry
+whose `meta.json` format version is newer than the running binary's is left
+alone (a downgrade); an older one is read by the version's own rules, which each
+format change keeps. At start, the app and the LSP drain it on a background
+thread: `ready/` entries are sent, `pending/` entries whose lock is free are
+handed to a finisher, stale crash-state directories are removed, and dumps older
+than a day in `<cache>/crashes` (left by a reporter killed mid-upload) are
+deleted. Entries older than 30 days are deleted, which is also as far back as
+Relay accepts an event's timestamp by default (`max_secs_in_past`), and the
+oldest go first once the outbox passes 100 MiB.
 
 ### 4.13 Failures in the reporting itself
 
@@ -789,6 +791,11 @@ the oldest go first once the outbox passes 100 MiB.
 - The server unreachable: the envelope stays in the outbox. A CLI run that
   can't send within `shutdown_timeout` prints
   `phpstan-rs: N crash report(s) kept in <outbox> for the next run`.
+- A CLI run interrupted (Ctrl-C, `SIGTERM`) after an isolated panic but
+  before the end of the run loses its event, since grouping and bundling
+  happen at the end. The run's own report, printed at the same point, is lost
+  the same way, so the two stay consistent; a crash that recurs is reported
+  by the next run that finishes.
 - A rejected envelope (4xx other than 429): deleted, with
   `phpstan-rs: the crash-report server rejected a report (<status>)` on
   stderr.
