@@ -4149,6 +4149,26 @@ the rest), which the gate excludes and lists.
   narrowing predicates, the date / xml / DateInterval validators (as
   throw-type extensions), regex / PCRE, and the date parser.
 - `builtins` is always registered, including by the testing harness.
+- The throw-type extensions `throws/dynamic.rs` lacks are added, each
+  throwing only for the arguments that can fail: `array_chunk()`/
+  `str_split()` with a length that may be below 1 (`ValueError`),
+  `array_combine()` of unequal sizes, `min()`/`max()` of one possibly
+  empty array, the printf family for a format that may be invalid or
+  short of arguments (`ValueError`, `ArgumentCountError`), `get_class()`
+  without an argument outside a class (`Error`) and of a non-object
+  (`TypeError`), `round()` with an invalid mode, `trigger_error()` with a
+  level other than `E_USER_*`, `unserialize()` with invalid options,
+  `version_compare()` with an unknown operator, `Ds\Map::get()`/
+  `remove()` without a default, `DateTime::modify()`,
+  `DateInterval::createFromDateString()` and the `ReflectionClassConstant`
+  constructor (PHPStan's `*ThrowTypeExtension`s). Without them a `catch`
+  around such a call can't be judged, so `catch.neverThrown` (D2's throw
+  points, E3f) misses them: the rules oracle's `printf-throw-type.php`
+  (20), `min-max-throw-type.php`, `round-throw-type.php`,
+  `get-class-throw-type.php`, `unserialize-throw-type.php`,
+  `str-split-throw-type.php`, `array-chunk-throw-type.php`,
+  `trigger-error-throw-type.php`, `ds-map-void-throw-type.php`,
+  `bug-9066.php` (about 50).
 - Behaviour commits, each with its fixture, after the move. Wrong values
   first:
   - `get_parent_class($this)` is `false` in a class with subclasses, so
@@ -5383,7 +5403,31 @@ fixture:
   - a `catch` its `try` can't reach is `catch.neverThrown` (from D2's
     throw points): `try { $q = 1; } catch (\Throwable $e) {}` and a
     `catch (\LogicException)` around a call declared `@throws
-    \RuntimeException` are unreported today.
+    \RuntimeException` are unreported today; the rule doesn't exist (the
+    rules oracle's 189). The throw points it reads are PHPStan's: a write
+    to a typed property throws `TypeError` only when the value may not fit
+    after coercion (`int` into `?float` doesn't, a PHPDoc-only mismatch
+    doesn't; `bug-6256.php`, `bug-6791.php`, `bug-9146*.php`,
+    `union-type-error.php`); `99 / $v` on `int<min, -1>|int<1, max>`
+    can't throw `DivisionByZeroError` (`bug-6349.php`, 20); a `match` with
+    `default` or exhausted arms can't throw `UnhandledMatchError`
+    (`bug-6115.php`); `echo`/`(string)` of an object and a magic call
+    follow `__toString()`'s and `__call()`'s `@throws void`
+    (`bug-5952.php`, `bug-13806.php`, `dead-catch-magic-methods.php`),
+    `isset()` on an `ArrayAccess` its `offsetExists()`
+    (`bug-11427.php`), `new $class` on a `class-string<T>` the
+    constructor of `T` when final or consistent (`bug-4806.php`,
+    `bug-6574.php`), and a static call its method's conditional `@throws`
+    (`bug-4805.php`); `foreach` over an array, creating a first-class
+    callable and `assert(false)` (an `AssertionError`) throw nothing a
+    `catch (\RuntimeException)` takes (`bug-5903.php`,
+    `dead-catch-first-class-callables.php`, `bug-5650.php`); property
+    hooks are throw points only through their own `@throws` when
+    `exceptions.implicitThrows` is off
+    (`unthrown-exception-property-hooks*.php`); each member of a multi-
+    catch is judged alone (`unthrown-exception-multi.php`); and a caught
+    class that isn't an exception, or is guarded by `class_exists()`, is
+    judged as well (`catch.php`, `class-exists.php`);
 - (g) the restricted-usage framework: `@internal` core, deprecation
   (ext-deprecation-rules), disallowed-calls, and `phpstan_api`.
 - (h) `FileAssertRule` (with the `assertNativeType` and
