@@ -161,7 +161,7 @@ impl<'a> Checker<'a> {
                 if self.magic_number(subject).is_some() {
                     self.report_magic_number(subject.span, "match", "in match condition");
                 }
-                for (conditions, _) in arms {
+                for conditions in arms.iter().filter_map(|arm| arm.conditions.as_ref()) {
                     for condition in conditions {
                         if self.magic_number(condition).is_some() {
                             self.report_magic_number(

@@ -382,8 +382,8 @@ impl<'a> Checker<'a> {
         {
             self.check_strict_rules_expression(e, locals);
         }
-        if !is_bare_statement && let ExprKind::Match { arms, default, .. } = &e.kind {
-            self.check_void_match_usage(arms, default.as_deref(), locals, e.span);
+        if !is_bare_statement && let ExprKind::Match { arms, .. } = &e.kind {
+            self.check_void_match_usage(arms, locals, e.span);
         }
         match &e.kind {
             ExprKind::Call(callee, args) => {
@@ -3163,11 +3163,8 @@ impl<'a> Checker<'a> {
                 }
                 Type::String
             }
-            ExprKind::Match {
-                subject,
-                arms,
-                default,
-            } => {
+            ExprKind::Match { subject, arms } => {
+                let default = match_default(arms);
                 let before_match = (default.is_none() && !self.try_throw_states.is_empty())
                     .then(|| locals.clone());
                 self.check_expr(subject, locals, label);
@@ -3201,7 +3198,7 @@ impl<'a> Checker<'a> {
                 // but not yet this one) to ask "is the last arm's own
                 // condition already tautologically true from here."
                 let mut accumulated_before_last_arm = accumulated.clone();
-                let arms_count = arms.len();
+                let arms_count = arms.iter().filter(|arm| arm.conditions.is_some()).count();
                 // `match.alwaysTrue`/`match.alwaysFalse` - real PHPStan's
                 // own `MatchExpressionRule` dead-arm half, the sibling of
                 // `match.unhandled`'s own missing-arm half just below.
@@ -3254,7 +3251,9 @@ impl<'a> Checker<'a> {
                 } else {
                     self.expand_enum_cases(&self.infer_expr(subject, locals))
                 };
-                for (i, (conds, result)) in arms.iter().enumerate() {
+                for (i, (conds, result)) in
+                    arms.iter().filter_map(MatchArm::conditioned).enumerate()
+                {
                     for c in conds {
                         self.check_expr(c, locals, label);
                     }
@@ -3356,7 +3355,11 @@ impl<'a> Checker<'a> {
                         // own OR-combined exhaustiveness isn't), matching
                         // this same arm's own narrowing-loop exemption
                         // just above.
-                        let last_is_exhaustive = arms.last().is_some_and(|(conds, _)| {
+                        let last_is_exhaustive = arms
+                            .iter()
+                            .filter_map(MatchArm::conditioned)
+                            .next_back()
+                            .is_some_and(|(conds, _)| {
                             matches!(conds.as_slice(), [only_cond]
                                 if self.condition_is_provably_true(only_cond, &accumulated_before_last_arm))
                         });
@@ -3404,7 +3407,7 @@ impl<'a> Checker<'a> {
                         // fall through to a runtime `UnhandledMatchError`.
                         let subject_ty = self.infer_expr(subject, locals);
                         let mut remaining = self.expand_enum_cases(&subject_ty);
-                        for (conds, _) in arms.iter() {
+                        for (conds, _) in arms.iter().filter_map(MatchArm::conditioned) {
                             for c in conds {
                                 let cond_ty = self.infer_expr(c, locals);
                                 if is_known_single_value(&cond_ty) {
@@ -4426,11 +4429,8 @@ impl<'a> Checker<'a> {
                     None,
                 )
             }
-            ExprKind::Match {
-                subject,
-                arms,
-                default,
-            } => {
+            ExprKind::Match { subject, arms } => {
+                let default = match_default(arms);
                 // Same "don't let an unknown branch compose into a
                 // partial Union that looks more precise than it is" rule
                 // Ternary applies, generalized to N arms plus an optional
@@ -4441,7 +4441,7 @@ impl<'a> Checker<'a> {
                 let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
                 let mut accumulated = locals.clone();
                 let mut result_types: Vec<Type> = Vec::new();
-                for (conds, result) in arms {
+                for (conds, result) in arms.iter().filter_map(MatchArm::conditioned) {
                     let arm_locals =
                         self.narrow_match_arm_conditions(subject, conds, &accumulated, match_true);
                     result_types.push(self.infer_expr(result, &arm_locals));

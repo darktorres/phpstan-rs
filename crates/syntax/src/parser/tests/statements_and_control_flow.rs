@@ -276,3 +276,23 @@ fn error_suppression_is_kept_as_a_node() {
     assert!(matches!(&inner.kind, ExprKind::Call(..)));
     assert!(matches!(&unwrap_grouping(rhs).kind, ExprKind::Call(..)));
 }
+
+#[test]
+fn match_arms_are_spanned_with_the_default_in_its_place() {
+    let src = "<?php $r = match ($x) { default => 0, 1, 2 => 1 };";
+    let program = parse(src);
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected an assignment, got {:?}", program[0].kind);
+    };
+    let ExprKind::Match { arms, .. } = &rhs.kind else {
+        panic!("expected a match, got {:?}", rhs.kind);
+    };
+    assert!(arms[0].conditions.is_none());
+    assert_eq!(arms[1].conditions.as_ref().map(Vec::len), Some(2));
+    assert_eq!((arms[1].span.start.col, arms[1].span.end.col), (39, 48));
+    assert!(match_default(arms).is_some());
+}

@@ -106,14 +106,13 @@ impl Parser {
         self.expect(&Token::LBrace)?;
 
         let mut arms = Vec::new();
-        let mut default = None;
         while !self.check(&Token::RBrace) && !self.at_eof() {
-            if self.eat(&Token::Keyword(Keyword::Default)) {
+            let arm_start = self.current_pos();
+            let conditions = if self.eat(&Token::Keyword(Keyword::Default)) {
                 // `default` also tolerates a trailing comma before `=>`,
                 // same as an ordinary arm's condition list.
                 self.eat(&Token::Comma);
-                self.expect(&Token::FatArrow)?;
-                default = Some(Box::new(self.parse_expression()?));
+                None
             } else {
                 let mut conds = vec![self.parse_expression()?];
                 while self.eat(&Token::Comma) {
@@ -122,10 +121,18 @@ impl Parser {
                     }
                     conds.push(self.parse_expression()?);
                 }
-                self.expect(&Token::FatArrow)?;
-                let result = self.parse_expression()?;
-                arms.push((conds, result));
-            }
+                Some(conds)
+            };
+            self.expect(&Token::FatArrow)?;
+            let body = self.parse_expression()?;
+            arms.push(MatchArm {
+                conditions,
+                body,
+                span: Span {
+                    start: arm_start,
+                    end: self.previous_end(),
+                },
+            });
             if !self.eat(&Token::Comma) {
                 break;
             }
@@ -136,7 +143,6 @@ impl Parser {
             ExprKind::Match {
                 subject: Box::new(subject),
                 arms,
-                default,
             },
             start,
         ))

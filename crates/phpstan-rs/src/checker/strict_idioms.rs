@@ -251,11 +251,8 @@ impl<'a> Checker<'a> {
             }
         }
         if self.settings.shipmonk.check_enum_exhaustiveness
-            && let ExprKind::Match {
-                subject,
-                default: Some(default),
-                ..
-            } = &e.kind
+            && let ExprKind::Match { subject, arms } = &e.kind
+            && let Some(default) = match_default(arms)
             && let Some(enum_name) = self.enum_of(&self.infer_expr(subject, locals))
         {
             self.report(format!("match over enum {enum_name} has a default arm; a newly added case would be absorbed instead of flagged as unhandled."),

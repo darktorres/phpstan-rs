@@ -1230,11 +1230,34 @@ pub enum ExprKind {
         // See `Closure.attrs` above.
         attrs: Vec<Attribute>,
     },
+    // The arms in written order, `default` among them.
     Match {
         subject: Box<Expr>,
-        arms: Vec<(Vec<Expr>, Expr)>,
-        default: Option<Box<Expr>>,
+        arms: Vec<MatchArm>,
     },
+}
+
+/// One arm of a `match`: `conditions => body`, or `default => body`.
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    // `None` for the `default` arm.
+    pub conditions: Option<Vec<Expr>>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+impl MatchArm {
+    /// A non-default arm's conditions and body.
+    pub fn conditioned(&self) -> Option<(&Vec<Expr>, &Expr)> {
+        Some((self.conditions.as_ref()?, &self.body))
+    }
+}
+
+/// The body of a `match`'s `default` arm.
+pub fn match_default(arms: &[MatchArm]) -> Option<&Expr> {
+    arms.iter()
+        .find(|arm| arm.conditions.is_none())
+        .map(|arm| &arm.body)
 }
 
 /// Peels through any `(...)`-grouping wrapper(s) to the real expression

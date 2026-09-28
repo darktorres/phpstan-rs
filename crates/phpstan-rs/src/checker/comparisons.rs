@@ -146,13 +146,12 @@ impl<'a> Checker<'a> {
     /// `void`.
     pub(crate) fn check_void_match_usage(
         &mut self,
-        arms: &[(Vec<syntax::ast::Expr>, syntax::ast::Expr)],
-        default: Option<&syntax::ast::Expr>,
+        arms: &[syntax::ast::MatchArm],
         locals: &Locals,
         span: Span,
     ) {
         let mut saw_void = false;
-        for result in arms.iter().map(|(_, r)| r).chain(default) {
+        for result in arms.iter().map(|arm| &arm.body) {
             match self.infer_expr(result, locals) {
                 Type::Void => saw_void = true,
                 Type::Never => {}

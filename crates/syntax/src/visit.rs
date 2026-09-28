@@ -369,20 +369,13 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
             }
             v.visit_expr(body);
         }
-        ExprKind::Match {
-            subject,
-            arms,
-            default,
-        } => {
+        ExprKind::Match { subject, arms } => {
             v.visit_expr(subject);
-            for (conds, result) in arms {
-                for cond in conds {
+            for arm in arms {
+                for cond in arm.conditions.iter().flatten() {
                     v.visit_expr(cond);
                 }
-                v.visit_expr(result);
-            }
-            if let Some(default) = default {
-                v.visit_expr(default);
+                v.visit_expr(&arm.body);
             }
         }
     }
@@ -1061,20 +1054,13 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
             }
             v.visit_expr(body);
         }
-        ExprKind::Match {
-            subject,
-            arms,
-            default,
-        } => {
+        ExprKind::Match { subject, arms } => {
             v.visit_expr(subject);
-            for (conds, result) in arms {
-                for cond in conds {
+            for arm in arms {
+                for cond in arm.conditions.iter_mut().flatten() {
                     v.visit_expr(cond);
                 }
-                v.visit_expr(result);
-            }
-            if let Some(default) = default {
-                v.visit_expr(default);
+                v.visit_expr(&mut arm.body);
             }
         }
     }
