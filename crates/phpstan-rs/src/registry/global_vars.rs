@@ -27,7 +27,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::registry::infer_const_type;
 use syntax::ast::{BinOp, Expr, ExprKind, GlobalVar, Literal, StaticTarget, Stmt, StmtKind};
-use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
+use syntax::visit::{Visitor, any_stmt_in_body, opens_scope, walk_expr, walk_stmt};
 use types::union_types;
 use types::{Shape, Type};
 
@@ -340,34 +340,21 @@ fn walk_function_body<'a>(
     walk_scope(stmts, &mut ctx, file_ctx, false, &global_names, out);
 }
 
+/// Every name a `global` statement in this body imports. A nested
+/// function, class or closure needs its own `global`, so none is entered.
 fn collect_global_names(stmts: &[&Stmt]) -> FxHashSet<Arc<str>> {
     let mut out = FxHashSet::default();
-    collect_global_names_rec(stmts, &mut out);
-    out
-}
-
-fn collect_global_names_rec(stmts: &[&Stmt], out: &mut FxHashSet<Arc<str>>) {
     for stmt in stmts {
-        if let StmtKind::Global(names) = &stmt.kind {
-            for name in names.iter().filter_map(GlobalVar::name) {
-                out.insert(Arc::from(name));
+        any_stmt_in_body(stmt, |s| {
+            if let StmtKind::Global(names) = &s.kind {
+                for name in names.iter().filter_map(GlobalVar::name) {
+                    out.insert(Arc::from(name));
+                }
             }
-        }
-        // Don't descend into a nested scope boundary - a nested function/
-        // closure/anonymous-class method needs its own `global` to
-        // qualify, never inherits the enclosing body's. `global` is a
-        // statement, never an expression, so a closure buried inside this
-        // statement's own expressions (e.g. `$x = function () { global
-        // $z; };`) is already correctly excluded just by never visiting
-        // expressions here at all - nothing to search for there.
-        if matches!(
-            &stmt.kind,
-            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_)
-        ) {
-            continue;
-        }
-        collect_global_names_rec(&child_stmts(stmt), out);
+            false
+        });
     }
+    out
 }
 
 fn walk_scope<'a>(
@@ -378,50 +365,89 @@ fn walk_scope<'a>(
     global_names: &FxHashSet<Arc<str>>,
     out: &mut WalkOutput<'a>,
 ) {
+    let mut scope = Scope {
+        ctx,
+        file_ctx,
+        top_level,
+        global_names,
+        out,
+    };
     for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::FunctionDecl(f) => {
-                walk_function_body(&f.body.iter().collect::<Vec<_>>(), ctx, file_ctx, out);
-                continue;
-            }
-            StmtKind::ClassDecl(c) => {
-                for method in &c.methods {
-                    walk_function_body(
-                        &method.function.body.iter().collect::<Vec<_>>(),
-                        ctx,
-                        file_ctx,
-                        out,
-                    );
-                }
-                continue;
-            }
-            StmtKind::Expression(e) => {
-                handle_top_expr_statement(e, ctx, file_ctx, top_level, global_names, out);
-            }
-            _ => {}
-        }
-
-        for e in stmt_exprs(stmt) {
-            walk_expr_for_includes_and_scopes(e, ctx, file_ctx, top_level, out);
-        }
-
-        walk_scope(
-            &child_stmts(stmt),
-            ctx,
-            file_ctx,
-            top_level,
-            global_names,
-            out,
-        );
+        scope.visit_stmt(stmt);
     }
 }
 
-/// Recognizes `$name = <expr>;` / `$name[<key>] = <expr>;` / their `??=`
-/// forms, and `$name = array_merge($name, <rhs>);`, staging a site when
-/// `$name` is a real candidate here (file top level, or `global_names`
-/// already contains it).
+/// One scope's walk: a nested function, method or closure body is walked
+/// as its own scope, and the include sites are recorded on the way.
+struct Scope<'r, 'a> {
+    ctx: &'r mut NameContext,
+    file_ctx: &'r FileCtx<'a>,
+    top_level: bool,
+    global_names: &'r FxHashSet<Arc<str>>,
+    out: &'r mut WalkOutput<'a>,
+}
+
+impl<'a> Visitor<'a> for Scope<'_, 'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match &stmt.kind {
+            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
+            StmtKind::Use(imports) => self.ctx.add_uses(imports),
+            StmtKind::FunctionDecl(f) => {
+                let body: Vec<&Stmt> = f.body.iter().collect();
+                walk_function_body(&body, self.ctx, self.file_ctx, self.out);
+                return;
+            }
+            StmtKind::ClassDecl(c) => {
+                for method in &c.methods {
+                    let body: Vec<&Stmt> = method.function.body.iter().collect();
+                    walk_function_body(&body, self.ctx, self.file_ctx, self.out);
+                }
+                return;
+            }
+            StmtKind::Expression(e) => {
+                handle_top_expr_statement(
+                    e,
+                    self.ctx,
+                    self.file_ctx,
+                    self.top_level,
+                    self.global_names,
+                    self.out,
+                );
+            }
+            _ => {}
+        }
+        walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match &expr.kind {
+            ExprKind::Closure { body, .. } => {
+                let body: Vec<&Stmt> = body.iter().collect();
+                walk_function_body(&body, self.ctx, self.file_ctx, self.out);
+                return;
+            }
+            ExprKind::NewAnonymousClass(decl, _) => {
+                for method in &decl.methods {
+                    let body: Vec<&Stmt> = method.function.body.iter().collect();
+                    walk_function_body(&body, self.ctx, self.file_ctx, self.out);
+                }
+                return;
+            }
+            ExprKind::Include(_, target) => {
+                self.out.include_sites.push(IncludeSite {
+                    source: self.file_ctx.path,
+                    top_level: self.top_level,
+                    target,
+                });
+            }
+            _ => {}
+        }
+        if !opens_scope(expr) {
+            walk_expr(self, expr);
+        }
+    }
+}
+
 fn handle_top_expr_statement<'a>(
     e: &'a Expr,
     ctx: &NameContext,
@@ -590,49 +616,6 @@ fn literal_string_key(expr: &Expr) -> Option<String> {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
         _ => None,
-    }
-}
-
-/// Walks an expression looking only for two things: an `include`-shaped
-/// call site, and a nested `Closure`/`NewAnonymousClass` scope boundary -
-/// everything else just recurses via `child_exprs`. Not the same as
-/// `resolve_static_expr_type` below, which answers a completely different
-/// question ("what type is this expression") for a very different,
-/// narrower set of callers.
-fn walk_expr_for_includes_and_scopes<'a>(
-    expr: &'a Expr,
-    ctx: &mut NameContext,
-    file_ctx: &FileCtx<'a>,
-    top_level: bool,
-    out: &mut WalkOutput<'a>,
-) {
-    match &expr.kind {
-        ExprKind::Closure { body, .. } => {
-            walk_function_body(&body.iter().collect::<Vec<_>>(), ctx, file_ctx, out);
-            return;
-        }
-        ExprKind::NewAnonymousClass(decl, _) => {
-            for method in &decl.methods {
-                walk_function_body(
-                    &method.function.body.iter().collect::<Vec<_>>(),
-                    ctx,
-                    file_ctx,
-                    out,
-                );
-            }
-            return;
-        }
-        ExprKind::Include(_, target) => {
-            out.include_sites.push(IncludeSite {
-                source: file_ctx.path,
-                top_level,
-                target,
-            });
-        }
-        _ => {}
-    }
-    for child in child_exprs(expr) {
-        walk_expr_for_includes_and_scopes(child, ctx, file_ctx, top_level, out);
     }
 }
 

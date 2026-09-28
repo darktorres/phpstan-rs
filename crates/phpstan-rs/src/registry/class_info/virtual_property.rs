@@ -4,9 +4,9 @@ use std::sync::Arc;
 use crate::registry::function_sig::{mark_template_params, resolve_type};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use syntax::ast::TypeHint;
-use syntax::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
+use syntax::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks};
 use syntax::name_resolution::NameContext;
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{any_expr_in_body, any_expr_in_scope};
 use types::{TemplateParam, Type};
 
 /// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can
@@ -59,108 +59,32 @@ pub(crate) fn hooks_reference_backing_storage(hooks: &PropertyHooks, prop_name: 
 /// `propertySetHook.noAssign`), not just the OR'd-together whole-property
 /// question `hooks_reference_backing_storage` above answers.
 pub(crate) fn hook_body_references_property(body: &PropertyHookBody, prop_name: &str) -> bool {
-    match body {
-        PropertyHookBody::Arrow(e) => expr_references_property(e, prop_name),
-        PropertyHookBody::Block(stmts) => {
-            stmts.iter().any(|s| stmt_references_property(s, prop_name))
-        }
-        // An abstract hook can't reference `$this->prop` at all - no
-        // real body exists to reference anything.
-        PropertyHookBody::Abstract => false,
-    }
+    // Every occurrence of `$this->prop_name` counts - a read, a bare
+    // statement, an `isset()`/`unset()` operand, or a write target - as in
+    // PHP's own virtual-property rule; one inside a nested closure, arrow
+    // function or anonymous class does not.
+    any_hook_expr(body, |e| {
+        matches!(&e.kind, ExprKind::PropertyAccess(base, name, _)
+            if **name == *prop_name
+                && matches!(&base.kind, ExprKind::Variable(v) if **v == *"this"))
+    })
 }
 
 /// Whether `body` calls the parent's hook of `prop_name`
 /// (`parent::$prop_name::get()`/`::set()`), which uses the backing value
 /// when the parent declares no such hook.
 pub(crate) fn hook_body_calls_parent_hook(body: &PropertyHookBody, prop_name: &str) -> bool {
-    fn in_expr(e: &Expr, prop_name: &str) -> bool {
-        if let ExprKind::StaticCall(target, _, _) = &e.kind
-            && target.parent_hook_property() == Some(prop_name)
-        {
-            return true;
-        }
-        child_exprs(e).into_iter().any(|c| in_expr(c, prop_name))
-    }
-    fn in_stmt(stmt: &Stmt, prop_name: &str) -> bool {
-        stmt_expr_fields(stmt)
-            .into_iter()
-            .any(|e| in_expr(e, prop_name))
-            || child_stmts(stmt).into_iter().any(|s| in_stmt(s, prop_name))
-    }
+    any_hook_expr(body, |e| {
+        matches!(&e.kind, ExprKind::StaticCall(target, _, _)
+            if target.parent_hook_property() == Some(prop_name))
+    })
+}
+
+/// Whether `pred` holds for an expression in the hook's own body.
+fn any_hook_expr(body: &PropertyHookBody, pred: impl FnMut(&Expr) -> bool) -> bool {
     match body {
-        PropertyHookBody::Arrow(e) => in_expr(e, prop_name),
-        PropertyHookBody::Block(stmts) => stmts.iter().any(|s| in_stmt(s, prop_name)),
+        PropertyHookBody::Arrow(e) => any_expr_in_scope(e, pred),
+        PropertyHookBody::Block(stmts) => any_expr_in_body(stmts, pred),
         PropertyHookBody::Abstract => false,
-    }
-}
-
-/// Deliberately checks every occurrence of `$this->prop_name` - a read, a
-/// bare unused statement, an `isset()`/`unset()` argument, or a write
-/// target - uniformly, since real PHP's virtual-property algorithm
-/// doesn't distinguish between them either (a bare `$this->x;` statement
-/// with no use at all still makes the property non-virtual).
-/// `child_exprs`/`child_stmts` already stop at a nested closure/
-/// arrow-fn/anonymous-class boundary (see `visit::opens_scope`) -
-/// exactly the scope boundary real PHP's algorithm
-/// respects too (a `$this->propName` read inside a nested closure/
-/// arrow-fn does NOT count).
-fn stmt_references_property(stmt: &Stmt, prop_name: &str) -> bool {
-    stmt_expr_fields(stmt)
-        .into_iter()
-        .any(|e| expr_references_property(e, prop_name))
-        || child_stmts(stmt)
-            .into_iter()
-            .any(|s| stmt_references_property(s, prop_name))
-}
-
-fn expr_references_property(e: &Expr, prop_name: &str) -> bool {
-    if let ExprKind::PropertyAccess(base, name, _) = &e.kind
-        && **name == *prop_name
-        && matches!(&base.kind, ExprKind::Variable(v) if **v == *"this")
-    {
-        return true;
-    }
-
-    child_exprs(e)
-        .into_iter()
-        .any(|c| expr_references_property(c, prop_name))
-}
-
-/// This statement's own direct `Expr` fields (not nested statements -
-/// `child_stmts` already covers those) - mirrors `checker::unused::
-/// walk_stmt_for_members`'s identical enumeration, kept as its own copy
-/// here since that one is coupled to a different walk's own accumulator/
-/// context parameters.
-fn stmt_expr_fields(stmt: &Stmt) -> Vec<&Expr> {
-    match &stmt.kind {
-        StmtKind::Expression(e) | StmtKind::Throw(e) => vec![e],
-        StmtKind::Return(Some(e)) => vec![e],
-        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => exprs.iter().collect(),
-        StmtKind::If { cond, .. }
-        | StmtKind::While { cond, .. }
-        | StmtKind::DoWhile { cond, .. } => vec![cond],
-        StmtKind::For {
-            init, cond, step, ..
-        } => init.iter().chain(cond).chain(step).collect(),
-        StmtKind::Foreach {
-            subject,
-            key,
-            value,
-            ..
-        } => {
-            let mut v = vec![subject];
-            v.extend(key.iter());
-            v.push(value);
-            v
-        }
-        StmtKind::GlobalConst(consts) => consts.iter().map(|c| &c.value).collect(),
-        StmtKind::StaticVar(vars) => vars.iter().filter_map(|(_, d)| d.as_ref()).collect(),
-        StmtKind::Switch { subject, cases } => {
-            let mut v = vec![subject];
-            v.extend(cases.iter().filter_map(|c| c.test.as_ref()));
-            v
-        }
-        _ => vec![],
     }
 }
