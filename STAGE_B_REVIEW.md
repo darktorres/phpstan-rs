@@ -401,7 +401,7 @@ through `check-project`.
   `return.missing` (php confirms it's a generator). `any_expr_in_body`,
   `any_expr_in_scope`, `any_child_expr` and 12 callers outside `visit.rs`
   share it. Only the class body opens a scope. (`167ff73d` area; probed)
-- [ ] **F56. Nullsafe `?->` in simple interpolation isn't recognized.**
+- [x] **F56. Nullsafe `?->` in simple interpolation isn't recognized.** (`a62b2c77`)
   `"[$o?->b]"` lexes as `$o` plus the text `?->b`, so an object without
   `__toString` reports `encapsedStringPart.nonString` (php prints `[B]`,
   and `[]` for null), and `$o?->nope` isn't checked. `interpolation.rs`'s
