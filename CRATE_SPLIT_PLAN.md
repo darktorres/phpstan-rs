@@ -1537,6 +1537,32 @@ Follow-ups:
 - **Patch versions.** `PhpVersion` carries the patch: the false branch of
   `PHP_VERSION_ID >= 80105` keeps 8.1 (`narrow_at_least` drops it, which
   D5's scope narrowing would read as dead code).
+- **Type behaviour lives on the type.** PHPStan asks a type what it does
+  (`getOffsetValueType`, `hasOffsetValueType`, `setOffsetValueType`,
+  `getIterableKeyType`/`getIterableValueType`, `isArray`/`isList`/
+  `isString`/`isObject`/`isCallable`/`isIterable`, `isNull`/`isTrue`/
+  `isFalse`/`toBoolean`, `isConstantValue`, `getConstantStrings`/
+  `getConstantArrays`/`getConstantScalarValues`, `generalize`,
+  `toNumber`/`toArray`/`toArrayKey`, `looseCompare`, `tryRemove`); here each
+  question is a `match ty` in whichever checker file needed it, answered
+  again wherever else it came up, and not always the same way: four
+  `flatten_union`s (`by_ref_params`, `property_type_too_wide`,
+  `return_type_too_wide`, `throws/too_wide`), two `is_array_like`
+  (`expr/array_ops`, `var_tag_types`), two `is_object_like`
+  (`narrowing/type_ops`, `strict_idioms`), two `generalize` (`comparisons`,
+  `constant_resolver`), `iterable_element_type` (`stmt/loops`) beside
+  `iterable_value_of`/`iterable_key_of` (`var_tag_types`), and
+  `is_string`/`is_string_type`/`is_exactly_string_operand`/
+  `is_string_shaped`/`is_string_or_nullable_string` across `strict_rules`,
+  `offset_assignment`, `operators` and `expr`. Each question becomes one
+  `Type` method (a trinary one where PHPStan's is: `is_array()` of
+  `array|int` is `Maybe`), or a `Relation` method where it needs the class
+  hierarchy, in `crates/types`. The checker's helpers are deleted and their
+  callers read the method; where two copies disagreed, the method follows
+  PHPStan and the difference is fixtured. Subtraction, `Relation::remove`
+  and the coercions already moving in follow the same shape. Member
+  lookup (`getMethod`/`getProperty`/`getConstant`) waits for C8's
+  reflection.
 - **Tests move in.** `checker/tests/accessory_and_refinement_types.rs`
   (12 tests of `types::union_types`) and
   `checker/tests/array_literals_and_shapes.rs` (2 of
