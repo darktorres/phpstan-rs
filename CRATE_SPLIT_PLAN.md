@@ -1025,7 +1025,9 @@ corpus, type, baseline, performance and build-time gates run locally
 14. **Public API** (from G1). Each library crate's public API, as
     `cargo public-api` lists it from rustdoc's JSON (the pinned nightly), is
     snapshotted under `gates/public-api/<crate>.txt`, the crates extracted in B
-    and C included from G1's first commit. A change is an approved delta,
+    and C included from G1's first commit. The tool is pinned to the version
+    that reads the pinned nightly's rustdoc JSON format, and moves with the
+    toolchain. A change is an approved delta,
     reviewed against the crate's design in §3.
 
 **Approved deltas.** A commit that intentionally changes output records its
@@ -7492,15 +7494,19 @@ Per crate:
   module linking `crash-sys` under `crash-reporting`
   (`CRASH_REPORTING_PLAN.md` §5).
 - **`lsp`**: the server and its features over the Session and observers
-  (`lsp-server`, `lsp-types`, `crossbeam-channel`). Its entry point takes the
-  registrations `app` assembles and the server info the bin passes (§2):
+  (`lsp-server`, `lsp-types`, `crossbeam-channel`). Its entry point takes the function
+  `app` exposes for building a root's Session from that root's config (the
+  registrations and the extensions its composer files activate, C1, so each
+  root of F1's per-root Sessions gets its own) and the server info the bin
+  passes (§2):
   `serverInfo.version` is the binary's version and build identity (F4), where
   today it is the package's `CARGO_PKG_VERSION`.
 - **The bin** keeps `main.rs` alone, with `clap`, `clap_complete`, `ctrlc` and
   `dhat`, and the `hotpath`, `hotpath-alloc` and `dhat-heap` features; the
   package has no library target. Every `phpstan_rs::` user is repointed:
-  `tools/gate-runner` to `app` and `project`, `tools/crash-repro` to `app`, the
-  bench and fuzz target (G2) to `project`.
+  `tools/gate-runner` to `app` and `project` (unless Phase 181's
+  `report --export` has replaced it, `GATE_SPEED_PLAN.md` S9c),
+  `tools/crash-repro` to `app`, the bench and fuzz target (G2) to `project`.
 
 After the last extraction the gates that read the package's source move to the
 crates, in one commit:
@@ -7532,6 +7538,12 @@ crates, in one commit:
   extensions' identifiers to `app`, the one crate that registers everything, so
   no separate test crate is needed. The directory layout under each crate's
   `tests/fixtures` keeps the file's path below its old family directory.
+- **Hermetic fixtures.** A fixture reads nothing outside its own directory:
+  `Session::for_fixture` roots the VFS at the fixture, and a path outside it is
+  absent, so moving a fixture can't change its result. Today
+  `includes/missing_paths_are_reported_per_construct` expects
+  `<fixture>/../elsewhere.php` to be missing, a path in its family directory
+  that a file placed there would make exist.
 - **Fixture targets.** Each owning crate has `[[test]] name = "fixtures"`,
   `harness = false`, a `tests/fixtures.rs` of a few lines calling
   `testing::run` with its registrations, and discovery anchored on its
@@ -7597,8 +7609,15 @@ keeps the paths of that commit. A check joins gate 1's quick tier: every
 repository path the living Markdown docs cite exists, so a later move can't
 leave them stale; the commit-named reports are exempt.
 
-**G4. Build time.** Gate 9's targets are asserted, over scenarios that now
-stand for crates:
+**G4. Build time.** Gate 9's scenarios now stand for crates, and each records
+its `cargo build -p phpstan-rs` and `cargo test --workspace --no-run` times
+with the crates it rebuilt, as `.corpus-runs/gate/buildtime` does today. The
+rebuild sets are asserted, since the crate graph alone doesn't decide them: a
+build script's `rerun-if-changed` scope, `include_str!` inputs and feature
+unification between the build and the test build rebuild crates too. At
+`25d63876` a stub edit rebuilt `syntax`, `types`, `phpdoc`, `diagnostics` and
+`composer`, none of which depends on `stub-sources`; at `1b20b638` it rebuilds
+`stub_sources` and the package alone. The asserted sets:
 
 - an engine edit (a file in `analyser`) rebuilds nothing below `analyser`;
 - a rule edit (a file in `rules`) rebuilds neither `analyser`, `builtins` nor
@@ -7609,8 +7628,11 @@ stand for crates:
   `types`, `phpdoc`, `sql`, `diagnostics`, `composer` or `config`;
 - a lexer edit rebuilds everything above `syntax`, and its time is recorded.
 
-Each scenario's `cargo test --workspace --no-run` and
-`cargo build -p phpstan-rs` times are compared with the Stage A baseline.
+The times are asserted too. A rule edit and an extension edit build faster than
+an engine edit, which is what the split is for: today all three rebuild the
+one package, and at `1b20b638` the rule edit's build (8.5 s) is slower than
+the engine edit's (7.3 s). No scenario is slower than its last record before
+G.
 `-Z threads` and mold are measured again, clean and incremental, with and
 without, and `.cargo/config.toml` keeps what is faster, its comment stating the
 measurement.
