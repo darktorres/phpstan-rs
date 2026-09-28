@@ -4123,7 +4123,11 @@ the rest), which the gate excludes and lists.
   private method the host implements) or through a class-string is a
   use, `method.unused` today (11: `bug-8346.php`, `bug-8071.php`,
   `bug-6039.php`, `nullsafe-unused-private-method.php`,
-  `unused-private-method.php`); a private method used only by itself (a
+  `unused-private-method.php`); a private hooked property whose `get` no
+  one calls is `property.neverRead` ("Readable property … is never read",
+  an abstract private one included; `bug-12702.php`,
+  `abstract-private-property-hook.php`, 3), unreported today; a private
+  method used only by itself (a
   recursive call, a `[$this, 'doBaz']` callable in its own body) or only
   from other unused ones is `method.unused`, and a dynamic `$x->$y()`
   counts only for the names `$y` can be (after `$y !== 'doBar'` it
@@ -4720,7 +4724,9 @@ fixture:
     default `magicConstant.outOfFunction`, and `__NAMESPACE__` in the
     global namespace `magicConstant.outOfNamespace`, unreported today
     (`magic-constant*.php`, 6, 3, 2 and 1);
-  - enum cases compared with `<`, `>`, `<=` or `>=` are always false
+  - `null <= $object` is always true (`smallerOrEqual.alwaysTrue`,
+    `bug-13001.php`), and enum cases compared with `<`, `>`, `<=` or `>=`
+    are always false
     (`Foo::A > Foo::B`; `greater.alwaysFalse`/`smaller.alwaysFalse`,
     `bug-7052.php`), and a ternary as a statement is
     `ternary.resultUnused` (`isset($d['x']) ? 'foo' : 'bar';`,
@@ -5255,7 +5261,9 @@ fixture:
     marker (`$this->returningMethod();`), unreported today
     (`pure-method.php`, 8); and `array_map()` given an opaque, maybe-null
     or maybe-non-callable callback is `possiblyImpure.functionCall`, as is
-    the callable itself (`pure-unless-callable-is-impure*.php`, 7); a
+    the callable itself (`pure-unless-callable-is-impure*.php`, 7);
+    taking a reference to a property (`$value = &$this->p`) is
+    `possiblyImpure.propertyAssignByRef` (`impure-assign-ref.php`); a
     closure passed to a `@param-immediately-invoked-callable` parameter
     (or a maybe-callable one) runs there, so its `exit` is `impure.exit`
     in the pure caller (`pure-function.php`, `bug13288*`, 3);
