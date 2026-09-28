@@ -4056,7 +4056,8 @@ cause, a plan item citing the file and count. Each E3 sub-phase ends when its
 identifiers have no PHPStan-only findings left, or each remaining one is an
 approved deviation (an identifier named differently, such as
 `class.abstractMethodNotImplemented` for `method.abstract`, or a
-PHPStan-specific check: `phpstan.*`, `phpParser.*`,
+PHPStan-specific check: the assert mismatches of `phpstan.*` (E3h),
+`phpParser.*`,
 `phpstanApi.*` outside a PHPStan extension's package, `function.inner`,
 PHPStan's "inner named functions are not supported", and `class.prefixed`
 for a `_PHPStan_` prefix; the Rector, PHP-Scoper, PHPUnit PHAR and Box
@@ -5030,7 +5031,9 @@ fixture:
     (`parameterByRef.tooWide`) becomes PHPStan's
     `TooWideParameterOutTypeCheck`: a union member the function never
     assigns is reported, not a missing narrowing to a literal (10
-    rules-oracle findings, `too-wide-*-parameter-out.php`);
+    rules-oracle findings, `too-wide-*-parameter-out.php`), as
+    `parameterByRef.unusedType`, or `paramOut.unusedType` for a
+    `@param-out` type, where it is `parameterByRef.tooWide` today;
   - an empty array assigned under any array `@var` is widening, not
     `varTag.type`: `/** @var array{string, int} $a */ $a = [];` is
     reported today (`var-above-empty-array-widening.php`,
@@ -5474,7 +5477,12 @@ fixture:
   (ext-deprecation-rules), disallowed-calls, and `phpstan_api`.
 - (h) `FileAssertRule` (with the `assertNativeType` and
   `assertVariableCertainty` support Stage D's oracle added), the dump rules
-  and the four asserts.
+  and the four asserts. `\PHPStan\dumpType()`, `dumpNativeType()`,
+  `dumpPhpDocType()` and `debugScope()` report under PHPStan's
+  identifiers (`phpstan.dumpType` and the rest; the rules oracle's 39, 9,
+  27 and 1, none reported today); the asserts' mismatches keep
+  `phpstanRs.*` (approved: PHPStan's `phpstan.type`, `phpstan.nativeType`,
+  `phpstan.superType`, `phpstan.variable`).
 - (i) semantic-token predicates exposed.
 
 Mixed modules are split row by row (Appendix A). Gate: architecture rule 10
