@@ -5079,8 +5079,8 @@ fixture:
     (`set (int|array $v)` on `int`); and the native type where the PHPDoc
     doesn't apply (`@param Foo|Bar[]` on `array`, an unresolvable
     `array<int, int, int>` or `array{foo: int}&array{bar: string}`).
-    `missingType.generics`, `generics.notGeneric` and
-    `generics.notSubtype` (a `mixed` or `string` argument outside the
+    `missingType.generics`, `generics.notGeneric`, `generics.lessTypes`
+    (10) and `generics.notSubtype` (a `mixed` or `string` argument outside the
     template's bound, as in `@extends FooGeneric<int, mixed>`) walk the
     same sites,
     `@param-closure-this`, `@use` and a template bound included
@@ -5143,7 +5143,10 @@ fixture:
     and value types (`YieldTypeRule`): `yield 1` under `@return
     Generator<int, string>` or `iterable<int, string>` is unreported today;
     only `yield from` delegation is checked (28 oracle
-    `generator.valueType` findings);
+    `generator.valueType` findings); a `yield` under a return type that
+    isn't a generator is `generator.returnType` at each `yield` and `yield
+    from`, as PHPStan reports it, not once on the declaration (the rules
+    oracle's 10 PHPStan-only, `yield-in-generator.php`, `returnTypes.php`);
   - a returned value is checked against a template return type:
     `return 5;` under `@template T @param T $x @return T`, and `return new
     stdClass();` under `@template T of object @return T`, are unreported
