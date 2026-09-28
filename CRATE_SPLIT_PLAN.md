@@ -7541,8 +7541,15 @@ What an extraction checks:
   dev-depend on crates above its own (G2).
 - **Lints**, active from the extraction commit (§2): `missing_docs` on the API
   crates (§2), those already extracted gaining it in G1's first commit;
-  `clippy::print_stdout`/`print_stderr` at `deny` in every library crate, the
-  arch gate's `LIBRARY_CRATES` gaining the crate.
+  `clippy::print_stdout`/`print_stderr` at `deny` in every library crate. The
+  arch gate checks the attribute in the crates of a hand-kept list
+  (`LIBRARY_CRATES`, the eight B and C extracted) that a new crate isn't on
+  until someone adds it; the list becomes every workspace member with a `lib`
+  target, from `cargo metadata`, in G1's first commit. Today's print calls all
+  sit in code headed for such a crate or for none: `main/check_project.rs`'s 21
+  move into `app` with F4's reporting and become writes (below), `lsp`'s 18
+  become F1's `window/logMessage`, and `check`, `demo` and `incremental-bench`'s
+  27 leave with F4 for examples, which may print.
 - **Comments** follow the comment rules, as Stage B's crates did: a comment
   citing a module the crate can't see, a phase, a fix number or an
   investigation's history is rewritten, the count per crate listed in the
@@ -7580,15 +7587,18 @@ Per crate:
   `FileAssertRule`, which is what keeps `rules` out of its dependencies.
 - **`app`**: the composition root (every registration, extension activation),
   the ErrorFormatter set, `run(args, extra)` over already parsed arguments (no
-  `clap` in a library crate, §3.7), and the crash reporter's `crash_report`
-  module linking `crash-sys` under `crash-reporting`
-  (`CRASH_REPORTING_PLAN.md` §5). An integration test,
+  `clap` in a library crate, §3.7) and the writers it prints to: the report,
+  F4's progress line, `-v`'s statistics and the warnings go through the
+  `io::Write`s the bin passes (its stdout and stderr), since the print lints
+  deny `print!`/`eprintln!` in a library crate, and a test passes buffers; and
+  the crash reporter's `crash_report` module linking `crash-sys` under
+  `crash-reporting` (`CRASH_REPORTING_PLAN.md` §5). An integration test,
   `app/tests/third_party.rs`, is the third party §2's composition model
-  promises: being a crate of its own, it sees only public items, and it
-  defines a rule, a collector, a dynamic return-type extension and an
-  ErrorFormatter, registers them through `run(args, |b| …)`, runs a fixture
-  through `testing`, and checks the formatter's output, so an API the design
-  names but the crates don't export fails a test instead of a user.
+  promises: being a crate of its own, it sees only public items, and it defines
+  a rule, a collector, a dynamic return-type extension and an ErrorFormatter,
+  registers them through `run(args, |b| …)`, runs a fixture through `testing`,
+  and checks the formatter's output, so an API the design names but the crates
+  don't export fails a test instead of a user.
 - **`lsp`**: the server and its features over the Session and observers
   (`lsp-server`, `lsp-types`, `crossbeam-channel`). Its entry point takes,
   beside the config schema the bin already passes from `app`
