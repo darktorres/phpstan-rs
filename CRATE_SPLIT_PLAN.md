@@ -2728,8 +2728,9 @@ suffix (`T (function f(), argument)`), an accessory string's combined name
 integer range against its literals (`int<0, 1>` is `0|1`), PHPStan's implicit
 `*NEVER*` against `never`, and backslashes in a string literal (`'A\\B'` is
 `'A\B'`). The files that assert an unpinned version range
-(`predefined-constants.php`, `bug-4434.php`) are the pinned version's approved
-deviations. phpstan-rs misses 11,106 at `76e738b4`. By asserted expression:
+(`predefined-constants.php`, `bug-4434.php`, and
+`node-callback-scope.php:482`'s `PHP_VERSION_ID`) are the pinned version's
+approved deviations. phpstan-rs misses 11,106 at `76e738b4`. By asserted expression:
 4,788 are variables, 3,399 are calls to functions PHPStan types through an
 extension (E2; 413 of them `mixed`, among them `filter_var` 191 and `min`/`max`
 198), 1,016 are operators (D3), 707 are method calls, 347 other function calls,
@@ -2759,7 +2760,8 @@ inheritance. The first `cargo xtask nsrt` run therefore checks in
 `gates/nsrt/owners.toml`, which names the owning phase (B3, B4, C1–C10, D1–D6,
 E2) for each of the 1,360 mismatching files, split by line where a file
 spans phases. Appendix G is its draft for the extension calls and Appendix H
-for the 1,066 files the phases don't cite, by cause. A phase is done when
+for the 1,066 files the phases don't cite, by cause; Appendix J sorts the
+cited files' lines their citing items don't describe. A phase is done when
 its files have no mismatches, or each remaining line is an approved
 deviation that names its runtime reason.
 `cargo xtask nsrt` reports by owner and lists the wrong values first, and
@@ -5439,7 +5441,11 @@ fixture:
     `bug-10297.php`, `bug-8074.php`, `bug-13247.php`, `yield.php`);
   - an assertion of a template type narrows (`@phpstan-assert T $value` on
     `mixed` is `assert.alreadyNarrowedType` today,
-    `assert-unresolved-generic.php`, `bug-10573.php`);
+    `assert-unresolved-generic.php`, `bug-10573.php`), and so does an
+    array assertion over `mixed` values: `@phpstan-assert string[] $arr`
+    on a `mixed[]` parameter is `assert.alreadyNarrowedType` "does not
+    narrow down the type" today and leaves the argument `array<mixed>`
+    (nsrt `assert-docblock.php`, Appendix J's `assert-array-mixed`);
   - a covariant template may type a property that can't be written from
     outside after construction (readonly, `private(set)`, a class marked
     `@immutable`/`@readonly`): `public $value` typed `Value` in an
@@ -8617,3 +8623,515 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `yield-from-key-value` (1 finding, 1 file; wrong today): `yield from` checks
   the inner generator's values as `generator.valueType`; phpstan-rs reports them
   as `generator.keyType`; `yield-from.php`.
+
+## Appendix J: the nsrt suite's cited files by cause
+
+At `76e738b4`, the 169 cited files that aren't wholly an extension's have 3,445
+lines with an nsrt mismatch the earlier passes left unsorted. Each line was read
+against its fixture and its citing item's text, and where the two tools disagree
+on runtime behaviour, php 8.5. 1,062 are what the citing item (or another item
+naming the behaviour) describes, 635 are calls Appendix G already counts, and 21
+differ only in a display form the gate's normalization covers (a union nested in
+a generic, `never`, a backslash); the measurement sorted top-level unions only.
+The other 1,727 trace to 156 causes, listed here per line like Appendix H's keys
+and sharing them where the cause is the same. Each entry gives the cause's key,
+its mismatch count and files, what holds, and the files, most mismatches first.
+`gates/nsrt/owners.toml` takes these lines from here. Each entry is a phase
+item: the phase is done with it when its lines have no mismatches, or each
+remaining one is an approved deviation that names its runtime reason. The
+**Right at runtime** entries are those deviations already: phpstan-rs's type is
+the runtime's, and PHPStan's is wider or wrong. `ext:` keys are E2's extensions;
+the calls' own mismatches are in Appendix G, and these are the values that flow
+on from them.
+
+**Suite setup** (3 mismatches, 3 files, 2 causes):
+
+- `suite-context` (2, 2 files): passes analysed alone; in the suite project a
+  global constant defined elsewhere too (`data/bug-8526.php` has `define('FOO',
+  true)`) is `mixed`, and the gate analyses each file in its own project or
+  scopes `define()` per file; `constant.php`, `constants.php`.
+- `env-phpversion` (1, 1 file): `PHP_VERSION_ID` asserted over PHPStan's whole
+  supported range; the pinned version gives `int<80500, 80599>`, an approved
+  deviation as for `predefined-constants.php`; `node-callback-scope.php`.
+
+**Right at runtime** (27 mismatches, 12 files, 12 causes):
+
+- `diff-empty-right` (8, 1 file): `array_diff*($a, [])` returns `$a` unchanged,
+  so phpstan-rs's exact shape is right where PHPStan widens;
+  `array-functions.php`.
+- `match-unhandled-narrow` (4, 1 file): after `match ($i) { 1 => … }` without
+  `default`, an unmatched `$i` has thrown `UnhandledMatchError`, so `$i` is `1`;
+  PHPStan keeps `1|2|3|4`; `match-expr.php`.
+- `array-union-merge` (3, 2 files): phpstan-rs keeps a union of arrays unmerged
+  (`list<int>|non-empty-list<string>` in the else of `count() >= 2`,
+  `array{}|non-empty-list<1|2|3>`), the same values as PHPStan's merged
+  `list<…>`; `bug-13747.php`, `foreach-loop-variables.php`.
+- `bcmath-strict` (3, 1 file): `BcMath\Number == null` is `false` and `* null`
+  throws at runtime (php 8.5); PHPStan's `bool` and `0` are its own gaps;
+  `bcmath-number.php`.
+- `iterator-aggregate-right` (2, 1 file): foreach over an `IteratorAggregate`
+  whose `getIterator()` is typed gives its key and value (`int`, `string`);
+  PHPStan has `mixed` and notes it should be these; `bug-4415.php`.
+- `array-flip-mixed-right` (1, 1 file): `array_flip($mixed)` is
+  `array<int|string>`, as right as PHPStan's `array`: the values are the old
+  keys; `array-flip.php`.
+- `array-unique-shape` (1, 1 file): `array_unique([1, 2, 3])` stays `array{0: 1,
+  1: 2, 2: 3}`, which PHP returns; `array-functions.php`.
+- `catch-unknown-throwable` (1, 1 file): a caught unknown class is `X&Throwable`
+  in PHPStan; the plain class holds the same values; `if.php`.
+- `duplicate-var-right` (1, 1 file): a property with two `@var int` tags is
+  `int`; PHPStan drops both and has `mixed`; `properties.php`.
+- `e-all-right` (1, 1 file): `E_ALL` is `30719` from PHP 8.4, which drops
+  `E_STRICT`; PHPStan has `int`; `predefined-constants.php`.
+- `loose-strict` (1, 1 file): a non-falsy string `== true` is `true` (PHP casts
+  it to bool); PHPStan's `bool` is imprecise; `loose-comparisons.php`.
+- `nullsafe-else-right` (1, 1 file): in the else of `$s?->p !== null`, `$s->p`
+  is `null` either way (a `null` `$s` reads `null` with a warning); PHPStan
+  keeps `Foo|null`; `nullsafe.php`.
+
+**B4** (151 mismatches, 17 files, 18 causes):
+
+- `unsealed-shape-ops` (35, 2 files): unsealed shapes (`array{a: int, ...<K,
+  V>}`) print their tail key only when it isn't `int|string`, become general
+  arrays when every key is optional, keep `hasOffsetValue` and non-emptiness
+  from writes, and keep the tail through `array_unshift`, `array_pop`,
+  `array_shift`, `shuffle` and `array_splice` (`array` today);
+  `unsealed-array-shapes.php`, `unsealed-derivations.php`.
+- `pow-error` (20, 1 file): `**` with an array, an object or a non-numeric
+  string is *ERROR*; `pow.php`.
+- `type-print` (19, 4 files): display forms beyond the gate's normalization: a
+  template with its bound (`T of stdClass (class …, argument)`), a newline in a
+  constant string (`"\n"`, two raw line breaks today), and an explicit `mixed`
+  value (`list<mixed>`); `generics.php`, `shuffle.php`,
+  `predefined-constants.php`, `property-hooks.php`.
+- `iterable-type` (16, 1 file): `iterable` is a type of its own: `T[]` on a
+  native `iterable` is `iterable<T>` (an array today, which a `Traversable`
+  argument contradicts), `T[]|iterable` is `iterable<T>`, and it prints
+  `iterable`, not `array|Traversable`; `iterable.php`.
+- `generic-new-infer` (12, 3 files): `new` infers the class's templates: without
+  arguments `C<mixed>` (stored in a `C<int>` property, `C<int>`), from a static
+  factory, and through a stub (`new IteratorIterator($it)` gives
+  `getInnerIterator()` `Iterator<int, string>`); it prints without arguments
+  today; `generics.php`, `bug-8441.php`, `iterator-iterator.php`.
+- `template-property` (10, 1 file): a property typed with a class template reads
+  as `T` (`mixed` today); `generics.php`.
+- `plus-invalid` (7, 1 file): `+` with an array and a non-array, and on
+  non-numeric strings, is *ERROR*; `binary.php`.
+- `instanceof-intersect` (6, 1 file): `instanceof` narrows to the intersection
+  with an interface (`$this(Foo)&BarInterface`), keeps `static(Foo)`, narrows a
+  class-string subject, and is *ERROR* for an invalid right side;
+  `instanceof.php`.
+- `iterable-intersect` (5, 1 file): `Bar[]|Collection` on a native `Collection`
+  is `iterable<Bar>&Collection`, and foreach over it gives `Bar`;
+  `iterable.php`.
+- `template-infer` (5, 1 file): a template inferred from an unsealed shape's
+  values includes the tail; `unsealed-array-shapes.php`.
+- `class-name-literal` (4, 1 file): `X::class` is the literal name whether or
+  not `X` exists, `static::class` is `class-string<static>` and `parent::class`
+  a `class-string`; `binary.php`.
+- `generic-defaults` (3, 2 files): a generic missing arguments fills them:
+  `Generator<Foo>` is `Generator<mixed, Foo, mixed, mixed>`, and a bare
+  `ReflectionClass` is `ReflectionClass<object>`, so `->name` is
+  `class-string<object>`; `nullsafe.php`, `iterable.php`.
+- `untyped-property-mixed` (3, 1 file): an untyped property is `mixed`, not the
+  type of its assignments; `integer-range-types.php`.
+- `static-closure` (2, 1 file): a static closure prints `static-Closure():
+  never`; `bug-15285.php`.
+- `static-call-generic` (1, 1 file): `$s::genericStatic(1)` on a class-string
+  resolves the template; `node-callback-scope.php`.
+- `template-float-bound` (1, 1 file): a template bounded by `float` keeps the
+  literal `1.0`; `generics.php`.
+- `template-generalize` (1, 1 file): `new FooGeneric(5)` generalizes to
+  `FooGeneric<int>`; `node-callback-scope.php`.
+- `union-normalize` (1, 1 file): an `exit()` arm leaves `never|2|3`
+  unnormalized; `match-expr.php`.
+
+**C4** (12 mismatches, 4 files, 4 causes):
+
+- `var-tags` (5, 1 file): `@var` on `global`: a nameless one types the single
+  global, a named one only the variable it names (`@var int $baz` above `global
+  $lorem` leaves `$baz` alone, where it is `int` today), and one above a foreach
+  destructuring types the destructured variable; `bug-4500.php`.
+- `inheritdoc` (3, 1 file): a property's PHPDoc is inherited through
+  `{@inheritdoc}`, `@inheritdoc` without braces and implicitly;
+  `properties.php`.
+- `unresolvable-phpdoc` (3, 3 files): `\\Test\Bar` (a doubled leading backslash)
+  in a `@param` or `@var` is an invalid type, so the parameter or property is
+  `mixed`; `method-phpDocs-inheritdoc.php`,
+  `methodPhpDocs-implicitInheritance.php`, `properties.php`.
+- `property-tags` (1, 1 file): a native property from an ancestor
+  (`DOMDocument::$documentElement`) wins over the class's `@property-read
+  string`; `properties.php`.
+
+**C6** (8 mismatches, 2 files, 2 causes):
+
+- `env-constants` (7, 1 file): a constant whose value depends on the build or
+  the machine (`PHP_EXTRA_VERSION`, `DEFAULT_INCLUDE_PATH`, `PEAR_INSTALL_DIR`,
+  `PEAR_EXTENSION_DIR`, `PHP_CONFIG_FILE_SCAN_DIR`, `ZEND_DEBUG_BUILD`,
+  `ZEND_THREAD_SAFE`) is its general type; today it is phpstorm-stubs' sample
+  value (`'/usr/lib/php5/20090626'`), wrong on every PHP 8 install;
+  `predefined-constants.php`.
+- `stub-return` (1, 1 file): `Throwable::getCode()` on an `Exception` is
+  `int|string`; `generics.php`.
+
+**C7** (31 mismatches, 8 files, 7 causes):
+
+- `iterator-key` (9, 2 files): foreach and `getIterator()` over a generic
+  `IteratorAggregate`, `Iterator`, `Generator<Foo>` or `ArrayObject<int,
+  string>` give its key and value types; `generics.php`, `iterable.php`.
+- `callable-template-infer` (7, 2 files): `@param T|(Closure(): T)` given a
+  closure or an invokable object binds `T` from its return, not to the closure
+  itself; `generic-unions.php`, `bug-2572.php`.
+- `generic-reflection` (7, 2 files): `ReflectionClass<T>`'s `getName()`,
+  `->name` and `newInstanceWithoutConstructor()` carry `T`/`static`, `new
+  ReflectionClass(stdClass::class)` included, and so does a first-class callable
+  of `getName`; `generics.php`, `first-class-callables.php`.
+- `template-default-param` (4, 2 files): a template parameter whose argument is
+  omitted binds from the default: `@param T $t = null` makes `new C()` a
+  `C<null>` and a call `3|null`; `bug-8441.php`, `generic-unions.php`.
+- `hook-method-template` (2, 1 file): a constructor's `@template T` resolves in
+  a promoted property's hook; it is a class named `T` today;
+  `property-hooks.php`.
+- `class-string-rule` (1, 1 file): `Rule<T>::getNodeType()` returns
+  `class-string<T>`; `generics.php`.
+- `conditional-return` (1, 1 file): a conditional return on a template resolves
+  per member of a `class-string<CustomResponse>|null` argument
+  (`CustomResponse|null`); `bug-8048.php`.
+
+**C8** (2 mismatches, 1 file, 1 cause):
+
+- `type-alias-enum` (2, 1 file): `@phpstan-type` declared on an enum resolves in
+  its methods; `enums.php`.
+
+**D3** (828 mismatches, 59 files, 76 causes):
+
+- `loose-eq-fold` (107, 1 file): `==` folds by PHP 8's table where every pair of
+  members has one answer: an array against a scalar or a shape, an int range
+  against constants, `true`/`false`/`null`, case-accessory strings against
+  literals of the other case, numeric strings against non-numeric ones;
+  `loose-comparisons.php`.
+- `subtracted` (44, 6 files): subtracted types: truthiness, `!=`/`!==`, `is_*`
+  and `instanceof` negations on `mixed` or `object` give `mixed~(…)`/`object~X`,
+  a negated `@phpstan-assert !null` gives `mixed~null`, a `while (($f = …) ===
+  null)` exit leaves `mixed~null`, and a `(string)` or `(int)` of the result
+  keeps what it proves; `node-callback-scope.php`, `non-empty-string.php`,
+  `integer-range-types.php`, `bug-15039.php`, `if.php`, `assert-docblock.php`.
+- `closure-param-infer` (42, 3 files): a closure takes its parameters from where
+  it is used: on the right of `|>` or invoked at once, the argument's type;
+  passed where a callable type gives `never` (`array_map` over `list<never>`,
+  `callable(never...)`) or `true`, that type; `pipe-operator.php`,
+  `bug-15285.php`, `bug-2572.php`.
+- `static-type` (42, 7 files): `static` and `$this` survive: `$this` in a method
+  is `$this(Foo)`, `@var static[]` and `@return static[]` are
+  `array<static(Foo)>` through `$this->`, `self::` and `static::`, an inherited
+  `@param static` is `static(Child)`, `parent::m()` returning `static`/`$this`
+  keeps `static(Child)`/`$this(Child)`, and `@param-closure-this static` binds
+  `static(Bar)`; `method-phpDocs-inheritdoc.php`,
+  `methodPhpDocs-implicitInheritance.php`, `static-methods.php`,
+  `static-properties.php`, `param-closure-this.php`, `native-types.php`,
+  `properties.php`.
+- `byref-array-fns` (37, 4 files): `array_pop`, `array_shift`, `shuffle` and the
+  sort family rewrite the argument: a shape loses the key, non-emptiness and a
+  template's `T&list<…>` stay, `mixed` becomes a `list` (or `mixed~array`), a
+  non-array is *ERROR*, and a shape whose keys are all optional shuffles to a
+  possibly empty `list` (`non-empty-list` today, a wrong value); `array` today;
+  `array-pop.php`, `array-shift.php`, `sort.php`, `shuffle.php`.
+- `operator-ranges` (34, 3 files): `+`, `-`, `*` and `/` on ranges and range
+  unions give ranges (`int<2, 13>`, `float|int<1, 10>`), a constant minus
+  `count()` is bounded, `/ -1` of a range flips it and stays `int`, and
+  `PHP_INT_MIN / -1` is the float alone (`9223372036854775807|float` today);
+  `integer-range-types.php`, `math.php`, `bug-15242.php`.
+- `for-cond-entry` (30, 2 files): a `for` condition is evaluated on the initial
+  values: false there (`$i = 1; $i < count([])`) makes the body unreachable,
+  every expression in it `*NEVER*`; true there runs the body at least once, so
+  what it assigns is defined after the loop; `math.php`, `if.php`.
+- `shift-ranges` (30, 1 file): `<<` and `>>` on ranges and constants give ranges
+  and literals, and a negative shift, an array or a non-numeric string is
+  *ERROR* (`int` today); `integer-range-types.php`.
+- `coalesce-fold` (26, 1 file): `??` folds: a non-nullable left is the left
+  (`$this->string ?? false` is `string`), a never-null right drops `null`, and
+  an always-null or undefined left is the right;
+  `isset-coalesce-empty-type.php`.
+- `float-const-fold` (26, 3 files): constant arithmetic folds to its value (`1 /
+  2` is `0.5`, `1 / 1` is `1`, `$w = 1; $w *= 2.0` is `2.0`), `/ 0` and `% 0`
+  are *ERROR*, `%` of floats is an int, and unary `+`/`-` of a constant folds;
+  `binary.php`, `node-callback-scope.php`, `if.php`.
+- `pow-ranges` (26, 1 file): `**` on ranges and constants gives ranges (`int<4,
+  81>`) and literals (`'5' ** '4'` is `625`, `x ** 0` is `1` or `1.0`);
+  `pow.php`.
+- `array-is-list` (25, 1 file): `array_is_list()` folds on list shapes: `true`
+  on a `list{…}`, `false` after unsetting a required key or a non-constant key,
+  and `true` again after appending; `bug-14177.php`.
+- `enum-loose-fold` (25, 1 file): `==`/`!=` with an enum fold: identity against
+  enums, `true` against `true`, `false` against `false`, `null`, strings and
+  ints; `enums.php`.
+- `static-call-classstring` (17, 1 file): a static call, a static property or
+  `new` through a `class-string<T>` variable or an object's `::class` is
+  `T`/`static` (`mixed` today); `generics.php`.
+- `static-closure-this` (17, 1 file): `$this` in a static closure or arrow
+  function, or in a closure outside a class, is *ERROR* (`mixed` today); a
+  static closure passed to a `@param-closure-this` parameter isn't bound, so it
+  gets the bound class today; `param-closure-this.php`.
+- `int-truthy-narrow` (15, 1 file): truthiness and `== 0` on an int narrow it to
+  `0` or `int<min, -1>|int<1, max>`, and a loop counter is `int<0, max>`;
+  `node-callback-scope.php`.
+- `isset-fold` (15, 1 file): `isset()` and `empty()` of variables and offsets
+  whose definedness and nullability are known fold to `true`/`false`;
+  `binary.php`.
+- `list-write` (15, 4 files): an offset write makes the array non-empty (`$a[$s]
+  = 2`, `$this->p[$s] = $v`) and keeps a `string` key type
+  (`(int|string)|string` today); `bug-4708.php`, `foreach-loop-variables.php`,
+  `non-empty-string.php`, `bug-2911.php`.
+- `maybe-defined-type` (13, 2 files): a maybe-defined variable keeps its type
+  (`mixed` today); `if.php`, `bug-7291.php`.
+- `new-dynamic` (13, 1 file): `new $a()` is `object` on a string or `mixed`, and
+  the class-string's class after narrowing (`mixed` today);
+  `generic-class-string.php`.
+- `loop-generalize` (12, 3 files): loop counters and values changed each pass
+  widen to ranges (`int<0, 4>`, `int<10, max>`); unrolled constants or `int`
+  today; `integer-range-types.php`, `foreach-loop-variables.php`, `if.php`.
+- `multiply-zero` (12, 1 file): `$x * 0`, `* false`, `* '0'` and `$x *= 0` fold
+  to `0` on an int and `0.0` on a float; `math.php`.
+- `is-subclass-narrow` (11, 1 file): `is_subclass_of($a, X)` narrows `mixed`,
+  `string`, `object` and a class-string to `class-string<X>|X`, and `$a::f()`
+  after it returns `f()`'s type; `generic-class-string.php`.
+- `shape-union` (11, 3 files): branches with different shapes stay a union
+  (`array{}|array{'one', 'two'}`, preg_match's `array{}|array{string}`), and
+  `isset`/`array_key_exists` drop the members without the key; one shape with
+  optional keys today; `isset.php`, `if.php`, `bug-14081.php`.
+- `assert-named-args` (10, 1 file): `@phpstan-assert` on a parameter passed as a
+  named argument out of order (`trueCheck(allow_null: false, input: $a)`) isn't
+  applied, so `$a` stays `mixed`; `bug-9435.php`.
+- `foreach-constant-unroll` (10, 2 files): a foreach over a constant array runs
+  once per element: a value changed each pass stays a finite union
+  (`1|10|100|null`), appends build `list{0: 1|2|3, 1?: …, 2?: …}`, and after the
+  loop the last key and value are the last element's (`'b'`, `string`);
+  `foreach-loop-variables.php`, `bug-15250.php`.
+- `key-first-last-fold` (10, 1 file): `($key = array_key_first($l))` truthy or
+  `!== null` makes the list non-empty and `$key` `int<1, max>`/`int<0, max>`,
+  and on a list the key is `int<0, max>|null`; `bug-14081.php`.
+- `assert-array-mixed` (9, 1 file): `@phpstan-assert string[] $arr` on a
+  `mixed[]` argument doesn't narrow it, and the declaration is
+  `assert.alreadyNarrowedType` "does not narrow down the type", a false
+  positive: `array<mixed>` is taken as already `array<string>`, where a scalar
+  assertion (`int` on `mixed`) and `list<int>` on `array` narrow;
+  `assert-docblock.php`.
+- `isset-narrow` (7, 4 files): `isset()` narrows: an offset makes the array
+  non-empty and `mixed` `mixed~null`, and a maybe-defined variable becomes
+  defined with its type (`Foo`, `1`); `if.php`, `isset.php`,
+  `array-functions.php`, `falsey-isset-certainty.php`.
+- `list-shape` (7, 1 file): `array_key_exists(3, $l)` on `list{0: s, 1: s, 2?:
+  s, 3?: s}` makes every lower key required, the else drops key 3, and a
+  `list{…}` prints as one; `bug-14177.php`.
+- `append-shape` (6, 1 file): appends to an undefined or `null` variable, and to
+  a constant list, build the exact shape (`$a[] = 'one'` is `array{'one'}`);
+  `if.php`.
+- `assert-tags` (6, 1 file): a templated `@phpstan-assert T $o` with
+  `class-string<T> $class`, and a method's `-if-true` on its argument, inherited
+  through `parent::`; `assert-docblock.php`.
+- `casts` (6, 1 file): casts of constants fold: `(int) '1'` is `1`, `(array)
+  '1'` is `array{'1'}`, `(object)` is `stdClass`, `(bool) true` is `true`;
+  `node-callback-scope.php`.
+- `error-type` (6, 5 files): an invalid expression is *ERROR*: a missing enum
+  case, an undefined constant or property, an `unset()` variable,
+  `$string::class` (PHP throws `Error`); `class-constant-on-expr.php`,
+  `constants.php`, `enums.php`, `native-types.php`, `properties.php`.
+- `array-plus` (5, 1 file): `+` on shapes is a shape keyed by the left then the
+  right (`array{int, int, int}`); `binary.php`.
+- `check-fold` (5, 1 file): `is_int`, `is_numeric` and `in_array` on known
+  values fold; `binary.php`.
+- `clone-with` (5, 1 file): PHP 8.5 `clone($o, […])` is `object` for a `?object`
+  or `mixed` `$o` (cloning `null` throws; `object|null` and `mixed` today),
+  keeps `static` for `new $this`/`new static`, and adds `hasProperty()` for each
+  assigned name; `clone-with.php`.
+- `empty-narrow` (5, 1 file): truthiness and `count()` on an array narrow it to
+  `array{}` or non-empty, and an impossible branch is `never`;
+  `node-callback-scope.php`.
+- `key-exists-fold` (5, 2 files): `array_key_exists('a', $a)` makes `mixed` or
+  `array<string, int>` `non-empty-array&hasOffset('a')`, and a comparison of the
+  offset after it adds `hasOffsetValue`; `array-flip.php`, `isset.php`.
+- `offset-narrow-memory` (5, 1 file): `!is_string($s['k'])`, `!in_array($s['k'],
+  […], true)` and `!is_numeric($s['k']) || $s['k'] < 1` throwing narrow the
+  offset of an unsealed shape; `bug-2911.php`.
+- `callable-value-call` (4, 1 file): calling a variable returns the callee's
+  return: an object with `__invoke`, `[$this, 'm']`; `['C', 'm']` and `'C::m'`
+  naming a non-static method are *ERROR* (`mixed` today); `callables.php`.
+- `class-constant` (4, 2 files): `$o::class` is `class-string<X>&literal-string`
+  (the literal on a final class or an enum), `null` on a nullable object, and
+  `'Foo'::class` is `'Foo'`; `class-constant-on-expr.php`, `enums.php`.
+- `class-string-final-narrow` (4, 1 file): `$s === FinalCar::class` on
+  `class-string<FinalCar|FinalBike|FinalBoat>` gives the literal, and the else
+  removes `FinalCar`; `bug-9534.php`.
+- `closure-generator` (4, 1 file): a closure with `yield` returns `Generator<K,
+  V, …>`, so `new FooFilterIterator($gen())` infers its templates and
+  `key()`/`current()` are `bool` (`mixed` today); `bug-7519.php`.
+- `foreach-overwrite-value` (4, 1 file): writing `$a[$k]` for the loop's own key
+  on every path through a foreach over `$a` replaces its value type: after
+  `foreach ($a as $k => $v) { $a[$k] = 1; }` on `array<int, string>` it is
+  `array<int, 1>` (`array<int, 1|string>` today), a property included;
+  `overwritten-arrays.php`.
+- `int-float-sum-static` (4, 1 file): a sum with a `static::` constant is
+  `float|int`, since a subclass may override it; `binary.php`.
+- `string-offset-write` (4, 1 file): `$s[0] = '1'` makes a string non-empty;
+  writing a general string at an offset of a `literal-string` drops
+  `literal-string`, and of a non-falsy one leaves it non-empty; `bug-3981.php`.
+- `coalesce-narrow` (3, 1 file): `??` with a non-nullable left is the left
+  (`$string ?? $int` is `string`), and on a maybe-defined variable the union;
+  `binary.php`.
+- `enum-name-value` (3, 1 file): `->name` of an enum with cases removed is the
+  remaining cases' names; `bug-8486.php`.
+- `loop-body-narrow` (3, 2 files): inside a foreach over an array, the array is
+  non-empty; `native-types.php`, `iterable.php`.
+- `nullsafe-narrow` (3, 1 file): the arguments of `$e?->m(…)` see `$e` non-null,
+  and a truthy `$s?->p` makes `$s` non-null; `nullsafe.php`.
+- `string-offset-read` (3, 1 file): `$s[0]` on a string is a `string`
+  (`non-empty-string` in PHPStan), `mixed` today; `bug-3981.php`.
+- `finally-scope` (2, 1 file): `finally` sees the merged `try` and `catch`
+  scopes (`1|'foo'`, the caught exceptions or `null`); `finally.php`.
+- `foreach-narrow-all` (2, 1 file): a foreach throwing when `$key === 'a'`
+  leaves `array<'b', int>` and later keys `'b'`; `bug-15250.php`.
+- `mixin` (2, 2 files): `@mixin` forwards method calls, on an enum and through a
+  stub's `@mixin TIterator` (`IteratorIterator::getArrayCopy()`); `enums.php`,
+  `iterator-iterator.php`.
+- `nullsafe-on-null` (2, 1 file): `$null?->foo` and `$null?->m()` on `null` are
+  `null` (`mixed` today); `nullsafe.php`.
+- `readonly-remember` (2, 1 file): a readonly property assigned a constant in
+  the constructor keeps it in other methods (`'foo'`; `?? null` stays `'foo'`);
+  `bug-15056.php`.
+- `simplexml` (2, 1 file): `SimpleXMLElement::asXML()` and `xpath()`;
+  `binary.php`.
+- `switch-nested-break` (2, 1 file): a `break` inside an `if` in a switch case
+  carries that path's assignments past the switch, fallthrough included;
+  `if.php`.
+- `ternary-const-cond` (2, 1 file): a ternary on a constant condition is its
+  taken arm (`true ? 1 : 2` is `1`); `binary.php`.
+- `unset-shape` (2, 1 file): `unset()` with a non-constant key makes every key
+  optional; `binary.php`.
+- `catch-scope` (1, 1 file): a `catch (\Exception $e)` after `catch
+  (InvalidArgumentException)` is `Exception~InvalidArgumentException`;
+  `native-types.php`.
+- `class-exists-narrow` (1, 1 file): `class_exists()` on a literal class name
+  keeps the literal (`'stdClass'`; `class-string<stdClass>` today);
+  `generic-class-string.php`.
+- `count-narrow` (1, 1 file): `count($a) >= 5` on an unsealed list makes the
+  first five entries required; `unsealed-derivations.php`.
+- `else-narrow` (1, 1 file): the else of an always-true `instanceof` on the
+  PHPDoc type is `*NEVER*`; `native-types.php`.
+- `falsy-narrow` (1, 1 file): the else of `if ($s)` on a string is `''|'0'`;
+  `non-empty-string.php`.
+- `float-literal` (1, 1 file): `1.0` merged from a `catch` stays the literal
+  (`1|1.0`); `if.php`.
+- `identical-fold` (1, 1 file): `'1e2' === '1E2'` folds to `false`;
+  `loose-comparisons.php`.
+- `identical-narrow` (1, 1 file): `$foo === Foo::TWO` on `Foo::ONE` is
+  `*NEVER*`; `enums.php`.
+- `impure-invalidate` (1, 1 file): an immediately-invoked callable calling
+  `$s->voidMethod()` forgets `$s->prop`'s narrowing; `param-closure-this.php`.
+- `increment-types` (1, 1 file): `$s++` on a `string` is `float|int|string`;
+  `literal-string.php`.
+- `offset-write-unknown-key` (1, 1 file): a foreach writing `$r[$field]` under
+  `array_key_exists($field, $r)` keeps the other `hasOffsetValue` facts;
+  `bug-4708.php`.
+- `property-exists-narrow` (1, 1 file): `property_exists()` on
+  `object|class-string` keeps `class-string` (`object|string` today);
+  `bug-2861.php`.
+- `spaceship-range` (1, 1 file): `$a <=> $b` is `int<-1, 1>` (`int` today);
+  `math.php`.
+- `spread-list` (1, 1 file): `[...$generator, &$x]` over `Generator<int, int>`
+  is a `non-empty-list<int>`; `bug-15247.php`.
+- `string-truthy-narrow` (1, 1 file): a truthy string is `non-empty-string`;
+  `node-callback-scope.php`.
+
+**E2** (665 mismatches, 21 files, 34 causes):
+
+- `settype-var` (149, 1 file): `settype($x, 'int')` and each other constant type
+  name rewrites the variable to the cast type, and an invalid name is *ERROR*;
+  the variable is `mixed` today (`SetTypeFunctionTypeSpecifyingExtension`);
+  `set-type-type-specifying.php`.
+- `bcmath-invalid-ops` (141, 1 file): `BcMath\Number` with a `bool`, `null`,
+  array, float or non-numeric operand, and under every shift and bitwise
+  operator, is *ERROR* (`int` or `float` today); `bcmath-number.php`.
+- `preg-group0` (84, 1 file): group 0 of a pattern that must match something is
+  non-empty, and non-falsy with a literal or a quantified group (`string`
+  today); `preg_match_shapes.php`.
+- `ext:function-values` (65, 1 file): values assigned from `microtime()`,
+  `version_compare()`, the `mb_*` encoding functions, `gettimeofday()`,
+  `parse_url()`, `stat()` and its variants, `base64_decode()` and
+  `str_word_count()` keep the extensions' types; `functions.php`.
+- `preg-mixed` (31, 2 files): `$matches` stays `mixed` where the pattern is
+  still analysable: a non-constant flags argument, `(?J)` duplicate names, a
+  pattern in a variable, a `(?|…)` branch reset, a `preg_quote()` concatenation;
+  a pattern it can't parse gives `array<string>`; `preg_match_shapes.php`,
+  `passed-by-reference.php`.
+- `preg-else-empty` (29, 1 file): the false branch of `preg_match()` is
+  `array{}`, so the merge is `array{}|shape`, not one shape with every key
+  optional; `preg_match_shapes.php`.
+- `preg-group-nonfalsy` (27, 1 file): a capturing group with a literal or a `+`
+  quantifier is non-falsy (`non-empty-string` today); `preg_match_shapes.php`.
+- `preg-literal-alt` (17, 1 file): a group of alternated literals or a class of
+  literal characters is their union (`'bar'|'baz'`, `']'|'a'`);
+  `preg_match_shapes.php`.
+- `bcmath-compare-fold` (16, 1 file): comparisons and `&&`/`||` of a
+  `BcMath\Number` against constants fold (`> null` is `true`, `&& false` is
+  `false`); `bcmath-number.php`.
+- `bcmath-concat` (10, 1 file): a `BcMath\Number` concatenated is a non-empty
+  numeric string, non-falsy with a non-empty other side; `bcmath-number.php`.
+- `ext:CallUserFunc` (7, 1 file): `call_user_func()` with a function name, a
+  spread or a `[class, method]` array returns the callee's return, a template
+  resolved; `call-user-func.php`.
+- `ext:DateIntervalFormat` (7, 1 file): `DateInterval::format('%a')` is a
+  lowercase non-empty numeric string, so `* 60` on it is `float|int`;
+  `bug-1452.php`.
+- `intersect-empty` (7, 1 file): `array_intersect*`/`array_uintersect*` against
+  `[]` are `array{}`; today they keep `$a`, as `array_intersect_key` does;
+  `array-functions.php`.
+- `preg-list-shape` (7, 1 file): `PREG_UNMATCHED_AS_NULL` and optional trailing
+  groups give a `list{…}` shape; `preg_match_shapes.php`.
+- `settype-offset` (7, 1 file): `settype($a['x'], 'string')` rewrites that
+  offset of the shape; it is unchanged today, a wrong value;
+  `set-type-type-specifying.php`.
+- `ext:ArrayCountValues` (6, 1 file): `array_count_values()` keeps the value
+  literals as keys with `int<1, max>` counts, and is `array{}` for objects and
+  scalars that aren't int or string; `array-count-values.php`.
+- `ext:ArrayReduce` (6, 1 file): `array_reduce()` is the callback's return on a
+  non-empty array, the initial value on an empty one and their union otherwise
+  (`mixed|null` today); `array-functions.php`.
+- `ext:Sscanf` (6, 1 file): `sscanf($s, '%s %d %d', $month, $day, $year)` types
+  the by-reference outputs by their conversions (`string|null`, `int|null`),
+  `mixed` today; `sscanf.php`.
+- `ext:ArrayMap` (5, 1 file): `array_map()` with a typed closure keeps the keys
+  and the closure's return; `array-functions.php`.
+- `ext:ArrayMerge` (5, 2 files): `array_merge()` of int arrays is `array<int>`,
+  and of a shape with `array<string, mixed>` keeps the tail's key type
+  (`...<string, mixed>`; `...` today); `bug-2911.php`, `array-functions.php`.
+- `preg-offset-int` (5, 1 file): `PREG_OFFSET_CAPTURE` offsets are `int<-1,
+  max>` (`int` today); `preg_match_shapes.php`.
+- `preg-optional-alt` (5, 1 file): an empty alternative (`'~|(a)~'`) makes the
+  group optional in one shape instead of a union of shapes;
+  `preg_match_shapes.php`.
+- `ext:ClosureFromCallable` (4, 2 files): `Closure::fromCallable()`, of a `[$o,
+  'm']` array too, keeps the callable's signature; `first-class-callables.php`,
+  `node-callback-scope.php`.
+- `ext:ArrayFill` (3, 1 file): `array_fill()`/`array_fill_keys()` with constant
+  arguments build the shape; `array-functions.php`.
+- `ext:ArrayFillKeys` (2, 1 file): `array_fill_keys(['foo', …], true)` is a
+  shape, so `$l['derp'] ?? false` is `false`; `isset.php`.
+- `ext:ArrayFlip` (2, 1 file): `array_flip()` of `mixed[]` is
+  `array<(int|string)>`, and of a list `array<V, int<0, max>>`;
+  `array-flip.php`.
+- `ext:ArraySlice` (2, 1 file): `array_slice()` of a constant array, then an
+  append, keeps the shape; `array-functions.php`.
+- `ext:ArraySum` (2, 1 file): `array_sum()` of floats is `0|float`, and of a
+  non-empty float array `float`; `array-sum.php`.
+- `ext:Explode` (2, 1 file): `[$x, $y] = explode(':::', 'App/Service::foo')`
+  folds, so `$y` past the end is *ERROR*; `bug-15013.php`.
+- `ext:MinMax` (2, 1 file): a variable holding `min(30, $i)` is `int<min, 30>`;
+  `math.php`.
+- `ext:ArrayFindKey` (1, 1 file): `array_find_key()` over a shape is the union
+  of its keys or `null`; `array-find-key.php`.
+- `ext:ArrayReplace` (1, 1 file): `array_replace([1, 2, 3], [4, 5, 6])` is
+  `array{4, 5, 6}`; `native-types.php`.
+- `ext:ClosureBind` (1, 1 file): `(function () {…})->call($o)` binds `$this` in
+  the body to `$o`'s type; `native-types.php`.
+- `ext:FilterVarArray` (1, 1 file): `filter_var_array()` of an unsealed shape
+  applies the filter to the tail; `unsealed-derivations.php`.
