@@ -4623,6 +4623,13 @@ fixture:
     unreported today;
   - `@phpstan-consistent-constructor` on a class with a private
     constructor is `consistentConstructor.private`, unreported today;
+  - a template no parameter references is
+    `method.templateTypeNotInParameter` wherever else it appears: today it
+    is reported only when the return type uses it, so a template used
+    nowhere, or only by `@param-out`, a conditional return, a
+    `@phpstan-assert` or a `@throws`, isn't (the rules oracle's 80
+    PHPStan-only, `function-template.php`, `method-template.php`,
+    `*-conditional-return-type.php`, `*-assert.php`, `param-out.php`);
   - an anonymous class is a declaration like any other: the class, member
     and constructor rules run on it and calls see its members' signatures.
     Today `new class() implements F {}` missing `doFoo()`, an untyped or
