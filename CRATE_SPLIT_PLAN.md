@@ -6738,6 +6738,30 @@ Behaviour commits, one each with its fixture:
   goes through `window/logMessage` and `$/logTrace` at the level `$/setTrace`
   asks for, where today most of it is `eprintln!` to stderr, which a client
   shows, if at all, in a raw output channel.
+- **The VS Code extension follows the server** (`editors/vscode`), one commit
+  with its `extension.test.ts` cases:
+  - the document selector adds `untitled:` PHP buffers, so the server's
+    analysis of unsaved buffers (above) receives them, and `phpstan-rs.toml`, so
+    an unsaved config edit is validated live; today it is
+    `{ scheme: "file", language: "php" }` only;
+  - `configPath` and `enable` are read per workspace folder, as their
+    `"scope": "resource"` declares, and the server pulls them per folder
+    (above); today `startClient` calls `getSettings()` with no folder, reading
+    one value and `buildInitializationOptions` resolves `configPath` against
+    `firstFolderPath()`, the first folder alone;
+  - `enable` has one meaning, a folder's analysis off: the server keeps no
+    Session for a disabled folder, and the extension stops the server only when
+    every folder is disabled. Today the extension stops the whole server, while
+    the server's own `enable` flag ("stop showing squiggles", hover kept) is
+    never reached;
+  - a changed `configPath` or `enable` applies through the server's
+    `reconfigure` with no restart; only `serverPath` still offers one (today all
+    three prompt "Restart Server");
+  - activation adds `workspaceContains:**/phpstan-rs.toml` and
+    `workspaceContains:**/composer.json`, so a workspace's diagnostics appear
+    before a PHP file is opened; today only `onLanguage:php` activates it;
+  - `capabilities.untrustedWorkspaces` (below) and the stub content provider
+    (F5) are declared here.
 - **Untrusted workspaces.** The VS Code extension declares
   `untrustedWorkspaces: limited` and passes the trust state as an initialization
   option; in an untrusted workspace the server doesn't connect to a database the
