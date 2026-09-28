@@ -898,12 +898,14 @@ corpus, type, baseline, performance and build-time gates run locally
    its own CLI run.
 8. **Performance**, measured against the previous commit, one-sided:
    - wall time: hyperfine, warmup, 10 runs; the mean may not exceed the
-     previous mean + max(2%, 3σ);
+     previous mean + max(2%, 3σ); from F2, cold (`--no-result-cache`), warm
+     with nothing changed, and warm after one file's change, each held to its
+     own previous mean;
    - peak RSS (`/usr/bin/time -v`) and dhat peak;
-      - LSP steady-state RSS, incremental re-check latency (the edited file's
-        publish and the whole affected set's), and the 95th-percentile latency
-        of hover, definition, completion and references over a fixed sample of
-        corpus positions.
+   - LSP steady-state RSS, incremental re-check latency (the edited file's
+     publish and the whole affected set's), and the 95th-percentile latency
+     of hover, definition, completion and references over a fixed sample of
+     corpus positions.
 
    Results are stored under `.corpus-runs/perf/<hash>`.
 9. **Build time.** Scenarios: touch an engine file, a rule file, a lexer
@@ -6879,7 +6881,10 @@ the whole registry (§1), which C4's memo already removes.
   point anywhere; the cache writes only inside a directory it created, marked by
   a `CACHEDIR.TAG`, and never replaces a file it didn't write, so
   `result_cache_path = "~/.bashrc"` fails the run instead of overwriting the
-  file. `clear-result-cache` deletes only such a marked directory.
+  file. `clear-result-cache` deletes only such a marked directory. A run whose
+  output needs every file walked (`--dump-types`, `--emission-order`, `--debug`)
+  reads no cached result but still writes the cache, and the fixture harness
+  never uses one.
 - **Incremental collectors.** Collected data is cached per file; a run
   recollects the analysed files and reruns the project-level rules over the
   merged data. A fact producer → consumer edge keyed by host class (another
@@ -6891,10 +6896,12 @@ the whole registry (§1), which C4's memo already removes.
   the results of files whose overlay matches the disk; an overlay's results are
   never cached.
 
-Gate: the cache closure gate. A sequence of edits applied through cached runs
-gives, at every step, exactly a cold run's result (a property test over the
-fixture directories); on the corpus, a warm run after no change equals the cold
-run and analyses no file. The LSP replay gate (gate 7) goes on.
+The gates run cold (`--no-result-cache`), so their snapshots and timings never
+depend on what a previous run left on disk; the cache has its own gates. Gate:
+the cache closure gate. A sequence of edits applied through cached runs gives,
+at every step, exactly a cold run's result (a property test over the fixture
+directories); on the corpus, a warm run after no change equals the cold run and
+analyses no file. The LSP replay gate (gate 7) goes on.
 
 **F3. ErrorFormatter set.** An `ErrorFormatter` (§3.10) takes the finalized
 result (file, not-file and internal errors, warnings, stats) and a writer. The
