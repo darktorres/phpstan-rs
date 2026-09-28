@@ -1524,6 +1524,15 @@ positive-int ? 1 : T is negative-int ? -1 : 0)`, `bug-8609.php`); and
 plain `callable` today, so it is `parameter.phpDocType` "callable is not
 subtype of native type Closure", `bug-9009.php`).
 
+Follow-up: **what phpdoc-parser rejects is `phpDoc.parseError`**, where
+the parser today accepts it: `@use FooTrait` without generic arguments
+(expected `<`), `callable() $cb` without a return type, `A & B | C`
+without parentheses, `\\Foo` with a doubled backslash, `@phpstan-type
+InvalidFoo what{}`, and a hook's `@return Test(` (the rules oracle's 11
+PHPStan-only, `impossible-instanceof-in-trait.php`,
+`check-implicit-mixed.php:102`, `invalid-phpdoc*.php`,
+`invalid-type-type-alias.php`).
+
 Follow-up: **a tag's diagnostics sit on the tag's line**: an invalid
 `@param`, `@var` or `@return` is `phpDoc.parseError` on its own line, not
 the declaration's, so an `@phpstan-ignore-line` or `-next-line` inside the
@@ -1846,7 +1855,9 @@ Follow-ups:
   through the ConstantResolver, bare constant names namespace-resolved,
   `self`/`parent`/`static` bound to the class, `new` and constant
   expressions included (C8). `#[Table(self::TABLE_NAME)]` on a class is
-  `argument.type` "mixed given" today (the rules oracle's `bug-12011.php`).
+  `argument.type` "mixed given" today (the rules oracle's `bug-12011.php`),
+  and an undefined one (`#[MyAttr(self::BAR)]`) is `classConstant.notFound`,
+  unreported today (`class-constant-attribute.php`, 6).
 - The rest of C3's data model lands in C4: class and method keys, per-member
   flags and `Vec<TemplateParam>`, build scratch in the builder, provenance
   as the only location record, query accessors, parse-time resolved names,
@@ -4595,6 +4606,20 @@ fixture:
     `impossible-method-exists-on-generic-class-string.php`, 6), and a
     `global $pdo` variable, `mixed` at level 10 (`bug-14318.php`, 4); all
     unreported today;
+  - a parent's private constant read through a child (`self::PRIVATE_FOO`
+    in `Bar extends P`, `$bar::PRIVATE_FOO`) is `classConstant.notFound`
+    "undefined constant Bar::PRIVATE_FOO", as PHP reports it, not
+    `classConstant.private` as today, and a constant some member of a
+    union or intersection receiver lacks is `classConstant.notFound`
+    (`$fooOrString::DOLOR`; `class-constant-visibility.php`,
+    `class-constant.php:33`);
+  - named arguments that leave a required parameter unset are
+    `argument.missing`: `$f(i: 1)` for a two-parameter closure or a
+    `callable(int, int)`, `implode(array: [''])` and `join(array: …)`,
+    and `new \DatePeriod(…)` without `start` are unreported today (the
+    rules oracle's 10 PHPStan-only with the `call_user_func` ones,
+    `callables-named-arguments.php`, `implode-named-parameters.php`,
+    `bug-7048.php`);
   - invoking a value that isn't callable is `callable.nonCallable`: a
     constant string naming no function (`$n = 'nonexistent'; $n();`,
     `''`), `$i(...)` on `1`, `5 |> 'doFoo'` with no function `doFoo`, and
