@@ -1,6 +1,6 @@
 # Paths naming a `types::Type` variant outside crates/types, per file.
 # A count may only fall; `cargo xtask arch --bless-types` records a fall.
-# total 1505: 1425 in patterns, 80 in comparisons, 0 building a type
+# total 1423: 1348 in patterns, 75 in comparisons, 0 building a type
 4	crates/phpstan-rs/src/checker.rs
 6	crates/phpstan-rs/src/checker/access_attributes.rs
 137	crates/phpstan-rs/src/checker/assignment.rs
@@ -41,10 +41,7 @@
 3	crates/phpstan-rs/src/checker/internal_usage.rs
 31	crates/phpstan-rs/src/checker/missing_typehint.rs
 17	crates/phpstan-rs/src/checker/narrowing.rs
-18	crates/phpstan-rs/src/checker/narrowing/accessory_range.rs
-34	crates/phpstan-rs/src/checker/narrowing/array_shape.rs
 9	crates/phpstan-rs/src/checker/narrowing/assertions.rs
-30	crates/phpstan-rs/src/checker/narrowing/type_ops.rs
 36	crates/phpstan-rs/src/checker/native_type_hints.rs
 30	crates/phpstan-rs/src/checker/noop.rs
 19	crates/phpstan-rs/src/checker/offset_assignment.rs

@@ -5,27 +5,24 @@ use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
 use syntax::token::Span;
 use types::{AccessoryKind, Type};
-mod accessory_range;
-mod array_shape;
 mod assertions;
 mod predicates;
-mod type_ops;
 
-use accessory_range::{
-    comparison_narrowed_bounds, int_comparison_operands, narrow_array_to_non_list,
-    numeric_bounds_for_narrowing, upgrade_array_to_list, upgrade_array_to_non_empty,
-};
-pub(crate) use array_shape::{
-    array_value_type_for_key, narrow_array_shape_by_key_presence, narrow_isset_container,
-    narrow_type_excluding_falsy,
-};
-use predicates::preg_match_condition;
+use predicates::{int_comparison_operands, preg_match_condition};
 pub(crate) use predicates::{
     is_real_variable_key, key_depends_on, narrowing_key, narrowing_type_for_predicate,
     propagate_container_field_facts, purge_stale_narrowing_for,
 };
-use type_ops::narrow_instanceof_true;
-pub(crate) use type_ops::{is_known_single_value, narrow_type_excluding, narrow_type_to};
+use types::narrowing::narrow_instanceof_true;
+pub(crate) use types::narrowing::{
+    array_value_type_for_key, narrow_array_shape_by_key_presence, narrow_isset_container,
+    narrow_type_excluding_falsy,
+};
+use types::narrowing::{
+    comparison_narrowed_bounds, narrow_array_to_non_list, numeric_bounds_for_narrowing,
+    upgrade_array_to_list, upgrade_array_to_non_empty,
+};
+pub(crate) use types::narrowing::{is_known_single_value, narrow_type_excluding, narrow_type_to};
 
 /// `count($x)`'s own operand-order detection for the count-comparison
 /// narrowing below - same shape as `int_comparison_operands`, but keyed

@@ -20,6 +20,7 @@ mod extension;
 mod hierarchy;
 mod intersection;
 mod late;
+pub mod narrowing;
 mod parse;
 mod php_float_format;
 pub mod php_version;
