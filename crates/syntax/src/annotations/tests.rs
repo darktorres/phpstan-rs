@@ -74,9 +74,9 @@ fn a_statement_expression_is_marked_and_its_parts_are_not() {
 }
 
 #[test]
-fn catch_types_cover_the_try_body_only_and_stop_at_a_closure() {
+fn catch_types_cover_the_try_body_only_and_stop_at_a_closure_or_arrow_function() {
     let program = parse(
-        "<?php try { $inTry; try { $inner; } catch (B $e) {} $f = function () { $inClosure; }; } catch (A | \\C $e) { $inCatch; } finally { $inFinally; }",
+        "<?php try { $inTry; try { $inner; } catch (B $e) {} $f = function () { $inClosure; }; $g = fn () => $inArrow; } catch (A | \\C $e) { $inCatch; } finally { $inFinally; }",
     );
     let a = annotate(&program);
     let names = |v: &str| {
@@ -88,6 +88,7 @@ fn catch_types_cover_the_try_body_only_and_stop_at_a_closure() {
     assert_eq!(names("inTry"), ["A", "\\C"]);
     assert_eq!(names("inner"), ["A", "\\C", "B"]);
     assert!(names("inClosure").is_empty());
+    assert!(names("inArrow").is_empty());
     assert!(names("inCatch").is_empty());
     assert!(names("inFinally").is_empty());
 }

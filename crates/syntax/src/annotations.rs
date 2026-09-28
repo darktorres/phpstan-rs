@@ -154,11 +154,21 @@ impl Builder {
     /// Walks one function body: `goto` targets and `catch` types do not
     /// cross it.
     fn body(&mut self, stmts: &[Stmt]) {
+        self.function_scope(|this| walk_stmts(this, stmts));
+    }
+
+    /// Walks an arrow function's body, which runs later: the enclosing
+    /// `catch` types don't apply to it.
+    fn arrow_body(&mut self, body: &Expr) {
+        self.function_scope(|this| this.visit_expr(body));
+    }
+
+    fn function_scope(&mut self, walk: impl FnOnce(&mut Self)) {
         let gotos = std::mem::take(&mut self.gotos);
         let labels = std::mem::take(&mut self.labels);
         let catch_stack = std::mem::take(&mut self.catch_stack);
         let current_catch = std::mem::replace(&mut self.current_catch, NO_CATCH);
-        walk_stmts(self, stmts);
+        walk(self);
         for (name, id) in std::mem::take(&mut self.labels) {
             if self.gotos.contains(&name) {
                 self.set(id, GOTO_TARGET);
@@ -312,6 +322,12 @@ impl<'ast> Visitor<'ast> for Builder {
                     self.visit_param(param);
                 }
                 self.body(body);
+            }
+            ExprKind::ArrowFn { params, body, .. } => {
+                for param in params {
+                    self.visit_param(param);
+                }
+                self.arrow_body(body);
             }
             _ => walk_expr(self, expr),
         }
