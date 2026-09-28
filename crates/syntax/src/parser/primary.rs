@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, Span, Token};
 
 impl Parser {
     pub(crate) fn parse_array_items(
@@ -49,6 +49,106 @@ impl Parser {
         }
         self.expect(close)?;
         Ok(items)
+    }
+
+    /// What follows `new`: a class name, `(expr)`, or a variable with
+    /// property, static-property and offset accesses chained onto it (PHP's
+    /// `new_variable`), never a call, so `new $this->model($v)`
+    /// instantiates the class `$this->model` names and `($v)` is the
+    /// constructor's arguments.
+    fn parse_new_class_reference(&mut self) -> Result<Expr, ParseError> {
+        let start = self.current_pos();
+        let mut expr = match self.peek() {
+            Token::Variable(_) | Token::Dollar | Token::DollarBrace => self.parse_primary()?,
+            // `new ('std' . $class)`: the parenthesized expression is the
+            // whole reference.
+            Token::LParen => {
+                self.skip();
+                let e = self.parse_expression()?;
+                self.expect(&Token::RParen)?;
+                return Ok(self.expr(ExprKind::Grouping(Box::new(e)), start));
+            }
+            _ => {
+                let name = self.parse_qualified_name();
+                self.expr(ExprKind::Name(self.qualified_name(&name)), start)
+            }
+        };
+        loop {
+            match self.peek() {
+                Token::LBracket => {
+                    self.skip();
+                    let index = if self.check(&Token::RBracket) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expression()?))
+                    };
+                    self.expect(&Token::RBracket)?;
+                    expr = self.expr(ExprKind::Index(Box::new(expr), index), start);
+                }
+                Token::Arrow | Token::NullsafeArrow => {
+                    let nullsafe = matches!(self.peek(), Token::NullsafeArrow);
+                    self.skip();
+                    expr = match self.peek() {
+                        Token::LBrace => {
+                            self.skip();
+                            let name = self.parse_expression()?;
+                            self.expect(&Token::RBrace)?;
+                            self.expr(
+                                ExprKind::DynamicPropertyAccess(Box::new(expr), Box::new(name)),
+                                start,
+                            )
+                        }
+                        Token::Variable(_) | Token::Dollar | Token::DollarBrace => {
+                            let name = self.parse_primary()?;
+                            self.expr(
+                                ExprKind::DynamicPropertyAccess(Box::new(expr), Box::new(name)),
+                                start,
+                            )
+                        }
+                        _ => {
+                            let name = self.expect_ident_spanned()?;
+                            self.expr(
+                                ExprKind::PropertyAccess(Box::new(expr), name, nullsafe),
+                                start,
+                            )
+                        }
+                    };
+                }
+                Token::DoubleColon
+                    if matches!(
+                        self.peek_at(1),
+                        Token::Variable(_) | Token::Dollar | Token::DollarBrace
+                    ) =>
+                {
+                    self.skip();
+                    let target = match &expr.kind {
+                        ExprKind::Name(n) => StaticTarget::Name(n.clone(), expr.span),
+                        _ => StaticTarget::Expr(Box::new(expr)),
+                    };
+                    expr = if matches!(self.peek(), Token::Variable(_)) {
+                        let var_start = self.current_pos();
+                        let Token::Variable(name) = self.take_token() else {
+                            unreachable!()
+                        };
+                        let ident = Ident {
+                            name: self.interner.name(&name),
+                            span: Span {
+                                start: var_start,
+                                end: self.previous_end(),
+                            },
+                        };
+                        self.expr(ExprKind::StaticPropertyFetch(target, ident), start)
+                    } else {
+                        let name = self.parse_primary()?;
+                        self.expr(
+                            ExprKind::DynamicStaticPropertyFetch(target, Box::new(name)),
+                            start,
+                        )
+                    };
+                }
+                _ => return Ok(expr),
+            }
+        }
     }
 
     pub(crate) fn parse_primary(&mut self) -> Result<Expr, ParseError> {
@@ -143,34 +243,7 @@ impl Parser {
                 if self.check(&Token::AttributeStart) || self.at_anonymous_class_start() {
                     return self.parse_anonymous_class_new(start);
                 }
-                let class_expr = match self.peek() {
-                    Token::Variable(_) => {
-                        let s = self.current_pos();
-                        let Token::Variable(name) = self.take_token() else {
-                            unreachable!()
-                        };
-                        self.expr(ExprKind::Variable(name), s)
-                    }
-                    // `new ('std' . $class)` - a fully dynamic class
-                    // reference. Parsed as exactly one grouped expression
-                    // (not the general postfix-chaining primary parse),
-                    // so a constructor call's own `(...)` right after it
-                    // (`new ('std'.$class)()`) is left for the args check
-                    // below, not folded into this expression's postfix
-                    // chain.
-                    Token::LParen => {
-                        let s = self.current_pos();
-                        self.skip();
-                        let e = self.parse_expression()?;
-                        self.expect(&Token::RParen)?;
-                        self.expr(ExprKind::Grouping(Box::new(e)), s)
-                    }
-                    _ => {
-                        let s = self.current_pos();
-                        let name = self.parse_qualified_name();
-                        self.expr(ExprKind::Name(self.qualified_name(&name)), s)
-                    }
-                };
+                let class_expr = self.parse_new_class_reference()?;
                 // `new Foo(...)` parses but is a compile error in PHP (a
                 // constructor can't be referenced as a first-class
                 // callable) - kept as a `FirstClassCallable` so the

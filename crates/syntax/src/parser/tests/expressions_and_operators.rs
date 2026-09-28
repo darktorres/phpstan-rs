@@ -1109,3 +1109,22 @@ fn a_variable_variable_member_name_keeps_both_levels_of_indirection() {
     ));
     assert!(matches!(name_of(2), ExprKind::Literal(_)));
 }
+
+#[test]
+fn new_takes_a_property_chain_as_its_class_and_the_call_as_its_arguments() {
+    let program = parse("<?php $x = new $this->model($v); $y = new $a['k']::$cls();");
+    let class_of = |i: usize| {
+        let StmtKind::Expression(e) = &program[i].kind else {
+            panic!("expected an expression statement");
+        };
+        let ExprKind::Assign(_, rhs) = &e.kind else {
+            panic!("expected an assignment");
+        };
+        let ExprKind::New(class, args) = &rhs.kind else {
+            panic!("expected new, got {:?}", rhs.kind);
+        };
+        (class.kind.clone(), args.len())
+    };
+    assert!(matches!(class_of(0), (ExprKind::PropertyAccess(_, ref name, false), 1) if &*name.name == "model"));
+    assert!(matches!(class_of(1), (ExprKind::StaticPropertyFetch(StaticTarget::Expr(_), _), 0)));
+}
