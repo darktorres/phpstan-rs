@@ -884,14 +884,24 @@ corpus, type, baseline, performance and build-time gates run locally
    diagnostics and stale entries they report are snapshotted and held to
    the parent commit's like the corpus, changing only by approved delta;
    the counts are printed for information.
-7. **LSP replay** (from Stage F). Open every Piwigo file through the
-   Session in LSP mode, then run an edit/revert pass. The result must equal
-   the CLI snapshot.
+7. **LSP replay** (from Stage F). Open every Piwigo file through the Session in
+   LSP mode, then run an edit/revert pass, and compare after every step, not
+   only at the end: after each edit, the published diagnostics of every file
+   equal a CLI run over the edited tree, and after the revert, the CLI snapshot.
+   The edits are scripted: a declaration's signature changed, a class renamed
+   and its file moved, a file deleted and restored, a PHPDoc-only reference's
+   target changed, a syntax error typed and fixed character by character. The
+   replay runs once with one workspace folder and once with the corpus split
+   into two folders with different configs, each folder's diagnostics equal to
+   its own CLI run.
 8. **Performance**, measured against the previous commit, one-sided:
    - wall time: hyperfine, warmup, 10 runs; the mean may not exceed the
      previous mean + max(2%, 3σ);
    - peak RSS (`/usr/bin/time -v`) and dhat peak;
-   - LSP steady-state RSS and incremental re-check latency.
+      - LSP steady-state RSS, incremental re-check latency (the edited file's
+        publish and the whole affected set's), and the 95th-percentile latency
+        of hover, definition, completion and references over a fixed sample of
+        corpus positions.
 
    Results are stored under `.corpus-runs/perf/<hash>`.
 9. **Build time.** Scenarios: touch an engine file, a rule file, a lexer
@@ -7102,6 +7112,24 @@ Then the features:
   `codeDescription` links each identifier to its page in the rule reference
   (ROADMAP Phase 185), and the tip is a `relatedInformation` entry at the
   finding's own span instead of being appended to the message text.
+
+Gates, over the corpus, each recorded under `.corpus-runs/gate/lsp/<hash>` and
+held to the previous commit's:
+
+- **navigation consistency**: for every site E1's reference-site collector
+  records, definition answers the site's declaration, and references from that
+  declaration list the site;
+- **rename round trip**: for a fixed sample of classes, functions, methods,
+  properties and constants, applying rename's edit leaves every file's
+  diagnostics unchanged except for the renamed name in messages, and renaming
+  back restores the original bytes;
+- **completion recall**: at every `->`, `?->` and `::` site in the analysed
+  files, with the text cut after the operator, the member the site names is
+  offered, and nothing offered would be an error there (a private member outside
+  its class, an instance method after `::` outside `parent::`/`self::`);
+- **positions**: fixtures with multi-byte and astral characters in names,
+  strings and comments round-trip every published range and every request
+  position in UTF-8, UTF-16 and UTF-32.
 
 ### Stage G: extraction wave and tidy
 
