@@ -79,6 +79,8 @@ L1  phpdoc        the single PHPDoc grammar -> TypeNode AST; DocBlock  (syntax)
                   Identifier (+ families)                         (syntax)
     composer      composer.json / installed.json model, package context
                                                                   (syntax)
+    neon          NEON decoder and encoder (PHPStan's config and baseline
+                  format)                                         (no deps)
 L2  config        loader and section-owner registry with schema
                   validation; each settings type lives with its owner
                   module                                          (diagnostics)
@@ -6574,6 +6576,36 @@ Behaviour commits, one each with its fixture:
   normalized lexically only, so a baseline generated at the project root matches
   nothing in a run from a subdirectory with `--config ../phpstan-rs.toml`, whose
   paths are `../src/…`.
+- **PHPStan baselines load.** `baseline` and `--baseline` take a PHPStan
+  `.neon` or `.php` baseline beside the JSON one, so a project moving from
+  PHPStan keeps its baseline; today only JSON loads, and `convert-baseline`
+  reads only phpstan-rs's own versions. A NEON baseline is read by the `neon`
+  crate, its `includes` followed relative to the including file (a baseline
+  split across files); a `.php` one
+  (`$ignoreErrors[] = [...]; return ['parameters' => ['ignoreErrors' => $ignoreErrors]];`)
+  is parsed by phpstan-rs's own parser and evaluated by C2's initializer
+  evaluator, never executed. Its entries become C1's ignore-error entries:
+  `message` a PCRE pattern with its delimiters, `rawMessage` literal,
+  `identifier`, `count`, `path` relative to the baseline file; unmatched ones
+  report as the JSON baseline's stale entries do. PHPStan words many findings
+  differently from phpstan-rs, so an entry whose message matches no finding
+  falls back to its path, identifier and count, as `baseline_match_identifier`
+  matches, the identifier read through the pairs E's introduction names as
+  differently named (`method.abstract` for `class.abstractMethodNotImplemented`
+  and the rest); the load reports how many entries matched by message, by
+  identifier and not at all. `convert-baseline` converts between JSON, NEON and
+  PHP, and `--generate-baseline` with a `.neon` or `.php` path writes that
+  format (F3's baseline formatters), keeping the file's other keys.
+- **The `neon` crate** (L1, no dependencies) decodes and encodes NEON whole:
+  block and inline mappings and sequences, bare, single- and double-quoted
+  strings with their escapes, `'''` and `"""` multi-line strings, integers in
+  every base, floats, the `true`/`false`/`yes`/`no`/`on`/`off`/`null` literals
+  in their case forms, dates, entities (`Name(args)`) and entity chains,
+  comments, and errors with positions for mixed tab and space indentation and
+  duplicate keys. Its gate is a differential test against nette/neon's
+  `Neon::decode`, run through `php` over phpstan-src's `conf/*.neon`, the
+  `.neon` files under its `tests/`, and generated documents, plus a fuzz target;
+  its encoder's output decodes to the same value in both.
 - **Non-ignorable errors bypass the baseline**: `entries_for` writes them into
   a generated baseline, and `baseline::filter` suppresses them (it has no
   `non_ignorable` check; `ignore_errors::filter` has one). Generation reports
@@ -6626,6 +6658,12 @@ Behaviour commits, one each with its fixture:
   indistinguishable from "nothing here"). `lsp` accepts `--stdio`, which generic
   clients (a `vscode-languageclient` using `TransportKind.stdio`) append; the VS
   Code extension omits it today to avoid clap's rejection.
+- **Untrusted workspaces.** The VS Code extension declares
+  `untrustedWorkspaces: limited` and passes the trust state as an initialization
+  option; in an untrusted workspace the server doesn't connect to a database the
+  workspace's config names (ext-sql's live reflector reads the DDL schema only)
+  and says so once. Today opening a repository whose `phpstan-rs.toml` names a
+  database connects to it with the credentials in the file.
 - **An ignore code action**: every ignorable diagnostic offers "Ignore
   `<identifier>` on this line", adding the identifier to a `@phpstan-ignore`
   comment on the line (or the line above), extending one already there;
@@ -6788,6 +6826,14 @@ on.
   their roles moving to the syntax bench, the fixtures and a `project` example.
   `incremental-bench` becomes `project/examples/incremental.rs`, over any
   directory, plus a criterion bench.
+- PHPStan's command line works as is, so a CI script or tool that runs
+  `vendor/bin/phpstan analyse` can run phpstan-rs instead: `analyse` and
+  `analyze` name `check-project`; `-c`/`--configuration`, `-l`/`--level`,
+  `-b`/`--generate-baseline` (its value optional, `phpstan-baseline.neon` by
+  default), `--error-format` and `--autoload-file` (scanned as context) take
+  PHPStan's meaning; `--memory-limit`, `--xdebug`, `--debug`,
+  `--ansi`/`--no-ansi` and `-v`/`-vv`/`-vvv` are accepted, each one with no
+  meaning here reported once as ignored.
 - The `format_signature` test moves to `reflection`.
 - `tests/cli.rs` covers every format's output and exit code on a fixture tree
   holding a finding, a parse error, an internal error (the panic-injection hook)
