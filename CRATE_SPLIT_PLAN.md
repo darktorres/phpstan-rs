@@ -3214,6 +3214,17 @@ deleted; the file-size gate.
       `call-user-func-array.php`), and count them: `call_user_func($f)`
       and `call_user_func_array($f, [1])` for a callable needing two are
       `arguments.count`, unreported today (10 findings).
+    - **Every receiver form resolves the callee**: a static call through
+      a `class-string<Foo>` variable or on an `A|B` receiver checks its
+      arguments (`$cs::test(1, 2, 3)`, `$ab::sfoo()`;
+      `call-static-methods.php`, `bug-15251.php`, 5); a spread of a union
+      of shapes passes position by position (`...$args` on `array{'foo',
+      1}|array{'foo', 1, 'bar'}` passes `'foo'` first and maybe only two
+      arguments, `arguments.count`, where today the first is
+      `'bar'|'foo'|1`, a false `argument.type`; `bug-3481.php`); and a
+      parameter with a default before a required one is required
+      (`function ($a, $b = 'b', $c)` needs three, `callables.php:157`); all
+      unreported today.
     - **A variadic parameter** is `list<T>` in the body under
       `@no-named-arguments` and `array<int|string, T>` otherwise; it is
       `array<T>` today, so `$this->b = $b` into `list<B>` is
