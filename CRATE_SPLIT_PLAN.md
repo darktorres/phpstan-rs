@@ -4717,6 +4717,16 @@ fixture:
     `appended-array-item.php`, `appended-array-key.php`, `bug-9213.php`,
     `bug-7119.php`, `uksort.php`, `property-type-after-unset.php`,
     `properties-assigned-types.php`);
+  - a readonly property is modified by every write form, so outside the
+    constructor each is `property.readOnlyAssignNotInConstructor` ("Cannot
+    indirectly modify readonly property" at runtime): an offset write or
+    `unset()` of an offset, `++`/`--`, a compound assignment,
+    destructuring, a set hook writing it, and a by-reference argument
+    (also `argument.byRef`); only a plain `=` is reported today (the rules
+    oracle's 16 PHPStan-only, `readonly-assign.php`, `bug-6773.php`,
+    `bug-7198.php`, `readonly-property-hooks.php`,
+    `readonly-property-passed-by-reference.php`,
+    `unset-hooked-property.php`);
   - property hooks: the checks that a property overriding a writable or
     readable one stays so (`property.notWritable`/`notReadable`) and that
     a get hook of a non-virtual property reads its value and a set hook
@@ -4916,6 +4926,13 @@ fixture:
     `bug-4852.php`, `bug-5288.php`, `bug-7519.php`,
     `tentative-return-types.php`, and the anonymous classes of
     `offset-access-legal.php`); the rules oracle's 24 and 22 PHPStan-only;
+  - `#[\NoDiscard]` on a `void` or `never` function, method, closure or
+    arrow function is `attribute.target`, a PHP 8.5 compile error ("A void
+    function does not return a value, but #[\NoDiscard] requires a return
+    value"), magic methods returning `void` included; unreported today (14
+    of the rules oracle's 16 PHPStan-only, `typehints-nodiscard.php`,
+    `closure-typehints-nodiscard.php`,
+    `arrow-function-typehints-nodiscard.php`);
   - `parameter.requiredAfterOptional` covers closures and arrow functions
     as it does functions and methods, with the same per-version wording
     (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`);
