@@ -1426,7 +1426,9 @@ Follow-ups:
 - **Late types.** `new<T>` and `template-type<...>` get variants (PHPStan's
   `NewObjectType` and `GetTemplateTypeType`); `int-mask<>`/`int-mask-of<>`
   resolve in C7's resolver instead of reading as `int`; `key-of<C::ARR>`
-  resolves like `value-of<C::ARR>` (it reads as `mixed`). `key-of<T>` and
+  resolves like `value-of<C::ARR>` (it reads as `mixed`; `@param
+  key-of<self::ALL> $code` on a `string` is `parameter.phpDocType` today,
+  `call-methods.php:1769`). `key-of<T>` and
   `value-of<T>` of a template stay late (`KeyOfType`/`ValueOfType`) and
   answer through the template's bound: a template `Offset of
   key-of<DataArray>` with `DataArray of array<string, mixed>` passed to
@@ -1593,7 +1595,10 @@ Follow-up: **shape keys follow phpdoc-parser's identifier token**, which
 takes `-` and `\` anywhere after the first character: `array{psr-4?:
 list<string>}` and `array{x-1: int}` report `phpDoc.parseError` today (a
 `-` before a digit ends the key), and `array{e\f: int}` parses as
-`array{0: e\f: int}` with a `class.notFound`.
+`array{0: e\f: int}` with a `class.notFound`. The lost type cascades: the
+rules oracle's `bug-6000.php` and `bug-8467a.php` go on to
+`foreach.emptyArray`, `offsetAccess.notFound` and a `class.notFound` on
+the alias (13 findings).
 
 Follow-up: **type parsing is linear** in a type's length and depth-limited
 with a parse error: an `array<...>` nested 1,000 deep takes 3 s and 2,000
@@ -1773,7 +1778,9 @@ Follow-ups, one commit each, each with its test:
   `RecursiveRegexIterator`, `ReflectionObject`) exempts those classes from
   `missingType.generics`, reported for them today (11 findings,
   `bug-9615.php` and the `internal-classes-overload-offset-access*.php`
-  files). phpstan-strict-rules turns several of
+  files); `checkGenericIterableClasses` (off by default) exempts every
+  generic `Traversable` subtype the same way (`bug-9981.php`, 6).
+  phpstan-strict-rules turns several of
   these on (`polluteScopeWithBlock: false` among them), so E4's
   ext-strict-rules reads them. PHPStan's runtime parameters (`tmpDir`,
   `resultCache*`, `productionMode`, `bootstrapFiles`, the playground and
@@ -2508,7 +2515,10 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
   (about 85 sites);
 - an array PHPDoc type unioned with an iterable type gives it its value
   type (`TypeNodeResolver`'s union handling): `string[]|iterable` is
-  `iterable<string>` and `Foo[]|Collection` is `Collection&iterable<Foo>`,
+  `iterable<string>`, `Foo[]|Collection` is `Collection&iterable<Foo>`,
+  and `array|int[]` is `array<int>` (`missingType.iterableValue` on it
+  today, `missing-function-parameter-typehint.php`,
+  `properties-assigned-types.php`),
   where today they are `array<string>|array|Traversable` and a union, so
   `return [1];` under `@return string[]|iterable` is unreported
   (`returnTypes-iterable.php`, `returnTypes.php:151`, `:166`);
@@ -2793,6 +2803,9 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
     right-side variable and expression.
   - `StatementContext` holds top level and the foreach unroll factor.
 - A statement's `/** @throws */` overrides its throw points.
+- A branch whose condition is always false isn't analysed: a `foreach`
+  inside `if (!empty(X))` for `const X = []` is `foreach.emptyArray` today
+  (the rules oracle's `bug-7913.php`).
 - The statement after a terminating one gets the unreachable-statement
   node. Functions, classes and labels after it are still processed, and
   an empty statement (`;`) or a closing inline-HTML tag isn't reported
@@ -3584,6 +3597,14 @@ deleted; the file-size gate.
       `$v` as `int` today where PHPStan has `0` (nsrt `bug-15039.php`);
     - `$b?->c->n === 1` doesn't narrow `$b` to non-null
       (`createNullsafeTypes`);
+    - `if ($this->only)` doesn't narrow an untyped `?string` property to
+      `non-empty-string` inside (the rules oracle's `bug-6486.php`), and
+      `match (get_class($obj))` arms don't narrow `$obj`, so `$obj->id` in
+      the `A::class` arm is `property.notFound` on `A|B` (`bug-8536.php`);
+    - a template keeps `null` where the narrowing can't remove it: after
+      `if ($foo !== null && !$foo instanceof Foo) { throw …; }`, `$foo` of
+      `T` may still be `null`, so `$foo?->getValue()` isn't
+      `nullsafe.neverNull` (`nullsafe-method-call-template-type.php`);
     - a call's conditional return type narrows its arguments
       (`specifyTypesFromConditionalReturnType`): after
       `if (testIsInt($v))` with `@return ($value is int ? true : false)`,
@@ -3683,7 +3704,10 @@ building on the previous one:
     certainty added to the type snapshot:
     - A maybe-defined variable is reported today as `undefined variable` at
       level 0, where PHPStan reports "might not be defined" at level 1.
-      `$x ?? null` on one types as `mixed`.
+      `$x ?? null` on one types as `mixed`, and so does any read of it: a
+      maybe-defined `Foo|null` makes `$a?->foo` `property.nonObject` on
+      `mixed` (the rules oracle's `bug-7291.php`, `bug-12179.php`,
+      `bug-4337.php`).
     - After a foreach that may not run, the value variable is dropped, and
       a read of it is `variable.undefined`.
     - At a file's top level every unknown variable is Maybe
@@ -3970,7 +3994,11 @@ building on the previous one:
       scope merges `=== [] || is_object()`; today `$arr` in the body is
       `array<string, int>`, not non-empty (nsrt `bug-13312.php`,
       `bug-13270a.php`, `foreach-with-specified-key-type.php`), and a
-      `for` loop over `count($arr)` sees it non-empty the same way;
+      `for` loop over `count($arr)` sees it non-empty the same way; a
+      non-empty iteratee runs the body at least once, so its value variable
+      and the body's assignments are defined after the loop (after
+      `isset($arr['foo'])`, `echo $val` is `variable.undefined` today, the
+      rules oracle's `foreach.php`, 11, `bug-8467c.php`);
     - `$arr[$k]` is the value type in the body, through the
       `OriginalForeachKey`/`OriginalForeachValue` virtual keys;
     - after the loop, the iteratee's value and key types are rewritten from
@@ -4346,7 +4374,9 @@ the rest), which the gate excludes and lists.
   `unused-private-method.php`); a private hooked property whose `get` no
   one calls is `property.neverRead` ("Readable property … is never read",
   an abstract private one included; `bug-12702.php`,
-  `abstract-private-property-hook.php`, 3), unreported today; a private
+  `abstract-private-property-hook.php`, 3), unreported today, and a
+  get-only one has no backing store to write, so it isn't
+  `property.onlyRead` (`bug-12702.php:11`); a private
   method used only by itself (a
   recursive call, a `[$this, 'doBaz']` callable in its own body) or only
   from other unused ones is `method.unused`, and a dynamic `$x->$y()`
@@ -4842,7 +4872,11 @@ fixture:
     the rules oracle's 37 PHPStan-only `instanceof.alwaysFalse`,
     `impossible-instanceof.php`, `boolean-*.php`, `elseif-condition.php`,
     `if-condition.php`), and a `callable` is never an instance of a final
-    class without `__invoke()`; both unreported today;
+    class without `__invoke()`; both unreported today; where the `if` was
+    `$x instanceof Lorem && $x instanceof Ipsum`, the `elseif`'s `$x
+    instanceof Lorem` is reported `instanceof.alwaysTrue` on
+    `Lorem&Ipsum` today, a wrong verdict (`boolean-and.php:66`,
+    `boolean-logical-and.php:66`, `if-condition.php:61`);
   - `--`/`++` on a non-numeric string (`$s = 'a'; $s--;`, which PHP
     leaves unchanged), `unset()` of an undefined variable
     (`unset.variable`), `unset()` of an offset on a non-array
@@ -5436,7 +5470,10 @@ fixture:
     parameter as a property too (`property.trait`), `$x = yield 1` under a
     `void` send type (`generator.void`), an enum case whose value is a
     constant of the wrong type (`case Two = self::S;` with a string
-    `S`, `enum.caseType`), `new $bar` of a constant class-string naming an
+    `S`, `enum.caseType`; the right type isn't: `case TESTING =
+    self::PREFIX . 'test'` on a string enum is `enum.caseType` "value
+    string does not match the \"string\" type" today, `bug-9005.php`),
+    `new $bar` of a constant class-string naming an
     interface or abstract class (`new.interface`, `new.abstract`), an
     append to a `private(set)` array from outside
     (`assign.propertyPrivateSet`), `array_filter()` without a callback on
@@ -5809,7 +5846,9 @@ fixture:
     scope's parameter types: after `if ($lazy) { return …; }`, nette's
     `Strings::matchAll` returns a `list` against `($lazy is true ?
     Generator : list)`, and `return is_int($value);` under `@return ($value
-    is int ? true : false)` returns `bool`; both are `return.type` today
+    is int ? true : false)` returns `bool` (`return $value === null` under
+    `($value is null ? true : false)` too, the rules oracle's
+    `bug-12087b.php`); both are `return.type` today
     (phpstan-rs reports 12 against a conditional in the corpus; PHPStan
     reports 1 of the 5 checked, e.g. not
     `nette/utils/src/Utils/Strings.php:538` or
@@ -5887,7 +5926,11 @@ fixture:
     hooks are throw points only through their own `@throws` when
     `exceptions.implicitThrows` is off
     (`unthrown-exception-property-hooks*.php`); each member of a
-    multi-catch is judged alone (`unthrown-exception-multi.php`); and a caught
+    multi-catch is judged alone (`unthrown-exception-multi.php`); a read
+    of the backing property inside its own hook can't throw, so `try {
+    return $this->i; } catch (…) {}` in a get hook returns on every path
+    (`return.missing` today, `unthrown-exception-property-hooks.php:18`);
+    and a caught
     class that isn't an exception, or is guarded by `class_exists()`, is
     judged as well (`catch.php`, `class-exists.php`);
 - (g) the restricted-usage framework: `@internal` core, deprecation
