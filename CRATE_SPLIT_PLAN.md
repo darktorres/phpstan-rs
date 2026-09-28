@@ -4075,7 +4075,12 @@ the rest), which the gate excludes and lists.
   private method the host implements) or through a class-string is a
   use, `method.unused` today (11: `bug-8346.php`, `bug-8071.php`,
   `bug-6039.php`, `nullsafe-unused-private-method.php`,
-  `unused-private-method.php`);
+  `unused-private-method.php`); a private method used only by itself (a
+  recursive call, a `[$this, 'doBaz']` callable in its own body) or only
+  from other unused ones is `method.unused`, and a dynamic `$x->$y()`
+  counts only for the names `$y` can be (after `$y !== 'doBar'` it
+  doesn't use `doBar()`); both unreported today (`unused-private-method.php`,
+  `bug-11802b.php`);
 - duplicates;
 - circular namespaces;
 - architecture;
@@ -4750,9 +4755,8 @@ fixture:
     can't be the property (`$this->$name` over `['foo', 'bar']` leaves
     `$baz` write-only, and so does `$x->{$y}` after `$y !== 'isFinal'`;
     `unused-private-property.php:117`, `bug-11802.php`), where today any
-    dynamic read counts for every property. The writes that count are
-    PHP 8.5's `clone($this, ['priv' => 2])` (`property.unused` today;
-    `clone-with.php` and its readonly variants, 4), an offset write
+    dynamic read counts for every property. The writes that count include
+    an offset write
     (`$this->tuple[$i] = false`, `bug-3339.php`) and a static write
     through a constant dynamic name (`self::${$name} = …`,
     `bug-13093c.php`, `bug-13093d.php`);
