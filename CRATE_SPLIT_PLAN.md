@@ -2823,7 +2823,14 @@ deleted; the file-size gate.
   non-nullable `$d` is reported today. The isset rules read the same
   certainty: `isset($bar)`, `empty($foo)` and `$baz ?? 1` on a variable
   that is never defined are `isset.variable`/`empty.variable`/
-  `nullCoalesce.variable` "is never defined", unreported today. The
+  `nullCoalesce.variable` "is never defined", unreported today.
+  `nullCoalesce.property` covers static properties and always-`null`
+  ones (`FooCoalesce::$staticString ?? ''`, `self::$date ?? …`, `$foo->
+  alwaysNull ?? ''` for `@var null`; `null-coalesce*.php`, `bug-3636.php`,
+  `bug-14393.php`), unreported today; an untyped property without a
+  default starts as `null` whatever its `@var`, so `??` on it stays
+  unreported where PHPStan reports "not nullable" (approved;
+  `bug-3636.php:13`, `bug-14393.php:36`). The
   descriptor covers a nullsafe chain: `$f?->bar() ?? 0` and
   `empty($i?->bar())` on an undefined `$f`/`$i` are `variable.undefined`
   and `method.nonObject` today (the rules oracle's `bug-7291.php`), and
@@ -3054,7 +3061,9 @@ deleted; the file-size gate.
     - **Compound assignments** have the assigned value as their type
       (`AssignOpHandler`): `$x = 1; $x += 1` as an expression, `$i /= 2` and
       `$n ??= 1` are all `mixed` today where PHPStan has `2`, `(float|int)`
-      and `1|string` (nsrt `binary.php`, `coalesce-assign.php`).
+      and `1|string` (nsrt `binary.php`, `coalesce-assign.php`), so
+      `($this->lazy ??= new \DateTimeImmutable())->format('Y')` is
+      `method.nonObject` "on mixed" today, a false positive.
     - **Pipes** follow `PipeHandler`: `$s |> strlen(...)` is `mixed` today.
       The right side is called with the left side as its argument, so an
       arrow function's parameter takes its type and the statement is a
