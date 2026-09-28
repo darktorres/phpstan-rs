@@ -437,9 +437,9 @@ Visitor-based walk.
   config file's directory; paths given on the command line resolve against
   the working directory. Both the CLI and the LSP resolve them through the
   same function.
-- A one-release compatibility shim maps the old flat `check_*` keys, with a
-  warning. The Piwigo toml, README and VSCode docs migrate in the same
-  commit.
+- No compatibility shim: nothing is released, so the old flat `check_*` keys go
+  outright (an unknown key like any other), `app.rs`'s `MOVED_KEYS` table with
+  them, and the Piwigo toml, README and VSCode docs migrate in the same commit.
 - The ~60 per-rule CLI flags and all `Project::set_*` setters are deleted,
   replaced by a generic two-way `--set key=value`.
 - Settings split three ways, following Appendix B:
@@ -470,8 +470,9 @@ Visitor-based walk.
   same fields minus file and trait file, which a rule doesn't know. The
   dispatcher turns each into a `Diagnostic` (PHPStan's `RuleError` →
   `Error`).
-- `location` and `metadata` are removed. The baseline format is versioned,
-  keyed like PHPStan (path, identifier, message, count), with a converter.
+- `location` and `metadata` are removed. The baseline is keyed like PHPStan's
+  (path relative to the baseline file, identifier, message, count). Nothing is
+  released, so it changes in place, with no version field or converter.
 - No `clap` in any library crate.
 
 ### 3.8 analyser
@@ -689,9 +690,8 @@ Visitor-based walk.
   conditional tags.
 - One documented default level for CLI and LSP.
 - Rules above the level never run.
-- `Diagnostic.level` goes. The JSON `level` field is filled from rule
-  metadata under a versioned schema, and the LSP severity comes from
-  rule-declared severity.
+- `Diagnostic.level` goes. The JSON `level` field is filled from rule metadata,
+  and the LSP severity comes from rule-declared severity.
 
 ### 3.10 project, app, lsp, bin
 
@@ -1809,7 +1809,7 @@ A bug below that sits in code a later Stage C phase rewrites gets a fixture
 first and is fixed in that phase, as its own behaviour commit after the
 structural one (Appendix F).
 
-**C1. config.** The schema, owner sections, the shim, `--set`, deletion of
+**C1. config.** The schema, owner sections, `--set`, deletion of
 the per-rule flags and setters (an approved delta for the CLI surface),
 extension activation; the settings split per Appendix B, each type in its
 owner module (`project::session::SessionSettings`,
@@ -1882,7 +1882,8 @@ Follow-ups, one commit each with its test:
   turns several of these on (`polluteScopeWithBlock: false` among them), so E4's
   ext-strict-rules reads them. PHPStan's runtime parameters (`tmpDir`,
   `resultCache*`, `productionMode`, `bootstrapFiles`, the playground and CLI
-  ones) have no phpstan-rs meaning; the shim reports them as ignored.
+  ones) have no phpstan-rs key; `init` lists them as not converted (ROADMAP
+  Phase 183).
 - **One settings assembly**: `lsp/workspace_config.rs` stops assembling
   `ProjectSettings` itself and uses `Session::resolve`'s function: the same
   validation (overlays, architecture, banned constructs, psr3 pattern), the
@@ -1929,7 +1930,7 @@ Follow-ups, one commit each with its test:
   `ext.psr3.check_psr3_logging`); one casing, no key repeating its section's
   name (`ext.psr3.check_psr3_logging`, `ext.psr3.psr3_context_key_pattern`,
   `ext.sidz.magic_number_exemptions`), a PHPStan parameter's own name where
-  one exists, settled before the shim is removed. PHP versions and extension
+  one exists, settled in C1. PHP versions and extension
   activation read every discovered composer root's manifest, as
   `phpstan_api_check_enabled` does.
 - **PHPStan configs** are ROADMAP Phase 183's (the `neon` crate,
@@ -6672,12 +6673,11 @@ approved deltas for the corpus, type-snapshot and baseline gates (§4):
   baseline paths are. Today an entry holds the run's own spelling of the path,
   normalized lexically only, so a baseline generated at the project root matches
   nothing in a run from a subdirectory with `--config ../phpstan-rs.toml`, whose
-  paths are `../src/…`. The format becomes version 3; a version 1 or 2 file,
-  which doesn't record the directory it was generated from, loads with its paths
-  read against the working directory as today, and `convert-baseline` rewrites
-  it as version 3 relative to itself. Gate 6's Stage A baselines are version 2
-  and keep matching unchanged; their version 3 conversions join the gate beside
-  them.
+  paths are `../src/…`. Nothing is released, so the format changes in place,
+  with no new version: gate 6's Stage A baselines are rewritten once in this
+  commit (an approved delta), and the old-format support goes with it, since no
+  released build ever wrote an old file: the version-1 loader (`EntryV1`,
+  `BaselineFileV1`), the `version` field's check and `convert-baseline`.
 - **Non-ignorable errors bypass the baseline**: `entries_for` writes them into
   a generated baseline, and `baseline::filter` suppresses them (it has no
   `non_ignorable` check; `ignore_errors::filter` has one). Generation reports
@@ -6868,23 +6868,23 @@ the whole registry (§1), which C4's memo already removes.
   override for parallel tests; with neither writable the run goes uncached, with
   a warning), at `result_cache_path` when set; entries hold project-relative
   paths, so a cache restored into another checkout location (a CI cache) still
-  applies (C1's shim stops reporting PHPStan's `tmpDir` and `resultCachePath` as
-  ignored), and is written atomically (a temporary file renamed over it) under a
-  lock (`std::fs::File::lock`), so concurrent runs can't corrupt it; an
-  unreadable or version-mismatched cache is discarded with a warning. A file
-  with an internal error isn't cached. `--no-result-cache` skips it, and the
-  `clear-result-cache` command deletes it. A config file travels with its
-  repository, so a cloned repository's `phpstan-rs.toml` must not choose where
-  its reader's machine writes: a `tmp_dir` or `result_cache_path` from a config
-  file resolves inside the project root or the user cache directory and is
-  refused otherwise, while the same keys from `--set` or the environment may
-  point anywhere; the cache writes only inside a directory it created, marked by
-  a `CACHEDIR.TAG`, and never replaces a file it didn't write, so
-  `result_cache_path = "~/.bashrc"` fails the run instead of overwriting the
-  file. `clear-result-cache` deletes only such a marked directory. A run whose
-  output needs every file walked (`--dump-types`, `--emission-order`, `--debug`)
-  reads no cached result but still writes the cache, and the fixture harness
-  never uses one.
+  applies (phpstan-rs keys; `init` converts PHPStan's `tmpDir` and
+  `resultCachePath` to them), and is written atomically (a temporary file
+  renamed over it) under a lock (`std::fs::File::lock`), so concurrent runs
+  can't corrupt it; an unreadable or version-mismatched cache is discarded with
+  a warning. A file with an internal error isn't cached. `--no-result-cache`
+  skips it, and the `clear-result-cache` command deletes it. A config file
+  travels with its repository, so a cloned repository's `phpstan-rs.toml` must
+  not choose where its reader's machine writes: a `tmp_dir` or
+  `result_cache_path` from a config file resolves inside the project root or the
+  user cache directory and is refused otherwise, while the same keys from
+  `--set` or the environment may point anywhere; the cache writes only inside a
+  directory it created, marked by a `CACHEDIR.TAG`, and never replaces a file it
+  didn't write, so `result_cache_path = "~/.bashrc"` fails the run instead of
+  overwriting the file. `clear-result-cache` deletes only such a marked
+  directory. A run whose output needs every file walked (`--dump-types`,
+  `--emission-order`, `--debug`) reads no cached result but still writes the
+  cache, and the fixture harness never uses one.
 - **Incremental collectors.** Collected data is cached per file; a run
   recollects the analysed files and reruns the project-level rules over the
   merged data. A fact producer → consumer edge keyed by host class (another
@@ -6929,7 +6929,7 @@ Today's five formats (`text`, `friendly`, `json`, `checkstyle`, `junit`) live in
   `files.<path>.errors` and `messages[]` (`message`, `line`, `ignorable`, `tip`,
   `identifier`), and `errors[]` for not-file errors. Today's JSON
   (`totals.files_checked`/`diagnostics`, `column`, `level`) becomes
-  `phpstan-rs-json`, versioned, with the full record (span start and end, tips,
+  `phpstan-rs-json`, with the full record (span start and end, tips,
   fixes, non-ignorable, internal errors, warnings, stats), and the schema
   ROADMAP Phase 181's `report` serves. The corpus gate switches to it in the
   same commit: `xtask`'s per-level and performance runs (`--format json` today),
@@ -6981,12 +6981,13 @@ on.
   terminal, off with `--no-progress` and when stderr isn't one; today a run
   prints nothing until it finishes.
 - The subcommands are `check-project`, `lsp` (accepting `--stdio`),
-  `convert-baseline`, `clear-result-cache` and `completions`, plus the crash
-  reporter's hidden `__crash-finish` and its supervisor and worker roles
-  (`CRASH_REPORTING_PLAN.md` §4.1, §4.10); Phase 183's `init` joins them.
-  `check` and `demo` are deleted, their roles moving to the syntax bench, the
-  fixtures and a `project` example. `incremental-bench` becomes
-  `project/examples/incremental.rs`, over any directory, plus a criterion bench.
+  `clear-result-cache` and `completions` (`convert-baseline` goes with the old
+  baseline formats, F1), plus the crash reporter's hidden `__crash-finish` and
+  its supervisor and worker roles (`CRASH_REPORTING_PLAN.md` §4.1, §4.10); Phase
+  183's `init` joins them. `check` and `demo` are deleted, their roles moving to
+  the syntax bench, the fixtures and a `project` example. `incremental-bench`
+  becomes `project/examples/incremental.rs`, over any directory, plus a
+  criterion bench.
 - PHPStan's command line works as is, so a CI script or tool that runs
   `vendor/bin/phpstan analyse` can run phpstan-rs instead: `analyse` and
   `analyze` name `check-project`; `-c`/`--configuration`, `-l`/`--level`,
@@ -7253,9 +7254,10 @@ The `structured_php` fuzz target moves to `project`.
   gates relative to the previous commit.
 - **Cross-crate inlining.** Thin LTO plus `codegen-units = 1`, decided and
   baselined in A0. The timing gate applies from B1 on.
-- **User-visible changes.** Config schema (with a shim), CLI flags,
-  baseline format (with a converter), JSON schema (versioned), exit code,
-  output order. Each is its own changelog-noted commit.
+- **User-visible changes.** Config schema, CLI flags, baseline format, JSON
+  output, exit code, output order. Nothing is released, so each changes in
+  place, with no shim, converter or version field; each is still its own commit,
+  with the Piwigo toml, the gates' snapshots and the docs moved in it.
 - **Package build time during D–F.** The engine is redesigned in the
   package before its extraction; the per-commit build-time gate tracks it.
 
