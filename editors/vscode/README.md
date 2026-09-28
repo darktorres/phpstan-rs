@@ -6,9 +6,11 @@ Cargo workspace - it never touches `Cargo.lock`/`target/`.
 
 ## Toolchain
 
-- Package manager: npm (`package-lock.json`, committed).
-- Node version: whatever `@types/node`'s major targets (see
-  `package.json`) - no `.nvmrc` pinned yet.
+- Package manager: bun, at the version `package.json`'s `packageManager`
+  names (`bun.lock`, committed). `trustedDependencies` lets
+  `@vscode/vsce-sign`'s postinstall fetch its signing binary.
+- Runtime: Node runs the tests and `vsce` (CI pins 22.23.3); `vsce` lists
+  the dependencies it ships through `npm`, which comes with Node.
 - No bundler (esbuild/webpack) yet - deferred, not a correctness gap.
   The packaged `.vsix` ships `node_modules/` as-is for its one runtime
   dependency, `vscode-languageclient`.
@@ -16,9 +18,10 @@ Cargo workspace - it never touches `Cargo.lock`/`target/`.
 ## Development
 
 ```sh
-npm install
-npm run compile   # tsc -> out/
-npm run watch     # tsc -w
+bun install
+bun run compile   # tsc -> out/
+bun run watch     # tsc -w
+bunx vsce package # .vsix
 ```
 
 Press F5 in VS Code (with this directory open) to launch an Extension
@@ -53,7 +56,7 @@ Development Host.
   `node:test`, no VS Code host needed):
 
   ```sh
-  npm run test:unit
+  bun run test:unit
   ```
 
 - Activation smoke test (`src/test/suite/activation.smoke.test.ts`,
@@ -65,7 +68,7 @@ Development Host.
 
   ```sh
   cargo build --release -p phpstan-rs --manifest-path ../../Cargo.toml
-  PHPSTAN_RS_TEST_BIN="$(pwd)/../../target/release/phpstan-rs" npm run test:smoke
+  PHPSTAN_RS_TEST_BIN="$(pwd)/../../target/release/phpstan-rs" bun run test:smoke
   ```
 
   Use a **release** build (`--release`, `target/release/phpstan-rs`),

@@ -4,9 +4,8 @@ import { runTests } from "@vscode/test-electron";
 /**
  * Launches a real VS Code instance (downloaded/cached by
  * `@vscode/test-electron`) with this extension installed, running the
- * Mocha suite in `./suite/index.js` inside it. Not wired into CI (this
- * repo has none today) - run manually via `npm run test:smoke` inside
- * `editors/vscode/`. Requires a built `phpstan-rs` binary; point
+ * Mocha suite in `./suite/index.js` inside it. Extension CI runs it; run
+ * it by hand with `bun run test:smoke` inside `editors/vscode/`. Requires a built `phpstan-rs` binary; point
  * `PHPSTAN_RS_TEST_BIN` at one (see `suite/activation.smoke.test.ts`).
  */
 async function main(): Promise<void> {

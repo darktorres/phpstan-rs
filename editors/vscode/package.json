@@ -3,6 +3,7 @@
   "displayName": "phpstan-rs",
   "description": "Language Server Protocol client for phpstan-rs, a Rust reimplementation of PHPStan's static analysis engine.",
   "version": "0.0.1",
+  "packageManager": "bun@1.3.14",
   "private": true,
   "publisher": "phpstan-rs",
   "engines": {
@@ -57,13 +58,16 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
-    "test:unit": "npm run compile && node --test out/extension.test.js out/serverDownload.test.js out/config.test.js out/serverBinary.test.js",
-    "pretest": "npm run compile",
+    "test:unit": "bun run compile && node --test out/extension.test.js out/serverDownload.test.js out/config.test.js out/serverBinary.test.js",
+    "pretest": "bun run compile",
     "test:smoke": "node ./out/test/runTest.js"
   },
   "dependencies": {
     "vscode-languageclient": "10.1.1"
   },
+  "trustedDependencies": [
+    "@vscode/vsce-sign"
+  ],
   "devDependencies": {
     "@types/mocha": "10.0.10",
     "@types/node": "26.6.2",

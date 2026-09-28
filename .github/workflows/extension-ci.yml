@@ -41,9 +41,13 @@ jobs:
         with:
           node-version: "22.23.3"
           package-manager-cache: false
-      - run: npm ci
-      - run: npm run compile
-      - run: npm run test:unit
+      # bun installs and runs the scripts; Node runs the tests.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: editors/vscode/package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run compile
+      - run: bun run test:unit
 
   integration:
     needs: unit
@@ -62,6 +66,10 @@ jobs:
         with:
           node-version: "22.23.3"
           package-manager-cache: false
+      # bun installs and runs the scripts; Node runs the tests.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: editors/vscode/package.json
 
       # .cargo/config.toml links x86_64 Linux artifacts with mold.
       - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
@@ -85,10 +93,10 @@ jobs:
           echo "PHPSTAN_RS_TEST_BIN=$(pwd)/target/release/$bin" >> "$GITHUB_ENV"
 
       - working-directory: editors/vscode
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - working-directory: editors/vscode
-        run: npm run compile
+        run: bun run compile
 
       - name: Run the activation smoke test
         working-directory: editors/vscode
@@ -101,7 +109,7 @@ jobs:
           # Electron window - only Linux runners lack a display server by
           # default; macOS/Windows runner images already have one.
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            xvfb-run -a npm run test:smoke
+            xvfb-run -a bun run test:smoke
           else
-            npm run test:smoke
+            bun run test:smoke
           fi
