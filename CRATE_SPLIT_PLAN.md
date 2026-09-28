@@ -1859,8 +1859,10 @@ Follow-ups:
   `self`/`parent`/`static` bound to the class, `new` and constant
   expressions included (C8). `#[Table(self::TABLE_NAME)]` on a class is
   `argument.type` "mixed given" today (the rules oracle's `bug-12011.php`),
-  and an undefined one (`#[MyAttr(self::BAR)]`) is `classConstant.notFound`,
-  unreported today (`class-constant-attribute.php`, 6).
+  and an undefined one (`#[MyAttr(self::BAR)]`) is `classConstant.notFound`
+  and a private one of another class (`#[MyAttr(Foo::FOO)]` elsewhere)
+  `classConstant.private`, unreported today (`class-constant-attribute.php`,
+  6 and 1).
 - The rest of C3's data model lands in C4: class and method keys, per-member
   flags and `Vec<TemplateParam>`, build scratch in the builder, provenance
   as the only location record, query accessors, parse-time resolved names,
