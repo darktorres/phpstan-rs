@@ -21,13 +21,15 @@ impl Type {
     /// settled.
     pub fn resolve_class_references(&self, consts: &dyn ClassConstants) -> Type {
         syntax::stack::guard(|| match self {
-            Type(Repr::ValueOf(target)) => match target.as_ref() {
-                Type(Repr::ClassConstant { .. }) => {
-                    value_of(&target.resolve_class_references(consts)).unwrap_or(Type::mixed())
+            // An enum's case values need `consts`; any other target settles
+            // like `key-of` does, a template staying until a call binds it.
+            Type(Repr::ValueOf(target)) => {
+                let target = target.resolve_class_references(consts);
+                match &target {
+                    Type(Repr::Object(class, _)) => consts.enum_values(class),
+                    _ => settle(Type::value_of(target)),
                 }
-                Type(Repr::Object(class, _)) => consts.enum_values(class),
-                _ => Type::mixed(),
-            },
+            }
             Type(Repr::ClassConstant { class, pattern }) => consts.class_constants(class, pattern),
             Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)) => {
                 settle(self.map_children(&mut |t| t.resolve_class_references(consts)))
