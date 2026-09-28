@@ -8097,7 +8097,7 @@ its owner. Non-Registry keys follow the table.
 | crossbeam-channel, lsp-server, lsp-types | lsp |
 | dhat | bin |
 | hotpath | every measured crate (plain dependency); features only on the bin |
-| imbl | syntax (name resolution's `use` map); analyser (holder maps); reflection only if its snapshots use it |
+| imbl | analyser (holder maps); reflection only if its snapshots use it. `syntax` no longer uses it (B3), and `uninitialized_dataflow`'s use goes with its walker (E3d) |
 | indexmap | reflection |
 | md5 | reflection (anonymous-class naming) |
 | pcre2-sys | pcre, which `php-regex` links under `pcre-validate` (`UNSAFE_PLAN.md`) |
@@ -8108,7 +8108,7 @@ its owner. Non-Registry keys follow the table.
 | roxmltree | builtins (xml validators) |
 | rustc-hash | wherever used |
 | serde | every crate with a config section or serialized output |
-| serde_json | diagnostics / app formatters, project (cache), lsp, composer |
+| serde_json | app (formatters), project (the baseline and the result cache), lsp, composer; not `rules` or `ext-disallowed-calls`: the `multibyte-strings` preset, which `banned.rs` builds today by formatting JSON and parsing it back, is built as entries directly when E3g moves it |
 | toml | config |
 | sqlparser, mysql, postgres, rusqlite, r2d2, r2d2_postgres, r2d2_sqlite | sql (sqlparser also in ext-sql only if it keeps checker-side parsing; the target is an `sql` API) |
 | arbitrary | syntax (`fuzzing`) |
