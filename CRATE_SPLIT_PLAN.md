@@ -2513,6 +2513,12 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
       `DoWhileHandler`, `ForHandler`).
     - A switch without `default` terminates when its cases leave the
       subject `never` (`SwitchHandler`).
+    - A `finally` that always returns terminates its `try`, and so does a
+      `new` whose constructor is `@return never`: `try {} finally { return
+      'foo'; }` under `: string` and `new self();` under `: bool` are
+      `return.missing` today (the rules oracle's
+      `overwritten-exit-point.php`, `missing-return.php:206`,
+      `bug-4455-constructor.php`).
     - Reproduced `return.missing` today: a `break` in a nested loop inside
       `while (true)`; `while (FOREVER)` with a `true` constant;
       `do { … } while (true)`; and a switch covering every case of an enum
@@ -2740,6 +2746,10 @@ deleted; the file-size gate.
       on an untyped `$d`, `base64_encode($d)` is `argument.type` "int
       given" (the rules oracle's `bug-8094.php`); a string with an int is
       `*ERROR*` (B4).
+    - **`%` by a constant** is bounded by it: `$k % 4` on `int` is
+      `int<-3, 3>` and on a non-negative `int<0, 3>`, `int` today, so a
+      `match` over its values is `match.unhandled` (the rules oracle's
+      `bug-8900.php`, `bug-9879.php`).
     - **`<=>`** is `-1|0|1`, `int` today, so it doesn't satisfy `@return
       -1|0|1` (the rules oracle's `bug-5008.php`). `+` with a `mixed`
       operand is `array|float|int`, `int` today (`bug-3759.php`).
@@ -2818,7 +2828,12 @@ deleted; the file-size gate.
       where PHPStan has `non-empty-array<string, array{}>`, so
       `array_push($array[$key], $item)` reads `mixed` (the rules oracle's
       `bug-3387.php`).
-    - **`$o::class`** is `class-string<C>&literal-string` for an object of
+    - **`$o::class`** and `get_class($o)` are the class name literal for an
+      object of a final class (`'FA'|'FB'` on `FA|FB`, `string` today, so a
+      `match` over the names is `match.unhandled`: the rules oracle's
+      `bug-7698.php`, `bug-7746.php`, `bug-8536.php`, `bug-9534.php`,
+      `match-expr.php:199`), and `get_debug_type()` likewise.
+      `$o::class` is `class-string<C>&literal-string` for an object of
       class `C`, `class-string<T>&literal-string` for a template `T`, and
       `class-string&literal-string` for `object`: the template and `object`
       cases are `string` today and the `literal-string` part is missing, so
@@ -3393,7 +3408,24 @@ building on the previous one:
     preg_match($p, $s, $m) => $m[1], … }`, `$dir` and `$m` are
     `variable.undefined` today (the rules oracle's `bug-13981.php`,
     `bug-10418.php`), as are the same shapes in a `switch (true)` case
-    (`bug-5326.php`).
+    (`bug-5326.php`). An array subject is exhaustive when the arms cover
+    its constant combinations: `match ([$b1, $b2])` with the four `[true,
+    true]`…`[false, false]` arms, and `[$first, $second]` over enums or
+    `1|2|3` × `'a'|'b'|'c'`, report `match.unhandled` "remaining value:
+    array{0: bool, 1: bool}" today (the rules oracle's `bug-10128.php`,
+    `bug-11453.php`, `bug-13029.php`, `bug-4451.php`). A subject over a
+    small integer range is exhausted by its values: `match (rand(1, 3)) {
+    1 => …, 2 => …, 3 => … }` leaves `int<1, 3>` today (`bug-6064.php`). An
+    unhandled match isn't reported where an enclosing `try` catches
+    `UnhandledMatchError` or the function declares it in `@throws`
+    (`MatchExpressionRule::isUnhandledMatchErrorCaught`,
+    `hasUnhandledMatchErrorThrowsTag`; `match-expr-property-hooks.php`).
+    A template-typed subject is exhausted through its bound: `match
+    ($indexBy)` on `T of IndexBy|null` with every case and `null`, and
+    `match ($class)` on `class-string<T>` for `T of A|B` (both final) with
+    `A::class`/`B::class`, report "remaining value: T" and
+    "`class-string<T>`" today (the rules oracle's `bug-13048.php`,
+    `bug-12998.php`).
   - **Try/catch/finally** follows `TryCatchHandler`:
     - a catch is entered from the merge of the throw points it catches;
     - its variable is the catch type minus the earlier catches, and an
@@ -3674,6 +3706,14 @@ rules-oracle findings).
     or `!==` doesn't make `$a` non-empty (`count($a) === 1`, `!== 0`, and
     `match (count($a))`'s arms; `>` and `>=` already do), so `reset($a)` in
     the `1` arm is `string|false` (the rules oracle's `bug-10974.php`).
+    `in_array()` narrows through an enum-case haystack (`in_array($x,
+    [Suit::S], true)` returning leaves `Suit`, `bug-7176.php`) and, loose,
+    an integer subject over an integer haystack (after `if
+    (!in_array($foo, [0, 1, 2])) { exit(); }` on `int<0, 100>`, `$foo` is
+    `0|1|2`, `bug-9436.php`). `count()` and `strlen()` of a union of
+    constant shapes or strings are the union of their lengths (`count($r)`
+    on `array{'a'}|array{'a', 'b'}` is `1|2`, `int<0, max>` today,
+    `bug-12790.php`).
     `is_numeric()` drops non-numeric constant strings: on `1|'a'` it keeps
     `1|'a'` today (the rules oracle's `bug-2550.php`).
     `is_callable()` keeps a non-final class as `Class&callable(): mixed`:
@@ -3681,7 +3721,7 @@ rules-oracle findings).
     rules oracle's `bug-5333.php`); on an array it gives `callable-array`,
     a two-element list with `0|1` keys, `class-string|object` at `[0]`
     and `non-falsy-string` at `[1]`, which a `callable-array` parameter
-    reads as too (`bug-14549.php`). `in_array`, `is_a` on an object,
+    reads as too (`bug-14549.php`). `is_a` on an object,
     `str_contains`, `defined`/`define` and the rest of the `is_*` family
     already match.
 
@@ -3963,6 +4003,10 @@ fixture:
   - a finally block that changes a value returned by reference is
     `return.byRefFinally` (13 rules-oracle findings), and every exit point
     a finally block overrides is `finally.exitPoint` (25 of 42 missed);
+  - `return.missing` is reported where execution falls off, the body's
+    last statement (PHPStan's `ExecutionEndNode`), not on the declaration:
+    36 of the rules oracle's 53 phpstan-rs-only `return.missing` are the
+    same finding on the declaration's line;
   - a return type that includes `void` accepts falling off the end (fixed
     first): `@return void|int` on a function that returns only on some
     paths is `return.missing` today, 10 of the oracle's 38 phpstan-rs-only
