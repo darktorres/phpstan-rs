@@ -14,14 +14,23 @@ use crate::modgraph::walk_dir;
 
 const BASELINE: &str = "gates/type-access.txt";
 
+/// How many of the counted paths are patterns and how many comparisons;
+/// the rest build a type.
+#[derive(Default)]
+struct Breakdown {
+    patterns: usize,
+    comparisons: usize,
+}
+
 /// `(path, count)` for every file outside `crates/types` naming a variant.
-fn count(root: &Path) -> Result<BTreeMap<String, usize>, String> {
+fn count(root: &Path) -> Result<(BTreeMap<String, usize>, Breakdown), String> {
     let variants = variant_names(root)?;
     let mut files = Vec::new();
     walk_dir(&root.join("crates"), &mut files)?;
     walk_dir(&root.join("xtask"), &mut files)?;
     files.sort();
     let mut counts = BTreeMap::new();
+    let mut breakdown = Breakdown::default();
     for path in &files {
         if path.starts_with(root.join("crates/types")) {
             continue;
@@ -31,14 +40,20 @@ fn count(root: &Path) -> Result<BTreeMap<String, usize>, String> {
         let mut counter = Counter {
             variants: &variants,
             found: 0,
+            in_patterns: 0,
+            in_comparisons: 0,
+            pattern_depth: 0,
+            comparison_depth: 0,
         };
         counter.visit_file(&ast);
+        breakdown.patterns += counter.in_patterns;
+        breakdown.comparisons += counter.in_comparisons;
         if counter.found > 0 {
             let shown = path.strip_prefix(root).unwrap_or(path);
             counts.insert(shown.display().to_string(), counter.found);
         }
     }
-    Ok(counts)
+    Ok((counts, breakdown))
 }
 
 /// The variant names of `pub enum Type` in `crates/types/src/lib.rs`.
@@ -60,6 +75,11 @@ fn variant_names(root: &Path) -> Result<Vec<String>, String> {
 struct Counter<'v> {
     variants: &'v [String],
     found: usize,
+    /// Of `found`: in a pattern, and in an `==`/`!=` or `contains` test.
+    in_patterns: usize,
+    in_comparisons: usize,
+    pattern_depth: usize,
+    comparison_depth: usize,
 }
 
 impl<'ast> Visit<'ast> for Counter<'_> {
@@ -70,8 +90,33 @@ impl<'ast> Visit<'ast> for Counter<'_> {
             && self.variants.iter().any(|v| variant.ident == v)
         {
             self.found += 1;
+            if self.pattern_depth > 0 {
+                self.in_patterns += 1;
+            } else if self.comparison_depth > 0 {
+                self.in_comparisons += 1;
+            }
         }
         syn::visit::visit_path(self, path);
+    }
+
+    fn visit_pat(&mut self, pat: &'ast syn::Pat) {
+        self.pattern_depth += 1;
+        syn::visit::visit_pat(self, pat);
+        self.pattern_depth -= 1;
+    }
+
+    fn visit_expr_binary(&mut self, e: &'ast syn::ExprBinary) {
+        let comparison = matches!(e.op, syn::BinOp::Eq(_) | syn::BinOp::Ne(_));
+        self.comparison_depth += usize::from(comparison);
+        syn::visit::visit_expr_binary(self, e);
+        self.comparison_depth -= usize::from(comparison);
+    }
+
+    fn visit_expr_method_call(&mut self, e: &'ast syn::ExprMethodCall) {
+        let comparison = e.method == "contains";
+        self.comparison_depth += usize::from(comparison);
+        syn::visit::visit_expr_method_call(self, e);
+        self.comparison_depth -= usize::from(comparison);
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
@@ -137,12 +182,14 @@ fn read_baseline(root: &Path) -> Result<BTreeMap<String, usize>, String> {
         .collect()
 }
 
-fn render(counts: &BTreeMap<String, usize>) -> String {
+fn render(counts: &BTreeMap<String, usize>, breakdown: &Breakdown) -> String {
     let total: usize = counts.values().sum();
+    let (patterns, comparisons) = (breakdown.patterns, breakdown.comparisons);
+    let built = total - patterns - comparisons;
     let mut out = format!(
         "# Paths naming a `types::Type` variant outside crates/types, per file.\n\
          # A count may only fall; `cargo xtask arch --bless-types` records a fall.\n\
-         # total {total}\n"
+         # total {total}: {patterns} in patterns, {comparisons} in comparisons, {built} building a type\n"
     );
     for (file, n) in counts {
         out.push_str(&format!("{n}\t{file}\n"));
@@ -152,14 +199,15 @@ fn render(counts: &BTreeMap<String, usize>) -> String {
 
 /// Rewrites the baseline from the current source.
 pub(crate) fn bless(root: &Path) -> Result<(), String> {
-    let counts = count(root)?;
+    let (counts, breakdown) = count(root)?;
     let path = root.join(BASELINE);
-    std::fs::write(&path, render(&counts)).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::write(&path, render(&counts, &breakdown))
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The violations: a file whose count rose, or fell without a bless.
 pub(crate) fn check(root: &Path) -> Result<Vec<String>, String> {
-    let counts = count(root)?;
+    let (counts, _) = count(root)?;
     let baseline = read_baseline(root)?;
     let mut violations = Vec::new();
     let files: std::collections::BTreeSet<&String> = counts.keys().chain(baseline.keys()).collect();
