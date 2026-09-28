@@ -95,6 +95,19 @@ Status: design. Nothing here is implemented.
   one ends `check-project` with exit code 101 and no message at all: the hook
   that would print it is the silent one, and the restore after `run` is never
   reached.
+- **Declaration resolution isn't isolated either.** `Project::finish_loading`
+  (`project.rs:703`) runs `canonicalize_class_name_case`, `flatten_traits`,
+  `precompute_member_owners`, `resolve_transitive_purity` and
+  `precompute_ancestor_names`, most of them as `par_iter` over every class
+  (`registry/resolve.rs`, `hierarchy.rs`, `purity.rs`). A panic in one ends
+  `check-project` the same silent way. Rayon moves a worker's panic to the
+  thread that called into the pool with `resume_unwind`, which runs no hook.
+- **`ensure_member_index_built`** (`project.rs:830`), which the dead-enum-case
+  rule calls when the main pass didn't seed member references, re-checks every
+  file in turn with no isolation, so one file's panic ends the whole pass.
+- **The LSP logs a caught panic** as
+  `phpstan-rs lsp: checking <path> panicked: <message>` on stderr
+  (`lsp.rs:642`).
 - **CLI output for a caught panic:** text and friendly formats print
   `<path>: internal error while checking: <message>` and add
   "N file(s) errored while checking" to the summary; JSON and checkstyle drop
@@ -300,11 +313,19 @@ through it. The hook:
 
 - **when `reporting` is set** prints the default message and does nothing
   else;
-- **on an isolated thread** prints nothing and stores the panic's message,
-  location and an unresolved `backtrace::Backtrace` in a thread-local, which
-  `isolated` takes into the unit's internal error (§4.4). The backtrace is
-  captured when a client is active or `RUST_BACKTRACE` is set, and resolved
-  only when printed or sent;
+- **on an isolated thread** prints nothing and stores a panic record (the
+  message, location, the thread's focus at that moment, and an unresolved
+  `backtrace::Backtrace`) in a thread-local, which `isolated` takes into the
+  unit's internal error (§4.4). The backtrace is captured when a client is
+  active or `RUST_BACKTRACE` is set, and resolved only when printed or sent;
+- **on a worker-pool thread outside an isolated unit** prints nothing and
+  stores the record in a process-wide deferred list, newest first, holding at
+  most 64. Rayon carries such a panic to the thread that called into the pool,
+  with `resume_unwind`, which runs no hook, so the decision belongs to
+  whichever catch receives it: an `isolated` unit up the calling thread (a
+  load step running `par_iter`, §4.5) takes the newest record whose message
+  equals its payload's, and so records the location and backtrace from the
+  worker, not from the resume. Records nobody takes age out of the list;
 - **anywhere else** prints the default message (the previous hook, kept) and,
   with a client, builds the event with `PanicIntegration::event_from_panic_info`
   and captures it as a pending report (§4.6). A location already reported by
@@ -316,6 +337,13 @@ through it. The hook:
 The hook itself never panics: every step returns a `Result` that it ignores,
 and it runs no allocation-heavy work beyond building the event.
 
+A deferred panic that no isolated unit catches reaches the top of a thread.
+`crash_report::entry(|| ...)` wraps `main`'s body and every thread the program
+spawns (the LSP's reader, debounce and report threads). When a panic escapes,
+it takes the matching deferred record, prints the default message the hook
+held back, reports it as a pending report (§4.6) when there is a client, and
+resumes unwinding, so the process or thread ends as it does today.
+
 Vendor discovery's swap is deleted rather than converted: its parse already
 returns errors (B8, "No global panic hook"). The `composer` crate gains no
 dependency.
@@ -326,8 +354,8 @@ dependency.
 
 ```rust
 pub struct InternalError {
-    pub unit: Unit,              // Parse(path) | Facts(path) | Check(path) | Pass(name)
-    pub focus: Option<PathBuf>,  // the file a whole-program pass was on (§4.7)
+    pub unit: Unit,              // Parse(path) | Facts(path) | Check(path) | Pass(name) | Load(step)
+    pub focus: Option<PathBuf>,  // the panicking thread's focus (§4.7)
     pub message: String,
     pub location: Option<Location>, // file:line:col in phpstan-rs's source
     pub backtrace: Option<backtrace::Backtrace>,
@@ -351,7 +379,13 @@ Output, a behaviour commit with its `tests/cli.rs` changes:
   checking", and a parse panic no longer counts in "skipped: parse error";
 - `check` prints `<path>: internal error: <message> (at <location>)` for a
   panic, keeping `<path>: <message>` for a parse error;
-- a pass that panics contributes no diagnostics; the other passes still run.
+- a pass that panics contributes no diagnostics; the other passes still run;
+- a load step that panics ends the run: `Session::run` returns the internal
+  error, printed as `internal error while <step>: <message> (at <location>)`
+  plus the focus, the way it prints its other errors today;
+- the LSP's log line becomes
+  `phpstan-rs lsp: internal error while checking <path>: <message> (at
+  <location>)`.
 
 JSON, checkstyle and JUnit output and the exit code stay as they are until
 Stage F's "Internal errors are reported in every format" and "The exit code".
@@ -368,6 +402,20 @@ value doesn't change.
 in one keeps the others' results. Each pass sets the focus (§4.7) as it moves
 between declarations, so its internal error, and its bundle, name the file it
 was on.
+
+`ensure_member_index_built` runs each file's re-check as its own
+`isolated(Unit::Check(path), ..)`: a file that panics contributes no member
+references, and the pass goes on with the rest.
+
+`finish_loading`'s five steps each run as `isolated(Unit::Load(step), ..)`
+(`canonicalize_class_names`, `flatten_traits`, `member_owners`,
+`transitive_purity`, `ancestor_names`). Their `par_iter` closures set the
+focus to the declaring file of the class they're on, so a panic on a worker
+carries it in its deferred record. A failed step leaves the registry
+unusable, so the run ends with that internal error rather than analysing
+against half-resolved declarations. The LSP's incremental resolution
+(`project.rs:987`, on the debounce thread) stays unisolated until Stage F
+moves it onto the pool; its panics are reported through `entry` (§4.3).
 
 ### 4.6 From crashes to events
 
@@ -401,7 +449,7 @@ was on.
 ### 4.7 Tags, context, breadcrumbs and focus
 
 - **Tags:** `command` (`check`, `check-project`, `lsp`), `level`, `unit`
-  (`parse`, `facts`, `check`, `pass:<name>`, `native`), `pcre_validate`,
+  (`parse`, `facts`, `check`, `pass:<name>`, `load:<step>`, `native`), `pcre_validate`,
   `lsp.client` and `lsp.client_version` (from `initialize`'s `clientInfo`),
   `bundle` (`attached`, `already_sent`, `too_large`, `no_focus`, `failed`,
   `pending`).
@@ -452,6 +500,7 @@ external/<n>/<name>      files outside the root, mapped in the manifest
     references and through `Project::dependents` (the files referencing a
     declaration are what whole-program passes read); with no focus, the
     manifest alone, tagged `no_focus`;
+  - `load:<step>`: as `pass:<name>`, from the focus;
   - `native`: every in-progress file (the dump alone doesn't say which thread
     caused it), each walked as `check`.
 
@@ -748,8 +797,11 @@ so the user's binary doesn't carry it:
 
 ### 4.19 Tests
 
-- **Unit:** the hook's three paths, with the `sentry` `test` feature capturing
-  events in memory; `isolated` recording location and backtrace; the bundle
+- **Unit:** the hook's four paths, with the `sentry` `test` feature capturing
+  events in memory; `isolated` recording location, backtrace and focus; a
+  panic inside a `par_iter` under an isolated unit recorded once, with the
+  worker's location and focus; `entry` printing and reporting a deferred
+  panic that escapes; the bundle
   builder (the walk's order, ancestors first, both directions for passes, the
   cap and `omitted`, the config rewrite, overlays); grouping; `sent.json`
   under two concurrent writers, and written only after a 2xx; the outbox
@@ -854,8 +906,9 @@ tests; the end-to-end tests run from step 8 on and again at the end.
 
 1. **Single panic hook, isolated units and internal errors** (§4.3 without
    the client paths, §4.4, §4.5 with focus), pulled forward with no Sentry
-   involved: the four swaps go, vendor discovery's with them; parse, facts and
-   passes stop dropping or escaping panics; the CLI output changes (a
+   involved: the four swaps go, vendor discovery's with them; `entry` wraps
+   `main` and the LSP's threads; parse, facts, passes, the member-index
+   re-check and the load steps stop dropping or escaping panics; the CLI output changes (a
    behaviour commit with its `tests/cli.rs` changes); the §5 edits for B8 and
    F1.
 2. **Build:** `[profile.dist]`, the build-ID flags, the release workflow's
