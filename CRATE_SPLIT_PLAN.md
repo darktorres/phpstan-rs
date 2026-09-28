@@ -2802,7 +2802,11 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
     `deadCode.unreachable`: `bug-4505.php`, `bug-3632.php`,
     `bug-11903.php`, `strict-comparison-71.php`, `true-typehint.php`,
     `multiple_unreachable*.php`), and so is the code after `do { … }
-    while (true);` without a `break` (`call-methods.php:1028`).
+    while (true);` without a `break` (`call-methods.php:1028`); a `do`
+    loop's `while (false)` is `doWhile.alwaysFalse` even when a `foreach`
+    inside breaks (the `break` leaves the `foreach`;
+    `do-while-loop.php:115`), and `while ($object = null)` is falsy
+    (`Functions/data/do-while-loop.php`).
   - **A nameless `@var`** above `throw` applies to the thrown expression as
     it does above `return`: `/** @var \Exception */ throw $foo;` on a
     `stdClass $foo` is `throw.notThrowable` today (the rules oracle's
@@ -4095,7 +4099,10 @@ of an identifier phpstan-rs matches at least once was traced to its
 cause, a plan item citing the file and count. Each E3 sub-phase ends when its
 identifiers have no PHPStan-only findings left, or each remaining one is an
 approved deviation (an identifier named differently, such as
-`class.abstractMethodNotImplemented` for `method.abstract`, or a
+`class.abstractMethodNotImplemented` for `method.abstract`,
+`class.extendsEnum` for `class.disallowedSubtype` and `generics.wrongParent`
+for a self-referencing `@extends`/`@implements`/`@use`'s
+`generics.notCompatible`, or a
 PHPStan-specific check: the assert mismatches of `phpstan.*` (E3h),
 `phpParser.*`,
 `phpstanApi.*` outside a PHPStan extension's package, `function.inner`,
@@ -4251,7 +4258,11 @@ the rest), which the gate excludes and lists.
     . '}'` has no ending delimiter), and the empty pattern (`preg_replace('',
     …)`) is invalid; only a whole constant pattern is checked today (the
     rules oracle's 16 PHPStan-only `regexp.pattern`, `preg-quote.php`,
-    `valid-regex-pattern.php`, `null-coalesce.php:83`);
+    `valid-regex-pattern.php`, `null-coalesce.php:83`); `preg_quote()`'s
+    delimiter is checked the same way through named arguments
+    (`preg_split(subject: $s, pattern: '&' . preg_quote(delimiter: '/',
+    str: $s) …)`) and a delimiter taken from a prefix variable
+    (`argument.invalidPregQuote`, `preg-quote*.php`, 3);
   - `json_decode()` of a constant string folds to its value
     (`JsonThrowOnErrorDynamicReturnTypeExtension`): `json_decode('{"class":
     "x"}')->class` is `property.nonObject` "on mixed" today (the rules
@@ -5094,7 +5105,9 @@ fixture:
     are); a known class named with the wrong case is `class.nameCase` at
     the same sites (`FOO::class`, a native `POST` parameter and return,
     `@param-out fOO`, `@param-closure-this fOO`, `@phpstan-self-out fOO`,
-    a template bound `baz`; the rules oracle's 13 PHPStan-only);
+    a template bound `baz`, and for an interface `interface.nameCase` at an
+    `instanceof` and a `use` import, grouped ones included; the rules
+    oracle's 13 and 3 PHPStan-only);
   - `by-ref parameter's declared type is never narrower than 'foo'`
     (`parameterByRef.tooWide`) becomes PHPStan's
     `TooWideParameterOutTypeCheck`: a union member the function never
@@ -5260,7 +5273,9 @@ fixture:
     PHPStan-only, `bug-3753.php`, `explain-unresolvable-method-parameter.php`,
     `param-closure-this.php`, `incompatible-types.php:126`), and a
     property's `@var never` or `class-string<int>`
-    (`property.unresolvableType`, promoted ones included, 4); a parameter
+    (`property.unresolvableType`, promoted ones included, 4), and an
+    inline `@var self&\stdClass` inside a class
+    (`varTag.unresolvableType`, `invalid-var-tag-type.php`, 3); a parameter
     whose PHPDoc type doesn't resolve still has one, so `@param
     value-of<T> $v` on an untyped `$v` is not also `missingType.parameter`
     (the rules oracle's `unresolvable-parameter.php`);
@@ -5288,6 +5303,10 @@ fixture:
     string `classConstant.dynamicString` ("not supported in PHP",
     `class-constant-on-expr.php`), both unreported today;
   - `@mixin int` is `mixin.nonObject`, unreported today;
+  - an interface, trait or enum is never an attribute class, even marked
+    `#[\Attribute]` (PHP rejects the mark): using one is
+    `attribute.notAttribute` (`class-attributes.php`,
+    `enum-attributes.php`, 3; a trait is `attribute.trait` today);
   - a PHPDoc tag a trait can't carry is reported: `@phpstan-self-out`,
     `@phpstan-sealed`, `@mixin`, `@method`, `@property` and
     `@phpstan-type` on a trait (`selfOut.trait`, `sealed.onTrait`,
