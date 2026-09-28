@@ -418,7 +418,7 @@ through `check-project`.
 
 ### False positives (from reading)
 
-- [ ] **F42. Native-type suggestions PHP can't compile.** `render`
+- [x] **F42. Native-type suggestions PHP can't compile.** (`516fc901`) `render`
   (`native.rs`) suggests `true|null`/`false|null` for PHP 8.0 and 8.1:
   `true` doesn't exist before 8.2, and `false|null` is a compile error
   before 8.2. Class atoms have no leading `\`, so in a namespace the
