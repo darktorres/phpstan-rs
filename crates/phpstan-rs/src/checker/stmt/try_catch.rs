@@ -41,7 +41,6 @@ impl<'a> Checker<'a> {
         })
     }
 
-    #[hotpath::measure]
     pub(crate) fn check_try(
         &mut self,
         body: &[Stmt],

@@ -1209,6 +1209,7 @@ pub(crate) mod phpstan_api;
 mod pipe_operator;
 mod predefined_constants;
 mod preg_pattern_validity;
+mod profiling;
 mod property_assignment;
 mod property_default_types;
 mod property_type_too_wide;

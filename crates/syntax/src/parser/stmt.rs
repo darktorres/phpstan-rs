@@ -5,7 +5,6 @@ use crate::token::{Keyword, Span, Token};
 impl Parser {
     // ---- statements ----
 
-    #[hotpath::measure]
     pub(crate) fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
         // Captured before any leading `#[Attr]` group(s) are consumed, so
         // a declaration's own span includes them - matches how `start`

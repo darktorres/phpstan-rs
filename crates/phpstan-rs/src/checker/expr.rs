@@ -234,7 +234,9 @@ impl<'a> Checker<'a> {
     /// recursive calls needing to know about rule dispatch at all (see
     /// `rule`'s own module doc comment).
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
-        let ty = self.check_expr_impl(e, locals, label);
+        let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
+            self.check_expr_impl(e, locals, label)
+        });
         if !self.try_throw_states.is_empty()
             && let Some(thrown) = self.thrown_by(e, locals)
         {
@@ -300,7 +302,6 @@ impl<'a> Checker<'a> {
         self.diagnostics.extend(found);
     }
 
-    #[hotpath::measure]
     fn check_expr_impl(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         // See `Checker::in_bare_statement_position`'s doc comment - taken,
         // not just read, so it reads `true` only for the exact top-level

@@ -294,7 +294,6 @@ impl<'a> Checker<'a> {
     /// below never reflects it), so convergence would wrongly conclude
     /// "nothing changed" after a single pass and keep that pass's own
     /// diagnostics - computed against the stale, pre-reassignment entry.
-    #[hotpath::measure]
     pub(crate) fn converge_loop_body(
         &mut self,
         entry: &Locals,

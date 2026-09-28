@@ -3,7 +3,6 @@ use syntax::ast::*;
 use types::Type;
 
 impl<'a> Checker<'a> {
-    #[hotpath::measure]
     pub(crate) fn check_switch(
         &mut self,
         subject: &Expr,

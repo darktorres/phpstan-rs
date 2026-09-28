@@ -143,7 +143,6 @@ impl<'a> Checker<'a> {
     /// statically, and a non-literal key has no fixed name to key a
     /// field by at all - degrading to the honest `Array(Mixed)` for
     /// those specific cases, matching the status quo everywhere else.
-    #[hotpath::measure]
     pub(crate) fn infer_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
         if items.iter().any(|item| item.spread) {
             return self.infer_spread_array_literal_type(items, locals);

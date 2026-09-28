@@ -29,7 +29,6 @@ mod switch;
 mod try_catch;
 
 impl<'a> Checker<'a> {
-    #[hotpath::measure]
     pub(crate) fn check_block(
         &mut self,
         stmts: &[Stmt],
@@ -96,7 +95,9 @@ impl<'a> Checker<'a> {
         {
             self.check_strict_rules_statement(stmt, locals);
         }
-        self.check_stmt_impl(stmt, locals, declared_return, label);
+        crate::checker::profiling::measure_outermost!("checker::check_stmt", {
+            self.check_stmt_impl(stmt, locals, declared_return, label)
+        });
         self.record_type_dump(stmt, locals);
         if !self.external_rules.is_empty() {
             self.dispatch_stmt_rules(stmt, locals);
@@ -397,7 +398,6 @@ impl<'a> Checker<'a> {
         self.diagnostics.extend(found);
     }
 
-    #[hotpath::measure]
     fn check_stmt_impl(
         &mut self,
         stmt: &Stmt,
@@ -1101,7 +1101,6 @@ impl<'a> Checker<'a> {
     /// A bare, non-elseif `If` has no such chain-position concept at all
     /// and is never exempted.
     #[allow(clippy::too_many_arguments)]
-    #[hotpath::measure]
     fn check_if(
         &mut self,
         cond: &Expr,

@@ -27,7 +27,6 @@ impl<'a> Checker<'a> {
     /// class's properties, its `@extends`/`@implements` tags) rather
     /// than at every call/access site - a generic type only needs
     /// flagging once, where it's *written*.
-    #[hotpath::measure]
     /// `location` names where `ty` was written, as the messages quote it
     /// (`PHPDoc tag @param for parameter $x`).
     pub(crate) fn check_generic_bounds(

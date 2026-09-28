@@ -207,7 +207,6 @@ impl<'a> Checker<'a> {
         );
     }
 
-    #[hotpath::measure]
     pub(crate) fn check_function(
         &mut self,
         f: &FunctionDecl,
