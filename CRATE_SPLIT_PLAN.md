@@ -2695,7 +2695,11 @@ deleted; the file-size gate.
   engine and the isset rules share. On a constant array, `empty($a['nope'])`
   and `empty($a[3])` for a falsy value are `true` (`bool` today; nsrt
   `isset-coalesce-empty-type.php`), and `isset($this->p)` on an
-  initialized non-nullable property is `true`, so `isset($this->r) ||
+  initialized non-nullable property is `true` (a typed property that may
+  be uninitialized isn't: `isset($this->i)` on `int $i` without a default,
+  or in a trait whose hosts differ, is `isset.property` "not nullable"
+  today, the rules oracle's `bug-8668.php`, `bug-14416.php`,
+  `isset-in-trait.php`), so `isset($this->r) ||
   isset($this->i)` is `booleanOr.alwaysTrue` in PHPStan and `bool` today;
   `$a?->b ?? $c` is `nullsafe.neverNull` ("unnecessary on left side of
   ??"). The isset rules read the same
@@ -3340,7 +3344,11 @@ building on the previous one:
     - A closure's property writes invalidate the outer scope where it is
       called immediately (`InvalidateExprNode`): after
       `array_map(function () { $this->p = null; }, …)`, `$this->p` keeps
-      its narrowing today.
+      its narrowing today; a closure passed to a call that may invoke it
+      later counts too: after `$this->callbacks = [];
+      $this->runner->wrap(function () { $this->callbacks[] = …; });`,
+      iterating `$this->callbacks` is `foreach.emptyArray` today (the
+      rules oracle's `bug-14888.php`).
     - A write to a typed property stores the value as PHP coerces it to the
       native type (`toCoercedArgumentType` under coercive typing) and
       intersected with it: after `$this->foo = '123'` on an `int` property
@@ -3651,7 +3659,10 @@ building on the previous one:
     - holders rooted at a `use`d variable carry into the closure body
       (`enterAnonymousFunction`): after `if ($call->name instanceof Id)`,
       `function () use ($call) { … }` sees `$call->name` as `Id|string`
-      today, while an arrow function already keeps `Id`;
+      today, while an arrow function already keeps `Id`; an arrow
+      function's own parameter shadows the outer variable's holders: after
+      `$p->visited = true`, `fn (Point $p) => !$p->visited` is
+      `booleanNot.alwaysFalse` today (the rules oracle's `bug-6473.php`);
     - `$f = function () use (&$f)` types `$f` as the closure inside its
       own body;
     - a closure's type carries its throw points, impure points and
@@ -3931,6 +3942,9 @@ rules-oracle findings).
     'm')` does, and both guard a ternary's true branch and a first-class
     callable (`method_exists($this, 'm') ? $this->m(...) : null`); each is
     `method.notFound` today (the rules oracle's `bug-13596.php`);
+    `defined('Foo::TEST')` and `defined('static::FIELDS')` guard the class
+    constant (`classConstant.notFound` under them today,
+    `class-const-fetch-defined.php`, `bug-8034.php`);
     `property_exists(static::class, 'd')` guards `static::$d` and
     `method_exists(static::class, 'm')` or `method_exists(X::class, 'm')`
     a static call (each is `staticProperty.notFound`/
@@ -4096,6 +4110,12 @@ fixture:
     `static::` can be overridden, so `if (static::FOO)` isn't
     `if.alwaysTrue` unless the constant or class is final
     (`if-condition.php:130`);
+  - a call that returns by reference is a valid by-reference argument
+    (`callReturnsByReference`): `useString($a->getString())` for `function
+    &getString()`, `reset($this->getList())` for a by-reference
+    `getList()`, are `argument.byRef` "expects variables only" today (5
+    rules-oracle findings, `bug-757.php`, `bug-13711.php`,
+    `bug-1501.php`);
   - a call to a method a class doesn't have is `method.notFound`, never
     `method.nonObject`: `(new stdClass())->foo()` is "call to method foo()
     on a non-object type stdClass" today (the rules oracle's
@@ -4266,6 +4286,17 @@ fixture:
   - `#[\Override]` on a trait member is checked in each host: a trait
     property overriding the host's parent's is `property.override` "no
     matching parent property" today (`property-override-attr.php`);
+  - a conditional return type may test `$this` (`($this is self::This ?
+    'here' : 'there')` on an enum) and a callable parameter's own
+    parameter; both are `parameter.notFound` "references unknown
+    parameter" today (`bug-11939.php`, `method-conditional-return-type.php`,
+    `callable-type-predicate-rule.php`); an assertion may name a method
+    call (`@phpstan-assert-if-false non-empty-list<static>
+    $this->getValues()`), `assert.unknownExpr` today
+    (`incompatible-assert-type-with-method-return-type.php`); a `@var`
+    naming a variable the assignment's right side reads types that
+    variable (`/** @var int $foo */ $bar = $foo + 1;`), not
+    `varTag.differentVariable` (`bug-3515.php`, 4 findings);
   - `static` in `@phpstan-assert static $object` resolves to the called
     class; `assert.unresolvableType` today (`bug-12548.php`);
   - a template bound is supported when `TemplateTypeCheck` lists its type:
@@ -4337,7 +4368,8 @@ fixture:
     `return.missing` (the `php_codesniffer` sniffs' `process()`), and
     returning `null` under it is accepted: `return rand(0, 1) ? 17 :
     null;` under `@return void|int` is `return.type` today (the rules
-    oracle's `bug-10291.php`);
+    oracle's `bug-10291.php`), and a bare `return;` is `return.empty` (4
+    findings, `bug-11980.php`, `returnTypes.php:652`, `bug-13566.php`);
   - a conditional return type is resolved at each `return` against the
     scope's parameter types: after `if ($lazy) { return …; }`, nette's
     `Strings::matchAll` returns a `list` against `($lazy is true ?
