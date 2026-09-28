@@ -6692,6 +6692,21 @@ Behaviour commits, one each with its fixture:
   workspace's config names (ext-sql's live reflector reads the DDL schema only)
   and says so once. Today opening a repository whose `phpstan-rs.toml` names a
   database connects to it with the credentials in the file.
+- **An edit's text applies at once; only its recheck waits.** `didChange`
+  updates the overlay and its line index immediately, and the debounce delays
+  only the analysis. Today the text itself waits: `queue_change` only queues it,
+  and `latest_text` is written by `handle_debounced_change` after the 200 ms
+  window. So a completion request, which a client sends the moment `>` is typed,
+  reads the text from before the `->`, and a hover or definition inside the
+  window maps the new position onto the old text. A request on a document with
+  an unanalysed change runs that document's recheck first (the edited file is
+  checked first anyway, above) or answers from the snapshot with positions
+  mapped through the pending edits.
+- **Navigation resolves the member kind the syntax names.** `Foo::X` is a
+  constant, `Foo::x()` a method and `Foo::$x` a property, separate namespaces in
+  PHP; today `Resolved::Member` carries no kind and the caller tries a method,
+  then a property, then a constant, so in a class declaring both `x()` and
+  `const x`, definition and hover on `Foo::x` go to the method.
 - **Navigation covers every name.** Definition, type definition, hover,
   document highlight, references and rename resolve a name in a PHPDoc type
   (C7's name scope: `@param`, `@var`, `@return`, `@throws`,
@@ -6746,11 +6761,13 @@ Behaviour commits, one each with its fixture:
     edit the bare completion already makes;
   - a call's argument list offers its parameters' names for named arguments,
     and `$` offers the variables defined at that point.
-- **Signature help shows the whole signature**: default values, by-reference
-  and variadic markers and the PHPDoc types (`make(float $radius, bool $cached)`
-  for `bool $cached = false` today), the active parameter following named
-  arguments as well as positions, and every variant of a function C6 keeps
-  several of.
+- **Signature help shows the whole signature**, callable-typed values included
+  (`$cb(` on a `Closure(int $n): void`, a first-class callable, an invokable
+  object's `__invoke`, which have no signature to show today since only a named
+  callee resolves): default values, by-reference and variadic markers and the
+  PHPDoc types (`make(float $radius, bool $cached)` for `bool $cached = false`
+  today), the active parameter following named arguments as well as positions,
+  and every variant of a function C6 keeps several of.
 - **Hover at a write shows the written value's type**: on `$x` in
   `$x = make(2.0, true);` it answers `mixed` today, while the inlay hint on the
   same `$x` says `App\Circle`.
