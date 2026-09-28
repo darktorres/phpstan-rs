@@ -29,6 +29,22 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
   - Expected shifts: nullable receivers reported at level 8 and partial
     unions at level 7 (R1-1), list keys shown as `int<0, max>` (R1-L),
     printf messages naming the whole argument type (R1-1).
+  - Seen while running fixture groups for later fixes, to judge in V1:
+    - `receiver_type_checks/foreach_non_iterable/*`: the message is now
+      "only arrays and objects are supported";
+    - `offset_non_accessible/indexing_a_plain_class_not_implementing_arrayaccess_is_flagged`
+      loses its finding: a non-final class may have an `ArrayAccess`
+      subclass, so it's Maybe (a `final` one still reports);
+    - `key_value_of/value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`:
+      `value-of<T>` with `T of \UnitEnum` settles to `mixed` and gains
+      `return.phpDocType` since `97472c63`; decide what a non-backed
+      enum bound gives;
+    - `invalid_assignment_targets/a_nullsafe_operator_nested_deeper_in_a_ref_assignments_rhs_is_still_flagged`
+      gains `property.nonObject` on `$f?->bar->baz` (`bar` is `?Foo`, a
+      real finding);
+    - `array_functions/array_key_first_reports_a_real_key_type_for_a_literal_array_shape`
+      and `array_keys_unions_int_and_string_for_a_genuinely_mixed_shape`
+      give a shape's literal keys (`'a'|'b'`, `list<0|'name'>`).
 - [ ] **V2. Corpus run and delta approval** after V1, saved to
   `.corpus-runs/<scope>/<hash>.txt`.
 
