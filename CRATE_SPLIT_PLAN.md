@@ -4959,7 +4959,7 @@ fixture:
     `missingType.generics` walks the same sites, `@param-closure-this`
     included (the rules oracle's 18 PHPStan-only: class tags,
     `@param-out`, `@phpstan-self-out`, an inline `@var`, a conditional
-    return, a set hook's parameter);
+    return, a set hook's parameter).
 - (f) control flow, returns, throws and generators:
   - an empty body is checked like any other: a function or method with a
     non-`void` return type and an empty body (or only a comment) throws a
