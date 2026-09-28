@@ -14,7 +14,7 @@ use crate::parent_calls::{HasContent, Invocation, ParentCallRule};
 use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
+use syntax::visit::any_expr_in_body;
 
 use super::Project;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
@@ -76,19 +76,7 @@ fn stmt_is_parent_call(stmt: &Stmt, method: &str) -> bool {
 }
 
 fn contains_parent_call(stmts: &[Stmt], method: &str) -> bool {
-    stmts
-        .iter()
-        .any(|stmt| stmt_contains_parent_call(stmt, method))
-}
-
-fn stmt_contains_parent_call(stmt: &Stmt, method: &str) -> bool {
-    fn in_expr(e: &Expr, method: &str) -> bool {
-        is_parent_call(e, method) || any_child_expr(e, &mut |child| in_expr(child, method))
-    }
-    stmt_exprs(stmt).into_iter().any(|e| in_expr(e, method))
-        || child_stmts(stmt)
-            .into_iter()
-            .any(|child| stmt_contains_parent_call(child, method))
+    any_expr_in_body(stmts, |e| is_parent_call(e, method))
 }
 
 fn diagnostic(message: String, span: Span, level: u8, id: &'static str) -> DiagnosticBuilder {

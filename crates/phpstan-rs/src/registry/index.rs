@@ -11,6 +11,7 @@ use crate::registry::{
 use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
+use syntax::visit::{Visitor, opens_scope, walk_expr, walk_stmt, walk_stmts};
 use types::Type;
 
 /// One declaration's already-built, registry-independent info/sig, plus
@@ -703,41 +704,38 @@ fn build_declarations_with_context(
 /// method body, a loop, a `try`, a `switch` - still creates a global
 /// constant at runtime, so it's registered like a top-level one.
 fn collect_nested_defines(stmts: &[Stmt], out: &mut Vec<BuiltDecl>) {
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Expression(e) if define_call_constant(e).is_some() => {
-                if let Some((name, ty)) = define_call_constant(e) {
-                    out.push(BuiltDecl::GlobalConst { name, ty });
-                }
-            }
-            StmtKind::FunctionDecl(f) => collect_nested_defines(&f.body, out),
-            StmtKind::ClassDecl(c) => {
-                for m in &c.methods {
-                    collect_nested_defines(&m.function.body, out);
-                }
-            }
-            _ => {
-                for e in syntax::visit::stmt_exprs(stmt) {
-                    collect_defines_in_expr(e, out);
-                }
-                for child in syntax::visit::child_stmts(stmt) {
-                    collect_nested_defines(std::slice::from_ref(child), out);
-                }
-            }
-        }
-    }
+    walk_stmts(&mut Defines(out), stmts);
 }
 
-/// A `define()` call nested inside an expression (`defined('X') ||
-/// define('X', 1)`), outside any closure body.
 fn collect_defines_in_expr(e: &Expr, out: &mut Vec<BuiltDecl>) {
-    if let Some((name, ty)) = define_call_constant(e) {
-        out.push(BuiltDecl::GlobalConst { name, ty });
+    Defines(out).visit_expr(e);
+}
+
+/// Every `define()` call, in function and method bodies too; a closure's
+/// is not entered.
+struct Defines<'o>(&'o mut Vec<BuiltDecl>);
+
+impl<'ast> Visitor<'ast> for Defines<'_> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            StmtKind::FunctionDecl(f) => walk_stmts(self, &f.body),
+            StmtKind::ClassDecl(c) => {
+                for m in &c.methods {
+                    walk_stmts(self, &m.function.body);
+                }
+            }
+            _ => walk_stmt(self, stmt),
+        }
     }
-    syntax::visit::any_child_expr(e, &mut |child| {
-        collect_defines_in_expr(child, out);
-        false
-    });
+
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        if let Some((name, ty)) = define_call_constant(e) {
+            self.0.push(BuiltDecl::GlobalConst { name, ty });
+        }
+        if !opens_scope(e) {
+            walk_expr(self, e);
+        }
+    }
 }
 
 /// Recognizes a top-level `define('NAME', value)` (or `\define(...)`)

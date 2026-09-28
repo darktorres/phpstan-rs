@@ -31,7 +31,7 @@ use crate::registry::{BuiltDecl, ClassReflection};
 use syntax::ast::*;
 use syntax::name_resolution::{NameContext, for_each_in_context};
 use syntax::token::Span;
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{Visitor, walk_expr};
 
 /// A class declaration's name, or `class@anonymous` for an anonymous
 /// class.
@@ -66,13 +66,13 @@ pub(crate) fn collect_anonymous_classes(
     // Each class with the context of the statement it is in.
     let mut contexts: Vec<NameContext> = Vec::new();
     let mut found: Vec<(&Expr, &ClassDecl, usize)> = Vec::new();
-    let mut in_stmt = Vec::new();
+    let mut in_stmt = Found(Vec::new());
     for_each_in_context(stmts, |stmt, ctx| {
-        walk_stmt(stmt, &mut in_stmt);
-        if !in_stmt.is_empty() {
+        in_stmt.visit_stmt(stmt);
+        if !in_stmt.0.is_empty() {
             contexts.push(ctx.clone());
             let at = contexts.len() - 1;
-            found.extend(in_stmt.drain(..).map(|(expr, decl)| (expr, decl, at)));
+            found.extend(in_stmt.0.drain(..).map(|(expr, decl)| (expr, decl, at)));
         }
     });
 
@@ -112,163 +112,14 @@ pub(crate) fn collect_anonymous_classes(
     (decls, names)
 }
 
-fn walk_stmt<'a>(stmt: &'a Stmt, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
-    match &stmt.kind {
-        StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr(e, found),
-        StmtKind::Return(Some(e)) => walk_expr(e, found),
-        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-            for e in exprs {
-                walk_expr(e, found);
-            }
-        }
-        StmtKind::If { cond, .. }
-        | StmtKind::While { cond, .. }
-        | StmtKind::DoWhile { cond, .. } => {
-            walk_expr(cond, found);
-        }
-        StmtKind::For {
-            init, cond, step, ..
-        } => {
-            for e in init.iter().chain(cond).chain(step) {
-                walk_expr(e, found);
-            }
-        }
-        StmtKind::Foreach {
-            subject,
-            key,
-            value,
-            ..
-        } => {
-            walk_expr(subject, found);
-            if let Some(k) = key {
-                walk_expr(k, found);
-            }
-            walk_expr(value, found);
-        }
-        StmtKind::FunctionDecl(f) => walk_function(f, found),
-        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => walk_enum(e, found),
-        StmtKind::ClassDecl(c) => walk_class(c, found),
-        StmtKind::GlobalConst(consts) => {
-            for c in consts {
-                walk_expr(&c.value, found);
-            }
-        }
-        StmtKind::StaticVar(vars) => {
-            for (_, d) in vars {
-                if let Some(e) = d {
-                    walk_expr(e, found);
-                }
-            }
-        }
-        StmtKind::Switch { subject, cases } => {
-            walk_expr(subject, found);
-            for case in cases {
-                if let Some(t) = &case.test {
-                    walk_expr(t, found);
-                }
-            }
-        }
-        _ => {}
-    }
-    for child in child_stmts(stmt) {
-        walk_stmt(child, found);
-    }
-}
+/// Every anonymous class, in source order, wherever it is.
+struct Found<'a>(Vec<(&'a Expr, &'a ClassDecl)>);
 
-fn walk_function<'a>(f: &'a FunctionDecl, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
-    for p in &f.params {
-        if let Some(d) = &p.default {
-            walk_expr(d, found);
+impl<'a> Visitor<'a> for Found<'a> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let ExprKind::NewAnonymousClass(decl, _) = &expr.kind {
+            self.0.push((expr, decl));
         }
-        if let Some(hooks) = &p.hooks {
-            walk_property_hooks(hooks, found);
-        }
-    }
-    for s in f.body.iter() {
-        walk_stmt(s, found);
-    }
-}
-
-fn walk_class<'a>(c: &'a ClassDecl, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
-    for p in &c.properties {
-        if let Some(d) = &p.default {
-            walk_expr(d, found);
-        }
-        if let Some(hooks) = &p.hooks {
-            walk_property_hooks(hooks, found);
-        }
-    }
-    for m in &c.methods {
-        walk_function(&m.function, found);
-    }
-    for cst in &c.consts {
-        walk_expr(&cst.value, found);
-    }
-}
-
-fn walk_enum<'a>(e: &'a ClassDecl, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
-    for m in &e.methods {
-        walk_function(&m.function, found);
-    }
-    for cst in &e.consts {
-        walk_expr(&cst.value, found);
-    }
-    for case in &e.enum_cases {
-        if let Some(v) = &case.value {
-            walk_expr(v, found);
-        }
-    }
-}
-
-fn walk_property_hooks<'a>(hooks: &'a PropertyHooks, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
-    if let Some(body) = &hooks.get {
-        walk_hook_body(body, found);
-    }
-    if let Some((param, body)) = &hooks.set {
-        if let Some(p) = param
-            && let Some(d) = &p.default
-        {
-            walk_expr(d, found);
-        }
-        walk_hook_body(body, found);
-    }
-}
-
-fn walk_hook_body<'a>(body: &'a PropertyHookBody, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
-    match body {
-        PropertyHookBody::Arrow(e) => walk_expr(e, found),
-        PropertyHookBody::Block(stmts) => {
-            for s in stmts {
-                walk_stmt(s, found);
-            }
-        }
-        PropertyHookBody::Abstract => {}
-    }
-}
-
-fn walk_expr<'a>(expr: &'a Expr, found: &mut Vec<(&'a Expr, &'a ClassDecl)>) {
-    match &expr.kind {
-        ExprKind::NewAnonymousClass(decl, args) => {
-            found.push((expr, decl));
-            for a in args {
-                walk_expr(&a.value, found);
-            }
-            walk_class(decl, found);
-        }
-        ExprKind::Closure { params, body, .. } => {
-            for p in params {
-                if let Some(d) = &p.default {
-                    walk_expr(d, found);
-                }
-            }
-            for s in body {
-                walk_stmt(s, found);
-            }
-        }
-        ExprKind::ArrowFn { body, .. } => walk_expr(body, found),
-        _ => {}
-    }
-    for child in child_exprs(expr) {
-        walk_expr(child, found);
+        walk_expr(self, expr);
     }
 }

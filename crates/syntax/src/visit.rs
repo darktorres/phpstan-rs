@@ -582,6 +582,42 @@ pub fn any_stmt_in_body<'ast>(stmt: &'ast Stmt, pred: impl FnMut(&'ast Stmt) -> 
     search.found
 }
 
+/// Whether `pred` holds for an expression in `stmts` or in the statements
+/// nested in them, within the same function body: closures, arrow
+/// functions, anonymous classes and nested function and class
+/// declarations are not entered (though `pred` sees the expression that
+/// starts one). Stops at the first match.
+pub fn any_expr_in_body<'ast>(stmts: &'ast [Stmt], pred: impl FnMut(&'ast Expr) -> bool) -> bool {
+    struct Search<F> {
+        pred: F,
+        found: bool,
+    }
+    impl<'ast, F: FnMut(&'ast Expr) -> bool> Visitor<'ast> for Search<F> {
+        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            if !self.found {
+                walk_stmt(self, stmt);
+            }
+        }
+        fn visit_expr(&mut self, expr: &'ast Expr) {
+            if self.found {
+                return;
+            }
+            if (self.pred)(expr) {
+                self.found = true;
+                return;
+            }
+            if !opens_scope(expr) {
+                walk_expr(self, expr);
+            }
+        }
+        fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+        fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+    }
+    let mut search = Search { pred, found: false };
+    walk_stmts(&mut search, stmts);
+    search.found
+}
+
 /// Whether `pred` holds for `expr` or an expression nested in it within
 /// the same scope: closures, arrow functions and anonymous classes are
 /// not entered (though `pred` sees the expression that starts one). Stops
@@ -714,9 +750,9 @@ pub fn stmt_exprs(stmt: &Stmt) -> Vec<&Expr> {
 /// `yield from`, making it a generator. A `yield` inside a nested
 /// closure, arrow function, class or function belongs to that scope.
 pub fn body_contains_yield(stmts: &[Stmt]) -> bool {
-    stmts
-        .iter()
-        .any(|stmt| any_stmt_in_body(stmt, |s| stmt_exprs(s).into_iter().any(expr_contains_yield)))
+    any_expr_in_body(stmts, |e| {
+        matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
+    })
 }
 
 /// `body_contains_yield` for an arrow function's expression body.

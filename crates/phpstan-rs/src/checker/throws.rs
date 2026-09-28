@@ -20,85 +20,61 @@
 
 use crate::checker::Checker;
 use crate::registry::{FunctionReflection, Registry};
-use syntax::ast::{Expr, ExprKind, Stmt, StmtKind};
+use syntax::ast::{ClassDecl, Expr, ExprKind, FunctionDecl, Stmt, StmtKind};
 use syntax::token::Span;
-use syntax::visit::{child_exprs, child_stmts};
+use syntax::visit::{Visitor, opens_scope, walk_expr, walk_stmt, walk_stmts};
 use types::Type;
 
 mod dynamic;
 mod missing;
 mod too_wide;
 
-/// Whether `stmts` contains a real, direct `throw` anywhere in its own
-/// body - `Some(span)` of the first one found. Mirrors
-/// `visit`'s `body_contains_yield` trio, including their
-/// "stops at a nested `Closure`/`ArrowFn`/`NewAnonymousClass`/
-/// `FunctionDecl`/`ClassDecl`/`ClassDecl` boundary" semantics - a `throw`
-/// inside a nested closure belongs to that closure, not the outer one.
+/// The first `throw` in `stmts`' own body. A `throw` inside a nested
+/// closure, arrow function, anonymous class or declaration belongs to
+/// that, not to this body.
 pub(crate) fn body_contains_explicit_throw(stmts: &[Stmt]) -> Option<Span> {
-    stmts.iter().find_map(stmt_contains_explicit_throw)
+    let mut first = FirstThrow(None);
+    walk_stmts(&mut first, stmts);
+    first.0
 }
 
-fn stmt_contains_explicit_throw(stmt: &Stmt) -> Option<Span> {
-    if let StmtKind::Throw(_) = &stmt.kind {
-        return Some(stmt.span);
-    }
-    let own = match &stmt.kind {
-        StmtKind::Expression(e) => expr_contains_explicit_throw(e),
-        StmtKind::Return(Some(e)) => expr_contains_explicit_throw(e),
-        StmtKind::Return(None) => None,
-        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-            exprs.iter().find_map(expr_contains_explicit_throw)
-        }
-        StmtKind::If { cond, .. }
-        | StmtKind::While { cond, .. }
-        | StmtKind::DoWhile { cond, .. } => expr_contains_explicit_throw(cond),
-        StmtKind::For {
-            init, cond, step, ..
-        } => init
-            .iter()
-            .chain(cond)
-            .chain(step)
-            .find_map(expr_contains_explicit_throw),
-        StmtKind::Foreach {
-            subject,
-            key,
-            value,
-            ..
-        } => expr_contains_explicit_throw(subject)
-            .or_else(|| key.as_ref().and_then(expr_contains_explicit_throw))
-            .or_else(|| expr_contains_explicit_throw(value)),
-        StmtKind::GlobalConst(consts) => consts
-            .iter()
-            .find_map(|c| expr_contains_explicit_throw(&c.value)),
-        StmtKind::StaticVar(vars) => vars
-            .iter()
-            .find_map(|(_, d)| d.as_ref().and_then(expr_contains_explicit_throw)),
-        StmtKind::Switch { subject, cases } => {
-            expr_contains_explicit_throw(subject).or_else(|| {
-                cases
-                    .iter()
-                    .find_map(|c| c.test.as_ref().and_then(expr_contains_explicit_throw))
-            })
-        }
-        _ => None,
-    };
-    own.or_else(|| {
-        child_stmts(stmt)
-            .into_iter()
-            .find_map(stmt_contains_explicit_throw)
-    })
-}
-
-// `check_get_hook`/`check_set_hook`'s `throws.void` check needs this for
-// an arrow-form hook body, which is a single `Expr`, not a `Vec<Stmt>`.
+/// `body_contains_explicit_throw` for an arrow-form hook body, which is a
+/// single expression.
 pub(crate) fn expr_contains_explicit_throw(e: &Expr) -> Option<Span> {
-    if let ExprKind::Throw(_) = &e.kind {
-        return Some(e.span);
+    let mut first = FirstThrow(None);
+    first.visit_expr(e);
+    first.0
+}
+
+struct FirstThrow(Option<Span>);
+
+impl<'ast> Visitor<'ast> for FirstThrow {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        if self.0.is_some() {
+            return;
+        }
+        if let StmtKind::Throw(_) = stmt.kind {
+            self.0 = Some(stmt.span);
+            return;
+        }
+        walk_stmt(self, stmt);
     }
-    child_exprs(e)
-        .into_iter()
-        .find_map(expr_contains_explicit_throw)
+
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        if self.0.is_some() {
+            return;
+        }
+        if let ExprKind::Throw(_) = e.kind {
+            self.0 = Some(e.span);
+            return;
+        }
+        if !opens_scope(e) {
+            walk_expr(self, e);
+        }
+    }
+
+    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
 }
 
 impl<'a> Checker<'a> {
