@@ -1,0 +1,7 @@
+a.php:15:13-15:23 banned.eval L0 | eval() is banned by this project's configuration.
+a.php:19:13-19:23 banned.eval L0 | eval() is banned by this project's configuration.
+a.php:24:22-24:39 banned.eval L0 | eval() is banned by this project's configuration.
+a.php:27:7-27:21 banned.namedArguments L0 | A named argument is banned by this project's configuration.
+a.php:30:17-30:25 banned.type L0 | Parameter $x of an arrow function uses banned type float.
+a.php:30:28-30:33 banned.type L0 | The return type of an arrow function uses banned type float.
+a.php:31:27-31:32 banned.type L0 | The return type of a closure uses banned type float.

@@ -167,8 +167,8 @@ fn collect_facts_in_stmts(stmts: &[Stmt], facts: &mut FileFacts) {
     walk_stmts(&mut Facts(facts), stmts);
 }
 
-/// Every expression in the file, closures and declarations included, but
-/// not parameter defaults, attributes, property hooks or enum case values.
+/// Every expression in the file: closures, declarations, parameter
+/// defaults, attributes, property hooks and enum case values included.
 struct Facts<'f>(&'f mut FileFacts);
 
 impl<'ast> Visitor<'ast> for Facts<'_> {
@@ -176,10 +176,6 @@ impl<'ast> Visitor<'ast> for Facts<'_> {
         collect_facts_in_expr(e, self.0);
         walk_expr(self, e);
     }
-    fn visit_param(&mut self, _: &'ast Param) {}
-    fn visit_attribute(&mut self, _: &'ast Attribute) {}
-    fn visit_property_hooks(&mut self, _: &'ast PropertyHooks) {}
-    fn visit_enum_case(&mut self, _: &'ast EnumCase) {}
 }
 
 /// `e`'s own facts, not its operands'.

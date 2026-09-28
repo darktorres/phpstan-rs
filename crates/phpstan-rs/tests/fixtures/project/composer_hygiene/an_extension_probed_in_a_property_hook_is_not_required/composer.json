@@ -1,0 +1,2 @@
+{"name": "acme/app", "require": {"ext-json": "*"}, "suggest": {"ext-imagick": "optional"},
+            "autoload": {"psr-4": {"App\\": "src/"}}}
