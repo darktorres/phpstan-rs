@@ -3853,7 +3853,10 @@ building on the previous one:
     `amphp/http-client/src/Response.php:218`. Each arm's condition is
     evaluated on the scope the earlier arms' falsey narrowing leaves, so a
     repeated condition is `match.alwaysFalse`: `match ($i) { 1 => 'a', 1 =>
-    'b', default => 'c' }` isn't reported today. `default` sees the subject
+    'b', default => 'c' }` isn't reported today, nor is an arm outside the
+    subject's type (`0 =>` on `int<1, max>` or `1|2|3`, a repeated enum
+    case; the rules oracle's 7 PHPStan-only, `bug-11310.php`,
+    `match-enums.php`, `match-expr.php`). `default` sees the subject
     with every arm excluded: in `match ($this) { self::TWO => …, default =>
     $this->requireOne($this) }` on a two-case enum, `$this` is the whole
     enum today where it is `E::ONE` (the rules oracle's
@@ -4415,7 +4418,8 @@ fixture:
     oracle's PHPStan-only `echo.nonString` 375, `binaryOp.invalid` 93,
     `assignOp.invalid` 77, `offsetAccess.invalidOffset` 79,
     `foreach.nonIterable` 27, `callable.nonCallable` 25, `cast.*` 42,
-    `unaryOp.invalid` 18, `offsetAccess.nonArray` 16 and smaller rows);
+    `unaryOp.invalid` 18, `offsetAccess.nonArray` 16 and smaller rows,
+    `print.nonString` 8 among them, `print` of a closure included);
     an `object` operand of `+`, `-` or `%` is invalid too (`+$o`, `$o % 3`);
   - `++`/`--` on `bool`, `null`, a `resource` or a non-numeric string is
     `postInc.type`/`preDec.type` and the rest (PHP leaves `true`, `false`
@@ -4989,7 +4993,12 @@ fixture:
   - a PHPDoc type resolving to `never` (`int&string`, a template whose
     bound makes it empty) is `return.unresolvableType`/
     `parameter.unresolvableType`/`assert.unresolvableType`, unreported
-    today (32 oracle findings); a parameter whose PHPDoc type doesn't
+    today (32 oracle findings), and so is one that can't intersect
+    (`array{foo: int}&array{bar: string}`), a set hook's `@param`, and a
+    `@param-closure-this` of a non-object (the rules oracle's 7
+    PHPStan-only, `bug-3753.php`, `explain-unresolvable-method-parameter.php`,
+    `param-closure-this.php`, `incompatible-types.php:126`); a parameter
+    whose PHPDoc type doesn't
     resolve still has one, so `@param value-of<T> $v` on an untyped `$v`
     is not also `missingType.parameter` (the rules oracle's
     `unresolvable-parameter.php`);
@@ -5116,9 +5125,10 @@ fixture:
     doesn't apply (`@param Foo|Bar[]` on `array`, an unresolvable
     `array<int, int, int>` or `array{foo: int}&array{bar: string}`).
     `missingType.generics`, `generics.notGeneric`, `generics.lessTypes`
-    (10) and `generics.notSubtype` (a `mixed` or `string` argument outside the
-    template's bound, as in `@extends FooGeneric<int, mixed>`) walk the
-    same sites,
+    (10), `generics.moreTypes` (7, `static<int, string>` in `@return`
+    included) and `generics.notSubtype` (a `mixed` or `string` argument
+    outside the template's bound, as in `@extends FooGeneric<int, mixed>`)
+    walk the same sites,
     `@param-closure-this`, `@use` and a template bound included
     (`Exception<int>` in an inline `@var` is unreported today; the rules
     oracle's 18, 15 and 15 PHPStan-only: class tags,
