@@ -7601,7 +7601,9 @@ crates, in one commit:
   normal and build dependencies on other workspace crates are within its row.
   `testing` appears in no row, being a dev-dependency only, and the bin's row
   shrinks to what `main` uses (`app`, `lsp`), where today's lists every
-  crate, `testing` included.
+  crate, `testing` included. The `phpstan-rs` package, which the check skips
+  today since it holds every module not yet extracted, is checked against the
+  `bin` row.
 - **Architecture (gate 10).** The engine-I/O rule covers every crate but
   `project`'s session module, `app`, `lsp`, the bin and tests, where
   `is_engine_source` reads paths under `crates/phpstan-rs/src` today; the rules
