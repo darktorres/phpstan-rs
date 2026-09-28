@@ -4335,7 +4335,7 @@ The oracle's other side is the false-positive measure: phpstan-rs reports
 2,588 findings PHPStan doesn't, and every one was traced to its cause.
 Each cause is a plan item where it lives (the items cite the rules
 oracle's file; Appendix I lists, by cause and phase, the 1,019 in 410
-files no item names and the 394 in 96 cited files their item doesn't
+files no item names and the 444 in 105 cited files their item doesn't
 explain), and the phase that fixes it re-runs the oracle and removes
 its findings; what stays is approved: stricter checks that are right at
 runtime (`array_sum()` of arrays, printf placeholders that cast objects,
@@ -7705,19 +7705,20 @@ values that flow on from them.
 ## Appendix I: the rules oracle's unexplained phpstan-rs-only findings by cause
 
 At `76e738b4`, the rules oracle's 2,588 phpstan-rs-only findings split three
-ways: 1,175 are explained by the plan item that cites their file, 1,019 are in
-410 files the plan cites nowhere else, and 394 are in 96 cited files whose
-citing item doesn't explain them. The last two sets are listed here. Each
-finding was read against its fixture, the phar's findings on the same line and,
-where the two tools disagree on runtime behaviour, php 8.5; they trace to 249
-causes. By verdict: 826 are wrong today (a false positive, or a wrong type that
-leads to one), 169 are a finding PHPStan reports under another identifier or
-phpstan-rs reports twice, 70 are `phpstanRs.assertType` mismatches, 124 are
-right at runtime and approved, 43 come from bleeding-edge toggles C1 turns into
-settings, and 181 are the oracle's setup (php-parser classes, an unused trait,
-the measured run's single-int `phpVersion`) or an approved rename. Each entry
-gives the cause's key, its findings and files, its verdict, what holds, and the
-files, most findings first; the phase is done with it when its files have no
+ways: 1,125 are explained by the plan item that cites their file, 1,019 are in
+410 files the plan cites nowhere else, and 444 are in 105 cited files whose
+citing item doesn't explain them (each cited file's findings were checked
+against its item's text). The last two sets are listed here. Each finding was
+read against its fixture, the phar's findings on the same line and, where the
+two tools disagree on runtime behaviour, php 8.5; they trace to 256 causes. By
+verdict: 857 are wrong today (a false positive, or a wrong type that leads to
+one), 188 are a finding PHPStan reports under another identifier or phpstan-rs
+reports twice, 70 are `phpstanRs.assertType` mismatches, 124 are right at
+runtime and approved, 43 come from bleeding-edge toggles C1 turns into settings,
+and 181 are the oracle's setup (php-parser classes, an unused trait, the
+measured run's single-int `phpVersion`) or an approved rename. Each entry gives
+the cause's key, its findings and files, its verdict, what holds, and the files,
+most findings first; the phase is done with it when its files have no
 phpstan-rs-only findings left, or each remaining one is approved.
 
 **Oracle setup** (167 findings, 19 files, 3 causes):
@@ -7752,7 +7753,7 @@ phpstan-rs-only findings left, or each remaining one is approved.
   `declare-shebang.php`, `declare-shebang2.php`, `declare-shebang3.php`,
   `bug-6252.php`.
 
-**B4** (103 findings, 40 files, 19 causes):
+**B4** (105 findings, 41 files, 19 causes):
 
 - `template-iterable` (27 findings, 5 files; wrong today): `foreach` over
   `iterable<T>` gives `T` (`mixed` today, B4's `iterable<K, V>` item);
@@ -7761,9 +7762,9 @@ phpstan-rs-only findings left, or each remaining one is approved.
   prints without its `(int|string)` key, the nsrt normalization's form;
   `bug-13921.php`, `file-asserts.php`, `discussion-7004.php`, `bug-5372_2.php`,
   `inherit-phpdoc-return-type-with-narrower-native-return-type.php`.
-- `template-property` (12 findings, 6 files; wrong today): a property holding a
+- `template-property` (14 findings, 7 files; wrong today): a property holding a
   `T` (assigned, promoted, or `@var E|null` with `?? throw`) returns `T`;
-  `generic-subtype.php`, `bug-13440.php`, `bug-4590.php`,
+  `generic-subtype.php`, `bug-13440.php`, `yield.php`, `bug-4590.php`,
   `template-string-bound.php`, `bug-14138.php`, `bug-13190.php`.
 - `template-infer-keys` (7 findings, 2 files; wrong today; an assertType
   mismatch): `array<K, V>` arguments infer `K`, and `new Collection([0 => …])`
@@ -7812,7 +7813,7 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `template-narrow` (1 finding, 1 file; wrong today): `!instanceof C` on `T of
   A|B|C` leaves `A|B`, which has `$name`; `bug-6566.php`.
 
-**C4** (60 findings, 29 files, 20 causes):
+**C4** (65 findings, 31 files, 22 causes):
 
 - `method-tag-static-trait` (8 findings, 1 file; wrong today): static `@method`
   tags declared on a trait or parent resolve on the class;
@@ -7830,6 +7831,10 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `require-extends-members` (5 findings, 1 file; wrong today):
   `@phpstan-require-extends` on an interface makes the required class's members
   accessible through it; `require-extends.php`.
+- `define-constant-ctor` (4 findings, 1 file; wrong today): a constant
+  `define()`d in the constructor is known in the class's other methods, with its
+  value's type (`constant.notFound` on each read today);
+  `remembered-constructor-scope.php`.
 - `trait-templates` (4 findings, 3 files; wrong today): `@use
   Trait<X>`/`@phpstan-use` resolves a trait's method `@return` and property
   `@var` templates; `php-82-dynamic-properties-allow.php`, `bug-9657.php`,
@@ -7874,6 +7879,10 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `property-tag-private` (1 finding, 1 file; wrong today): a `@property` tag
   over a private property makes it readable outside (through `__get`);
   `private-property-with-allowed-property-tag-is-public.php`.
+- `self-const-value` (1 finding, 1 file; wrong today): `self::LOREM` reads the
+  constant's value (`self` isn't late-bound), so `@var int` on `IPSUM =
+  self::LOREM` holds where phpstan-rs uses `LOREM`'s `@var string|int`;
+  `value-assigned-to-class-constant.php`.
 
 **C6** (144 findings, 23 files, 12 causes):
 
@@ -7963,24 +7972,31 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `value-of-template` (1 finding, 1 file; wrong today): `?value-of<T>` for `T of
   BackedEnum` is `int|string|null`, not `mixed`; `bug-13638.php`.
 
-**C9** (27 findings, 13 files, 4 causes):
+**C9** (46 findings, 18 files, 5 causes):
 
-- `builtin-purity` (11 findings, 6 files; wrong today): built-ins and enum
+- `builtin-purity` (14 findings, 7 files; wrong today): built-ins and enum
   methods are pure: `is_int`, `is_string`, `is_numeric`, `is_array`, `empty`,
   `array_key_exists`, `tryFrom()` (functionMetadata); `bug-11207.php`,
-  `bug-12224.php`, `bug-12224.php`, `bug-13201.php`, `bug-14511-method.php`,
-  `bug-14511.php`.
+  `bug-12224.php`, `pure-method.php`, `bug-12224.php`, `bug-13201.php`,
+  `bug-14511-method.php`, `bug-14511.php`.
+- `user-function-purity` (12 findings, 3 files; wrong today): a call to a user
+  function or method is judged by its body and its callback arguments (named or
+  shuffled included): a pure one is silent and an impure one
+  `impure.functionCall`/`impure.methodCall`, where today each is
+  `possiblyImpure.*` "unknown"; `pure-unless-callable-is-impure-named-arg.php`,
+  `pure-unless-callable-is-impure.php`, `pure-function.php`.
 - `ctor-purity` (10 findings, 4 files; wrong today): a user class's constructor
   purity is known (promoted-only constructors are pure); `possiblyImpure.new`
   "unknown class" today; `pure-method.php`,
   `pure-unless-callable-is-impure.php`, `possibly-impure-instanceof-tip.php`,
   `bug-14138-pure.php`.
+- `method-purity` (7 findings, 2 files; wrong today): a method calling an impure
+  function or method is impure (`method.resultUnused` today);
+  `call-to-static-method-without-impure-points.php`,
+  `call-to-method-without-impure-points.php`.
 - `impure-rename` (3 findings, 2 files; the oracle setup or an approved rename):
   `possiblyImpure.*` for `impure.*` until C5's `functionMetadata.php`
   (approved); `all-methods-are-pure.php`, `bug-11361-pure.php`.
-- `method-purity` (3 findings, 1 file; wrong today): a method calling an impure
-  function or method is impure (`method.resultUnused` today);
-  `call-to-method-without-impure-points.php`.
 
 **D2** (11 findings, 5 files, 1 cause):
 
@@ -7989,7 +8005,7 @@ phpstan-rs-only findings left, or each remaining one is approved.
   `unset-false-key.php`, `bug-8280.php`, `bug-7531.php`, `bug-10861.php`,
   `discussion-13274.php`.
 
-**D3** (295 findings, 140 files, 51 causes):
+**D3** (298 findings, 143 files, 52 causes):
 
 - `byref-out-undefined` (73 findings, 23 files; wrong today): an undefined
   variable passed to an out parameter is defined by the call and not checked
@@ -8021,24 +8037,25 @@ phpstan-rs-only findings left, or each remaining one is approved.
   `!$a && !$b`, `in_array($t, [A, B])` then `$t === A`, `count($row) === N`, the
   same superglobal offset); `bug-8430.php`, `bug-8430b.php`, `bug-12992.php`,
   `bug-12597.php`, `bug-4173.php`, `bug-5805.php`.
+- `infer-expr-gaps` (13 findings, 9 files; wrong today): `infer_expr` has no
+  `instanceof` arm and gives `mixed` for a short ternary (`$s ?: ''`), so
+  `return $o instanceof X`, `match ($x instanceof Y)` and `$a ?: [...]` are
+  `mixed`; `bug-9991.php`, `bug-12827-instanceof.php`, `bug-6349.php`,
+  `bug-10214.php`, `bug-6910.php`, `bug-4188.php`, `returnTypes.php`,
+  `bug-5164.php`, `bug-5382.php`.
 - `magic-constants` (13 findings, 6 files; wrong today; an assertType mismatch):
   `__FILE__` is `mixed` today; `__FUNCTION__`/`__METHOD__` in a closure are
   `'{closure}'`; `file.php`, `bug-anonymous-function-method-constant.php`,
   `compiler-halt-offset-const-defined.php`,
   `compiler-halt-offset-const-not-defined.php`, `bug-12850.php`,
   `recursive-iterator-iterator.php`.
-- `infer-expr-gaps` (12 findings, 8 files; wrong today): `infer_expr` has no
-  `instanceof` arm and gives `mixed` for a short ternary (`$s ?: ''`), so
-  `return $o instanceof X`, `match ($x instanceof Y)` and `$a ?: [...]` are
-  `mixed`; `bug-9991.php`, `bug-12827-instanceof.php`, `bug-6349.php`,
-  `bug-10214.php`, `bug-6910.php`, `bug-4188.php`, `bug-5164.php`,
-  `bug-5382.php`.
-- `match-exhaustive` (12 findings, 7 files; wrong today): `match (true)` is
+- `match-exhaustive` (13 findings, 8 files; wrong today): `match (true)` is
   exhaustive when its arms' narrowings cover the subject: `instanceof` over a
   union, `===` over literals or enum cases, `is_string`/`is_array`, every
   combination of two bools; `bug-8042.php`, `bug-13303.php`,
   `strict-comparison-last-match-arm.php`, `bug-7721.php`, `bug-8937.php`,
-  `bug-unhandled-true-with-complex-condition.php`, `bug-13210.php`.
+  `bug-unhandled-true-with-complex-condition.php`,
+  `match-always-true-last-arm.php`, `bug-13210.php`.
 - `assert:offset-writes` (9 findings, 1 file; an assertType mismatch): nested
   offset writes and `isset` narrowing on `array<array<mixed>>`; `bug-8113.php`.
 - `append-byref-arg` (8 findings, 3 files; wrong today): an offset or append
@@ -8117,6 +8134,9 @@ phpstan-rs-only findings left, or each remaining one is approved.
   the values (`mixed` today); `bug-13526.php`, `bug-7763.php`.
 - `string-offset-write` (2 findings, 1 file; wrong today): `$string[$k] = $v` on
   `''` in a loop; the string isn't `''` after it; `bug-3803.php`.
+- `array-literal-key-order` (1 finding, 1 file; wrong today): array-literal keys
+  are evaluated in order: `[$idx++ => 'test', $idx++ => 'presto']` has keys 0
+  and 1 (`array.duplicateKey` "2" today); `duplicate-keys.php`.
 - `arrayaccess-offset-set` (1 finding, 1 file; approved, right at runtime):
   `$data['k'] = 1` against `offsetSet()`'s `@param string`, PHPDoc-only, which
   PHPStan doesn't check; `bug-2268.php`.
@@ -8340,7 +8360,7 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `simplexml` (1 finding, 1 file; wrong today): `foreach` over
   `SimpleXMLElement::children()` gives `SimpleXMLElement`; `bug-3947.php`.
 
-**E3** (307 findings, 110 files, 68 causes):
+**E3** (328 findings, 114 files, 71 causes):
 
 - `static-prop-statement` (79 findings, 6 files; approved, right at runtime): a
   static property read as a statement is `expr.resultUnused` (approved);
@@ -8352,6 +8372,10 @@ phpstan-rs-only findings left, or each remaining one is approved.
   callable is pure, and calling one takes the callee's purity
   (`possiblyImpure.*` "unknown" today);
   `first-class-callable-pure-function.php`.
+- `use-superglobal-cascade` (18 findings, 1 file; another identifier or a second
+  report): a superglobal in a closure's `use` list is `closure.useSuperGlobal`
+  (a compile error); the `argument.type` "mixed given" on reading it follows;
+  `invalid-lexical-variables-in-closure-use.php`.
 - `castable-to-number` (14 findings, 4 files; approved, right at runtime; a
   bleeding-edge toggle): `array_sum()`/`array_product()` of arrays or objects
   (`checkParameterCastableToNumberFunctions`, approved);
@@ -8491,6 +8515,10 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `trait-use-line` (2 findings, 1 file; another identifier or a second report):
   a trait using a class or an unknown trait is reported on the `use`, not the
   trait's line; `trait-use-error.php`.
+- `variance-private-method` (2 findings, 2 files; wrong today): variance isn't
+  checked on a private method, which can't be called through the parent type;
+  `method-signature-variance-contravariant.php`,
+  `method-signature-variance-covariant.php`.
 - `assignop-offset-dup` (1 finding, 1 file; another identifier or a second
   report): `$s['k'] += null` on a string is `offsetAccess.notFound` and
   `assignOp.invalid`, not `offsetAssign.dimType`; `offset-access-assignop.php`.
@@ -8522,6 +8550,9 @@ phpstan-rs-only findings left, or each remaining one is approved.
 - `no-parent-rename` (1 finding, 1 file; another identifier or a second report):
   `parent::` in a class without a parent is `class.noParent`, not
   `class.notFound`; `bug-12272.php`.
+- `nullsafe-byref-dup` (1 finding, 1 file; another identifier or a second
+  report): `$a = &$b?->foo` is `nullsafe.byRef`, not `property.nonObject` on
+  `mixed`; `invalid-assign-var.php`.
 - `offset-not-found-dup` (1 finding, 1 file; another identifier or a second
   report): `offsetAccess.notFound` once per offset chain; `bug-5743.php`.
 - `override-magic-stdclass` (1 finding, 1 file; approved, right at runtime):
