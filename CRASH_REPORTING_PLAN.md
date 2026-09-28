@@ -194,6 +194,17 @@ Status: design. Nothing here is implemented.
   `before_capture(scope, path)` first, flushes for up to `flush_timeout`, then
   deletes the dump file (`minidumper-child`'s `on_minidump_created`) and
   exits. A failed upload loses the dump unless the transport keeps it.
+- **A Linux minidump carries the process's environment and command line.**
+  `minidump-writer` 0.12 copies `/proc/<pid>/environ` and
+  `/proc/<pid>/cmdline` into the `LinuxEnviron` and `LinuxCmdLine` streams
+  (`src/linux/minidump_writer/mod.rs:422-423`), next to `auxv`, `maps`,
+  `status`, `/proc/cpuinfo` and the OS release file. Sent as-is, a native
+  crash in CI would upload every secret in the job's environment (cloud keys,
+  tokens, the DSN itself, the variable `password_env` names) and any
+  `--set` on the command line. Neither `sentry-minidump` nor
+  `minidumper-child` offers a way to leave streams out; the reporter's
+  `before_capture` can replace the attachment (`Scope::clear_attachments`,
+  then `add_attachment`) while the dump file still exists.
 - **`crash-handler`** interposes `pthread_create` on Linux and macOS, so every
   thread gets its own alternate signal stack and a stack overflow on a rayon
   worker or the debounce thread is caught. The interposer is linked in whether
@@ -283,6 +294,15 @@ stop a report already on its way.
 invalid DSN, or an unreadable `PHPSTAN_RS_SENTRY_CA_FILE` (then only the
 system roots are trusted).
 
+A process that can't be started degrades instead of failing the run. The
+supervisor failing to start its worker (`current_exe` unavailable, as when the
+binary was replaced during an upgrade and `/proc/self/exe` names a deleted
+file) runs the command itself as the app, unsupervised, with one line on
+stderr. `sentry-minidump` failing to start its reporter leaves the app without
+native-crash reports (it logs through `sentry_debug!`, which we surface as one
+stderr line). A finisher that can't be started leaves its pending entry for
+the next drain.
+
 ### 4.2 Client and transport
 
 `main` starts with `crash_report::init()`, before `Cli::parse`, the dhat
@@ -292,7 +312,13 @@ returns `None` and nothing else in this plan runs. With it set:
 
 - `dsn` from the variable; `release` = `phpstan-rs@<version>+<commit>`, the
   commit from `PHPSTAN_RS_BUILD_COMMIT` at compile time (`option_env!`, set by
-  the release workflow), `+dev` when absent; `environment` = `release` for a
+  the release workflow), `+dev` when absent. A build script reading
+  `git rev-parse HEAD` would give development builds their commit, but its
+  output changes on every commit and would force the crate, and everything
+  above it, to recompile each time; instead every event carries the binary's
+  identity, its build ID (the debug-images integration's `code_id`) and its
+  executable's size and modification time as the extra `binary`, which tell
+  two development builds apart; `environment` = `release` for a
   `dist` build (`PHPSTAN_RS_DIST` at compile time), `development` otherwise;
 - `default_integrations = false`, then the backtrace, contexts and
   debug-images integrations, and the minidump integration in the app role; the
@@ -336,7 +362,14 @@ through `crash_report::exit(code)`, which flushes first: `main.rs:83`,
 
 A user cache directory, `crash_report::cache_dir()` (`dirs::cache_dir()` +
 `phpstan-rs`), holds the outbox, the crash state and `sent.json`, and is
-created with mode `0700` on Unix, since it holds source. Stage F2's result
+created with mode `0700` on Unix, since it holds source. When there is no
+user cache directory (no `HOME` in a container) or it can't be written, it
+falls back to `std::env::temp_dir()/phpstan-rs-<uid>` (the user's name on
+Windows), created `0700` and refused if it exists owned by someone else; when
+that fails too, the run keeps nothing on disk: envelopes are sent directly
+(§4.2's unwritable-outbox path), and a native crash is reported without
+crash state, so without a bundle. An internal `_PHPSTAN_RS_CACHE_DIR`
+overrides the location, for tests running in parallel. Stage F2's result
 cache reuses the function (§5).
 
 All crash-report code goes through `Hub::main()`, never `Hub::current()`
@@ -467,6 +500,10 @@ moves it onto the pool; its panics are reported through `entry` (§4.3).
 
 ### 4.6 From crashes to events
 
+- **Messages:** an event's message is the panic message cut at 8 KiB on a
+  character boundary (a `format!`ed panic can embed a whole AST or type);
+  the full message goes into the bundle's manifest. The CLI's own line keeps
+  the whole message.
 - **Isolated panics, CLI:** after analysis and before the report, internal
   errors are grouped by panic location. Each group becomes one event: message
   and stack trace from the group's first error, fingerprint
@@ -517,8 +554,15 @@ moves it onto the pool; its panics are reported through `entry` (§4.3).
   threads are named `phpstan-rs-worker-<n>` for this (`ThreadPoolBuilder::
   thread_name`). `isolated` clears it when its unit ends, and the reporter's
   extra with it, so an idle thread never names a file it has finished.
-  Setting or clearing it costs one thread-local write, plus one socket message
-  when a reporter is attached.
+- **Two levels of focus.** A unit's focus (the file of a per-file unit, the
+  current pass or load step) is forwarded to the reporter; a declaration's
+  focus inside a pass or load step (one per class, tens of thousands in a
+  large project) stays in the thread-local, where the in-process record
+  reads it. Setting either costs a thread-local write; a unit's also costs one
+  socket message when a reporter is attached, so a native crash names the file
+  a unit was on and a panic names the declaration too. Step 8 measures
+  `check-project` over the Piwigo corpus with and without a DSN; the overhead
+  must stay under 2 % of wall time, or the forwarding is batched per worker.
 
 ### 4.8 Reproduction bundle
 
@@ -614,6 +658,17 @@ external/<n>/<name>      files outside the root, mapped in the manifest
   `_PHPSTAN_RS_CRASH_REPORTER`, `process_name` `phpstan-rs crash reporter`,
   `crashes_dir` `<cache>/crashes`, and `on_process` nulling the reporter's
   stdin and stdout (under `lsp` they are the protocol pipes; stderr stays).
+- **Scrubbing the dump:** `before_capture` first reads the dump file,
+  blanks the data of its `LinuxEnviron` (`0x47670007`) and `LinuxCmdLine`
+  (`0x47670006`) streams in place (the header's stream count and directory
+  offset, then each 12-byte directory entry's type, size and offset: no parser
+  crate needed), and replaces the attachment with the scrubbed bytes. Stream
+  types other platforms' writers don't produce are simply absent. What a dump
+  still holds is each thread's stack memory, which can include fragments of
+  whatever the program was handling (source text, and during a live SQL
+  connection its credentials); the README says so (§4.21), and the tests
+  check that a canary environment variable and a canary `--set` value never
+  appear in an uploaded dump, on Linux, macOS and Windows.
 - **In the reporter's `before_capture`:** it creates the pending entry,
   copies the crash state and the current `focus.*` paths into it, and tags the
   event `bundle = pending` and `unit = native` with the entry's id; the outbox
@@ -682,7 +737,10 @@ The worker must not outlive the supervisor. On Unix the supervisor forwards
 `SIGTERM`, `SIGHUP` and `SIGINT` to it (`signal-hook`'s iterator and
 `nix::sys::signal::kill`, no `unsafe`), so a CI timeout still stops the
 analysis, and on Linux the worker also sets `PR_SET_PDEATHSIG` to `SIGTERM`
-(`nix::sys::prctl::set_pdeathsig`) against a supervisor killed outright. On
+(`nix::sys::prctl::set_pdeathsig`) against a supervisor killed outright,
+then checks that its parent is still the supervisor (`getppid` against the
+pid the supervisor passes down), and exits if not, since the supervisor may
+have died before the call. On
 Windows the worker is started in a job object with kill-on-close
 (`win32job`), so ending the supervisor ends the worker. macOS has no
 parent-death signal; a supervisor killed with `SIGKILL` leaves its worker to
@@ -698,7 +756,7 @@ editor restarts it, and its detached finishers run on the same machine.
 
 ```
 envelope        the serialised envelope
-meta.json       DSN hash, created, attempts, not_before, run id, bundle key
+meta.json       format version, DSN hash, created, attempts, not_before, run id, bundle key
 entry.lock      empty; held by whoever is writing, sending or finishing it
 state/          pending entries only: the crash state copy and paths
 finisher.log    pending entries only
@@ -711,7 +769,9 @@ with `try_lock` before sending and skips the entry when it can't, so two runs
 draining at once never send one report twice; the transport holds it from
 writing the entry until it is sent or left for later. An entry is sent only
 by a client with the same DSN hash, so switching servers never sends old
-reports to the new one. At start, the app and the LSP drain
+reports to the new one. An entry whose `meta.json` format version is newer
+than the running binary's is left alone (a downgrade); an older one is read
+by the version's own rules, which each format change keeps. At start, the app and the LSP drain
 it on a background thread: `ready/` entries are sent, `pending/` entries whose
 lock is free are handed to a finisher, stale crash-state directories are
 removed, and dumps older than a day in `<cache>/crashes` (left by a reporter
@@ -841,6 +901,14 @@ so the user's binary doesn't carry it:
   attempt; when the worker dies of the same signal, the supervisor records
   the candidate as reproducing and starts a new worker from the saved state.
   The result is a new bundle and a fixture directory ready to commit.
+- **Development builds' symbols.** An isolated panic's backtrace is
+  resolved in-process before sending, so a development build, which keeps its
+  debug info, sends frames with function, file and line. Its minidumps are
+  symbolicated on the server, which has no debug files for a local build:
+  `cargo xtask crash-debug-files [debug|release]` uploads the local binary
+  with `sentry-cli debug-files upload --include-sources`, using the same
+  `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` and `SENTRY_AUTH_TOKEN` as
+  `fetch`, for a maintainer running development builds with a DSN.
 - **`fetch <issue>`** downloads an issue's latest bundle through the Sentry
   API with `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` and a
   `SENTRY_AUTH_TOKEN` with `event:read`: `GET /api/0/issues/<id>/events/latest/`
@@ -898,6 +966,14 @@ so the user's binary doesn't carry it:
   builders likewise, as a unit test in `xtask`.
 - **Windows abort:** the `crash-injection` feature's abort, on the Windows
   CI job, produces the supervisor's "worker terminated" event.
+- **Dump scrubbing:** with a canary variable in the environment and a canary
+  `--set` value, the injected stack overflow's uploaded minidump contains
+  neither, on all three CI operating systems.
+- **Cache fallback:** with the cache directory unwritable, a report still
+  arrives, from the temporary-directory fallback; with that unwritable too,
+  sent directly.
+- **Degraded starts:** a supervisor whose worker can't start runs the command
+  itself and exits with its result.
 - **SQL cache:** a panic injected while the cache lock is held leaves later
   files' SQL reflection working.
 
@@ -966,12 +1042,18 @@ A "Crash reporting" section, in these words:
 > reproduce the crash: the file being analysed and the files it depends
 > on, up to 10 MiB compressed, including unsaved editor buffers, and the
 > schema ext-sql reflected. It contains your file paths, OS and CPU
-> architecture; it leaves out your hostname and the database connection
-> settings (host, user, password, database name).
+> architecture; it leaves out your hostname, your environment variables and
+> the database connection settings (host, user, password, database name). A
+> report of a hard crash (a stack overflow, an abort) also carries a memory
+> snapshot of the program's thread stacks, which can hold fragments of
+> whatever it was processing at that moment.
 > Only turn it on for code you may send to that server.
 >
-> Reports that can't be sent are kept in the user cache directory and
-> retried by later runs for 30 days. With a private CA, point
+> Reports that can't be sent are kept in the user cache directory
+> (`phpstan-rs/crash-outbox` under `$XDG_CACHE_HOME`, `~/Library/Caches`
+> or `%LOCALAPPDATA%`) and retried by later runs for 30 days; with
+> reporting turned off nothing reads that directory, so delete it by hand to
+> discard what's left. With a private CA, point
 > `PHPSTAN_RS_SENTRY_CA_FILE` at its certificate. For another editor, set
 > the variable in the environment the editor starts `phpstan-rs lsp` with.
 
