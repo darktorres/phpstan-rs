@@ -4100,9 +4100,12 @@ cause, a plan item citing the file and count. Each E3 sub-phase ends when its
 identifiers have no PHPStan-only findings left, or each remaining one is an
 approved deviation (an identifier named differently, such as
 `class.abstractMethodNotImplemented` for `method.abstract`,
-`class.extendsEnum` for `class.disallowedSubtype` and `generics.wrongParent`
+`class.extendsEnum` for `class.disallowedSubtype`, `generics.wrongParent`
 for a self-referencing `@extends`/`@implements`/`@use`'s
-`generics.notCompatible`, or a
+`generics.notCompatible`, `requireExtends.nonObject` for
+`requireExtends.interface`, `intersectionType.int` for
+`property.unresolvableNativeType`, and `enum.duplicateConstant` on the
+constant for `enum.duplicateEnumCase` on the case, or a
 PHPStan-specific check: the assert mismatches of `phpstan.*` (E3h),
 `phpParser.*`,
 `phpstanApi.*` outside a PHPStan extension's package, `function.inner`,
@@ -5154,8 +5157,20 @@ fixture:
     type's (`callable<\stdClass of mixed>(T): T`); reported today only on
     functions and methods (3);
   - the rules oracle's remaining one- and two-finding gaps, each
-    unreported today: `self::doBar(...)` of an instance method from a
-    static method (`method.staticCall`), `Ab::doBaz(...)` of an abstract
+    unreported today: a `private(set)` property is implicitly final (PHP
+    8.4), so redeclaring it is `property.parentPropertyFinal`
+    (`overriding-final-property.php:31`, `:33`); `print_r(return: false,
+    value: …)` in an expression is `function.uselessReturnValue` as the
+    positional form is (`useless-fn-return-php8.php`); `@param-out` on a
+    set hook's `$value` is `parameter.notByRef` as on a function's
+    by-value parameter (`incompatible-property-hook-phpdoc-types.php`);
+    `array != int` is `notEqual.alwaysTrue` beside `notEqual.invalid`
+    (`invalid-comparison.php`, `bug-3364.php`); an `include`/`require` of
+    a stream-wrapper path PHP can't open (`vfs://…` unregistered,
+    `not-a-registered-wrapper://…`) is `*.fileNotFound`
+    (`require-file-stream-wrapper.php`); `self::doBar(...)` of an
+    instance method from a static method (`method.staticCall`),
+    `Ab::doBaz(...)` of an abstract
     static method (`staticMethod.callToAbstract`), a trait-typed promoted
     parameter as a property too (`property.trait`), `$x = yield 1` under a
     `void` send type (`generator.void`), an enum case whose value is a
