@@ -4416,7 +4416,9 @@ fixture:
     truthiness, not only by a `true` type: `if ($std)` on an object, `if
     (retObj())`, `if ($arr)` after `$arr = [1]`, `if ($one or $i)` on `1`,
     `if (1 xor 0)` and `if (function_exists('strlen'))` are
-    `if.alwaysTrue`, and `!$b` after `if ($b) { return; }` is
+    `if.alwaysTrue`, `!$std` on an object is `booleanNot.alwaysFalse`
+    (in `if`, `elseif` and `?:`; `boolean-not*.php`, `ternary.php`,
+    `elseif-condition.php`), and `!$b` after `if ($b) { return; }` is
     `booleanNot.alwaysTrue`, all unreported today (the rules oracle's 37
     PHPStan-only `if.alwaysTrue`: `if-condition.php`,
     `if-condition-not-phpdoc.php`, `boolean-logical-*.php`,
