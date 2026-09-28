@@ -1,6 +1,13 @@
 import * as path from "path";
-import Mocha = require("mocha");
+import MochaModule = require("mocha");
 import { globSync } from "glob";
+
+// mocha is an ES module whose default export is the constructor. Node's
+// `require` of an ES module returns the constructor itself on newer Node
+// and the module namespace on the older Node that VS Code's extension host
+// runs, so take `default` when it is there.
+const Mocha: typeof MochaModule =
+  (MochaModule as unknown as { default?: typeof MochaModule }).default ?? MochaModule;
 
 /** Loaded inside the real VS Code test host by `@vscode/test-electron`
  * (see `../runTest.ts`) - discovers and runs every `*.test.js` file
