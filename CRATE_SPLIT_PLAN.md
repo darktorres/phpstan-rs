@@ -4352,6 +4352,21 @@ fixture:
     deprecates creating a dynamic property and a readonly class throws;
   - a typed static property checks its assigned value: `R::$s = 'q'` on a
     `static int` is unreported today (PHP throws a `TypeError`);
+  - every write form is checked against the property's type (PHPStan's
+    `TypeExpressionOnlyAssignment` of the whole new value): an append or
+    offset write (`$this->ints[] = 'foo'` on `array<int>`,
+    `$this->byStr[$n] = 1` on `array<string, int>`, `$this->d['age'] =
+    'x'` on a shape, nested `$foo->bar['a']['b'][] = 'x'`), a
+    by-reference array function (`array_push($this->ints, 'x')`,
+    `array_shift($this->q)` on a `non-empty-list`), a compound assignment
+    (`$this->i .= 'test'` on `int`, `$a->has |= 999` on `int<0, 1>`) and
+    an increment past a range (`$this->r++` on `int<min, 3>`) are all
+    unreported today (most of the rules oracle's 138 PHPStan-only
+    `assign.propertyType`: `appended-array-item.php`,
+    `appended-array-key.php`, `bug-2888.php`, `bug-3703.php`,
+    `bug-6286.php`, `bug-6356b.php`, `bug-13438*.php`, `bug-7912.php`,
+    `properties-assigned-types.php`); the rest are the level-10 implicit
+    `mixed` (31) and the generic and template rows D3 and B4 name;
   - `unset()` of a readonly property is `unset.readOnlyProperty` and of a
     hooked one `unset.hookedProperty` (PHP throws an `Error` for both), and
     of a non-final class's property `unset.possiblyHookedProperty` (a
