@@ -1531,7 +1531,9 @@ without parentheses, `\\Foo` with a doubled backslash, `@phpstan-type
 InvalidFoo what{}`, and a hook's `@return Test(` (the rules oracle's 11
 PHPStan-only, `impossible-instanceof-in-trait.php`,
 `check-implicit-mixed.php:102`, `invalid-phpdoc*.php`,
-`invalid-type-type-alias.php`).
+`invalid-type-type-alias.php`). A tag that doesn't parse is dropped, so an
+untyped property whose `@var` fails is `missingType.property` too
+(`invalid-phpdoc.php:59`, `incompatible-property-phpdoc.php:18`).
 
 Follow-up: **a tag's diagnostics sit on the tag's line**: an invalid
 `@param`, `@var` or `@return` is `phpDoc.parseError` on its own line, not
@@ -4553,7 +4555,9 @@ fixture:
     `$o->getItem()` and `$o->x` on `object $o` are unreported today (the
     oracle finds 59 "undefined method/property object::"), and so is
     `$p->test()` on a template bounded by `object`
-    (`php-82-dynamic-properties-allow.php`);
+    (`php-82-dynamic-properties-allow.php`) or a static call `$o::doFoo()`
+    on an `object` (`staticMethod.notFound`, `first-class-callables.php`,
+    4);
   - a property fetch inside `isset()`, `empty()` and `??` checks its
     receiver as the offset checks do: on a `string` it is
     `property.nonObject`, the fetch never finding anything (`isset($s->p)`,
@@ -5125,7 +5129,13 @@ fixture:
     `TypeError` ("none returned") and isn't `return.missing` today, and
     neither is a get hook with an empty body (`get {}`); 507 of the rules
     oracle's 517 PHPStan-only `return.missing` are this (matched per
-    declaration). The
+    declaration). An empty body under `@return never` is `return.never`
+    (`bug-5627.php`, `missing-return.php:473`, `:481`,
+    `typehints-nodiscard.php`), one marked `@phpstan-impure` or under
+    `@phpstan-all-methods-impure` is `impureMethod.pure`
+    (`all-methods-are-pure.php`, `pure-constructor.php`, 8), and `fn ():
+    never => 1` is `return.never` ("should never return"), `return.type`
+    today. The
     same exemption skips the `@param-out` end-of-execution check: `/**
     @param-out positive-int $i */ function a(int &$i): void {}` isn't
     reported, while a non-empty body that never assigns `$i` is
