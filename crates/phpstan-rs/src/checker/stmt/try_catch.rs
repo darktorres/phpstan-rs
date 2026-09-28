@@ -11,12 +11,12 @@ impl<'a> Checker<'a> {
     /// Whether some value of type `thrown` can be an instance of one of
     /// `caught`. An unknown class on either side may be.
     fn may_catch(&self, thrown: &Type, caught: &[Type]) -> bool {
-        thrown_members(thrown).iter().any(|t| {
-            let Type::Object(t, _) = t else {
+        thrown.union_members().iter().any(|t| {
+            let Some((t, _)) = t.object_class_and_args() else {
                 return true;
             };
             caught.iter().any(|c| {
-                let Type::Object(c, _) = c else {
+                let Some((c, _)) = c.object_class_and_args() else {
                     return true;
                 };
                 t.eq_ignore_ascii_case(c)
@@ -31,13 +31,14 @@ impl<'a> Checker<'a> {
     /// Whether every value of type `thrown` is an instance of one of
     /// `caught`.
     fn surely_caught(&self, thrown: &Type, caught: &[Type]) -> bool {
-        thrown_members(thrown).iter().all(|t| {
-            let Type::Object(t, _) = t else {
+        thrown.union_members().iter().all(|t| {
+            let Some((t, _)) = t.object_class_and_args() else {
                 return false;
             };
             caught.iter().any(|c| {
-                matches!(c, Type::Object(c, _)
-                    if t.eq_ignore_ascii_case(c) || self.registry.is_subclass_of(t, c))
+                c.object_class_and_args().is_some_and(|(c, _)| {
+                    t.eq_ignore_ascii_case(c) || self.registry.is_subclass_of(t, c)
+                })
             })
         })
     }
@@ -77,10 +78,8 @@ impl<'a> Checker<'a> {
         let new_catch_types: Vec<Type> = catches
             .iter()
             .flat_map(|c| &c.types)
-            .filter_map(|t| match self.resolve_name_expr(t) {
-                obj @ Type::Object(..) => Some(obj),
-                _ => None,
-            })
+            .map(|t| self.resolve_name_expr(t))
+            .filter(|t| t.object_class_and_args().is_some())
             .collect();
         self.current_catch_types.extend(new_catch_types);
         self.try_throw_states.push(Vec::new());
@@ -154,7 +153,8 @@ impl<'a> Checker<'a> {
             // error at declaration time otherwise ("Cannot catch X
             // because it does not implement Throwable").
             for (i, t) in c.types.iter().enumerate() {
-                if let Type::Object(class, _) = self.resolve_name_expr(t) {
+                let resolved = self.resolve_name_expr(t);
+                if let Some((class, _)) = resolved.object_class_and_args() {
                     // `CaughtExceptionExistenceRule`'s own existence
                     // half, checked first - a typo'd/missing exception
                     // class would otherwise fall straight through to
@@ -165,7 +165,7 @@ impl<'a> Checker<'a> {
                     // confusingly wrong "does not implement Throwable"
                     // - the `else` here reports at most one diagnostic
                     // per catch type instead of both.
-                    if !self.class_name_exists(&class) {
+                    if !self.class_name_exists(class) {
                         self.report(
                             format!("caught class {class} not found"),
                             c.span,
@@ -179,7 +179,7 @@ impl<'a> Checker<'a> {
                             "class.notFound",
                         );
                     } else {
-                        if !self.registry.is_subclass_of(&class, "Throwable") {
+                        if !self.registry.is_subclass_of(class, "Throwable") {
                             self.report(
                                 format!("cannot catch {class}: it does not implement Throwable"),
                                 c.span,
@@ -193,9 +193,9 @@ impl<'a> Checker<'a> {
                         // return_type_span`'s own precedent).
                         let span = c.types_spans.get(i).copied().unwrap_or(c.span);
                         self.check_class_name_case(t, span);
-                        self.check_internal_catch(&class, c.span);
+                        self.check_internal_catch(class, c.span);
                         self.check_restricted_class_name_usage(
-                            &class,
+                            class,
                             "Catching",
                             c.span,
                             crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
@@ -207,11 +207,11 @@ impl<'a> Checker<'a> {
                 c.types.iter().map(|t| self.resolve_name_expr(t)).collect();
             if !clause_types.is_empty()
                 && clause_types.iter().all(|ct| {
-                    let Type::Object(class, _) = ct else {
+                    let Some((class, _)) = ct.object_class_and_args() else {
                         return false;
                     };
                     previously_caught.iter().any(|pt| {
-                        let Type::Object(prev, _) = pt else {
+                        let Some((prev, _)) = pt.object_class_and_args() else {
                             return false;
                         };
                         class == prev || self.registry.is_subclass_of(class, prev)
@@ -379,7 +379,7 @@ impl<'a> Checker<'a> {
         }
         if self.settings.extras.check_throw_base_class
             && let ExprKind::New(_, _) = &e.kind
-            && let Type::Object(class, _) = &thrown_ty
+            && let Some((class, _)) = thrown_ty.object_class_and_args()
             && (class.eq_ignore_ascii_case("Exception") || class.eq_ignore_ascii_case("Error"))
         {
             self.report(format!("Throwing the base {class} class is not recommended, use a specific subclass instead."),
@@ -479,12 +479,13 @@ impl<'a> Checker<'a> {
                 let ExprKind::Name(raw) = &class.kind else {
                     continue;
                 };
-                let Type::Object(class, _) = self.resolve_name_expr(raw) else {
+                let resolved = self.resolve_name_expr(raw);
+                let Some((class, _)) = resolved.object_class_and_args() else {
                     continue;
                 };
                 let accepts_previous = self
                     .registry
-                    .lookup_method(&class, "__construct")
+                    .lookup_method(class, "__construct")
                     .is_some_and(|ctor| {
                         ctor.params().iter().any(|p| {
                             p.name().eq_ignore_ascii_case("previous")
@@ -508,13 +509,12 @@ impl<'a> Checker<'a> {
             }
         }
         let base = c.types.iter().find_map(|t| {
-            let Type::Object(class, _) = self.resolve_name_expr(t) else {
-                return None;
-            };
+            let resolved = self.resolve_name_expr(t);
+            let (class, _) = resolved.object_class_and_args()?;
             BASE_EXCEPTIONS
                 .iter()
                 .any(|b| class.eq_ignore_ascii_case(b))
-                .then_some(class)
+                .then(|| class.clone())
         });
         if let Some(base) = base
             && !throws.iter().any(|(_, _, top)| *top)
@@ -525,12 +525,5 @@ impl<'a> Checker<'a> {
                 "catch.baseWithoutRethrow",
             );
         }
-    }
-}
-
-fn thrown_members(thrown: &Type) -> Vec<&Type> {
-    match thrown {
-        Type::Union(members) => members.iter().collect(),
-        other => vec![other],
     }
 }

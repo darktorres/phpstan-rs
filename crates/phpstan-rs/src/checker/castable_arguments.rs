@@ -106,17 +106,12 @@ impl<'a> Checker<'a> {
                     return;
                 };
                 let flags = match resolved.get(1).copied().flatten() {
-                    Some(flag_expr) => match self.infer_expr(flag_expr, locals) {
-                        Type::IntLiteral(n) => Some(vec![n]),
-                        Type::Union(members) => members
-                            .iter()
-                            .map(|m| match m {
-                                Type::IntLiteral(n) => Some(*n),
-                                _ => None,
-                            })
-                            .collect(),
-                        _ => None,
-                    },
+                    Some(flag_expr) => self
+                        .infer_expr(flag_expr, locals)
+                        .union_members()
+                        .iter()
+                        .map(Type::int_literal_value)
+                        .collect(),
                     None if function == "array_unique" => Some(vec![SORT_STRING]),
                     None => Some(vec![SORT_REGULAR]),
                 };
@@ -211,19 +206,7 @@ impl<'a> Checker<'a> {
     /// `Type::toNumber()`: an array or a non-numeric object can't be
     /// used as a number.
     fn type_to_number(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Array(..) | Type::ArrayShape(_) => false,
-            Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
-                false
-            }
-            Type::Object(..) | Type::ObjectWithoutClass | Type::Resource { .. } => {
-                ty.to_float(self.registry).is_some()
-            }
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().any(|m| self.type_to_number(m))
-            }
-            _ => true,
-        }
+        ty.to_number(self.registry).is_some()
     }
 
     /// `type_to_float`, with an array also illegal (`ArrayType::
@@ -250,12 +233,8 @@ impl<'a> Checker<'a> {
         let Some(key_ty) = value_ty.array_key_type() else {
             return;
         };
-        let is_string = |t: &Type| matches!(t, Type::String | Type::StringLiteral(_));
-        let (definitely, possibly) = match &key_ty {
-            t if is_string(t) => (true, true),
-            Type::Union(members) => (members.iter().all(is_string), members.iter().any(is_string)),
-            _ => (false, false),
-        };
+        let definitely = key_ty.is_string().yes();
+        let possibly = key_ty.union_members().iter().any(|m| m.is_string().yes());
         if !possibly {
             return;
         }

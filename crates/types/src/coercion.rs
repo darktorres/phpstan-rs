@@ -63,6 +63,30 @@ impl Type {
         }
     }
 
+    /// PHPStan's `toNumber()`: what arithmetic reads a value of this type
+    /// as - an int or float as it is, a bool or `null` as `0`/`1`,
+    /// anything else that coerces as `int|float`. `None` for an array, or
+    /// an object `to_float` refuses.
+    pub fn to_number(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
+        if self.is_array().yes() {
+            return None;
+        }
+        match self {
+            Type::Int
+            | Type::IntLiteral(_)
+            | Type::IntRange(..)
+            | Type::Float
+            | Type::FloatLiteral(_) => Some(self.clone()),
+            Type::True | Type::False | Type::Null | Type::Bool => self.to_integer(hierarchy),
+            Type::Union(members) | Type::Intersection(members) => {
+                union_coercion(members, |m| m.to_number(hierarchy))
+            }
+            _ => self
+                .to_float(hierarchy)
+                .map(|_| union_types(Type::Int, Type::Float)),
+        }
+    }
+
     /// `(string) $x`: a string as it is, an int as its decimal digits, a bool or
     /// `null` as `'1'`/`''`, a float as non-empty text (numeric when
     /// finite, `INF`/`NAN` otherwise), a resource as its `Resource id #N`

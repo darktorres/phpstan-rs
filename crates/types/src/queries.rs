@@ -167,6 +167,66 @@ impl Type {
         }
     }
 
+    /// Whether this names the class it is written in: `self`, `static`
+    /// or `$this`.
+    pub fn is_self_reference(&self) -> bool {
+        matches!(self, Type::SelfRef(_) | Type::StaticRef(_) | Type::This)
+    }
+
+    /// Every template this type uses, at any depth (not inside a
+    /// template's own bound), in order.
+    pub fn nested_templates(&self) -> Vec<&crate::TemplateParam> {
+        let mut out = Vec::new();
+        self.collect_nested_templates(&mut out);
+        out
+    }
+
+    fn collect_nested_templates<'t>(&'t self, out: &mut Vec<&'t crate::TemplateParam>) {
+        match self {
+            Type::TemplateParam(param) => out.push(param),
+            _ => self.for_each_child(&mut |t| t.collect_nested_templates(out)),
+        }
+    }
+
+    /// Whether every value is a single, known value: a literal, `null`,
+    /// an enum case or a sealed array shape (PHPStan's
+    /// `isConstantValue()`, with enum cases counted).
+    pub fn is_constant_value(&self) -> TrinaryLogic {
+        match self {
+            Type::IntLiteral(_)
+            | Type::StringLiteral(_)
+            | Type::FloatLiteral(_)
+            | Type::True
+            | Type::False
+            | Type::Null
+            | Type::EnumCase(..) => TrinaryLogic::Yes,
+            Type::ArrayShape(shape) => TrinaryLogic::from_bool(shape.is_sealed()),
+            Type::Union(members) => members
+                .iter()
+                .map(Type::is_constant_value)
+                .reduce(TrinaryLogic::and)
+                .unwrap_or(TrinaryLogic::No),
+            Type::Mixed(_) | Type::TemplateParam(_) => TrinaryLogic::Maybe,
+            _ => TrinaryLogic::No,
+        }
+    }
+
+    /// A conditional type's condition: its subject (a parameter or
+    /// template name), its target, whether it's negated (`is not`), and
+    /// whether the subject names a template. `None` for any other type.
+    pub fn conditional_condition(&self) -> Option<(&str, &Type, bool, bool)> {
+        match self {
+            Type::Conditional {
+                subject,
+                target,
+                negated,
+                template_subject,
+                ..
+            } => Some((subject, target, *negated, *template_subject)),
+            _ => None,
+        }
+    }
+
     /// Whether this is `void`.
     pub fn is_void(&self) -> bool {
         matches!(self, Type::Void)

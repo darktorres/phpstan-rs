@@ -45,7 +45,9 @@ pub use decide::reconcile_with_native;
 pub use extension::ExtensionTypeData;
 pub use hierarchy::{ClassFacts, ClassHierarchy, NoClasses, effective_slot_variance};
 pub use intersection::intersect_types;
-pub use late::{contains_late, references_template, resolve_late_to_bounds, settle};
+pub use late::{
+    ClassConstants, contains_late, references_template, resolve_late_to_bounds, settle,
+};
 pub use native::native_declaration;
 pub use parse::{canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance};
 pub use parse::{parse_native_type_string, parse_type_string};

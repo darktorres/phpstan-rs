@@ -4,6 +4,50 @@
 
 use crate::{ShapeKey, Type};
 
+/// What resolving a class reference inside a type needs to know.
+pub trait ClassConstants {
+    /// `value-of<class>`: an enum's case values; `mixed` for a class
+    /// that isn't a known enum.
+    fn enum_values(&self, class: &str) -> Type;
+
+    /// The union of the constants of `class` whose names match `pattern`
+    /// (`*` matching any run of characters); `mixed` when unknown.
+    fn class_constants(&self, class: &Type, pattern: &str) -> Type;
+}
+
+impl Type {
+    /// This type with each `value-of<Class>` and class constant
+    /// reference answered by `consts`, and each late type over them
+    /// settled.
+    pub fn resolve_class_references(&self, consts: &dyn ClassConstants) -> Type {
+        match self {
+            Type::ValueOf(target) => match target.as_ref() {
+                Type::ClassConstant { .. } => {
+                    value_of(&target.resolve_class_references(consts)).unwrap_or(Type::Mixed(false))
+                }
+                Type::Object(class, _) => consts.enum_values(class),
+                _ => Type::Mixed(false),
+            },
+            Type::ClassConstant { class, pattern } => consts.class_constants(class, pattern),
+            Type::KeyOf(_) | Type::OffsetAccess(..) => {
+                settle(self.map_children(&mut |t| t.resolve_class_references(consts)))
+            }
+            _ => self.map_children(&mut |t| t.resolve_class_references(consts)),
+        }
+    }
+
+    /// This type with each class constant reference replaced by `f`'s
+    /// answer for its class and name pattern, kept where `f` gives none.
+    pub fn map_class_constants(&self, f: &mut dyn FnMut(&Type, &str) -> Option<Type>) -> Type {
+        match self {
+            Type::ClassConstant { class, pattern } => {
+                f(class, pattern).unwrap_or_else(|| self.clone())
+            }
+            _ => self.map_children(&mut |t| t.map_class_constants(&mut *f)),
+        }
+    }
+}
+
 /// `key-of<ty>` when `ty` is an array type: its key type. `None` for
 /// anything whose keys aren't known from the type alone.
 pub(crate) fn key_of(ty: &Type) -> Option<Type> {

@@ -881,15 +881,12 @@ impl Registry {
         ty: &Type,
         method_name: &str,
     ) -> bool {
-        match ty {
-            Type::TemplateParam(tp) => !matches!(
+        ty.nested_templates().iter().any(|tp| {
+            !matches!(
                 tp.scope.as_deref(),
                 Some(s) if s == method_name || s == types::CALLABLE_TEMPLATE_SCOPE
-            ),
-            _ => ty.any_child(|t| {
-                Registry::type_mentions_foreign_scoped_template_param(t, method_name)
-            }),
-        }
+            )
+        })
     }
 
     /// `class_name`'s concrete binding for each templated ancestor
@@ -933,23 +930,14 @@ impl Registry {
         method_name: &str,
         ancestor_bindings: &FxHashMap<Arc<str>, FxHashMap<String, Type>>,
     ) -> bool {
-        match ty {
-            Type::TemplateParam(tp) => {
-                tp.scope.as_deref() == Some(method_name)
-                    || tp.scope.as_deref() == Some(types::CALLABLE_TEMPLATE_SCOPE)
-                    || tp
-                        .scope
-                        .as_deref()
-                        .is_some_and(|s| ancestor_bindings.get(s).is_some_and(|b| !b.is_empty()))
-            }
-            _ => !ty.any_child(|t| {
-                !Registry::template_param_scopes_all_safe_to_backfill(
-                    t,
-                    method_name,
-                    ancestor_bindings,
-                )
-            }),
-        }
+        ty.nested_templates().iter().all(|tp| {
+            tp.scope.as_deref() == Some(method_name)
+                || tp.scope.as_deref() == Some(types::CALLABLE_TEMPLATE_SCOPE)
+                || tp
+                    .scope
+                    .as_deref()
+                    .is_some_and(|s| ancestor_bindings.get(s).is_some_and(|b| !b.is_empty()))
+        })
     }
 
     /// Whether backfilling `ancestor_ty` onto a position whose own native
@@ -968,8 +956,11 @@ impl Registry {
     /// hint already resolves to - backfilling it would still silently
     /// widen away the already-correct, more specific native class.
     pub(crate) fn safe_to_backfill_object_type(ancestor_ty: &Type, native_ty: &Type) -> bool {
-        match (ancestor_ty, native_ty) {
-            (Type::Object(a, _), Type::Object(n, _)) => a == n,
+        match (
+            ancestor_ty.object_class_and_args(),
+            native_ty.object_class_and_args(),
+        ) {
+            (Some((a, _)), Some((n, _))) => a == n,
             _ => true,
         }
     }
@@ -1131,7 +1122,7 @@ impl Registry {
                                         i,
                                         function_sig::reconcile_with_native(
                                             Registry::substitute_class_scoped_ancestor_templates(
-                                                &bind_self_ref(&ancestor_param.ty, &owner),
+                                                &ancestor_param.ty.bind_self(&owner),
                                                 ancestor_bindings(),
                                             ),
                                             p.ty_native.clone(),
@@ -1165,7 +1156,7 @@ impl Registry {
                                         i,
                                         function_sig::reconcile_with_native(
                                             Registry::substitute_class_scoped_ancestor_templates(
-                                                &bind_self_ref(&ancestor_param.ty, &owner),
+                                                &ancestor_param.ty.bind_self(&owner),
                                                 ancestor_bindings(),
                                             ),
                                             p.ty_native.clone(),
@@ -1204,7 +1195,7 @@ impl Registry {
                         (
                             function_sig::reconcile_with_native(
                                 Registry::substitute_class_scoped_ancestor_templates(
-                                    &bind_self_ref(&ancestor_sig.return_type, &owner),
+                                    &ancestor_sig.return_type.bind_self(&owner),
                                     ancestor_bindings(),
                                 ),
                                 sig.return_type_native.clone(),
@@ -1283,21 +1274,19 @@ fn resolve_deferred_value_of_in_type(
     ty: Type,
     classes: &FxHashMap<Arc<str>, ClassReflection>,
 ) -> Type {
-    match ty {
-        Type::ValueOf(target) => match *target {
-            target @ Type::ClassConstant { .. } => {
-                value_of_type(resolve_deferred_value_of_in_type(target, classes))
-            }
-            Type::Object(target_fqn, _) => resolve_value_of_target(&target_fqn, classes),
-            _ => Type::mixed(),
-        },
-        Type::ClassConstant { class, pattern } => {
-            resolve_class_const_type(&class, &pattern, classes)
-        }
-        late @ (Type::KeyOf(_) | Type::OffsetAccess(..)) => types::settle(
-            late.map_children(&mut |t| resolve_deferred_value_of_in_type(t.clone(), classes)),
-        ),
-        other => other.map_children(&mut |t| resolve_deferred_value_of_in_type(t.clone(), classes)),
+    ty.resolve_class_references(&DeclaredConstants(classes))
+}
+
+/// The constants and enum cases of the classes indexed so far.
+struct DeclaredConstants<'a>(&'a FxHashMap<Arc<str>, ClassReflection>);
+
+impl types::ClassConstants for DeclaredConstants<'_> {
+    fn enum_values(&self, class: &str) -> Type {
+        resolve_value_of_target(class, self.0)
+    }
+
+    fn class_constants(&self, class: &Type, pattern: &str) -> Type {
+        resolve_class_const_type(class, pattern, self.0)
     }
 }
 
@@ -1317,7 +1306,7 @@ fn resolve_class_const_type(
     pattern: &str,
     classes: &FxHashMap<Arc<str>, ClassReflection>,
 ) -> Type {
-    let Type::Object(fqn, _) = class else {
+    let Some((fqn, _)) = class.object_class_and_args() else {
         return Type::mixed();
     };
     let fqn = fqn.trim_start_matches('\\');
@@ -1433,35 +1422,6 @@ fn glob_matches(pattern: &str, name: &str) -> bool {
     rest.ends_with(last)
 }
 
-/// `value-of<T>` for an already-resolved `T` that isn't a bare enum
-/// reference (`value-of<Foo::VALUES>`, a constant holding an array): the
-/// array's value type, the union of an array shape's real fields, or
-/// `Mixed` for anything else.
-fn value_of_type(ty: Type) -> Type {
-    match ty {
-        Type::Array(_, value) => *value,
-        // `list<V>`/`non-empty-array<V>` - the `Array` member carries `V`.
-        Type::Intersection(members) => members
-            .into_iter()
-            .find(|m| matches!(m, Type::Array(..)))
-            .map_or(Type::mixed(), value_of_type),
-        Type::ArrayShape(shape) => {
-            let mut members: Vec<Type> = Vec::new();
-            for f in shape.fields {
-                if !members.contains(&f.ty) {
-                    members.push(f.ty);
-                }
-            }
-            match members.len() {
-                0 => Type::never(),
-                1 => members.pop().expect("len checked"),
-                _ => Type::union_of(members),
-            }
-        }
-        _ => Type::mixed(),
-    }
-}
-
 /// Resolves every `ClassConstant` in `ty` that names `class`
 /// itself (`self::X`, `static::X`, or `class`'s own name) straight from
 /// `own_consts`. `resolve_deferred_value_of` takes the class being
@@ -1487,39 +1447,31 @@ fn bind_class_const_self_at(
     depth: usize,
 ) -> Type {
     const MAX_DEPTH: usize = 16;
-    let recurse = |t: Type| bind_class_const_self_at(t, class, own_consts, depth);
-    match ty {
-        Type::ClassConstant {
-            class: owner,
-            pattern,
-        } => {
-            let names_self = match &*owner {
-                Type::SelfRef(_) | Type::StaticRef(_) | Type::This => true,
-                Type::Object(fqn, _) => fqn.trim_start_matches('\\') == class,
-                _ => false,
-            };
-            match names_self {
-                true if depth >= MAX_DEPTH => Type::mixed(),
-                true => bind_class_const_self_at(
-                    matching_class_const_type(own_consts, &pattern),
-                    class,
-                    own_consts,
-                    depth + 1,
-                ),
-                false => Type::class_constant(*owner, pattern),
-            }
+    ty.map_class_constants(&mut |owner, pattern| {
+        let names_self = owner.is_self_reference()
+            || owner
+                .object_class_and_args()
+                .is_some_and(|(fqn, _)| fqn.trim_start_matches('\\') == class);
+        if !names_self {
+            return None;
         }
-        other => other.map_children(&mut |t| recurse(t.clone())),
-    }
+        Some(if depth >= MAX_DEPTH {
+            Type::mixed()
+        } else {
+            bind_class_const_self_at(
+                matching_class_const_type(own_consts, pattern),
+                class,
+                own_consts,
+                depth + 1,
+            )
+        })
+    })
 }
 
 /// Replaces every `ClassConstant` still left in `ty` with
 /// `Mixed` - see `resolve_class_constant_references`.
 fn unresolved_class_const_to_mixed(ty: Type) -> Type {
-    match ty {
-        Type::ClassConstant { .. } => Type::mixed(),
-        other => other.map_children(&mut |t| unresolved_class_const_to_mixed(t.clone())),
-    }
+    ty.map_class_constants(&mut |_, _| Some(Type::mixed()))
 }
 
 /// `value-of<target_fqn>`'s resolved value, once `target_fqn`'s class/
@@ -1606,19 +1558,6 @@ impl ClassReflection {
     }
 }
 
-/// `self` in a type inherited from `owner`'s PHPDoc means `owner`, the
-/// declaring class, wherever the type is later read; `static` keeps
-/// its late binding.
-fn bind_self_ref(ty: &Type, owner: &str) -> Type {
-    match ty {
-        Type::SelfRef(args) => Type::object(
-            owner.into(),
-            args.iter().map(|a| bind_self_ref(a, owner)).collect(),
-        ),
-        other => other.map_children(&mut |t| bind_self_ref(t, owner)),
-    }
-}
-
 impl Registry {
     /// `reconcile_with_native` runs before the class hierarchy exists, so
     /// it keeps every class-named PHPDoc member. Once every class is
@@ -1692,22 +1631,16 @@ impl Registry {
             return None;
         }
         let bind = |t: &Type| match class {
-            Some(c) => bind_pseudo_refs(t, c),
+            Some(c) => t.bind_self(c).bind_static(c),
             None => t.clone(),
         };
         let unbound_native = native;
         let native = bind(native);
-        let members: Vec<&Type> = match ty {
-            Type::Union(ms) => ms.iter().collect(),
-            other => vec![other],
-        };
-        let native_members: Vec<&Type> = match unbound_native {
-            Type::Union(ms) => ms.iter().collect(),
-            other => vec![other],
-        };
+        let members = ty.union_members();
+        let native_members = unbound_native.union_members();
         let mut kept: Vec<Type> = Vec::new();
         let mut changed = false;
-        for m in &members {
+        for m in members {
             let bound = bind(m);
             let keep = match self.is_super_type_of(&native, &bound) {
                 types::TrinaryLogic::Yes => true,
@@ -1720,17 +1653,17 @@ impl Registry {
                 }
             };
             if keep {
-                kept.push((*m).clone());
+                kept.push(m.clone());
                 continue;
             }
             changed = true;
             // A wider doc member (`Node` on a `?Class_` hint) still covers
             // the native alternatives it contains.
-            for n in &native_members {
+            for n in native_members {
                 if self.is_super_type_of(&bound, &bind(n)) == types::TrinaryLogic::Yes
                     && !kept.contains(n)
                 {
-                    kept.push((*n).clone());
+                    kept.push(n.clone());
                 }
             }
         }
@@ -1744,9 +1677,9 @@ impl Registry {
             kept.iter()
                 .any(|k| self.is_super_type_of(&bind(n), &bind(k)) != types::TrinaryLogic::No)
         };
-        for n in &native_members {
+        for n in native_members {
             if !covered(&kept, n) {
-                kept.push((*n).clone());
+                kept.push(n.clone());
             }
         }
         Some(match kept.len() {
@@ -1762,31 +1695,16 @@ impl Registry {
     /// hierarchy the registry indexed - no template, shape, or unknown
     /// class.
     fn is_fully_known_class_type(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Null => true,
-            Type::Object(name, _) => {
-                self.lookup_class(name).is_some()
-                    && self
-                        .all_ancestor_names(name)
-                        .iter()
-                        .all(|a| self.lookup_class(a).is_some())
-            }
-            Type::Union(members) => members.iter().all(|m| self.is_fully_known_class_type(m)),
-            _ => false,
-        }
-    }
-}
-
-/// `self`/`static` as `class` - only for comparing against a native hint;
-/// the stored type keeps its late-bound `static`.
-fn bind_pseudo_refs(ty: &Type, class: &str) -> Type {
-    match ty {
-        Type::SelfRef(args) | Type::StaticRef(args) => Type::object(
-            class.into(),
-            args.iter().map(|a| bind_pseudo_refs(a, class)).collect(),
-        ),
-        Type::This => Type::object(class.into(), Vec::new()),
-        other => other.map_children(&mut |t| bind_pseudo_refs(t, class)),
+        ty.union_members().iter().all(|m| {
+            m.is_null().yes()
+                || m.object_class_and_args().is_some_and(|(name, _)| {
+                    self.lookup_class(name).is_some()
+                        && self
+                            .all_ancestor_names(name)
+                            .iter()
+                            .all(|a| self.lookup_class(a).is_some())
+                })
+        })
     }
 }
 
@@ -1905,7 +1823,7 @@ fn resolve_constant_names(ty: &Type, registry: &Registry) -> Option<Type> {
 }
 
 fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool) -> Type {
-    if let Type::Object(name, args) = ty
+    if let Some((name, args)) = ty.object_class_and_args()
         && args.is_empty()
         && let Some(value) = constant_named_type(name, registry)
     {

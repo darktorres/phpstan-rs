@@ -16,6 +16,17 @@ impl Type {
         }
     }
 
+    /// This type with `self` as `class`, at any depth.
+    pub fn bind_self(&self, class: &str) -> Type {
+        match self {
+            Type::SelfRef(args) => Type::Object(
+                class.into(),
+                args.iter().map(|a| a.bind_self(class)).collect(),
+            ),
+            other => other.map_children(&mut |t| t.bind_self(class)),
+        }
+    }
+
     /// This type with each sealed array shape unsealed, so a key it
     /// doesn't list isn't proven absent.
     pub fn unsealed_shapes(&self) -> Type {

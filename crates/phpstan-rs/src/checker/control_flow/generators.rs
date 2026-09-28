@@ -13,14 +13,11 @@ use types::Type;
 /// this project's usual "don't guess against yourself" leniency for an
 /// unresolved/undeclared type.
 pub(crate) fn type_allows_generator_return(ty: &Type, registry: &Registry) -> bool {
-    match ty {
-        Type::Mixed(_) => true,
-        Type::Object(name, _) => registry.is_subclass_of(name, "Traversable"),
-        Type::Union(members) | Type::Intersection(members) => members
+    ty.is_mixed()
+        || ty
+            .union_members()
             .iter()
-            .any(|m| type_allows_generator_return(m, registry)),
-        _ => false,
-    }
+            .any(|m| registry.relation().is_instance_of(m, "Traversable").yes())
 }
 
 /// Whether a generator's own falls-off-the-end/bare-`return;`
@@ -38,10 +35,8 @@ pub(crate) fn generator_missing_return_type(
     declared: Option<&Type>,
     registry: &Registry,
 ) -> Option<Type> {
-    match declared.map(|t| generator_template_param(t, registry, "TReturn"))? {
-        Type::Mixed(_) | Type::Void => None,
-        treturn => Some(treturn),
-    }
+    let treturn = generator_template_param(declared?, registry, "TReturn");
+    (!treturn.is_mixed() && !treturn.is_void()).then_some(treturn)
 }
 
 /// `ty`'s own binding for one of `Generator<TKey, TValue,
@@ -56,21 +51,18 @@ pub(crate) fn generator_missing_return_type(
 /// (already built for ordinary generic-class method-call resolution)
 /// does the whole job unchanged.
 pub(crate) fn generator_template_param(ty: &Type, registry: &Registry, param: &str) -> Type {
-    match ty {
-        Type::Object(name, args) => registry
-            .class_template_bindings(name, args, "Generator")
-            .get(param)
-            .cloned()
-            .unwrap_or(Type::mixed()),
-        Type::Union(members) | Type::Intersection(members) => members
-            .iter()
-            .find_map(|m| match generator_template_param(m, registry, param) {
-                Type::Mixed(_) => None,
-                found => Some(found),
-            })
-            .unwrap_or(Type::mixed()),
-        _ => Type::mixed(),
-    }
+    ty.union_members()
+        .iter()
+        .flat_map(Type::intersection_members)
+        .filter_map(Type::object_class_and_args)
+        .filter_map(|(name, args)| {
+            registry
+                .class_template_bindings(name, args, "Generator")
+                .get(param)
+                .cloned()
+        })
+        .find(|found| !found.is_mixed())
+        .unwrap_or(Type::mixed())
 }
 
 impl<'a> Checker<'a> {
@@ -117,7 +109,7 @@ impl<'a> Checker<'a> {
         // a plain `array`/other `Traversable` doesn't carry `TSend`, and
         // its own key/value types aren't available here yet either.
         // Don't guess past what's known.
-        let Type::Object(name, args) = inner_ty else {
+        let Some((name, args)) = inner_ty.object_class_and_args() else {
             return;
         };
         let inner_bindings = self
@@ -190,13 +182,7 @@ impl<'a> Checker<'a> {
 /// stay on the false-negative side: `int|Generator` really is iterable
 /// half the time, so only report when *no* member could possibly be.
 fn yield_from_arg_not_iterable(ty: &Type, registry: &Registry) -> bool {
-    match ty {
-        Type::Mixed(_) => false,
-        Type::Array(_, _) | Type::ArrayShape(_) => false,
-        Type::Object(class, _) => !registry.is_subclass_of(class, "Traversable"),
-        Type::Union(members) | Type::Intersection(members) => members
-            .iter()
-            .all(|m| yield_from_arg_not_iterable(m, registry)),
-        _ => true,
-    }
+    ty.union_members()
+        .iter()
+        .all(|m| registry.relation().is_iterable(m).no())
 }

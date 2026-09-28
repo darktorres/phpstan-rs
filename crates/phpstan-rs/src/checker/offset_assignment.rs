@@ -10,34 +10,6 @@ use crate::checker::{Checker, Locals};
 use syntax::ast::{Expr, ExprKind};
 use types::Type;
 
-fn is_string_type(ty: &Type) -> bool {
-    match ty {
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
-            true
-        }
-        Type::Intersection(members) => {
-            members
-                .iter()
-                .any(|m| matches!(m, Type::String | Type::StringLiteral(_)))
-                && members.iter().all(|m| {
-                    matches!(
-                        m,
-                        Type::String | Type::StringLiteral(_) | Type::Accessory(_)
-                    )
-                })
-        }
-        _ => false,
-    }
-}
-
-fn is_integer_type(ty: &Type) -> bool {
-    match ty {
-        Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => true,
-        Type::Union(members) => members.iter().all(is_integer_type),
-        _ => false,
-    }
-}
-
 impl<'a> Checker<'a> {
     /// `lhs` is the `$x[...]` write target; `value` is the assigned
     /// value's type; `is_assign_op` marks a compound assignment, which
@@ -64,10 +36,11 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let members: Vec<&Type> = match &container {
-            Type::Union(members) => members.iter().filter(|m| !m.is_null().yes()).collect(),
-            other => vec![other],
-        };
+        let members: Vec<&Type> = container
+            .union_members()
+            .iter()
+            .filter(|m| !m.is_null().yes())
+            .collect();
         let verdicts: Vec<Option<&'static str>> = members
             .iter()
             .map(|m| self.offset_write_error(m, dim.as_ref(), value))
@@ -99,16 +72,14 @@ impl<'a> Checker<'a> {
         dim: Option<&Type>,
         value: &Type,
     ) -> Option<&'static str> {
-        if is_string_type(container) {
+        if container.is_string().yes() {
             let bad = match dim {
                 None => true,
-                Some(d) => !d.is_mixed() && !is_integer_type(d),
+                Some(d) => !d.is_mixed() && !d.is_int().yes(),
             };
             return bad.then_some("offsetAssign.dimType");
         }
-        let Type::Object(class, _) = container else {
-            return None;
-        };
+        let (class, _) = container.object_class_and_args()?;
         if !self.registry.is_subclass_of(class, "ArrayAccess") {
             return None;
         }

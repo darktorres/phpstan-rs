@@ -408,10 +408,9 @@ impl<'a> Checker<'a> {
                 (None, None) => None,
             }
             .filter(|(_, ty)| {
-                matches!(
-                    ty,
-                    Type::EnumCase(..) | Type::IntLiteral(_) | Type::StringLiteral(_)
-                )
+                ty.is_enum_case()
+                    || ty.int_literal_value().is_some()
+                    || ty.string_literal_value().is_some()
             })
         } else {
             truthiness_discriminant_subject(cond).map(|key| {
@@ -450,22 +449,23 @@ impl<'a> Checker<'a> {
         let mut subjects: Vec<(String, Type)> = primary_subject.into_iter().collect();
         let mut flag_subjects: Vec<(String, Type)> = Vec::new();
         for (name, after_ty) in after.iter() {
-            let is_flag_proxy = matches!(after_ty, Type::True | Type::False);
+            let is_flag_proxy = after_ty.bool_literal_value().is_some();
             // A variable that became a concrete `Object` type specifically
             // within this branch is `instanceof`'s own proxy discriminant
             // (`replay_object_discriminant_facts`'s own doc comment) - the
             // object-typed counterpart of the boolean-flag-proxy case
             // above.
-            let is_object_proxy = matches!(after_ty, Type::Object(..) | Type::ObjectWithoutClass);
+            let is_object_proxy = after_ty.object_class_and_args().is_some()
+                || *after_ty == Type::object_without_class();
             // Same proxy shape as `is_object_proxy` above, for a variable
             // that became a concrete enum case specifically within this
             // branch (`AuthService::authKeyLogin`'s own `$valid_key =
-            // ConnectedWith::ApiKey;`) - `Type::EnumCase` is a distinct
-            // variant from `Type::Object`, so it needs its own check here;
+            // ConnectedWith::ApiKey;`) - an enum case isn't an object of a
+            // class here, so it needs its own check;
             // the replay side (`apply_equality_narrowing`) is already
             // generic over the discriminant value's own type and needs no
             // matching change.
-            let is_enum_case_proxy = matches!(after_ty, Type::EnumCase(..));
+            let is_enum_case_proxy = after_ty.is_enum_case();
             if (is_flag_proxy || is_object_proxy || is_enum_case_proxy)
                 && before.get(name) != Some(after_ty)
                 && !subjects.iter().any(|(k, _)| k == name)
@@ -1144,7 +1144,8 @@ impl<'a> Checker<'a> {
                     // (position `0` is falsy despite being a match) this
                     // checker doesn't otherwise model, unlike these three
                     // genuinely bool-returning functions.
-                    if let Type::StringLiteral(needle_lit) = self.infer_expr(&needle.value, locals)
+                    let needle_ty = self.infer_expr(&needle.value, locals);
+                    if let Some(needle_lit) = needle_ty.string_literal_value()
                         && !needle_lit.is_empty()
                     {
                         let kind = if needle_lit == "0" {
@@ -1209,18 +1210,7 @@ impl<'a> Checker<'a> {
             // generically, Union or not.
             ExprKind::MethodCall(recv, method, args, _) => {
                 let recv_ty = self.infer_expr(recv, locals);
-                let class = match &recv_ty {
-                    Type::Object(class, _) => Some(class.clone()),
-                    Type::EnumCase(fqn, _) => Some(fqn.clone()),
-                    Type::Union(members) | Type::Intersection(members) => {
-                        members.iter().find_map(|m| match m {
-                            Type::Object(class, _) => Some(class.clone()),
-                            Type::EnumCase(fqn, _) => Some(fqn.clone()),
-                            _ => None,
-                        })
-                    }
-                    _ => None,
-                };
+                let class = recv_ty.object_class_names().first().map(|c| (*c).clone());
                 if let Some(class) = class
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                 {

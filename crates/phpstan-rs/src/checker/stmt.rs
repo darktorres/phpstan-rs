@@ -509,7 +509,7 @@ impl<'a> Checker<'a> {
                 // false, `B` never runs and the statement simply ends,
                 // without proving `A` either way).
                 if let ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, lhs, rhs) = &e.kind
-                    && self.infer_expr(rhs, locals) == Type::Never
+                    && self.infer_expr(rhs, locals).is_never()
                 {
                     self.apply_narrowing(lhs, locals, true);
                 }
@@ -1416,18 +1416,12 @@ fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
 /// A static variable's type across calls: its initializer's general
 /// type, with `null` (the "not computed yet" sentinel) unknown.
 fn static_variable_type(initializer: &Type) -> Type {
-    match initializer {
-        Type::Null => Type::mixed(),
-        Type::IntLiteral(_) | Type::IntRange(..) => Type::int(),
-        Type::StringLiteral(_) => Type::string(),
-        Type::FloatLiteral(_) => Type::float(),
-        Type::True | Type::False => Type::bool(),
-        Type::ArrayShape(_) => Type::array(Type::unknown_array_key(), Type::mixed()),
-        Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
-            Type::array(Type::unknown_array_key(), Type::mixed())
-        }
-        Type::Array(..) => Type::array(Type::unknown_array_key(), Type::mixed()),
-        other => other.clone(),
+    if initializer.is_null().yes() {
+        Type::mixed()
+    } else if initializer.is_array().yes() {
+        Type::array(Type::unknown_array_key(), Type::mixed())
+    } else {
+        initializer.generalize()
     }
 }
 

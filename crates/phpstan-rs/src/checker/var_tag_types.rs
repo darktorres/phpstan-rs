@@ -40,20 +40,6 @@ struct Described {
     shape: ValueShape,
 }
 
-fn is_constant_value(ty: &Type) -> bool {
-    match ty {
-        Type::IntLiteral(_)
-        | Type::StringLiteral(_)
-        | Type::FloatLiteral(_)
-        | Type::True
-        | Type::False
-        | Type::Null
-        | Type::EnumCase(..) => true,
-        Type::Union(members) => members.iter().all(is_constant_value),
-        _ => false,
-    }
-}
-
 /// A native iterable's element type - known only for an array; an
 /// object's comes from PHPDoc generics.
 fn native_iterable_value(ty: &Type) -> Type {
@@ -79,10 +65,9 @@ impl<'a> Checker<'a> {
         if let Some(s) = literal_string_value(e) {
             return Some(s.into_owned());
         }
-        match self.infer_expr(e, locals) {
-            Type::StringLiteral(s) => Some(s.to_string()),
-            _ => None,
-        }
+        self.infer_expr(e, locals)
+            .string_literal_value()
+            .map(|s| s.to_string())
     }
 
     /// A closure/arrow-fn parameter's native type: its hint alone, with
@@ -163,9 +148,9 @@ impl<'a> Checker<'a> {
                 CastKind::Unset => Type::null(),
                 CastKind::Object | CastKind::Void => Type::mixed(),
             },
-            ExprKind::New(..) => match self.infer_expr(e, locals) {
-                Type::Object(class, _) => Type::object(class, Vec::new()),
-                _ => Type::mixed(),
+            ExprKind::New(..) => match self.infer_expr(e, locals).object_class_and_args() {
+                Some((class, _)) => Type::object(class.clone(), Vec::new()),
+                None => Type::mixed(),
             },
             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } => {
                 Type::object("Closure".into(), Vec::new())
@@ -223,10 +208,11 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::MethodCall(receiver, method, _, nullsafe) => {
-                let Type::Object(class, _) = self.native_expr_type(receiver, locals) else {
+                let receiver = self.native_expr_type(receiver, locals);
+                let Some((class, _)) = receiver.object_class_and_args() else {
                     return Type::mixed();
                 };
-                let ty = self.native_method_return(&class, method);
+                let ty = self.native_method_return(class, method);
                 if *nullsafe && !ty.is_mixed() {
                     union_types(ty, Type::null())
                 } else {
@@ -236,10 +222,10 @@ impl<'a> Checker<'a> {
             ExprKind::StaticCall(target, method, _) => {
                 let class = match target {
                     StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
-                    StaticTarget::Expr(receiver) => match self.native_expr_type(receiver, locals) {
-                        Type::Object(class, _) => Some(class.to_string()),
-                        _ => None,
-                    },
+                    StaticTarget::Expr(receiver) => self
+                        .native_expr_type(receiver, locals)
+                        .object_class_and_args()
+                        .map(|(class, _)| class.to_string()),
                 };
                 match class {
                     Some(class) => self.native_method_return(&class, method),
@@ -247,10 +233,11 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::PropertyAccess(receiver, prop, nullsafe) => {
-                let Type::Object(class, _) = self.native_expr_type(receiver, locals) else {
+                let receiver = self.native_expr_type(receiver, locals);
+                let Some((class, _)) = receiver.object_class_and_args() else {
                     return Type::mixed();
                 };
-                let ty = self.native_property_type(&class, prop, false);
+                let ty = self.native_property_type(class, prop, false);
                 if *nullsafe && !ty.is_mixed() {
                     union_types(ty, Type::null())
                 } else {
@@ -697,7 +684,7 @@ impl<'a> Checker<'a> {
         if ty.is_mixed() {
             return true;
         }
-        if matches!(ty, Type::ArrayShape(shape) if shape.is_empty_array()) {
+        if ty.is_empty_array().yes() {
             let array = Type::array(Type::unknown_array_key(), Type::mixed());
             return self.at_least_maybe_super_type(&array, tag);
         }
@@ -709,7 +696,7 @@ impl<'a> Checker<'a> {
             let inner_tag = self.iterable_value_of(tag);
             return self.is_valid_var_tag_super_type(&inner, &inner_tag, depth + 1);
         }
-        if depth == 0 && is_constant_value(ty) {
+        if depth == 0 && ty.is_constant_value().yes() {
             return self.at_least_maybe_super_type(ty, tag);
         }
         self.registry.is_super_type_of(ty, tag) == TrinaryLogic::Yes
@@ -721,15 +708,10 @@ impl<'a> Checker<'a> {
 
     /// Whether `ty` names a subclass of `PHPStan\Type\Type`.
     fn contains_phpstan_type(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Object(name, _) => {
-                self.registry.classes.contains_key("PHPStan\\Type\\Type")
-                    && self.registry.is_subclass_of(name, "PHPStan\\Type\\Type")
-            }
-            Type::Union(members) | Type::Intersection(members) => {
-                members.iter().any(|m| self.contains_phpstan_type(m))
-            }
-            _ => false,
-        }
+        self.registry.classes.contains_key("PHPStan\\Type\\Type")
+            && ty
+                .object_class_names()
+                .iter()
+                .any(|name| self.registry.is_subclass_of(name, "PHPStan\\Type\\Type"))
     }
 }

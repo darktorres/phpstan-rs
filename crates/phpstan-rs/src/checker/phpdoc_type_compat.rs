@@ -101,10 +101,11 @@ impl<'a> Checker<'a> {
                 // types.
                 if tag == "@param"
                     && param.variadic
-                    && array_value_type(&doc_ty).is_some()
-                    && !type_can_be_array(&native)
+                    && doc_ty.is_array().yes()
+                    && native.is_array().no()
+                    && let Some(value) = doc_ty.array_value_type()
                 {
-                    doc_ty = array_value_type(&doc_ty).unwrap();
+                    doc_ty = value;
                 }
                 if tag == "@param" {
                     self.report_phpdoc_native_mismatch(
@@ -169,9 +170,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         fn collect(ty: &Type, out: &mut Vec<Type>) {
-            if let Some(sig) = ty.callable_sig()
-                && matches!(ty, Type::Callable(_) | Type::Intersection(_))
-            {
+            if let Some(sig) = ty.callable_sig() {
                 if !sig.templates.is_empty() {
                     out.push(ty.clone());
                 }
@@ -457,21 +456,15 @@ impl<'a> Checker<'a> {
         }
         let templates = self.declared_template_names(f, class_name);
         for c in conditionals {
-            let Type::Conditional {
-                subject,
-                target,
-                negated,
-                template_subject,
-                ..
-            } = &c
+            let Some((subject, target, negated, template_subject)) = c.conditional_condition()
             else {
                 continue;
             };
-            let subject_ty = if *template_subject {
+            let subject_ty = if template_subject {
                 // Its own `@template`s, its class's, or one it inherited
                 // along with the tag (`{@inheritDoc}`).
                 let inherited = find_template_param(sig, subject);
-                if !templates.contains(subject) && inherited.is_none() {
+                if !templates.iter().any(|t| t == subject) && inherited.is_none() {
                     let shown = self.resolve_type_hint(Some(subject));
                     self.report(format!(
                             "Conditional return type uses subject type {shown} which is not part of PHPDoc @template tags."
@@ -487,7 +480,7 @@ impl<'a> Checker<'a> {
                     None => continue,
                 }
             } else {
-                match sig.params().iter().find(|p| **p.name() == **subject) {
+                match sig.params().iter().find(|p| **p.name() == *subject) {
                     Some(p) => p.ty().clone(),
                     None => {
                         self.report(
@@ -511,8 +504,8 @@ impl<'a> Checker<'a> {
                 TrinaryLogic::Yes => true,
                 TrinaryLogic::No => false,
             };
-            let always = holds != *negated;
-            let word = if *negated { "is not" } else { "is" };
+            let always = holds != negated;
+            let word = if negated { "is not" } else { "is" };
             self.report(format!(
                     "Condition \"{subject_ty} {word} {target}\" in conditional return type is always {always}."
                 ),
@@ -651,29 +644,9 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// The element type of an array-typed PHPDoc value (`int[]`,
-/// `array<string, int>`, `list<int>`), `None` for anything else.
-fn array_value_type(ty: &Type) -> Option<Type> {
-    match ty {
-        Type::Array(_, value) => Some((**value).clone()),
-        Type::Intersection(members) => members.iter().find_map(array_value_type),
-        _ => None,
-    }
-}
-
-/// Whether some value of a native hint could be an array - `array`,
-/// `iterable`, `mixed`, or a union including one.
-fn type_can_be_array(ty: &Type) -> bool {
-    match ty {
-        Type::Array(..) | Type::ArrayShape(_) | Type::Mixed(_) => true,
-        Type::Union(members) | Type::Intersection(members) => members.iter().any(type_can_be_array),
-        _ => false,
-    }
-}
-
-/// Every `Type::Conditional` inside `ty`, outermost first.
+/// Every conditional type inside `ty`, outermost first.
 fn collect_conditionals(ty: &Type, out: &mut Vec<Type>) {
-    if matches!(ty, Type::Conditional { .. }) {
+    if ty.conditional_condition().is_some() {
         out.push(ty.clone());
     }
     let _ = ty.map_children(&mut |child| {
@@ -684,23 +657,10 @@ fn collect_conditionals(ty: &Type, out: &mut Vec<Type>) {
 
 /// The `TemplateParam` named `name` somewhere in `sig`, with its bound.
 fn find_template_param(sig: &FunctionReflection, name: &str) -> Option<Type> {
-    fn find(ty: &Type, name: &str) -> Option<Type> {
-        if let Type::TemplateParam(tp) = ty
-            && tp.name == name
-        {
-            return Some(ty.clone());
-        }
-        let mut found = None;
-        let _ = ty.map_children(&mut |child| {
-            if found.is_none() {
-                found = find(child, name);
-            }
-            child.clone()
-        });
-        found
-    }
     sig.params()
         .iter()
-        .find_map(|p| find(p.ty(), name))
-        .or_else(|| find(sig.return_type(), name))
+        .map(|p| p.ty())
+        .chain(std::iter::once(sig.return_type()))
+        .find_map(|ty| ty.nested_templates().into_iter().find(|tp| tp.name == name))
+        .map(|tp| Type::template_param(tp.clone()))
 }
