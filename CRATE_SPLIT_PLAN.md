@@ -4635,6 +4635,19 @@ fixture:
     `global $pdo` variable, `mixed` at level 10 (`bug-14318.php`, 4), and
     a static call on `mixed`, `T of mixed` or an `int` (`$m::foo()`,
     `$i::doFoo(...)`; `staticMethod.nonObject`, 6); all unreported today;
+  - a constant `define()`d in a static or non-constructor method isn't
+    known in another method (only the constructor's scope is remembered):
+    `echo XYZ22;` after `static function s() { define('XYZ22', 1); }` is
+    `constant.notFound`, as is `__COMPILER_HALT_OFFSET__` in a file
+    without `__halt_compiler()`; both unreported today
+    (`remembered-constructor-scope.php`, 3,
+    `compiler-halt-offset-const-not-defined.php`);
+  - `filterVar.nullOnFailureAndThrowOnFailure` reads the flags through a
+    named `options:` argument, a variable, `filter_input()` and the
+    per-key options of `filter_var_array()`/`filter_input_array()`;
+    only the positional form is reported today
+    (`filter-functions-null-and-throw.php`, `filter_var_null_and_throw.php`,
+    6);
   - `__TRAIT__` outside a trait is `magicConstant.outOfTrait` in a
     parameter's or a property's default too (`string $trait =
     __TRAIT__`, `public $t = __TRAIT__;`), unreported today
@@ -4800,7 +4813,9 @@ fixture:
     every kind: an enum's `name` and `value` (`$this->name = 'ONE'`, an
     `Error`), an object shape's property (`$o->foo = 1` on `object{foo:
     int}`), a `@property-read` tag reached from another class, and a
-    readonly property in PHP 8.5's `clone($f, ['i' => …])` from outside;
+    readonly property in PHP 8.5's `clone($f, ['i' => …])` from outside
+    (and a `protected(set)` one, `assign.propertyProtectedSet`,
+    `bug-14063.php`, `clone-with.php`, 5);
     unreported today (the rules oracle's 11 PHPStan-only,
     `readonly-assign.php`, `properties-object-shapes.php`,
     `writing-to-read-only-properties.php`, `bug-11241.php`,
@@ -5085,9 +5100,11 @@ fixture:
     `arrow-function-typehints-nodiscard.php`);
   - `parameter.requiredAfterOptional`, `parameter.implicitlyNullable`
     ("Deprecated in PHP 8.4: … implicitly nullable via default value
-    null", 9) and `parameter.unresolvableNativeType` (`fn (Lorem&Ipsum
-    $a)`, 4) cover closures and arrow functions as they do functions and
-    methods, `requiredAfterOptional` with the same per-version wording
+    null", 9), `parameter.unresolvableNativeType` (`fn (Lorem&Ipsum
+    $a)`, 4) and `return.unresolvableNativeType` (`: int&mixed`, also
+    unreported on functions and methods, 6) cover closures and arrow
+    functions as they do functions and methods, `requiredAfterOptional`
+    with the same per-version wording
     (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`);
     unreported today (all 25 of the rules oracle's PHPStan-only,
     `required-parameter-after-optional-closures.php`,
