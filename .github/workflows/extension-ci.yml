@@ -45,6 +45,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: editors/vscode/package.json
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('editors/vscode/bun.lock') }}
       - run: bun install --frozen-lockfile
       - run: bun run compile
       - run: bun run test:unit
@@ -77,6 +81,15 @@ jobs:
         with:
           mold-version: 2.42.1
 
+      # The pinned toolchain, keyed by the file that pins it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.rustup/toolchains
+          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
       - name: Build the phpstan-rs release binary
         run: cargo build --release --locked
 
@@ -92,11 +105,22 @@ jobs:
           fi
           echo "PHPSTAN_RS_TEST_BIN=$(pwd)/target/release/$bin" >> "$GITHUB_ENV"
 
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('editors/vscode/bun.lock') }}
       - working-directory: editors/vscode
         run: bun install --frozen-lockfile
 
       - working-directory: editors/vscode
         run: bun run compile
+
+      # The VS Code build the smoke test downloads: the version
+      # engines.vscode names.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: editors/vscode/.vscode-test
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('editors/vscode/package.json') }}
 
       - name: Run the activation smoke test
         working-directory: editors/vscode
