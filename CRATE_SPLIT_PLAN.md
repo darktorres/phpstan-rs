@@ -1908,7 +1908,10 @@ Follow-ups:
     `instanceof.alwaysFalse` (`deptrac/src/Core/Layer/CollectorProvider.php:27`,
     `Supportive/OutputFormatter/FormatterProvider.php:28`);
   - PHPDoc inheritance carries `@phpstan-assert*`, `@param-out`,
-    `@phpstan-self-out`, `@throws` and method templates, and a property
+    `@phpstan-self-out`, `@throws`, `@phpstan-pure`/`@phpstan-impure` (an
+    implementation of a `@phpstan-pure` interface method is checked for
+    impure points: an `echo` in it is `impure.echo`, unreported today) and
+    method templates, and a property
     redeclared without `@var` keeps its parent's (`mixed` today; nsrt
     `inherit-phpdoc-merging-var.php`);
   - `@phpstan-type` aliases apply in `@property`/`@method` tags and on
@@ -2539,6 +2542,8 @@ deleted; the file-size gate.
       `$matches` (41 findings, in each of its three copies).
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
       is `Closure(): mixed` today instead of returning a `Generator`.
+    - **Dynamic class constant names** (PHP 8.3): `K::{'X'}` with a literal
+      name is `K::X`'s type; it is `mixed` today.
     - **`new $c()`** for a `class-string<T> $c` is `T` (`NewHandler`); it is
       `mixed` today, so `function make(string $c) { return new $c(); }`
       with `@return T` is `return.type` "expected T, got mixed".
@@ -3192,6 +3197,18 @@ fixture:
   - a non-numeric string offset on a string throws a `TypeError`:
     `$s['x']` on a `string` isn't reported today, nor `$d['priority']` on
     `array<string>|string` (`react/dns/src/Protocol/BinaryDumper.php:86`);
+  - the class-access checks cover every receiver and target, each a
+    runtime `Error` unreported today: `$i::X` and `$i::$y` on an `int`
+    (`classConstant.nonObject`, `staticProperty.nonObject`), `T::C` on a
+    trait (`classConstant.onTrait`), and a static property read through
+    `->` (`$p->st`, `property.staticAccess`); `$m instanceof T` with a
+    trait is always false (`instanceof.trait`);
+  - `yield` outside a function is a compile error
+    (`generator.outOfFunction`), unreported today;
+  - a discarded pure call is reported inside PHP 8.5's `(void)` cast
+    (`function.inVoidCast`, `method.inVoidCast`, `callable.inVoidCast`) and
+    as a bare closure call (`$c();`, `expr.resultUnused`), both unreported
+    today;
   - `self`/`static`/`parent` outside a class throw an `Error`:
     `self::class` in a function isn't `outOfClass.self` today
     (`outOfClass.static` is already reported);
@@ -3224,9 +3241,15 @@ fixture:
     deprecates creating a dynamic property and a readonly class throws;
   - a typed static property checks its assigned value: `R::$s = 'q'` on a
     `static int` is unreported today (PHP throws a `TypeError`);
-  - `unset()` of a readonly property is `unset.readOnlyProperty` (PHP
-    throws an `Error`), unreported today;
-  - a readonly property read before its initialization is reported
+  - `unset()` of a readonly property is `unset.readOnlyProperty` and of a
+    hooked one `unset.hookedProperty` (PHP throws an `Error` for both), and
+    of a non-final class's property `unset.possiblyHookedProperty` (a
+    subclass may hook it); all three are unreported today;
+  - a property that is only appended to is write-only:
+    `$this->only[] = $v` with no read isn't `property.onlyWritten` today,
+    where a plain assignment is;
+  - a readonly property, native or `@readonly`, read before its
+    initialization is reported
     (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
     $this->x; $this->x = 1;` in a constructor isn't reported today (12
     oracle findings in revolt's event loop drivers);
@@ -3235,7 +3258,15 @@ fixture:
     and at level 10 neither is `$m['k'] = 1` or `$m[] = 2` on `mixed`
     (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
     fail and stays unreported (331 PHPStan reports on `mixed`).
-- (e) declarations, generics checks and PHPDoc.
+- (e) declarations, generics checks and PHPDoc:
+  - the type-alias checks: a cycle (`@phpstan-type A = B`, `B = A`) is
+    `typeAlias.circular`, and `class.notFound` today; an alias resolving
+    to `never` (`int&string`) is `typeAlias.unresolvableType`; an invalid
+    alias name (`123bad`) and an `@phpstan-import-type` of an alias the
+    class doesn't define are reported; all unreported today;
+  - `@mixin int` is `mixin.nonObject`, unreported today;
+  - `@phpstan-consistent-constructor` on a class with a private
+    constructor is `consistentConstructor.private`, unreported today.
 - (f) control flow, returns, throws and generators:
   - a return type that includes `void` accepts falling off the end (fixed
     first): `@return void|int` on a function that returns only on some
@@ -3255,6 +3286,14 @@ fixture:
     Generator<int, string>` or `iterable<int, string>` is unreported today;
     only `yield from` delegation is checked (28 oracle
     `generator.valueType` findings);
+  - a returned value is checked against a template return type:
+    `return 5;` under `@template T @param T $x @return T`, and `return new
+    stdClass();` under `@template T of object @return T`, are unreported
+    today (`T` can be any type the caller picks);
+  - a concrete function with an empty body still checks its `@throws`:
+    `/** @throws \Exception */ function ex(): void {}` isn't
+    `throws.unusedType` today (the empty-body exemption is for abstract and
+    interface methods);
   - a `catch` its `try` can't reach is `catch.neverThrown` (from D2's
     throw points): `try { $q = 1; } catch (\Throwable $e) {}` and a
     `catch (\LogicException)` around a call declared `@throws
