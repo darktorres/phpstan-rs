@@ -6501,24 +6501,38 @@ Structural commits first, one each:
   `paths = ["src"]`, opening `tests/t.php` publishes its `return.type` in the
   editor, where `check-project` reports nothing, and the file stays analysed for
   the session. A file's identity is its canonical path (C1's walker dedup), so
-  two spellings of one file are one file, while each open document keeps the URI
-  its client used, which diagnostics are published under (a workspace opened
-  through a symlink sees its own paths), and a URI the server makes for a file
-  never opened follows its workspace folder's spelling (a drive letter's case,
-  an encoded `:`). A path that isn't valid UTF-8 round-trips through its URI as
-  bytes, where `path_to_uri` and `percent_decode` go through `to_string_lossy`
-  and `from_utf8_lossy` today and name a file that doesn't exist. The walk and
-  the LSP's file watchers follow C1's `file_extensions`, where both hard-code
-  `.php` today (`collect_php_files`, the `**/*.php` registration), and scan and
-  stub paths outside every workspace folder get watchers of their own (a
-  relative pattern on each base directory), since a change there changes what
-  analysed files resolve. A deleted directory removes every file under it: a
-  client may report a folder's deletion as one event for the folder, and
-  `handle_watched_files_changed` passes that path to `remove_file`, which
-  removes nothing, so the folder's files stay analysed and published. Contents
-  are read when needed and kept only for overlays and the files a request is
-  working on, with each file's line index; today `retain_source` keeps every
-  loaded file's text for the whole LSP session, vendor context included.
+  two spellings of one file are one file (a case-insensitive filesystem's
+  `Foo.php` and `foo.php` included), while each open document keeps the URI its
+  client used, which diagnostics are published under (a workspace opened through
+  a symlink sees its own paths), and a URI the server makes for a file never
+  opened follows its workspace folder's spelling (a drive letter's case, an
+  encoded `:`). The identity is used for comparing and never printed, and on
+  Windows it drops `canonicalize`'s verbatim `\\?\` prefix where that keeps the
+  path valid (as the `dunce` crate does): today `Session::resolve` and
+  `composer_roots` canonicalize the root and compare it with composer's
+  unprefixed manifest paths, so on Windows (a release target, read from the
+  code, not run) no file would match its package's directory, and every
+  package-aware check (package names, composer hygiene, `phpstan_api` gating)
+  would see no package. PHP and LSP both end a line at `\n`, `\r\n` and a lone
+  `\r` (`php` reports the syntax error in `<?php\r$a = 1;\r$b = ;` on line 3),
+  and the lexer's line starts and the line index follow them; the lexer's
+  `compute_line_starts` ends a line at `\n` alone today, so in a file with a
+  lone `\r` every line phpstan-rs reports after it is too low, and inline
+  ignores match the wrong lines. A path that isn't valid UTF-8 round-trips
+  through its URI as bytes, where `path_to_uri` and `percent_decode` go through
+  `to_string_lossy` and `from_utf8_lossy` today and name a file that doesn't
+  exist. The walk and the LSP's file watchers follow C1's `file_extensions`,
+  where both hard-code `.php` today (`collect_php_files`, the `**/*.php`
+  registration), and scan and stub paths outside every workspace folder get
+  watchers of their own (a relative pattern on each base directory), since a
+  change there changes what analysed files resolve. A deleted directory removes
+  every file under it: a client may report a folder's deletion as one event for
+  the folder, and `handle_watched_files_changed` passes that path to
+  `remove_file`, which removes nothing, so the folder's files stay analysed and
+  published. Contents are read when needed and kept only for overlays and the
+  files a request is working on, with each file's line index; today
+  `retain_source` keeps every loaded file's text for the whole LSP session,
+  vendor context included.
 - **Panic isolation, on the pool.** Every parse and check runs on the process's
   worker pool (`project::worker_pool`, 64 MiB stacks) under `catch_unwind`, and
   a panic becomes that file's internal error. That covers the batch run and, in
@@ -7535,6 +7549,7 @@ its owner. Non-Registry keys follow the table.
 | clap, clap_complete (new) | bin |
 | ctrlc (new) | bin (F4's interrupt handling) |
 | blake3 (new) | project (F2's content hashes and fingerprints) |
+| dunce (new) | project (F1's path identity without Windows' verbatim prefix) |
 | stacker (new) | syntax, types, analyser (F1's stack growth at recursion points) |
 | crossbeam-channel, lsp-server, lsp-types | lsp |
 | dhat | bin |
