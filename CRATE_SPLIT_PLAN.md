@@ -4748,7 +4748,11 @@ fixture:
     (`LOCK_EX | LOCK_SH`, `argument.exclusiveConstants`) and `|` where the
     parameter takes one constant (`array_unique($a, SORT_STRING |
     SORT_NUMERIC)`, `argument.bitmaskNotAllowed`), unreported today (33
-    rules-oracle findings);
+    rules-oracle findings), at every call form: functions, constructors
+    (`new \finfo(SORT_REGULAR)`), methods and static methods
+    (`PDOStatement::fetch()`, `IntlDateFormatter::create()`), named
+    arguments (`json_encode('{}', flags: SORT_REGULAR)`), and a closure or
+    `call_user_func()` callable that forwards to a mapped function;
   - `new DateTime('2020.11.17')` and `new DateTimeImmutable('asdfasdf')`
     with a literal PHP rejects are `new.dateTime`/`new.dateTimeImmutable`:
     the rule exists (`date_time.rs`, E2's date parser) and misses both
