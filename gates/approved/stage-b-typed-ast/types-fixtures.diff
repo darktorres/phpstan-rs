@@ -1,0 +1,439 @@
+--- old
++++ new
+@@ -1017,6 +1017,8 @@
+ checker/attributes/an_attribute_on_a_set_hook_naming_an_unknown_class_is_flagged_not_found: an_attribute_on_a_set_hook_naming_an_unknown_class_is_flagged_not_found.php:5:35 [C] this: C; this->x: int; v: int
+ checker/attributes/attributes_on_global_constants_below_php_8_5_are_flagged_unsupported: attributes_on_global_constants_below_php_8_5_are_flagged_unsupported.php:2:13 [] 
+ checker/attributes/attributes_on_global_constants_on_php_8_5_or_later_are_never_flagged_for_version_support: attributes_on_global_constants_on_php_8_5_or_later_are_never_flagged_for_version_support.php:5:13 [] 
++checker/backtick_operator/a_backtick_returns_what_shell_exec_does_and_is_impure: a_backtick_returns_what_shell_exec_does_and_is_impure.php:7:5 [] dir: string (native string)
++checker/backtick_operator/a_backtick_returns_what_shell_exec_does_and_is_impure: a_backtick_returns_what_shell_exec_does_and_is_impure.php:13:5 [] 
+ checker/backtick_operator/a_backtick_shell_exec_below_php_8_5_is_never_flagged: a_backtick_shell_exec_below_php_8_5_is_never_flagged.php:3:17 [] x: string|false|null
+ checker/backtick_operator/a_backtick_shell_exec_on_php_8_5_is_flagged: a_backtick_shell_exec_on_php_8_5_is_flagged.php:3:17 [] x: string|false|null
+ checker/backtick_operator/a_backtick_shell_exec_still_type_checks_its_interpolated_contents: a_backtick_shell_exec_still_type_checks_its_interpolated_contents.php:3:17 [] x: string|false|null
+@@ -3614,6 +3616,21 @@
+ checker/invalid_assignment_targets/a_nullsafe_property_access_on_the_rhs_of_a_ref_assignment_is_flagged: a_nullsafe_property_access_on_the_rhs_of_a_ref_assignment_is_flagged.php:4:17 [] f: Foo|null (native Foo|null); x: Foo|null
+ checker/invalid_assignment_targets/a_skipped_destructuring_slot_is_never_flagged_as_a_non_assignable_target: a_skipped_destructuring_slot_is_never_flagged_as_a_non_assignable_target.php:3:17 [] extension: string; s: string (native string); t: array (native array)
+ checker/invalid_assignment_targets/a_skipped_destructuring_slot_is_never_flagged_as_a_non_assignable_target: a_skipped_destructuring_slot_is_never_flagged_as_a_non_assignable_target.php:4:17 [] a: mixed; c: mixed; extension: string; s: string (native string); t: array (native array)
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:4:5 [] a: int|null (native int|null); b: 1 (native 1); g: int (native int); i: int (native int); r: int (native int|null)
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:5:5 [] a: int|null (native int|null); b: 1 (native 1); g: 2 (native 2); i: int (native int); r: int (native int|null); s: 3
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:6:5 [] a: int|null (native int|null); b: 1 (native 1); g: 2 (native 2); i: int (native int); r: int (native int|null); s: 3
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:7:5 [] a: int|null (native int|null); b: 1 (native 1); g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:8:5 [] a: int|null (native int|null); b: 1 (native 1); g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:9:5 [] a: int|null (native int|null); b: 1 (native 1); dir: resource; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:9:47 [] a: int|null (native int|null); b: 1 (native 1); dir: resource|false; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:10:9 [] a: int|null (native int|null); b: 1 (native 1); dir: resource|false; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:12:5 [] a: int|null (native int|null); b: 1 (native 1); dir: resource; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:13:5 [] a: int|null (native int|null); b: 1 (native 1); dir: resource; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6; v: int (native int); w: '5' (native '5')
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:14:5 [] a: int|null (native int|null); b: 1 (native 1); dir: resource; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6; v: int (native int); w: '5' (native '5')
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:15:5 [] a: int|null (native int|null); b: 1 (native 1); dir: resource; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6; v: int (native int); w: '5' (native '5'); x: int<0, max> (native int|false)
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:15:43 [] a: int|null (native int|null); b: 1 (native 1); dir: resource; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6; v: int (native int); w: '5' (native '5'); x: false (native int|false)
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:16:9 [] a: int|null (native int|null); b: 1 (native 1); dir: resource; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6; v: int (native int); w: '5' (native '5'); x: false (native int|false)
++checker/invalid_assignment_targets/an_assignment_is_an_operand_at_every_operator: an_assignment_is_an_operand_at_every_operator.php:18:5 [] a: int|null (native int|null); b: 1 (native 1); dir: resource; g: 2 (native 2); i: 3 (native 3); r: int (native int|null); s: 3; t: 6; v: int (native int); w: '5' (native '5'); x: int<0, max> (native int|false)
+ checker/invalid_assignment_targets/an_ordinary_non_nullsafe_property_assignment_is_never_flagged: an_ordinary_non_nullsafe_property_assignment_is_never_flagged.php:4:17 [] f: Foo (native Foo); f->bar: Foo
+ checker/invalid_assignment_targets/an_ordinary_non_nullsafe_ref_assignment_is_never_flagged_as_byref_nullsafe: an_ordinary_non_nullsafe_ref_assignment_is_never_flagged_as_byref_nullsafe.php:4:17 [] f: Foo (native Foo); x: Foo|null
+ checker/invalid_assignment_targets/ordinary_assignable_targets_are_never_flagged_as_invalid: ordinary_assignable_targets_are_never_flagged_as_invalid.php:4:17 [] a: 1 (native 1); f: Foo (native Foo); name: string (native string); x: array (native array)
+@@ -3656,6 +3673,8 @@
+ checker/key_value_of/value_of_on_an_unbacked_enum_resolves_to_never: value_of_on_an_unbacked_enum_resolves_to_never.php:9:17 [] x: never
+ checker/key_value_of/value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type: value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type.php:11:21 [Coercer] this: Coercer<T>; value: mixed
+ checker/key_value_of/value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type: value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type.php:15:17 [] c: Coercer (native Coercer)
++checker/keywords/a_shebang_line_is_not_a_statement: a_shebang_line_is_not_a_statement.php:3:1 [] 
++checker/keywords/a_shebang_line_is_not_a_statement: a_shebang_line_is_not_a_statement.php:4:1 [] 
+ checker/keywords/break_and_continue_levels_are_checked: break_and_continue_levels_are_checked.php:3:17 [] xs: array (native array)
+ checker/keywords/break_and_continue_levels_are_checked: break_and_continue_levels_are_checked.php:4:17 [] xs: array (native array)
+ checker/keywords/break_and_continue_levels_are_checked: break_and_continue_levels_are_checked.php:4:37 [] c: Closure(): void (native Closure); x: mixed; xs: array (native array)
+@@ -3689,6 +3708,10 @@
+ checker/keywords/goto_targets_are_checked: goto_targets_are_checked.php:14:21 [] xs: array (native array)
+ checker/keywords/goto_targets_are_checked: goto_targets_are_checked.php:16:21 [] xs: array (native array)
+ checker/keywords/goto_targets_are_checked: goto_targets_are_checked.php:17:21 [] xs: array (native array)
++checker/keywords/keywords_fold_case: keywords_fold_case.php:2:1 [] 
++checker/keywords/keywords_fold_case: keywords_fold_case.php:3:45 [C] this: C
++checker/keywords/keywords_fold_case: keywords_fold_case.php:4:45 [C] this: C
++checker/keywords/keywords_fold_case: keywords_fold_case.php:11:1 [] 
+ checker/magic_numbers/every_position: every_position.php:2:1 [] 
+ checker/magic_numbers/every_position: every_position.php:3:1 [] 
+ checker/magic_numbers/every_position: every_position.php:10:9 [Box] flags: int (native int); n: int (native int); this: Box; x: 42 (native 42)
+@@ -3816,12 +3839,20 @@
+ checker/misc_and_regressions/division_involving_a_float_infers_plain_float: division_involving_a_float_infers_plain_float.php:3:17 [] a: int (native int); b: float (native float)
+ checker/misc_and_regressions/division_of_two_ints_infers_int_or_float: division_of_two_ints_infers_int_or_float.php:3:17 [] a: int (native int); b: int (native int)
+ checker/misc_and_regressions/division_of_two_mixed_values_infers_int_or_float_not_mixed: division_of_two_mixed_values_infers_int_or_float_not_mixed.php:3:17 [] a: mixed; b: mixed
++checker/misc_and_regressions/dollar_brace_interpolation_reads_the_variable: dollar_brace_interpolation_reads_the_variable.php:4:5 [] name: int (native int); s: string (native string)
++checker/misc_and_regressions/dollar_brace_interpolation_reads_the_variable: dollar_brace_interpolation_reads_the_variable.php:5:5 [] name: int (native int); s: string (native string)
++checker/misc_and_regressions/dollar_brace_interpolation_reads_the_variable: dollar_brace_interpolation_reads_the_variable.php:6:5 [] arr: array{k: 1} (native array<1>); name: int (native int); s: string (native string)
++checker/misc_and_regressions/dollar_brace_interpolation_reads_the_variable: dollar_brace_interpolation_reads_the_variable.php:7:5 [] arr: array{k: 1} (native array<1>); name: int (native int); s: string (native string)
++checker/misc_and_regressions/dollar_brace_interpolation_reads_the_variable: dollar_brace_interpolation_reads_the_variable.php:8:5 [] arr: array{k: 1} (native array<1>); name: int (native int); s: string (native string); v: 'name' (native 'name')
++checker/misc_and_regressions/dollar_brace_interpolation_reads_the_variable: dollar_brace_interpolation_reads_the_variable.php:9:5 [] arr: array{k: 1} (native array<1>); name: int (native int); s: string (native string); v: 'name' (native 'name')
++checker/misc_and_regressions/dollar_brace_interpolation_reads_the_variable: dollar_brace_interpolation_reads_the_variable.php:10:5 [] arr: array{k: 1} (native array<1>); name: int (native int); s: string (native string); v: 'name' (native 'name')
++checker/misc_and_regressions/dollar_brace_interpolation_reads_the_variable: dollar_brace_interpolation_reads_the_variable.php:11:5 [] arr: array{k: 1} (native array<1>); name: int (native int); s: string (native string); v: 'name' (native 'name')
+ checker/misc_and_regressions/flags_a_genuinely_undefined_variable: flags_a_genuinely_undefined_variable.php:3:17 [] 
+ checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:4:17 [] file: string (native string)
+-checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:5:17 [] file: string
+-checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:6:17 [] file: string
+-checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:7:17 [] file: string; vars: array<string, mixed> (native array)
+-checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:8:17 [] file: string; vars: array<string, mixed> (native array)
++checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:5:17 [] file: string (native string)
++checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:6:17 [] file: string (native string)
++checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:7:17 [] file: string (native string); vars: array<string, mixed> (native array)
++checker/misc_and_regressions/get_defined_vars_after_an_include_can_hold_any_variable: get_defined_vars_after_an_include_can_hold_any_variable.php:8:17 [] file: string (native string); vars: array<string, mixed> (native array)
+ checker/misc_and_regressions/global_statement_binds_its_names: global_statement_binds_its_names.php:3:17 [] config: mixed
+ checker/misc_and_regressions/global_statement_binds_its_names: global_statement_binds_its_names.php:4:17 [] config: mixed
+ checker/misc_and_regressions/increment_on_a_bool_variable_leaves_it_a_bool: increment_on_a_bool_variable_leaves_it_a_bool.php:3:17 [] x: true (native true)
+@@ -3831,6 +3862,14 @@
+ checker/misc_and_regressions/increment_on_a_null_variable_rebinds_it_to_int: increment_on_a_null_variable_rebinds_it_to_int.php:4:17 [] x: int
+ checker/misc_and_regressions/increment_on_a_null_variable_rebinds_it_to_int: increment_on_a_null_variable_rebinds_it_to_int.php:5:17 [] x: int
+ checker/misc_and_regressions/instantiating_a_class_via_a_leading_backslash_is_not_flagged: instantiating_a_class_via_a_leading_backslash_is_not_flagged.php:3:28 [] 
++checker/misc_and_regressions/integer_literals_read_as_php_reads_them: integer_literals_read_as_php_reads_them.php:3:1 [] 
++checker/misc_and_regressions/integer_literals_read_as_php_reads_them: integer_literals_read_as_php_reads_them.php:4:1 [] 
++checker/misc_and_regressions/integer_literals_read_as_php_reads_them: integer_literals_read_as_php_reads_them.php:5:1 [] 
++checker/misc_and_regressions/integer_literals_read_as_php_reads_them: integer_literals_read_as_php_reads_them.php:6:1 [] 
++checker/misc_and_regressions/integer_literals_read_as_php_reads_them: integer_literals_read_as_php_reads_them.php:7:1 [] 
++checker/misc_and_regressions/integer_literals_read_as_php_reads_them: integer_literals_read_as_php_reads_them.php:8:1 [] 
++checker/misc_and_regressions/integer_literals_read_as_php_reads_them: integer_literals_read_as_php_reads_them.php:9:1 [] 
++checker/misc_and_regressions/integer_literals_read_as_php_reads_them: integer_literals_read_as_php_reads_them.php:10:1 [] 
+ checker/misc_and_regressions/intersection_typed_receiver_accepts_a_method_found_on_any_member: intersection_typed_receiver_accepts_a_method_found_on_any_member.php:5:17 [] x: Countable2&Nameable (native Countable2&Nameable)
+ checker/misc_and_regressions/intersection_typed_receiver_accepts_a_method_found_on_any_member: intersection_typed_receiver_accepts_a_method_found_on_any_member.php:6:17 [] x: Countable2&Nameable (native Countable2&Nameable)
+ checker/misc_and_regressions/intersection_typed_receiver_still_rejects_a_method_missing_from_every_member: intersection_typed_receiver_still_rejects_a_method_missing_from_every_member.php:4:56 [] x: Countable2&Nameable (native Countable2&Nameable)
+@@ -3838,9 +3877,18 @@
+ checker/misc_and_regressions/isset_and_empty_infer_as_bool_when_read_as_a_plain_value: isset_and_empty_infer_as_bool_when_read_as_a_plain_value.php:5:17 [] a: bool; post: array (native array)
+ checker/misc_and_regressions/isset_and_empty_infer_as_bool_when_read_as_a_plain_value: isset_and_empty_infer_as_bool_when_read_as_a_plain_value.php:6:17 [] a: bool; b: bool; post: array (native array)
+ checker/misc_and_regressions/isset_and_empty_infer_as_bool_when_read_as_a_plain_value: isset_and_empty_infer_as_bool_when_read_as_a_plain_value.php:7:17 [] a: bool; b: bool; post: array (native array)
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:5:5 [] maybe: mixed; row: array (native array)
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:5:24 [] maybe: mixed; row: array (native array)
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:6:9 [] maybe: mixed; row: array (native array)
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:8:5 [] maybe: mixed; row: array (native array)
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:8:31 [] maybe: mixed; row: array (native array); row[name]: mixed
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:9:9 [] maybe: mixed; row: array (native array); row[name]: mixed
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:11:5 [] gone: 1 (native 1); maybe: mixed; row: array (native array)
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:12:5 [] maybe: mixed; row: array (native array)
++checker/misc_and_regressions/isset_empty_and_unset_as_constructs: isset_empty_and_unset_as_constructs.php:13:5 [] maybe: mixed; row: array (native array)
+ checker/misc_and_regressions/isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined: isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined.php:2:13 [] x: 1 (native 1)
+-checker/misc_and_regressions/isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined: isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined.php:3:13 [] x: 1
+-checker/misc_and_regressions/isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined: isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined.php:4:13 [] x: 1
++checker/misc_and_regressions/isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined: isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined.php:3:13 [] x: 1 (native 1)
++checker/misc_and_regressions/isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined: isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined.php:4:13 [] x: 1 (native 1)
+ checker/misc_and_regressions/isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined: isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined.php:5:13 [] 
+ checker/misc_and_regressions/isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined: isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined.php:6:13 [] 
+ checker/misc_and_regressions/isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined: isset_empty_unset_eval_exit_die_are_never_flagged_as_undefined.php:6:24 [] 
+@@ -3873,6 +3921,12 @@
+ checker/misc_and_regressions/spaceship_operator_infers_as_int_not_bool__0: spaceship_operator_infers_as_int_not_bool__0.php:3:17 [] a: int (native int); b: int (native int)
+ checker/misc_and_regressions/spaceship_operator_infers_as_int_not_bool__1: spaceship_operator_infers_as_int_not_bool__1.php:3:17 [] a: int (native int); b: int (native int)
+ checker/misc_and_regressions/static_call_arguments_are_still_checked_for_undefined_variables: static_call_arguments_are_still_checked_for_undefined_variables.php:6:17 [] 
++checker/misc_and_regressions/string_literals_are_bytes: string_literals_are_bytes.php:3:5 [] 
++checker/misc_and_regressions/string_literals_are_bytes: string_literals_are_bytes.php:3:30 [] 
++checker/misc_and_regressions/string_literals_are_bytes: string_literals_are_bytes.php:4:9 [] 
++checker/misc_and_regressions/string_literals_are_bytes: string_literals_are_bytes.php:6:5 [] 
++checker/misc_and_regressions/string_literals_are_bytes: string_literals_are_bytes.php:6:25 [] 
++checker/misc_and_regressions/string_literals_are_bytes: string_literals_are_bytes.php:7:9 [] 
+ checker/misc_and_regressions/superglobals_are_never_flagged: superglobals_are_never_flagged.php:3:17 [] 
+ checker/misc_and_regressions/unary_minus_on_a_non_numeric_string_infers_as_int_but_is_flagged: unary_minus_on_a_non_numeric_string_infers_as_int_but_is_flagged.php:2:47 [] s: string (native string)
+ checker/misc_and_regressions/unary_minus_on_a_numeric_string_infers_as_int_and_is_never_flagged: unary_minus_on_a_numeric_string_infers_as_int_and_is_never_flagged.php:3:47 [] s: numeric-string (native string)
+@@ -4139,10 +4193,10 @@
+ checker/narrowing/a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own_override: a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own_override.php:6:17 [] view: View&HasValue|View (native View)
+ checker/narrowing/a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own_override: a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own_override.php:6:48 [] view: View&HasValue (native View)
+ checker/narrowing/a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own_override: a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own_override.php:7:21 [] view: View&HasValue (native View)
+-checker/narrowing/a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch: a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch.php:3:17 [] a: string|null; b: string|null
+-checker/narrowing/a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch: a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch.php:3:36 [] a: string; b: string
+-checker/narrowing/a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch: a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch.php:4:21 [] a: string; b: string
+-checker/narrowing/a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch: a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch.php:6:17 [] a: string|null; b: string|null
++checker/narrowing/a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch: a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch.php:3:17 [] a: string|null (native string|null); b: string|null (native string|null)
++checker/narrowing/a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch: a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch.php:3:36 [] a: string (native string|null); b: string (native string|null)
++checker/narrowing/a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch: a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch.php:4:21 [] a: string (native string|null); b: string (native string|null)
++checker/narrowing/a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch: a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch.php:6:17 [] a: string|null (native string|null); b: string|null (native string|null)
+ checker/narrowing/a_named_inline_var_annotation_on_its_own_assignment_also_overrides_it: a_named_inline_var_annotation_on_its_own_assignment_also_overrides_it.php:4:45 [Iter] this: Iter
+ checker/narrowing/a_named_inline_var_annotation_on_its_own_assignment_also_overrides_it: a_named_inline_var_annotation_on_its_own_assignment_also_overrides_it.php:8:17 [] file: FakeFileInfo9921; it: Iter (native Iter)
+ checker/narrowing/a_named_inline_var_annotation_on_its_own_assignment_also_overrides_it: a_named_inline_var_annotation_on_its_own_assignment_also_overrides_it.php:9:17 [] file: FakeFileInfo9921; it: Iter (native Iter)
+@@ -4491,10 +4545,10 @@
+ checker/narrowing/do_while_loop_narrows_the_negated_condition_after_exit: do_while_loop_narrows_the_negated_condition_after_exit.php:4:20 [] x: 5 (native 5)
+ checker/narrowing/do_while_loop_narrows_the_negated_condition_after_exit: do_while_loop_narrows_the_negated_condition_after_exit.php:5:21 [] x: 5 (native 5)
+ checker/narrowing/do_while_loop_narrows_the_negated_condition_after_exit: do_while_loop_narrows_the_negated_condition_after_exit.php:7:17 [] x: 5 (native 5)
+-checker/narrowing/empty_guard_narrows_past_the_if: empty_guard_narrows_past_the_if.php:3:17 [] x: non-falsy-string
+-checker/narrowing/empty_guard_narrows_past_the_if: empty_guard_narrows_past_the_if.php:3:32 [] x: string|null
+-checker/narrowing/empty_guard_narrows_past_the_if: empty_guard_narrows_past_the_if.php:4:21 [] x: string|null
+-checker/narrowing/empty_guard_narrows_past_the_if: empty_guard_narrows_past_the_if.php:6:17 [] x: non-falsy-string
++checker/narrowing/empty_guard_narrows_past_the_if: empty_guard_narrows_past_the_if.php:3:17 [] x: non-falsy-string (native string|null)
++checker/narrowing/empty_guard_narrows_past_the_if: empty_guard_narrows_past_the_if.php:3:32 [] x: string|null (native string|null)
++checker/narrowing/empty_guard_narrows_past_the_if: empty_guard_narrows_past_the_if.php:4:21 [] x: string|null (native string|null)
++checker/narrowing/empty_guard_narrows_past_the_if: empty_guard_narrows_past_the_if.php:6:17 [] x: non-falsy-string (native string|null)
+ checker/narrowing/equality_narrows_a_literal_array_index_expression: equality_narrows_a_literal_array_index_expression.php:4:17 [] info: array{code?: string|null} (native array); info[code]: null
+ checker/narrowing/equality_narrows_a_literal_array_index_expression: equality_narrows_a_literal_array_index_expression.php:4:45 [] info: array{code?: string|null} (native array); info[code]: string
+ checker/narrowing/equality_narrows_a_literal_array_index_expression: equality_narrows_a_literal_array_index_expression.php:5:21 [] info: array{code?: string|null} (native array); info[code]: string
+@@ -4732,18 +4786,18 @@
+ checker/narrowing/is_string_narrows_an_assignment_nested_in_its_own_argument: is_string_narrows_an_assignment_nested_in_its_own_argument.php:4:51 [] result: string (native string|false)
+ checker/narrowing/is_string_narrows_an_assignment_nested_in_its_own_argument: is_string_narrows_an_assignment_nested_in_its_own_argument.php:5:21 [] result: string (native string|false)
+ checker/narrowing/is_string_narrows_an_assignment_nested_in_its_own_argument: is_string_narrows_an_assignment_nested_in_its_own_argument.php:7:17 [] result: false (native string|false)
+-checker/narrowing/isset_false_branch_is_not_narrowed: isset_false_branch_is_not_narrowed.php:3:17 [] x: string|null
+-checker/narrowing/isset_false_branch_is_not_narrowed: isset_false_branch_is_not_narrowed.php:3:32 [] x: string
+-checker/narrowing/isset_false_branch_is_not_narrowed: isset_false_branch_is_not_narrowed.php:4:21 [] x: string
+-checker/narrowing/isset_false_branch_is_not_narrowed: isset_false_branch_is_not_narrowed.php:6:17 [] x: string|null
++checker/narrowing/isset_false_branch_is_not_narrowed: isset_false_branch_is_not_narrowed.php:3:17 [] x: string|null (native string|null)
++checker/narrowing/isset_false_branch_is_not_narrowed: isset_false_branch_is_not_narrowed.php:3:32 [] x: string (native string|null)
++checker/narrowing/isset_false_branch_is_not_narrowed: isset_false_branch_is_not_narrowed.php:4:21 [] x: string (native string|null)
++checker/narrowing/isset_false_branch_is_not_narrowed: isset_false_branch_is_not_narrowed.php:6:17 [] x: string|null (native string|null)
+ checker/narrowing/isset_guard_narrows_a_property_access_too: isset_guard_narrows_a_property_access_too.php:4:17 [] box: Box (native Box)
+ checker/narrowing/isset_guard_narrows_a_property_access_too: isset_guard_narrows_a_property_access_too.php:4:41 [] box: Box (native Box); box->value: string
+ checker/narrowing/isset_guard_narrows_a_property_access_too: isset_guard_narrows_a_property_access_too.php:5:21 [] box: Box (native Box); box->value: string
+ checker/narrowing/isset_guard_narrows_a_property_access_too: isset_guard_narrows_a_property_access_too.php:7:17 [] box: Box (native Box)
+-checker/narrowing/isset_guard_narrows_null_away_in_the_truthy_branch: isset_guard_narrows_null_away_in_the_truthy_branch.php:3:17 [] x: string|null
+-checker/narrowing/isset_guard_narrows_null_away_in_the_truthy_branch: isset_guard_narrows_null_away_in_the_truthy_branch.php:3:32 [] x: string
+-checker/narrowing/isset_guard_narrows_null_away_in_the_truthy_branch: isset_guard_narrows_null_away_in_the_truthy_branch.php:4:21 [] x: string
+-checker/narrowing/isset_guard_narrows_null_away_in_the_truthy_branch: isset_guard_narrows_null_away_in_the_truthy_branch.php:6:17 [] x: string|null
++checker/narrowing/isset_guard_narrows_null_away_in_the_truthy_branch: isset_guard_narrows_null_away_in_the_truthy_branch.php:3:17 [] x: string|null (native string|null)
++checker/narrowing/isset_guard_narrows_null_away_in_the_truthy_branch: isset_guard_narrows_null_away_in_the_truthy_branch.php:3:32 [] x: string (native string|null)
++checker/narrowing/isset_guard_narrows_null_away_in_the_truthy_branch: isset_guard_narrows_null_away_in_the_truthy_branch.php:4:21 [] x: string (native string|null)
++checker/narrowing/isset_guard_narrows_null_away_in_the_truthy_branch: isset_guard_narrows_null_away_in_the_truthy_branch.php:6:17 [] x: string|null (native string|null)
+ checker/narrowing/isset_on_an_offset_narrows_the_container_too: isset_on_an_offset_narrows_the_container_too.php:5:17 [] u: string (native string); x: array{a: int}|array{a?: int}|false
+ checker/narrowing/isset_on_an_offset_narrows_the_container_too: isset_on_an_offset_narrows_the_container_too.php:5:37 [] u: string (native string); x: array{a: int}; x[a]: mixed
+ checker/narrowing/isset_on_an_offset_narrows_the_container_too: isset_on_an_offset_narrows_the_container_too.php:6:21 [] u: string (native string); x: array{a: int}; x[a]: mixed
+@@ -4831,12 +4885,12 @@
+ checker/narrowing/negated_truthy_guard_narrows_past_the_if: negated_truthy_guard_narrows_past_the_if.php:3:26 [] x: string|null (native string|null)
+ checker/narrowing/negated_truthy_guard_narrows_past_the_if: negated_truthy_guard_narrows_past_the_if.php:4:21 [] x: string|null (native string|null)
+ checker/narrowing/negated_truthy_guard_narrows_past_the_if: negated_truthy_guard_narrows_past_the_if.php:6:17 [] x: non-falsy-string (native string|null)
+-checker/narrowing/not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty: not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty.php:5:17 [] x: string
+-checker/narrowing/not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty: not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty.php:5:33 [] x: non-falsy-string
+-checker/narrowing/not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty: not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty.php:6:21 [] x: non-falsy-string
+-checker/narrowing/not_empty_on_an_array_narrows_to_non_empty_array: not_empty_on_an_array_narrows_to_non_empty_array.php:5:17 [] x: array
+-checker/narrowing/not_empty_on_an_array_narrows_to_non_empty_array: not_empty_on_an_array_narrows_to_non_empty_array.php:5:33 [] x: non-empty-array
+-checker/narrowing/not_empty_on_an_array_narrows_to_non_empty_array: not_empty_on_an_array_narrows_to_non_empty_array.php:6:21 [] x: non-empty-array
++checker/narrowing/not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty: not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty.php:5:17 [] x: string (native string)
++checker/narrowing/not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty: not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty.php:5:33 [] x: non-falsy-string (native string)
++checker/narrowing/not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty: not_empty_on_a_string_narrows_to_non_falsy_string_not_merely_non_empty.php:6:21 [] x: non-falsy-string (native string)
++checker/narrowing/not_empty_on_an_array_narrows_to_non_empty_array: not_empty_on_an_array_narrows_to_non_empty_array.php:5:17 [] x: array (native array)
++checker/narrowing/not_empty_on_an_array_narrows_to_non_empty_array: not_empty_on_an_array_narrows_to_non_empty_array.php:5:33 [] x: non-empty-array (native array)
++checker/narrowing/not_empty_on_an_array_narrows_to_non_empty_array: not_empty_on_an_array_narrows_to_non_empty_array.php:6:21 [] x: non-empty-array (native array)
+ checker/narrowing/not_empty_upgrades_an_already_non_empty_string_to_non_falsy_string_too: not_empty_upgrades_an_already_non_empty_string_to_non_falsy_string_too.php:6:17 [] x: non-falsy-string|non-empty-string
+ checker/narrowing/not_empty_upgrades_an_already_non_empty_string_to_non_falsy_string_too: not_empty_upgrades_an_already_non_empty_string_to_non_falsy_string_too.php:6:33 [] x: non-falsy-string
+ checker/narrowing/not_empty_upgrades_an_already_non_empty_string_to_non_falsy_string_too: not_empty_upgrades_an_already_non_empty_string_to_non_falsy_string_too.php:7:21 [] x: non-falsy-string
+@@ -5087,16 +5141,16 @@
+ checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:8:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
+ checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:9:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
+ checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:10:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:11:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:12:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:13:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:14:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:15:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:16:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:17:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:18:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:19:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
+-checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:20:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:11:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:12:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:13:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:14:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:15:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:16:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:17:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:18:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:19:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
++checker/noop/a_bare_side_effect_free_expression_is_named: a_bare_side_effect_free_expression_is_named.php:20:17 [] a: int (native int); list: array (native array); p: Point (native Point); s: string (native string)
+ checker/noop/a_bare_ternary_statement_is_flagged: a_bare_ternary_statement_is_flagged.php:3:17 [] a: bool (native bool); b: int (native int); c: int (native int)
+ checker/noop/a_bare_word_and_statement_is_flagged_under_the_logical_identifier: a_bare_word_and_statement_is_flagged_under_the_logical_identifier.php:3:17 [] a: bool (native bool); b: bool (native bool)
+ checker/noop/a_bare_word_or_statement_is_flagged_under_the_logical_identifier: a_bare_word_or_statement_is_flagged_under_the_logical_identifier.php:3:17 [] a: bool (native bool); b: bool (native bool)
+@@ -5127,7 +5181,7 @@
+ checker/noop/exit_calls_closures_and_writes_are_not_noops: exit_calls_closures_and_writes_are_not_noops.php:9:17 [] a: array (native array); i: int; o: object (native object); o->p: 1
+ checker/noop/exit_calls_closures_and_writes_are_not_noops: exit_calls_closures_and_writes_are_not_noops.php:10:17 [] a: array (native array); i: int; o: object (native object); o->p: 1
+ checker/noop/exit_calls_closures_and_writes_are_not_noops: exit_calls_closures_and_writes_are_not_noops.php:11:17 [] a: array (native array); i: int; o: object (native object); o->p: 1
+-checker/noop/guard_or_die_idiom_is_never_flagged: guard_or_die_idiom_is_never_flagged.php:4:21 [Guard] msg: string; this: Guard
++checker/noop/guard_or_die_idiom_is_never_flagged: guard_or_die_idiom_is_never_flagged.php:4:21 [Guard] msg: string (native string); this: Guard
+ checker/noop/guard_or_die_idiom_is_never_flagged: guard_or_die_idiom_is_never_flagged.php:8:17 [] cond: bool (native bool); g: Guard (native Guard)
+ checker/noop/long_expressions_are_cut_to_their_first_line: long_expressions_are_cut_to_their_first_line.php:2:28 [] a: int (native int)
+ checker/noop/word_operators_are_reported_despite_a_local_assignment: word_operators_are_reported_despite_a_local_assignment.php:3:17 [] b: bool (native bool); x: true (native true)
+@@ -5149,8 +5203,8 @@
+ checker/null_probes/coalesce_on_a_never_nullable_local_is_flagged: coalesce_on_a_never_nullable_local_is_flagged.php:3:17 [] x: int (native int)
+ checker/null_probes/coalesce_on_a_nullable_local_is_never_flagged: coalesce_on_a_nullable_local_is_never_flagged.php:3:17 [] x: int|null (native int|null)
+ checker/null_probes/compound_coalesce_assign_on_a_never_nullable_local_is_flagged: compound_coalesce_assign_on_a_never_nullable_local_is_flagged.php:3:17 [] x: int (native int)
+-checker/null_probes/empty_on_a_never_nullable_local_is_never_flagged: empty_on_a_never_nullable_local_is_never_flagged.php:3:17 [] x: int
+-checker/null_probes/empty_on_a_never_nullable_local_is_never_flagged: empty_on_a_never_nullable_local_is_never_flagged.php:3:32 [] x: int
++checker/null_probes/empty_on_a_never_nullable_local_is_never_flagged: empty_on_a_never_nullable_local_is_never_flagged.php:3:17 [] x: int (native int)
++checker/null_probes/empty_on_a_never_nullable_local_is_never_flagged: empty_on_a_never_nullable_local_is_never_flagged.php:3:32 [] x: int (native int)
+ checker/null_probes/isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_flagged: isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_flagged.php:4:17 [] items: array<(int|string), string> (native array)
+ checker/null_probes/isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_flagged: isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_flagged.php:4:43 [] found: string; item: string; items: array<(int|string), string> (native array)
+ checker/null_probes/isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_flagged: isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_flagged.php:5:21 [] found: string; item: string; items: array<(int|string), string> (native array)
+@@ -5176,14 +5230,14 @@
+ checker/null_probes/isset_on_a_maybe_undefined_variable_is_never_flagged: isset_on_a_maybe_undefined_variable_is_never_flagged.php:4:21 [] cond: bool (native bool); x: 1 (native 1)
+ checker/null_probes/isset_on_a_maybe_undefined_variable_is_never_flagged: isset_on_a_maybe_undefined_variable_is_never_flagged.php:6:17 [] cond: bool (native bool); x: mixed
+ checker/null_probes/isset_on_a_maybe_undefined_variable_is_never_flagged: isset_on_a_maybe_undefined_variable_is_never_flagged.php:6:32 [] cond: bool (native bool); x: mixed
+-checker/null_probes/isset_on_a_never_nullable_local_is_flagged: isset_on_a_never_nullable_local_is_flagged.php:3:17 [] x: int
+-checker/null_probes/isset_on_a_never_nullable_local_is_flagged: isset_on_a_never_nullable_local_is_flagged.php:3:32 [] x: int
++checker/null_probes/isset_on_a_never_nullable_local_is_flagged: isset_on_a_never_nullable_local_is_flagged.php:3:17 [] x: int (native int)
++checker/null_probes/isset_on_a_never_nullable_local_is_flagged: isset_on_a_never_nullable_local_is_flagged.php:3:32 [] x: int (native int)
+ checker/null_probes/isset_on_a_non_nullable_property_with_a_default_is_flagged: isset_on_a_non_nullable_property_with_a_default_is_flagged.php:6:17 [] f: Foo (native Foo)
+ checker/null_probes/isset_on_a_non_nullable_property_with_a_default_is_flagged: isset_on_a_non_nullable_property_with_a_default_is_flagged.php:6:35 [] f: Foo (native Foo); f->x: int
+ checker/null_probes/isset_on_a_non_nullable_property_with_no_default_is_never_flagged: isset_on_a_non_nullable_property_with_no_default_is_never_flagged.php:6:17 [] f: Foo (native Foo)
+ checker/null_probes/isset_on_a_non_nullable_property_with_no_default_is_never_flagged: isset_on_a_non_nullable_property_with_no_default_is_never_flagged.php:6:35 [] f: Foo (native Foo); f->x: int
+-checker/null_probes/isset_on_a_nullable_local_is_never_flagged: isset_on_a_nullable_local_is_never_flagged.php:3:17 [] x: int|null
+-checker/null_probes/isset_on_a_nullable_local_is_never_flagged: isset_on_a_nullable_local_is_never_flagged.php:3:32 [] x: int
++checker/null_probes/isset_on_a_nullable_local_is_never_flagged: isset_on_a_nullable_local_is_never_flagged.php:3:17 [] x: int|null (native int|null)
++checker/null_probes/isset_on_a_nullable_local_is_never_flagged: isset_on_a_nullable_local_is_never_flagged.php:3:32 [] x: int (native int|null)
+ checker/null_probes/isset_on_a_nullable_property_is_never_flagged_regardless_of_default: isset_on_a_nullable_property_is_never_flagged_regardless_of_default.php:6:17 [] f: Foo (native Foo)
+ checker/null_probes/isset_on_a_nullable_property_is_never_flagged_regardless_of_default: isset_on_a_nullable_property_is_never_flagged_regardless_of_default.php:6:35 [] f: Foo (native Foo); f->x: int
+ checker/null_probes/isset_on_a_plain_array_key_is_never_flagged: isset_on_a_plain_array_key_is_never_flagged.php:4:17 [] x: array<string, int> (native array)
+@@ -5195,8 +5249,8 @@
+ checker/null_probes/isset_on_a_shape_key_never_declared_at_all_is_flagged_as_absent: isset_on_a_shape_key_never_declared_at_all_is_flagged_as_absent.php:4:17 [] x: array{other: int} (native array)
+ checker/null_probes/isset_on_a_shape_key_never_declared_at_all_is_flagged_as_absent: isset_on_a_shape_key_never_declared_at_all_is_flagged_as_absent.php:4:39 [] x: array{other: int} (native array); x[key]: mixed
+ checker/null_probes/isset_on_an_always_null_local_is_flagged_as_always_null: isset_on_an_always_null_local_is_flagged_as_always_null.php:3:17 [] x: null (native null)
+-checker/null_probes/isset_on_an_always_null_local_is_flagged_as_always_null: isset_on_an_always_null_local_is_flagged_as_always_null.php:4:17 [] x: never|null
+-checker/null_probes/isset_on_an_always_null_local_is_flagged_as_always_null: isset_on_an_always_null_local_is_flagged_as_always_null.php:4:32 [] x: never
++checker/null_probes/isset_on_an_always_null_local_is_flagged_as_always_null: isset_on_an_always_null_local_is_flagged_as_always_null.php:4:17 [] x: never|null (native null)
++checker/null_probes/isset_on_an_always_null_local_is_flagged_as_always_null: isset_on_an_always_null_local_is_flagged_as_always_null.php:4:32 [] x: never (native null)
+ checker/null_probes/isset_on_an_index_expression_is_never_flagged: isset_on_an_index_expression_is_never_flagged.php:3:17 [] x: array (native array)
+ checker/null_probes/isset_on_an_index_expression_is_never_flagged: isset_on_an_index_expression_is_never_flagged.php:3:39 [] x: array&hasOffsetValue('key', mixed) (native array); x[key]: mixed
+ checker/null_probes/null_coalesce_assign_on_a_required_non_nullable_shape_key_is_flagged: null_coalesce_assign_on_a_required_non_nullable_shape_key_is_flagged.php:4:17 [] x: array{key: int} (native array); x[key]: int
+@@ -5447,6 +5501,9 @@
+ checker/operator_validity/concatenating_a_string_and_a_stringable_object_is_never_flagged: concatenating_a_string_and_a_stringable_object_is_never_flagged.php:3:56 [Foo] this: Foo
+ checker/operator_validity/concatenating_a_string_and_a_stringable_object_is_never_flagged: concatenating_a_string_and_a_stringable_object_is_never_flagged.php:6:17 [] f: Foo (native Foo); s: string (native string)
+ checker/operator_validity/concatenating_a_string_and_an_object_without_tostring_is_flagged: concatenating_a_string_and_an_object_without_tostring_is_flagged.php:4:17 [] f: Foo (native Foo); s: string (native string)
++checker/operator_validity/concatenation_binds_looser_than_arithmetic_and_shifts: concatenation_binds_looser_than_arithmetic_and_shifts.php:4:5 [] a: int (native int); b: int (native int)
++checker/operator_validity/concatenation_binds_looser_than_arithmetic_and_shifts: concatenation_binds_looser_than_arithmetic_and_shifts.php:5:5 [] a: int (native int); b: int (native int)
++checker/operator_validity/concatenation_binds_looser_than_arithmetic_and_shifts: concatenation_binds_looser_than_arithmetic_and_shifts.php:6:5 [] a: int (native int); b: int (native int)
+ checker/operator_validity/decrementing_an_int_literal_reduces_its_own_value: decrementing_an_int_literal_reduces_its_own_value.php:3:17 [] n: 5 (native 5)
+ checker/operator_validity/decrementing_an_int_literal_reduces_its_own_value: decrementing_an_int_literal_reduces_its_own_value.php:4:17 [] n: 4
+ checker/operator_validity/decrementing_an_int_literal_reduces_its_own_value: decrementing_an_int_literal_reduces_its_own_value.php:5:17 [] n: 4
+@@ -6484,25 +6541,25 @@
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:20:1 [] box: Box (native Box); box->value: 41; greeting: 'Hello, 41! Next is 42.
+ checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); name: 'Ada' (native 'Ada')
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:21:1 [] box: Box (native Box); box->value: 41; greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:23:1 [] box: Box (native Box); box->value: 41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:25:1 [] box: Box (native Box); box->value: never|41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:31:1 [] adder: Closure (native Closure); box: Box (native Box); box->value: never|41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:32:1 [] adder: Closure (native Closure); box: Box (native Box); box->value: never|41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:33:1 [] adder: Closure (native Closure); box: Box (native Box); box->value: never|41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:34:1 [] adder: Closure (native Closure); box: Box (native Box); box->value: never|41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:35:1 [] adder: Closure (native Closure); box: Box (native Box); box->value: never|41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:36:1 [] adder: Closure (native Closure); box: Box (native Box); box->value: never|41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: string (native string)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string)
+ checker/small_programs/closures_string_interpolation_and_property_writes: closures_string_interpolation_and_property_writes.php:38:1 [] adder: Closure (native Closure); box: Box (native Box); box->value: never|41; double: Closure(int): int (native Closure); greeting: 'Hello, 41! Next is 42.
+-checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: string (native string); staticFn: Closure(mixed): int (native Closure)
++checker/small_programs/closures_string_interpolation_and_property_writes: ' (native string); items: array{0: 1, 1: 2, 2: 3} (native array<1|2|3>); label: 'small'|'medium'|'large'; name: 'Ada' (native 'Ada'); simple: 'value=41 items=1 plain Ada end' (native string); staticFn: Closure(mixed): int (native Closure)
+ checker/small_programs/custom_exceptions_and_typed_array_parameters: custom_exceptions_and_typed_array_parameters.php:7:9 [DomainError] this: DomainError
+ checker/small_programs/custom_exceptions_and_typed_array_parameters: custom_exceptions_and_typed_array_parameters.php:13:5 [] x: int (native int)
+ checker/small_programs/custom_exceptions_and_typed_array_parameters: custom_exceptions_and_typed_array_parameters.php:21:5 [] nums: array<(int|string), int> (native array); total: 0 (native 0)
+@@ -6634,15 +6691,15 @@
+ checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:12:13 [] n: 3 (native int)
+ checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:14:13 [] n: int (native int)
+ checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:20:5 [] id: int (native int); name: 'widget' (native 'widget')
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:21:5 [] id: int (native int); name: 'widget' (native 'widget'); sql: string (native string)
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:27:5 [] id: int (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: string (native string)
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:31:5 [] id: int<0, max> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: string (native string)
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:32:9 [] id: int<0, max> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: string (native string)
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:32:22 [] id: int<min, -1> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: string (native string)
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:33:13 [] id: int<min, -1> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: string (native string)
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:35:9 [] id: int<0, max> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: string (native string)
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:37:9 [] e: NotFoundException|RuntimeException; id: int<min, -1> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: string (native string)
+-checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:39:9 [] id: int (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:21:5 [] id: int (native int); name: 'widget' (native 'widget'); sql: non-falsy-string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:27:5 [] id: int (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: non-falsy-string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:31:5 [] id: int<0, max> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: non-falsy-string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:32:9 [] id: int<0, max> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: non-falsy-string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:32:22 [] id: int<min, -1> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: non-falsy-string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:33:13 [] id: int<min, -1> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: non-falsy-string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:35:9 [] id: int<0, max> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: non-falsy-string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:37:9 [] e: NotFoundException|RuntimeException; id: int<min, -1> (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: non-falsy-string (native string)
++checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:39:9 [] id: int (native int); name: 'widget' (native 'widget'); raw: 'literal $name stays $literal' (native 'literal $name stays $literal'); sql: non-falsy-string (native string)
+ checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:43:1 [] 
+ checker/small_programs/switch_fallthrough_and_exception_classes: switch_fallthrough_and_exception_classes.php:44:1 [] 
+ checker/small_programs/traits_with_properties_composed_into_a_class: traits_with_properties_composed_into_a_class.php:9:9 [Job] msg: string (native string); this: Job
+@@ -6778,22 +6835,22 @@
+ checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:5:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null)
+ checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:6:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+ checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:7:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:8:5 [] a: A|null; b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:9:5 [] a: A|null; b: A; n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:10:5 [] a: A|null; b: A; n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:11:5 [] a: A|null; b: A; n: int|null (native int|null); plain: string; s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:12:5 [] a: A|null; b: A; list: array{0: A} (native array<A>); n: int|null (native int|null); plain: string; s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:13:5 [] a: A|null; b: A; list: array{0: A} (native array<A>); n: int|null (native int|null); plain: string; s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:8:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:9:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:10:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:11:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:12:5 [] a: A|null (native A|null); b: A (native A); list: array{0: A} (native array<A>); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__0: null_coercions_and_object_probes__0.php:13:5 [] a: A|null (native A|null); b: A (native A); list: array{0: A} (native array<A>); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+ checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:4:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null)
+ checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:5:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null)
+ checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:6:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+ checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:7:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:8:5 [] a: A|null; b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:9:5 [] a: A|null; b: A; n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:10:5 [] a: A|null; b: A; n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:11:5 [] a: A|null; b: A; n: int|null (native int|null); plain: string; s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:12:5 [] a: A|null; b: A; list: array{0: A} (native array<A>); n: int|null (native int|null); plain: string; s: string|null (native string|null); total: int
+-checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:13:5 [] a: A|null; b: A; list: array{0: A} (native array<A>); n: int|null (native int|null); plain: string; s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:8:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:9:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:10:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:11:5 [] a: A|null (native A|null); b: A (native A); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:12:5 [] a: A|null (native A|null); b: A (native A); list: array{0: A} (native array<A>); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
++checker/strict_idioms/null_coercions_and_object_probes__1: null_coercions_and_object_probes__1.php:13:5 [] a: A|null (native A|null); b: A (native A); list: array{0: A} (native array<A>); n: int|null (native int|null); plain: string (native string); s: string|null (native string|null); total: int
+ checker/strict_rules/arithmetic_operands__0: arithmetic_operands__0.php:4:5 [] a: array (native array); b: bool (native bool); f: float (native float); g: GMP (native GMP); i: int (native int); m: mixed; maybe: int|null (native int|null); num: numeric-string (native string); s: string (native string); x: float
+ checker/strict_rules/arithmetic_operands__0: arithmetic_operands__0.php:5:5 [] a: array (native array); b: bool (native bool); f: float (native float); g: GMP (native GMP); i: int (native int); m: mixed; maybe: int|null (native int|null); num: numeric-string (native string); s: string (native string); x: int
+ checker/strict_rules/arithmetic_operands__0: arithmetic_operands__0.php:6:5 [] a: array (native array); b: bool (native bool); f: float (native float); g: GMP (native GMP); i: int (native int); m: mixed; maybe: int|null (native int|null); num: numeric-string (native string); s: string (native string); x: int
+@@ -7486,8 +7543,10 @@
+ checker/uninitialized_dataflow/this_method_calls_inside_an_absorbed_parent_body_dispatch_virtually: this_method_calls_inside_an_absorbed_parent_body_dispatch_virtually.php:17:21 [Child] this: Child; this->x: 1
+ checker/unused_symbols/a_local_variable_assigned_an_unrelated_class_is_not_treated_as_self: a_local_variable_assigned_an_unrelated_class_is_not_treated_as_self.php:7:21 [Foo] this: Foo; x: Other (native Other)
+ checker/unused_symbols/a_local_variable_assigned_an_unrelated_class_is_not_treated_as_self: a_local_variable_assigned_an_unrelated_class_is_not_treated_as_self.php:8:21 [Foo] this: Foo; x: Other (native Other)
++checker/unused_symbols/a_private_constructor_is_used_whatever_its_case: a_private_constructor_is_used_whatever_its_case.php:11:9 [Singleton] 
++checker/unused_symbols/a_private_constructor_is_used_whatever_its_case: a_private_constructor_is_used_whatever_its_case.php:16:9 [Singleton] this: Singleton
+ checker/unused_symbols/always_read_tag_suppresses_a_false_never_read_report: always_read_tag_suppresses_a_false_never_read_report.php:6:21 [Widget] this: Widget; this->count: 1
+-checker/unused_symbols/an_eval_in_a_constructor_body_counts_as_using_every_parameter: an_eval_in_a_constructor_body_counts_as_using_every_parameter.php:4:21 [Scripted] code: string; seed: int (native int); this: Scripted
++checker/unused_symbols/an_eval_in_a_constructor_body_counts_as_using_every_parameter: an_eval_in_a_constructor_body_counts_as_using_every_parameter.php:4:21 [Scripted] code: string (native string); seed: int (native int); this: Scripted
+ checker/unused_symbols/anonymous_class_unused_constructor_parameter_names_the_anonymous_class: anonymous_class_unused_constructor_parameter_names_the_anonymous_class.php:3:17 [] 
+ checker/unused_symbols/anonymous_class_unused_constructor_parameter_names_the_anonymous_class: anonymous_class_unused_constructor_parameter_names_the_anonymous_class.php:5:25 [class@anonymous] seed: int; this: class@anonymous
+ checker/unused_symbols/attribute_class_constructor_parameters_are_not_flagged: attribute_class_constructor_parameters_are_not_flagged.php:5:21 [Route] path: string (native string); this: Route
+@@ -7643,7 +7702,6 @@
+ checker/whitespace/templates_and_code_without_a_closing_tag_are_fine__0: templates_and_code_without_a_closing_tag_are_fine__0.php:2:15 [] 
+ checker/whitespace/templates_and_code_without_a_closing_tag_are_fine__0: templates_and_code_without_a_closing_tag_are_fine__0.php:3:1 [] 
+ checker/whitespace/templates_and_code_without_a_closing_tag_are_fine__1: templates_and_code_without_a_closing_tag_are_fine__1.php:2:1 [] 
+-checker/whitespace/templates_and_code_without_a_closing_tag_are_fine__2: templates_and_code_without_a_closing_tag_are_fine__2.php:1:1 [] 
+ checker/whitespace/templates_and_code_without_a_closing_tag_are_fine__2: templates_and_code_without_a_closing_tag_are_fine__2.php:3:1 [] 
+ checker/whitespace/the_single_newline_after_a_closing_tag_is_part_of_the_tag__0: the_single_newline_after_a_closing_tag_is_part_of_the_tag__0.php:2:1 [] 
+ checker/whitespace/the_single_newline_after_a_closing_tag_is_part_of_the_tag__0: the_single_newline_after_a_closing_tag_is_part_of_the_tag__0.php:3:1 [] 
+@@ -7673,19 +7731,19 @@
+ project/banned/a_banned_type_is_found_in_signatures_properties_and_float_literals: a.php:7:38 [Money] this: Money
+ project/banned/every_banned_construct_is_reported_where_it_appears: a.php:3:5 [] list: array (native array); rest: array<string> (native array<string>)
+ project/banned/every_banned_construct_is_reported_where_it_appears: a.php:4:5 [] list: array (native array); rest: array<string> (native array<string>)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:5:5 [] list: array; rest: array<string> (native array<string>)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:6:5 [] list: array; rest: array<string> (native array<string>)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:7:5 [] list: array; rest: array<string> (native array<string>); x: array|false (native array|false)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:8:5 [] list: array; rest: array<string> (native array<string>); x: array|false (native array|false)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:8:28 [] list: array; rest: array<string> (native array<string>); x: array|false (native array|false)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:9:5 [] list: array; rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:10:5 [] list: array; rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:11:5 [] list: array; rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:12:5 [] list: array; o: string|false|null; rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:13:5 [] g: mixed; list: array; o: string|false|null; rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:14:5 [] g: mixed; list: array; o: string|false|null; rest: array<string> (native array<string>); v: mixed; x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:15:5 [] g: mixed; list: array; m: mixed; o: string|false|null; rest: array<string> (native array<string>); v: mixed; x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+-project/banned/every_banned_construct_is_reported_where_it_appears: a.php:16:5 [] g: mixed; list: array; m: mixed; n: array|false; o: string|false|null; rest: array<string> (native array<string>); v: mixed; x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:5:5 [] list: array (native array); rest: array<string> (native array<string>)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:6:5 [] list: array (native array); rest: array<string> (native array<string>)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:7:5 [] list: array (native array); rest: array<string> (native array<string>); x: array|false (native array|false)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:8:5 [] list: array (native array); rest: array<string> (native array<string>); x: array|false (native array|false)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:8:28 [] list: array (native array); rest: array<string> (native array<string>); x: array|false (native array|false)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:9:5 [] list: array (native array); rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:10:5 [] list: array (native array); rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:11:5 [] list: array (native array); rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:12:5 [] list: array (native array); o: string|false|null; rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:13:5 [] g: mixed; list: array (native array); o: string|false|null; rest: array<string> (native array<string>); x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:14:5 [] g: mixed; list: array (native array); o: string|false|null; rest: array<string> (native array<string>); v: mixed; x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:15:5 [] g: mixed; list: array (native array); m: mixed; o: string|false|null; rest: array<string> (native array<string>); v: mixed; x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
++project/banned/every_banned_construct_is_reported_where_it_appears: a.php:16:5 [] g: mixed; list: array (native array); m: mixed; n: array|false; o: string|false|null; rest: array<string> (native array<string>); v: mixed; x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+ project/banned/every_banned_construct_is_reported_where_it_appears: a.php:17:5 [] g: mixed; list: array (native array); m: mixed; n: array|false; o: string|false|null; rest: array<string> (native array<string>); v: mixed; x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+ project/banned/every_banned_construct_is_reported_where_it_appears: a.php:18:5 [] g: mixed; list: array (native array); m: mixed; n: array|false; o: string|false|null; rest: array<string> (native array<string>); v: mixed; x: array|false (native array|false); y: mixed (native array|false|1); z: bool (native bool)
+ project/banned/only_configured_constructs_are_reported: a.php:2:1 [] a: false (native bool)

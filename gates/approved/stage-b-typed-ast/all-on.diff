@@ -1,0 +1,27 @@
+--- old
++++ new
+@@ -3167,7 +3167,6 @@
+ src/Piwigo/Core/ServerTiming.php	50	36	0	currentTime.time	Calling microtime() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ src/Piwigo/Core/ServerTiming.php	50	46	0	argument.booleanTrap	microtime() argument #1 ($as_float) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Core/ShutdownHandler.php	32	37	6	missingType.callable	Method Piwigo\\Core\\ShutdownHandler::register() has parameter $cleanup with no signature specified for callable.	
+-src/Piwigo/Core/ShutdownHandler.php	47	18	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Core/StringHelper.php	18	25	0	restrictedSymbol.function	Call to restricted function strrpos(): use mb_strrpos() instead; strrpos() counts bytes, not characters	
+ src/Piwigo/Core/StringHelper.php	20	47	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ src/Piwigo/Core/StringHelper.php	29	16	0	restrictedSymbol.function	Call to restricted function strrpos(): use mb_strrpos() instead; strrpos() counts bytes, not characters	
+@@ -16627,8 +16626,6 @@
+ tools/coverage-merge.php	75	27	0	undeclared.composerDependency	Class SebastianBergmann\\FileIterator\\Facade is declared in package phpunit/php-file-iterator, which composer.json doesn't require; it's only installed as another package's dependency.	
+ tools/coverage-merge.php	146	38	0	argument.booleanTrap	SebastianBergmann\\CodeCoverage\\Report\\Text::__construct() argument #2 ($showUncoveredFiles) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tools/doc-drift-check.php	6	24	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-tools/doc-drift-check.php	48	10	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-tools/doc-drift-check.php	60	14	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/doc-drift-check.php	80	17	0	plus.leftNonNumeric	Only numeric types are allowed in +, int|string given on the left side.	
+ tools/i18n/convert-all.php	24	40	0	argument.booleanTrap	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tools/i18n/convert-all.php	28	17	0	restrictedSymbol.function	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+@@ -16646,7 +16643,6 @@
+ tools/i18n/verify-parity.php	83	37	0	restrictedSymbol.function	Call to restricted function strlen(): use mb_strlen() instead; strlen() counts bytes, not characters	
+ tools/i18n/verify-parity.php	149	6	0	comparison.nonComparable	Comparison mixed > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ tools/latte-lint.php	6	24	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-tools/latte-lint.php	50	10	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/latte-lint.php	65	5	0	comparison.nonComparable	Comparison int|bool > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.	Also BcMath\\Number is allowed.
+ tools/normalize-fixture.php	6	24	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/opcache-preload.php	75	24	0	magicNumber.argument	Do not use magic number as a function argument. Move to constant with a suitable name.	
