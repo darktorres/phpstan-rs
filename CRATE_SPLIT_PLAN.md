@@ -4410,6 +4410,8 @@ fixture:
     `checkNullables` set), where today only a wholly invalid operand is:
     `echo $a?->foo` on `Foo|null`, `foreach` over `array<int>|null`,
     `(string)` of `stdClass|null`, `object|string` or a plain `object`,
+    `clone` of `Foo|null` or `mixed` (`clone.nonObject`,
+    `variable-cloning*.php`, 3),
     `[$a] = $arrayOrNull`,
     `...$integersOrNull`, destructuring an `int|list<int>` `foreach` value
     or a nested `stdClass` (`[[$a]] = [new \stdClass()]`, also definite),
@@ -4650,8 +4652,14 @@ fixture:
     6);
   - `__TRAIT__` outside a trait is `magicConstant.outOfTrait` in a
     parameter's or a property's default too (`string $trait =
-    __TRAIT__`, `public $t = __TRAIT__;`), unreported today
-    (`magic-constant*.php`, 6);
+    __TRAIT__`, `public $t = __TRAIT__;`), and `__CLASS__` outside a class
+    `magicConstant.outOfClass`, unreported today (`magic-constant*.php`, 6
+    and 3);
+  - enum cases compared with `<`, `>`, `<=` or `>=` are always false
+    (`Foo::A > Foo::B`; `greater.alwaysFalse`/`smaller.alwaysFalse`,
+    `bug-7052.php`), and a ternary as a statement is
+    `ternary.resultUnused` (`isset($d['x']) ? 'foo' : 'bar';`,
+    `access-properties.php:127`, `bug-7109.php`), both unreported today;
   - a parent's private constant read through a child (`self::PRIVATE_FOO`
     in `Bar extends P`, `$bar::PRIVATE_FOO`) is `classConstant.notFound`
     "undefined constant Bar::PRIVATE_FOO", as PHP reports it, not
@@ -4875,7 +4883,16 @@ fixture:
     a `private(set)`/`protected(set)` static property assigned from outside
     (`assign.staticPropertyPrivateSet`/`ProtectedSet`) and a `@readonly`
     property assigned twice (`assign.readOnlyPropertyByPhpDoc`) are
-    unreported today;
+    unreported today; a get-only virtual property may narrow the
+    overridden type (`int` over `int|string`, as PHP allows), which is
+    `property.nativeType` "not the same" today, a false positive, while
+    widening it is `property.covariant` and widening a set-only one
+    `property.contravariant` (`bug-12466.php`,
+    `property-prototype-from-interface.php`); a `@readonly` property with a
+    default value is `property.readOnlyByPhpDocDefaultValue`, and so is
+    every property of an `@immutable` class and of its subclasses, which
+    are `@readonly` by inheritance; only a property tagged `@readonly`
+    itself is reported today (`read-only-property-phpdoc.php`, 3);
   - a readonly property, native or `@readonly`, read before its
     initialization is reported
     (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
@@ -4962,6 +4979,15 @@ fixture:
     `@immutable` class is `generics.variance` "input (parameter) position"
     today, and the message names a property, not a parameter
     (`bug-13049.php`, `bug-9153.php`, `bug-12964.php`);
+  - class structure errors PHP rejects at compile time: `parent::` in a
+    class without a parent (`class.noParent`; `class-constant-visibility.php`,
+    `bug-12272.php`, `access-static-properties.php`, 3), `implements
+    \iterable` (not an interface; `interface.notFound`, `bug-8889.php`, 2),
+    `break`/`continue` in a property hook outside a loop
+    (`break.outOfLoop`, `continue-break-property-hook.php`, 3), and an
+    unknown `@phpstan-*` tag above a statement or on a hook
+    (`phpDoc.phpstanTag`, `invalid-phpstan-doc*.php`, 3); all unreported
+    today;
   - a template's variance is checked through composition, each parameter
     on its own (`VarianceCheck`, `TemplateTypeVariance::compose`): a
     covariant `X` in `Out<X>`, `In<Out<X>>`, `Inv<X>` (an invariant
