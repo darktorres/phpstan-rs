@@ -502,11 +502,11 @@ through `check-project`.
   `$a | $b` and `$a & $b` over strings give a string in PHP (bytewise;
   `'a' ^ "\x02"` is `'c'`). `binary_operation_type`'s bitwise arm returns
   `int`. (`615ad35d`) Done in `48b1f80f`, with `~` alongside.
-- [ ] **F32. `++` on a string keeps its value.** `$s = 'a'; $s++;` stays
+- [x] **F32. `++` on a string keeps its value.** `$s = 'a'; $s++;` stays
   `'a'` where PHP gives `'b'`: `step` leaves a string unchanged instead of
   applying PHP's string increment (alphanumeric carry; a numeric string
   steps as a number). `null++` gives `int`; PHP gives exactly `1`.
-  (`fd5c800e`)
+  (`fd5c800e`) Done in `b5ffd642`; `++$x` also gave the old value in `infer_expr`.
 - [ ] **F33. A string written as an array key is taken as a string key.**
   `$b = []; $b[$s] = 1;` with `$s: string` infers `array<string, 1>`, but
   PHP turns a numeric string into an int key (`["5" => 1]` has key `5`).
