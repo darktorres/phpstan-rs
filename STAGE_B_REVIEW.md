@@ -148,6 +148,11 @@ Each fix needs a fixture.
   `instanceof`) from an enum's object type expands the enum to its cases
   first, as PHPStan's `EnumCaseObjectType` subtraction does.
 
+- [ ] **P5. A first-class callable has no signature.** `strlen(...)`,
+  `exit(...)` and `$obj->method(...)` are a bare `Closure`; their type is
+  the function's signature as a closure (`Closure(string): int<0, max>`),
+  so a call through the value is checked and typed.
+
 ## Review 2: structure, types crate
 
 - [ ] **T1. One absorption rule for unions.** `union_types_impl` in
@@ -427,7 +432,7 @@ through `check-project`.
 
 ### Wrong types and missed reports (probed)
 
-- [ ] **F1. `exit(...)` is typed `never`.** Since PHP 8.4 `exit`/`die`
+- [x] **F1. `exit(...)` is typed `never`.** (`b09b0cea`) Since PHP 8.4 `exit`/`die`
   are functions and `exit(...)` is a first-class callable. The parser
   (`parser/primary.rs`, exit arm) drops `parse_args`' first-class-callable
   flag, so `$f = exit(...);` is `never` and the rest of the function is
@@ -712,7 +717,7 @@ through `check-project`.
   `Arc<str>`, so call sites convert through the global interner. Extends
   S4. `strict_rules.rs` still gives a static variable the statement's span.
   (`b7c04ec9`)
-- [ ] **F20. `exit` records its form by span width.** `banned.rs` tells a
+- [x] **F20. `exit` records its form by span width.** (`b09b0cea`) `banned.rs` tells a
   bare `exit` from `exit()` by measuring the span; the node doesn't record
   it. (`f9757b0a`)
 - [ ] **F25. The error type is produced by nothing.** `Type::error()`
