@@ -381,6 +381,8 @@ fn expr_disqualifies(
         | ExprKind::DynamicStaticPropertyFetch(..) => true,
         ExprKind::Variable(name) if is_superglobal(name) => true,
         ExprKind::Yield(..) | ExprKind::YieldFrom(_) => true,
+        // Runs a shell command.
+        ExprKind::ShellExec(_) => true,
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
             property_write_target(lhs)
                 || expr_disqualifies(lhs, declaring_class, registry, deps)

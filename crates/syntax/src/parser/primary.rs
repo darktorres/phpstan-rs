@@ -396,28 +396,13 @@ impl Parser {
                 };
                 self.build_interpolated(parts, start)?
             }
-            // `` `cmd $interpolated` `` - shell-exec shorthand. See
-            // `ExprKind::ShellExec`'s own doc comment for why this
-            // wraps, rather than just *is*, the plain `shell_exec()`
-            // call it builds.
+            // `` `cmd $interpolated` `` - shell-exec shorthand.
             Token::ShellExec(_) => {
                 let Token::ShellExec(parts) = self.take_token() else {
                     unreachable!()
                 };
                 let cmd = self.build_interpolated(parts, start)?;
-                let name = self.expr(ExprKind::Name(self.qualified_name("shell_exec")), start);
-                let call = self.expr(
-                    ExprKind::Call(
-                        Box::new(name),
-                        vec![Arg {
-                            name: None,
-                            spread: false,
-                            value: cmd,
-                        }],
-                    ),
-                    start,
-                );
-                self.expr(ExprKind::ShellExec(Box::new(call)), start)
+                self.expr(ExprKind::ShellExec(Box::new(cmd)), start)
             }
             // `namespace\Foo` - a name explicitly relative to the current
             // namespace. Only ever appears as a value in expression

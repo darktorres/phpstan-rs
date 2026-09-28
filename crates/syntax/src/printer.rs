@@ -423,18 +423,14 @@ fn write_expr(out: &mut String, e: &Expr) {
             out.push_str(printed.strip_suffix("()").unwrap_or(&printed));
             out.push_str("(...)");
         }
-        ExprKind::ShellExec(call) => {
+        ExprKind::ShellExec(cmd) => {
             out.push('`');
-            if let ExprKind::Call(_, args) = &call.kind
-                && let [arg] = args.as_slice()
-            {
-                match &arg.value.kind {
-                    ExprKind::Interpolated(parts) => write_interpolated_parts(out, parts),
-                    ExprKind::Literal(Literal::String(s)) => {
-                        out.push_str(&s.to_str_lossy());
-                    }
-                    _ => write_expr(out, &arg.value),
+            match &cmd.kind {
+                ExprKind::Interpolated(parts) => write_interpolated_parts(out, parts),
+                ExprKind::Literal(Literal::String(s)) => {
+                    out.push_str(&s.to_str_lossy());
                 }
+                _ => write_expr(out, cmd),
             }
             out.push('`');
         }

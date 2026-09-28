@@ -213,6 +213,13 @@ pub(crate) fn type_can_never_call_methods(ty: &Type) -> bool {
 }
 
 impl<'a> Checker<'a> {
+    /// What a backtick command returns: `shell_exec()`'s return type.
+    fn shell_exec_type(&self) -> Type {
+        self.registry
+            .lookup_function("shell_exec")
+            .map_or(Type::Mixed(false), |f| f.return_type().clone())
+    }
+
     /// A `new class { ... }` expression's own inferred type - looks its
     /// span up in `anonymous_class_names` (populated once, at parse time,
     /// by `registry::collect_anonymous_classes` - see that module's own
@@ -1822,13 +1829,10 @@ impl<'a> Checker<'a> {
                 }
                 self.cast_type(cast.kind(), &inner_ty)
             }
-            // See `ExprKind::ShellExec`'s own doc comment - a thin
-            // wrapper around the identical `Call` a plain `shell_exec()`
-            // invocation would itself produce, so every consumer besides
-            // this one new check just delegates straight through.
-            ExprKind::ShellExec(inner) => {
+            ExprKind::ShellExec(cmd) => {
                 self.check_backtick_deprecation(e.span);
-                self.check_expr(inner, locals, label)
+                self.check_expr(cmd, locals, label);
+                self.shell_exec_type()
             }
             // A throw expression never actually produces a value - Never
             // is exactly the right type for it, the same way it's used
@@ -4487,7 +4491,7 @@ impl<'a> Checker<'a> {
             // a function that always throws or exits.
             ExprKind::Throw(_) => Type::Never,
             ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
-            ExprKind::ShellExec(inner) => self.infer_expr(inner, locals),
+            ExprKind::ShellExec(_) => self.shell_exec_type(),
             ExprKind::Cast(cast, inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
                 self.cast_type(cast.kind(), &inner_ty)
