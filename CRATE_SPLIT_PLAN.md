@@ -4234,6 +4234,9 @@ the rest), which the gate excludes and lists.
   narrowing predicates, the date / xml / DateInterval validators (as
   throw-type extensions), regex / PCRE, and the date parser.
 - `builtins` is always registered, including by the testing harness.
+- Every return-type extension in Appendix G reaches PHPStan's value in the
+  nsrt suite (3,108 mismatches over 94 extensions today); the items below
+  are the wrong values among them, fixed first.
 - The throw-type extensions `throws/dynamic.rs` lacks are added, each
   throwing only for the arguments that can fail: `array_chunk()`/
   `str_split()` with a length that may be below 1 (`ValueError`),
@@ -6218,3 +6221,248 @@ its owner. Non-Registry keys follow the table.
   reasons in the D6 commit.
 - **`Type` as a closed enum.** Kept. Every PHPStan type concept has its own
   variant, and `ExtensionTypeData` covers open extension data.
+
+## Appendix G: built-in return types against the nsrt suite
+
+The nsrt suite at `76e738b4` has 3,108 mismatches on a call to a function
+one of PHPStan's `Type/Php/*ReturnTypeExtension`s types, spread over 94
+extensions. E2 brings each to PHPStan's value; a mismatch that stays is
+phpstan-rs being right at runtime and is listed as an approved deviation.
+Each entry gives the extension, the functions the suite asserts, the
+mismatch count and files, and one mismatch from the run (phpstan-rs's type
+first). The extensions not listed have no mismatches.
+
+- `FilterVarDynamicReturnTypeExtension` (`filter_var()`; 293, 3 files):
+  `filter_var(17)` is `mixed` where PHPStan has `'17'`;
+- `MinMaxFunctionReturnTypeExtension` (`max()`, `min()`; 217, 10 files):
+  `max([1])` is `mixed` where PHPStan has `1`;
+- `ArrayColumnFunctionReturnTypeExtension` (`array_column()`; 216, 5 files):
+  `array_column($array, 'foo')` is `array` where PHPStan has `list`;
+- `SprintfFunctionDynamicReturnTypeExtension` (`sprintf()`, `vsprintf()`; 136, 6
+  files): `sprintf('%d', $constant)` is `string` where PHPStan has `'0'`;
+- `BcMathStringOrNullReturnTypeExtension` (`bcdiv()`, `bcmod()`, `bcpowmod()`,
+  `bcsqrt()`; 134, 2 files): `bcsqrt('-10')` is `string` where PHPStan has
+  `null`;
+- `CountFunctionReturnTypeExtension` (`count()`, `sizeof()`; 116, 17 files):
+  `count($arr)` is `int<0, max>` where PHPStan has `1`;
+- `ArraySliceFunctionReturnTypeExtension` (`array_slice()`; 102, 4 files):
+  `array_slice($b, 1)` is `non-empty-list` where PHPStan has `list`;
+- `ClassImplementsFunctionReturnTypeExtension` (`class_implements()`,
+  `class_parents()`, `class_uses()`; 90, `class-implements.php`):
+  `class_uses('thisIsNotAClass')` is `array<(int|string), string>|false` where
+  PHPStan has `false`;
+- `ExplodeFunctionDynamicReturnTypeExtension` (`explode()`; 66, 7 files):
+  `explode('', $v)` is `non-empty-list<string>` where PHPStan has `false`;
+- `ArraySearchFunctionDynamicReturnTypeExtension` (`array_search()`; 63, 8
+  files): `array_search('b', $arr)` is `int|false` where PHPStan has `1`;
+- `StrvalFamilyFunctionReturnTypeExtension` (`boolval()`, `floatval()`,
+  `intval()`, `strval()`; 61, 3 files): `intval([])` is `int` where PHPStan has
+  `0`;
+- `HashFunctionsReturnTypeExtension` (`hash()`, `hash_file()`, `hash_hkdf()`,
+  `hash_hmac()`, `hash_hmac_file()`, `hash_pbkdf2()`; 58, 3 files):
+  `hash_hkdf('crc32', 'key')` is `string` where PHPStan has `false`;
+- `RoundFunctionReturnTypeExtension` (`ceil()`, `floor()`, `round()`; 57, 3
+  files): `ceil(array())` is `float` where PHPStan has `false`;
+- `StrIncrementDecrementFunctionReturnTypeExtension` (`str_decrement()`,
+  `str_increment()`; 56, 3 files): `str_decrement($s)` is `string` where PHPStan
+  has `'a'`;
+- `SubstrDynamicReturnTypeExtension` (`mb_substr()`, `substr()`; 55, 10 files):
+  `substr('de_DE', 5, -5)` is `string` where PHPStan has `''`;
+- `ArrayIntersectKeyFunctionReturnTypeExtension` (`array_intersect_key()`; 46, 7
+  files): `array_intersect_key(['a' => 1])` is `array` where PHPStan has
+  `array{a: 1}`;
+- `ArrayMergeFunctionDynamicReturnTypeExtension` (`array_merge()`; 44, 5 files):
+  `array_merge([], ...[])` is `array` where PHPStan has `array{}`;
+- `PregSplitDynamicReturnTypeExtension` (`preg_split()`; 44, `preg_split.php`):
+  `preg_split('/-/', '')` is `list<string>|false` where PHPStan has
+  `array{''}|false`;
+- `ArrayReplaceFunctionReturnTypeExtension` (`array_replace()`; 43, 4 files):
+  `array_replace($array)` is `array` where PHPStan has `non-empty-array`;
+- `ImplodeFunctionReturnTypeExtension` (`implode()`, `join()`; 42, 9 files):
+  `implode(['12', '345'])` is `string` where PHPStan has `'12345'`;
+- `PowFunctionReturnTypeExtension` (`pow()`; 42, `pow.php`): `pow($s, 0)` is
+  `object|int|float` where PHPStan has `1`;
+- `ArrayFillKeysFunctionReturnTypeExtension` (`array_fill_keys()`; 41, 7 files):
+  `array_fill_keys($mixed, 'b')` is `array<'b'>` where PHPStan has `null`;
+- `ArrayCombineFunctionReturnTypeExtension` (`array_combine()`; 40, 6 files):
+  `array_combine([1], [2])` is `array{0: 2}` where PHPStan has `array{1: 2}`;
+- `RangeFunctionReturnTypeExtension` (`range()`; 40, 8 files): `range(2, 5, 2)`
+  is `array` where PHPStan has `array{2, 4}`;
+- `MbSubstituteCharacterDynamicReturnTypeExtension`
+  (`mb_substitute_character()`; 38, 2 files): `mb_substitute_character('')` is
+  `bool|int|string` where PHPStan has `true`;
+- `AbsFunctionDynamicReturnTypeExtension` (`abs()`; 36, `abs.php`):
+  `abs($float)` is `0` where PHPStan has `0.0`;
+- `ArrayMapFunctionReturnTypeExtension` (`array_map()`; 36, 9 files):
+  `array_map(null, [])` is `array` where PHPStan has `array{}`;
+- `ArrayChunkFunctionReturnTypeExtension` (`array_chunk()`; 35, 5 files):
+  `array_chunk($arr, 2)` is `array<array>` where PHPStan has
+  `list<non-empty-list<mixed>>`;
+- `ArrayChangeKeyCaseFunctionReturnTypeExtension` (`array_change_key_case()`;
+  34, 2 files): `array_change_key_case($arr2)` is `array<string, string>` where
+  PHPStan has `array<lowercase-string, string>`;
+- `StrlenFunctionReturnTypeExtension` (`strlen()`; 33, 8 files): `strlen('')` is
+  `int<0, max>` where PHPStan has `0`;
+- `ArrayPadDynamicReturnTypeExtension` (`array_pad()`; 32, `array_pad.php`):
+  `array_pad($listString, $int, 'foo')` is `array<string>` where PHPStan has
+  `list<string>`;
+- `GetClassDynamicReturnTypeExtension` (`get_class()`; 32, 10 files):
+  `get_class($entity)` is `string` where PHPStan has `class-string`;
+- `ArrayKeysFunctionDynamicReturnTypeExtension` (`array_keys()`; 31, 9 files):
+  `array_keys($arr)` is `list` where PHPStan has `array{}`;
+- `MbStrlenFunctionReturnTypeExtension` (`mb_strlen()`; 30, 2 files):
+  `mb_strlen('')` is `int` where PHPStan has `0`;
+- `ArrayReverseFunctionReturnTypeExtension` (`array_reverse()`; 29, 4 files):
+  `array_reverse([])` is `array` where PHPStan has `array{}`;
+- `GetParentClassDynamicFunctionReturnTypeExtension` (`get_parent_class()`; 29,
+  3 files): `get_parent_class(self::class)` is `string|false` where PHPStan has
+  `false`;
+- `ArraySumFunctionDynamicReturnTypeExtension` (`array_sum()`; 26,
+  `array-sum.php`): `array_sum($list)` is `int|float` where PHPStan has `0`;
+- `NonEmptyStringFunctionsReturnTypeExtension` (`addcslashes()`, `addslashes()`,
+  `escapeshellarg()`, `escapeshellcmd()`, `htmlentities()`,
+  `htmlspecialchars()`, `preg_quote()`, `rawurldecode()`, `rawurlencode()`,
+  `urldecode()`, `urlencode()`; 26, 2 files): `urldecode($nonEmpty)` is `string`
+  where PHPStan has `non-empty-string`;
+- `StrCaseFunctionsReturnTypeExtension` (`lcfirst()`, `mb_convert_case()`,
+  `mb_convert_kana()`, `mb_strtolower()`, `mb_strtoupper()`, `strtoupper()`,
+  `ucwords()`; 26, 3 files): `mb_strtolower('Ａｂｃ')` is `'Ａｂｃ'` where PHPStan has
+  `'ａｂｃ'`;
+- `ArrayFilterFunctionReturnTypeExtension` (`array_filter()`; 25, 11 files):
+  `array_filter($falsey)` is `array<int, never>` where PHPStan has `array{}`;
+- `MbConvertEncodingFunctionReturnTypeExtension` (`mb_convert_encoding()`; 25, 3
+  files): `mb_convert_encoding($arr)` is `array|string|false` where PHPStan has
+  `array|false`;
+- `ReplaceFunctionsDynamicReturnTypeExtension` (`preg_replace()`,
+  `preg_replace_callback_array()`, `strtr()`; 25, 6 files): `preg_replace($s,
+  $ls, $ls)` is `string|null` where PHPStan has `lowercase-string|null`;
+- `ArrayFlipFunctionReturnTypeExtension` (`array_flip()`; 23, 7 files):
+  `array_flip($unsealed)[1]` is `0` where PHPStan has `int`;
+- `DateFunctionReturnTypeExtension` (`date()`; 22, 5 files): `date('')` is
+  `string` where PHPStan has `''`;
+- `StrRepeatFunctionReturnTypeExtension` (`str_repeat()`; 22, 4 files):
+  `str_repeat($nonEmpty, 1)` is `string` where PHPStan has `non-empty-string`;
+- `TrimFunctionDynamicReturnTypeExtension` (`chop()`, `rtrim()`, `trim()`; 22, 4
+  files): `trim($foo, $fooOrBar)` is `string` where PHPStan has `''|'foo'`;
+- `StrPadFunctionReturnTypeExtension` (`str_pad()`; 21, 5 files): `str_pad($s,
+  1)` is `string` where PHPStan has `non-empty-string`;
+- `ArrayValuesFunctionDynamicReturnTypeExtension` (`array_values()`; 20, 7
+  files): `array_values($arr)` is `list` where PHPStan has `array{}`;
+- `RandomIntFunctionReturnTypeExtension` (`mt_rand()`, `rand()`, `random_int()`;
+  19, 5 files): `rand(5, 1)` is `int<5, 1>` where PHPStan has `int<1, 5>`;
+- `ArrayFirstLastDynamicReturnTypeExtension` (`array_first()`,
+  `array_key_first()`, `array_key_last()`, `array_last()`; 18, 2 files):
+  `array_last($mixed)` is `mixed|null` where PHPStan has `mixed`;
+- `CountCharsFunctionDynamicReturnTypeExtension` (`count_chars()`; 16, 2 files):
+  `count_chars(self::ABC, 3)` is `array<(int|string), int>|string` where PHPStan
+  has `string`;
+- `FilterInputDynamicReturnTypeExtension` (`filter_input()`; 13, 4 files):
+  `filter_input(-1, 'foo', FILTER_VALIDATE_INT)` is `int|null|false` where
+  PHPStan has `null`;
+- `ArrayFillFunctionReturnTypeExtension` (`array_fill()`; 12, 3 files):
+  `array_fill(2, $integer, new \stdClass())` is `array<stdClass>` where PHPStan
+  has `array<int, stdClass>`;
+- `ArrayRandFunctionReturnTypeExtension` (`array_rand()`; 12,
+  `array-functions.php`): `array_rand(["a" => 1, 2 => "b"])` is `string|2` where
+  PHPStan has `2|'a'`;
+- `DateTimeDynamicReturnTypeExtension` (`date_create_from_format()`,
+  `date_create_immutable_from_format()`; 12, `DateTimeDynamicReturnTypes.php`):
+  `date_create_from_format('Y-m-d', '2022/02/20')` is `DateTime|false` where
+  PHPStan has `false`;
+- `LtrimFunctionReturnTypeExtension` (`ltrim()`; 12, 5 files): `ltrim($foo,
+  $fooOrBar)` is `string` where PHPStan has `''|'foo'`;
+- `VersionCompareFunctionDynamicReturnTypeExtension` (`version_compare()`; 12, 2
+  files): `\version_compare('Foo','Bar','<')` is `int|bool` where PHPStan has
+  `false`;
+- `OpensslCipherFunctionsReturnTypeExtension` (`openssl_cipher_iv_length()`,
+  `openssl_cipher_key_length()`; 11, 3 files):
+  `openssl_cipher_iv_length('unknown')` is `int|false` where PHPStan has
+  `false`;
+- `ParseUrlFunctionDynamicReturnTypeExtension` (`parse_url()`; 11, 2 files):
+  `parse_url('abc.def', PHP_URL_SCHEME)` is `string|false|null` where PHPStan
+  has `null`;
+- `DateTimeCreateDynamicReturnTypeExtension` (`date_create()`,
+  `date_create_immutable()`; 10, `DateTimeCreateDynamicReturnTypes.php`):
+  `date_create('202/20')` is `DateTime|false` where PHPStan has `false`;
+- `CompactFunctionReturnTypeExtension` (`compact()`; 9, 5 files):
+  `compact($dolor)` is `array` where PHPStan has `array<string, mixed>`;
+- `ConstantFunctionReturnTypeExtension` (`constant()`; 9, `constant.php`):
+  `constant('FOO')` is `mixed` where PHPStan has `'foo'`;
+- `IteratorToArrayFunctionReturnTypeExtension` (`iterator_to_array()`; 9,
+  `iterator_to_array.php`): `iterator_to_array($foo)` is `array` where PHPStan
+  has `array<string, int>`;
+- `HighlightStringDynamicReturnTypeExtension` (`highlight_string()`; 8, 2
+  files): `highlight_string($string)` is `string|true` where PHPStan has `true`;
+- `IniGetReturnTypeExtension` (`ini_get()`; 8, 2 files):
+  `ini_get("memory_limit")` is `string|false` where PHPStan has `string`;
+- `PregFilterFunctionReturnTypeExtension` (`preg_filter()`; 8,
+  `preg_filter.php`): `preg_filter($pattern)` is `string|array<(int|string),
+  string>|null` where PHPStan has `list<string>|string|null`;
+- `StrShuffleFunctionReturnTypeExtension` (`str_shuffle()`; 8,
+  `str-shuffle.php`): `str_shuffle($nonES)` is `string` where PHPStan has
+  `non-empty-string`;
+- `StrSplitFunctionReturnTypeExtension` (`mb_str_split()`; 8, 2 files):
+  `mb_str_split('', 1)` is `array` where PHPStan has `array{}`;
+- `GetDebugTypeFunctionReturnTypeExtension` (`get_debug_type()`; 7,
+  `get-debug-type.php`): `get_debug_type($o)` is `string` where PHPStan has
+  `'stdClass'`;
+- `PgLastNoticeDynamicReturnTypeExtension` (`pg_last_notice()`; 7,
+  `pg-last-notice.php`): `pg_last_notice($connection)` is `array|string|bool`
+  where PHPStan has `string`;
+- `TriggerErrorDynamicReturnTypeExtension` (`trigger_error()`; 7, 3 files):
+  `trigger_error('bar', $errorLevels[4])` is `true` where PHPStan has `false`;
+- `DateFormatFunctionReturnTypeExtension` (`date_format()`; 6, 2 files):
+  `date_format($dt, '')` is `string` where PHPStan has `''`;
+- `JsonThrowOnErrorDynamicReturnTypeExtension` (`json_encode()`; 6, 2 files):
+  `json_encode($mixed)` is `string|false` where PHPStan has
+  `non-empty-string|false`;
+- `StrrevFunctionReturnTypeExtension` (`strrev()`; 6, `strrev.php`):
+  `strrev($constantStrings)` is `string` where PHPStan has `'oof'|'rab'`;
+- `ArrayCurrentDynamicReturnTypeExtension` (`current()`; 5, 3 files):
+  `current($a)($b)` is `mixed` where PHPStan has `string`;
+- `CurlGetinfoFunctionDynamicReturnTypeExtension` (`curl_getinfo()`; 5,
+  `curl_getinfo.php`): `curl_getinfo($handle, PHP_EOL)` is `mixed` where PHPStan
+  has `false`;
+- `GetDefinedVarsFunctionReturnTypeExtension` (`get_defined_vars()`; 5,
+  `get-defined-vars.php`);
+- `LocaltimeFunctionDynamicReturnTypeExtension` (`localtime()`; 5,
+  `localeconv.php`);
+- `PathinfoFunctionDynamicReturnTypeExtension` (`pathinfo()`; 5, 2 files):
+  `pathinfo($s, $flag)` is `array|string` where PHPStan has `string`;
+- `ArrayShiftFunctionReturnTypeExtension` (`array_shift()`; 4, 4 files):
+  `array_shift($arr)` is `mixed` where PHPStan has `1|null`;
+- `GettypeFunctionReturnTypeExtension` (`gettype()`; 4, 2 files): `gettype($x)`
+  is `'integer'|'string'` where PHPStan has `'integer'`;
+- `IdateFunctionReturnTypeExtension` (`idate()`; 4, `idate.php`): `idate('Y')`
+  is `int|false` where PHPStan has `int`;
+- `ArrayFindFunctionReturnTypeExtension` (`array_find()`; 3, `array-find.php`):
+  `array_find($array, 'is_int')` is `mixed` where PHPStan has `int|null`;
+- `NumberFormatFunctionDynamicReturnTypeExtension` (`number_format()`; 3,
+  `number_format.php`): `number_format(1002.7, 3, '', '')` is `string` where
+  PHPStan has `numeric-string`;
+- `PgResultStatusDynamicReturnTypeExtension` (`pg_result_status()`; 3,
+  `pg-result-status.php`): `pg_result_status($result)` is `string|int` where
+  PHPStan has `int`;
+- `SscanfFunctionDynamicReturnTypeExtension` (`sscanf()`; 3, `sscanf.php`):
+  `sscanf($s, $s)` is `array|int|null` where PHPStan has `array|null`;
+- `StrTokFunctionReturnTypeExtension` (`strtok()`; 3, `bug-3981.php`):
+  `strtok('', ' ')` is `string|false` where PHPStan has `false`;
+- `ArrayFindKeyFunctionReturnTypeExtension` (`array_find_key()`; 2,
+  `array-find-key.php`): `array_find_key($array, 'is_int')` is
+  `(int|string)|null` where PHPStan has `int|string|null`;
+- `ArrayPopFunctionReturnTypeExtension` (`array_pop()`; 2, 2 files):
+  `array_pop($arr)` is `0|1|2` where PHPStan has `0|1|2|null`;
+- `Base64DecodeDynamicFunctionReturnTypeExtension` (`base64_decode()`; 2,
+  `base64_decode.php`): `base64_decode($string)` is `string|false` where PHPStan
+  has `string`;
+- `DateIntervalFormatFunctionReturnTypeExtension` (`date_interval_format()`; 2,
+  `bug-1452.php`): `date_interval_format($interval, '%a')` is `string` where
+  PHPStan has `lowercase-string&non-empty-string`;
+- `GetCalledClassDynamicReturnTypeExtension` (`get_called_class()`; 2,
+  `bug-14951.php`);
+- `ArrayCountValuesDynamicReturnTypeExtension` (`array_count_values()`; 1,
+  `array-count-values.php`): `array_count_values(returnsStringOrObjectArray())`
+  is `array<int>` where PHPStan has `array<string, int<1, max>>`;
+- `ArrayKeyDynamicReturnTypeExtension` (`key()`; 1, `array-functions.php`):
+  `key($generalStringKeys)` is `int|string|null` where PHPStan has
+  `string|null`.
