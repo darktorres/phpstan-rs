@@ -45,6 +45,11 @@ Legend: `[x]` done (commit given), `[>]` moved to the crate-split plan
     - `array_functions/array_key_first_reports_a_real_key_type_for_a_literal_array_shape`
       and `array_keys_unions_int_and_string_for_a_genuinely_mixed_shape`
       give a shape's literal keys (`'a'|'b'`, `list<0|'name'>`).
+    - `generics_and_templates/a_template_typed_property_reads_as_its_template_inside_the_class`:
+      a `?T` property reads as `T`, losing `null`;
+    - `class_string_template_binds_through_a_nullable_union_parameter` and
+      `declaration_sanity/nullsafe_returned_by_reference_is_flagged` gain
+      level-8 nullable findings (R1-1's shift).
 - [ ] **V2. Corpus run and delta approval** after V1, saved to
   `.corpus-runs/<scope>/<hash>.txt`.
 
@@ -474,6 +479,12 @@ through `check-project`.
   form. The name isn't known non-empty, and `[$c => 1]` gets the key
   `int|string` where a class name is never an int key. Moved to C7's
   resolver list. (found fixing F33)
+- [ ] **F62. `parent` without a parent class is reported twice.** In a
+  class with no parent, `@param parent $p` gives both
+  `parameter.unresolvableType` and `parameter.noParent` at the same
+  parameter (`checker/resolve.rs`'s `check_no_parent_ref` runs on a type
+  the PHPDoc check already found unresolvable). One finding, `noParent`,
+  says what's wrong. (found fixing F34)
 
 ### False positives (from reading)
 
@@ -541,14 +552,14 @@ through `check-project`.
   (and fits `array<int<0, max>, int>`). The literal, the duplicate-key
   check and the spread paths resolve keys three ways; one resolver over
   `to_array_key`. (`323eeb36`, `e024c0bc`) Done in `8febbd1e`; C2 (non-emptiness) stays open.
-- [ ] **F34. Unknown classes in generic arguments and callable signatures
+- [x] **F34. Unknown classes in generic arguments and callable signatures
   go unreported.** `@param Box<NoSuchA>` and `@param callable(NoSuchB):
   void` give no `class.notFound` (`array<NoSuchC>` and `NoSuchD` do).
   `Type::referenced_class_names` walks only array, class-string,
   union/intersection and shape positions, while `nested_class_names`
   walks every child. The unknown-class, trait, parent and internal-prefix
   checks use the partial one. Keep one walker over every child
-  (`has_parent_ref` too). (`3ac29a9a`)
+  (`has_parent_ref` too). (`3ac29a9a`) Done in `d41a83bf`.
 - [ ] **F43. `accepts` lets unsound values through.**
   - Shape against shape (`ArrayShape` and `ObjectShape` arms) ignores the
     given field's `optional`: `array{a?: int}` passes for `array{a: int}`,
