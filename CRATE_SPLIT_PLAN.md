@@ -6479,16 +6479,23 @@ stdio.
   ("thread 'phpstan-rs-lsp-debounce' has overflowed its stack"), and one holding
   120 aborts it during the startup scan, on the main thread. A panic there
   unwinds while holding the `Server` mutex, and the next `lock().unwrap()`
-  panics too. The default panic message is silenced by one hook installed once,
-  quiet on a thread inside an isolated check, instead of swapping the
-  process-global hook (`take_hook`/`set_hook` around the CLI run and in
-  `check_paths_isolating_panics`, racing the LSP's other threads). A parse that
-  panics is an internal error, not a skipped file (`read_and_parse_file` returns
-  `None` for it today). An internal error carries the file, the panic message
-  and location and, under `RUST_BACKTRACE`, the backtrace the hook captured,
-  where today it is the message alone. A request whose handler panics answers
-  `InternalError` and the server keeps serving; today a panicking hover or
-  completion unwinds through the dispatch loop and ends the process.
+  panics too. The hook, the isolated units and the internal-error record land
+  early, in `CRASH_REPORTING_PLAN.md`'s step 1 (its `crash-context` crate): one
+  hook installed once, quiet on a thread inside an isolated unit, replaces the
+  process-global swaps (`take_hook`/`set_hook` around the CLI run, in
+  `check_paths_isolating_panics` and in vendor discovery, racing the LSP's other
+  threads); `crash_context::isolated` wraps each parse, property-facts
+  collection, check, whole-program pass and load step; and `AnalysisResult`'s
+  internal errors are `InternalError`s (the unit, the file the panicking thread
+  was on, the message, the location in phpstan-rs's source and an unresolved
+  backtrace), where today a check keeps its message alone and a parse or facts
+  panic keeps nothing (`read_and_parse_file` returns `None`, counted as a parse
+  error). F1 runs the LSP's handlers on the pool through `isolated` as well, so
+  their panics become internal errors like the workspace check's. The backtrace
+  is captured under `RUST_BACKTRACE`, with a crash-reporting client, or with
+  `-v` (F4). A request whose handler panics answers `InternalError` and the
+  server keeps serving; today a panicking hover or completion unwinds through
+  the dispatch loop and ends the process.
 - **Cancellation, last-good AST, `reconfigure`.** A `CancellationToken` is
   checked between files and at statement boundaries within one, replacing
   `update_file_cancellable`'s per-file `should_abort` closure, and it backs
@@ -6828,14 +6835,18 @@ the whole registry (§1), which C4's memo already removes.
 
   It lives under `tmp_dir` (default the user cache directory,
   `$XDG_CACHE_HOME/phpstan-rs` or its platform equivalent, one cache per
-  canonical project root and config file), at `result_cache_path` when set;
-  entries hold project-relative paths, so a cache restored into another checkout
-  location (a CI cache) still applies (C1's shim stops reporting PHPStan's
-  `tmpDir` and `resultCachePath` as ignored), and is written atomically (a
-  temporary file renamed over it) under a lock (`std::fs::File::lock`), so
-  concurrent runs can't corrupt it; an unreadable or version-mismatched cache is
-  discarded with a warning. A file with an internal error isn't cached.
-  `--no-result-cache` skips it, and the `clear-result-cache` command deletes it.
+  canonical project root and config file, created with mode `0700` on Unix since
+  cached errors quote source; the directory comes from
+  `CRASH_REPORTING_PLAN.md`'s `crash_report::cache_dir()`, which F2 moves down
+  into `project`, where the result cache can reach it, the crash reporter's
+  outbox calling it there), at `result_cache_path` when set; entries hold
+  project-relative paths, so a cache restored into another checkout location (a
+  CI cache) still applies (C1's shim stops reporting PHPStan's `tmpDir` and
+  `resultCachePath` as ignored), and is written atomically (a temporary file
+  renamed over it) under a lock (`std::fs::File::lock`), so concurrent runs
+  can't corrupt it; an unreadable or version-mismatched cache is discarded with
+  a warning. A file with an internal error isn't cached. `--no-result-cache`
+  skips it, and the `clear-result-cache` command deletes it.
 - **Incremental collectors.** Collected data is cached per file; a run
   recollects the analysed files and reruns the project-level rules over the
   merged data. A fact producer → consumer edge keyed by host class (another
@@ -6879,9 +6890,12 @@ Today's five formats (`text`, `friendly`, `json`, `checkstyle`, `junit`) live in
   `identifier`), and `errors[]` for not-file errors. Today's JSON
   (`totals.files_checked`/`diagnostics`, `column`, `level`) becomes
   `phpstan-rs-json`, versioned, with the full record (span start and end, tips,
-  fixes, non-ignorable, internal errors, warnings, stats), which the corpus gate
-  (`xtask`'s runs and `.corpus-runs/README.md`, on `--format json` today)
-  switches to in the same commit.
+  fixes, non-ignorable, internal errors, warnings, stats), and the schema
+  ROADMAP Phase 181's `report` serves. The corpus gate switches to it in the
+  same commit: `xtask`'s per-level and performance runs (`--format json` today),
+  `tools/gate-runner`'s `render_json` call, and the commands in
+  `.corpus-runs/README.md`; Phase 181's `report --export` later replaces the
+  runner (`GATE_SPEED_PLAN.md` S9c).
 - `sarif` (SARIF 2.1.0, which GitHub code scanning and most security dashboards
   ingest): a rule per identifier, each result with its region from the span's
   start and end, its tip, and its fix as a SARIF `fix`.
@@ -6897,9 +6911,11 @@ Today's five formats (`text`, `friendly`, `json`, `checkstyle`, `junit`) live in
   report and a CI file (`--format table --format junit=report.xml`) instead of
   running twice; one without a path writes to stdout, and at most one may.
 - Formatters write through `io::Write` and return its errors: a closed pipe
-  ends the output quietly, the run keeping its exit code. Today
-  `check-project | head -1` panics ("failed printing to stdout: Broken pipe")
-  and exits 101.
+  ends the run quietly with exit code 141 (128 + `SIGPIPE`, what a shell reports
+  for a program the signal ended), any other write error is printed and exits 2.
+  `CRASH_REPORTING_PLAN.md`'s step 1b lands this early for today's formats, and
+  every F3 formatter keeps the contract. Today `check-project | head -1` panics
+  ("failed printing to stdout: Broken pipe") and exits 101.
 - Colour follows the terminal: on when the output is a terminal, off under
   `NO_COLOR`, forced by `FORCE_COLOR` or `--ansi`, disabled by `--no-ansi` (only
   `friendly` reads `NO_COLOR` today).
@@ -6915,17 +6931,21 @@ on.
 - Global flags (`--config`, `--set`, `--level`, `--php-version`,
   `--no-composer`, `--scan-dir`, `--stub-path`, `--format`, `--baseline`,
   `--baseline-match-identifier`, `--baseline-per-identifier`,
-  `--generate-baseline`, `--fix`, `--no-result-cache`, `--no-progress`,
-  and the hidden `--dump-types` and `--emission-order`) are parsed in the bin
-  and passed to `app::run(args, extra)`, which returns the exit code; `main`
-  returns an `ExitCode`, and nothing calls `process::exit`.
+  `--generate-baseline`, `--fix`, `--no-result-cache`, `--no-progress`, and the
+  hidden `--dump-types` and `--emission-order`) are parsed in the bin and passed
+  to `app::run(args, extra)`, which returns the exit code; `main` returns an
+  `ExitCode`, and nothing calls `process::exit` outside the crash reporter's own
+  roles (`CRASH_REPORTING_PLAN.md` §4.1: the reporter and the finisher exit
+  through `crash_report::exit`, which flushes first).
 - A progress line (files analysed of total) goes to stderr when it's a
   terminal, off with `--no-progress` and when stderr isn't one; today a run
   prints nothing until it finishes.
 - The subcommands are `check-project`, `lsp` (accepting `--stdio`),
-  `convert-baseline`, `clear-result-cache` and `completions`; Phase 183's `init`
-  joins them. `check` and `demo` are deleted, their roles moving to the syntax
-  bench, the fixtures and a `project` example. `incremental-bench` becomes
+  `convert-baseline`, `clear-result-cache` and `completions`, plus the crash
+  reporter's hidden `__crash-finish` and its supervisor and worker roles
+  (`CRASH_REPORTING_PLAN.md` §4.1, §4.10); Phase 183's `init` joins them.
+  `check` and `demo` are deleted, their roles moving to the syntax bench, the
+  fixtures and a `project` example. `incremental-bench` becomes
   `project/examples/incremental.rs`, over any directory, plus a criterion bench.
 - PHPStan's command line works as is, so a CI script or tool that runs
   `vendor/bin/phpstan analyse` can run phpstan-rs instead: `analyse` and
