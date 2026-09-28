@@ -3757,7 +3757,8 @@ building on the previous one:
       pre-scan, so the class methods' `return.type` errors disappear too,
       and an `eval()` inside a top-level closure does the same to the whole
       file: `unused-closure-uses.php` reports nothing, 14 of the rules
-      oracle's findings lost.
+      oracle's findings lost, with `bug-12364.php`'s top-level `extract()`
+      (3) and `bug-3690.php`'s `return eval('')` (1).
     - `extract()` of a constant array assigns its keys as variables, with
       optional keys Maybe; only another argument sets `afterExtractCall`.
     - `afterExtractCall` clears the conditional holders and makes every
