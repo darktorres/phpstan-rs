@@ -4352,8 +4352,9 @@ fixture:
     deprecates creating a dynamic property and a readonly class throws;
   - a typed static property checks its assigned value: `R::$s = 'q'` on a
     `static int` is unreported today (PHP throws a `TypeError`);
-  - every write form is checked against the property's type (PHPStan's
-    `TypeExpressionOnlyAssignment` of the whole new value): an append or
+  - every write form is checked against the property's type
+    (`TypesAssignedToPropertiesRule` over each `PropertyAssignNode`, which
+    carries the whole new value): an append or
     offset write (`$this->ints[] = 'foo'` on `array<int>`,
     `$this->byStr[$n] = 1` on `array<string, int>`, `$this->d['age'] =
     'x'` on a shape, nested `$foo->bar['a']['b'][] = 'x'`), a
