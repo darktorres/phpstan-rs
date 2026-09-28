@@ -2240,7 +2240,11 @@ Follow-ups:
     `inherit-phpdoc-merging-var.php`) and so isn't `missingType.property`
     (`protected $message = '…'` in an `Exception` subclass, `public $layout
     = null` over a typed parent: the rules oracle's `bug-11761-bis.php`,
-    `bug-10987.php`, `bug-7074.php`, `bug-7692.php`, `bug-7839.php`).
+    `bug-10987.php`, `bug-7074.php`, `bug-7692.php`, `bug-7839.php`); its
+    default is checked against the inherited type (`$primaryKey = ['abc']`
+    under the parent's `@var string` is `property.defaultValue`,
+    `bug-7074.php`), and an inherited `@phpstan-pure` makes a child's
+    `void` method `pureMethod.void` (`bug-14563.php`).
     Inheritance searches every parent interface: for `interface MC
     extends CC, M` with `add()` declared on the second, an untyped
     `add($item)` in an implementing class reads `$item` as `mixed` and is
@@ -5197,6 +5201,9 @@ fixture:
     (`bug-11535.php`), all unreported today; a named one above a
     destructuring whose native type decides is `varTag.nativeType`, not
     `varTag.type` (`wrong-var-native-type.php:109`);
+  - `#[\Override]` on a constructor is `method.override` (PHP: "no
+    matching parent method exists", constructors don't override;
+    `override-attribute.php:42`), unreported today;
   - `#[\Override]` on a trait member is checked in each host: a trait
     property overriding the host's parent's is `property.override` "no
     matching parent property" today (`property-override-attr.php`);
@@ -5270,7 +5277,10 @@ fixture:
   - the purity checks cover property hooks (`impure.propertyHookCall`,
     `purePropertyHook.void`, `impurePropertyHook.pure`) and a pure
     function's callable-only redundancy
-    (`pureFunction.redundantUnlessCallable`), unreported today; a method
+    (`pureFunction.redundantUnlessCallable`), unreported today; a pure
+    `void` function or method is `pureFunction.void`/`pureMethod.void`
+    under `@throws void` too, which today exempts it as any `@throws`
+    does (`bug-12224.php`, 2); a method
     is pure through an ancestor's `@phpstan-pure`, a hook through its own,
     and a callback a built-in invokes at once (`array_map()`, `array_any()`,
     `array_find()`) is part of the pure caller's body, so an `echo` in any
