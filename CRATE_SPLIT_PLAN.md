@@ -6425,54 +6425,72 @@ resolves a config into a run (`resolve`, `for_fixture`), loads and checks it
 (`load`, `analyse`, `run`), and `AnalysisResult::finalize` applies the level
 filter, inline ignores, `ignore_errors`, the baseline and the order;
 `app::check_project` prepares a CLI run, and the fixture harness
-(`tests/fixtures.rs`) drives `Session::for_fixture`. The rest sits outside it.
-The bin's `report` (`main/check_project.rs`) generates baselines, applies fixes,
-prints and exits. `AnalysisResult` holds the whole `Project`, because the
-finalizer reads inline ignores from it. The language server (`lsp.rs`, 2,842
-lines) builds its own `Project` with its own settings assembly
-(`lsp/workspace_config.rs`), post-filters (`apply_post_filters`: the level,
-`ignore_errors` and the baseline; inline ignores are applied inside the checker,
-`defer_inline_ignores` being off), file walk and incremental path
-(`Project::update_file_cancellable`, `remove_files`, `deps.rs`). The
-observations below come from the debug binary at `56c3beab`, the LSP driven over
-stdio.
+(`tests/fixtures.rs`) drives `Session::for_fixture`. The rest sits outside it:
 
-**F1. Session** (§3.10). Fixed first, each an interim commit with its test on
-today's code, long before the phase, since each ends the language server, loses
-data or corrupts files (Appendix F):
+- the bin's `report` (`main/check_project.rs`) generates baselines, applies
+  fixes, prints and exits;
+- `AnalysisResult` holds the whole `Project`, because the finalizer reads
+  inline ignores from it;
+- the language server (`lsp.rs`, 2,842 lines) builds its own `Project`, with its
+  own settings assembly (`lsp/workspace_config.rs`), post-filters
+  (`apply_post_filters`: the level, `ignore_errors` and the baseline; inline
+  ignores are applied inside the checker, `defer_inline_ignores` being off),
+  file walk and incremental path (`Project::update_file_cancellable`,
+  `remove_files`, `deps.rs`).
 
-- the LSP's debounce thread is spawned with `WORKER_STACK_SIZE` and the
+The LSP and CLI observations below come from the debug binary at `56c3beab`,
+the LSP driven over stdio; the line-terminator ones from `php`; the Windows path
+one from reading the code, not a run.
+
+F1 builds the Session and moves the CLI and the LSP onto it; F2 persists its
+results; F3 and F4 are the formats and the binary over it; F5 is the language
+features over F1's snapshots. Within each, the structural commits land before
+the behaviour commits, and a behaviour commit carries its fixture and, where the
+output changes, its approved deltas for the corpus, type-snapshot and baseline
+gates (§4).
+
+**F1. Session** (§3.10).
+
+*Fixed first.* Each of these ends the language server, loses data or corrupts
+files, so each is an interim commit with its test on today's code, long before
+the phase (Appendix F); the F1 or F5 item that names it later replaces the
+interim fix with the general one:
+
+- the LSP's debounce thread is spawned with `WORKER_STACK_SIZE`, and the
   workspace scan's parses run on the worker pool, so a file of 60 or 120 nested
-  arrays no longer aborts the server (the pool move below makes it general);
+  arrays no longer aborts the server (panic isolation, below);
 - `queue_change` writes `latest_text` when `didChange` arrives, so completion
-  triggered by `>` reads the text with the `->`;
-- `didClose` restores the file's disk content;
-- `--generate-baseline` keeps the entries and `includes` of files the run
-  didn't analyse (it erases them today);
+  triggered by `>` reads the text with the `->` (an edit's text applies at
+  once, below);
+- `didClose` restores the file's disk content (below);
+- `--generate-baseline` keeps the entries and `includes` of files the run didn't
+  analyse, where it erases them today (below);
 - `--fix` skips a file whose content changed since it was analysed, rather than
-  patching it at stale offsets;
-- a closed output pipe ends the run quietly (`CRASH_REPORTING_PLAN.md`'s step 1b).
+  patching it at stale offsets (below);
+- a closed output pipe ends the run quietly (`CRASH_REPORTING_PLAN.md`'s step
+  1b; F3);
+- rename refuses any rename whose sites include a qualified name, an import or
+  an alias, instead of returning an edit that leaves code resolving elsewhere,
+  until F5's rewrite lands.
 
-F5's rename refuses, until its rewrite lands, any rename whose sites include a
-qualified name, an import or an alias, instead of returning an edit that leaves
-code resolving elsewhere.
+*Structural commits*, one each:
 
-Structural commits first, one each:
-
-- **`AnalysisResult` owns its data** instead of the `Project`: file errors,
-  not-file errors and internal errors as separate lists; each analysed file's
-  inline-ignore records (the lines and identifiers its `@phpstan-ignore*`
-  comments cover and where each comment sits, PHPStan's
-  `linesToIgnore`/`unmatchedLineIgnores`), which the finalizer reads instead of
-  `Project::apply_inline_ignores` walking `FileState.ignores` and each file's
-  AST for trait ranges, so a result F2 reads from the cache finalizes without
-  parsing its file; collected data and dependencies; stats (checked, skipped,
-  context loaded, panicked); warnings (config warnings, SQL schema drift, lexer
-  warnings: today `Session.warnings`, `AnalysisResult.lex_warnings` and
-  `Report::notices`, which the bin prints to stderr and no structured format
-  carries); the type dump.
-- **The finalizer** in §3.10's order, with no level stage: E5 runs no rule
-  above the level, so `Finalize.level` and `Overrides.report_level` go, and the
+- **`AnalysisResult` owns its data** instead of the `Project`:
+  - file errors, not-file errors and internal errors, as separate lists;
+  - each analysed file's inline-ignore records (the lines and identifiers its
+    `@phpstan-ignore*` comments cover and where each comment sits, PHPStan's
+    `linesToIgnore`/`unmatchedLineIgnores`), which the finalizer reads instead
+    of `Project::apply_inline_ignores` walking `FileState.ignores` and each
+    file's AST for trait ranges, so a result F2 reads from the cache finalizes
+    without parsing its file;
+  - collected data and dependencies;
+  - stats (checked, skipped, context loaded, panicked);
+  - warnings: config warnings, SQL schema drift and lexer warnings, today
+    `Session.warnings`, `AnalysisResult.lex_warnings` and `Report::notices`,
+    which the bin prints to stderr and no structured format carries;
+  - the type dump.
+- **The finalizer** in §3.10's order, with no level stage: E5 runs no rule above
+  the level, so `Finalize.level` and `Overrides.report_level` go, and the
   fixture harness, which records every level at once through
   `report_level: u8::MAX` today, runs at `max`. Stale baseline entries are
   finalizer output under `reportUnmatched`, like any unmatched ignore, instead
@@ -6491,139 +6509,152 @@ Structural commits first, one each:
   `check_whole_program`) collapse into `run` and `update`, and the
   `project/tests` and `lsp/tests` that drive `Project` move onto them, names
   kept through `gates/test-renames`.
-- **The VFS**: one source of file contents and one file set. Contents come from
-  disk or an editor overlay (open buffers), the overlay first; the walk, the LSP
-  and `--fix` read through it. Membership (analysed, context from scan, stub or
-  composer vendor paths, or neither) is decided once from `paths` and C1's
-  `exclude_paths`, for the batch walk, a file the editor opens and a
-  watched-file event alike. Today `update_file` makes any file it hasn't seen
-  analysed unless it sits under `vendor`, `.git` or `node_modules`: with
-  `paths = ["src"]`, opening `tests/t.php` publishes its `return.type` in the
-  editor, where `check-project` reports nothing, and the file stays analysed for
-  the session. A file's identity is its canonical path (C1's walker dedup), so
-  two spellings of one file are one file (a case-insensitive filesystem's
-  `Foo.php` and `foo.php` included), while each open document keeps the URI its
-  client used, which diagnostics are published under (a workspace opened through
-  a symlink sees its own paths), and a URI the server makes for a file never
-  opened follows its workspace folder's spelling (a drive letter's case, an
-  encoded `:`). The identity is used for comparing and never printed, and on
-  Windows it drops `canonicalize`'s verbatim `\\?\` prefix where that keeps the
-  path valid (as the `dunce` crate does): today `Session::resolve` and
-  `composer_roots` canonicalize the root and compare it with composer's
-  unprefixed manifest paths, so on Windows (a release target, read from the
-  code, not run) no file would match its package's directory, and every
-  package-aware check (package names, composer hygiene, `phpstan_api` gating)
-  would see no package. PHP and LSP both end a line at `\n`, `\r\n` and a lone
-  `\r` (`php` reports the syntax error in `<?php\r$a = 1;\r$b = ;` on line 3),
-  and the lexer's line starts and the line index follow them; the lexer's
-  `compute_line_starts` ends a line at `\n` alone today, so in a file with a
-  lone `\r` every line phpstan-rs reports after it is too low, and inline
-  ignores match the wrong lines. A path that isn't valid UTF-8 round-trips
-  through its URI as bytes, where `path_to_uri` and `percent_decode` go through
-  `to_string_lossy` and `from_utf8_lossy` today and name a file that doesn't
-  exist. The walk and the LSP's file watchers follow C1's `file_extensions`,
-  where both hard-code `.php` today (`collect_php_files`, the `**/*.php`
-  registration), and scan and stub paths outside every workspace folder get
-  watchers of their own (a relative pattern on each base directory), since a
-  change there changes what analysed files resolve. A deleted directory removes
-  every file under it: a client may report a folder's deletion as one event for
-  the folder, and `handle_watched_files_changed` passes that path to
-  `remove_file`, which removes nothing, so the folder's files stay analysed and
-  published. Contents are read when needed and kept only for overlays and the
-  files a request is working on, with each file's line index; today
-  `retain_source` keeps every loaded file's text for the whole LSP session,
-  vendor context included.
+- **The VFS**: one source of file contents and one file set.
+  - *Contents* come from disk or an editor overlay (open buffers), the overlay
+    first; the walk, the LSP and `--fix` read through it. They are read when
+    needed and kept only for overlays and the files a request is working on,
+    with each file's line index; today `retain_source` keeps every loaded
+    file's text for the whole LSP session, vendor context included.
+  - *Membership* (analysed; context from scan, stub or composer vendor paths;
+    or neither) is decided once, from `paths` and C1's `exclude_paths`, for the
+    batch walk, a file the editor opens and a watched-file event alike. Today
+    `update_file` makes any file it hasn't seen analysed unless it sits under
+    `vendor`, `.git` or `node_modules`: with `paths = ["src"]`, opening
+    `tests/t.php` publishes its `return.type` in the editor, where
+    `check-project` reports nothing, and the file stays analysed for the
+    session.
+  - *Identity* is the canonical path (C1's walker dedup), so two spellings of
+    one file are one file, a case-insensitive filesystem's `Foo.php` and
+    `foo.php` included. It is used for comparing, never printed. On Windows it
+    drops `canonicalize`'s verbatim `\\?\` prefix where that keeps the path
+    valid, as the `dunce` crate does: today `Session::resolve` and
+    `composer_roots` canonicalize the root and compare it with composer's
+    unprefixed manifest paths, so on Windows (a release target) no file would
+    match its package's directory, and every package-aware check (package
+    names, composer hygiene, `phpstan_api` gating) would see no package.
+  - *URIs*: each open document keeps the URI its client used, which its
+    diagnostics are published under (a workspace opened through a symlink sees
+    its own paths), and a URI the server makes for a file never opened follows
+    its workspace folder's spelling (a drive letter's case, an encoded `:`). A
+    path that isn't valid UTF-8 round-trips through its URI as bytes, where
+    `path_to_uri` and `percent_decode` go through `to_string_lossy` and
+    `from_utf8_lossy` today and name a file that doesn't exist.
+  - *Lines* end at `\n`, `\r\n` and a lone `\r`, as in PHP and LSP (`php`
+    reports the syntax error in `<?php\r$a = 1;\r$b = ;` on line 3), and the
+    lexer's line starts and the line index follow them. The lexer's
+    `compute_line_starts` ends a line at `\n` alone today, so in a file with a
+    lone `\r` every line phpstan-rs reports after it is too low, and inline
+    ignores match the wrong lines.
+  - *File events*: the walk and the LSP's file watchers follow C1's
+    `file_extensions`, where both hard-code `.php` today (`collect_php_files`,
+    the `**/*.php` registration). Scan and stub paths outside every workspace
+    folder get watchers of their own (a relative pattern on each base
+    directory), since a change there changes what analysed files resolve. A
+    deleted directory removes every file under it: a client may report a
+    folder's deletion as one event for the folder, and
+    `handle_watched_files_changed` passes that path to `remove_file`, which
+    removes nothing, so the folder's files stay analysed and published.
 - **Panic isolation, on the pool.** Every parse and check runs on the process's
   worker pool (`project::worker_pool`, 64 MiB stacks) under `catch_unwind`, and
-  a panic becomes that file's internal error. That covers the batch run and, in
-  the LSP, the workspace scan, `didOpen`, the debounced `didChange` recheck,
-  watched-file events, folder removal, and the requests that run the checker
-  (hover, inlay hints, code actions, completion probes, references' first member
-  index). Today only the batch check and the LSP's whole-workspace check are
-  isolated. The rest run on the LSP's main thread or its debounce thread,
-  spawned with the default 2 MiB stack although `WORKER_STACK_SIZE`'s doc says
-  the checker needs far more. A file holding 60 nested arrays, which
-  `check-project` checks cleanly, aborts the language server on `didChange`
-  ("thread 'phpstan-rs-lsp-debounce' has overflowed its stack"), and one holding
-  120 aborts it during the startup scan, on the main thread. A panic there
-  unwinds while holding the `Server` mutex, and the next `lock().unwrap()`
-  panics too. The hook, the isolated units and the internal-error record land
-  early, in `CRASH_REPORTING_PLAN.md`'s step 1 (its `crash-context` crate): one
-  hook installed once, quiet on a thread inside an isolated unit, replaces the
-  process-global swaps (`take_hook`/`set_hook` around the CLI run, in
-  `check_paths_isolating_panics` and in vendor discovery, racing the LSP's other
-  threads); `crash_context::isolated` wraps each parse, property-facts
-  collection, check, whole-program pass and load step; and `AnalysisResult`'s
-  internal errors are `InternalError`s (the unit, the file the panicking thread
-  was on, the message, the location in phpstan-rs's source and an unresolved
-  backtrace), where today a check keeps its message alone and a parse or facts
-  panic keeps nothing (`read_and_parse_file` returns `None`, counted as a parse
-  error). F1 runs the LSP's handlers on the pool through `isolated` as well, so
-  their panics become internal errors like the workspace check's. The backtrace
-  is captured under `RUST_BACKTRACE`, with a crash-reporting client, or with
-  `-v` (F4). A request whose handler panics answers `InternalError` and the
-  server keeps serving; today a panicking hover or completion unwinds through
-  the dispatch loop and ends the process.
-- **Cancellation, last-good AST, `reconfigure`.** A `CancellationToken` is
-  checked between files and at statement boundaries within one, replacing
+  a panic becomes that file's internal error.
+  - *Where*: the batch run and, in the LSP, the workspace scan, `didOpen`, the
+    debounced `didChange` recheck, watched-file events, folder removal, and the
+    requests that run the checker (hover, inlay hints, code actions, completion
+    probes, references' first member index). Today only the batch check and the
+    LSP's whole-workspace check are isolated. The rest run on the LSP's main
+    thread or its debounce thread, spawned with the default 2 MiB stack although
+    `WORKER_STACK_SIZE`'s doc says the checker needs far more: a file holding 60
+    nested arrays, which `check-project` checks cleanly, aborts the language
+    server on `didChange` ("thread 'phpstan-rs-lsp-debounce' has overflowed its
+    stack"), and one holding 120 aborts it during the startup scan, on the main
+    thread. A panic there unwinds while holding the `Server` mutex, and the next
+    `lock().unwrap()` panics too.
+  - *How*: the hook, the isolated units and the internal-error record land
+    early, in `CRASH_REPORTING_PLAN.md`'s step 1 (its `crash-context` crate).
+    One hook, installed once and quiet on a thread inside an isolated unit,
+    replaces the process-global swaps (`take_hook`/`set_hook` around the CLI
+    run, in `check_paths_isolating_panics` and in vendor discovery, racing the
+    LSP's other threads); `crash_context::isolated` wraps each parse,
+    property-facts collection, check, whole-program pass and load step; and
+    `AnalysisResult`'s internal errors are `InternalError`s (the unit, the file
+    the panicking thread was on, the message, the location in phpstan-rs's
+    source and an unresolved backtrace), where today a check keeps its message
+    alone and a parse or facts panic keeps nothing (`read_and_parse_file`
+    returns `None`, counted as a parse error). The backtrace is captured under
+    `RUST_BACKTRACE`, with a crash-reporting client, or with `-v` (F4).
+  - *Requests*: F1 runs the LSP's handlers on the pool through `isolated` as
+    well. A request whose handler panics answers `InternalError` and the server
+    keeps serving; today a panicking hover or completion unwinds through the
+    dispatch loop and ends the process.
+- **Cancellation and the event loop.** A `CancellationToken` is checked between
+  files and at statement boundaries within one, replacing
   `update_file_cancellable`'s per-file `should_abort` closure, and it backs
   `$/cancelRequest`, whose flags no handler reads today. The loop is ROADMAP
   Phase 187's, event-driven with no timed wakeups (the dispatch loop blocking on
   its channel, the shutdown flag set under the debounce queue's mutex), and the
-  Session's work leaves it: requests run on the pool against the last published
-  snapshot (C4) while an update builds the next, answered in whatever order they
-  finish, while document notifications apply in arrival order. Hover and
-  completion stop waiting behind a recheck that holds the `Server` lock
-  (`DebounceHandle`'s documented trade-off), and a slow request (references'
-  first member index, a workspace symbol search) stops delaying the next. An
-  update publishes the edited file as soon as it is checked, then open
-  documents, then the rest of the affected files; today
-  `update_file_cancellable` checks the whole affected set before anything is
-  published, so the file being typed in waits for its dependents. A file that
-  stops parsing keeps its last good AST, as `update_file` already does by
-  parsing before it unindexes, while its parse errors are published (below);
-  once the parser recovers (below), a declaration the recovered tree still holds
-  is read from it and one the error swallowed keeps its last good version, so
-  the file's dependents don't flood with errors mid-edit. `reconfigure` rebuilds
-  registrations and the file set and reuses unchanged reflection and stub
-  layers: today `reload_configuration` applies settings but can't change the
-  loaded files (`Project` has no unload), so a changed `scan_paths`,
-  `stub_paths` or `no_composer` only logs "reload the window". Changes to
-  `composer.json`, `composer.lock` and `vendor/composer/installed.json`,
-  unwatched today (the watcher registers `**/*.php` only), reconfigure too, and
-  the baseline and the files it includes are watched and reloaded, so
-  regenerating it updates the editor (the LSP reads it once per configuration
-  today).
+  Session's work leaves it:
+  - requests run on the pool against the last published snapshot (C4) while an
+    update builds the next, answered in whatever order they finish, while
+    document notifications apply in arrival order. Hover and completion stop
+    waiting behind a recheck that holds the `Server` lock (`DebounceHandle`'s
+    documented trade-off), and a slow request (references' first member index,
+    a workspace symbol search) stops delaying the next;
+  - an update publishes the edited file as soon as it is checked, then open
+    documents, then the rest of the affected files; today
+    `update_file_cancellable` checks the whole affected set before anything is
+    published, so the file being typed in waits for its dependents.
+- **Last good AST.** A file that stops parsing keeps its last good AST, as
+  `update_file` already does by parsing before it unindexes, while its parse
+  errors are published (below). Once the parser recovers (below), a declaration
+  the recovered tree still holds is read from it, and one the error swallowed
+  keeps its last good version, so the file's dependents don't flood with errors
+  mid-edit.
+- **`reconfigure`** rebuilds registrations and the file set and reuses unchanged
+  reflection and stub layers. Today `reload_configuration` applies settings but
+  can't change the loaded files (`Project` has no unload), so a changed
+  `scan_paths`, `stub_paths` or `no_composer` only logs "reload the window". It
+  runs on a settings change, on a change to the config file, on a change to
+  `composer.json`, `composer.lock` or `vendor/composer/installed.json`
+  (unwatched today: the watcher registers `**/*.php` only), and on a change to
+  the baseline or a file it includes, so regenerating the baseline updates the
+  editor (the LSP reads it once per configuration today).
 - **One Session per root.** Each workspace folder has its own Session and
   config, and a file belongs to the innermost root containing it; the Sessions
   share the worker pool and C5's version-keyed stub layer, so a second root
-  costs its own files, not another copy of the stubs. The client settings are
-  pulled per folder (`workspace/configuration` with each folder's `scopeUri`),
-  so `phpstan-rs.configPath` and `phpstan-rs.enable` can differ between folders;
-  today one unscoped pull serves every folder. Today `root`, `baseline`,
+  costs its own files, not another copy of the stubs. Today `root`, `baseline`,
   `ignore_error_entries`, `level_cutoff` and the project's settings are
-  last-root-wins across folders. A file opened outside every workspace folder
+  last-root-wins across folders. The client settings are pulled per folder
+  (`workspace/configuration` with each folder's `scopeUri`), so
+  `phpstan-rs.configPath` and `phpstan-rs.enable` can differ between folders,
+  where today one unscoped pull serves every folder; and a folder's first load
+  uses them, read from `initializationOptions` and each folder's pull before it
+  loads. Today the server never reads `initialization_options` (a test pins
+  only that it tolerates them), so the startup scan uses the root's
+  `phpstan-rs.toml` and the override arrives with the first configuration pull,
+  after the load, where a changed file set only logs "reload the window".
+- **Files outside every folder.** A file opened outside every workspace folder
   gets a Session rooted at its nearest ancestor holding a config file or
   `composer.json`, else one for the file alone with the default settings, as
   does an unsaved `untitled:` buffer, which is analysed from its overlay and
-  never cached (today `uri_to_path` drops every non-`file:` URI, so a new PHP
-  buffer gets no diagnostics until saved); today it joins the one `Project` with
-  whatever the last root configured, or with no configuration when no folder is
-  open.
-- **The workspace load runs as the CLI's does**: the analysed files and the
+  never cached. Today such a file joins the one `Project` with whatever the last
+  root configured, or with no configuration when no folder is open, and
+  `uri_to_path` drops every non-`file:` URI, so a new PHP buffer gets no
+  diagnostics until saved.
+- **The workspace load runs as the CLI's does.** The analysed files and the
   context the locators load eagerly (Composer `files` entries, functions and
   constants, C5) are parsed in parallel on the pool, in no particular order
   (C4's collision policy doesn't depend on it), and context classes are read on
   demand through C5's locators instead of every vendor file up front, as
-  `load_workspace_files` and `Session::load` both parse today; the load is
-  reported through `$/progress` on a token the server creates
-  (`window/workDoneProgress/create`) when the client supports it; today progress
-  shows only when the client happened to send a token with `initialize`, and a
-  recheck after `reconfigure` or a folder change reports none. Today
+  `load_workspace_files` and `Session::load` both parse today. Today
   `load_workspace_files` parses each file in turn on the main thread inside the
-  `initialized` notification, then checks, and no request is answered until both
-  finish.
-- **LSP parity**, one commit per §1 divergence, each fixtured and held to gate 7:
+  `initialized` notification, then checks, and no request is answered until
+  both finish. The load is reported through `$/progress` on a token the server
+  creates (`window/workDoneProgress/create`) when the client supports it; today
+  progress shows only when the client happened to send a token with
+  `initialize`, and a recheck after `reconfigure` or a folder change reports
+  none.
+- **LSP parity**, one commit per §1 divergence, each fixtured and held to gate
+  7:
   - the project-level rules (E1's collector rules: dead code, members, enum
     cases and abstract classes, duplicates, namespace cycles, architecture,
     class shapes, composer hygiene; ext-mockstan's mock hygiene) run on every
@@ -6632,10 +6663,10 @@ Structural commits first, one each:
     checked file's;
   - composer roots and path-repository promotion (the LSP loads one
     `PackageContext`, at the workspace root);
-    - config errors surface as diagnostics on the config file, each at the
-      offending key's or value's position (the loader keeps the TOML spans
-      beside C1's dotted key path), and a `window/showMessage` (today an
-      `eprintln!` to the server's stderr and an empty config);
+  - config errors surface as diagnostics on the config file, each at the
+    offending key's or value's position (the loader keeps the TOML spans beside
+    C1's dotted key path), and a `window/showMessage` (today an `eprintln!` to
+    the server's stderr and an empty config);
   - paths resolve against the config file's directory: the LSP resolves
     `paths`, `scan_paths`, `stub_paths`, the baseline and the SQL schema against
     the workspace root, which differs when `phpstan-rs.configPath` names a file
@@ -6650,13 +6681,6 @@ Structural commits first, one each:
     (`apply_post_filters` discards them today).
 - **`ResolvedWorkspaceConfig` deleted**, with `workspace_config.rs` and the
   `Server` fields it fed.
-- **The exit code** (approved delta, `tests/cli.rs`): 0 when nothing remains
-  after the finalizer; 1 when a file or not-file error remains; 2 when the
-  result can't be trusted, because the run couldn't start (an invalid config, no
-  files under the paths, an unreadable baseline) or finished incomplete (an
-  internal error), so CI tells a broken run from a failing one. Today every run
-  exits 0 but a config or `--set` error (1): a finding, a parse error, a panic
-  and `check-project nosuchdir` ("no .php files found") all do.
 
 The fixture harness, already on `Session::for_fixture`, gains edit fixtures: a
 scripted sequence of deltas through `update`, each step compared with a fresh
@@ -6664,9 +6688,16 @@ run (gate 7 in miniature). Gate: nothing outside `project` constructs a
 `Checker` or a `Project` (gate 10's engine-construction rule, over `lsp`, whose
 hover, inlay and completion probes build `Checker`s until E6's observers).
 
-Behaviour commits, one each with its fixture and, where the output changes, its
-approved deltas for the corpus, type-snapshot and baseline gates (§4):
+*Behaviour commits*, one each. The run's result:
 
+- **The exit code** (approved delta, `tests/cli.rs`) is decided from the result
+  (Appendix F): 0 when nothing remains after the finalizer; 1 when a file or
+  not-file error remains; 2 when the result can't be trusted, because the run
+  couldn't start (an invalid config, no files under the paths, an unreadable
+  baseline) or finished incomplete (an internal error), so CI tells a broken run
+  from a failing one. F3 adds 141 and F4 130. Today every run exits 0 but a
+  config or `--set` error (1): a finding, a parse error, a panic and
+  `check-project nosuchdir` ("no .php files found") all do.
 - **Parse errors are reported.** A file that fails to parse gets a
   non-ignorable `phpstan.parse` error at the parser's position, in every format
   and in the editor. Today `check-project` counts it ("1 file(s) skipped: parse
@@ -6681,47 +6712,6 @@ approved deltas for the corpus, type-snapshot and baseline gates (§4):
   and reflection and navigation read the recovered declarations, so a method
   added above a syntax error resolves at once, where the last good AST alone
   keeps the file's state from before the edit.
-- **Internal errors are reported in every format** and fail the run, with a
-  note that the result is incomplete; the JSON, checkstyle and JUnit formats
-  drop `check_panics` today.
-- **The baseline is keyed relative to its own directory**, as PHPStan's
-  baseline paths are. Today an entry holds the run's own spelling of the path,
-  normalized lexically only, so a baseline generated at the project root matches
-  nothing in a run from a subdirectory with `--config ../phpstan-rs.toml`, whose
-  paths are `../src/…`. Nothing is released, so the format changes in place,
-  with no new version: gate 6's Stage A baselines are rewritten once in this
-  commit (an approved delta), and the old-format support goes with it, since no
-  released build ever wrote an old file: the version-1 loader (`EntryV1`,
-  `BaselineFileV1`), the `version` field's check and `convert-baseline`.
-- **Non-ignorable errors bypass the baseline**: `entries_for` writes them into
-  a generated baseline, and `baseline::filter` suppresses them (it has no
-  `non_ignorable` check; `ignore_errors::filter` has one). Generation reports
-  how many it left out.
-- **Generating a baseline from part of the project keeps the rest.**
-  `--generate-baseline` over fewer files than the config's paths replaces only
-  the analysed files' entries, and a baseline split into included files keeps
-  its `includes`. Today `write_entries` rewrites the file from the run's entries
-  alone, so `check-project --generate-baseline bl.json src/a.php` erases every
-  other file's entries, and the `includes` list goes with them.
-- **Only an analysed file's baseline entries can be stale.** `baseline::filter`
-  reports every entry left unmatched, so checking one file of a baselined
-  project calls every other file's entries stale: after a baseline of `src`,
-  `check-project --baseline bl.json src/a.php` reports `src/b.php`'s entry "no
-  longer matches any diagnostic". As §3.10 has for `ignore_errors` path entries,
-  an entry counts as unmatched only when its file was analysed.
-- **A baseline that can't be loaded fails the run** (today the error is printed
-  and the run reports unfiltered, exit 0). A clean run's `--generate-baseline`
-  writes an empty baseline, a valid result; paths that match nothing already
-  fail the run.
-- **`--fix` reports what it left.** The diagnostics it fixed leave the printed
-  report (today the pre-fix report prints after fixing, as if nothing had been
-  fixed); a file whose content changed since it was analysed is skipped, not
-  patched at stale offsets (`apply_fixes` re-reads the file and applies the
-  analysis-time offsets to whatever is there); a fix overlapping one already
-  applied is reported as skipped (`apply_fixes` drops it silently, and the
-  summary counts only what applied), and the fixed files are analysed again and
-  fixed again until no fix applies, a fix exposed by another landing in the same
-  run; the exit code reflects what remains.
 - **Deep nesting works on any thread.** The parser's recursive productions, the
   analyser's expression and statement handlers and the type operations over
   nested types grow the stack on demand (`stacker::maybe_grow` at each recursion
@@ -6730,16 +6720,65 @@ approved deltas for the corpus, type-snapshot and baseline gates (§4):
   today (unreported, like every parse error), and the pool's 64 MiB stays a
   throughput choice, not what correctness rests on. D3's iterative binary chains
   stay.
-- **LSP positions follow the negotiated encoding.** A `Span` column counts code
+- **Internal errors are reported in every format** and fail the run, with a
+  note that the result is incomplete; the JSON, checkstyle and JUnit formats
+  drop `check_panics` today.
+
+The baseline:
+
+- **Keyed relative to its own directory**, as PHPStan's baseline paths are.
+  Today an entry holds the run's own spelling of the path, normalized lexically
+  only, so a baseline generated at the project root matches nothing in a run
+  from a subdirectory with `--config ../phpstan-rs.toml`, whose paths are
+  `../src/…`. Nothing is released, so the format changes in place, with no new
+  version: gate 6's Stage A baselines are rewritten once in this commit (an
+  approved delta), and the old-format support goes with it, since no released
+  build ever wrote an old file: the version-1 loader (`EntryV1`,
+  `BaselineFileV1`), the `version` field's check and `convert-baseline`.
+- **Non-ignorable errors bypass it**: `entries_for` writes them into a generated
+  baseline, and `baseline::filter` suppresses them (it has no `non_ignorable`
+  check; `ignore_errors::filter` has one). Generation reports how many it left
+  out.
+- **Generating it from part of the project keeps the rest.**
+  `--generate-baseline` over fewer files than the config's paths replaces only
+  the analysed files' entries, and a baseline split into included files keeps
+  its `includes`. Today `write_entries` rewrites the file from the run's entries
+  alone, so `check-project --generate-baseline bl.json src/a.php` erases every
+  other file's entries, and the `includes` list goes with them.
+- **Only an analysed file's entries can be stale.** `baseline::filter` reports
+  every entry left unmatched, so checking one file of a baselined project calls
+  every other file's entries stale: after a baseline of `src`,
+  `check-project --baseline bl.json src/a.php` reports `src/b.php`'s entry "no
+  longer matches any diagnostic". As §3.10 has for `ignore_errors` path entries,
+  an entry counts as unmatched only when its file was analysed.
+- **One that can't be loaded fails the run** (today the error is printed and the
+  run reports unfiltered, exit 0). A clean run's `--generate-baseline` writes an
+  empty baseline, a valid result; paths that match nothing already fail the run.
+
+Fixes:
+
+- **`--fix` reports what it left.** The diagnostics it fixed leave the printed
+  report (today the pre-fix report prints after fixing, as if nothing had been
+  fixed); a file whose content changed since it was analysed is skipped, not
+  patched at stale offsets (`apply_fixes` re-reads the file and applies the
+  analysis-time offsets to whatever is there); a fix overlapping one already
+  applied is reported as skipped (`apply_fixes` drops it silently, and the
+  summary counts only what applied); and the fixed files are analysed again and
+  fixed again until no fix applies, a fix exposed by another landing in the
+  same run. The exit code reflects what remains.
+
+The language server:
+
+- **Positions follow the negotiated encoding.** A `Span` column counts code
   points. The server announces `utf-8` whenever the client offers it and
   otherwise leaves UTF-16, but sends code-point columns either way
   (`to_lsp_position`, `from_lsp_position`): for `return $s;` after `"é𝄞"` on its
   line it sends character 38, where UTF-8 is 42 and UTF-16 39. `Span` carries
-  byte offsets beside line and column (syntax), and the VFS keeps a line index
-  per file, which converts both ways in the negotiated encoding (UTF-8
-  preferred, then UTF-32, UTF-16 otherwise) and replaces `diagnostics::fix`'s
-  `byte_offset` rescan of the source. Text sync becomes incremental, the edits
-  applied to the overlay through the same index (full-document sync today).
+  byte offsets beside line and column (syntax), and the VFS's line index
+  converts both ways in the negotiated encoding (UTF-8 preferred, then UTF-32,
+  UTF-16 otherwise) and replaces `diagnostics::fix`'s `byte_offset` rescan of
+  the source. Text sync becomes incremental, the edits applied to the overlay
+  through the same index (full-document sync today).
 - **An edit's text applies at once; only its recheck waits.** `didChange`
   updates the overlay and its line index immediately, and the debounce delays
   only the analysis. Today the text itself waits: `queue_change` only queues it,
@@ -6748,13 +6787,13 @@ approved deltas for the corpus, type-snapshot and baseline gates (§4):
   reads the text from before the `->`, and a hover or definition inside the
   window maps the new position onto the old text. A request on a document with
   an unanalysed change runs that document's recheck first (the edited file is
-  checked first anyway, above) or answers from the snapshot with positions
-  mapped through the pending edits.
-- **`didClose` restores the file's disk content**, or removes the file when
-  none exists (an unsaved new file). It is a no-op today, so a file closed
-  without saving keeps being analysed, and its dependents checked, against text
-  that exists nowhere.
-- **LSP protocol conformance.** A request before `initialize` answers
+  checked first anyway) or answers from the snapshot with positions mapped
+  through the pending edits.
+- **`didClose` restores the file's disk content**, or removes the file when none
+  exists (an unsaved new file). It is a no-op today, so a file closed without
+  saving keeps being analysed, and its dependents checked, against text that
+  exists nowhere.
+- **Protocol conformance.** A request before `initialize` answers
   `ServerNotInitialized` and one after `shutdown` `InvalidRequest`; a request
   whose params don't deserialize answers `InvalidParams` (today each handler's
   `serde_json::from_value(…).ok()` turns it into a `null` result,
@@ -6768,16 +6807,20 @@ approved deltas for the corpus, type-snapshot and baseline gates (§4):
   goes through `window/logMessage` and `$/logTrace` at the level `$/setTrace`
   asks for, where today most of it is `eprintln!` to stderr, which a client
   shows, if at all, in a raw output channel.
+- **Untrusted workspaces.** In an untrusted workspace (the client's trust state,
+  passed as an initialization option) the server doesn't connect to a database
+  the workspace's config names (ext-sql's live reflector reads the DDL schema
+  only) and says so once. Today opening a repository whose `phpstan-rs.toml`
+  names a database connects to it with the credentials in the file.
 - **The VS Code extension follows the server** (`editors/vscode`), one commit
   with its `extension.test.ts` cases:
-  - the document selector adds `untitled:` PHP buffers, so the server's
-    analysis of unsaved buffers (above) receives them, and `phpstan-rs.toml`, so
-    an unsaved config edit is validated live; today it is
-    `{ scheme: "file", language: "php" }` only;
+  - the document selector adds `untitled:` PHP buffers, which the server now
+    analyses, and `phpstan-rs.toml`, so an unsaved config edit is validated
+    live; today it is `{ scheme: "file", language: "php" }` only;
   - `configPath` and `enable` are read per workspace folder, as their
-    `"scope": "resource"` declares, and the server pulls them per folder
-    (above); today `startClient` calls `getSettings()` with no folder, reading
-    one value and `buildInitializationOptions` resolves `configPath` against
+    `"scope": "resource"` declares, and the server pulls them per folder; today
+    `startClient` calls `getSettings()` with no folder, reading one value, and
+    `buildInitializationOptions` resolves `configPath` against
     `firstFolderPath()`, the first folder alone;
   - `enable` has one meaning, a folder's analysis off: the server keeps no
     Session for a disabled folder, and the extension stops the server only when
@@ -6790,24 +6833,11 @@ approved deltas for the corpus, type-snapshot and baseline gates (§4):
   - activation adds `workspaceContains:**/phpstan-rs.toml` and
     `workspaceContains:**/composer.json`, so a workspace's diagnostics appear
     before a PHP file is opened; today only `onLanguage:php` activates it;
-    - the first scan uses the configured file: the server takes `configPath`
-      and `enable` from `initializationOptions`, and pulls each folder's
-      settings (`workspace/configuration`) before it loads that folder. Today
-      the server never reads `initialization_options` (a test pins only that it
-      tolerates them), so the startup scan uses the root's `phpstan-rs.toml` and
-      the override arrives with the first configuration pull, after the load,
-      where a changed file set only logs "reload the window";
   - a server found through `serverPath` or `PATH` whose `serverInfo.version`
     differs from the extension's (they are released in lockstep, and the
     downloaded one always matches) is named once in a warning;
-  - `capabilities.untrustedWorkspaces` (below) and the stub content provider
-    (F5) are declared here.
-- **Untrusted workspaces.** The VS Code extension declares
-  `untrustedWorkspaces: limited` and passes the trust state as an initialization
-  option; in an untrusted workspace the server doesn't connect to a database the
-  workspace's config names (ext-sql's live reflector reads the DDL schema only)
-  and says so once. Today opening a repository whose `phpstan-rs.toml` names a
-  database connects to it with the credentials in the file.
+  - `capabilities.untrustedWorkspaces` is `limited`, the trust state passed as
+    an initialization option, and the stub content provider (F5) is declared.
 
 **F2. Result cache and dependencies.** Today nothing persists between runs, and
 the LSP's invalidation is syntactic. `deps.rs` collects the names a file spells
@@ -6845,73 +6875,70 @@ the whole registry (§1), which C4's memo already removes.
   signature rechecks that class's readers, not every reader of the file's other
   declarations; each rechecked file's own fingerprints decide whether it goes
   further.
-- **The persistent cache.** Per analysed file it stores the content hash
-  (BLAKE3), the raw errors (before the finalizer), the inline-ignore records,
-  collected data, dependencies, the fingerprint and the summaries. A run
-  analyses only the files whose content, or whose dependencies' fingerprints,
-  changed; context files (scan and stub paths, vendor code outside the lock) are
-  nodes of the same graph, hashed and fingerprinted, so editing one rechecks its
-  readers instead of discarding the cache; the rest come from the cache, and
-  their declarations are read lazily through the locator (C5) from a cached
-  per-file name index, not parsed. The cache is keyed by a meta hash of:
-  - the binary's identity, as `CRASH_REPORTING_PLAN.md` §4.2 defines it (the
-    version, the release commit from `PHPSTAN_RS_BUILD_COMMIT` when the
-    release workflow set it, the GNU build ID, and the executable's size and
-    modification time), so a rebuilt development binary never reads a stale
-    cache, and a cache format version;
-  - the stub index (stub-sources) and the user stub files;
-  - the config, minus the keys only the finalizer or the formatters read
-    (`ignore_errors`, the baseline, `report_unmatched_ignored_errors`, the
-    output settings);
-  - the PHP version range and the level;
-  - the analysed paths;
-  - each discovered root's `composer.json`, `composer.lock` and
-    `installed.json` (composer hygiene and the PHP version range read the
-    manifests);
-  - the SQL schema file and, when ext-sql reflects a live database, its schema
-    fingerprint, a hidden input otherwise;
-  - each extension's `ResultCacheMeta`.
-
-  It lives under `tmp_dir` (default the user cache directory,
-  `$XDG_CACHE_HOME/phpstan-rs` or its platform equivalent, one cache per
-  canonical project root and config file, created with mode `0700` on Unix since
-  cached errors quote source; the directory comes from
-  `CRASH_REPORTING_PLAN.md`'s `crash_report::cache_dir()`, which F2 moves down
-  into `project`, where the result cache can reach it, the crash reporter's
-  outbox calling it there, with its fallback to a per-user `0700` temporary
-  directory when no cache directory is writable and its `_PHPSTAN_RS_CACHE_DIR`
-  override for parallel tests; with neither writable the run goes uncached, with
-  a warning), at `result_cache_path` when set; entries hold project-relative
-  paths, so a cache restored into another checkout location (a CI cache) still
-  applies (phpstan-rs keys; `init` converts PHPStan's `tmpDir` and
-  `resultCachePath` to them), and is written atomically (a temporary file
-  renamed over it) under a lock (`std::fs::File::lock`), so concurrent runs
-  can't corrupt it; an unreadable or version-mismatched cache is discarded with
-  a warning. The project's cache directory holds one entry set per meta hash,
-  not one overall, so configurations that alternate on one machine (the editor
-  at the config's level beside `analyse --set level=9`, a PHP-version matrix run
-  locally) each keep theirs instead of evicting one another; the four most
-  recently used sets are kept, an older one is deleted when a fifth is written,
-  and a set's entries for files that no longer exist are dropped when it is
-  written. A file with an internal error isn't cached. `--no-result-cache` skips
-  it, and the `clear-result-cache` command deletes it. A config file travels
-  with its repository, so a cloned repository's `phpstan-rs.toml` must not
-  choose where its reader's machine writes: a `tmp_dir` or `result_cache_path`
-  from a config file resolves inside the project root or the user cache
-  directory and is refused otherwise, while the same keys from `--set` or the
-  environment may point anywhere; the cache writes only inside a directory it
-  created, marked by a `CACHEDIR.TAG`, and never replaces a file it didn't
-  write, so `result_cache_path = "~/.bashrc"` fails the run instead of
-  overwriting the file. `clear-result-cache` deletes only such a marked
-  directory. A run whose output needs every file walked (the type dump,
-  `--emission-order`, `--debug`) reads no cached result but still writes the
-  cache, and the fixture harness never uses one.
 - **Incremental collectors.** Collected data is cached per file; a run
   recollects the analysed files and reruns the project-level rules over the
   merged data. A fact producer → consumer edge keyed by host class (another
   file's writes to a private property, read by `property.unusedType`; a trait's
   findings per host) rechecks the consumer when the producer's contribution
   changes.
+- **The persistent cache.** Per analysed file it stores the content hash
+  (BLAKE3), the raw errors (before the finalizer), the inline-ignore records,
+  collected data, dependencies, the fingerprint and the summaries. A run
+  analyses only the files whose content, or whose dependencies' fingerprints,
+  changed. Context files (scan and stub paths, vendor code outside the lock) are
+  nodes of the same graph, hashed and fingerprinted, so editing one rechecks its
+  readers instead of discarding the cache. The rest come from the cache, and
+  their declarations are read lazily through the locator (C5) from a cached
+  per-file name index, not parsed.
+  - *Key*: a meta hash of the binary's identity, as
+    `CRASH_REPORTING_PLAN.md` §4.2 defines it (the version, the release commit
+    from `PHPSTAN_RS_BUILD_COMMIT` when the release workflow set it, the GNU
+    build ID, and the executable's size and modification time), so a rebuilt
+    development binary never reads a stale cache, and a cache format version;
+    the stub index (stub-sources) and the user stub files; the config, minus
+    the keys only the finalizer or the formatters read (`ignore_errors`, the
+    baseline, `report_unmatched_ignored_errors`, the output settings); the PHP
+    version range and the level; the analysed paths; each discovered root's
+    `composer.json`, `composer.lock` and `installed.json` (composer hygiene and
+    the PHP version range read the manifests); the SQL schema file and, when
+    ext-sql reflects a live database, its schema fingerprint, a hidden input
+    otherwise; and each extension's `ResultCacheMeta`.
+  - *Entry sets*: the project's cache directory holds one entry set per meta
+    hash, not one overall, so configurations that alternate on one machine (the
+    editor at the config's level beside `analyse --set level=9`, a PHP-version
+    matrix run locally) each keep theirs instead of evicting one another. The
+    four most recently used sets are kept, an older one is deleted when a fifth
+    is written, and a set's entries for files that no longer exist are dropped
+    when it is written. Entries hold project-relative paths, so a cache restored
+    into another checkout location (a CI cache) still applies.
+  - *Location*: under `tmp_dir`, one cache per canonical project root and
+    config file, or at `result_cache_path` when set (phpstan-rs keys; `init`
+    converts PHPStan's `tmpDir` and `resultCachePath` to them). `tmp_dir`
+    defaults to the user cache directory, `$XDG_CACHE_HOME/phpstan-rs` or its
+    platform equivalent, from `CRASH_REPORTING_PLAN.md`'s
+    `crash_report::cache_dir()`, which F2 moves down into `project`, where the
+    result cache can reach it, the crash reporter's outbox calling it there. It
+    keeps that function's fallback to a per-user `0700` temporary directory when
+    no cache directory is writable and its `_PHPSTAN_RS_CACHE_DIR` override for
+    parallel tests; with neither writable the run goes uncached, with a warning.
+  - *Safety*: the directory is created with mode `0700` on Unix, since cached
+    errors quote source. A config file travels with its repository, so a cloned
+    repository's `phpstan-rs.toml` must not choose where its reader's machine
+    writes: a `tmp_dir` or `result_cache_path` from a config file resolves
+    inside the project root or the user cache directory and is refused
+    otherwise, while the same keys from `--set` or the environment may point
+    anywhere. The cache writes only inside a directory it created, marked by a
+    `CACHEDIR.TAG`, and never replaces a file it didn't write, so
+    `result_cache_path = "~/.bashrc"` fails the run instead of overwriting the
+    file; `clear-result-cache` deletes only such a marked directory.
+  - *Integrity*: the cache is written atomically (a temporary file renamed over
+    it) under a lock (`std::fs::File::lock`), so concurrent runs can't corrupt
+    it; an unreadable or version-mismatched cache is discarded with a warning;
+    a file with an internal error isn't cached.
+  - *Bypass*: `--no-result-cache` skips it and the `clear-result-cache` command
+    deletes it. A run whose output needs every file walked (the type dump,
+    `--emission-order`, `--debug`) reads no cached result but still writes the
+    cache, and the fixture harness never uses one.
 - **The LSP uses the same graph** for `update`, loads the cache at workspace
   open, so reopening an unchanged workspace analyses nothing, and writes back
   the results of files whose overlay matches the disk; an overlay's results are
@@ -6924,67 +6951,74 @@ at every step, exactly a cold run's result (a property test over the fixture
 directories); on the corpus, a warm run after no change equals the cold run and
 analyses no file. The LSP replay gate (gate 7) goes on.
 
-**F3. ErrorFormatter set.** An `ErrorFormatter` (§3.10) takes the finalized
-result (file, not-file and internal errors, warnings, stats) and a writer. The
-exit code is the app's, decided from the result (F1), not each formatter's.
-Today's five formats (`text`, `friendly`, `json`, `checkstyle`, `junit`) live in
-`output.rs` and see only per-file diagnostics.
+**F3. ErrorFormatter set.** Today's five formats (`text`, `friendly`, `json`,
+`checkstyle`, `junit`) live in `output.rs` and see only per-file diagnostics.
+An `ErrorFormatter` (§3.10) takes the finalized result (file, not-file and
+internal errors, warnings, stats) and an `io::Write`, and returns its write
+errors; the exit code is the app's, decided from the result (F1), never a
+formatter's. Third parties register formatters through `app::run`'s
+registration closure.
 
-- Two human formats, not four: nothing is released, so today's `text` and
+The formats:
+
+- **Two human formats, not four**: nothing is released, so today's `text` and
   `friendly` merge into PHPStan's names instead of standing beside them. `raw`
   is one line per error, `path:line:col: message (identifier)` as `text` prints
   it today (PHPStan's `raw` has no column, and the identifier only when
   verbose), a tip line under it, and not-file errors, internal errors and
-  warnings as `?:?:` lines; `table` groups per file with tips, identifiers and
+  warnings as `?:?:` lines. `table` groups per file with tips, identifiers and
   `editorUrl`/`editorUrlTitle` links (`%file%`, `%relFile%`, `%line%`), and on a
   terminal shows each error's code frame as `friendly` does today. The default
   is `table` when stdout is a terminal and `raw` otherwise, so a pipe or an
   editor's problem matcher gets one line per error with no flag.
-- `github`, workflow commands carrying `file`, `line`, `col`, `endLine` and
-  `endColumn` from the span and the identifier as `title` (PHPStan writes
-  `col=0`), warnings as `::warning`, and the whole report as a Markdown table in
-  `$GITHUB_STEP_SUMMARY` when it is set, since GitHub shows at most 10 error and
-  10 warning annotations per step; `gitlab` Code Quality JSON, whose fingerprint
-  hashes the relative path, identifier, message and the finding's index among
-  equal ones, so it survives a line shift that PHPStan's file-line-message hash
-  doesn't, a non-ignorable error being `blocker`; `teamcity`; `ci-detected`,
-  GitHub Actions or TeamCity from the environment and `table` otherwise; `junit`
-  and `checkstyle` with real columns, warnings and not-file errors included.
-- `json` and `prettyJson` in PHPStan's shape: `totals.errors`/`file_errors`,
+- **CI formats**: `github`, workflow commands carrying `file`, `line`, `col`,
+  `endLine` and `endColumn` from the span and the identifier as `title`
+  (PHPStan writes `col=0`), warnings as `::warning`, and the whole report as a
+  Markdown table in `$GITHUB_STEP_SUMMARY` when it is set, since GitHub shows at
+  most 10 error and 10 warning annotations per step; `gitlab` Code Quality JSON,
+  whose fingerprint hashes the relative path, identifier, message and the
+  finding's index among equal ones, so it survives a line shift that PHPStan's
+  file-line-message hash doesn't, a non-ignorable error being `blocker`;
+  `teamcity`; `ci-detected`, GitHub Actions or TeamCity from the environment and
+  `table` otherwise; `junit` and `checkstyle` with real columns, warnings and
+  not-file errors included.
+- **`json` and `prettyJson`** in PHPStan's shape: `totals.errors`/`file_errors`,
   `files.<path>.errors` and `messages[]` (`message`, `line`, `ignorable`, `tip`,
-  `identifier`), and `errors[]` for not-file errors. Today's JSON
-  (`totals.files_checked`/`diagnostics`, `column`, `level`) becomes
-  `phpstan-rs-json`, with the full record (span start and end, tips,
-  fixes, non-ignorable, internal errors, warnings, stats), and the schema
-  ROADMAP Phase 181's `report` serves. The corpus gate switches to it in the
-  same commit: `xtask`'s per-level and performance runs (`--format json` today),
-  `tools/gate-runner`'s `render_json` call, and the commands in
+  `identifier`), and `errors[]` for not-file errors.
+- **`phpstan-rs-json`**, today's JSON (`totals.files_checked`/`diagnostics`,
+  `column`, `level`) renamed and completed into the full record (span start and
+  end, tips, fixes, non-ignorable, internal errors, warnings, stats), the
+  schema ROADMAP Phase 181's `report` serves. The corpus gate switches to it in
+  the same commit: `xtask`'s per-level and performance runs (`--format json`
+  today), `tools/gate-runner`'s `render_json` call, and the commands in
   `.corpus-runs/README.md`; Phase 181's `report --export` later replaces the
   runner (`GATE_SPEED_PLAN.md` S9c).
-- `sarif` (SARIF 2.1.0, which GitHub code scanning and most security dashboards
-  ingest): a rule per identifier, each result with its region from the span's
-  start and end, its tip, and its fix as a SARIF `fix`.
+- **`sarif`** (SARIF 2.1.0, which GitHub code scanning and most security
+  dashboards ingest): a rule per identifier, each result with its region from
+  the span's start and end, its tip, and its fix as a SARIF `fix`.
 
-- Paths: the human and CI formats print a path relative to the working
+Across formats:
+
+- **Paths**: the human and CI formats print a path relative to the working
   directory when it lies under it, else absolute; `json`, as PHPStan's, keys
   files by absolute path; `phpstan-rs-json` keeps paths relative to the project
   root, so the corpus gate's output doesn't depend on the checkout's location
   (today each format prints the run's own spelling, `./b.php`).
-- Warnings, SQL schema drift among them, reach the CI formats; today they go to
-  stderr only.
-- `--format` repeats, each `name[=path]`, so one analysis writes the console
-  report and a CI file (`--format table --format junit=report.xml`) instead of
-  running twice; one without a path writes to stdout, and at most one may.
-- Formatters write through `io::Write` and return its errors: a closed pipe
-  ends the run quietly with exit code 141 (128 + `SIGPIPE`, what a shell reports
-  for a program the signal ended), any other write error is printed and exits 2.
-  `CRASH_REPORTING_PLAN.md`'s step 1b lands this early for today's formats, and
-  every F3 formatter keeps the contract. Today `check-project | head -1` panics
-  ("failed printing to stdout: Broken pipe") and exits 101.
-- Colour follows the terminal: on when the output is a terminal, off under
+- **Warnings**, SQL schema drift among them, reach the CI formats; today they
+  go to stderr only.
+- **Several outputs from one run**: `--format` repeats, each `name[=path]`, so
+  one analysis writes the console report and a CI file
+  (`--format table --format junit=report.xml`) instead of running twice; one
+  without a path writes to stdout, and at most one may.
+- **Write errors**: a closed pipe ends the run quietly with exit code 141 (128 +
+  `SIGPIPE`, what a shell reports for a program the signal ended), and any
+  other write error is printed and exits 2. `CRASH_REPORTING_PLAN.md`'s step 1b
+  lands this early for today's formats, and every F3 formatter keeps the
+  contract. Today `check-project | head -1` panics ("failed printing to stdout:
+  Broken pipe") and exits 101.
+- **Colour** follows the terminal: on when the output is a terminal, off under
   `NO_COLOR`, forced by `FORCE_COLOR` or `--ansi`, disabled by `--no-ansi` (only
   `friendly` reads `NO_COLOR` today).
-- Third parties register formatters through `app::run`'s registration closure.
 
 **F4. Binary.** Today the bin has six subcommands (`check`, `check-project`,
 `incremental-bench`, `lsp`, `demo`, `convert-baseline`), and `check-project` has
@@ -6993,87 +7027,85 @@ fixes, the text summary, the format dispatch), and its error paths call
 `process::exit`, skipping the dhat and hotpath flushes `main`'s comments rely
 on.
 
-- Global flags (`--config`, `--set`, `--level`, `--format`,
-  `--generate-baseline`, `--fix`, `--no-result-cache`, `--no-progress`, and the
-  hidden `--emission-order`, which the determinism check runs on the shipped
-  binary) are parsed in the bin and passed to `app::run(args, extra)`, which
-  returns the exit code; `main` returns an `ExitCode`, and nothing calls
-  `process::exit` outside the crash reporter's own roles
-  (`CRASH_REPORTING_PLAN.md` §4.1: the reporter and the finisher exit through
-  `crash_report::exit`, which flushes first).
-- A flag only ever sets a run's shape; a config key is set through `--set`, as
-  §3.6 has for the per-rule flags. So today's `--php-version`, `--no-composer`,
-  `--scan-dir`, `--stub-path`, `--baseline`, `--baseline-match-identifier` and
-  `--baseline-per-identifier` go for `--set php_version=8.4`,
-  `--set no_composer=true`, `--set 'scan_paths=["lib"]'` and the rest (nothing
-  is released), and xtask, the gate runner and the tests that pass them move in
-  the same commit. `--level` stays, being PHPStan's `-l`. The library follows:
-  `app::check_project::CheckRequest` keeps the config file, the `--set`
-  assignments, the paths, the level and the emission order (its `scan_paths`,
-  `stub_paths`, `php_version`, `no_composer`, `baseline`,
-  `baseline_match_identifier` and `baseline_per_identifier` go),
+- **`main` parses, `app::run` runs.** The flags are parsed in the bin and passed
+  to `app::run(args, extra)`, which returns the exit code; `main` returns an
+  `ExitCode`, and nothing calls `process::exit` outside the crash reporter's own
+  roles (`CRASH_REPORTING_PLAN.md` §4.1: the reporter and the finisher exit
+  through `crash_report::exit`, which flushes first).
+- **The commands.** The analysis command is `analyse`, with `analyze` as its
+  spelling alias, as PHPStan names it; nothing is released, so `check-project`
+  goes rather than staying beside them, and xtask, the gate runner's and
+  `.corpus-runs/README.md`'s commands, `tests/cli.rs`, the README and the VS
+  Code docs move in the same commit. Beside it: `lsp` (accepting `--stdio`),
+  `clear-result-cache` and `completions <shell>` (`clap_complete`), plus the
+  crash reporter's hidden `__crash-finish` and its supervisor and worker roles
+  (`CRASH_REPORTING_PLAN.md` §4.1, §4.10); Phase 183's `init` joins them.
+  `convert-baseline` goes with the old baseline format (F1). `check` and `demo`
+  are deleted, their roles moving to the syntax bench, the fixtures and a
+  `project` example. `incremental-bench` becomes
+  `project/examples/incremental.rs`, over any directory, plus a criterion
+  bench.
+- **A flag sets a run's shape; a config key goes through `--set`**, as §3.6 has
+  for the per-rule flags. The flags are `--config`, `--set`, `--level`,
+  `--format`, `--generate-baseline`, `--fix`, `--no-result-cache`,
+  `--no-progress`, `--ansi`/`--no-ansi`, `-v`, `--debug`, and the hidden
+  `--emission-order`, which the determinism check runs on the shipped binary.
+  Today's `--php-version`, `--no-composer`, `--scan-dir`, `--stub-path`,
+  `--baseline`, `--baseline-match-identifier` and `--baseline-per-identifier` go
+  for `--set php_version=8.4`, `--set no_composer=true`,
+  `--set 'scan_paths=["lib"]'` and the rest (nothing is released), and xtask,
+  the gate runner and the tests that pass them move in the same commit. The only
+  flags that set a config value are PHPStan's own (below): `--level`, its `-l`,
+  and `--autoload-file`. The library follows: `app::check_project::CheckRequest`
+  keeps the config file, the `--set` assignments, the paths, the level and the
+  emission order (its `scan_paths`, `stub_paths`, `php_version`, `no_composer`,
+  `baseline`, `baseline_match_identifier` and `baseline_per_identifier` go);
   `project::session::Overrides` keeps the paths, the level and the emission
-  order (F1 already removes `report_level`), and `Session::for_fixture` turns
+  order (F1 already removes `report_level`); and `Session::for_fixture` turns
   composer discovery off by setting `no_composer` on the fixture's config
-  instead of through an override; every other value reaches the Session as a
+  instead of through an override. Every other value reaches the Session as a
   config key, one path for the command line, the fixtures and the gate runner
   alike.
-- A progress line (files analysed of total) goes to stderr when it's a
-  terminal, off with `--no-progress` and when stderr isn't one; today a run
-  prints nothing until it finishes.
-- The analysis command is `analyse`, with `analyze` as its spelling alias, as
-  PHPStan names it; nothing is released, so `check-project` goes rather than
-  staying beside them, and xtask, the gate runner's and
-  `.corpus-runs/README.md`'s commands, `tests/cli.rs`, the README and the VS
-  Code docs move in the same commit.
-- The subcommands are `analyse`, `lsp` (accepting `--stdio`),
-  `clear-result-cache` and `completions` (`convert-baseline` goes with the old
-  baseline formats, F1), plus the crash reporter's hidden `__crash-finish` and
-  its supervisor and worker roles (`CRASH_REPORTING_PLAN.md` §4.1, §4.10); Phase
-  183's `init` joins them. `check` and `demo` are deleted, their roles moving to
-  the syntax bench, the fixtures and a `project` example. `incremental-bench`
-  becomes `project/examples/incremental.rs`, over any directory, plus a
-  criterion bench.
-- PHPStan's command line works as is, so a CI script or tool that runs
+- **PHPStan's command line works as is**, so a CI script or tool that runs
   `vendor/bin/phpstan analyse` can run phpstan-rs instead: `analyse`/`analyze`
-  is the command itself (above); `-c`/`--configuration`, `-l`/`--level`,
+  is the command itself; `-c`/`--configuration`, `-l`/`--level`,
   `-b`/`--generate-baseline` (its value optional: the config's `baseline` path
-  when set, else `phpstan-rs-baseline.json`), `--error-format` and
-  `--autoload-file` (scanned as context) take PHPStan's meaning;
-  `--ansi`/`--no-ansi` set colour (F3); `-v` adds the run's statistics, elapsed
-  time and peak memory, and internal errors' backtraces without
-  `RUST_BACKTRACE`, `-vv` each phase's timing, `-vvv` each file's; `--debug`
-  analyses one file at a time on one worker, printing each path before it
-  starts, so a crash no isolation can catch (a stack overflow aborts the
-  process) names its file; `--memory-limit` and `--xdebug` are accepted and
-  reported once as ignored. `-c` naming a `.neon` file fails, pointing at `init`
-  (ROADMAP Phase 183).
-- The shipped binary carries no gate-only flag (`GATE_SPEED_PLAN.md` S9c): the
+  when set, else `phpstan-rs-baseline.json`), `--error-format` (`--format`) and
+  `--autoload-file` (scanned as context) take PHPStan's meaning; `-v` adds the
+  run's statistics, elapsed time and peak memory, and internal errors'
+  backtraces without `RUST_BACKTRACE`, `-vv` each phase's timing, `-vvv` each
+  file's; `--debug` analyses one file at a time on one worker, printing each
+  path before it starts, so a crash no isolation can catch (a stack overflow
+  aborts the process) names its file; `--memory-limit` and `--xdebug` are
+  accepted and reported once as ignored. `-c` naming a `.neon` file fails,
+  pointing at `init` (ROADMAP Phase 183).
+- **No gate-only flag** in the shipped binary (`GATE_SPEED_PLAN.md` S9c): the
   type dump is a Session option the gate runner sets through the library (and
   ROADMAP Phase 181's export after it), so the binary's hidden `--dump-types`
   and its `tests/cli.rs` case go; xtask already passes `--dump-types` to the
   runner, not the binary.
-- Flags that contradict each other are rejected: `--fix` with
-  `--generate-baseline` (today the baseline is written and `--fix` silently does
-  nothing).
-- Ctrl-C cancels the run's token: analysis stops at the next statement
+- **Contradicting flags are rejected**: `--fix` with `--generate-baseline`
+  (today the baseline is written and `--fix` silently does nothing).
+- **Progress**: a line of files analysed of total goes to stderr when it's a
+  terminal, off with `--no-progress` and when stderr isn't one; today a run
+  prints nothing until it finishes.
+- **Ctrl-C** cancels the run's token: analysis stops at the next statement
   boundary, the files finished so far are cached, and the process exits 130.
   Today an interrupted run loses everything.
-- `--version` prints the version and, for a release build, its commit
+- **`--version`** prints the version and, for a release build, its commit
   (`PHPSTAN_RS_BUILD_COMMIT`), else `+dev` with the build ID; no build script
   reads `git rev-parse`, whose output changing on every commit would recompile
   the crate and everything above it (`CRASH_REPORTING_PLAN.md` §4.2). It is the
-  identity F2's cache key records. `completions <shell>` prints shell
-  completions (`clap_complete`).
+  identity F2's cache key records.
 - The `format_signature` test moves to `reflection`.
 - `tests/cli.rs` covers every format's output and exit code on a fixture tree
-  holding a finding, a parse error, an internal error (the panic-injection hook)
-  and a warning.
+  holding a finding, a parse error, an internal error (the panic-injection
+  hook) and a warning.
 
 **F5. Language features**, on F1's Session and snapshots, F2's dependency graph,
-E1's reference-site collector and E6's observers, each its own commit with its
-`lsp/tests` cases (the harness driving the Session in LSP mode) and held to gate
-7. The structural query first:
+E1's reference-site collector and E6's observers (Appendix F), each its own
+commit with its `lsp/tests` cases (the harness driving the Session in LSP mode)
+and held to gate 7. The structural query comes first:
 
 - **One position query.** Hover, definition, highlight, signature help and
   completion find what is at a position through one node-at-position query over
@@ -7086,40 +7118,55 @@ E1's reference-site collector and E6's observers, each its own commit with its
   descend into is invisible to that feature alone. The use-site index is E1's
   reference-site collector (Appendix A).
 
-Then the features:
+Navigation:
 
-- **Navigation covers every name.** Definition, type definition, hover,
-  document highlight, references and rename resolve a name in a PHPDoc type
-  (C7's name scope: `@param`, `@var`, `@return`, `@throws`,
-  `@extends`/`@implements`/`@use` arguments, `@method`, `@property`, `@mixin`,
-  template bounds) and in a `use` import as they do one in code. Today, in a
-  file with `use App\Foo;` and `/** @param Foo $f */`, definition and hover
-  answer `null` on both, and references to `App\Foo` list neither.
-- **Navigation resolves the member kind the syntax names.** `Foo::X` is a
-  constant, `Foo::x()` a method and `Foo::$x` a property, separate namespaces in
-  PHP; today `Resolved::Member` carries no kind and the caller tries a method,
-  then a property, then a constant, so in a class declaring both `x()` and
-  `const x`, definition and hover on `Foo::x` go to the method.
-- **Definition reaches every declaration.** A name several files declare (a
-  polyfill beside the built-in, conditional declarations, the duplicates C4's
-  collision policy merges) answers each site, and a built-in's or embedded
-  stub's declaration opens as a read-only document under a `phpstan-rs-stub:`
-  URI (LSP 3.18's `workspace/textDocumentContent`, and the VS Code extension's
-  content provider for older clients). Today `class_declaration` and
-  `function_declaration` answer only an `Origin::File`, so definition on
-  `DateTime` or `array_map` answers nothing, and a name declared twice answers
-  one site.
-- **Hover shows the declaration**, as Markdown when the client's
-  `hover.contentFormat` accepts it: the declaration written as PHP (modifiers,
-  templates, parameters with their native and PHPDoc types and defaults, the
-  return type), a constant's or enum case's value, the doc comment's description
-  with its `@deprecated` and `@throws` tags, and where the symbol comes from
-  (the project, a composer package, a built-in). Today it is a bare
+- **Every name.** Definition, type definition, hover, document highlight,
+  references and rename resolve a name in a PHPDoc type (C7's name scope:
+  `@param`, `@var`, `@return`, `@throws`, `@extends`/`@implements`/`@use`
+  arguments, `@method`, `@property`, `@mixin`, template bounds) and in a `use`
+  import as they do one in code. Today, in a file with `use App\Foo;` and
+  `/** @param Foo $f */`, definition and hover answer `null` on both, and
+  references to `App\Foo` list neither.
+- **The member kind the syntax names.** `Foo::X` is a constant, `Foo::x()` a
+  method and `Foo::$x` a property, separate namespaces in PHP; today
+  `Resolved::Member` carries no kind and the caller tries a method, then a
+  property, then a constant, so in a class declaring both `x()` and `const x`,
+  definition and hover on `Foo::x` go to the method.
+- **Every declaration.** A name several files declare (a polyfill beside the
+  built-in, conditional declarations, the duplicates C4's collision policy
+  merges) answers each site, and a built-in's or embedded stub's declaration
+  opens as a read-only document under a `phpstan-rs-stub:` URI (LSP 3.18's
+  `workspace/textDocumentContent`, and the VS Code extension's content provider
+  for older clients). Today `class_declaration` and `function_declaration`
+  answer only an `Origin::File`, so definition on `DateTime` or `array_map`
+  answers nothing, and a name declared twice answers one site.
+- **Hierarchy**: `textDocument/implementation` (an interface's or abstract
+  method's implementations, a class's subclasses), `typeHierarchy` (supertypes
+  and subtypes) and `callHierarchy` (callers and callees), answered from
+  reflection's `ClassHierarchy` and E1's reference-site collector; none is
+  served today.
+- **The outline is complete**: promoted constructor properties are listed as
+  the class's properties (`private float $r` in `__construct` is missing
+  today), and declarations below the top level (C4's indexed ones in function
+  bodies, `try` and `switch`) are listed where they sit; today only `if` and
+  block nesting is followed.
+
+Hover:
+
+- **The declaration**, as Markdown when the client's `hover.contentFormat`
+  accepts it: the declaration written as PHP (modifiers, templates, parameters
+  with their native and PHPDoc types and defaults, the return type), a
+  constant's or enum case's value, the doc comment's description with its
+  `@deprecated` and `@throws` tags, and where the symbol comes from (the
+  project, a composer package, a built-in). Today it is a bare
   `MarkedString::String` (`class App\Foo extends Base`, `Foo::X: int`) with
   nothing from the doc comment.
-- **Hover at a write shows the written value's type**: on `$x` in
+- **At a write, the written value's type**: on `$x` in
   `$x = make(2.0, true);` it answers `mixed` today, while the inlay hint on the
   same `$x` says `App\Circle`.
+
+References and rename:
+
 - **References are complete; rename touches only what it may rewrite.** Targets
   are keyed by C4's folded names, so `new foo()` is a reference to `App\Foo`:
   today the index keys each site by the name as written, and a differently cased
@@ -7137,7 +7184,7 @@ Then the features:
     bare new name: renaming `App\Foo` to `Bar` turns `\App\Foo` in
     `namespace Other` into `Bar`, which resolves to `Other\Bar`, and leaves
     `use App\Foo;` pointing at nothing while `b(Foo $g)` becomes an unimported
-    `b(Bar $g)`.
+    `b(Bar $g)`. This replaces F1's interim refusal.
   - A rename that would collide with a name already declared or imported in a
     file is refused, naming the file.
   - The new name is checked as an identifier PHP accepts for that kind of
@@ -7153,10 +7200,15 @@ Then the features:
     rename within their function, a parameter's named arguments at its call
     sites included.
   - A class whose file is named after it under a PSR-4 root renames the file
-    too, when the client supports resource operations.
+    too, when the client supports resource operations, and
+    `workspace/willRenameFiles` renaming such a file offers the class rename as
+    its edit.
   - The edit is a versioned `documentChanges` edit, so a client rejects it
     against a document that changed since, where today it is an unversioned
     `changes` map.
+
+Editing aids:
+
 - **Completion reads the scope at the cursor.** It asks the Session for the D6
   scope at the position in the recovered tree, where today `lsp/completion.rs`
   re-lexes the live buffer, finds the enclosing function by name, clones its
@@ -7211,29 +7263,22 @@ Then the features:
   destructuring, `catch` variables and untyped closure and arrow-function
   parameters, where today only an assignment statement's plain variable gets
   one.
+
+Code actions:
+
 - **Quick fixes follow §3.7's fix list**: each of a diagnostic's fixes is its
   own action, the first preferred, and a fix editing several places (an import
   added beside the use it enables) is one edit. Today `Diagnostic.fix` is an
   `Option`, so a diagnostic offers at most one single-edit action, always marked
   preferred.
-- **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
-  the document at once, which editors can run on save; today each quick fix is
-  offered alone.
-- **An ignore code action**: every ignorable diagnostic offers "Ignore
-  `<identifier>` on this line", adding the identifier to a `@phpstan-ignore`
-  comment on the line (or the line above), extending one already there;
-  non-ignorable ones don't.
-- **The outline is complete**: promoted constructor properties are listed as
-  the class's properties (`private float $r` in `__construct` is missing today),
-  and declarations below the top level (C4's indexed ones in function bodies,
-  `try` and `switch`) are listed where they sit; today only `if` and block
-  nesting is followed.
-- **Hierarchy navigation**: `textDocument/implementation` (an interface's or
-  abstract method's implementations, a class's subclasses), `typeHierarchy`
-  (supertypes and subtypes) and `callHierarchy` (callers and callees), answered
-  from reflection's `ClassHierarchy` and E1's reference-site collector; none is
-  served today. `workspace/willRenameFiles` renaming a PSR-4 class's file offers
-  the class rename (above) as its edit.
+- **Fix all** (`source.fixAll.phpstan-rs`) applies every fix in the document at
+  once, which editors can run on save; today each quick fix is offered alone.
+- **Ignore**: every ignorable diagnostic offers "Ignore `<identifier>` on this
+  line", adding the identifier to a `@phpstan-ignore` comment on the line (or
+  the line above), extending one already there; non-ignorable ones don't.
+
+Diagnostics:
+
 - **Pull diagnostics.** A client offering `textDocument/diagnostic` and
   `workspace/diagnostic` pulls them, with `interFileDependencies` and
   `workspace/diagnostic/refresh` after an update changes other files' results;
@@ -7241,12 +7286,12 @@ Then the features:
 - **Diagnostics carry what the protocol has fields for**:
   `DiagnosticTag::Deprecated` on the deprecation rules' findings and
   `Unnecessary` on dead and unused code (identifiers declared with the tag by
-  their rules), and a finding naming other sites (a duplicate declaration's
-  other declarations, a namespace cycle's edges) lists them as
-  `relatedInformation`, where today they are text in the message;
-  `codeDescription` links each identifier to its page in the rule reference
-  (ROADMAP Phase 185), and the tip is a `relatedInformation` entry at the
-  finding's own span instead of being appended to the message text.
+  their rules); a finding naming other sites (a duplicate declaration's other
+  declarations, a namespace cycle's edges) lists them as `relatedInformation`,
+  where today they are text in the message; `codeDescription` links each
+  identifier to its page in the rule reference (ROADMAP Phase 185); and the tip
+  is a `relatedInformation` entry at the finding's own span instead of being
+  appended to the message text.
 
 Gates, over the corpus, each recorded under `.corpus-runs/gate/lsp/<hash>` and
 held to the previous commit's:
@@ -7596,7 +7641,7 @@ its owner. Non-Registry keys follow the table.
   `void|…` return type (E3f), each a false positive on ordinary code; D2 and D5
   name the interim fix. Also fixed first, as Stage F's items name them: bugs
   that end the language server, lose a user's data or write broken code,
-  whatever phase rewrites the code (F1 "Fixed first", F5's rename).
+  whatever phase rewrites the code (F1's "Fixed first").
 - **phpstan-symfony** has no counterpart crate: the ROADMAP's extension
   config mapping marks it unsupported (its rules need the container XML or
   a console application loader).
