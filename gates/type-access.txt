@@ -1,9 +1,8 @@
 # Paths naming a `types::Type` variant outside crates/types, per file.
 # A count may only fall; `cargo xtask arch --bless-types` records a fall.
-# total 1087: 1021 in patterns, 66 in comparisons, 0 building a type
+# total 1068: 1002 in patterns, 66 in comparisons, 0 building a type
 4	crates/phpstan-rs/src/checker.rs
 6	crates/phpstan-rs/src/checker/access_attributes.rs
-12	crates/phpstan-rs/src/checker/assignment.rs
 1	crates/phpstan-rs/src/checker/by_ref_params.rs
 8	crates/phpstan-rs/src/checker/callable_values.rs
 7	crates/phpstan-rs/src/checker/calls.rs
@@ -17,7 +16,7 @@
 4	crates/phpstan-rs/src/checker/current_time.rs
 1	crates/phpstan-rs/src/checker/doctrine/query_builder.rs
 12	crates/phpstan-rs/src/checker/doctrine/result_shape.rs
-141	crates/phpstan-rs/src/checker/expr.rs
+135	crates/phpstan-rs/src/checker/expr.rs
 104	crates/phpstan-rs/src/checker/expr/builtin_calls.rs
 61	crates/phpstan-rs/src/checker/expr/member_resolution.rs
 11	crates/phpstan-rs/src/checker/expr/mysqli.rs
@@ -73,7 +72,7 @@
 1	crates/phpstan-rs/src/checker/throws/too_wide.rs
 1	crates/phpstan-rs/src/checker/type_declarations.rs
 3	crates/phpstan-rs/src/checker/uninitialized_dataflow.rs
-20	crates/phpstan-rs/src/checker/var_tag_types.rs
+19	crates/phpstan-rs/src/checker/var_tag_types.rs
 3	crates/phpstan-rs/src/lsp.rs
 4	crates/phpstan-rs/src/lsp/completion.rs
 1	crates/phpstan-rs/src/lsp/workspace_symbol.rs

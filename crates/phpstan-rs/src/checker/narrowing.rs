@@ -14,15 +14,14 @@ pub(crate) use predicates::{
     propagate_container_field_facts, purge_stale_narrowing_for,
 };
 use types::narrowing::narrow_instanceof_true;
-pub(crate) use types::narrowing::{
-    array_value_type_for_key, narrow_array_shape_by_key_presence, narrow_isset_container,
-    narrow_type_excluding_falsy,
-};
 use types::narrowing::{
     comparison_narrowed_bounds, narrow_array_to_non_list, numeric_bounds_for_narrowing,
     upgrade_array_to_list, upgrade_array_to_non_empty,
 };
 pub(crate) use types::narrowing::{is_known_single_value, narrow_type_excluding, narrow_type_to};
+pub(crate) use types::narrowing::{
+    narrow_array_shape_by_key_presence, narrow_isset_container, narrow_type_excluding_falsy,
+};
 
 /// `count($x)`'s own operand-order detection for the count-comparison
 /// narrowing below - same shape as `int_comparison_operands`, but keyed
@@ -1111,7 +1110,8 @@ impl<'a> Checker<'a> {
                     // "exclude `Null`" half of that for the false
                     // branch, a different, already-covered concern).
                     if branch_true
-                        && let Some(value_ty) = array_value_type_for_key(&narrowed, &lit_key)
+                        && let Some(value_ty) =
+                            narrowed.offset_value_type(Some(&types::ShapeKey::from_name(&lit_key)))
                     {
                         locals.insert(format!("{arr_key}[{lit_key}]"), value_ty);
                     }

@@ -1,7 +1,7 @@
 use crate::checker::expr::ranges::{NullProbeVerdictFn, expr_reads_a_property};
 use crate::checker::{
-    Checker, Locals, array_value_type_for_key, literal_string_key,
-    narrow_array_shape_by_key_presence, narrowing_type_for_predicate,
+    Checker, Locals, literal_string_key, narrow_array_shape_by_key_presence,
+    narrowing_type_for_predicate,
 };
 use syntax::ast::*;
 use syntax::token::Span;
@@ -222,7 +222,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 if narrow_array_shape_by_key_presence(&base_ty, &key, false) == Type::Never {
-                    return array_value_type_for_key(&base_ty, &key);
+                    return base_ty.offset_value_type(Some(&types::ShapeKey::from_name(&key)));
                 }
                 None
             }

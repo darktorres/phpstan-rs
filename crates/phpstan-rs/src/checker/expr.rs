@@ -17,7 +17,7 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
-use types::{self, AccessoryKind, Relation, Shape, ShapeKey, Type};
+use types::{self, AccessoryKind, Relation, Shape, Type};
 
 mod array_ops;
 mod builtin_calls;
@@ -2213,7 +2213,14 @@ impl<'a> Checker<'a> {
                         // across a loop's multi-pass fixed-point
                         // convergence must resolve here exactly as
                         // `infer_expr`'s identical read does.
-                        index_result_type(base_ty, literal_string_key(i).as_deref())
+                        base_ty
+                            .offset_value_type(
+                                literal_string_key(i)
+                                    .as_deref()
+                                    .map(types::ShapeKey::from_name)
+                                    .as_ref(),
+                            )
+                            .unwrap_or(Type::mixed())
                     }
                     // `OffsetAccessWithoutDimForReadingRule` - every
                     // write target routes around this arm, and a
@@ -4838,7 +4845,9 @@ impl<'a> Checker<'a> {
                     return narrowed.clone();
                 }
                 let key = literal_string_key(idx);
-                index_result_type(self.infer_expr(base, locals), key.as_deref())
+                (self.infer_expr(base, locals))
+                    .offset_value_type(key.as_deref().map(types::ShapeKey::from_name).as_ref())
+                    .unwrap_or(Type::mixed())
             }
             ExprKind::Name(name) => self
                 .global_constant_type(name)
@@ -5712,80 +5721,6 @@ fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
             .reduce(union_types)
             .unwrap_or(Type::mixed()),
         other => other.clone(),
-    }
-}
-
-/// The type of `container[key]` for a known container type - shared by
-/// `infer_expr`'s `Index` arm and its own recursion into a
-/// `Type::Union`'s members. `preg_match`'s `Union` of `ArrayShape`s (the
-/// matched shape, unioned with an empty one for the no-match case) needs
-/// this same per-key resolution combined across every member via
-/// `union_types`, rather than silently dropping to `Mixed` for the whole
-/// type just because it's a `Union` - general infrastructure for a
-/// `Union` whose members agree on a key's type, not what recovers
-/// precision for `preg_match`'s common case (that's `apply_narrowing`'s
-/// `preg_match_condition` recognizer, `checker/narrowing.rs`).
-pub(crate) fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
-    match container_ty {
-        Type::Array(_, inner) => *inner,
-        // A genuinely empty shape has zero possible keys, so a dynamic
-        // key read is unconditionally real PHP's "undefined array key"
-        // warning, returning `null` - without this, an incremented,
-        // auto-vivifying fresh dynamic key (`$counts = []; ... =
-        // ++$counts[$c];`) would read back bare `Mixed` instead of
-        // `Null`, so the increment arm's `Null -> Int` transition
-        // (`advance_incdec_type`) would never engage.
-        //
-        // Scoped to a dynamic key only (`key.is_none()`), not a literal
-        // one too - `preg_match`'s by-ref `$matches` shape is a `Union`
-        // whose "no match" branch is exactly this same empty shape, and
-        // a literal-keyed read there (`$matches[1]`, unconditionally,
-        // with no narrowing) is this project's deliberate leniency:
-        // absorbing into `Mixed` rather than sharpening to `|null` and
-        // forcing every unnarrowed `$matches[N]` access to handle a null
-        // case most callers never bother to. A literal key miss already
-        // has its own "key not found" diagnostic path
-        // (`check_offset_existence`) regardless of what this function
-        // returns.
-        Type::ArrayShape(shape) if shape.is_empty_array() && key.is_none() => Type::null(),
-        Type::ArrayShape(shape) => key
-            .and_then(|k| shape.field(&ShapeKey::from_name(k)))
-            .map(|f| f.ty.clone())
-            .unwrap_or(Type::mixed()),
-        Type::Union(members) => members
-            .into_iter()
-            .map(|m| index_result_type(m, key))
-            .reduce(union_types)
-            .unwrap_or(Type::mixed()),
-        // A `list<T>`/`non-empty-array<T>`-typed value is a real
-        // `Intersection([Array(T), Accessory(_)])`, not plain
-        // `Array(T)` - without this, indexing into one (`$listArg[0]`)
-        // would fall to `Mixed`.
-        //
-        // A container that also carries a `hasOffsetValue(key, value)`
-        // member for this exact literal key (`write_literal_key_aware`'s
-        // own doc comment - `checker::assignment`'s construction site)
-        // must resolve to that tracked precise `value` instead of the
-        // base `Array`'s own coarse element type - mirrors real
-        // PHPStan's identical read-side resolution, confirmed via
-        // `assertType()`. Checked before the generic `array_element_type`
-        // fallback below, which has no way to single out one specific
-        // key at all.
-        Type::Intersection(members) => {
-            let has_offset_value = key.and_then(|k| {
-                members.iter().find_map(|m| match m {
-                    Type::HasOffsetValue(mk, v) if mk.is(k) => Some((**v).clone()),
-                    _ => None,
-                })
-            });
-            has_offset_value.unwrap_or_else(|| {
-                members
-                    .into_iter()
-                    .find_map(|m| m.array_value_type())
-                    .unwrap_or(Type::mixed())
-            })
-        }
-        _ => Type::mixed(),
     }
 }
 

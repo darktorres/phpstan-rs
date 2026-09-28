@@ -54,18 +54,6 @@ fn is_constant_value(ty: &Type) -> bool {
     }
 }
 
-fn offset_value_type(ty: &Type, key: &Type) -> Type {
-    match ty {
-        Type::ArrayShape(shape) => {
-            let Some(key) = types::ShapeKey::from_type(key) else {
-                return Type::mixed();
-            };
-            shape.field(&key).map_or(Type::mixed(), |f| f.ty.clone())
-        }
-        other => other.array_value_type().unwrap_or(Type::mixed()),
-    }
-}
-
 /// A native iterable's element type - known only for an array; an
 /// object's comes from PHPDoc generics.
 fn native_iterable_value(ty: &Type) -> Type {
@@ -595,8 +583,14 @@ impl<'a> Checker<'a> {
                         None => Type::int_literal(i as i64),
                     };
                     let item_described = Described {
-                        native: offset_value_type(&described.native, &key),
-                        doc: offset_value_type(&described.doc, &key),
+                        native: described
+                            .native
+                            .offset_value_type(types::ShapeKey::from_type(&key).as_ref())
+                            .unwrap_or(Type::mixed()),
+                        doc: described
+                            .doc
+                            .offset_value_type(types::ShapeKey::from_type(&key).as_ref())
+                            .unwrap_or(Type::mixed()),
                         shape: ValueShape::Other,
                     };
                     self.collect_target_checks(

@@ -36,7 +36,7 @@ fn array_value_type_for_key_returns_none_for_a_missing_shape_key() {
         false,
     )]));
     assert_eq!(
-        narrowing::array_value_type_for_key(&shape, "b"),
+        shape.offset_value_type(Some(&types::ShapeKey::from_name("b"))),
         None,
         "a shape genuinely missing the key has no value type to offer"
     );

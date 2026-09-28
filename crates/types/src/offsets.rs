@@ -44,6 +44,41 @@ impl Type {
         }
     }
 
+    /// PHPStan's `getOffsetValueType()` for an array: the value at `key`,
+    /// `None` for an offset not known literally (every value it could
+    /// be; `null` from `array{}`). `None` when this isn't an array, or a
+    /// sealed shape surely lacks `key`.
+    pub fn offset_value_type(&self, key: Option<&ShapeKey>) -> Option<Type> {
+        match self {
+            Type::Array(_, value) => Some((**value).clone()),
+            Type::ArrayShape(shape) => match key {
+                Some(key) => match shape.field(key) {
+                    Some(field) => Some(field.ty.clone()),
+                    None => shape.unsealed.as_deref().map(|tail| tail.1.clone()),
+                },
+                None if shape.is_empty_array() => Some(Type::Null),
+                None => self.array_value_type(),
+            },
+            Type::Intersection(members) => {
+                let tracked = key.and_then(|key| {
+                    members.iter().find_map(|m| match m {
+                        Type::HasOffsetValue(k, v) if k == key => Some((**v).clone()),
+                        _ => None,
+                    })
+                });
+                tracked.or_else(|| members.iter().find_map(|m| m.offset_value_type(key)))
+            }
+            Type::Union(members) | Type::BenevolentUnion(members) => members
+                .iter()
+                .map(|m| m.offset_value_type(key))
+                .collect::<Option<Vec<_>>>()?
+                .into_iter()
+                .reduce(union_types),
+            Type::TemplateParam(param) => param.bound.offset_value_type(key),
+            _ => None,
+        }
+    }
+
     /// PHPStan's `setOffsetValueType()`: this array after `[offset] =
     /// value`, `offset` `None` for an append (`[] = value`); `None` when
     /// this type doesn't carry enough shape to update precisely. A

@@ -2,7 +2,7 @@
 //! from an excluded one, by key presence, by truthiness, and the array
 //! and integer refinements comparisons and counts prove.
 
-use crate::{AccessoryKind, PhpString, Relation, ShapeField, ShapeKey, Type, union_types};
+use crate::{AccessoryKind, PhpString, Relation, ShapeField, ShapeKey, Type};
 use syntax::ast::BinOp;
 
 /// A comparison's own truth value, canonicalized to "the narrowed side
@@ -639,49 +639,6 @@ pub fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
             }
         }
         _ => ty.clone(),
-    }
-}
-
-/// `HasOffsetValueType` equivalent, adapted to this
-/// project's own type system rather than replicating real PHPStan's -
-/// real PHPStan represents "definitely has offset `key`, value type `V`"
-/// as a whole new `CompoundType`/`AccessoryType` (`Type::Accessory::
-/// HasOffsetType`/`HasOffsetValueType`, ~40 polymorphic methods,
-/// `TypeCombinator`-intersected onto the base array type) because its
-/// own `ConstantArrayType` (the `ArrayShape` equivalent) is reserved for
-/// a *fully* known literal shape - a general `array<K, V>` needs a
-/// *separate* vehicle to carry "and I also know this one extra key
-/// exists" without claiming to know every other key too. This project
-/// has no such restriction (`Type::ArrayShape` was never scoped to
-/// "fully known" in the first place), and already has the exact right
-/// mechanism for "I know more about this one specific access than the
-/// container's own general type says" - a composite `narrowing_key`
-/// entry (`"arr[key]"`), the same one `is_string($info['code'])`-style
-/// per-element narrowing already writes and `infer_expr`'s own `Index`
-/// arm already reads back first. So instead of building a new
-/// accessory-type hierarchy, `array_key_exists`'s own true-branch
-/// narrowing (below) writes `"arr[key]" => this function's own result`
-/// directly, alongside its existing `$arr`-wide `narrow_array_shape_by_
-/// key_presence` call - no new `Type` variant, no `TypeCombinator`
-/// equivalent needed. Derived from `ty` *after* shape-based narrowing
-/// (not the pre-narrowing type), so a `Union` member `narrow_array_
-/// shape_by_key_presence` already proved impossible doesn't also
-/// contribute a bogus value type here. `None` when nothing in `ty`
-/// carries a real value type for `key` at all (an unrelated type, or an
-/// `ArrayShape` genuinely missing the key - only reachable when
-/// `present` was `false`, so the composite key isn't written for that
-/// branch anyway).
-pub fn array_value_type_for_key(ty: &Type, key: &str) -> Option<Type> {
-    match ty {
-        Type::ArrayShape(shape) => shape.field(&ShapeKey::from_name(key)).map(|f| f.ty.clone()),
-        Type::Array(_, value_ty) => Some((**value_ty).clone()),
-        Type::Union(members) => members
-            .iter()
-            .map(|m| array_value_type_for_key(m, key))
-            .collect::<Option<Vec<Type>>>()?
-            .into_iter()
-            .reduce(union_types),
-        _ => None,
     }
 }
 

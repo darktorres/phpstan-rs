@@ -1249,7 +1249,7 @@ pub(crate) use internal_usage::class_type_word;
 pub(crate) use missing_typehint::{ITERABLE_GENERIC_CLASS_NAMES, class_kind_word};
 pub(crate) use named_argument_renames::NamedArgumentCallFacts;
 pub(crate) use narrowing::{
-    array_value_type_for_key, count_call_operand, is_known_single_value, is_real_variable_key,
+    count_call_operand, is_known_single_value, is_real_variable_key,
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
     narrow_type_to, narrowing_key, narrowing_type_for_predicate, propagate_container_field_facts,
     purge_stale_narrowing_for,

@@ -241,38 +241,12 @@ impl<'a> Checker<'a> {
         let (ExprKind::ArrayLiteral(items) | ExprKind::List(items)) = &lhs.kind else {
             return;
         };
-        match ty {
-            Type::ArrayShape(shape) => {
-                for (position, item) in items.iter().enumerate() {
-                    let field_key = match item.key.as_ref().map(|k| &k.kind) {
-                        Some(ExprKind::Literal(Literal::String(s))) => {
-                            Some(ShapeKey::from_name(&s.to_str_lossy()))
-                        }
-                        Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
-                        Some(_) => None,
-                        None => Some(ShapeKey::Int(position as i64)),
-                    };
-                    let element_ty = field_key
-                        .and_then(|k| shape.field(&k))
-                        .map(|f| f.ty.clone())
-                        .unwrap_or(Type::mixed());
-                    self.check_param_out_assignment(&item.value, &element_ty);
-                    self.check_by_ref_destructuring(&item.value, &element_ty);
-                }
-            }
-            Type::Array(..) | Type::Intersection(_) => {
-                let element_ty = ty.array_value_type().unwrap_or(Type::mixed());
-                for item in items {
-                    self.check_param_out_assignment(&item.value, &element_ty);
-                    self.check_by_ref_destructuring(&item.value, &element_ty);
-                }
-            }
-            _ => {
-                for item in items {
-                    self.check_param_out_assignment(&item.value, &Type::mixed());
-                    self.check_by_ref_destructuring(&item.value, &Type::mixed());
-                }
-            }
+        for (position, item) in items.iter().enumerate() {
+            let element_ty = ty
+                .offset_value_type(destructured_key(item, position).as_ref())
+                .unwrap_or(Type::mixed());
+            self.check_param_out_assignment(&item.value, &element_ty);
+            self.check_by_ref_destructuring(&item.value, &element_ty);
         }
     }
 
@@ -353,49 +327,16 @@ impl<'a> Checker<'a> {
                 self.probe_hit_at(lhs.span, &ty);
                 locals.declare(name.to_string(), ty, lhs.span);
             }
-            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => match &ty {
-                // A known array shape (from a `@return array{0: int, 1:
-                // string}`-typed source, most commonly) carries real
-                // per-position/per-key types - a plain homogeneous
-                // `Type::Array` fallback would silently discard that
-                // precision. A keyed destructuring element (`['key' =>
-                // $x] = $shaped`) looks up its own literal key directly;
-                // a positional element (`[$a, $b] = $shaped`, the common
-                // tuple-destructuring case) looks up the field whose key
-                // is that position's own index ("0", "1", ...).
-                Type::ArrayShape(shape) => {
-                    for (position, item) in items.iter().enumerate() {
-                        let field_key = match item.key.as_ref().map(|k| &k.kind) {
-                            Some(ExprKind::Literal(Literal::String(s))) => {
-                                Some(ShapeKey::from_name(&s.to_str_lossy()))
-                            }
-                            Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
-                            Some(_) => None,
-                            None => Some(ShapeKey::Int(position as i64)),
-                        };
-                        let element_ty = field_key
-                            .and_then(|k| shape.field(&k))
-                            .map(|f| f.ty.clone())
-                            .unwrap_or(Type::mixed());
-                        self.bind_assignment_target(&item.value, element_ty, locals);
-                    }
+            // Each element takes the value at its key: a keyed element's
+            // literal key, a positional one's index.
+            ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
+                for (position, item) in items.iter().enumerate() {
+                    let element_ty = ty
+                        .offset_value_type(destructured_key(item, position).as_ref())
+                        .unwrap_or(Type::mixed());
+                    self.bind_assignment_target(&item.value, element_ty, locals);
                 }
-                // `Type::array_value_type` also sees through an
-                // `Intersection`-wrapped `list<T>`/`non-empty-array<T>` -
-                // without it, destructuring one (`[$a, $b] = $listTypedVar`)
-                // would lose its real element type down to `Mixed`.
-                Type::Array(..) | Type::Intersection(_) => {
-                    let element_ty = ty.array_value_type().unwrap_or(Type::mixed());
-                    for item in items {
-                        self.bind_assignment_target(&item.value, element_ty.clone(), locals);
-                    }
-                }
-                _ => {
-                    for item in items {
-                        self.bind_assignment_target(&item.value, Type::mixed(), locals);
-                    }
-                }
-            },
+            }
             // `$x['newKey'] = $value;` adds a real key to `$x`'s
             // tracked shape when `$x` already holds a known one (most
             // commonly, from an earlier `$x = []` or `$x = ['a' => 1]`
@@ -611,24 +552,8 @@ impl<'a> Checker<'a> {
             ExprKind::Index(..) => self.nested_write_container_type(inner, locals),
             _ => self.infer_expr(inner, locals),
         };
-        let shapes: Vec<&Shape> = match &inner_ty {
-            Type::ArrayShape(shape) => vec![shape],
-            Type::Union(members) => {
-                let shapes: Vec<_> = members
-                    .iter()
-                    .filter_map(|m| match m {
-                        Type::ArrayShape(shape) => Some(shape),
-                        _ => None,
-                    })
-                    .collect();
-                if shapes.len() != members.len() {
-                    return self.infer_expr(e, locals);
-                }
-                shapes
-            }
-            _ => return self.infer_expr(e, locals),
-        };
-        if shapes.iter().any(|shape| !shape.is_sealed()) {
+        let shapes = inner_ty.constant_arrays();
+        if shapes.is_empty() {
             return self.infer_expr(e, locals);
         }
         let absent = match idx.as_deref() {
@@ -709,8 +634,9 @@ impl<'a> Checker<'a> {
                         [s] => Some(s.to_string()),
                         _ => None,
                     });
-                let inner_container =
-                    crate::checker::expr::index_result_type(container.clone(), key.as_deref());
+                let inner_container = container
+                    .offset_value_type(key.as_deref().map(types::ShapeKey::from_name).as_ref())
+                    .unwrap_or(Type::mixed());
                 self.check_destructuring_offsets(inner, &inner_container, locals);
             }
         }
@@ -848,10 +774,22 @@ pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
 /// variable to the union of every element, not one resolved literal per
 /// pass). Empty for anything else, never a guess.
 fn literal_keys_from_type(ty: &Type) -> Vec<String> {
-    match ty {
-        Type::StringLiteral(s) => vec![s.to_string()],
-        Type::IntLiteral(n) => vec![n.to_string()],
-        Type::Union(members) => members.iter().flat_map(literal_keys_from_type).collect(),
-        _ => Vec::new(),
+    ty.union_members()
+        .iter()
+        .filter_map(|m| match m.int_literal_value() {
+            Some(n) => Some(n.to_string()),
+            None => m.constant_strings().first().map(|s| s.to_string()),
+        })
+        .collect()
+}
+
+/// The key a destructuring element reads: its literal key, its position
+/// when it has none, `None` for a key only known at runtime.
+fn destructured_key(item: &ArrayItem, position: usize) -> Option<ShapeKey> {
+    match item.key.as_ref().map(|k| &k.kind) {
+        Some(ExprKind::Literal(Literal::String(s))) => Some(ShapeKey::from_name(&s.to_str_lossy())),
+        Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
+        Some(_) => None,
+        None => Some(ShapeKey::Int(position as i64)),
     }
 }
