@@ -2852,7 +2852,10 @@ deleted; the file-size gate.
   `bug-3636.php`, `bug-14393.php`), unreported today; an untyped
   property without a default starts as `null` whatever its `@var`, so
   `??` and `isset()` on it stay unreported where PHPStan reports "not
-  nullable" (approved; `bug-3636.php:13`, `bug-14393.php:36`). The
+  nullable" (approved; `bug-3636.php:13`, `bug-14393.php:36`).
+  `nullCoalesce.offset` covers a literal or `null` container (`[0][0] ??
+  'ok'` always exists, `(null)[0] ?? 'ok'` doesn't; `offset-access-legal.php`),
+  unreported today. The
   descriptor covers a nullsafe chain: `$f?->bar() ?? 0` and
   `empty($i?->bar())` on an undefined `$f`/`$i` are `variable.undefined`
   and `method.nonObject` today (the rules oracle's `bug-7291.php`), and
@@ -4820,7 +4823,9 @@ fixture:
     oracle's 16 PHPStan-only, `readonly-assign.php`, `bug-6773.php`,
     `bug-7198.php`, `readonly-property-hooks.php`,
     `readonly-property-passed-by-reference.php`,
-    `unset-hooked-property.php`);
+    `unset-hooked-property.php`), and a `@readonly` one alike
+    (`property.readOnlyByPhpDocAssignNotInConstructor`, 7,
+    `readonly-assign-phpdoc.php`);
   - property hooks: the checks that a property overriding a writable or
     readable one stays so (`property.notWritable`/`notReadable`) and that
     a get hook of a non-virtual property reads its value and a set hook
@@ -5124,16 +5129,17 @@ fixture:
     (`set (int|array $v)` on `int`); and the native type where the PHPDoc
     doesn't apply (`@param Foo|Bar[]` on `array`, an unresolvable
     `array<int, int, int>` or `array{foo: int}&array{bar: string}`).
-    `missingType.generics`, `generics.notGeneric`, `generics.lessTypes`
-    (10), `generics.moreTypes` (7, `static<int, string>` in `@return`
-    included) and `generics.notSubtype` (a `mixed` or `string` argument
-    outside the template's bound, as in `@extends FooGeneric<int, mixed>`)
-    walk the same sites,
-    `@param-closure-this`, `@use` and a template bound included
-    (`Exception<int>` in an inline `@var` is unreported today; the rules
-    oracle's 18, 15 and 15 PHPStan-only: class tags,
+    The generics checks walk the same sites, `@param-closure-this`, `@use`
+    and a template bound included: `missingType.generics` (18),
+    `generics.notGeneric` (15; `Exception<int>` in an inline `@var`),
+    `generics.lessTypes` (10), `generics.moreTypes` (7; `static<int,
+    string>` in `@return`), `generics.notSubtype` (15; a `mixed` or
+    `string` argument outside the template's bound, as in `@extends
+    FooGeneric<int, mixed>`) and `generics.callSiteVarianceRedundant`/
+    `…Conflict` (7 each; `Covariant<covariant int>`, `<contravariant
+    int>`); each count is the rules oracle's PHPStan-only, at class tags,
     `@param-out`, `@phpstan-self-out`, an inline `@var`, a conditional
-    return, a set hook's parameter).
+    return and a set hook's parameter, unreported today.
 - (f) control flow, returns, throws and generators:
   - an empty body is checked like any other: a function or method with a
     non-`void` return type and an empty body (or only a comment) throws a
