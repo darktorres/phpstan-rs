@@ -4357,7 +4357,8 @@ fixture:
     invalid", "might not be", at the level `checkUnionTypes` and
     `checkNullables` set), where today only a wholly invalid operand is:
     `echo $a?->foo` on `Foo|null`, `foreach` over `array<int>|null`,
-    `(string)` of `stdClass|null` or `object|string`, `[$a] = $arrayOrNull`,
+    `(string)` of `stdClass|null`, `object|string` or a plain `object`,
+    `[$a] = $arrayOrNull`,
     `...$integersOrNull`, `new stdClass instanceof $class` with
     `string|null`, `$ob < $n` for `stdClass` and `float|null`, `$string()`
     and `$o(...)` for a `string` or `object` that may not be callable, an
@@ -4804,6 +4805,13 @@ fixture:
     `@immutable` class is `generics.variance` "input (parameter) position"
     today, and the message names a property, not a parameter
     (`bug-13049.php`, `bug-9153.php`, `bug-12964.php`);
+  - a template's variance is checked through composition, each parameter
+    on its own (`VarianceCheck`, `TemplateTypeVariance::compose`): a
+    covariant `X` in `Out<X>`, `In<Out<X>>`, `Inv<X>` (an invariant
+    position), a closure's parameter (`\Closure(X): X`) or a `@param-out`
+    type is `generics.variance`; today only a bare `X` parameter is
+    reported, once per method (the rules oracle's 18 PHPStan-only,
+    `method-signature-variance-*.php`, `bug-10609.php`);
   - imports are per namespace block: repeating `use X\Y;` in a second
     `namespace N;` block, and `use \stdClass;` in the global namespace
     (a PHP warning, "no effect"), are `use.nameInUse` today (7 findings,
