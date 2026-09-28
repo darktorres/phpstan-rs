@@ -34,36 +34,38 @@ fn collect_declared<'a>(
     ctx: &mut NameContext,
     out: &mut FxHashMap<String, Declared<'a>>,
 ) {
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::ClassDecl(c) => {
-                out.insert(
-                    ctx.declared_name(class_decl_name(c)).to_ascii_lowercase(),
-                    Declared {
-                        name_span: c.name_span,
-                        span: stmt.span,
-                        attributes: c.attrs.iter().map(|a| ctx.resolve(&a.name)).collect(),
-                        public_methods: c
-                            .methods
-                            .iter()
-                            .filter(|m| {
-                                m.visibility == Visibility::Public
-                                    && !m.function.name.eq_ignore_ascii_case("__construct")
-                            })
-                            .map(|m| m.function.name.as_ref())
-                            .collect(),
-                    },
-                );
+    syntax::stack::guard(|| {
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::ClassDecl(c) => {
+                    out.insert(
+                        ctx.declared_name(class_decl_name(c)).to_ascii_lowercase(),
+                        Declared {
+                            name_span: c.name_span,
+                            span: stmt.span,
+                            attributes: c.attrs.iter().map(|a| ctx.resolve(&a.name)).collect(),
+                            public_methods: c
+                                .methods
+                                .iter()
+                                .filter(|m| {
+                                    m.visibility == Visibility::Public
+                                        && !m.function.name.eq_ignore_ascii_case("__construct")
+                                })
+                                .map(|m| m.function.name.as_ref())
+                                .collect(),
+                        },
+                    );
+                }
+                StmtKind::Block(body)
+                | StmtKind::Declare {
+                    body: Some(body), ..
+                } => collect_declared(body, ctx, out),
+                _ => {}
             }
-            StmtKind::Block(body)
-            | StmtKind::Declare {
-                body: Some(body), ..
-            } => collect_declared(body, ctx, out),
-            _ => {}
         }
-    }
+    })
 }
 
 fn contains(outer: Span, inner: Span) -> bool {

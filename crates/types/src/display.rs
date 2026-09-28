@@ -50,130 +50,132 @@ fn write_callable_sig(f: &mut fmt::Formatter<'_>, keyword: &str, sig: &CallableS
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Type(Repr::Mixed(_)) => write!(f, "mixed"),
-            Type(Repr::Error) => write!(f, "*ERROR*"),
-            Type(Repr::Never) => write!(f, "never"),
-            Type(Repr::Void) => write!(f, "void"),
-            Type(Repr::Null) => write!(f, "null"),
-            Type(Repr::Bool) => write!(f, "bool"),
-            Type(Repr::True) => write!(f, "true"),
-            Type(Repr::False) => write!(f, "false"),
-            Type(Repr::Int) => write!(f, "int"),
-            Type(Repr::IntLiteral(n)) => write!(f, "{n}"),
-            Type(Repr::Float) => write!(f, "float"),
-            Type(Repr::String) => write!(f, "string"),
-            Type(Repr::StringLiteral(s)) => write!(f, "'{s}'"),
-            Type(Repr::Array(key, value)) => {
-                let known_key = **key != Type::unknown_array_key();
-                match (known_key, value.as_ref()) {
-                    (false, Type(Repr::Mixed(_))) => write!(f, "array"),
-                    (false, v) => write!(f, "array<{v}>"),
-                    (true, v) => write!(f, "array<{key}, {v}>"),
+        syntax::stack::guard(|| {
+            match self {
+                Type(Repr::Mixed(_)) => write!(f, "mixed"),
+                Type(Repr::Error) => write!(f, "*ERROR*"),
+                Type(Repr::Never) => write!(f, "never"),
+                Type(Repr::Void) => write!(f, "void"),
+                Type(Repr::Null) => write!(f, "null"),
+                Type(Repr::Bool) => write!(f, "bool"),
+                Type(Repr::True) => write!(f, "true"),
+                Type(Repr::False) => write!(f, "false"),
+                Type(Repr::Int) => write!(f, "int"),
+                Type(Repr::IntLiteral(n)) => write!(f, "{n}"),
+                Type(Repr::Float) => write!(f, "float"),
+                Type(Repr::String) => write!(f, "string"),
+                Type(Repr::StringLiteral(s)) => write!(f, "'{s}'"),
+                Type(Repr::Array(key, value)) => {
+                    let known_key = **key != Type::unknown_array_key();
+                    match (known_key, value.as_ref()) {
+                        (false, Type(Repr::Mixed(_))) => write!(f, "array"),
+                        (false, v) => write!(f, "array<{v}>"),
+                        (true, v) => write!(f, "array<{key}, {v}>"),
+                    }
                 }
-            }
-            Type(Repr::ClassString(inner)) => write!(f, "class-string<{inner}>"),
-            Type(Repr::ClassKindString(ClassKind::Interface)) => write!(f, "interface-string"),
-            Type(Repr::ClassKindString(ClassKind::Trait)) => write!(f, "trait-string"),
-            Type(Repr::ClassKindString(ClassKind::Enum)) => write!(f, "enum-string"),
-            Type(Repr::ClassKindString(ClassKind::Class)) => write!(f, "class-string"),
-            Type(Repr::ArrayShape(shape)) => write_shape(f, "array", shape),
-            Type(Repr::ObjectShape(shape)) => write_shape(f, "object", shape),
-            // Real PHPStan's own `GenericTypeNode::__toString()` format.
-            Type(Repr::VarianceArg(CallSiteVariance::Bivariant, _)) => write!(f, "*"),
-            Type(Repr::VarianceArg(CallSiteVariance::Covariant, inner)) => {
-                write!(f, "covariant {inner}")
-            }
-            Type(Repr::VarianceArg(CallSiteVariance::Contravariant, inner)) => {
-                write!(f, "contravariant {inner}")
-            }
-            // Normally resolved away before display; shown in its source
-            // form if it ever isn't (an unknown class).
-            Type(Repr::ClassConstant { class, pattern }) => write!(f, "{class}::{pattern}"),
-            Type(Repr::ValueOf(inner)) => write!(f, "value-of<{inner}>"),
-            Type(Repr::Extension(data)) => data.describe(f),
-            Type(Repr::KeyOf(inner)) => write!(f, "key-of<{inner}>"),
-            Type(Repr::OffsetAccess(base, key)) => write!(f, "{base}[{key}]"),
-            Type(Repr::Object(name, args)) => write_generic(f, name, args),
-            Type(Repr::ObjectWithoutClass) => write!(f, "object"),
-            Type(Repr::Resource { closed: false }) => write!(f, "resource"),
-            Type(Repr::Resource { closed: true }) => write!(f, "closed-resource"),
-            Type(Repr::EnumCase(fqn, case)) => write!(f, "{fqn}::{case}"),
-            Type(Repr::Callable(None)) => write!(f, "callable"),
-            Type(Repr::Callable(Some(sig))) => write_callable_sig(f, "callable", sig),
-            Type(Repr::SelfRef(args)) => write_generic(f, "self", args),
-            Type(Repr::ParentRef) => write!(f, "parent"),
-            Type(Repr::StaticRef(args)) => write_generic(f, "static", args),
-            Type(Repr::This) => write!(f, "$this"),
-            Type(Repr::TemplateParam(tp)) => write!(f, "{}", tp.name),
-            // Parenthesized, as PHPStan describes a benevolent union, so
-            // a message tells it apart from a plain one.
-            Type(Repr::BenevolentUnion(members)) => {
-                let parts: Vec<String> = members.iter().map(Type::to_string).collect();
-                write!(f, "({})", parts.join("|"))
-            }
-            Type(Repr::Union(members)) => {
-                let parts: Vec<String> = members.iter().map(Type::to_string).collect();
-                write!(f, "{}", parts.join("|"))
-            }
-            Type(Repr::Intersection(members)) => {
-                if let Some(name) = describe_accessory_intersection(members) {
-                    return write!(f, "{name}");
+                Type(Repr::ClassString(inner)) => write!(f, "class-string<{inner}>"),
+                Type(Repr::ClassKindString(ClassKind::Interface)) => write!(f, "interface-string"),
+                Type(Repr::ClassKindString(ClassKind::Trait)) => write!(f, "trait-string"),
+                Type(Repr::ClassKindString(ClassKind::Enum)) => write!(f, "enum-string"),
+                Type(Repr::ClassKindString(ClassKind::Class)) => write!(f, "class-string"),
+                Type(Repr::ArrayShape(shape)) => write_shape(f, "array", shape),
+                Type(Repr::ObjectShape(shape)) => write_shape(f, "object", shape),
+                // Real PHPStan's own `GenericTypeNode::__toString()` format.
+                Type(Repr::VarianceArg(CallSiteVariance::Bivariant, _)) => write!(f, "*"),
+                Type(Repr::VarianceArg(CallSiteVariance::Covariant, inner)) => {
+                    write!(f, "covariant {inner}")
                 }
-                if let [
-                    Type(Repr::Object(class, args)),
-                    Type(Repr::Callable(Some(sig))),
-                ] = members.as_slice()
-                    && class == "Closure"
-                    && args.is_empty()
-                {
-                    return write_callable_sig(f, "Closure", sig);
+                Type(Repr::VarianceArg(CallSiteVariance::Contravariant, inner)) => {
+                    write!(f, "contravariant {inner}")
                 }
-                let parts: Vec<String> = members.iter().map(Type::to_string).collect();
-                write!(f, "{}", parts.join("&"))
+                // Normally resolved away before display; shown in its source
+                // form if it ever isn't (an unknown class).
+                Type(Repr::ClassConstant { class, pattern }) => write!(f, "{class}::{pattern}"),
+                Type(Repr::ValueOf(inner)) => write!(f, "value-of<{inner}>"),
+                Type(Repr::Extension(data)) => data.describe(f),
+                Type(Repr::KeyOf(inner)) => write!(f, "key-of<{inner}>"),
+                Type(Repr::OffsetAccess(base, key)) => write!(f, "{base}[{key}]"),
+                Type(Repr::Object(name, args)) => write_generic(f, name, args),
+                Type(Repr::ObjectWithoutClass) => write!(f, "object"),
+                Type(Repr::Resource { closed: false }) => write!(f, "resource"),
+                Type(Repr::Resource { closed: true }) => write!(f, "closed-resource"),
+                Type(Repr::EnumCase(fqn, case)) => write!(f, "{fqn}::{case}"),
+                Type(Repr::Callable(None)) => write!(f, "callable"),
+                Type(Repr::Callable(Some(sig))) => write_callable_sig(f, "callable", sig),
+                Type(Repr::SelfRef(args)) => write_generic(f, "self", args),
+                Type(Repr::ParentRef) => write!(f, "parent"),
+                Type(Repr::StaticRef(args)) => write_generic(f, "static", args),
+                Type(Repr::This) => write!(f, "$this"),
+                Type(Repr::TemplateParam(tp)) => write!(f, "{}", tp.name),
+                // Parenthesized, as PHPStan describes a benevolent union, so
+                // a message tells it apart from a plain one.
+                Type(Repr::BenevolentUnion(members)) => {
+                    let parts: Vec<String> = members.iter().map(Type::to_string).collect();
+                    write!(f, "({})", parts.join("|"))
+                }
+                Type(Repr::Union(members)) => {
+                    let parts: Vec<String> = members.iter().map(Type::to_string).collect();
+                    write!(f, "{}", parts.join("|"))
+                }
+                Type(Repr::Intersection(members)) => {
+                    if let Some(name) = describe_accessory_intersection(members) {
+                        return write!(f, "{name}");
+                    }
+                    if let [
+                        Type(Repr::Object(class, args)),
+                        Type(Repr::Callable(Some(sig))),
+                    ] = members.as_slice()
+                        && class == "Closure"
+                        && args.is_empty()
+                    {
+                        return write_callable_sig(f, "Closure", sig);
+                    }
+                    let parts: Vec<String> = members.iter().map(Type::to_string).collect();
+                    write!(f, "{}", parts.join("&"))
+                }
+                Type(Repr::IntRange(min, max)) => write!(
+                    f,
+                    "int<{}, {}>",
+                    min.map_or("min".to_string(), |n| n.to_string()),
+                    max.map_or("max".to_string(), |n| n.to_string()),
+                ),
+                Type(Repr::FloatLiteral(n)) => write!(f, "{n}"),
+                Type(Repr::Accessory(kind)) => write!(f, "{}", accessory_kind_name(*kind)),
+                // Mirrors real PHPStan's own `HasOffsetValueType::describe()`
+                // format exactly (confirmed via `assertType()` against the
+                // vendored phar) - never intercepted by
+                // `describe_accessory_intersection`'s own known-shape fast
+                // paths above (none of them match a `HasOffsetValue` member),
+                // so this always reaches the generic `&`-joined
+                // `Repr::Intersection` fallback alongside its own base
+                // `Repr::Array`.
+                Type(Repr::HasOffsetValue(key, value)) => {
+                    write!(f, "hasOffsetValue('{key}', {value})")
+                }
+                Type(Repr::HasOffset(key)) => write!(f, "hasOffset('{key}')"),
+                Type(Repr::HasMethod(name)) => write!(f, "hasMethod({name})"),
+                Type(Repr::HasProperty(name)) => write!(f, "hasProperty({name})"),
+                // No real PHPStan equivalent to mirror (this variant is a
+                // this-project-only synthesis, see its own doc comment) -
+                // a plain, self-describing debug format.
+                Type(Repr::ReflectedMember(owner, name)) => {
+                    write!(f, "reflectedMember({owner}, '{name}')")
+                }
+                Type(Repr::Conditional {
+                    subject,
+                    target,
+                    if_true,
+                    if_false,
+                    negated,
+                    template_subject,
+                }) => write!(
+                    f,
+                    "({}{subject} is {}{target} ? {if_true} : {if_false})",
+                    if *template_subject { "" } else { "$" },
+                    if *negated { "not " } else { "" },
+                ),
             }
-            Type(Repr::IntRange(min, max)) => write!(
-                f,
-                "int<{}, {}>",
-                min.map_or("min".to_string(), |n| n.to_string()),
-                max.map_or("max".to_string(), |n| n.to_string()),
-            ),
-            Type(Repr::FloatLiteral(n)) => write!(f, "{n}"),
-            Type(Repr::Accessory(kind)) => write!(f, "{}", accessory_kind_name(*kind)),
-            // Mirrors real PHPStan's own `HasOffsetValueType::describe()`
-            // format exactly (confirmed via `assertType()` against the
-            // vendored phar) - never intercepted by
-            // `describe_accessory_intersection`'s own known-shape fast
-            // paths above (none of them match a `HasOffsetValue` member),
-            // so this always reaches the generic `&`-joined
-            // `Repr::Intersection` fallback alongside its own base
-            // `Repr::Array`.
-            Type(Repr::HasOffsetValue(key, value)) => {
-                write!(f, "hasOffsetValue('{key}', {value})")
-            }
-            Type(Repr::HasOffset(key)) => write!(f, "hasOffset('{key}')"),
-            Type(Repr::HasMethod(name)) => write!(f, "hasMethod({name})"),
-            Type(Repr::HasProperty(name)) => write!(f, "hasProperty({name})"),
-            // No real PHPStan equivalent to mirror (this variant is a
-            // this-project-only synthesis, see its own doc comment) -
-            // a plain, self-describing debug format.
-            Type(Repr::ReflectedMember(owner, name)) => {
-                write!(f, "reflectedMember({owner}, '{name}')")
-            }
-            Type(Repr::Conditional {
-                subject,
-                target,
-                if_true,
-                if_false,
-                negated,
-                template_subject,
-            }) => write!(
-                f,
-                "({}{subject} is {}{target} ? {if_true} : {if_false})",
-                if *template_subject { "" } else { "$" },
-                if *negated { "not " } else { "" },
-            ),
-        }
+        })
     }
 }
 

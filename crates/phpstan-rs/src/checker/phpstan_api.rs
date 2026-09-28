@@ -1079,6 +1079,16 @@ impl<'a> Walker<'a> {
         param_types: &ParamTypes,
         label: &str,
     ) {
+        syntax::stack::guard(|| self.check_stmt_unguarded(stmt, ctx, param_types, label));
+    }
+
+    fn check_stmt_unguarded(
+        &mut self,
+        stmt: &Stmt,
+        ctx: &NameContext,
+        param_types: &ParamTypes,
+        label: &str,
+    ) {
         match &stmt.kind {
             StmtKind::Block(_)
             | StmtKind::InlineHtml(_)
@@ -1171,6 +1181,16 @@ impl<'a> Walker<'a> {
     /// covers its own children by hand, matching what `any_child_expr`
     /// would otherwise return, or falls through to the catch-all).
     fn check_expr(&mut self, e: &Expr, ctx: &NameContext, param_types: &ParamTypes, label: &str) {
+        syntax::stack::guard(|| self.check_expr_unguarded(e, ctx, param_types, label));
+    }
+
+    fn check_expr_unguarded(
+        &mut self,
+        e: &Expr,
+        ctx: &NameContext,
+        param_types: &ParamTypes,
+        label: &str,
+    ) {
         match &e.kind {
             ExprKind::Call(callee, args) => {
                 if let ExprKind::Name(n) = &callee.kind {

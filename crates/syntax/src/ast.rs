@@ -1088,6 +1088,36 @@ pub struct Expr {
     pub span: Span,
 }
 
+impl Expr {
+    /// The expression's kind, taken out of it.
+    pub fn into_kind(mut self) -> ExprKind {
+        std::mem::replace(&mut self.kind, ExprKind::Literal(Literal::Null))
+    }
+}
+
+impl Stmt {
+    /// The statement's kind, taken out of it.
+    pub fn into_kind(mut self) -> StmtKind {
+        std::mem::replace(&mut self.kind, StmtKind::Block(Vec::new()))
+    }
+}
+
+/// Dropping a tree goes one level at a time on a guarded stack, so a deep
+/// tree (a long `.` chain is one) drops without overflowing it.
+impl Drop for Expr {
+    fn drop(&mut self) {
+        let kind = std::mem::replace(&mut self.kind, ExprKind::Literal(Literal::Null));
+        crate::stack::guard(|| drop(kind));
+    }
+}
+
+impl Drop for Stmt {
+    fn drop(&mut self) {
+        let kind = std::mem::replace(&mut self.kind, StmtKind::Block(Vec::new()));
+        crate::stack::guard(|| drop(kind));
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     Literal(Literal),
@@ -1277,10 +1307,10 @@ pub fn match_default(arms: &[MatchArm]) -> Option<&Expr> {
 /// casing needs to see through `(function () {...})` the same as a bare
 /// `function () {...}`.
 pub fn unwrap_grouping(e: &Expr) -> &Expr {
-    match &e.kind {
+    crate::stack::guard(|| match &e.kind {
         ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => unwrap_grouping(inner),
         _ => e,
-    }
+    })
 }
 
 /// A literal string's text, or a statically-foldable `.`-concatenation of
@@ -1293,7 +1323,7 @@ pub fn unwrap_grouping(e: &Expr) -> &Expr {
 /// resolved here even if a caller's type tracking knows it's a literal
 /// value, since this function only sees the raw `Expr`.
 pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
-    match &e.kind {
+    crate::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::String(s)) => s.as_str().map(std::borrow::Cow::Borrowed),
         ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => literal_string_value(inner),
         ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
@@ -1302,7 +1332,7 @@ pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
             Some(std::borrow::Cow::Owned(format!("{l}{r}")))
         }
         _ => None,
-    }
+    })
 }
 
 /// Whether `name` (without its `$`) is one of PHP's superglobals.

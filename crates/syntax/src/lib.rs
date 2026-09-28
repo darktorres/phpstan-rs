@@ -13,6 +13,7 @@ mod parse;
 pub mod parser;
 pub mod php_string;
 pub mod printer;
+pub mod stack;
 pub mod token;
 pub mod visit;
 

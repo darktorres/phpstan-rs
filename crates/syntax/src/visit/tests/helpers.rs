@@ -5,7 +5,7 @@ use crate::parser::Parser;
 pub(super) fn parse_expr(src: &str) -> Expr {
     let tokens = Lexer::new(&format!("<?php {src};")).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
-    match program.into_iter().next().unwrap().kind {
+    match program.into_iter().next().unwrap().into_kind() {
         StmtKind::Expression(e) => e,
         other => panic!("expected an Expression statement, got {other:?}"),
     }

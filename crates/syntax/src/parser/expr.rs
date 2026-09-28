@@ -55,14 +55,7 @@ impl Parser {
     }
 
     pub(crate) fn parse_assignment(&mut self) -> Result<Expr, ParseError> {
-        self.enter_expr()?;
-        let result = self.parse_assignment_inner();
-        self.leave_expr();
-        result
-    }
-
-    pub(crate) fn parse_assignment_inner(&mut self) -> Result<Expr, ParseError> {
-        self.parse_ternary()
+        crate::stack::guard(|| self.parse_ternary())
     }
 
     /// An assignment whose target is the operand just parsed. PHP's grammar
@@ -137,13 +130,10 @@ impl Parser {
     }
 
     pub(crate) fn parse_coalesce(&mut self) -> Result<Expr, ParseError> {
-        self.enter_expr()?;
-        let result = self.parse_coalesce_inner();
-        self.leave_expr();
-        result
+        crate::stack::guard(|| self.parse_coalesce_inner())
     }
 
-    pub(crate) fn parse_coalesce_inner(&mut self) -> Result<Expr, ParseError> {
+    fn parse_coalesce_inner(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         let lhs = self.parse_logical_or()?;
         if self.eat(&Token::QuestionQuestion) {
@@ -259,9 +249,7 @@ impl Parser {
     }
 
     /// PHP 8.5's `|> ` pipe operator: `$value |> callable` desugars to
-    /// `callable($value)`. Left-associative (a while-loop, not
-    /// self-recursion, so it's already immune to the stack-depth issue
-    /// MAX_EXPR_DEPTH guards against). Precedence empirically checked
+    /// `callable($value)`. Left-associative. Precedence empirically checked
     /// against a real PHP 8.5 build: tighter than relational (`<`), looser
     /// than shift/concat/additive.
     pub(crate) fn parse_pipe(&mut self) -> Result<Expr, ParseError> {
@@ -352,7 +340,7 @@ impl Parser {
     pub(crate) fn parse_not(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         if self.eat(&Token::Bang) {
-            let operand = self.parse_not()?;
+            let operand = crate::stack::guard(|| self.parse_not())?;
             return Ok(self.expr(ExprKind::Unary(UnaryOp::Not, Box::new(operand)), start));
         }
         self.parse_instanceof()
@@ -378,13 +366,10 @@ impl Parser {
     }
 
     pub(crate) fn parse_unary(&mut self) -> Result<Expr, ParseError> {
-        self.enter_expr()?;
-        let result = self.parse_unary_inner();
-        self.leave_expr();
-        result
+        crate::stack::guard(|| self.parse_unary_inner())
     }
 
-    pub(crate) fn parse_unary_inner(&mut self) -> Result<Expr, ParseError> {
+    fn parse_unary_inner(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         if let Some(spelling) = self.try_parse_cast() {
             let operand = self.parse_unary()?;

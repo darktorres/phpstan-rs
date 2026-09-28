@@ -526,23 +526,25 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
 /// `HYDRATE_OBJECT` computation, rather than duplicating every select-
 /// item-kind match arm a second time for the array-mode case.
 fn to_array_mode(checker: &Checker, ty: Type) -> Type {
-    if let Some((class, _)) = ty.as_object()
-        && entity_info(checker, class).is_some()
-    {
-        return entity_array_shape(checker, class);
-    }
-    // A polymorphic (entity-inheritance) row: every mapped subclass
-    // member converts independently.
-    let members = ty.union_members();
-    if members.len() > 1 {
-        return ty.with_members(
-            members
-                .iter()
-                .map(|m| to_array_mode(checker, m.clone()))
-                .collect(),
-        );
-    }
-    ty
+    syntax::stack::guard(|| {
+        if let Some((class, _)) = ty.as_object()
+            && entity_info(checker, class).is_some()
+        {
+            return entity_array_shape(checker, class);
+        }
+        // A polymorphic (entity-inheritance) row: every mapped subclass
+        // member converts independently.
+        let members = ty.union_members();
+        if members.len() > 1 {
+            return ty.with_members(
+                members
+                    .iter()
+                    .map(|m| to_array_mode(checker, m.clone()))
+                    .collect(),
+            );
+        }
+        ty
+    })
 }
 
 /// `getArrayResult()` (ROADMAP Phase 168 168f) - the identical row

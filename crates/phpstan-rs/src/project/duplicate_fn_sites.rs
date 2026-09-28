@@ -58,43 +58,45 @@ impl DuplicateFunctionSites {
         path: &Path,
         conditional: bool,
     ) {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::FunctionDecl(f) => {
-                    if conditional {
-                        continue;
+        syntax::stack::guard(|| {
+            for stmt in stmts {
+                match &stmt.kind {
+                    StmtKind::Namespace(name) => ctx.set_namespace(name),
+                    StmtKind::Use(imports) => ctx.add_uses(imports),
+                    StmtKind::FunctionDecl(f) => {
+                        if conditional {
+                            continue;
+                        }
+                        self.record(ctx.declared_name(&f.name), path, f);
                     }
-                    self.record(ctx.declared_name(&f.name), path, f);
-                }
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    self.index(
-                        std::slice::from_ref(then_branch),
-                        &mut ctx.clone(),
-                        path,
-                        true,
-                    );
-                    if let Some(else_branch) = else_branch {
+                    StmtKind::If {
+                        then_branch,
+                        else_branch,
+                        ..
+                    } => {
                         self.index(
-                            std::slice::from_ref(else_branch),
+                            std::slice::from_ref(then_branch),
                             &mut ctx.clone(),
                             path,
                             true,
                         );
+                        if let Some(else_branch) = else_branch {
+                            self.index(
+                                std::slice::from_ref(else_branch),
+                                &mut ctx.clone(),
+                                path,
+                                true,
+                            );
+                        }
                     }
+                    StmtKind::Block(inner)
+                    | StmtKind::Declare {
+                        body: Some(inner), ..
+                    } => self.index(inner, ctx, path, conditional),
+                    _ => {}
                 }
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
-                    body: Some(inner), ..
-                } => self.index(inner, ctx, path, conditional),
-                _ => {}
             }
-        }
+        })
     }
 
     fn record(&mut self, fqn: String, path: &Path, f: &FunctionDecl) {

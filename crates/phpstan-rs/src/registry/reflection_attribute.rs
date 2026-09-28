@@ -113,7 +113,7 @@ fn argument(arg: &Arg, ctx: &NameContext) -> AttributeArgument {
 }
 
 fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
-    match &expr.kind {
+    syntax::stack::guard(|| match &expr.kind {
         ExprKind::Literal(Literal::Null) => AttributeValue::Null,
         ExprKind::Literal(Literal::Bool(b)) => AttributeValue::Bool(*b),
         ExprKind::Literal(Literal::Int(i)) => AttributeValue::Int(*i),
@@ -164,5 +164,5 @@ fn value(expr: &Expr, ctx: &NameContext) -> AttributeValue {
         }
         ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => value(inner, ctx),
         _ => AttributeValue::Unsupported,
-    }
+    })
 }

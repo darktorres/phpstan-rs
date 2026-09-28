@@ -56,63 +56,65 @@ impl DuplicateClassSites {
         conditional: bool,
         is_stub: bool,
     ) {
-        for stmt in stmts {
-            match &stmt.kind {
-                StmtKind::Namespace(name) => ctx.set_namespace(name),
-                StmtKind::Use(imports) => ctx.add_uses(imports),
-                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                    if conditional {
-                        continue;
+        syntax::stack::guard(|| {
+            for stmt in stmts {
+                match &stmt.kind {
+                    StmtKind::Namespace(name) => ctx.set_namespace(name),
+                    StmtKind::Use(imports) => ctx.add_uses(imports),
+                    StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                        if conditional {
+                            continue;
+                        }
+                        self.record(
+                            ctx.declared_name(class_decl_name(e)),
+                            path,
+                            e.name_span,
+                            ClassKind::Enum,
+                            is_stub,
+                        );
                     }
-                    self.record(
-                        ctx.declared_name(class_decl_name(e)),
-                        path,
-                        e.name_span,
-                        ClassKind::Enum,
-                        is_stub,
-                    );
-                }
-                StmtKind::ClassDecl(c) => {
-                    if conditional {
-                        continue;
+                    StmtKind::ClassDecl(c) => {
+                        if conditional {
+                            continue;
+                        }
+                        self.record(
+                            ctx.declared_name(class_decl_name(c)),
+                            path,
+                            c.name_span,
+                            c.kind,
+                            is_stub,
+                        );
                     }
-                    self.record(
-                        ctx.declared_name(class_decl_name(c)),
-                        path,
-                        c.name_span,
-                        c.kind,
-                        is_stub,
-                    );
-                }
-                StmtKind::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    self.index(
-                        std::slice::from_ref(then_branch),
-                        &mut ctx.clone(),
-                        path,
-                        true,
-                        is_stub,
-                    );
-                    if let Some(else_branch) = else_branch {
+                    StmtKind::If {
+                        then_branch,
+                        else_branch,
+                        ..
+                    } => {
                         self.index(
-                            std::slice::from_ref(else_branch),
+                            std::slice::from_ref(then_branch),
                             &mut ctx.clone(),
                             path,
                             true,
                             is_stub,
                         );
+                        if let Some(else_branch) = else_branch {
+                            self.index(
+                                std::slice::from_ref(else_branch),
+                                &mut ctx.clone(),
+                                path,
+                                true,
+                                is_stub,
+                            );
+                        }
                     }
+                    StmtKind::Block(inner)
+                    | StmtKind::Declare {
+                        body: Some(inner), ..
+                    } => self.index(inner, ctx, path, conditional, is_stub),
+                    _ => {}
                 }
-                StmtKind::Block(inner)
-                | StmtKind::Declare {
-                    body: Some(inner), ..
-                } => self.index(inner, ctx, path, conditional, is_stub),
-                _ => {}
             }
-        }
+        })
     }
 
     fn record(&mut self, fqn: String, path: &Path, span: Span, kind: ClassKind, is_stub: bool) {

@@ -119,62 +119,66 @@ fn mark_write_target(
 }
 
 fn walk_stmt_for_members(stmt: &Stmt, fqn: &str, ctx: &NameContext, usage: &mut MemberUsage) {
-    match &stmt.kind {
-        StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr_for_members(e, fqn, ctx, usage),
-        StmtKind::Return(Some(e)) => walk_expr_for_members(e, fqn, ctx, usage),
-        StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-            for e in exprs {
-                walk_expr_for_members(e, fqn, ctx, usage);
+    syntax::stack::guard(|| {
+        match &stmt.kind {
+            StmtKind::Expression(e) | StmtKind::Throw(e) => {
+                walk_expr_for_members(e, fqn, ctx, usage)
             }
-        }
-        StmtKind::If { cond, .. }
-        | StmtKind::While { cond, .. }
-        | StmtKind::DoWhile { cond, .. } => walk_expr_for_members(cond, fqn, ctx, usage),
-        StmtKind::For {
-            init, cond, step, ..
-        } => {
-            for e in init.iter().chain(cond).chain(step) {
-                walk_expr_for_members(e, fqn, ctx, usage);
-            }
-        }
-        StmtKind::Foreach {
-            subject,
-            key,
-            value,
-            ..
-        } => {
-            walk_expr_for_members(subject, fqn, ctx, usage);
-            if let Some(k) = key {
-                walk_expr_for_members(k, fqn, ctx, usage);
-            }
-            walk_expr_for_members(value, fqn, ctx, usage);
-        }
-        StmtKind::GlobalConst(consts) => {
-            for c in consts {
-                walk_expr_for_members(&c.value, fqn, ctx, usage);
-            }
-        }
-        StmtKind::StaticVar(vars) => {
-            for (_, d) in vars {
-                if let Some(e) = d {
+            StmtKind::Return(Some(e)) => walk_expr_for_members(e, fqn, ctx, usage),
+            StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
+                for e in exprs {
                     walk_expr_for_members(e, fqn, ctx, usage);
                 }
             }
-        }
-        StmtKind::Switch { subject, cases } => {
-            walk_expr_for_members(subject, fqn, ctx, usage);
-            for case in cases {
-                if let Some(t) = &case.test {
-                    walk_expr_for_members(t, fqn, ctx, usage);
+            StmtKind::If { cond, .. }
+            | StmtKind::While { cond, .. }
+            | StmtKind::DoWhile { cond, .. } => walk_expr_for_members(cond, fqn, ctx, usage),
+            StmtKind::For {
+                init, cond, step, ..
+            } => {
+                for e in init.iter().chain(cond).chain(step) {
+                    walk_expr_for_members(e, fqn, ctx, usage);
                 }
             }
+            StmtKind::Foreach {
+                subject,
+                key,
+                value,
+                ..
+            } => {
+                walk_expr_for_members(subject, fqn, ctx, usage);
+                if let Some(k) = key {
+                    walk_expr_for_members(k, fqn, ctx, usage);
+                }
+                walk_expr_for_members(value, fqn, ctx, usage);
+            }
+            StmtKind::GlobalConst(consts) => {
+                for c in consts {
+                    walk_expr_for_members(&c.value, fqn, ctx, usage);
+                }
+            }
+            StmtKind::StaticVar(vars) => {
+                for (_, d) in vars {
+                    if let Some(e) = d {
+                        walk_expr_for_members(e, fqn, ctx, usage);
+                    }
+                }
+            }
+            StmtKind::Switch { subject, cases } => {
+                walk_expr_for_members(subject, fqn, ctx, usage);
+                for case in cases {
+                    if let Some(t) = &case.test {
+                        walk_expr_for_members(t, fqn, ctx, usage);
+                    }
+                }
+            }
+            _ => {}
         }
-        _ => {}
-    }
-    any_child_stmt(stmt, |child| {
-        walk_stmt_for_members(child, fqn, ctx, usage);
-        false
-    });
+        any_child_stmt(stmt, |child| {
+            walk_stmt_for_members(child, fqn, ctx, usage);
+            false
+        });
+    })
 }
 
 pub(crate) fn walk_expr_for_members(
@@ -183,154 +187,156 @@ pub(crate) fn walk_expr_for_members(
     ctx: &NameContext,
     usage: &mut MemberUsage,
 ) {
-    match &expr.kind {
-        // Handled explicitly (and `return`s below, skipping the generic
-        // `any_child_expr` recursion at the bottom of this function)
-        // specifically so a pure write target - `$this->x = ...` - is
-        // recorded as a write only, not *also* as a read the way falling
-        // through to the generic `PropertyAccess`/`ClassConstFetch`/`StaticPropertyFetch` arms
-        // further down would.
-        ExprKind::Assign(l, r) | ExprKind::AssignRef(l, r) => {
-            walk_expr_for_members(r, fqn, ctx, usage);
-            // `$var = new self()`/`new static()`/`new <SameClass>()` -
-            // see `MemberUsage::aliases`'s own doc comment. Moot for
-            // `AssignRef` in practice (real PHP rejects `=& new ...`),
-            // but harmless to still check.
-            if let ExprKind::Variable(name) = &l.kind
-                && is_new_self_instance(r, fqn, ctx)
-            {
-                usage.aliases.insert(name.clone());
+    syntax::stack::guard(|| {
+        match &expr.kind {
+            // Handled explicitly (and `return`s below, skipping the generic
+            // `any_child_expr` recursion at the bottom of this function)
+            // specifically so a pure write target - `$this->x = ...` - is
+            // recorded as a write only, not *also* as a read the way falling
+            // through to the generic `PropertyAccess`/`ClassConstFetch`/`StaticPropertyFetch` arms
+            // further down would.
+            ExprKind::Assign(l, r) | ExprKind::AssignRef(l, r) => {
+                walk_expr_for_members(r, fqn, ctx, usage);
+                // `$var = new self()`/`new static()`/`new <SameClass>()` -
+                // see `MemberUsage::aliases`'s own doc comment. Moot for
+                // `AssignRef` in practice (real PHP rejects `=& new ...`),
+                // but harmless to still check.
+                if let ExprKind::Variable(name) = &l.kind
+                    && is_new_self_instance(r, fqn, ctx)
+                {
+                    usage.aliases.insert(name.clone());
+                }
+                if !mark_write_target(l, fqn, ctx, usage, false) {
+                    walk_expr_for_members(l, fqn, ctx, usage);
+                }
+                return;
             }
-            if !mark_write_target(l, fqn, ctx, usage, false) {
-                walk_expr_for_members(l, fqn, ctx, usage);
+            ExprKind::CompoundAssign(_, l, r) => {
+                walk_expr_for_members(r, fqn, ctx, usage);
+                if !mark_write_target(l, fqn, ctx, usage, true) {
+                    walk_expr_for_members(l, fqn, ctx, usage);
+                }
+                return;
             }
-            return;
-        }
-        ExprKind::CompoundAssign(_, l, r) => {
-            walk_expr_for_members(r, fqn, ctx, usage);
-            if !mark_write_target(l, fqn, ctx, usage, true) {
-                walk_expr_for_members(l, fqn, ctx, usage);
+            ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
+                usage.reads.insert(intern(&name.name));
             }
-            return;
-        }
-        ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.reads.insert(intern(&name.name));
-        }
-        // `$var instanceof self`/`static`/`<SameClass>`, either polarity,
-        // anywhere in the body - see `MemberUsage::aliases`'s own doc
-        // comment. Deliberately not narrowed to "only inside the branch
-        // this proves true in" (this whole walker is flow-insensitive by
-        // design already, e.g. `usage.reads`/`usage.writes` are plain,
-        // unconditional sets too) - the safe direction here, matching
-        // this project's "favor false negatives [on `unused`] over false
-        // positives" default.
-        ExprKind::Instanceof(inner, InstanceofTarget::Name(class_ref, _)) => {
-            if let ExprKind::Variable(name) = &inner.kind
-                && class_ref_is_self(class_ref, fqn, ctx)
-            {
-                usage.aliases.insert(name.clone());
+            // `$var instanceof self`/`static`/`<SameClass>`, either polarity,
+            // anywhere in the body - see `MemberUsage::aliases`'s own doc
+            // comment. Deliberately not narrowed to "only inside the branch
+            // this proves true in" (this whole walker is flow-insensitive by
+            // design already, e.g. `usage.reads`/`usage.writes` are plain,
+            // unconditional sets too) - the safe direction here, matching
+            // this project's "favor false negatives [on `unused`] over false
+            // positives" default.
+            ExprKind::Instanceof(inner, InstanceofTarget::Name(class_ref, _)) => {
+                if let ExprKind::Variable(name) = &inner.kind
+                    && class_ref_is_self(class_ref, fqn, ctx)
+                {
+                    usage.aliases.insert(name.clone());
+                }
             }
-        }
-        // `Foo::${$expr}` / `Foo::$$name`: can't know which property
-        // this reaches, so the whole class's private-member checks are
-        // skipped (see `MemberUsage`'s own doc comment).
-        ExprKind::DynamicStaticPropertyFetch(..) => usage.escaped = true,
-        ExprKind::StaticPropertyFetch(target, prop) => {
-            if target_is_self(target, fqn, ctx) {
-                usage.reads.insert(intern(&prop.name));
-            }
-        }
-        ExprKind::ClassConstFetch(target, member) => {
-            if target_is_self(target, fqn, ctx) {
-                usage.consts.insert(intern(&member.name));
-            }
-        }
-        ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
-            ExprKind::Literal(Literal::String(member)) => {
+            // `Foo::${$expr}` / `Foo::$$name`: can't know which property
+            // this reaches, so the whole class's private-member checks are
+            // skipped (see `MemberUsage`'s own doc comment).
+            ExprKind::DynamicStaticPropertyFetch(..) => usage.escaped = true,
+            ExprKind::StaticPropertyFetch(target, prop) => {
                 if target_is_self(target, fqn, ctx) {
-                    usage.consts.insert(Arc::from(&*member.to_str_lossy()));
+                    usage.reads.insert(intern(&prop.name));
                 }
             }
-            _ => usage.escaped = true,
-        },
-        ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
-            usage.methods.insert(intern(&name.name));
-        }
-        ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn, ctx) => {
-            usage.methods.insert(intern(&name.name));
-        }
-        // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
-        // access this walker can't attribute to any specific member.
-        ExprKind::DynamicPropertyAccess(..)
-        | ExprKind::DynamicMethodCall(..)
-        | ExprKind::DynamicStaticCall(..) => {
-            usage.escaped = true;
-        }
-        // `[$this, 'methodName']` - PHP's array-callable convention
-        // (`usort($arr, [$this, 'compare'])`, `array_map([$this, 'fmt'],
-        // ...)`, ...), common enough that skipping it would be a real
-        // false-positive source for exactly the kind of private helper
-        // method this check is meant to protect, not flag.
-        ExprKind::ArrayLiteral(items) => {
-            if let [a, b] = items.as_slice()
-                && a.key.is_none()
-                && b.key.is_none()
-                && !a.spread
-                && !b.spread
-                && is_this_or_aliased(&a.value, usage)
-                && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
-            {
-                usage.methods.insert(Arc::from(&*name.to_str_lossy()));
-            }
-        }
-        // `any_child_expr` deliberately returns no children for these
-        // three (see `visit`'s own module doc comment - each consumer
-        // needs its own explicit handling since they don't fit the
-        // generic `Vec<&Expr>` shape). Without these arms, a private
-        // member referenced only from inside a closure/arrow function
-        // (`array_map`/`usort`/`preg_replace_callback`/
-        // `register_shutdown_function`/a transactional closure, ...)
-        // would otherwise be invisible to this walker and wrongly
-        // reported unused.
-        ExprKind::Closure { params, body, .. } => {
-            for p in params {
-                if let Some(d) = &p.default {
-                    walk_expr_for_members(d, fqn, ctx, usage);
+            ExprKind::ClassConstFetch(target, member) => {
+                if target_is_self(target, fqn, ctx) {
+                    usage.consts.insert(intern(&member.name));
                 }
             }
-            walk_stmt_body_for_members(body, fqn, ctx, usage);
-            return;
-        }
-        ExprKind::ArrowFn { params, body, .. } => {
-            for p in params {
-                if let Some(d) = &p.default {
-                    walk_expr_for_members(d, fqn, ctx, usage);
+            ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
+                ExprKind::Literal(Literal::String(member)) => {
+                    if target_is_self(target, fqn, ctx) {
+                        usage.consts.insert(Arc::from(&*member.to_str_lossy()));
+                    }
+                }
+                _ => usage.escaped = true,
+            },
+            ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
+                usage.methods.insert(intern(&name.name));
+            }
+            ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn, ctx) => {
+                usage.methods.insert(intern(&name.name));
+            }
+            // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
+            // access this walker can't attribute to any specific member.
+            ExprKind::DynamicPropertyAccess(..)
+            | ExprKind::DynamicMethodCall(..)
+            | ExprKind::DynamicStaticCall(..) => {
+                usage.escaped = true;
+            }
+            // `[$this, 'methodName']` - PHP's array-callable convention
+            // (`usort($arr, [$this, 'compare'])`, `array_map([$this, 'fmt'],
+            // ...)`, ...), common enough that skipping it would be a real
+            // false-positive source for exactly the kind of private helper
+            // method this check is meant to protect, not flag.
+            ExprKind::ArrayLiteral(items) => {
+                if let [a, b] = items.as_slice()
+                    && a.key.is_none()
+                    && b.key.is_none()
+                    && !a.spread
+                    && !b.spread
+                    && is_this_or_aliased(&a.value, usage)
+                    && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
+                {
+                    usage.methods.insert(Arc::from(&*name.to_str_lossy()));
                 }
             }
-            walk_expr_for_members(body, fqn, ctx, usage);
-            return;
-        }
-        // The anonymous class's own constructor `args` genuinely run in
-        // the *enclosing* scope (so `$this->x`/`self::CONST` there really
-        // is outer-class usage) and are walked. Its own class body is a
-        // deliberate exclusion: that body has its own, different
-        // `$this`/`self` binding, and this per-class syntactic walker has
-        // no scope-threading to keep the two apart safely - walking it
-        // would risk the wrong-direction bug (marking an outer member
-        // "used" because of an unrelated same-named member access inside
-        // the anonymous class).
-        ExprKind::NewAnonymousClass(_, args) => {
-            for a in args {
-                walk_expr_for_members(&a.value, fqn, ctx, usage);
+            // `any_child_expr` deliberately returns no children for these
+            // three (see `visit`'s own module doc comment - each consumer
+            // needs its own explicit handling since they don't fit the
+            // generic `Vec<&Expr>` shape). Without these arms, a private
+            // member referenced only from inside a closure/arrow function
+            // (`array_map`/`usort`/`preg_replace_callback`/
+            // `register_shutdown_function`/a transactional closure, ...)
+            // would otherwise be invisible to this walker and wrongly
+            // reported unused.
+            ExprKind::Closure { params, body, .. } => {
+                for p in params {
+                    if let Some(d) = &p.default {
+                        walk_expr_for_members(d, fqn, ctx, usage);
+                    }
+                }
+                walk_stmt_body_for_members(body, fqn, ctx, usage);
+                return;
             }
-            return;
+            ExprKind::ArrowFn { params, body, .. } => {
+                for p in params {
+                    if let Some(d) = &p.default {
+                        walk_expr_for_members(d, fqn, ctx, usage);
+                    }
+                }
+                walk_expr_for_members(body, fqn, ctx, usage);
+                return;
+            }
+            // The anonymous class's own constructor `args` genuinely run in
+            // the *enclosing* scope (so `$this->x`/`self::CONST` there really
+            // is outer-class usage) and are walked. Its own class body is a
+            // deliberate exclusion: that body has its own, different
+            // `$this`/`self` binding, and this per-class syntactic walker has
+            // no scope-threading to keep the two apart safely - walking it
+            // would risk the wrong-direction bug (marking an outer member
+            // "used" because of an unrelated same-named member access inside
+            // the anonymous class).
+            ExprKind::NewAnonymousClass(_, args) => {
+                for a in args {
+                    walk_expr_for_members(&a.value, fqn, ctx, usage);
+                }
+                return;
+            }
+            _ => {}
         }
-        _ => {}
-    }
-    any_child_expr(expr, |child| {
-        walk_expr_for_members(child, fqn, ctx, usage);
-        false
-    });
+        any_child_expr(expr, |child| {
+            walk_expr_for_members(child, fqn, ctx, usage);
+            false
+        });
+    })
 }
 
 pub(crate) fn walk_property_hooks_for_members(

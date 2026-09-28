@@ -192,18 +192,20 @@ impl Builder {
 
     /// Conditions of an `if` and its `elseif` chain.
     fn if_chain(&mut self, stmt: &Stmt, is_elseif: bool) {
-        if let StmtKind::If {
-            cond, else_branch, ..
-        } = &stmt.kind
-        {
-            self.condition(cond, is_elseif && else_branch.is_none());
-            if let Some(else_branch) = else_branch
-                && matches!(else_branch.kind, StmtKind::If { .. })
+        crate::stack::guard(|| {
+            if let StmtKind::If {
+                cond, else_branch, ..
+            } = &stmt.kind
             {
-                self.elseifs.insert(else_branch.id);
-                self.if_chain(else_branch, true);
+                self.condition(cond, is_elseif && else_branch.is_none());
+                if let Some(else_branch) = else_branch
+                    && matches!(else_branch.kind, StmtKind::If { .. })
+                {
+                    self.elseifs.insert(else_branch.id);
+                    self.if_chain(else_branch, true);
+                }
             }
-        }
+        })
     }
 }
 

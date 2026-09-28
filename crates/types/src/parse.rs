@@ -12,54 +12,56 @@ use crate::{
 /// parentheses - PHPStan's own stub/native syntax rarely needs them outside
 /// advanced generic bounds.
 pub fn parse_type_string(raw: &str) -> Type {
-    let mut s = raw.trim();
-    let nullable = s.starts_with('?');
-    if nullable {
-        s = &s[1..];
-    }
-
-    // Splitting must respect <>/{} nesting - `Collection<int|string>` has
-    // no top-level union, but a naive `s.contains('|')` would still split
-    // on the one hiding inside the angle brackets.
-    let pipe_parts = split_top_level(s, '|');
-    let amp_parts = split_top_level(s, '&');
-    let ty = if pipe_parts.len() > 1 {
-        let mut members: Vec<Type> = pipe_parts.into_iter().map(parse_type_atom).collect();
-        // `Mixed` already includes every other possible value, so a
-        // union with `Mixed` alongside anything else (real shape:
-        // `end()`'s stub `@return mixed|false`) is simply `Mixed` -
-        // `Type::union` special-cases this at construction time, but
-        // this lower-level parser builds a `Repr::Union` directly from
-        // doc text with no such normalization; a stray non-`Mixed`
-        // member would otherwise fail an ordinary compatibility check
-        // even though the whole union is vacuously satisfiable.
-        if let Some(explicit) = members
-            .iter()
-            .filter_map(|m| match m {
-                Type(Repr::Mixed(explicit)) => Some(*explicit),
-                _ => None,
-            })
-            .reduce(|a, b| a || b)
-        {
-            return Type::mixed_with(explicit);
+    syntax::stack::guard(|| {
+        let mut s = raw.trim();
+        let nullable = s.starts_with('?');
+        if nullable {
+            s = &s[1..];
         }
-        crate::union::merge_int_ranges(&mut members);
-        if members.len() == 1 {
-            members.pop().expect("one member")
+
+        // Splitting must respect <>/{} nesting - `Collection<int|string>` has
+        // no top-level union, but a naive `s.contains('|')` would still split
+        // on the one hiding inside the angle brackets.
+        let pipe_parts = split_top_level(s, '|');
+        let amp_parts = split_top_level(s, '&');
+        let ty = if pipe_parts.len() > 1 {
+            let mut members: Vec<Type> = pipe_parts.into_iter().map(parse_type_atom).collect();
+            // `Mixed` already includes every other possible value, so a
+            // union with `Mixed` alongside anything else (real shape:
+            // `end()`'s stub `@return mixed|false`) is simply `Mixed` -
+            // `Type::union` special-cases this at construction time, but
+            // this lower-level parser builds a `Repr::Union` directly from
+            // doc text with no such normalization; a stray non-`Mixed`
+            // member would otherwise fail an ordinary compatibility check
+            // even though the whole union is vacuously satisfiable.
+            if let Some(explicit) = members
+                .iter()
+                .filter_map(|m| match m {
+                    Type(Repr::Mixed(explicit)) => Some(*explicit),
+                    _ => None,
+                })
+                .reduce(|a, b| a || b)
+            {
+                return Type::mixed_with(explicit);
+            }
+            crate::union::merge_int_ranges(&mut members);
+            if members.len() == 1 {
+                members.pop().expect("one member")
+            } else {
+                Type(Repr::Union(members))
+            }
+        } else if amp_parts.len() > 1 {
+            crate::intersect_types(amp_parts.into_iter().map(parse_type_atom).collect())
         } else {
-            Type(Repr::Union(members))
-        }
-    } else if amp_parts.len() > 1 {
-        crate::intersect_types(amp_parts.into_iter().map(parse_type_atom).collect())
-    } else {
-        parse_type_atom(s)
-    };
+            parse_type_atom(s)
+        };
 
-    if nullable && ty != Type::mixed() {
-        Type(Repr::Union(vec![ty, Type::null()]))
-    } else {
-        ty
-    }
+        if nullable && ty != Type::mixed() {
+            Type(Repr::Union(vec![ty, Type::null()]))
+        } else {
+            ty
+        }
+    })
 }
 
 /// Real structural parsing of a `Closure(...)`/`callable(...)` PHPDoc
@@ -810,42 +812,44 @@ const NATIVE_TYPE_KEYWORDS: &[&str] = &[
 /// a PHPDoc keyword such as `resource` or `integer` included, is a class,
 /// as PHP itself reads it.
 pub fn parse_native_type_string(s: &str) -> Type {
-    let s = s.trim();
-    if let Some(inner) = s.strip_prefix('?') {
-        return Type(Repr::Union(vec![
-            parse_native_type_string(inner),
-            Type::null(),
-        ]));
-    }
-    let alternatives = split_top_level(s, '|');
-    if alternatives.len() > 1 {
-        return Type(Repr::Union(
-            alternatives
-                .iter()
-                .map(|a| parse_native_type_string(a))
-                .collect(),
-        ));
-    }
-    let unwrapped = s
-        .strip_prefix('(')
-        .and_then(|inner| inner.strip_suffix(')'))
-        .unwrap_or(s);
-    let members = split_top_level(unwrapped, '&');
-    if members.len() > 1 {
-        return Type(Repr::Intersection(
-            members
-                .iter()
-                .map(|m| parse_native_type_string(m))
-                .collect(),
-        ));
-    }
-    let name = unwrapped.trim();
-    let bare = name.trim_start_matches('\\');
-    if NATIVE_TYPE_KEYWORDS.contains(&bare.to_ascii_lowercase().as_str()) {
-        parse_type_string(bare)
-    } else {
-        Type::object(name.into(), Vec::new())
-    }
+    syntax::stack::guard(|| {
+        let s = s.trim();
+        if let Some(inner) = s.strip_prefix('?') {
+            return Type(Repr::Union(vec![
+                parse_native_type_string(inner),
+                Type::null(),
+            ]));
+        }
+        let alternatives = split_top_level(s, '|');
+        if alternatives.len() > 1 {
+            return Type(Repr::Union(
+                alternatives
+                    .iter()
+                    .map(|a| parse_native_type_string(a))
+                    .collect(),
+            ));
+        }
+        let unwrapped = s
+            .strip_prefix('(')
+            .and_then(|inner| inner.strip_suffix(')'))
+            .unwrap_or(s);
+        let members = split_top_level(unwrapped, '&');
+        if members.len() > 1 {
+            return Type(Repr::Intersection(
+                members
+                    .iter()
+                    .map(|m| parse_native_type_string(m))
+                    .collect(),
+            ));
+        }
+        let name = unwrapped.trim();
+        let bare = name.trim_start_matches('\\');
+        if NATIVE_TYPE_KEYWORDS.contains(&bare.to_ascii_lowercase().as_str()) {
+            parse_type_string(bare)
+        } else {
+            Type::object(name.into(), Vec::new())
+        }
+    })
 }
 
 /// Parses one bound of an `int<min, max>` range - real PHPStan's own
@@ -1058,8 +1062,10 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 ty @ (Type(Repr::Array(..)) | Type(Repr::ArrayShape(_))) => {
                     late::value_of(&ty).unwrap_or(Type::mixed())
                 }
-                Type(Repr::Object(name, args)) if args.is_empty() => {
-                    Type::value_of(Type(Repr::Object(name, args)))
+                ty @ Type(Repr::Object(..))
+                    if ty.as_object().is_some_and(|(_, args)| args.is_empty()) =>
+                {
+                    Type::value_of(ty)
                 }
                 target @ Type(Repr::ClassConstant { .. }) => Type::value_of(target),
                 _ => Type::mixed(),
@@ -1072,8 +1078,10 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                     late::key_of(&ty).unwrap_or(Type::mixed())
                 }
                 // Possibly a template: kept until a call binds it.
-                Type(Repr::Object(name, args)) if args.is_empty() => {
-                    Type::key_of(Type(Repr::Object(name, args)))
+                ty @ Type(Repr::Object(..))
+                    if ty.as_object().is_some_and(|(_, args)| args.is_empty()) =>
+                {
+                    Type::key_of(ty)
                 }
                 _ => Type::mixed(),
             },

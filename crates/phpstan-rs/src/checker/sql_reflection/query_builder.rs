@@ -265,14 +265,14 @@ fn combine_predicate_parts(parts: &[(bool, String)]) -> Option<String> {
 }
 
 fn looks_like_dbal_query_builder_chain(e: &Expr) -> bool {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
         ExprKind::MethodCall(inner, _, _, _) => looks_like_dbal_query_builder_chain(inner),
         ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
             looks_like_dbal_query_builder_chain(inner)
         }
         _ => false,
-    }
+    })
 }
 
 struct ChainCall {
@@ -625,44 +625,46 @@ impl<'a> Checker<'a> {
 }
 
 fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<String> {
-    if let Some(s) = literal_string_value(expr) {
-        return Some(s.into_owned());
-    }
-    match &expr.kind {
-        // A double-quoted/heredoc string with every interpolated part
-        // itself foldable (a literal text chunk, or a variable narrowed
-        // to a literal) - `check_expr`'s own `Interpolated` arm
-        // deliberately widens this to plain `string` unconditionally
-        // (it exists to run the real `encapsedStringPart.nonString`/
-        // implicit-`__toString()` diagnostics, not to preserve a literal
-        // type), so `infer_expr`'s separate literal-fold arm below is
-        // never actually reachable for this case - folded here directly
-        // instead, scoped to this module only, rather than changing
-        // `check_expr`'s general narrowing behavior for every caller.
-        ExprKind::Interpolated(parts) => {
-            let mut out = String::new();
-            for part in parts {
-                out.push_str(&fold_string_expr(checker, part, locals)?);
-            }
-            return Some(out);
+    syntax::stack::guard(|| {
+        if let Some(s) = literal_string_value(expr) {
+            return Some(s.into_owned());
         }
-        ExprKind::Call(callee, args) => {
-            if let ExprKind::Name(name) = &callee.kind
-                && name
-                    .rsplit('\\')
-                    .next_back()
-                    .is_some_and(|n| n.eq_ignore_ascii_case("sprintf"))
-                && !args.iter().any(|a| a.spread)
-            {
-                return fold_sprintf_call(checker, args, locals);
+        match &expr.kind {
+            // A double-quoted/heredoc string with every interpolated part
+            // itself foldable (a literal text chunk, or a variable narrowed
+            // to a literal) - `check_expr`'s own `Interpolated` arm
+            // deliberately widens this to plain `string` unconditionally
+            // (it exists to run the real `encapsedStringPart.nonString`/
+            // implicit-`__toString()` diagnostics, not to preserve a literal
+            // type), so `infer_expr`'s separate literal-fold arm below is
+            // never actually reachable for this case - folded here directly
+            // instead, scoped to this module only, rather than changing
+            // `check_expr`'s general narrowing behavior for every caller.
+            ExprKind::Interpolated(parts) => {
+                let mut out = String::new();
+                for part in parts {
+                    out.push_str(&fold_string_expr(checker, part, locals)?);
+                }
+                return Some(out);
             }
+            ExprKind::Call(callee, args) => {
+                if let ExprKind::Name(name) = &callee.kind
+                    && name
+                        .rsplit('\\')
+                        .next_back()
+                        .is_some_and(|n| n.eq_ignore_ascii_case("sprintf"))
+                    && !args.iter().any(|a| a.spread)
+                {
+                    return fold_sprintf_call(checker, args, locals);
+                }
+            }
+            _ => {}
         }
-        _ => {}
-    }
-    checker
-        .infer_expr(expr, locals)
-        .string_literal_value()
-        .map(|s| s.to_string())
+        checker
+            .infer_expr(expr, locals)
+            .string_literal_value()
+            .map(|s| s.to_string())
+    })
 }
 
 /// A real `sprintf()` call whose format string and every value argument

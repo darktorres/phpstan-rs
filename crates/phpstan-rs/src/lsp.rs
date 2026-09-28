@@ -611,8 +611,7 @@ impl Server {
 
     /// Runs the checker over every analyzed (first-party) file currently
     /// loaded, post-filtered the same way any other published diagnostic
-    /// set is. Runs on the worker pool, whose threads have the stack the
-    /// checker's recursive walk needs, and through
+    /// set is. Runs on the worker pool, and through
     /// `Project::check_paths_isolating_panics` (not `check_paths`) so one
     /// file's latent checker bug can't take down the whole push. Shared by `publish_workspace_diagnostics`
     /// (which then drops empty results) and `republish_known_files`

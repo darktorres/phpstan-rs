@@ -10,45 +10,47 @@ use crate::{
 impl Type {
     /// This type with `static` and `$this` as `class`, at any depth.
     pub fn bind_static(&self, class: &str) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::StaticRef(args)) => Type::object(
                 class.into(),
                 args.iter().map(|a| a.bind_static(class)).collect(),
             ),
             Type(Repr::This) => Type::object(class.into(), Vec::new()),
             other => other.map_children(&mut |t| t.bind_static(class)),
-        }
+        })
     }
 
     /// This type with `self` as `class`, at any depth.
     pub fn bind_self(&self, class: &str) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::SelfRef(args)) => Type::object(
                 class.into(),
                 args.iter().map(|a| a.bind_self(class)).collect(),
             ),
             other => other.map_children(&mut |t| t.bind_self(class)),
-        }
+        })
     }
 
     /// This type with `parent` as `class`, at any depth.
     pub fn bind_parent(&self, class: &str) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::ParentRef) => Type::object(class.into(), Vec::new()),
             other => other.map_children(&mut |t| t.bind_parent(class)),
-        }
+        })
     }
 
     /// This type with each object whose class `replace` answers for
     /// replaced by that answer, generic arguments and all; every other
     /// type's children are walked.
     pub fn replace_objects(&self, replace: &mut dyn FnMut(&Name) -> Option<Type>) -> Type {
-        if let Type(Repr::Object(name, _)) = self
-            && let Some(replacement) = replace(name)
-        {
-            return replacement;
-        }
-        self.map_children(&mut |t| t.replace_objects(replace))
+        syntax::stack::guard(|| {
+            if let Type(Repr::Object(name, _)) = self
+                && let Some(replacement) = replace(name)
+            {
+                return replacement;
+            }
+            self.map_children(&mut |t| t.replace_objects(replace))
+        })
     }
 
     /// This type with each object's class renamed by `rename`, at any
@@ -56,7 +58,7 @@ impl Type {
     /// templates' bounds and defaults. The `Closure` of a `Closure(...)`
     /// shape is PHP's own and keeps its name.
     pub fn map_class_names(&self, rename: &mut dyn FnMut(&Name) -> Name) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Object(name, args)) => Type::object(
                 rename(name),
                 args.iter().map(|a| a.map_class_names(rename)).collect(),
@@ -100,7 +102,7 @@ impl Type {
                 )))
             }
             _ => self.map_children(&mut |t| t.map_class_names(rename)),
-        }
+        })
     }
 
     /// This type with each sealed array shape unsealed, so a key it
@@ -130,7 +132,7 @@ impl Type {
     }
 
     fn step(&self, by: i64) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Null) if by > 0 => Type::int(),
             Type(Repr::IntLiteral(n)) => Type::int_literal(n + by),
             Type(Repr::FloatLiteral(f)) => Type::float_literal(f + by as f64),
@@ -143,41 +145,41 @@ impl Type {
                 .reduce(Type::union)
                 .unwrap_or(Type::mixed()),
             other => other.clone(),
-        }
+        })
     }
 
     /// This type with each array value passed through `f`: a general
     /// array's, and each shape field's and unsealed tail's, in union and
     /// intersection members too. Other types are left as they are.
     pub fn map_array_values(&self, f: &mut dyn FnMut(&Type) -> Type) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Box::new(f(value)))),
             Type(Repr::ArrayShape(shape)) => Type::array_shape(shape.map_types(&mut |t| f(t))),
             Type(Repr::Union(_)) | Type(Repr::BenevolentUnion(_)) | Type(Repr::Intersection(_)) => {
                 self.map_children(&mut |m| m.map_array_values(&mut *f))
             }
             other => other.clone(),
-        }
+        })
     }
 
     /// This type with each general array's value type replaced by
     /// `value`, in union and intersection members too; an array shape
     /// keeps its fields.
     pub fn with_general_array_value(&self, value: &Type) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Array(key, _)) => Type(Repr::Array(key.clone(), Box::new(value.clone()))),
             Type(Repr::Union(_)) | Type(Repr::BenevolentUnion(_)) | Type(Repr::Intersection(_)) => {
                 self.map_children(&mut |m| m.with_general_array_value(value))
             }
             other => other.clone(),
-        }
+        })
     }
 
     /// This array with each value passed through `keep`: a shape field
     /// `keep` turns into `never` is dropped, and one it changes may be
     /// dropped (becomes optional). Other types are left as they are.
     pub fn filter_array_values(&self, keep: &dyn Fn(&Type) -> Type) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Array(key, value)) => Type(Repr::Array(key.clone(), Box::new(keep(value)))),
             Type(Repr::ArrayShape(shape)) => Type::array_shape(Shape {
                 fields: shape
@@ -205,7 +207,7 @@ impl Type {
                     .collect(),
             )),
             other => other.clone(),
-        }
+        })
     }
 
     /// This type without its accessory refinements: an intersection's

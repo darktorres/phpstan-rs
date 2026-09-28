@@ -21,7 +21,7 @@ use types::Type;
 /// what lets `is_int($x['k'] ?? null)` see `$x['k']`'s own true type
 /// (`int|null`), not the coalesce result's already-narrower one.
 pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => narrowing_infer_target(inner),
         ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
             if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
@@ -29,7 +29,7 @@ pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
             narrowing_infer_target(lhs)
         }
         _ => e,
-    }
+    })
 }
 
 /// A stable string key for the small set of expressions this checker can
@@ -62,92 +62,94 @@ pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
 /// existing use for the analogous shape-growing case in
 /// `bind_assignment_target`.
 pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
-    match &e.kind {
-        // No prefix - `locals` is keyed by bare variable name everywhere
-        // else in this checker (`ExprKind::Variable(name) => locals.get(name)`),
-        // and this has to produce the exact same key for a bare variable
-        // to stay a drop-in replacement at the Instanceof-narrowing call
-        // site.
-        ExprKind::Variable(name) => Some(name.to_string()),
-        ExprKind::PropertyAccess(base, prop, _) => {
-            narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
-        }
-        // A static property (`self::$adminSessionCookies !== null`)
-        // needs a narrowing key too, not just an instance property's
-        // `->` chain. Scoped to a real static property specifically
-        // (the parser's own `$`-prefixed `member` encoding,
-        // distinguishing it from a class constant or `Foo::class`) -
-        // both this arm and the generic write-side purge-and-update in
-        // `bind_assignment_target` key off `narrowing_key` uniformly,
-        // so a later `self::$prop = ...` correctly invalidates/replaces
-        // this same entry with no additional wiring needed.
-        ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), name) => {
-            Some(format!("{class_name}::${name}"))
-        }
-        ExprKind::Index(base, Some(idx)) => {
-            let base_key = narrowing_key(base)?;
-            match literal_string_key(idx) {
-                Some(key) => Some(format!("{base_key}[{key}]")),
-                // `is_string($this->mirror[$key])`
-                // where `$key` is a variable, not a literal - a `$`-
-                // prefixed marker distinguishes "keyed by this variable's
-                // current value" from a literal key's own text (which
-                // `is_real_variable_key` already treats as synthetic
-                // either way, so this can't be mistaken for a real bare-
-                // variable key). Only sound alongside real invalidation
-                // of this entry whenever `subscript_name` is reassigned -
-                // see `purge_stale_narrowing_for`, wired in everywhere a
-                // bare variable's value can change.
-                None => match &idx.kind {
-                    ExprKind::Variable(subscript_name) => {
-                        Some(format!("{base_key}[${subscript_name}]"))
-                    }
-                    _ => None,
-                },
+    syntax::stack::guard(|| {
+        match &e.kind {
+            // No prefix - `locals` is keyed by bare variable name everywhere
+            // else in this checker (`ExprKind::Variable(name) => locals.get(name)`),
+            // and this has to produce the exact same key for a bare variable
+            // to stay a drop-in replacement at the Instanceof-narrowing call
+            // site.
+            ExprKind::Variable(name) => Some(name.to_string()),
+            ExprKind::PropertyAccess(base, prop, _) => {
+                narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
             }
+            // A static property (`self::$adminSessionCookies !== null`)
+            // needs a narrowing key too, not just an instance property's
+            // `->` chain. Scoped to a real static property specifically
+            // (the parser's own `$`-prefixed `member` encoding,
+            // distinguishing it from a class constant or `Foo::class`) -
+            // both this arm and the generic write-side purge-and-update in
+            // `bind_assignment_target` key off `narrowing_key` uniformly,
+            // so a later `self::$prop = ...` correctly invalidates/replaces
+            // this same entry with no additional wiring needed.
+            ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), name) => {
+                Some(format!("{class_name}::${name}"))
+            }
+            ExprKind::Index(base, Some(idx)) => {
+                let base_key = narrowing_key(base)?;
+                match literal_string_key(idx) {
+                    Some(key) => Some(format!("{base_key}[{key}]")),
+                    // `is_string($this->mirror[$key])`
+                    // where `$key` is a variable, not a literal - a `$`-
+                    // prefixed marker distinguishes "keyed by this variable's
+                    // current value" from a literal key's own text (which
+                    // `is_real_variable_key` already treats as synthetic
+                    // either way, so this can't be mistaken for a real bare-
+                    // variable key). Only sound alongside real invalidation
+                    // of this entry whenever `subscript_name` is reassigned -
+                    // see `purge_stale_narrowing_for`, wired in everywhere a
+                    // bare variable's value can change.
+                    None => match &idx.kind {
+                        ExprKind::Variable(subscript_name) => {
+                            Some(format!("{base_key}[${subscript_name}]"))
+                        }
+                        _ => None,
+                    },
+                }
+            }
+            // `is_string($result = expr)` - an assignment nested
+            // inside the narrowed expression itself, the common "assign-then-
+            // check" idiom. An assignment's own runtime value is exactly
+            // what ends up stored under its left-hand side, so whatever gets
+            // checked here is equally true of `lhs`'s own key afterward -
+            // narrowing key can borrow the underlying variable/property/index
+            // key without needing its own dedicated storage.
+            ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => narrowing_key(lhs),
+            // `($file = readdir($dir)) !== false` - the
+            // "assign-then-check" idiom above, but wrapped in parens, which
+            // real PHP requires for the statement's own top-level shape
+            // (`$file = readdir($dir) !== false` would parse as `$file =
+            // (readdir($dir) !== false)` instead - `=` binds looser than
+            // `!==` there). Without this, `Assign`'s own arm above never
+            // gets a chance to run for the single most common shape it
+            // exists to cover. The comparison-operand position specifically
+            // (`false !== $file = readdir($dir)`, no parens, no assignment
+            // at the very top of the statement) doesn't need this arm at
+            // all - `parse_assignment_tail` already builds the right
+            // `Assign` node directly as the comparison's own operand - but
+            // plenty of real code still writes the parens out of habit, so
+            // both arms stay.
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => narrowing_key(inner),
+            // `is_int($decoded['status'] ?? null)` - a
+            // common defensive-coding idiom (json_decode results,
+            // `$_SERVER`/`$_GET` reads, ...). Scoped to a literal `null`
+            // fallback specifically, not any coalesce: `is_int($x['k'] ??
+            // null)` being true can only happen if `$x['k']` itself was
+            // already `int` (the fallback `null` would fail `is_int`
+            // otherwise, so `null` specifically can never be the reason the
+            // predicate passed) - but `is_int($x['k'] ?? 0)` gives no such
+            // guarantee, since `$x['k']` being absent/`null` would still make
+            // the whole expression `is_int`-true via the fallback `0`,
+            // wrongly narrowing `$x['k']` itself away from a real possibility
+            // (`null`) it could still hold.
+            ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
+                if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
+            {
+                narrowing_key(lhs)
+            }
+            _ => None,
         }
-        // `is_string($result = expr)` - an assignment nested
-        // inside the narrowed expression itself, the common "assign-then-
-        // check" idiom. An assignment's own runtime value is exactly
-        // what ends up stored under its left-hand side, so whatever gets
-        // checked here is equally true of `lhs`'s own key afterward -
-        // narrowing key can borrow the underlying variable/property/index
-        // key without needing its own dedicated storage.
-        ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => narrowing_key(lhs),
-        // `($file = readdir($dir)) !== false` - the
-        // "assign-then-check" idiom above, but wrapped in parens, which
-        // real PHP requires for the statement's own top-level shape
-        // (`$file = readdir($dir) !== false` would parse as `$file =
-        // (readdir($dir) !== false)` instead - `=` binds looser than
-        // `!==` there). Without this, `Assign`'s own arm above never
-        // gets a chance to run for the single most common shape it
-        // exists to cover. The comparison-operand position specifically
-        // (`false !== $file = readdir($dir)`, no parens, no assignment
-        // at the very top of the statement) doesn't need this arm at
-        // all - `parse_assignment_tail` already builds the right
-        // `Assign` node directly as the comparison's own operand - but
-        // plenty of real code still writes the parens out of habit, so
-        // both arms stay.
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => narrowing_key(inner),
-        // `is_int($decoded['status'] ?? null)` - a
-        // common defensive-coding idiom (json_decode results,
-        // `$_SERVER`/`$_GET` reads, ...). Scoped to a literal `null`
-        // fallback specifically, not any coalesce: `is_int($x['k'] ??
-        // null)` being true can only happen if `$x['k']` itself was
-        // already `int` (the fallback `null` would fail `is_int`
-        // otherwise, so `null` specifically can never be the reason the
-        // predicate passed) - but `is_int($x['k'] ?? 0)` gives no such
-        // guarantee, since `$x['k']` being absent/`null` would still make
-        // the whole expression `is_int`-true via the fallback `0`,
-        // wrongly narrowing `$x['k']` itself away from a real possibility
-        // (`null`) it could still hold.
-        ExprKind::Binary(BinOp::Coalesce, lhs, rhs)
-            if matches!(&rhs.kind, ExprKind::Literal(Literal::Null)) =>
-        {
-            narrowing_key(lhs)
-        }
-        _ => None,
-    }
+    })
 }
 
 /// Whether `key` (as found in a `Locals` map) could be a real PHP
@@ -403,56 +405,60 @@ impl<'a> Checker<'a> {
         cond: &'e Expr,
         locals: &Locals,
     ) -> Option<(String, Type, &'e Expr)> {
-        match &cond.kind {
-            ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
-                let (lk, lt, le) = self.or_chain_narrowing_target(l, locals)?;
-                let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
-                (lk == rk).then(|| (lk, Type::union(lt, rt), le))
-            }
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                self.or_chain_narrowing_target(inner, locals)
-            }
-            ExprKind::Call(callee, args) => {
-                let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice()) else {
-                    return None;
-                };
-                let key = narrowing_key(&single_arg.value)?;
-                let target_ty = narrowing_type_for_predicate(name.trim_start_matches('\\'))?;
-                Some((key, target_ty, &single_arg.value))
-            }
-            // `$node instanceof A || $node instanceof B ? (string) $node
-            // : ...` needs a leaf for `instanceof` here too, despite
-            // single-condition `if ($x instanceof Foo)` narrowing
-            // already working fine elsewhere. A dynamic target (`$x instanceof
-            // $className`) still doesn't name a concrete class to narrow
-            // to, same as the single-condition `ExprKind::Instanceof` arm
-            // above already requires.
-            ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name, _)) => {
-                let key = narrowing_key(inner)?;
-                let target_ty = self.resolve_name_expr(class_name);
-                Some((key, target_ty, inner))
-            }
-            // `$parentId === null || $parentId === 0` - an equality-
-            // comparison leaf, the same shape `apply_equality_narrowing`
-            // already recognizes for a single condition, now composable
-            // into an arbitrary-depth `||` chain the identical way
-            // `is_*()`/`instanceof` leaves already are. `Mixed` is
-            // excluded the same way `apply_equality_narrowing` excludes
-            // it - an unresolvable value proves nothing about which
-            // member the union should include.
-            ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) => {
-                let (key, narrowed_expr, target_ty) = match (narrowing_key(l), narrowing_key(r)) {
-                    (Some(key), _) => (key, l, self.infer_expr(r, locals)),
-                    (None, Some(key)) => (key, r, self.infer_expr(l, locals)),
-                    (None, None) => return None,
-                };
-                if target_ty.is_mixed() {
-                    return None;
+        syntax::stack::guard(|| {
+            match &cond.kind {
+                ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
+                    let (lk, lt, le) = self.or_chain_narrowing_target(l, locals)?;
+                    let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
+                    (lk == rk).then(|| (lk, Type::union(lt, rt), le))
                 }
-                Some((key, target_ty, narrowed_expr))
+                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                    self.or_chain_narrowing_target(inner, locals)
+                }
+                ExprKind::Call(callee, args) => {
+                    let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
+                    else {
+                        return None;
+                    };
+                    let key = narrowing_key(&single_arg.value)?;
+                    let target_ty = narrowing_type_for_predicate(name.trim_start_matches('\\'))?;
+                    Some((key, target_ty, &single_arg.value))
+                }
+                // `$node instanceof A || $node instanceof B ? (string) $node
+                // : ...` needs a leaf for `instanceof` here too, despite
+                // single-condition `if ($x instanceof Foo)` narrowing
+                // already working fine elsewhere. A dynamic target (`$x instanceof
+                // $className`) still doesn't name a concrete class to narrow
+                // to, same as the single-condition `ExprKind::Instanceof` arm
+                // above already requires.
+                ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name, _)) => {
+                    let key = narrowing_key(inner)?;
+                    let target_ty = self.resolve_name_expr(class_name);
+                    Some((key, target_ty, &**inner))
+                }
+                // `$parentId === null || $parentId === 0` - an equality-
+                // comparison leaf, the same shape `apply_equality_narrowing`
+                // already recognizes for a single condition, now composable
+                // into an arbitrary-depth `||` chain the identical way
+                // `is_*()`/`instanceof` leaves already are. `Mixed` is
+                // excluded the same way `apply_equality_narrowing` excludes
+                // it - an unresolvable value proves nothing about which
+                // member the union should include.
+                ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) => {
+                    let (key, narrowed_expr, target_ty) = match (narrowing_key(l), narrowing_key(r))
+                    {
+                        (Some(key), _) => (key, l, self.infer_expr(r, locals)),
+                        (None, Some(key)) => (key, r, self.infer_expr(l, locals)),
+                        (None, None) => return None,
+                    };
+                    if target_ty.is_mixed() {
+                        return None;
+                    }
+                    Some((key, target_ty, &**narrowed_expr))
+                }
+                _ => None,
             }
-            _ => None,
-        }
+        })
     }
 }
 
@@ -470,7 +476,7 @@ impl<'a> Checker<'a> {
         cond: &'e Expr,
         locals: &Locals,
     ) -> Option<(String, Type, &'e Expr)> {
-        match &cond.kind {
+        syntax::stack::guard(|| match &cond.kind {
             ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
                 let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
                 let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
@@ -481,7 +487,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner, locals),
             _ => None,
-        }
+        })
     }
 }
 

@@ -92,39 +92,41 @@ impl<'a> Checker<'a> {
     /// (`Some(false)`), or only sometimes (`None`) an instance of the
     /// registered class-like `target`.
     fn instanceof_verdict(&self, ty: &Type, target: &str) -> Option<bool> {
-        if ty.is_never() {
-            return None;
-        }
-        if let Some((class, _)) = ty.as_object() {
-            return self.class_instanceof_verdict(class, target);
-        }
-        if let Some(bound) = ty.template_bound() {
-            return self.instanceof_verdict(bound, target);
-        }
-        let members = ty.union_members();
-        if members.len() > 1 {
-            let mut verdicts = members.iter().map(|m| self.instanceof_verdict(m, target));
-            let first = verdicts.next()??;
-            return verdicts.all(|v| v == Some(first)).then_some(first);
-        }
-        let parts = ty.intersection_members();
-        if parts.len() > 1 {
-            let verdicts: Vec<_> = parts
-                .iter()
-                .filter_map(|m| self.instanceof_verdict(m, target))
-                .collect();
-            return if verdicts.contains(&true) {
-                Some(true)
-            } else if verdicts.contains(&false) {
-                Some(false)
-            } else {
-                None
-            };
-        }
-        self.relation()
-            .can_access_properties(ty)
-            .no()
-            .then_some(false)
+        syntax::stack::guard(|| {
+            if ty.is_never() {
+                return None;
+            }
+            if let Some((class, _)) = ty.as_object() {
+                return self.class_instanceof_verdict(class, target);
+            }
+            if let Some(bound) = ty.template_bound() {
+                return self.instanceof_verdict(bound, target);
+            }
+            let members = ty.union_members();
+            if members.len() > 1 {
+                let mut verdicts = members.iter().map(|m| self.instanceof_verdict(m, target));
+                let first = verdicts.next()??;
+                return verdicts.all(|v| v == Some(first)).then_some(first);
+            }
+            let parts = ty.intersection_members();
+            if parts.len() > 1 {
+                let verdicts: Vec<_> = parts
+                    .iter()
+                    .filter_map(|m| self.instanceof_verdict(m, target))
+                    .collect();
+                return if verdicts.contains(&true) {
+                    Some(true)
+                } else if verdicts.contains(&false) {
+                    Some(false)
+                } else {
+                    None
+                };
+            }
+            self.relation()
+                .can_access_properties(ty)
+                .no()
+                .then_some(false)
+        })
     }
 
     fn class_instanceof_verdict(&self, class: &str, target: &str) -> Option<bool> {

@@ -294,7 +294,7 @@ fn path_ends_with_suffix(path: &Path, suffix: &str) -> bool {
 /// suffix needs to match a real file's path, never the constant's actual
 /// value.
 fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
-    match &unwrap_grouping(expr).kind {
+    syntax::stack::guard(|| match &unwrap_grouping(expr).kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Name(_) => Some(String::new()),
         ExprKind::Binary(BinOp::Concat, l, r) => {
@@ -303,7 +303,7 @@ fn resolve_include_target_suffix(expr: &Expr) -> Option<String> {
             Some(l + &r)
         }
         _ => None,
-    }
+    })
 }
 
 /// Walks a file's own top-level statements - every assignment found here
@@ -555,17 +555,19 @@ fn handle_assignment_target<'a>(
 /// itself, `$name[] = ...` - nothing to report there, not a special
 /// case, `key.as_ref()` on `None` already falls through to `None`).
 fn root_variable_and_first_key(expr: &Expr) -> Option<(&Arc<str>, String)> {
-    let ExprKind::Index(base, key) = &unwrap_grouping(expr).kind else {
-        return None;
-    };
-    match &unwrap_grouping(base).kind {
-        ExprKind::Variable(name) => key
-            .as_deref()
-            .and_then(literal_string_key)
-            .map(|k| (name, k)),
-        ExprKind::Index(..) => root_variable_and_first_key(base),
-        _ => None,
-    }
+    syntax::stack::guard(|| {
+        let ExprKind::Index(base, key) = &unwrap_grouping(expr).kind else {
+            return None;
+        };
+        match &unwrap_grouping(base).kind {
+            ExprKind::Variable(name) => key
+                .as_deref()
+                .and_then(literal_string_key)
+                .map(|k| (name, k)),
+            ExprKind::Index(..) => root_variable_and_first_key(base),
+            _ => None,
+        }
+    })
 }
 
 /// `$name = array_merge($name, <rhs>);` - real PHP folds `<rhs>`'s own
@@ -622,65 +624,67 @@ fn literal_string_key(expr: &Expr) -> Option<String> {
 /// lookups and a positionally-correct `NameContext` - no `Checker`/
 /// `Locals`, neither exists yet at this point in the pipeline.
 fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext) -> Type {
-    let expr = unwrap_grouping(expr);
-    match &expr.kind {
-        ExprKind::New(callee, _args) => {
-            if let ExprKind::Name(name) = &unwrap_grouping(callee).kind {
-                return Type::object(ctx.resolve(name).into(), vec![]);
+    syntax::stack::guard(|| {
+        let expr = unwrap_grouping(expr);
+        match &expr.kind {
+            ExprKind::New(callee, _args) => {
+                if let ExprKind::Name(name) = &unwrap_grouping(callee).kind {
+                    return Type::object(ctx.resolve(name).into(), vec![]);
+                }
+                Type::mixed()
             }
-            Type::mixed()
-        }
-        ExprKind::ArrayLiteral(items) => {
-            let mut fields = Vec::new();
-            for item in items {
-                let Some(key_expr) = &item.key else {
-                    continue;
-                };
-                let Some(key) = literal_string_key(key_expr) else {
-                    continue;
-                };
-                let ty = resolve_static_expr_type(&item.value, registry, ctx);
-                fields.push((key, ty, false));
+            ExprKind::ArrayLiteral(items) => {
+                let mut fields = Vec::new();
+                for item in items {
+                    let Some(key_expr) = &item.key else {
+                        continue;
+                    };
+                    let Some(key) = literal_string_key(key_expr) else {
+                        continue;
+                    };
+                    let ty = resolve_static_expr_type(&item.value, registry, ctx);
+                    fields.push((key, ty, false));
+                }
+                Type::array_shape(Shape::from_named(fields))
             }
-            Type::array_shape(Shape::from_named(fields))
+            ExprKind::Call(callee, _args) => {
+                let ExprKind::Name(name) = &unwrap_grouping(callee).kind else {
+                    return Type::mixed();
+                };
+                let (primary, fallback) = ctx.resolve_function_candidates(name);
+                registry
+                    .lookup_function(&primary)
+                    .or_else(|| {
+                        fallback
+                            .as_deref()
+                            .and_then(|f| registry.lookup_function(f))
+                    })
+                    .map(|sig| sig.return_type.clone())
+                    .unwrap_or(Type::mixed())
+            }
+            ExprKind::StaticCall(target, method, _args) => {
+                let fqn = ctx.resolve(target.as_name().unwrap_or("?"));
+                registry
+                    .lookup_method(&fqn, method)
+                    .map(|sig| sig.return_type.clone())
+                    .unwrap_or(Type::mixed())
+            }
+            ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
+                let fqn = ctx.resolve(class);
+                registry
+                    .lookup_const(&fqn, name)
+                    .map(|c| c.ty.clone())
+                    .unwrap_or(Type::mixed())
+            }
+            ExprKind::MethodCall(recv, method, _args, _) => {
+                let recv_ty = resolve_static_expr_type(recv, registry, ctx);
+                recv_ty
+                    .as_object()
+                    .and_then(|(class, _)| registry.lookup_method(class, method))
+                    .map(|sig| sig.return_type.clone())
+                    .unwrap_or(Type::mixed())
+            }
+            _ => infer_const_type(expr),
         }
-        ExprKind::Call(callee, _args) => {
-            let ExprKind::Name(name) = &unwrap_grouping(callee).kind else {
-                return Type::mixed();
-            };
-            let (primary, fallback) = ctx.resolve_function_candidates(name);
-            registry
-                .lookup_function(&primary)
-                .or_else(|| {
-                    fallback
-                        .as_deref()
-                        .and_then(|f| registry.lookup_function(f))
-                })
-                .map(|sig| sig.return_type.clone())
-                .unwrap_or(Type::mixed())
-        }
-        ExprKind::StaticCall(target, method, _args) => {
-            let fqn = ctx.resolve(target.as_name().unwrap_or("?"));
-            registry
-                .lookup_method(&fqn, method)
-                .map(|sig| sig.return_type.clone())
-                .unwrap_or(Type::mixed())
-        }
-        ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
-            let fqn = ctx.resolve(class);
-            registry
-                .lookup_const(&fqn, name)
-                .map(|c| c.ty.clone())
-                .unwrap_or(Type::mixed())
-        }
-        ExprKind::MethodCall(recv, method, _args, _) => {
-            let recv_ty = resolve_static_expr_type(recv, registry, ctx);
-            recv_ty
-                .as_object()
-                .and_then(|(class, _)| registry.lookup_method(class, method))
-                .map(|sig| sig.return_type.clone())
-                .unwrap_or(Type::mixed())
-        }
-        _ => infer_const_type(expr),
-    }
+    })
 }

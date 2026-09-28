@@ -132,18 +132,20 @@ impl<'a> Checker<'a> {
     /// recursive calls needing to know about rule dispatch at all (see
     /// `rule`'s own module doc comment).
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
-        let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
-            self.check_expr_impl(e, locals, label)
-        });
-        if !self.try_throw_states.is_empty()
-            && let Some(thrown) = self.thrown_by(e, locals)
-        {
-            self.record_throw_state(thrown, locals);
-        }
-        if !self.external_rules.is_empty() {
-            self.dispatch_expr_rules(e, locals, &ty);
-        }
-        ty
+        syntax::stack::guard(|| {
+            let ty = crate::checker::profiling::measure_outermost!("checker::check_expr", {
+                self.check_expr_impl(e, locals, label)
+            });
+            if !self.try_throw_states.is_empty()
+                && let Some(thrown) = self.thrown_by(e, locals)
+            {
+                self.record_throw_state(thrown, locals);
+            }
+            if !self.external_rules.is_empty() {
+                self.dispatch_expr_rules(e, locals, &ty);
+            }
+            ty
+        })
     }
 
     /// Records `locals` as a scope the innermost enclosing `try` body can
@@ -4224,6 +4226,10 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer_expr(&self, e: &Expr, locals: &Locals) -> Type {
+        syntax::stack::guard(|| self.infer_expr_unguarded(e, locals))
+    }
+
+    fn infer_expr_unguarded(&self, e: &Expr, locals: &Locals) -> Type {
         match &e.kind {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::int_literal(*n),
@@ -6128,36 +6134,38 @@ impl<'a> Checker<'a> {
     /// fire for that narrower shape, rather than report something
     /// unproven.
     fn expand_enum_cases(&self, ty: &Type) -> Type {
-        let members = ty.union_members();
-        if members.len() > 1 {
-            let expanded: Vec<Type> = members
-                .iter()
-                .flat_map(|m| self.expand_enum_cases(m).union_members().to_vec())
-                .collect();
-            return match expanded.len() {
-                0 => Type::never(),
-                1 => expanded.into_iter().next().unwrap(),
-                _ => ty.with_members(expanded),
+        syntax::stack::guard(|| {
+            let members = ty.union_members();
+            if members.len() > 1 {
+                let expanded: Vec<Type> = members
+                    .iter()
+                    .flat_map(|m| self.expand_enum_cases(m).union_members().to_vec())
+                    .collect();
+                return match expanded.len() {
+                    0 => Type::never(),
+                    1 => expanded.into_iter().next().unwrap(),
+                    _ => ty.with_members(expanded),
+                };
+            }
+            let Some((class_name, _)) = ty.as_object() else {
+                return ty.clone();
             };
-        }
-        let Some((class_name, _)) = ty.as_object() else {
-            return ty.clone();
-        };
-        let Some(info) = self.registry.classes.get(class_name.as_str()) else {
-            return ty.clone();
-        };
-        let cases: Vec<Type> = info
-            .consts()
-            .values()
-            .filter_map(|c| c.ty().as_enum_case())
-            .filter(|(cls, _)| *cls == class_name)
-            .map(|(cls, case)| Type::enum_case(cls.clone(), case.clone()))
-            .collect();
-        match cases.len() {
-            0 => ty.clone(),
-            1 => cases.into_iter().next().unwrap(),
-            _ => Type::union_of(cases),
-        }
+            let Some(info) = self.registry.classes.get(class_name.as_str()) else {
+                return ty.clone();
+            };
+            let cases: Vec<Type> = info
+                .consts()
+                .values()
+                .filter_map(|c| c.ty().as_enum_case())
+                .filter(|(cls, _)| *cls == class_name)
+                .map(|(cls, case)| Type::enum_case(cls.clone(), case.clone()))
+                .collect();
+            match cases.len() {
+                0 => ty.clone(),
+                1 => cases.into_iter().next().unwrap(),
+                _ => Type::union_of(cases),
+            }
+        })
     }
 }
 
@@ -6174,7 +6182,7 @@ impl<'a> Checker<'a> {
 /// and re-widening its result to include `Null` here would risk masking
 /// further bugs rather than fixing anything.
 pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
-    match &base.kind {
+    syntax::stack::guard(|| match &base.kind {
         ExprKind::PropertyAccess(inner, _, nullsafe) => {
             *nullsafe || postfix_chain_has_nullsafe(inner)
         }
@@ -6185,7 +6193,7 @@ pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
             postfix_chain_has_nullsafe(inner)
         }
         _ => false,
-    }
+    })
 }
 
 /// A non-generator closure literal's inferred return type, from the

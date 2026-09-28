@@ -210,40 +210,42 @@ fn resolve_pure_ast(sql: &str, driver: Option<SqlDriver>) -> Option<Type> {
 /// "spans aren't a substitute for knowing the real shape" lesson this
 /// module already learned once for `normalize_placeholders_for_driver`.
 fn pure_ast_expr(expr: &Expr, driver: Option<SqlDriver>) -> Option<(String, Type)> {
-    match expr {
-        Expr::Value(v) => Some((
-            literal_name(&v.value)?,
-            literal_value_type(&v.value, driver)?,
-        )),
-        Expr::UnaryOp {
-            op: UnaryOperator::Minus,
-            expr: inner,
-        } => {
-            let (inner_name, ty) = pure_ast_expr(inner, driver)?;
-            Some((format!("-{inner_name}"), ty))
-        }
-        Expr::UnaryOp {
-            op: UnaryOperator::Plus,
-            expr: inner,
-        } => pure_ast_expr(inner, driver),
-        Expr::Nested(inner) => pure_ast_expr(inner, driver),
-        // `COUNT(...)`'s own base type is unanimous across every engine
-        // (a plain integer count) regardless of driver - `resolve_sql_
-        // row_type`'s own `refine_count_columns` post-processing refines
-        // this further to `int<0, max>` afterward, the same as any other
-        // resolution step's raw answer.
-        Expr::Function(f) => {
-            let is_count = f.name.0.last().is_some_and(|part| {
-                matches!(part, ObjectNamePart::Identifier(ident) if ident.value.eq_ignore_ascii_case("COUNT"))
-            });
-            if !is_count {
-                return None;
+    syntax::stack::guard(|| {
+        match expr {
+            Expr::Value(v) => Some((
+                literal_name(&v.value)?,
+                literal_value_type(&v.value, driver)?,
+            )),
+            Expr::UnaryOp {
+                op: UnaryOperator::Minus,
+                expr: inner,
+            } => {
+                let (inner_name, ty) = pure_ast_expr(inner, driver)?;
+                Some((format!("-{inner_name}"), ty))
             }
-            let arg_name = count_argument_name(f, driver)?;
-            Some((format!("COUNT({arg_name})"), Type::int()))
+            Expr::UnaryOp {
+                op: UnaryOperator::Plus,
+                expr: inner,
+            } => pure_ast_expr(inner, driver),
+            Expr::Nested(inner) => pure_ast_expr(inner, driver),
+            // `COUNT(...)`'s own base type is unanimous across every engine
+            // (a plain integer count) regardless of driver - `resolve_sql_
+            // row_type`'s own `refine_count_columns` post-processing refines
+            // this further to `int<0, max>` afterward, the same as any other
+            // resolution step's raw answer.
+            Expr::Function(f) => {
+                let is_count = f.name.0.last().is_some_and(|part| {
+                    matches!(part, ObjectNamePart::Identifier(ident) if ident.value.eq_ignore_ascii_case("COUNT"))
+                });
+                if !is_count {
+                    return None;
+                }
+                let arg_name = count_argument_name(f, driver)?;
+                Some((format!("COUNT({arg_name})"), Type::int()))
+            }
+            _ => None,
         }
-        _ => None,
-    }
+    })
 }
 
 /// `COUNT(*)` or `COUNT(<a literal this module already knows how to
@@ -469,91 +471,93 @@ fn resolve_select_from_static_schema(
     select: &Select,
     ctes: &FxHashMap<String, Vec<TypedColumn>>,
 ) -> Option<Vec<(String, Type, bool)>> {
-    if select.from.len() != 1 || !select.from[0].joins.is_empty() {
-        return None;
-    }
-    let columns: Vec<TypedColumn> = match &select.from[0].relation {
-        TableFactor::Table { name, .. } => {
-            let table_name = name.0.last().and_then(|part| match part {
-                ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
-                ObjectNamePart::Function(_) => None,
-            })?;
-            match ctes.get(table_name) {
-                Some(cte_columns) => cte_columns.clone(),
-                None => schema
-                    .table(table_name)?
-                    .iter()
-                    .map(TypedColumn::from_column)
-                    .collect(),
-            }
+    syntax::stack::guard(|| {
+        if select.from.len() != 1 || !select.from[0].joins.is_empty() {
+            return None;
         }
-        // `SELECT ... FROM (<subquery>) AS t` - resolved via the exact
-        // same primitive a real table's own column list already goes
-        // through, so a derived table is indistinguishable from a real
-        // one from this point on (mirroring the plan's own "one shared
-        // mechanism, not one-off ones" framing for virtual relations).
-        TableFactor::Derived { subquery, .. } => {
-            let SetExpr::Select(inner) = &*subquery.body else {
-                return None;
-            };
-            let inner_ctes = resolve_ctes_from_static_schema(schema, subquery)?;
-            let mut merged = ctes.clone();
-            merged.extend(inner_ctes);
-            resolve_select_from_static_schema(schema, inner, &merged)?
-                .into_iter()
-                .map(|(name, ty, _)| TypedColumn {
-                    name,
-                    ty,
-                    nullable: false,
-                })
-                .collect()
-        }
-        _ => return None,
-    };
-
-    let mut fields = Vec::new();
-    for item in &select.projection {
-        match item {
-            SelectItem::Wildcard(_) => {
-                for col in &columns {
-                    fields.push((col.name.clone(), column_value_type(col), false));
+        let columns: Vec<TypedColumn> = match &select.from[0].relation {
+            TableFactor::Table { name, .. } => {
+                let table_name = name.0.last().and_then(|part| match part {
+                    ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
+                    ObjectNamePart::Function(_) => None,
+                })?;
+                match ctes.get(table_name) {
+                    Some(cte_columns) => cte_columns.clone(),
+                    None => schema
+                        .table(table_name)?
+                        .iter()
+                        .map(TypedColumn::from_column)
+                        .collect(),
                 }
             }
-            SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
-                let col = columns.iter().find(|c| c.name == ident.value)?;
-                fields.push((ident.value.clone(), column_value_type(col), false));
+            // `SELECT ... FROM (<subquery>) AS t` - resolved via the exact
+            // same primitive a real table's own column list already goes
+            // through, so a derived table is indistinguishable from a real
+            // one from this point on (mirroring the plan's own "one shared
+            // mechanism, not one-off ones" framing for virtual relations).
+            TableFactor::Derived { subquery, .. } => {
+                let SetExpr::Select(inner) = &*subquery.body else {
+                    return None;
+                };
+                let inner_ctes = resolve_ctes_from_static_schema(schema, subquery)?;
+                let mut merged = ctes.clone();
+                merged.extend(inner_ctes);
+                resolve_select_from_static_schema(schema, inner, &merged)?
+                    .into_iter()
+                    .map(|(name, ty, _)| TypedColumn {
+                        name,
+                        ty,
+                        nullable: false,
+                    })
+                    .collect()
             }
-            SelectItem::UnnamedExpr(Expr::CompoundIdentifier(parts)) => {
-                let col_name = &parts.last()?.value;
-                let col = columns.iter().find(|c| &c.name == col_name)?;
-                fields.push((col_name.clone(), column_value_type(col), false));
-            }
-            SelectItem::ExprWithAlias {
-                expr: Expr::Identifier(ident),
-                alias,
-            } => {
-                let col = columns.iter().find(|c| c.name == ident.value)?;
-                fields.push((alias.value.clone(), column_value_type(col), false));
-            }
-            SelectItem::ExprWithAlias {
-                expr: Expr::CompoundIdentifier(parts),
-                alias,
-            } => {
-                let col_name = &parts.last()?.value;
-                let col = columns.iter().find(|c| &c.name == col_name)?;
-                fields.push((alias.value.clone(), column_value_type(col), false));
-            }
-            // A computed/aggregate select item, a qualified wildcard, or
-            // anything else this simplified path doesn't model - can't
-            // be answered from base column definitions alone, fall
-            // through to the live path rather than guess.
             _ => return None,
+        };
+
+        let mut fields = Vec::new();
+        for item in &select.projection {
+            match item {
+                SelectItem::Wildcard(_) => {
+                    for col in &columns {
+                        fields.push((col.name.clone(), column_value_type(col), false));
+                    }
+                }
+                SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
+                    let col = columns.iter().find(|c| c.name == ident.value)?;
+                    fields.push((ident.value.clone(), column_value_type(col), false));
+                }
+                SelectItem::UnnamedExpr(Expr::CompoundIdentifier(parts)) => {
+                    let col_name = &parts.last()?.value;
+                    let col = columns.iter().find(|c| &c.name == col_name)?;
+                    fields.push((col_name.clone(), column_value_type(col), false));
+                }
+                SelectItem::ExprWithAlias {
+                    expr: Expr::Identifier(ident),
+                    alias,
+                } => {
+                    let col = columns.iter().find(|c| c.name == ident.value)?;
+                    fields.push((alias.value.clone(), column_value_type(col), false));
+                }
+                SelectItem::ExprWithAlias {
+                    expr: Expr::CompoundIdentifier(parts),
+                    alias,
+                } => {
+                    let col_name = &parts.last()?.value;
+                    let col = columns.iter().find(|c| &c.name == col_name)?;
+                    fields.push((alias.value.clone(), column_value_type(col), false));
+                }
+                // A computed/aggregate select item, a qualified wildcard, or
+                // anything else this simplified path doesn't model - can't
+                // be answered from base column definitions alone, fall
+                // through to the live path rather than guess.
+                _ => return None,
+            }
         }
-    }
-    if fields.is_empty() {
-        return None;
-    }
-    Some(fields)
+        if fields.is_empty() {
+            return None;
+        }
+        Some(fields)
+    })
 }
 
 #[cfg(test)]

@@ -85,24 +85,26 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        if self.settings.shipmonk.check_enum_exhaustiveness {
-            self.check_strict_statement_idioms(stmt, locals);
-        }
-        if self.settings.sidz.check_magic_numbers {
-            self.check_magic_numbers_statement(stmt);
-        }
-        if self.settings.strict_rules.check_loop_variable_overwrite
-            || self.settings.strict_rules.check_switch_case_types
-        {
-            self.check_strict_rules_statement(stmt, locals);
-        }
-        crate::checker::profiling::measure_outermost!("checker::check_stmt", {
-            self.check_stmt_impl(stmt, locals, declared_return, label)
-        });
-        self.record_type_dump(stmt, locals);
-        if !self.external_rules.is_empty() {
-            self.dispatch_stmt_rules(stmt, locals);
-        }
+        syntax::stack::guard(|| {
+            if self.settings.shipmonk.check_enum_exhaustiveness {
+                self.check_strict_statement_idioms(stmt, locals);
+            }
+            if self.settings.sidz.check_magic_numbers {
+                self.check_magic_numbers_statement(stmt);
+            }
+            if self.settings.strict_rules.check_loop_variable_overwrite
+                || self.settings.strict_rules.check_switch_case_types
+            {
+                self.check_strict_rules_statement(stmt, locals);
+            }
+            crate::checker::profiling::measure_outermost!("checker::check_stmt", {
+                self.check_stmt_impl(stmt, locals, declared_return, label)
+            });
+            self.record_type_dump(stmt, locals);
+            if !self.external_rules.is_empty() {
+                self.dispatch_stmt_rules(stmt, locals);
+            }
+        })
     }
 
     /// `phpDoc.parseError` for a statement's own docblock - the
@@ -1117,163 +1119,165 @@ impl<'a> Checker<'a> {
         label: &str,
         is_elseif: bool,
     ) {
-        let is_last_without_else = else_branch.is_none();
-        self.in_condition_position = true;
-        self.in_exempt_last_condition = is_elseif && is_last_without_else;
-        let cond_ty = self.check_expr(cond, locals, label);
-        self.check_non_boolean_condition(
-            cond,
-            &cond_ty,
-            if is_elseif {
-                "an elseif condition"
-            } else {
-                "an if condition"
-            },
-            if is_elseif {
-                "elseif.condNotBoolean"
-            } else {
-                "if.condNotBoolean"
-            },
-        );
-        if let Some(value) = self.inferred_constant_condition(cond, locals) {
-            if is_elseif {
-                if !(value && is_last_without_else) {
+        syntax::stack::guard(|| {
+            let is_last_without_else = else_branch.is_none();
+            self.in_condition_position = true;
+            self.in_exempt_last_condition = is_elseif && is_last_without_else;
+            let cond_ty = self.check_expr(cond, locals, label);
+            self.check_non_boolean_condition(
+                cond,
+                &cond_ty,
+                if is_elseif {
+                    "an elseif condition"
+                } else {
+                    "an if condition"
+                },
+                if is_elseif {
+                    "elseif.condNotBoolean"
+                } else {
+                    "if.condNotBoolean"
+                },
+            );
+            if let Some(value) = self.inferred_constant_condition(cond, locals) {
+                if is_elseif {
+                    if !(value && is_last_without_else) {
+                        self.report(
+                            format!(
+                                "Elseif condition is always {}.",
+                                if value { "true" } else { "false" }
+                            ),
+                            cond.span,
+                            4,
+                            if value {
+                                "elseif.alwaysTrue"
+                            } else {
+                                "elseif.alwaysFalse"
+                            },
+                        );
+                    }
+                } else {
                     self.report(
                         format!(
-                            "Elseif condition is always {}.",
+                            "If condition is always {}.",
                             if value { "true" } else { "false" }
                         ),
                         cond.span,
                         4,
                         if value {
-                            "elseif.alwaysTrue"
+                            "if.alwaysTrue"
                         } else {
-                            "elseif.alwaysFalse"
+                            "if.alwaysFalse"
                         },
                     );
                 }
-            } else {
-                self.report(
-                    format!(
-                        "If condition is always {}.",
-                        if value { "true" } else { "false" }
-                    ),
-                    cond.span,
-                    4,
-                    if value {
-                        "if.alwaysTrue"
-                    } else {
-                        "if.alwaysFalse"
-                    },
-                );
             }
-        }
 
-        // Disjunctive-syllogism narrowing (`Checker::pending_or_
-        // disjunctions`'s own doc comment): a `Binary(Or, l, r))`
-        // condition's own true branch pushes `(l, r)` for the duration
-        // of `then_branch`'s own check, so any nested `if` inside it
-        // proving one disjunct false can assert the other true - popped
-        // unconditionally afterward, matching an ordinary stack
-        // discipline regardless of how `then_branch`'s own check
-        // returns.
-        let or_disjuncts = match &unwrap_grouping(cond).kind {
-            ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
-                Some(((**l).clone(), (**r).clone()))
-            }
-            _ => None,
-        };
-        if let Some(pair) = or_disjuncts.clone() {
-            self.pending_or_disjunctions.push(pair);
-        }
-        // `Checker::active_discriminant`'s own doc comment - a bare
-        // boolean `Variable` condition is this mechanism's only
-        // currently-recognized shape, matching this project's own
-        // "narrow correctly first" precedent for a new fact-tracking
-        // trigger.
-        let discriminant_subject = match &unwrap_grouping(cond).kind {
-            ExprKind::Variable(name) => Some(name.to_string()),
-            _ => None,
-        };
-        let mut then_locals = locals.clone();
-        self.apply_narrowing(cond, &mut then_locals, true);
-        if let Some(subject) = &discriminant_subject {
-            self.active_discriminant.push((subject.clone(), true));
-        }
-        self.check_stmt(then_branch, &mut then_locals, declared_return, label);
-        if discriminant_subject.is_some() {
-            self.active_discriminant.pop();
-        }
-        if or_disjuncts.is_some() {
-            self.pending_or_disjunctions.pop();
-        }
-        self.record_branch_implied_facts(cond, locals, &mut then_locals, true);
-
-        let mut else_locals = locals.clone();
-        self.apply_narrowing(cond, &mut else_locals, false);
-        self.apply_disjunctive_syllogism(cond, &mut else_locals);
-        // Before the else branch's own body is checked, so a flag the
-        // else branch itself also reassigns still gets purged by that
-        // check's own ordinary rebind-invalidation, the same as any
-        // other alias.
-        self.record_if_body_flag_alias(cond, then_branch, &mut then_locals, &mut else_locals);
-        if let Some(subject) = &discriminant_subject {
-            self.active_discriminant.push((subject.clone(), false));
-        }
-        if let Some(e) = else_branch {
-            if let StmtKind::If {
-                cond: nested_cond,
-                then_branch: nested_then,
-                else_branch: nested_else,
-            } = &e.kind
-            {
-                self.check_if(
-                    nested_cond,
-                    nested_then,
-                    nested_else,
-                    &mut else_locals,
-                    declared_return,
-                    label,
-                    true,
-                );
-            } else {
-                self.check_stmt(e, &mut else_locals, declared_return, label);
-            }
-        }
-        if discriminant_subject.is_some() {
-            self.active_discriminant.pop();
-        }
-        self.record_branch_implied_facts(cond, locals, &mut else_locals, false);
-
-        // The classic guard clause - `if ($x === null) { return; }` -
-        // depends on this: a branch that unconditionally
-        // returns/throws/breaks/continues never reaches the merge point,
-        // so only the surviving branch's (narrowed) scope should
-        // propagate past the if. Without this, the terminated branch's
-        // narrowing (here, "$x is null") would incorrectly leak into the
-        // code after the guard.
-        let then_terminates = self.always_terminates(then_branch, &then_locals);
-        let else_terminates = else_branch
-            .as_deref()
-            .is_some_and(|e| self.always_terminates(e, &else_locals));
-
-        *locals = match (then_terminates, else_terminates) {
-            (true, false) => else_locals,
-            (false, true) => then_locals,
-            _ => {
-                let mut merged = merge_scopes(&then_locals, &else_locals);
-                // `cond`'s own discriminant cannot hold in the other
-                // branch, so its facts stay as that branch recorded them.
-                for (branch, branch_true) in [(&then_locals, true), (&else_locals, false)] {
-                    if let Some(key) = self.primary_discriminant_key(cond, locals, branch_true)
-                        && let Some(facts) = branch.branch_implied_facts.get(&key)
-                    {
-                        merged.branch_implied_facts.insert(key, facts.clone());
-                    }
+            // Disjunctive-syllogism narrowing (`Checker::pending_or_
+            // disjunctions`'s own doc comment): a `Binary(Or, l, r))`
+            // condition's own true branch pushes `(l, r)` for the duration
+            // of `then_branch`'s own check, so any nested `if` inside it
+            // proving one disjunct false can assert the other true - popped
+            // unconditionally afterward, matching an ordinary stack
+            // discipline regardless of how `then_branch`'s own check
+            // returns.
+            let or_disjuncts = match &unwrap_grouping(cond).kind {
+                ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
+                    Some(((**l).clone(), (**r).clone()))
                 }
-                merged
+                _ => None,
+            };
+            if let Some(pair) = or_disjuncts.clone() {
+                self.pending_or_disjunctions.push(pair);
             }
-        };
+            // `Checker::active_discriminant`'s own doc comment - a bare
+            // boolean `Variable` condition is this mechanism's only
+            // currently-recognized shape, matching this project's own
+            // "narrow correctly first" precedent for a new fact-tracking
+            // trigger.
+            let discriminant_subject = match &unwrap_grouping(cond).kind {
+                ExprKind::Variable(name) => Some(name.to_string()),
+                _ => None,
+            };
+            let mut then_locals = locals.clone();
+            self.apply_narrowing(cond, &mut then_locals, true);
+            if let Some(subject) = &discriminant_subject {
+                self.active_discriminant.push((subject.clone(), true));
+            }
+            self.check_stmt(then_branch, &mut then_locals, declared_return, label);
+            if discriminant_subject.is_some() {
+                self.active_discriminant.pop();
+            }
+            if or_disjuncts.is_some() {
+                self.pending_or_disjunctions.pop();
+            }
+            self.record_branch_implied_facts(cond, locals, &mut then_locals, true);
+
+            let mut else_locals = locals.clone();
+            self.apply_narrowing(cond, &mut else_locals, false);
+            self.apply_disjunctive_syllogism(cond, &mut else_locals);
+            // Before the else branch's own body is checked, so a flag the
+            // else branch itself also reassigns still gets purged by that
+            // check's own ordinary rebind-invalidation, the same as any
+            // other alias.
+            self.record_if_body_flag_alias(cond, then_branch, &mut then_locals, &mut else_locals);
+            if let Some(subject) = &discriminant_subject {
+                self.active_discriminant.push((subject.clone(), false));
+            }
+            if let Some(e) = else_branch {
+                if let StmtKind::If {
+                    cond: nested_cond,
+                    then_branch: nested_then,
+                    else_branch: nested_else,
+                } = &e.kind
+                {
+                    self.check_if(
+                        nested_cond,
+                        nested_then,
+                        nested_else,
+                        &mut else_locals,
+                        declared_return,
+                        label,
+                        true,
+                    );
+                } else {
+                    self.check_stmt(e, &mut else_locals, declared_return, label);
+                }
+            }
+            if discriminant_subject.is_some() {
+                self.active_discriminant.pop();
+            }
+            self.record_branch_implied_facts(cond, locals, &mut else_locals, false);
+
+            // The classic guard clause - `if ($x === null) { return; }` -
+            // depends on this: a branch that unconditionally
+            // returns/throws/breaks/continues never reaches the merge point,
+            // so only the surviving branch's (narrowed) scope should
+            // propagate past the if. Without this, the terminated branch's
+            // narrowing (here, "$x is null") would incorrectly leak into the
+            // code after the guard.
+            let then_terminates = self.always_terminates(then_branch, &then_locals);
+            let else_terminates = else_branch
+                .as_deref()
+                .is_some_and(|e| self.always_terminates(e, &else_locals));
+
+            *locals = match (then_terminates, else_terminates) {
+                (true, false) => else_locals,
+                (false, true) => then_locals,
+                _ => {
+                    let mut merged = merge_scopes(&then_locals, &else_locals);
+                    // `cond`'s own discriminant cannot hold in the other
+                    // branch, so its facts stay as that branch recorded them.
+                    for (branch, branch_true) in [(&then_locals, true), (&else_locals, false)] {
+                        if let Some(key) = self.primary_discriminant_key(cond, locals, branch_true)
+                            && let Some(facts) = branch.branch_implied_facts.get(&key)
+                        {
+                            merged.branch_implied_facts.insert(key, facts.clone());
+                        }
+                    }
+                    merged
+                }
+            };
+        })
     }
 
     /// A statement's resolved `@var` tags; none on a declaration, whose
@@ -1428,12 +1432,12 @@ fn static_variable_type(initializer: &Type) -> Type {
 /// The plain variables an assignment target writes: `$x`, or each of a
 /// `[$a, $b]`/`list($a, $b)` destructuring's.
 pub(super) fn assigned_variable_names(target: &Expr) -> Vec<String> {
-    match &target.kind {
+    syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(v) => vec![v.to_string()],
         ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items
             .iter()
             .flat_map(|item| assigned_variable_names(&item.value))
             .collect(),
         _ => Vec::new(),
-    }
+    })
 }

@@ -92,36 +92,24 @@ fn regular_comment_is_not_captured_as_a_doc_comment() {
 }
 
 #[test]
-fn moderately_nested_unary_still_parses() {
-    let nested = "~".repeat(500);
-    parse(&format!("<?php $x = {nested}1;"));
-}
-
-#[test]
-fn pathologically_nested_unary_fails_cleanly_instead_of_overflowing_the_stack() {
-    // php-src's Zend/tests/stack_limit/stack_limit_013.phpt is exactly
-    // this shape (~7700 levels); parsing it must produce a parse error,
-    // not a stack overflow. Runs on a thread with a generous stack, as the
-    // checker's workers do: a debug build's frames are large enough to
-    // exhaust a default thread stack before the depth guard trips.
-    let nested = "~".repeat(8000);
-    let source = format!("<?php $x = {nested}1;");
-    let result = std::thread::Builder::new()
-        .stack_size(64 * 1024 * 1024)
-        .spawn(move || {
-            Parser::new(crate::lexer::Lexer::new(&source).tokenize_with_spans())
-                .parse_program()
-                .map(|_| ())
-        })
-        .expect("failed to spawn worker thread")
-        .join()
-        .expect("the parser must not panic");
-    let error = result.expect_err("expected a parse error");
-    assert!(
-        error.message.contains("expression nested too deeply"),
-        "got: {}",
-        error.message
-    );
+fn deeply_nested_expressions_parse_on_a_default_thread() {
+    // php-src's Zend/tests/stack_limit/stack_limit_013.phpt nests about
+    // 7,700 unary operators; parentheses, arrays and blocks nest the same
+    // way. Each parses on a test thread's ordinary stack.
+    for (open, close) in [("~", ""), ("(", ")"), ("[", "]")] {
+        let source = format!(
+            "<?php $x = {}1{};",
+            open.repeat(20_000),
+            close.repeat(20_000)
+        );
+        Parser::new(crate::lexer::Lexer::new(&source).tokenize_with_spans())
+            .parse_program()
+            .expect("deep nesting parses");
+    }
+    let blocks = format!("<?php {}echo 1;{}", "{".repeat(20_000), "}".repeat(20_000));
+    Parser::new(crate::lexer::Lexer::new(&blocks).tokenize_with_spans())
+        .parse_program()
+        .expect("deep blocks parse");
 }
 
 #[test]

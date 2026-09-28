@@ -19,39 +19,43 @@ impl Type {
     /// float literal truncated. A resource is legal (`(int) $fileHandle`
     /// is its id), an arbitrary object isn't.
     pub fn to_integer(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
-        match self {
-            Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => {
-                Some(self.clone())
+        syntax::stack::guard(|| {
+            match self {
+                Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => {
+                    Some(self.clone())
+                }
+                Type(Repr::True) => Some(Type::int_literal(1)),
+                Type(Repr::False) | Type(Repr::Null) => Some(Type::int_literal(0)),
+                Type(Repr::Bool) => Some(Type::int_range(Some(0), Some(1))),
+                Type(Repr::FloatLiteral(f))
+                    if f.is_finite() && f.trunc().abs() < i64::MAX as f64 =>
+                {
+                    Some(Type::int_literal(f.trunc() as i64))
+                }
+                Type(Repr::Resource { .. }) => Some(Type::int()),
+                Type(Repr::Object(name, _)) if castable(hierarchy, name, INT_CASTABLE_CLASSES) => {
+                    Some(Type::int())
+                }
+                Type(Repr::Object(..))
+                | Type(Repr::ObjectWithoutClass)
+                | Type(Repr::ObjectShape(_))
+                | Type(Repr::EnumCase(..)) => None,
+                // An intersection must not fall to the permissive catch-all:
+                // `(int)` on `Countable&ArrayAccess` is illegal. If any
+                // member offers a legal cast path, the value supports it.
+                Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
+                    union_coercion(members, |m| m.to_integer(hierarchy))
+                }
+                _ => Some(Type::int()),
             }
-            Type(Repr::True) => Some(Type::int_literal(1)),
-            Type(Repr::False) | Type(Repr::Null) => Some(Type::int_literal(0)),
-            Type(Repr::Bool) => Some(Type::int_range(Some(0), Some(1))),
-            Type(Repr::FloatLiteral(f)) if f.is_finite() && f.trunc().abs() < i64::MAX as f64 => {
-                Some(Type::int_literal(f.trunc() as i64))
-            }
-            Type(Repr::Resource { .. }) => Some(Type::int()),
-            Type(Repr::Object(name, _)) if castable(hierarchy, name, INT_CASTABLE_CLASSES) => {
-                Some(Type::int())
-            }
-            Type(Repr::Object(..))
-            | Type(Repr::ObjectWithoutClass)
-            | Type(Repr::ObjectShape(_))
-            | Type(Repr::EnumCase(..)) => None,
-            // An intersection must not fall to the permissive catch-all:
-            // `(int)` on `Countable&ArrayAccess` is illegal. If any
-            // member offers a legal cast path, the value supports it.
-            Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
-                union_coercion(members, |m| m.to_integer(hierarchy))
-            }
-            _ => Some(Type::int()),
-        }
+        })
     }
 
     /// `(float) $x`: a float as it is, an int, bool or `null` literal as its
     /// value; otherwise as `to_integer`, with PHPStan's one entry narrower
     /// numeric-castable class list (no `CurlHandle`/`CurlMultiHandle`).
     pub fn to_float(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Float) | Type(Repr::FloatLiteral(_)) => Some(self.clone()),
             Type(Repr::IntLiteral(n)) => Some(Type::float_literal(*n as f64)),
             Type(Repr::True) => Some(Type::float_literal(1.0)),
@@ -68,7 +72,7 @@ impl Type {
                 union_coercion(members, |m| m.to_float(hierarchy))
             }
             _ => Some(Type::float()),
-        }
+        })
     }
 
     /// PHPStan's `toNumber()`: what arithmetic reads a value of this type
@@ -76,25 +80,27 @@ impl Type {
     /// anything else that coerces as `int|float`. `None` for an array, or
     /// an object `to_float` refuses.
     pub fn to_number(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
-        if self.is_array().yes() {
-            return None;
-        }
-        match self {
-            Type(Repr::Int)
-            | Type(Repr::IntLiteral(_))
-            | Type(Repr::IntRange(..))
-            | Type(Repr::Float)
-            | Type(Repr::FloatLiteral(_)) => Some(self.clone()),
-            Type(Repr::True) | Type(Repr::False) | Type(Repr::Null) | Type(Repr::Bool) => {
-                self.to_integer(hierarchy)
+        syntax::stack::guard(|| {
+            if self.is_array().yes() {
+                return None;
             }
-            Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
-                union_coercion(members, |m| m.to_number(hierarchy))
+            match self {
+                Type(Repr::Int)
+                | Type(Repr::IntLiteral(_))
+                | Type(Repr::IntRange(..))
+                | Type(Repr::Float)
+                | Type(Repr::FloatLiteral(_)) => Some(self.clone()),
+                Type(Repr::True) | Type(Repr::False) | Type(Repr::Null) | Type(Repr::Bool) => {
+                    self.to_integer(hierarchy)
+                }
+                Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
+                    union_coercion(members, |m| m.to_number(hierarchy))
+                }
+                _ => self
+                    .to_float(hierarchy)
+                    .map(|_| Type::union(Type::int(), Type::float())),
             }
-            _ => self
-                .to_float(hierarchy)
-                .map(|_| Type::union(Type::int(), Type::float())),
-        }
+        })
     }
 
     /// `(string) $x`: a string as it is, an int as its decimal digits, a bool or
@@ -106,70 +112,74 @@ impl Type {
     /// overload). A class the hierarchy doesn't know is left alone: stub
     /// coverage may simply not include it.
     pub fn to_string_type(&self, hierarchy: &dyn ClassHierarchy) -> Option<Type> {
-        let decimal_int_string = || {
-            Type(Repr::Intersection(vec![
-                Type::string(),
-                Type::accessory(AccessoryKind::DecimalIntegerString),
-            ]))
-        };
-        if !matches!(self, Type(Repr::Mixed(_)) | Type(Repr::Never))
-            && crate::Relation::structural()
-                .is_super_type_of(&Type::string(), self)
-                .yes()
-        {
-            return Some(self.clone());
-        }
-        match self {
-            Type(Repr::IntLiteral(n)) => Some(Type::string_literal(n.to_string().into())),
-            Type(Repr::Int) | Type(Repr::IntRange(..)) => Some(decimal_int_string()),
-            Type(Repr::FloatLiteral(f)) => Some(Type::string_literal(format_php_float(*f).into())),
-            // `INF`, `-INF` and `NAN` aren't numeric.
-            Type(Repr::Float) => Some(Type(Repr::Intersection(vec![
-                Type::string(),
-                Type::accessory(AccessoryKind::UppercaseString),
-                Type::accessory(AccessoryKind::NonEmptyString),
-            ]))),
-            Type(Repr::True) => Some(Type::string_literal("1".into())),
-            Type(Repr::False) | Type(Repr::Null) => {
-                Some(Type::string_literal(PhpString::default()))
-            }
-            Type(Repr::Bool) => Some(Type(Repr::Union(vec![
-                Type::string_literal("1".into()),
-                Type::string_literal(PhpString::default()),
-            ]))),
-            Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => None,
-            Type(Repr::Intersection(members))
-                if members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
+        syntax::stack::guard(|| {
+            let decimal_int_string = || {
+                Type(Repr::Intersection(vec![
+                    Type::string(),
+                    Type::accessory(AccessoryKind::DecimalIntegerString),
+                ]))
+            };
+            if !matches!(self, Type(Repr::Mixed(_)) | Type(Repr::Never))
+                && crate::Relation::structural()
+                    .is_super_type_of(&Type::string(), self)
+                    .yes()
             {
-                None
+                return Some(self.clone());
             }
-            Type(Repr::Resource { .. }) => Some(Type(Repr::Intersection(vec![
-                Type::string(),
-                Type::accessory(AccessoryKind::NonEmptyString),
-            ]))),
-            Type(Repr::Object(name, _)) => {
-                if hierarchy.is_subclass_of(name, "GMP")
-                    || hierarchy.is_subclass_of(name, "BcMath\\Number")
+            match self {
+                Type(Repr::IntLiteral(n)) => Some(Type::string_literal(n.to_string().into())),
+                Type(Repr::Int) | Type(Repr::IntRange(..)) => Some(decimal_int_string()),
+                Type(Repr::FloatLiteral(f)) => {
+                    Some(Type::string_literal(format_php_float(*f).into()))
+                }
+                // `INF`, `-INF` and `NAN` aren't numeric.
+                Type(Repr::Float) => Some(Type(Repr::Intersection(vec![
+                    Type::string(),
+                    Type::accessory(AccessoryKind::UppercaseString),
+                    Type::accessory(AccessoryKind::NonEmptyString),
+                ]))),
+                Type(Repr::True) => Some(Type::string_literal("1".into())),
+                Type(Repr::False) | Type(Repr::Null) => {
+                    Some(Type::string_literal(PhpString::default()))
+                }
+                Type(Repr::Bool) => Some(Type(Repr::Union(vec![
+                    Type::string_literal("1".into()),
+                    Type::string_literal(PhpString::default()),
+                ]))),
+                Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) => None,
+                Type(Repr::Intersection(members))
+                    if members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
                 {
-                    return Some(Type(Repr::Intersection(vec![
-                        Type::string(),
-                        Type::accessory(AccessoryKind::NumericString),
-                        Type::accessory(AccessoryKind::NonEmptyString),
-                    ])));
+                    None
                 }
-                match hierarchy.method_return_type(name, "__toString") {
-                    Some(ty) => Some(ty),
-                    None if hierarchy.find_class(name).is_some() => None,
-                    None => Some(Type::string()),
+                Type(Repr::Resource { .. }) => Some(Type(Repr::Intersection(vec![
+                    Type::string(),
+                    Type::accessory(AccessoryKind::NonEmptyString),
+                ]))),
+                Type(Repr::Object(name, _)) => {
+                    if hierarchy.is_subclass_of(name, "GMP")
+                        || hierarchy.is_subclass_of(name, "BcMath\\Number")
+                    {
+                        return Some(Type(Repr::Intersection(vec![
+                            Type::string(),
+                            Type::accessory(AccessoryKind::NumericString),
+                            Type::accessory(AccessoryKind::NonEmptyString),
+                        ])));
+                    }
+                    match hierarchy.method_return_type(name, "__toString") {
+                        Some(ty) => Some(ty),
+                        None if hierarchy.find_class(name).is_some() => None,
+                        None => Some(Type::string()),
+                    }
                 }
+                // An enum case can't declare `__toString()`.
+                Type(Repr::EnumCase(..)) => None,
+                Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
+                    union_coercion(members, |m| m.to_string_type(hierarchy))
+                }
+                _ => Some(Type::string()),
             }
-            // An enum case can't declare `__toString()`.
-            Type(Repr::EnumCase(..)) => None,
-            Type(Repr::Union(members)) | Type(Repr::Intersection(members)) => {
-                union_coercion(members, |m| m.to_string_type(hierarchy))
-            }
-            _ => Some(Type::string()),
-        }
+        })
     }
 
     /// PHPStan's `toArrayKey()`: the key a value of this type becomes in

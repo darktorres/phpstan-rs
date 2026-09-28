@@ -333,54 +333,58 @@ impl<'a> Checker<'a> {
     }
 
     fn is_comparable(&self, ty: &Type) -> bool {
-        if self.contains_only(
-            ty,
-            &[
-                Type::int(),
-                Type::float(),
-                Type::string(),
-                Type::object("DateTimeInterface".into(), Vec::new()),
-                Type::object(("BcMath\\Number".to_string()).into(), Vec::new()),
-            ],
-        ) {
-            return true;
-        }
-        let tuples = ty.constant_arrays();
-        !tuples.is_empty()
-            && tuples.iter().all(|t| is_tuple(t))
-            && tuples
-                .iter()
-                .flat_map(|t| t.types())
-                .all(|value| self.is_comparable(value))
+        syntax::stack::guard(|| {
+            if self.contains_only(
+                ty,
+                &[
+                    Type::int(),
+                    Type::float(),
+                    Type::string(),
+                    Type::object("DateTimeInterface".into(), Vec::new()),
+                    Type::object(("BcMath\\Number".to_string()).into(), Vec::new()),
+                ],
+            ) {
+                return true;
+            }
+            let tuples = ty.constant_arrays();
+            !tuples.is_empty()
+                && tuples.iter().all(|t| is_tuple(t))
+                && tuples
+                    .iter()
+                    .flat_map(|t| t.types())
+                    .all(|value| self.is_comparable(value))
+        })
     }
 
     fn is_comparable_together(&self, left: &Type, right: &Type) -> bool {
-        let number = Type::object(("BcMath\\Number".to_string()).into(), Vec::new());
-        let date = Type::object("DateTimeInterface".into(), Vec::new());
-        if self.contains_only(left, &[number.clone(), Type::int()])
-            && self.contains_only(right, &[number, Type::int()])
-        {
-            return true;
-        }
-        for family in [
-            &[Type::int(), Type::float()][..],
-            &[Type::string()],
-            &[date],
-        ] {
-            if self.contains_only(left, family) {
-                return self.contains_only(right, family);
+        syntax::stack::guard(|| {
+            let number = Type::object(("BcMath\\Number".to_string()).into(), Vec::new());
+            let date = Type::object("DateTimeInterface".into(), Vec::new());
+            if self.contains_only(left, &[number.clone(), Type::int()])
+                && self.contains_only(right, &[number, Type::int()])
+            {
+                return true;
             }
-        }
-        let (left_tuples, right_tuples) = (left.constant_arrays(), right.constant_arrays());
-        if left_tuples.is_empty() || right_tuples.is_empty() {
-            return false;
-        }
-        left_tuples.iter().all(|l| {
-            right_tuples.iter().all(|r| {
-                l.fields.len() == r.fields.len()
-                    && l.types()
-                        .zip(r.types())
-                        .all(|(a, b)| self.is_comparable_together(a, b))
+            for family in [
+                &[Type::int(), Type::float()][..],
+                &[Type::string()],
+                &[date],
+            ] {
+                if self.contains_only(left, family) {
+                    return self.contains_only(right, family);
+                }
+            }
+            let (left_tuples, right_tuples) = (left.constant_arrays(), right.constant_arrays());
+            if left_tuples.is_empty() || right_tuples.is_empty() {
+                return false;
+            }
+            left_tuples.iter().all(|l| {
+                right_tuples.iter().all(|r| {
+                    l.fields.len() == r.fields.len()
+                        && l.types()
+                            .zip(r.types())
+                            .all(|(a, b)| self.is_comparable_together(a, b))
+                })
             })
         })
     }
@@ -802,7 +806,7 @@ impl<'a> Checker<'a> {
 /// The plain variables `target` binds (recursing into `[...]`/`list()`
 /// destructuring) that `locals` already defines.
 fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::token::Span)> {
-    match &target.kind {
+    syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) if locals.contains_key(name) => {
             vec![(name.to_string(), target.span)]
         }
@@ -811,7 +815,7 @@ fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::token
             .flat_map(|item| defined_targets(&item.value, locals))
             .collect(),
         _ => Vec::new(),
-    }
+    })
 }
 
 /// The argument bound to `sig`'s parameter at `position`, positionally or
@@ -937,7 +941,7 @@ impl<'ast> syntax::visit::Visitor<'ast> for Assigned {
 /// The variables an assignment target binds: a plain variable, the root
 /// of an offset chain, or each element of a destructuring.
 fn bind_targets(target: &Expr, loops: &[syntax::token::Span], out: &mut Vec<AssignedVariable>) {
-    match &target.kind {
+    syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => out.push(AssignedVariable {
             name: name.clone(),
             span: target.span,
@@ -950,5 +954,5 @@ fn bind_targets(target: &Expr, loops: &[syntax::token::Span], out: &mut Vec<Assi
             }
         }
         _ => {}
-    }
+    })
 }

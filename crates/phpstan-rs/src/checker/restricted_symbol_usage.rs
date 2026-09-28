@@ -143,7 +143,7 @@ impl<'a> Checker<'a> {
     /// always global constants, never class constants) - a disclosed,
     /// narrower scope, not a guess.
     fn fold_int_flags(&self, e: &Expr) -> Option<i64> {
-        match &e.kind {
+        syntax::stack::guard(|| match &e.kind {
             ExprKind::Literal(Literal::Int(n)) => Some(*n),
             ExprKind::Unary(UnaryOp::Neg, inner) => self.fold_int_flags(inner).map(|n| -n),
             ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
@@ -160,7 +160,7 @@ impl<'a> Checker<'a> {
                 Some(self.fold_int_flags(l)? ^ self.fold_int_flags(r)?)
             }
             _ => None,
-        }
+        })
     }
 
     /// One `ParamFlagsCondition`'s own match - the argument's own

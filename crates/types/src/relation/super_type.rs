@@ -18,223 +18,235 @@ impl Relation<'_> {
     /// unprovable is `Maybe`, including any comparison with a class the
     /// registry doesn't know.
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
-        match (sup, sub) {
-            (Type(Repr::Error), _) => TrinaryLogic::Yes,
-            (_, Type(Repr::Error)) => self.is_super_type_of(sup, &Type::mixed()),
-            (Type(Repr::Mixed(_)), _) | (_, Type(Repr::Never)) => TrinaryLogic::Yes,
-            // `NAN` is itself, as `ConstantFloatType::equals()` has it.
-            (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b)))
-                if a.is_nan() && b.is_nan() =>
-            {
-                TrinaryLogic::Yes
-            }
-            (a, b) if a == b => TrinaryLogic::Yes,
-            // `A & B` is within whatever either member is.
-            (_, Type(Repr::Intersection(members)))
-                if members.iter().any(|m| self.is_super_type_of(sup, m).yes()) =>
-            {
-                TrinaryLogic::Yes
-            }
-            (Type(Repr::Never), _) => TrinaryLogic::No,
-            (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
-                self.is_super_type_of(&sup.resolve_late_to_bounds(), sub)
-            }
-            (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => a
-                .is_super_type_of(&**b, self.hierarchy)
-                .unwrap_or_else(|| self.is_super_type_of(&a.base(), &b.base())),
-            // A plain base value may or may not carry the payload.
-            (Type(Repr::Extension(a)), _) => match self.is_super_type_of(&a.base(), sub) {
-                TrinaryLogic::No => TrinaryLogic::No,
-                _ => TrinaryLogic::Maybe,
-            },
-            (_, Type(Repr::Extension(b))) => self.is_super_type_of(sup, &b.base()),
-            (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
-                self.is_super_type_of(sup, &sub.resolve_late_to_bounds())
-            }
-            // A benevolent union (`(int|string)`) is its members for
-            // `isSuperTypeOf`; only `accepts` is lenient about it.
-            (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
-                TrinaryLogic::extreme_identity(
-                    members.iter().map(|m| self.is_super_type_of(sup, m)),
-                )
-            }
-            (_, Type(Repr::TemplateParam(tp))) => self.is_super_type_of(sup, &tp.bound),
-            (
-                _,
-                Type(Repr::Conditional {
-                    if_true, if_false, ..
-                }),
-            ) => TrinaryLogic::extreme_identity(
-                [if_true, if_false]
-                    .into_iter()
-                    .map(|branch| self.is_super_type_of(sup, branch)),
-            ),
-            (Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)), _) => {
-                let by_member =
-                    TrinaryLogic::max_min(members.iter().map(|m| self.is_super_type_of(m, sub)));
-                // `A & B` is within a union one of its own members is.
-                match sub {
-                    Type(Repr::Intersection(sub_members))
-                        if by_member != TrinaryLogic::Yes
-                            && sub_members
-                                .iter()
-                                .any(|m| self.is_super_type_of(sup, m).yes()) =>
-                    {
-                        TrinaryLogic::Yes
-                    }
-                    _ => by_member,
-                }
-            }
-            (_, Type(Repr::Mixed(_))) | (Type(Repr::TemplateParam(_)), _) => TrinaryLogic::Maybe,
-            (Type(Repr::Void), Type(Repr::Void)) => TrinaryLogic::Yes,
-            (Type(Repr::Void), _) | (_, Type(Repr::Void)) => TrinaryLogic::No,
-            // An object whose class declares `__invoke()` is callable
-            // (`ObjectType::isCallable()`); its signature is not compared
-            // with a callable's.
-            (Type(Repr::Callable(sig)), Type(Repr::Object(class, _)))
-                if self.hierarchy.has_method(class, "__invoke") =>
-            {
-                match sig {
-                    None => TrinaryLogic::Yes,
-                    Some(_) => TrinaryLogic::Maybe,
-                }
-            }
-            // Two lists compare by element type and non-emptiness, their
-            // keys being `int<0, max>` alike.
-            (Type(Repr::Intersection(sup_members)), Type(Repr::Intersection(sub_members)))
-                if sup_members.contains(&Type::accessory(AccessoryKind::ArrayList))
-                    && sub_members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
-            {
-                let elem_of = |members: &[Type]| {
-                    members.iter().find_map(|m| match m {
-                        Type(Repr::Array(_, v)) => Some(v.as_ref().clone()),
-                        _ => None,
-                    })
-                };
-                let non_empty = |members: &[Type]| {
-                    members.contains(&Type::accessory(AccessoryKind::NonEmptyArray))
-                };
-                match (elem_of(sup_members), elem_of(sub_members)) {
-                    (Some(sup_elem), Some(sub_elem)) => {
-                        let elem = self.is_super_type_of(&sup_elem, &sub_elem);
-                        match elem {
-                            TrinaryLogic::Yes
-                                if non_empty(sup_members) && !non_empty(sub_members) =>
-                            {
-                                TrinaryLogic::Maybe
-                            }
-                            TrinaryLogic::No => TrinaryLogic::No,
-                            TrinaryLogic::Yes => TrinaryLogic::Yes,
-                            TrinaryLogic::Maybe => TrinaryLogic::Maybe,
-                        }
-                    }
-                    _ => TrinaryLogic::Maybe,
-                }
-            }
-            (Type(Repr::Intersection(members)), _) => {
-                let results: Vec<TrinaryLogic> = members
-                    .iter()
-                    .map(|m| self.is_super_type_of(m, sub))
-                    .collect();
-                if results.contains(&TrinaryLogic::No) {
-                    TrinaryLogic::No
-                } else if results.iter().all(|r| *r == TrinaryLogic::Yes) {
+        syntax::stack::guard(|| {
+            match (sup, sub) {
+                (Type(Repr::Error), _) => TrinaryLogic::Yes,
+                (_, Type(Repr::Error)) => self.is_super_type_of(sup, &Type::mixed()),
+                (Type(Repr::Mixed(_)), _) | (_, Type(Repr::Never)) => TrinaryLogic::Yes,
+                // `NAN` is itself, as `ConstantFloatType::equals()` has it.
+                (Type(Repr::FloatLiteral(a)), Type(Repr::FloatLiteral(b)))
+                    if a.is_nan() && b.is_nan() =>
+                {
                     TrinaryLogic::Yes
-                } else {
+                }
+                (a, b) if a == b => TrinaryLogic::Yes,
+                // `A & B` is within whatever either member is.
+                (_, Type(Repr::Intersection(members)))
+                    if members.iter().any(|m| self.is_super_type_of(sup, m).yes()) =>
+                {
+                    TrinaryLogic::Yes
+                }
+                (Type(Repr::Never), _) => TrinaryLogic::No,
+                (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
+                    self.is_super_type_of(&sup.resolve_late_to_bounds(), sub)
+                }
+                (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => a
+                    .is_super_type_of(&**b, self.hierarchy)
+                    .unwrap_or_else(|| self.is_super_type_of(&a.base(), &b.base())),
+                // A plain base value may or may not carry the payload.
+                (Type(Repr::Extension(a)), _) => match self.is_super_type_of(&a.base(), sub) {
+                    TrinaryLogic::No => TrinaryLogic::No,
+                    _ => TrinaryLogic::Maybe,
+                },
+                (_, Type(Repr::Extension(b))) => self.is_super_type_of(sup, &b.base()),
+                (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
+                    self.is_super_type_of(sup, &sub.resolve_late_to_bounds())
+                }
+                // A benevolent union (`(int|string)`) is its members for
+                // `isSuperTypeOf`; only `accepts` is lenient about it.
+                (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
+                    TrinaryLogic::extreme_identity(
+                        members.iter().map(|m| self.is_super_type_of(sup, m)),
+                    )
+                }
+                (_, Type(Repr::TemplateParam(tp))) => self.is_super_type_of(sup, &tp.bound),
+                (
+                    _,
+                    Type(Repr::Conditional {
+                        if_true, if_false, ..
+                    }),
+                ) => TrinaryLogic::extreme_identity(
+                    [if_true, if_false]
+                        .into_iter()
+                        .map(|branch| self.is_super_type_of(sup, branch)),
+                ),
+                (Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)), _) => {
+                    let by_member = TrinaryLogic::max_min(
+                        members.iter().map(|m| self.is_super_type_of(m, sub)),
+                    );
+                    // `A & B` is within a union one of its own members is.
+                    match sub {
+                        Type(Repr::Intersection(sub_members))
+                            if by_member != TrinaryLogic::Yes
+                                && sub_members
+                                    .iter()
+                                    .any(|m| self.is_super_type_of(sup, m).yes()) =>
+                        {
+                            TrinaryLogic::Yes
+                        }
+                        _ => by_member,
+                    }
+                }
+                (_, Type(Repr::Mixed(_))) | (Type(Repr::TemplateParam(_)), _) => {
                     TrinaryLogic::Maybe
                 }
-            }
-            (
-                Type(Repr::Float) | Type(Repr::FloatLiteral(_)),
-                Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)),
-            ) => TrinaryLogic::No,
-            // A plain string may or may not name a class.
-            (
-                Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_)),
-                Type(Repr::String) | Type(Repr::StringLiteral(_)),
-            ) => TrinaryLogic::Maybe,
-            (
-                Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_)),
-                Type(Repr::Intersection(ms)),
-            ) if !ms.iter().any(|m| {
-                matches!(
-                    m,
-                    Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_))
-                )
-            }) =>
-            {
-                TrinaryLogic::Maybe
-            }
-            // An unresolved constant reference proves nothing.
-            (Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. }), _)
-            | (_, Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. })) => TrinaryLogic::Maybe,
-            (Type(Repr::Object(a, a_args)), Type(Repr::Object(b, b_args)))
-                if a == b && a_args.is_empty() && b_args.is_empty() =>
-            {
-                TrinaryLogic::Yes
-            }
-            (Type(Repr::Object(a, _)), Type(Repr::Object(b, _)))
-                if [a, b]
-                    .iter()
-                    .any(|n| self.hierarchy.find_class(n).is_none()) =>
-            {
-                TrinaryLogic::Maybe
-            }
-            (Type(Repr::ArrayShape(sup_shape)), Type(Repr::ArrayShape(sub_shape))) => {
-                self.shape_super_type_of(sup_shape, sub_shape)
-            }
-            // Arrays compare structurally: `accepts` reads an
-            // `array<mixed>` value as "unknown" and lets it fit any array,
-            // right for accepting an argument but not for "always". An
-            // empty array fits every array type, so this is never `No`.
-            (Type(Repr::Array(sk, sv)), Type(Repr::Array(k, v))) => {
-                // Every PHP array key is an `int|string`.
-                let key =
-                    if self.is_super_type_of(sk, &Type::unknown_array_key()) == TrinaryLogic::Yes {
+                (Type(Repr::Void), Type(Repr::Void)) => TrinaryLogic::Yes,
+                (Type(Repr::Void), _) | (_, Type(Repr::Void)) => TrinaryLogic::No,
+                // An object whose class declares `__invoke()` is callable
+                // (`ObjectType::isCallable()`); its signature is not compared
+                // with a callable's.
+                (Type(Repr::Callable(sig)), Type(Repr::Object(class, _)))
+                    if self.hierarchy.has_method(class, "__invoke") =>
+                {
+                    match sig {
+                        None => TrinaryLogic::Yes,
+                        Some(_) => TrinaryLogic::Maybe,
+                    }
+                }
+                // Two lists compare by element type and non-emptiness, their
+                // keys being `int<0, max>` alike.
+                (Type(Repr::Intersection(sup_members)), Type(Repr::Intersection(sub_members)))
+                    if sup_members.contains(&Type::accessory(AccessoryKind::ArrayList))
+                        && sub_members.contains(&Type::accessory(AccessoryKind::ArrayList)) =>
+                {
+                    let elem_of = |members: &[Type]| {
+                        members.iter().find_map(|m| match m {
+                            Type(Repr::Array(_, v)) => Some(v.as_ref().clone()),
+                            _ => None,
+                        })
+                    };
+                    let non_empty = |members: &[Type]| {
+                        members.contains(&Type::accessory(AccessoryKind::NonEmptyArray))
+                    };
+                    match (elem_of(sup_members), elem_of(sub_members)) {
+                        (Some(sup_elem), Some(sub_elem)) => {
+                            let elem = self.is_super_type_of(&sup_elem, &sub_elem);
+                            match elem {
+                                TrinaryLogic::Yes
+                                    if non_empty(sup_members) && !non_empty(sub_members) =>
+                                {
+                                    TrinaryLogic::Maybe
+                                }
+                                TrinaryLogic::No => TrinaryLogic::No,
+                                TrinaryLogic::Yes => TrinaryLogic::Yes,
+                                TrinaryLogic::Maybe => TrinaryLogic::Maybe,
+                            }
+                        }
+                        _ => TrinaryLogic::Maybe,
+                    }
+                }
+                (Type(Repr::Intersection(members)), _) => {
+                    let results: Vec<TrinaryLogic> = members
+                        .iter()
+                        .map(|m| self.is_super_type_of(m, sub))
+                        .collect();
+                    if results.contains(&TrinaryLogic::No) {
+                        TrinaryLogic::No
+                    } else if results.iter().all(|r| *r == TrinaryLogic::Yes) {
+                        TrinaryLogic::Yes
+                    } else {
+                        TrinaryLogic::Maybe
+                    }
+                }
+                (
+                    Type(Repr::Float) | Type(Repr::FloatLiteral(_)),
+                    Type(Repr::Int) | Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)),
+                ) => TrinaryLogic::No,
+                // A plain string may or may not name a class.
+                (
+                    Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_)),
+                    Type(Repr::String) | Type(Repr::StringLiteral(_)),
+                ) => TrinaryLogic::Maybe,
+                (
+                    Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_)),
+                    Type(Repr::Intersection(ms)),
+                ) if !ms.iter().any(|m| {
+                    matches!(
+                        m,
+                        Type(Repr::ClassString(_)) | Type(Repr::ClassKindString(_))
+                    )
+                }) =>
+                {
+                    TrinaryLogic::Maybe
+                }
+                // An unresolved constant reference proves nothing.
+                (Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. }), _)
+                | (_, Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. })) => {
+                    TrinaryLogic::Maybe
+                }
+                (Type(Repr::Object(a, a_args)), Type(Repr::Object(b, b_args)))
+                    if a == b && a_args.is_empty() && b_args.is_empty() =>
+                {
+                    TrinaryLogic::Yes
+                }
+                (Type(Repr::Object(a, _)), Type(Repr::Object(b, _)))
+                    if [a, b]
+                        .iter()
+                        .any(|n| self.hierarchy.find_class(n).is_none()) =>
+                {
+                    TrinaryLogic::Maybe
+                }
+                (Type(Repr::ArrayShape(sup_shape)), Type(Repr::ArrayShape(sub_shape))) => {
+                    self.shape_super_type_of(sup_shape, sub_shape)
+                }
+                // Arrays compare structurally: `accepts` reads an
+                // `array<mixed>` value as "unknown" and lets it fit any array,
+                // right for accepting an argument but not for "always". An
+                // empty array fits every array type, so this is never `No`.
+                (Type(Repr::Array(sk, sv)), Type(Repr::Array(k, v))) => {
+                    // Every PHP array key is an `int|string`.
+                    let key = if self.is_super_type_of(sk, &Type::unknown_array_key())
+                        == TrinaryLogic::Yes
+                    {
                         TrinaryLogic::Yes
                     } else {
                         self.is_super_type_of(sk, k)
                     };
-                match TrinaryLogic::extreme_identity(
-                    [key, self.is_super_type_of(sv, v)].into_iter(),
-                ) {
-                    TrinaryLogic::Yes => TrinaryLogic::Yes,
-                    _ => TrinaryLogic::Maybe,
+                    match TrinaryLogic::extreme_identity(
+                        [key, self.is_super_type_of(sv, v)].into_iter(),
+                    ) {
+                        TrinaryLogic::Yes => TrinaryLogic::Yes,
+                        _ => TrinaryLogic::Maybe,
+                    }
                 }
-            }
-            // A general array may or may not carry a shape's keys.
-            (Type(Repr::ArrayShape(_)), Type(Repr::Array(..))) => TrinaryLogic::Maybe,
-            _ if self.proves_super_type(sup, sub) => TrinaryLogic::Yes,
-            (_, Type(Repr::Intersection(members))) => {
-                let refused = members
-                    .iter()
-                    .filter(|m| !m.is_accessory())
-                    .any(|m| self.is_super_type_of(sup, m) == TrinaryLogic::No);
-                if refused {
+                // A general array may or may not carry a shape's keys.
+                (Type(Repr::ArrayShape(_)), Type(Repr::Array(..))) => TrinaryLogic::Maybe,
+                _ if self.proves_super_type(sup, sub) => TrinaryLogic::Yes,
+                (_, Type(Repr::Intersection(members))) => {
+                    let refused = members
+                        .iter()
+                        .filter(|m| !m.is_accessory())
+                        .any(|m| self.is_super_type_of(sup, m) == TrinaryLogic::No);
+                    if refused {
+                        TrinaryLogic::No
+                    } else {
+                        TrinaryLogic::Maybe
+                    }
+                }
+                (Type(Repr::Object(a, _)), Type(Repr::Object(b, _))) => {
+                    self.object_super_type_of(a, b)
+                }
+                // A case is an instance of its enum, so it relates to a class as
+                // its enum does.
+                (Type(Repr::Object(a, _)), Type(Repr::EnumCase(b, _)))
+                | (Type(Repr::EnumCase(b, _)), Type(Repr::Object(a, _))) => {
+                    match self.object_super_type_of(a, b) {
+                        TrinaryLogic::No => TrinaryLogic::No,
+                        _ => TrinaryLogic::Maybe,
+                    }
+                }
+                (Type(Repr::EnumCase(a, _)), Type(Repr::EnumCase(b, _)))
+                    if !a.eq_ignore_ascii_case(b) =>
+                {
                     TrinaryLogic::No
-                } else {
-                    TrinaryLogic::Maybe
                 }
-            }
-            (Type(Repr::Object(a, _)), Type(Repr::Object(b, _))) => self.object_super_type_of(a, b),
-            // A case is an instance of its enum, so it relates to a class as
-            // its enum does.
-            (Type(Repr::Object(a, _)), Type(Repr::EnumCase(b, _)))
-            | (Type(Repr::EnumCase(b, _)), Type(Repr::Object(a, _))) => {
-                match self.object_super_type_of(a, b) {
-                    TrinaryLogic::No => TrinaryLogic::No,
-                    _ => TrinaryLogic::Maybe,
+                _ if scalars_disjoint(sup, sub) => TrinaryLogic::No,
+                (Type(Repr::Accessory(kind)), _) if accessory_refuses(kind, sub) => {
+                    TrinaryLogic::No
                 }
+                _ => TrinaryLogic::Maybe,
             }
-            (Type(Repr::EnumCase(a, _)), Type(Repr::EnumCase(b, _)))
-                if !a.eq_ignore_ascii_case(b) =>
-            {
-                TrinaryLogic::No
-            }
-            _ if scalars_disjoint(sup, sub) => TrinaryLogic::No,
-            (Type(Repr::Accessory(kind)), _) if accessory_refuses(kind, sub) => TrinaryLogic::No,
-            _ => TrinaryLogic::Maybe,
-        }
+        })
     }
 
     /// `ConstantArrayType::isSuperTypeOf` between two shapes: every key
@@ -377,33 +389,35 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
 /// types of different scalar families (`string`/`int`, `array`/`object`).
 /// Anything else is not proven disjoint.
 fn scalars_disjoint(a: &Type, b: &Type) -> bool {
-    match (a, b) {
-        (Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)), _) => {
-            members.iter().all(|m| scalars_disjoint(m, b))
+    syntax::stack::guard(|| {
+        match (a, b) {
+            (Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)), _) => {
+                members.iter().all(|m| scalars_disjoint(m, b))
+            }
+            (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
+                members.iter().all(|m| scalars_disjoint(a, m))
+            }
+            // Two different values of the same kind can never overlap - real
+            // PHPStan's `ConstantStringType('send')->isSuperTypeOf(
+            // 'list_to_send')` is a definite no, not a maybe.
+            (Type(Repr::StringLiteral(x)), Type(Repr::StringLiteral(y))) => x != y,
+            (Type(Repr::IntLiteral(x)), Type(Repr::IntLiteral(y))) => x != y,
+            (Type(Repr::True), Type(Repr::False)) | (Type(Repr::False), Type(Repr::True)) => true,
+            // An open and a closed resource are never the same value.
+            (Type(Repr::Resource { closed: a }), Type(Repr::Resource { closed: b })) => a != b,
+            (Type(Repr::EnumCase(class_a, case_a)), Type(Repr::EnumCase(class_b, case_b))) => {
+                class_a == class_b && case_a != case_b
+            }
+            (Type(Repr::IntLiteral(n)), Type(Repr::IntRange(min, max)))
+            | (Type(Repr::IntRange(min, max)), Type(Repr::IntLiteral(n))) => {
+                min.is_some_and(|m| *n < m) || max.is_some_and(|m| *n > m)
+            }
+            _ => match (scalar_family(a), scalar_family(b)) {
+                (Some(fa), Some(fb)) => fa != fb,
+                _ => false,
+            },
         }
-        (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
-            members.iter().all(|m| scalars_disjoint(a, m))
-        }
-        // Two different values of the same kind can never overlap - real
-        // PHPStan's `ConstantStringType('send')->isSuperTypeOf(
-        // 'list_to_send')` is a definite no, not a maybe.
-        (Type(Repr::StringLiteral(x)), Type(Repr::StringLiteral(y))) => x != y,
-        (Type(Repr::IntLiteral(x)), Type(Repr::IntLiteral(y))) => x != y,
-        (Type(Repr::True), Type(Repr::False)) | (Type(Repr::False), Type(Repr::True)) => true,
-        // An open and a closed resource are never the same value.
-        (Type(Repr::Resource { closed: a }), Type(Repr::Resource { closed: b })) => a != b,
-        (Type(Repr::EnumCase(class_a, case_a)), Type(Repr::EnumCase(class_b, case_b))) => {
-            class_a == class_b && case_a != case_b
-        }
-        (Type(Repr::IntLiteral(n)), Type(Repr::IntRange(min, max)))
-        | (Type(Repr::IntRange(min, max)), Type(Repr::IntLiteral(n))) => {
-            min.is_some_and(|m| *n < m) || max.is_some_and(|m| *n > m)
-        }
-        _ => match (scalar_family(a), scalar_family(b)) {
-            (Some(fa), Some(fb)) => fa != fb,
-            _ => false,
-        },
-    }
+    })
 }
 
 #[derive(PartialEq)]

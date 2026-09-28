@@ -151,9 +151,11 @@ impl<'a> Checker<'a> {
     /// already document). `check_generic_bounds` uses this to skip a
     /// bound it has no way to actually verify, rather than guess wrong.
     pub(crate) fn is_type_fully_known(&self, ty: &Type) -> bool {
-        ty.as_object()
-            .is_none_or(|(name, _)| self.registry.classes.contains_key(name.as_str()))
-            && !ty.any_child(|t| !self.is_type_fully_known(t))
+        syntax::stack::guard(|| {
+            ty.as_object()
+                .is_none_or(|(name, _)| self.registry.classes.contains_key(name.as_str()))
+                && !ty.any_child(|t| !self.is_type_fully_known(t))
+        })
     }
 
     /// `check_generic_bounds` for everything a class declares outside

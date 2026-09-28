@@ -13,34 +13,36 @@ use syntax::token::Span;
 use super::protocol::to_lsp_range;
 
 pub(super) fn document_symbols(stmts: &[Stmt]) -> Vec<DocumentSymbol> {
-    let mut symbols = Vec::new();
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::FunctionDecl(f) => symbols.push(function_symbol(f, SymbolKind::FUNCTION)),
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => symbols.push(enum_symbol(e)),
-            StmtKind::ClassDecl(c) => symbols.push(class_symbol(c)),
-            StmtKind::Namespace(_) | StmtKind::Use(_) => {}
-            // A conditional top-level declaration (`if (...) { class Foo {} }`)
-            // still gets an outline entry - mirrors `DeclLocations::index`'s
-            // own recursion into `If`/`Block` for the identical reason.
-            StmtKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                symbols.extend(document_symbols(std::slice::from_ref(then_branch)));
-                if let Some(else_branch) = else_branch {
-                    symbols.extend(document_symbols(std::slice::from_ref(else_branch)));
+    syntax::stack::guard(|| {
+        let mut symbols = Vec::new();
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::FunctionDecl(f) => symbols.push(function_symbol(f, SymbolKind::FUNCTION)),
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => symbols.push(enum_symbol(e)),
+                StmtKind::ClassDecl(c) => symbols.push(class_symbol(c)),
+                StmtKind::Namespace(_) | StmtKind::Use(_) => {}
+                // A conditional top-level declaration (`if (...) { class Foo {} }`)
+                // still gets an outline entry - mirrors `DeclLocations::index`'s
+                // own recursion into `If`/`Block` for the identical reason.
+                StmtKind::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    symbols.extend(document_symbols(std::slice::from_ref(then_branch)));
+                    if let Some(else_branch) = else_branch {
+                        symbols.extend(document_symbols(std::slice::from_ref(else_branch)));
+                    }
                 }
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => symbols.extend(document_symbols(inner)),
+                _ => {}
             }
-            StmtKind::Block(inner)
-            | StmtKind::Declare {
-                body: Some(inner), ..
-            } => symbols.extend(document_symbols(inner)),
-            _ => {}
         }
-    }
-    symbols
+        symbols
+    })
 }
 
 #[allow(deprecated)] // `DocumentSymbol::deprecated`: no replacement field exists yet

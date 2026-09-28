@@ -12,9 +12,9 @@ impl Type {
     /// resolves to the real, useful native type instead of losing all
     /// precision.
     pub fn reconcile_with_native(self, native_ty: Type) -> Type {
-        let members: Vec<Type> = match self {
-            Type(Repr::Union(members)) => members,
-            other => vec![other],
+        let members: Vec<Type> = match self.into_repr() {
+            Repr::Union(members) => members,
+            other => vec![Type(other)],
         };
         let mut kept: Vec<Type> = members
             .into_iter()
@@ -221,93 +221,97 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
 // and no further `return` as "should never return, but a return
 // statement was reached."
 fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
-    if *native_ty == Type::void() && *m != Type::void() && *m != Type::never() {
-        return false;
-    }
-    match m {
-        // A class reference or a template can't be verified this early. A late-
-        // resolvable type or a `ClassConstant` is trusted the same way - `Registry::
-        // resolve_deferred_value_of`'s own later, whole-registry pass
-        // (see its own doc comment) restores the "fall back to native
-        // when the resolved doc type turns out to be Mixed" behavior this
-        // function would otherwise have given for free, once its real
-        // value is actually known.
-        Type(Repr::Object(_, _))
-        | Type(Repr::TemplateParam(_))
-        | Type(Repr::ObjectWithoutClass)
-        | Type(Repr::ValueOf(_))
-        | Type(Repr::KeyOf(_))
-        | Type(Repr::OffsetAccess(..))
-        | Type(Repr::ClassConstant { .. }) => true,
-        // `@return static` under a native `self`/`static`/class hint: the
-        // late-bound class is always an instance of the declaring one.
-        Type(Repr::StaticRef(_)) | Type(Repr::This) | Type(Repr::SelfRef(_)) => !matches!(
-            native_ty,
-            Type(Repr::Int)
-                | Type(Repr::Float)
-                | Type(Repr::String)
-                | Type(Repr::Bool)
-                | Type(Repr::Array(..))
-                | Type(Repr::Null)
-        ),
-        // A PHPStan/Psalm callable-shape doc member (`Closure(int):
-        // string`) degrades to plain `Repr::Callable` at parse time
-        // (`types::parse_type_atom`'s own documented simplification - no
-        // per-parameter/return signature is tracked) - the same
-        // information loss `Object`'s own case just above already has to
-        // work around, just one layer earlier. Without this,
-        // `subtype(Callable, Closure)` (correctly `false` in general -
-        // not every callable is a `Closure` instance) would wrongly read
-        // as "the doc member can't be right," discarding it even when
-        // the native hint is exactly `Closure` (e.g. a `null|Closure
-        // $predicate` parameter documented as `(Closure(Tv): bool)|null`
-        // resolving to bare `null` once the `Closure(...)`-shaped member
-        // is filtered out).
-        Type(Repr::Callable(_)) => true,
-        // A conditional return type (`($p is X ? A : B)`) is possible if
-        // either branch is - each call site picks (or unions) its own.
-        // Checked branch-wise through this same function, so a branch
-        // naming a template or a class is trusted the same way a plain
-        // one is, instead of failing `is_super_type_of`'s name-equality object
-        // check against the native class.
-        Type(Repr::Conditional {
-            if_true, if_false, ..
-        }) => {
-            member_possible_given_native(if_true, native_ty)
-                || member_possible_given_native(if_false, native_ty)
+    syntax::stack::guard(|| {
+        if *native_ty == Type::void() && *m != Type::void() && *m != Type::never() {
+            return false;
         }
-        // An array's key is never checked against `native_ty`: a native
-        // `array` hint carries no key information to contradict, so only
-        // the value side is checked against the native's own.
-        Type(Repr::Array(_, elem)) => match native_ty {
-            Type(Repr::Array(_, native_elem)) => member_possible_given_native(elem, native_elem),
-            _ => Relation::structural().is_super_type_of(native_ty, m).yes(),
-        },
-        // Same reasoning as the plain `Repr::Array` arm just above, for
-        // `list<T>`/`non-empty-array<T>`/`non-empty-list<T>`'s own real
-        // `Intersection([Array(key, elem), Accessory(_), ...])`
-        // representation - an accessory marker never affects
-        // whether the member is "possible" given a bare native `array`
-        // hint (which states nothing about list-ness/non-emptiness
-        // either), so this only needs to find the `Array` member inside
-        // and re-run the same key-ignoring check on it.
-        Type(Repr::Intersection(members)) => match (
-            members.iter().find_map(|inner| match inner {
-                Type(Repr::Array(_, elem)) => Some(elem.as_ref()),
-                _ => None,
-            }),
-            native_ty,
-        ) {
-            (Some(elem), Type(Repr::Array(_, native_elem))) => {
-                member_possible_given_native(elem, native_elem)
+        match m {
+            // A class reference or a template can't be verified this early. A late-
+            // resolvable type or a `ClassConstant` is trusted the same way - `Registry::
+            // resolve_deferred_value_of`'s own later, whole-registry pass
+            // (see its own doc comment) restores the "fall back to native
+            // when the resolved doc type turns out to be Mixed" behavior this
+            // function would otherwise have given for free, once its real
+            // value is actually known.
+            Type(Repr::Object(_, _))
+            | Type(Repr::TemplateParam(_))
+            | Type(Repr::ObjectWithoutClass)
+            | Type(Repr::ValueOf(_))
+            | Type(Repr::KeyOf(_))
+            | Type(Repr::OffsetAccess(..))
+            | Type(Repr::ClassConstant { .. }) => true,
+            // `@return static` under a native `self`/`static`/class hint: the
+            // late-bound class is always an instance of the declaring one.
+            Type(Repr::StaticRef(_)) | Type(Repr::This) | Type(Repr::SelfRef(_)) => !matches!(
+                native_ty,
+                Type(Repr::Int)
+                    | Type(Repr::Float)
+                    | Type(Repr::String)
+                    | Type(Repr::Bool)
+                    | Type(Repr::Array(..))
+                    | Type(Repr::Null)
+            ),
+            // A PHPStan/Psalm callable-shape doc member (`Closure(int):
+            // string`) degrades to plain `Repr::Callable` at parse time
+            // (`types::parse_type_atom`'s own documented simplification - no
+            // per-parameter/return signature is tracked) - the same
+            // information loss `Object`'s own case just above already has to
+            // work around, just one layer earlier. Without this,
+            // `subtype(Callable, Closure)` (correctly `false` in general -
+            // not every callable is a `Closure` instance) would wrongly read
+            // as "the doc member can't be right," discarding it even when
+            // the native hint is exactly `Closure` (e.g. a `null|Closure
+            // $predicate` parameter documented as `(Closure(Tv): bool)|null`
+            // resolving to bare `null` once the `Closure(...)`-shaped member
+            // is filtered out).
+            Type(Repr::Callable(_)) => true,
+            // A conditional return type (`($p is X ? A : B)`) is possible if
+            // either branch is - each call site picks (or unions) its own.
+            // Checked branch-wise through this same function, so a branch
+            // naming a template or a class is trusted the same way a plain
+            // one is, instead of failing `is_super_type_of`'s name-equality object
+            // check against the native class.
+            Type(Repr::Conditional {
+                if_true, if_false, ..
+            }) => {
+                member_possible_given_native(if_true, native_ty)
+                    || member_possible_given_native(if_false, native_ty)
             }
-            (Some(_), _) => Relation::structural().is_super_type_of(native_ty, m).yes(),
-            // A `Closure(...)` shape (`\Closure&callable(...)`) or any
-            // other object intersection: possible whenever one member is.
-            (None, _) => members
-                .iter()
-                .any(|inner| member_possible_given_native(inner, native_ty)),
-        },
-        _ => Relation::structural().is_super_type_of(native_ty, m).yes(),
-    }
+            // An array's key is never checked against `native_ty`: a native
+            // `array` hint carries no key information to contradict, so only
+            // the value side is checked against the native's own.
+            Type(Repr::Array(_, elem)) => match native_ty {
+                Type(Repr::Array(_, native_elem)) => {
+                    member_possible_given_native(elem, native_elem)
+                }
+                _ => Relation::structural().is_super_type_of(native_ty, m).yes(),
+            },
+            // Same reasoning as the plain `Repr::Array` arm just above, for
+            // `list<T>`/`non-empty-array<T>`/`non-empty-list<T>`'s own real
+            // `Intersection([Array(key, elem), Accessory(_), ...])`
+            // representation - an accessory marker never affects
+            // whether the member is "possible" given a bare native `array`
+            // hint (which states nothing about list-ness/non-emptiness
+            // either), so this only needs to find the `Array` member inside
+            // and re-run the same key-ignoring check on it.
+            Type(Repr::Intersection(members)) => match (
+                members.iter().find_map(|inner| match inner {
+                    Type(Repr::Array(_, elem)) => Some(elem.as_ref()),
+                    _ => None,
+                }),
+                native_ty,
+            ) {
+                (Some(elem), Type(Repr::Array(_, native_elem))) => {
+                    member_possible_given_native(elem, native_elem)
+                }
+                (Some(_), _) => Relation::structural().is_super_type_of(native_ty, m).yes(),
+                // A `Closure(...)` shape (`\Closure&callable(...)`) or any
+                // other object intersection: possible whenever one member is.
+                (None, _) => members
+                    .iter()
+                    .any(|inner| member_possible_given_native(inner, native_ty)),
+            },
+            _ => Relation::structural().is_super_type_of(native_ty, m).yes(),
+        }
+    })
 }

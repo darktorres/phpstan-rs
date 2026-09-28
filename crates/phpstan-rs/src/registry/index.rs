@@ -599,105 +599,107 @@ fn build_declarations_with_context(
     conditional: bool,
     out: &mut Vec<BuiltDecl>,
 ) {
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::ClassDecl(e) if e.kind == syntax::ast::ClassKind::Enum => {
-                for m in &e.methods {
-                    collect_nested_defines(&m.function.body, out);
+    syntax::stack::guard(|| {
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::ClassDecl(e) if e.kind == syntax::ast::ClassKind::Enum => {
+                    for m in &e.methods {
+                        collect_nested_defines(&m.function.body, out);
+                    }
+                    let name = intern(&ctx.declared_name(class_decl_name(e)));
+                    let mut info = ClassReflection::from_enum_decl(e, ctx);
+                    info.record_provenance(origin, &name, e.name_span, &MemberSpans::of_enum(e));
+                    out.push(BuiltDecl::Enum {
+                        name,
+                        conditional,
+                        info,
+                    });
                 }
-                let name = intern(&ctx.declared_name(class_decl_name(e)));
-                let mut info = ClassReflection::from_enum_decl(e, ctx);
-                info.record_provenance(origin, &name, e.name_span, &MemberSpans::of_enum(e));
-                out.push(BuiltDecl::Enum {
-                    name,
-                    conditional,
-                    info,
-                });
-            }
-            StmtKind::ClassDecl(c) => {
-                for m in &c.methods {
-                    collect_nested_defines(&m.function.body, out);
+                StmtKind::ClassDecl(c) => {
+                    for m in &c.methods {
+                        collect_nested_defines(&m.function.body, out);
+                    }
+                    let name = intern(&ctx.declared_name(class_decl_name(c)));
+                    let mut info = ClassReflection::from_decl(c, ctx);
+                    info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
+                    out.push(BuiltDecl::Class {
+                        name,
+                        conditional,
+                        info,
+                    });
                 }
-                let name = intern(&ctx.declared_name(class_decl_name(c)));
-                let mut info = ClassReflection::from_decl(c, ctx);
-                info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
-                out.push(BuiltDecl::Class {
-                    name,
-                    conditional,
-                    info,
-                });
-            }
-            StmtKind::FunctionDecl(f) => {
-                collect_nested_defines(&f.body, out);
-                let name = intern(&ctx.declared_name(&f.name));
-                let mut sig = FunctionReflection::from_decl(
-                    f,
-                    ctx,
-                    &rustc_hash::FxHashMap::default(),
-                    &rustc_hash::FxHashMap::default(),
-                    Visibility::Public,
-                );
-                sig.provenance = Provenance::new(origin.clone(), f.name_span);
-                out.push(BuiltDecl::Function {
-                    name,
-                    conditional,
-                    sig,
-                    site: (f.name_span.start.line, f.name_span.start.col),
-                });
-            }
-            // The common `if (!function_exists('foo')) { function
-            // foo() {} }` polyfill idiom declares a genuinely global
-            // function/class from inside a conditional - recursing here
-            // is what makes those visible at all. A branch can't hold a
-            // `namespace` or `use` statement, so both share `ctx`. Both branches are
-            // marked `conditional = true` regardless of the `if`'s own
-            // condition text - nothing downstream has a notion of which
-            // conditions are actually guards, only "was this declaration
-            // reached unconditionally or not."
-            StmtKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                build_declarations_with_context(
-                    std::slice::from_ref(then_branch),
-                    origin,
-                    ctx,
-                    true,
-                    out,
-                );
-                if let Some(else_branch) = else_branch {
+                StmtKind::FunctionDecl(f) => {
+                    collect_nested_defines(&f.body, out);
+                    let name = intern(&ctx.declared_name(&f.name));
+                    let mut sig = FunctionReflection::from_decl(
+                        f,
+                        ctx,
+                        &rustc_hash::FxHashMap::default(),
+                        &rustc_hash::FxHashMap::default(),
+                        Visibility::Public,
+                    );
+                    sig.provenance = Provenance::new(origin.clone(), f.name_span);
+                    out.push(BuiltDecl::Function {
+                        name,
+                        conditional,
+                        sig,
+                        site: (f.name_span.start.line, f.name_span.start.col),
+                    });
+                }
+                // The common `if (!function_exists('foo')) { function
+                // foo() {} }` polyfill idiom declares a genuinely global
+                // function/class from inside a conditional - recursing here
+                // is what makes those visible at all. A branch can't hold a
+                // `namespace` or `use` statement, so both share `ctx`. Both branches are
+                // marked `conditional = true` regardless of the `if`'s own
+                // condition text - nothing downstream has a notion of which
+                // conditions are actually guards, only "was this declaration
+                // reached unconditionally or not."
+                StmtKind::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
                     build_declarations_with_context(
-                        std::slice::from_ref(else_branch),
+                        std::slice::from_ref(then_branch),
                         origin,
                         ctx,
                         true,
                         out,
                     );
+                    if let Some(else_branch) = else_branch {
+                        build_declarations_with_context(
+                            std::slice::from_ref(else_branch),
+                            origin,
+                            ctx,
+                            true,
+                            out,
+                        );
+                    }
                 }
-            }
-            // A braced namespace body: its `use` statements apply to the
-            // declarations after them in the block, and the next
-            // `namespace` statement clears them (see `set_namespace`).
-            // Inherits whatever `conditional` its enclosing context
-            // already has.
-            StmtKind::Block(inner)
-            | StmtKind::Declare {
-                body: Some(inner), ..
-            } => build_declarations_with_context(inner, origin, ctx, conditional, out),
-            StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    let name = intern(&ctx.declared_name(&c.name));
-                    let ty = infer_const_type(&c.value);
-                    out.push(BuiltDecl::GlobalConst { name, ty });
+                // A braced namespace body: its `use` statements apply to the
+                // declarations after them in the block, and the next
+                // `namespace` statement clears them (see `set_namespace`).
+                // Inherits whatever `conditional` its enclosing context
+                // already has.
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => build_declarations_with_context(inner, origin, ctx, conditional, out),
+                StmtKind::GlobalConst(consts) => {
+                    for c in consts {
+                        let name = intern(&ctx.declared_name(&c.name));
+                        let ty = infer_const_type(&c.value);
+                        out.push(BuiltDecl::GlobalConst { name, ty });
+                    }
                 }
+                StmtKind::Expression(e) => collect_defines_in_expr(e, out),
+                _ => collect_nested_defines(std::slice::from_ref(stmt), out),
             }
-            StmtKind::Expression(e) => collect_defines_in_expr(e, out),
-            _ => collect_nested_defines(std::slice::from_ref(stmt), out),
         }
-    }
+    })
 }
 
 /// A `define()` statement anywhere in `stmts` - inside a function or

@@ -52,21 +52,23 @@ fn library_attribute(resolved: &str) -> Option<&str> {
 }
 
 fn class_names(args: &[Expr], ctx: &NameContext, out: &mut Vec<Arc<str>>) {
-    for arg in args {
-        match &arg.kind {
-            ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
-                out.push(intern(ctx.resolve(class).trim_start_matches('\\')));
+    syntax::stack::guard(|| {
+        for arg in args {
+            match &arg.kind {
+                ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
+                    out.push(intern(ctx.resolve(class).trim_start_matches('\\')));
+                }
+                ExprKind::Literal(Literal::String(s)) => {
+                    out.push(intern(s.to_str_lossy().trim_start_matches('\\')));
+                }
+                ExprKind::ArrayLiteral(items) => {
+                    let values: Vec<Expr> = items.iter().map(|i| i.value.clone()).collect();
+                    class_names(&values, ctx, out);
+                }
+                _ => {}
             }
-            ExprKind::Literal(Literal::String(s)) => {
-                out.push(intern(s.to_str_lossy().trim_start_matches('\\')));
-            }
-            ExprKind::ArrayLiteral(items) => {
-                let values: Vec<Expr> = items.iter().map(|i| i.value.clone()).collect();
-                class_names(&values, ctx, out);
-            }
-            _ => {}
         }
-    }
+    })
 }
 
 pub(crate) fn access_attributes(attrs: &[Attribute], ctx: &NameContext) -> AccessAttributes {

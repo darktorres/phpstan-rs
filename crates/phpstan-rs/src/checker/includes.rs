@@ -176,87 +176,89 @@ impl<'a> Checker<'a> {
     }
 
     fn resolve_paths_at(&self, e: &Expr, locals: &Locals, depth: usize) -> Option<Vec<String>> {
-        if let Some(init) = self.file_constant_initializer(e) {
-            return (depth < MAX_CONSTANT_DEPTH)
-                .then(|| self.resolve_paths_at(init, &Locals::default(), depth + 1))
-                .flatten();
-        }
-        match &e.kind {
-            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-                self.resolve_paths_at(inner, locals, depth)
+        syntax::stack::guard(|| {
+            if let Some(init) = self.file_constant_initializer(e) {
+                return (depth < MAX_CONSTANT_DEPTH)
+                    .then(|| self.resolve_paths_at(init, &Locals::default(), depth + 1))
+                    .flatten();
             }
-            // The platform's own separators - the paths are checked
-            // against this machine's filesystem.
-            ExprKind::Name(n) if n.trim_start_matches('\\') == "PATH_SEPARATOR" => {
-                Some(vec![":".to_string()])
-            }
-            ExprKind::Name(n) if n.trim_start_matches('\\') == "DIRECTORY_SEPARATOR" => {
-                Some(vec![std::path::MAIN_SEPARATOR.to_string()])
-            }
-            ExprKind::Call(callee, args)
-                if args.is_empty()
-                    && callee_name(callee)
-                        .is_some_and(|n| n.eq_ignore_ascii_case("get_include_path")) =>
-            {
-                Some(vec![DEFAULT_INCLUDE_PATH.to_string()])
-            }
-            ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => Some(vec![
-                self.current_dir_of_file()?.to_string_lossy().into_owned(),
-            ]),
-            ExprKind::Name(n) if n.eq_ignore_ascii_case("__FILE__") => Some(vec![
-                self.current_file_absolute()?.to_string_lossy().into_owned(),
-            ]),
-            ExprKind::Binary(BinOp::Concat, l, r) => {
-                let lefts = self.resolve_paths_at(l, locals, depth)?;
-                let rights = self.resolve_paths_at(r, locals, depth)?;
-                let mut out = Vec::new();
-                for left in &lefts {
-                    for right in &rights {
-                        out.push(format!("{left}{right}"));
-                    }
+            match &e.kind {
+                ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                    self.resolve_paths_at(inner, locals, depth)
                 }
-                Some(out)
-            }
-            ExprKind::Call(callee, args)
-                if callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("dirname")) =>
-            {
-                let [path_arg, rest @ ..] = args.as_slice() else {
-                    return None;
-                };
-                let levels = match rest {
-                    [] => 1,
-                    [level] => match &level.value.kind {
-                        ExprKind::Literal(Literal::Int(n)) if *n >= 1 => *n as usize,
+                // The platform's own separators - the paths are checked
+                // against this machine's filesystem.
+                ExprKind::Name(n) if n.trim_start_matches('\\') == "PATH_SEPARATOR" => {
+                    Some(vec![":".to_string()])
+                }
+                ExprKind::Name(n) if n.trim_start_matches('\\') == "DIRECTORY_SEPARATOR" => {
+                    Some(vec![std::path::MAIN_SEPARATOR.to_string()])
+                }
+                ExprKind::Call(callee, args)
+                    if args.is_empty()
+                        && callee_name(callee)
+                            .is_some_and(|n| n.eq_ignore_ascii_case("get_include_path")) =>
+                {
+                    Some(vec![DEFAULT_INCLUDE_PATH.to_string()])
+                }
+                ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => Some(vec![
+                    self.current_dir_of_file()?.to_string_lossy().into_owned(),
+                ]),
+                ExprKind::Name(n) if n.eq_ignore_ascii_case("__FILE__") => Some(vec![
+                    self.current_file_absolute()?.to_string_lossy().into_owned(),
+                ]),
+                ExprKind::Binary(BinOp::Concat, l, r) => {
+                    let lefts = self.resolve_paths_at(l, locals, depth)?;
+                    let rights = self.resolve_paths_at(r, locals, depth)?;
+                    let mut out = Vec::new();
+                    for left in &lefts {
+                        for right in &rights {
+                            out.push(format!("{left}{right}"));
+                        }
+                    }
+                    Some(out)
+                }
+                ExprKind::Call(callee, args)
+                    if callee_name(callee).is_some_and(|n| n.eq_ignore_ascii_case("dirname")) =>
+                {
+                    let [path_arg, rest @ ..] = args.as_slice() else {
+                        return None;
+                    };
+                    let levels = match rest {
+                        [] => 1,
+                        [level] => match &level.value.kind {
+                            ExprKind::Literal(Literal::Int(n)) if *n >= 1 => *n as usize,
+                            _ => return None,
+                        },
                         _ => return None,
-                    },
-                    _ => return None,
-                };
-                let paths = self.resolve_paths_at(&path_arg.value, locals, depth)?;
-                Some(
-                    paths
-                        .into_iter()
-                        .map(|p| {
-                            let mut path = PathBuf::from(p);
-                            for _ in 0..levels {
-                                if !path.pop() {
-                                    break;
+                    };
+                    let paths = self.resolve_paths_at(&path_arg.value, locals, depth)?;
+                    Some(
+                        paths
+                            .into_iter()
+                            .map(|p| {
+                                let mut path = PathBuf::from(p);
+                                for _ in 0..levels {
+                                    if !path.pop() {
+                                        break;
+                                    }
                                 }
-                            }
-                            path.to_string_lossy().into_owned()
-                        })
-                        .collect(),
-                )
+                                path.to_string_lossy().into_owned()
+                            })
+                            .collect(),
+                    )
+                }
+                _ => {
+                    let strings: Vec<String> = self
+                        .infer_expr(e, locals)
+                        .constant_strings()
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect();
+                    (!strings.is_empty()).then_some(strings)
+                }
             }
-            _ => {
-                let strings: Vec<String> = self
-                    .infer_expr(e, locals)
-                    .constant_strings()
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect();
-                (!strings.is_empty()).then_some(strings)
-            }
-        }
+        })
     }
 
     fn include_target_exists(&self, path: &str) -> bool {
@@ -388,24 +390,28 @@ impl<'ast> Visitor<'ast> for GuardArgs<'_> {
 }
 
 fn visit_guard_args_in_expr(e: &Expr, out: &mut dyn FnMut(IncludeCall)) {
-    if let ExprKind::Call(callee, args) = &e.kind
-        && let Some(name) = callee_name(callee)
-    {
-        let name = name.to_ascii_lowercase();
-        match (name.as_str(), args.as_slice()) {
-            (n, [arg, ..]) if GUARD_FUNCTIONS.contains(&n) => out(IncludeCall::Guard(&arg.value)),
-            ("set_include_path", [arg]) => out(IncludeCall::SetIncludePath(&arg.value)),
-            ("ini_set", [key, value]) if matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") => {
-                out(IncludeCall::SetIncludePath(&value.value))
+    syntax::stack::guard(|| {
+        if let ExprKind::Call(callee, args) = &e.kind
+            && let Some(name) = callee_name(callee)
+        {
+            let name = name.to_ascii_lowercase();
+            match (name.as_str(), args.as_slice()) {
+                (n, [arg, ..]) if GUARD_FUNCTIONS.contains(&n) => {
+                    out(IncludeCall::Guard(&arg.value))
+                }
+                ("set_include_path", [arg]) => out(IncludeCall::SetIncludePath(&arg.value)),
+                ("ini_set", [key, value]) if matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if *k == "include_path") => {
+                    out(IncludeCall::SetIncludePath(&value.value))
+                }
+                _ => {}
             }
-            _ => {}
         }
-    }
-    if let ExprKind::Closure { body, .. } = &e.kind {
-        body.iter().for_each(|s| visit_guard_args_in_stmt(s, out));
-    }
-    any_child_expr(e, &mut |child| {
-        visit_guard_args_in_expr(child, out);
-        false
-    });
+        if let ExprKind::Closure { body, .. } = &e.kind {
+            body.iter().for_each(|s| visit_guard_args_in_stmt(s, out));
+        }
+        any_child_expr(e, &mut |child| {
+            visit_guard_args_in_expr(child, out);
+            false
+        });
+    })
 }

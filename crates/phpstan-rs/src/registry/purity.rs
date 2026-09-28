@@ -302,71 +302,73 @@ fn stmt_disqualifies(
     registry: &Registry,
     deps: &mut Vec<PurityDependency>,
 ) -> bool {
-    let own = match &stmt.kind {
-        // `echo`/`die`/`exit`/`print` are `betweenPhpTags`'s own
-        // "output" siblings - real PHPStan's own separate `echo`
-        // identifier for the statement form specifically.
-        StmtKind::Echo(_) => true,
-        // An *explicit* `throw` - matches `resolveDependencies`'s own
-        // `$throwPoint->isExplicit()` check exactly (an implicit throw
-        // from a called function is a different, unmodeled concern,
-        // same as real PHPStan's own treatment).
-        StmtKind::Throw(_) => true,
-        StmtKind::Global(_) => true,
-        // `static $x = ...;` - a function-local variable persisting
-        // across calls, real PHPStan's own `'static'` identifier
-        // (distinct from `self`/`static::` class-name resolution,
-        // which never touches this statement kind at all).
-        StmtKind::StaticVar(_) => true,
-        // Real output between PHP tags - `betweenPhpTags`.
-        StmtKind::InlineHtml(_) => true,
-        StmtKind::Expression(e) => expr_disqualifies(e, declaring_class, registry, deps),
-        StmtKind::Return(Some(e)) => expr_disqualifies(e, declaring_class, registry, deps),
-        StmtKind::If { cond, .. }
-        | StmtKind::While { cond, .. }
-        | StmtKind::DoWhile { cond, .. } => {
-            expr_disqualifies(cond, declaring_class, registry, deps)
-        }
-        StmtKind::For {
-            init, cond, step, ..
-        } => init
-            .iter()
-            .chain(cond)
-            .chain(step)
-            .any(|e| expr_disqualifies(e, declaring_class, registry, deps)),
-        StmtKind::Foreach {
-            subject,
-            key,
-            value,
-            ..
-        } => {
-            expr_disqualifies(subject, declaring_class, registry, deps)
-                || key
-                    .as_ref()
-                    .is_some_and(|k| expr_disqualifies(k, declaring_class, registry, deps))
-                || expr_disqualifies(value, declaring_class, registry, deps)
-        }
-        StmtKind::Switch { subject, cases } => {
-            expr_disqualifies(subject, declaring_class, registry, deps)
-                || cases.iter().any(|c| {
-                    c.test
+    syntax::stack::guard(|| {
+        let own = match &stmt.kind {
+            // `echo`/`die`/`exit`/`print` are `betweenPhpTags`'s own
+            // "output" siblings - real PHPStan's own separate `echo`
+            // identifier for the statement form specifically.
+            StmtKind::Echo(_) => true,
+            // An *explicit* `throw` - matches `resolveDependencies`'s own
+            // `$throwPoint->isExplicit()` check exactly (an implicit throw
+            // from a called function is a different, unmodeled concern,
+            // same as real PHPStan's own treatment).
+            StmtKind::Throw(_) => true,
+            StmtKind::Global(_) => true,
+            // `static $x = ...;` - a function-local variable persisting
+            // across calls, real PHPStan's own `'static'` identifier
+            // (distinct from `self`/`static::` class-name resolution,
+            // which never touches this statement kind at all).
+            StmtKind::StaticVar(_) => true,
+            // Real output between PHP tags - `betweenPhpTags`.
+            StmtKind::InlineHtml(_) => true,
+            StmtKind::Expression(e) => expr_disqualifies(e, declaring_class, registry, deps),
+            StmtKind::Return(Some(e)) => expr_disqualifies(e, declaring_class, registry, deps),
+            StmtKind::If { cond, .. }
+            | StmtKind::While { cond, .. }
+            | StmtKind::DoWhile { cond, .. } => {
+                expr_disqualifies(cond, declaring_class, registry, deps)
+            }
+            StmtKind::For {
+                init, cond, step, ..
+            } => init
+                .iter()
+                .chain(cond)
+                .chain(step)
+                .any(|e| expr_disqualifies(e, declaring_class, registry, deps)),
+            StmtKind::Foreach {
+                subject,
+                key,
+                value,
+                ..
+            } => {
+                expr_disqualifies(subject, declaring_class, registry, deps)
+                    || key
                         .as_ref()
-                        .is_some_and(|t| expr_disqualifies(t, declaring_class, registry, deps))
-                })
-        }
-        StmtKind::GlobalConst(consts) => consts
-            .iter()
-            .any(|c| expr_disqualifies(&c.value, declaring_class, registry, deps)),
-        // Unsetting a variable changes nothing outside the function;
-        // unsetting a property does (`propertyUnset`).
-        StmtKind::Unset(targets) => targets.iter().any(|target| {
-            property_write_target(target)
-                || expr_disqualifies(target, declaring_class, registry, deps)
-        }),
-        _ => false,
-    };
-    own || any_child_stmt(stmt, |s| {
-        stmt_disqualifies(s, declaring_class, registry, deps)
+                        .is_some_and(|k| expr_disqualifies(k, declaring_class, registry, deps))
+                    || expr_disqualifies(value, declaring_class, registry, deps)
+            }
+            StmtKind::Switch { subject, cases } => {
+                expr_disqualifies(subject, declaring_class, registry, deps)
+                    || cases.iter().any(|c| {
+                        c.test
+                            .as_ref()
+                            .is_some_and(|t| expr_disqualifies(t, declaring_class, registry, deps))
+                    })
+            }
+            StmtKind::GlobalConst(consts) => consts
+                .iter()
+                .any(|c| expr_disqualifies(&c.value, declaring_class, registry, deps)),
+            // Unsetting a variable changes nothing outside the function;
+            // unsetting a property does (`propertyUnset`).
+            StmtKind::Unset(targets) => targets.iter().any(|target| {
+                property_write_target(target)
+                    || expr_disqualifies(target, declaring_class, registry, deps)
+            }),
+            _ => false,
+        };
+        own || any_child_stmt(stmt, |s| {
+            stmt_disqualifies(s, declaring_class, registry, deps)
+        })
     })
 }
 
@@ -376,108 +378,112 @@ fn expr_disqualifies(
     registry: &Registry,
     deps: &mut Vec<PurityDependency>,
 ) -> bool {
-    match &e.kind {
-        // Any static property access at all - real PHPStan's own
-        // `staticPropertyAccess` fires even for a bare read of shared
-        // static state, not just a write.
-        ExprKind::ClassConstFetch(..)
-        | ExprKind::ClassNameFetch(_)
-        | ExprKind::StaticPropertyFetch(..)
-        | ExprKind::DynamicStaticPropertyFetch(..) => true,
-        ExprKind::Variable(name) if is_superglobal(name) => true,
-        ExprKind::Yield(..) | ExprKind::YieldFrom(_) => true,
-        // Runs a shell command.
-        ExprKind::ShellExec(_) => true,
-        ExprKind::Print(_) | ExprKind::Exit(..) | ExprKind::Eval(_) | ExprKind::Include(..) => true,
-        ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-            property_write_target(lhs)
-                || expr_disqualifies(lhs, declaring_class, registry, deps)
-                || expr_disqualifies(rhs, declaring_class, registry, deps)
-        }
-        ExprKind::CompoundAssign(_, lhs, rhs) => {
-            property_write_target(lhs)
-                || expr_disqualifies(lhs, declaring_class, registry, deps)
-                || expr_disqualifies(rhs, declaring_class, registry, deps)
-        }
-        ExprKind::Call(callee, args) => {
-            if let ExprKind::Name(name) = &callee.kind {
+    syntax::stack::guard(|| {
+        match &e.kind {
+            // Any static property access at all - real PHPStan's own
+            // `staticPropertyAccess` fires even for a bare read of shared
+            // static state, not just a write.
+            ExprKind::ClassConstFetch(..)
+            | ExprKind::ClassNameFetch(_)
+            | ExprKind::StaticPropertyFetch(..)
+            | ExprKind::DynamicStaticPropertyFetch(..) => true,
+            ExprKind::Variable(name) if is_superglobal(name) => true,
+            ExprKind::Yield(..) | ExprKind::YieldFrom(_) => true,
+            // Runs a shell command.
+            ExprKind::ShellExec(_) => true,
+            ExprKind::Print(_) | ExprKind::Exit(..) | ExprKind::Eval(_) | ExprKind::Include(..) => {
+                true
+            }
+            ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
+                property_write_target(lhs)
+                    || expr_disqualifies(lhs, declaring_class, registry, deps)
+                    || expr_disqualifies(rhs, declaring_class, registry, deps)
+            }
+            ExprKind::CompoundAssign(_, lhs, rhs) => {
+                property_write_target(lhs)
+                    || expr_disqualifies(lhs, declaring_class, registry, deps)
+                    || expr_disqualifies(rhs, declaring_class, registry, deps)
+            }
+            ExprKind::Call(callee, args) => {
+                if let ExprKind::Name(name) = &callee.kind {
+                    if args
+                        .iter()
+                        .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
+                    {
+                        return true;
+                    }
+                    // Canonical declared name, not `lname` - see
+                    // `resolve_this_method_call`'s own doc comment for why
+                    // storing a lowercased key here would silently break
+                    // `dependency_is_pure`'s later exact lookup for any
+                    // function whose real declared name isn't already
+                    // all-lowercase.
+                    let Some((canonical_name, _)) = registry.lookup_function_with_name(name) else {
+                        return true;
+                    };
+                    deps.push(PurityDependency::Function(intern(canonical_name)));
+                    return false;
+                }
+                true
+            }
+            ExprKind::MethodCall(recv, name, args, _) => {
                 if args
                     .iter()
                     .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
                 {
                     return true;
                 }
-                // Canonical declared name, not `lname` - see
-                // `resolve_this_method_call`'s own doc comment for why
-                // storing a lowercased key here would silently break
-                // `dependency_is_pure`'s later exact lookup for any
-                // function whose real declared name isn't already
-                // all-lowercase.
-                let Some((canonical_name, _)) = registry.lookup_function_with_name(name) else {
+                if !matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this") {
+                    return true;
+                }
+                let Some(class) = declaring_class else {
                     return true;
                 };
-                deps.push(PurityDependency::Function(intern(canonical_name)));
-                return false;
+                resolve_this_method_call(class, name, registry, deps)
             }
-            true
-        }
-        ExprKind::MethodCall(recv, name, args, _) => {
-            if args
-                .iter()
-                .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
-            {
-                return true;
-            }
-            if !matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this") {
-                return true;
-            }
-            let Some(class) = declaring_class else {
-                return true;
-            };
-            resolve_this_method_call(class, name, registry, deps)
-        }
-        ExprKind::StaticCall(target, name, args) => {
-            if args
-                .iter()
-                .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
-            {
-                return true;
-            }
-            let Some(class) = declaring_class else {
-                return true;
-            };
-            // A dynamic receiver is never one of the resolvable
-            // pseudo-keywords: unresolvable, so disqualifying.
-            let Some(target) = target.as_name() else {
-                return true;
-            };
-            resolve_static_call(class, target, name, registry, deps)
-        }
-        // A computed method name: any method, so unresolvable.
-        ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) => true,
-        ExprKind::New(callee, args) => {
-            if args
-                .iter()
-                .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
-            {
-                return true;
-            }
-            let ExprKind::Name(name) = &callee.kind else {
-                return true;
-            };
-            let target_class = match name.trim_start_matches('\\') {
-                n if n.eq_ignore_ascii_case("self") || n.eq_ignore_ascii_case("static") => {
-                    let Some(class) = declaring_class else {
-                        return true;
-                    };
-                    class.to_string()
+            ExprKind::StaticCall(target, name, args) => {
+                if args
+                    .iter()
+                    .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
+                {
+                    return true;
                 }
-                n => n.to_string(),
-            };
-            resolve_new(&target_class, registry, deps)
+                let Some(class) = declaring_class else {
+                    return true;
+                };
+                // A dynamic receiver is never one of the resolvable
+                // pseudo-keywords: unresolvable, so disqualifying.
+                let Some(target) = target.as_name() else {
+                    return true;
+                };
+                resolve_static_call(class, target, name, registry, deps)
+            }
+            // A computed method name: any method, so unresolvable.
+            ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) => true,
+            ExprKind::New(callee, args) => {
+                if args
+                    .iter()
+                    .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
+                {
+                    return true;
+                }
+                let ExprKind::Name(name) = &callee.kind else {
+                    return true;
+                };
+                let target_class = match name.trim_start_matches('\\') {
+                    n if n.eq_ignore_ascii_case("self") || n.eq_ignore_ascii_case("static") => {
+                        let Some(class) = declaring_class else {
+                            return true;
+                        };
+                        class.to_string()
+                    }
+                    n => n.to_string(),
+                };
+                resolve_new(&target_class, registry, deps)
+            }
+            _ => any_child_expr(e, |c| expr_disqualifies(c, declaring_class, registry, deps)),
         }
-        _ => any_child_expr(e, |c| expr_disqualifies(c, declaring_class, registry, deps)),
-    }
+    })
 }
 
 /// `$obj->prop = ...`/`unset($obj->prop)` - a property write/unset on
@@ -491,11 +497,11 @@ fn expr_disqualifies(
 /// assignment target is written as a bare `PropertyAccess` or an
 /// `Index` chain ending in one.
 fn property_write_target(e: &Expr) -> bool {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::Index(base, _) => property_write_target(base),
         _ => false,
-    }
+    })
 }
 
 /// `$this->method(...)` - virtual dispatch against `class` (the
@@ -715,89 +721,95 @@ fn collect_stmt_impure_points(
     registry: &Registry,
     out: &mut Vec<ImpurePointOccurrence>,
 ) {
-    match &stmt.kind {
-        StmtKind::Echo(_) => out.push(ImpurePointOccurrence {
-            span: stmt.span,
-            identifier: "echo",
-            description: "echo",
-            certain: true,
-        }),
-        StmtKind::Global(_) => out.push(ImpurePointOccurrence {
-            span: stmt.span,
-            identifier: "global",
-            description: "global variable",
-            certain: true,
-        }),
-        StmtKind::StaticVar(_) => out.push(ImpurePointOccurrence {
-            span: stmt.span,
-            identifier: "static",
-            description: "static variable",
-            certain: true,
-        }),
-        StmtKind::InlineHtml(_) => out.push(ImpurePointOccurrence {
-            span: stmt.span,
-            identifier: "betweenPhpTags",
-            description: "output between PHP opening and closing tags",
-            certain: true,
-        }),
-        StmtKind::Expression(e) => collect_expr_impure_points(e, declaring_class, registry, out),
-        StmtKind::Return(Some(e)) => collect_expr_impure_points(e, declaring_class, registry, out),
-        StmtKind::If { cond, .. }
-        | StmtKind::While { cond, .. }
-        | StmtKind::DoWhile { cond, .. } => {
-            collect_expr_impure_points(cond, declaring_class, registry, out);
-        }
-        StmtKind::For {
-            init, cond, step, ..
-        } => {
-            for e in init.iter().chain(cond).chain(step) {
-                collect_expr_impure_points(e, declaring_class, registry, out);
+    syntax::stack::guard(|| {
+        match &stmt.kind {
+            StmtKind::Echo(_) => out.push(ImpurePointOccurrence {
+                span: stmt.span,
+                identifier: "echo",
+                description: "echo",
+                certain: true,
+            }),
+            StmtKind::Global(_) => out.push(ImpurePointOccurrence {
+                span: stmt.span,
+                identifier: "global",
+                description: "global variable",
+                certain: true,
+            }),
+            StmtKind::StaticVar(_) => out.push(ImpurePointOccurrence {
+                span: stmt.span,
+                identifier: "static",
+                description: "static variable",
+                certain: true,
+            }),
+            StmtKind::InlineHtml(_) => out.push(ImpurePointOccurrence {
+                span: stmt.span,
+                identifier: "betweenPhpTags",
+                description: "output between PHP opening and closing tags",
+                certain: true,
+            }),
+            StmtKind::Expression(e) => {
+                collect_expr_impure_points(e, declaring_class, registry, out)
             }
-        }
-        StmtKind::Foreach {
-            subject,
-            key,
-            value,
-            ..
-        } => {
-            collect_expr_impure_points(subject, declaring_class, registry, out);
-            if let Some(k) = key {
-                collect_expr_impure_points(k, declaring_class, registry, out);
+            StmtKind::Return(Some(e)) => {
+                collect_expr_impure_points(e, declaring_class, registry, out)
             }
-            collect_expr_impure_points(value, declaring_class, registry, out);
-        }
-        StmtKind::Switch { subject, cases } => {
-            collect_expr_impure_points(subject, declaring_class, registry, out);
-            for c in cases {
-                if let Some(t) = &c.test {
-                    collect_expr_impure_points(t, declaring_class, registry, out);
+            StmtKind::If { cond, .. }
+            | StmtKind::While { cond, .. }
+            | StmtKind::DoWhile { cond, .. } => {
+                collect_expr_impure_points(cond, declaring_class, registry, out);
+            }
+            StmtKind::For {
+                init, cond, step, ..
+            } => {
+                for e in init.iter().chain(cond).chain(step) {
+                    collect_expr_impure_points(e, declaring_class, registry, out);
                 }
             }
-        }
-        StmtKind::GlobalConst(consts) => {
-            for c in consts {
-                collect_expr_impure_points(&c.value, declaring_class, registry, out);
-            }
-        }
-        StmtKind::Unset(targets) => {
-            for target in targets {
-                if property_write_target(target) {
-                    out.push(ImpurePointOccurrence {
-                        span: stmt.span,
-                        identifier: "propertyUnset",
-                        description: "property unset",
-                        certain: true,
-                    });
+            StmtKind::Foreach {
+                subject,
+                key,
+                value,
+                ..
+            } => {
+                collect_expr_impure_points(subject, declaring_class, registry, out);
+                if let Some(k) = key {
+                    collect_expr_impure_points(k, declaring_class, registry, out);
                 }
-                collect_expr_impure_points(target, declaring_class, registry, out);
+                collect_expr_impure_points(value, declaring_class, registry, out);
             }
+            StmtKind::Switch { subject, cases } => {
+                collect_expr_impure_points(subject, declaring_class, registry, out);
+                for c in cases {
+                    if let Some(t) = &c.test {
+                        collect_expr_impure_points(t, declaring_class, registry, out);
+                    }
+                }
+            }
+            StmtKind::GlobalConst(consts) => {
+                for c in consts {
+                    collect_expr_impure_points(&c.value, declaring_class, registry, out);
+                }
+            }
+            StmtKind::Unset(targets) => {
+                for target in targets {
+                    if property_write_target(target) {
+                        out.push(ImpurePointOccurrence {
+                            span: stmt.span,
+                            identifier: "propertyUnset",
+                            description: "property unset",
+                            certain: true,
+                        });
+                    }
+                    collect_expr_impure_points(target, declaring_class, registry, out);
+                }
+            }
+            _ => {}
         }
-        _ => {}
-    }
-    any_child_stmt(stmt, |child| {
-        collect_stmt_impure_points(child, declaring_class, registry, out);
-        false
-    });
+        any_child_stmt(stmt, |child| {
+            collect_stmt_impure_points(child, declaring_class, registry, out);
+            false
+        });
+    })
 }
 
 fn collect_expr_impure_points(
@@ -806,70 +818,79 @@ fn collect_expr_impure_points(
     registry: &Registry,
     out: &mut Vec<ImpurePointOccurrence>,
 ) {
-    match &e.kind {
-        // Only a static property read is mutable shared state; a class
-        // constant or enum case is immutable (real PHPStan's own
-        // `NodeScopeResolver` never emits an `ImpurePoint` for a
-        // `ClassConstFetch`). `expr_disqualifies`'s boolean classifier
-        // still treats every static fetch as impure - a disclosed,
-        // narrower divergence in the "fewer false positives" direction.
-        ExprKind::StaticPropertyFetch(..) => out.push(ImpurePointOccurrence {
-            span: e.span,
-            identifier: "staticPropertyAccess",
-            description: "static property access",
-            certain: true,
-        }),
-        ExprKind::Variable(name) if is_superglobal(name) => out.push(ImpurePointOccurrence {
-            span: e.span,
-            identifier: "superglobal",
-            description: "access to superglobal variable",
-            certain: true,
-        }),
-        ExprKind::Yield(..) => out.push(ImpurePointOccurrence {
-            span: e.span,
-            identifier: "yield",
-            description: "yield",
-            certain: true,
-        }),
-        ExprKind::YieldFrom(_) => out.push(ImpurePointOccurrence {
-            span: e.span,
-            identifier: "yieldFrom",
-            description: "yield from",
-            certain: true,
-        }),
-        ExprKind::Exit(..) | ExprKind::Print(_) | ExprKind::Eval(_) | ExprKind::Include(..) => {
-            let construct = match &e.kind {
-                ExprKind::Exit(..) => "exit",
-                ExprKind::Print(_) => "print",
-                ExprKind::Eval(_) => "eval",
-                _ => "include",
-            };
-            out.push(ImpurePointOccurrence {
+    syntax::stack::guard(|| {
+        match &e.kind {
+            // Only a static property read is mutable shared state; a class
+            // constant or enum case is immutable (real PHPStan's own
+            // `NodeScopeResolver` never emits an `ImpurePoint` for a
+            // `ClassConstFetch`). `expr_disqualifies`'s boolean classifier
+            // still treats every static fetch as impure - a disclosed,
+            // narrower divergence in the "fewer false positives" direction.
+            ExprKind::StaticPropertyFetch(..) => out.push(ImpurePointOccurrence {
                 span: e.span,
-                identifier: construct,
-                description: construct,
+                identifier: "staticPropertyAccess",
+                description: "static property access",
                 certain: true,
-            });
-            any_child_expr(e, |child| {
-                collect_expr_impure_points(child, declaring_class, registry, out);
-                false
-            });
-        }
-        ExprKind::Assign(lhs, rhs) | ExprKind::CompoundAssign(_, lhs, rhs) => {
-            if property_write_target(lhs) {
+            }),
+            ExprKind::Variable(name) if is_superglobal(name) => out.push(ImpurePointOccurrence {
+                span: e.span,
+                identifier: "superglobal",
+                description: "access to superglobal variable",
+                certain: true,
+            }),
+            ExprKind::Yield(..) => out.push(ImpurePointOccurrence {
+                span: e.span,
+                identifier: "yield",
+                description: "yield",
+                certain: true,
+            }),
+            ExprKind::YieldFrom(_) => out.push(ImpurePointOccurrence {
+                span: e.span,
+                identifier: "yieldFrom",
+                description: "yield from",
+                certain: true,
+            }),
+            ExprKind::Exit(..) | ExprKind::Print(_) | ExprKind::Eval(_) | ExprKind::Include(..) => {
+                let construct = match &e.kind {
+                    ExprKind::Exit(..) => "exit",
+                    ExprKind::Print(_) => "print",
+                    ExprKind::Eval(_) => "eval",
+                    _ => "include",
+                };
                 out.push(ImpurePointOccurrence {
                     span: e.span,
-                    identifier: "propertyAssign",
-                    description: "property assignment",
+                    identifier: construct,
+                    description: construct,
                     certain: true,
                 });
+                any_child_expr(e, |child| {
+                    collect_expr_impure_points(child, declaring_class, registry, out);
+                    false
+                });
             }
-            collect_expr_impure_points(lhs, declaring_class, registry, out);
-            collect_expr_impure_points(rhs, declaring_class, registry, out);
-        }
-        ExprKind::Call(callee, args) => {
-            if let ExprKind::Name(name) = &callee.kind {
-                if registry.lookup_function(name).is_none() {
+            ExprKind::Assign(lhs, rhs) | ExprKind::CompoundAssign(_, lhs, rhs) => {
+                if property_write_target(lhs) {
+                    out.push(ImpurePointOccurrence {
+                        span: e.span,
+                        identifier: "propertyAssign",
+                        description: "property assignment",
+                        certain: true,
+                    });
+                }
+                collect_expr_impure_points(lhs, declaring_class, registry, out);
+                collect_expr_impure_points(rhs, declaring_class, registry, out);
+            }
+            ExprKind::Call(callee, args) => {
+                if let ExprKind::Name(name) = &callee.kind {
+                    if registry.lookup_function(name).is_none() {
+                        out.push(ImpurePointOccurrence {
+                            span: e.span,
+                            identifier: "functionCall",
+                            description: "call to unknown function",
+                            certain: false,
+                        });
+                    }
+                } else {
                     out.push(ImpurePointOccurrence {
                         span: e.span,
                         identifier: "functionCall",
@@ -877,136 +898,128 @@ fn collect_expr_impure_points(
                         certain: false,
                     });
                 }
-            } else {
-                out.push(ImpurePointOccurrence {
-                    span: e.span,
-                    identifier: "functionCall",
-                    description: "call to unknown function",
-                    certain: false,
-                });
+                for a in args {
+                    collect_expr_impure_points(&a.value, declaring_class, registry, out);
+                }
             }
-            for a in args {
-                collect_expr_impure_points(&a.value, declaring_class, registry, out);
-            }
-        }
-        ExprKind::MethodCall(recv, name, args, _) => {
-            let resolved =
-                matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
+            ExprKind::MethodCall(recv, name, args, _) => {
+                let resolved = matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
                     && declaring_class.is_some_and(|class| {
                         registry.lookup_method_with_owner(class, name).is_some_and(
                             |(owner, sig)| is_non_overridable(registry, class, &owner, name, sig),
                         )
                     });
-            if !resolved {
+                if !resolved {
+                    out.push(ImpurePointOccurrence {
+                        span: e.span,
+                        identifier: "methodCall",
+                        description: "call to unknown method",
+                        certain: false,
+                    });
+                }
+                collect_expr_impure_points(recv, declaring_class, registry, out);
+                for a in args {
+                    collect_expr_impure_points(&a.value, declaring_class, registry, out);
+                }
+            }
+            ExprKind::DynamicStaticCall(_, _, args) => {
                 out.push(ImpurePointOccurrence {
                     span: e.span,
                     identifier: "methodCall",
                     description: "call to unknown method",
                     certain: false,
                 });
+                for a in args {
+                    collect_expr_impure_points(&a.value, declaring_class, registry, out);
+                }
             }
-            collect_expr_impure_points(recv, declaring_class, registry, out);
-            for a in args {
-                collect_expr_impure_points(&a.value, declaring_class, registry, out);
+            ExprKind::DynamicMethodCall(recv, name, args, ..) => {
+                out.push(ImpurePointOccurrence {
+                    span: e.span,
+                    identifier: "methodCall",
+                    description: "call to unknown method",
+                    certain: false,
+                });
+                collect_expr_impure_points(recv, declaring_class, registry, out);
+                collect_expr_impure_points(name, declaring_class, registry, out);
+                for a in args {
+                    collect_expr_impure_points(&a.value, declaring_class, registry, out);
+                }
             }
-        }
-        ExprKind::DynamicStaticCall(_, _, args) => {
-            out.push(ImpurePointOccurrence {
-                span: e.span,
-                identifier: "methodCall",
-                description: "call to unknown method",
-                certain: false,
-            });
-            for a in args {
-                collect_expr_impure_points(&a.value, declaring_class, registry, out);
+            ExprKind::StaticCall(receiver, name, args) => {
+                let resolved = declaring_class.is_some_and(|class| {
+                    let is_receiver = |kw: &str| {
+                        receiver
+                            .as_name()
+                            .is_some_and(|n| n.eq_ignore_ascii_case(kw))
+                    };
+                    let target = if is_receiver("parent") {
+                        registry.lookup_ancestor_method_with_owner(class, name)
+                    } else if is_receiver("self") || is_receiver("static") {
+                        registry.lookup_method_with_owner(class, name)
+                    } else {
+                        None
+                    };
+                    target.is_some()
+                });
+                if !resolved {
+                    out.push(ImpurePointOccurrence {
+                        span: e.span,
+                        identifier: "methodCall",
+                        description: "call to unknown method",
+                        certain: false,
+                    });
+                }
+                for a in args {
+                    collect_expr_impure_points(&a.value, declaring_class, registry, out);
+                }
             }
-        }
-        ExprKind::DynamicMethodCall(recv, name, args, ..) => {
-            out.push(ImpurePointOccurrence {
-                span: e.span,
-                identifier: "methodCall",
-                description: "call to unknown method",
-                certain: false,
-            });
-            collect_expr_impure_points(recv, declaring_class, registry, out);
-            collect_expr_impure_points(name, declaring_class, registry, out);
-            for a in args {
-                collect_expr_impure_points(&a.value, declaring_class, registry, out);
-            }
-        }
-        ExprKind::StaticCall(receiver, name, args) => {
-            let resolved = declaring_class.is_some_and(|class| {
-                let is_receiver = |kw: &str| {
-                    receiver
-                        .as_name()
-                        .is_some_and(|n| n.eq_ignore_ascii_case(kw))
-                };
-                let target = if is_receiver("parent") {
-                    registry.lookup_ancestor_method_with_owner(class, name)
-                } else if is_receiver("self") || is_receiver("static") {
-                    registry.lookup_method_with_owner(class, name)
+            ExprKind::New(callee, args) => {
+                let resolved = if let ExprKind::Name(name) = &callee.kind {
+                    let target_class = match name.trim_start_matches('\\') {
+                        n if n.eq_ignore_ascii_case("self") || n.eq_ignore_ascii_case("static") => {
+                            declaring_class.map(str::to_string)
+                        }
+                        n => Some(n.to_string()),
+                    };
+                    target_class.is_some_and(|class| {
+                        registry
+                            .classes
+                            .get(class.as_str())
+                            .is_some_and(|info| info.methods.contains_key("__construct"))
+                    })
                 } else {
-                    None
+                    false
                 };
-                target.is_some()
-            });
-            if !resolved {
-                out.push(ImpurePointOccurrence {
-                    span: e.span,
-                    identifier: "methodCall",
-                    description: "call to unknown method",
-                    certain: false,
+                if !resolved {
+                    out.push(ImpurePointOccurrence {
+                        span: e.span,
+                        identifier: "new",
+                        description: "instantiation of unknown class",
+                        certain: false,
+                    });
+                }
+                for a in args {
+                    collect_expr_impure_points(&a.value, declaring_class, registry, out);
+                }
+            }
+            // Every arm above already recurses into its own real children
+            // explicitly (matching `expr_disqualifies`'s identical structure,
+            // not just visually similar to it) - falling through to `expr_
+            // children` unconditionally after the match, the way `stmt_
+            // children` safely does in `collect_stmt_impure_points` just
+            // above, would double-visit (and so double-report) every one of
+            // those same children here, since `any_child_expr` reaches a
+            // matched arm's own sub-expressions too, not just an unhandled
+            // arm's. Only reachable for anything *not* explicitly matched
+            // above (`BinaryOp`, `Ternary`, ...), exactly like `expr_
+            // disqualifies`'s own `_` arm.
+            _ => {
+                any_child_expr(e, |child| {
+                    collect_expr_impure_points(child, declaring_class, registry, out);
+                    false
                 });
             }
-            for a in args {
-                collect_expr_impure_points(&a.value, declaring_class, registry, out);
-            }
         }
-        ExprKind::New(callee, args) => {
-            let resolved = if let ExprKind::Name(name) = &callee.kind {
-                let target_class = match name.trim_start_matches('\\') {
-                    n if n.eq_ignore_ascii_case("self") || n.eq_ignore_ascii_case("static") => {
-                        declaring_class.map(str::to_string)
-                    }
-                    n => Some(n.to_string()),
-                };
-                target_class.is_some_and(|class| {
-                    registry
-                        .classes
-                        .get(class.as_str())
-                        .is_some_and(|info| info.methods.contains_key("__construct"))
-                })
-            } else {
-                false
-            };
-            if !resolved {
-                out.push(ImpurePointOccurrence {
-                    span: e.span,
-                    identifier: "new",
-                    description: "instantiation of unknown class",
-                    certain: false,
-                });
-            }
-            for a in args {
-                collect_expr_impure_points(&a.value, declaring_class, registry, out);
-            }
-        }
-        // Every arm above already recurses into its own real children
-        // explicitly (matching `expr_disqualifies`'s identical structure,
-        // not just visually similar to it) - falling through to `expr_
-        // children` unconditionally after the match, the way `stmt_
-        // children` safely does in `collect_stmt_impure_points` just
-        // above, would double-visit (and so double-report) every one of
-        // those same children here, since `any_child_expr` reaches a
-        // matched arm's own sub-expressions too, not just an unhandled
-        // arm's. Only reachable for anything *not* explicitly matched
-        // above (`BinaryOp`, `Ternary`, ...), exactly like `expr_
-        // disqualifies`'s own `_` arm.
-        _ => {
-            any_child_expr(e, |child| {
-                collect_expr_impure_points(child, declaring_class, registry, out);
-                false
-            });
-        }
-    }
+    })
 }

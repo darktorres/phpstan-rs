@@ -138,7 +138,7 @@ fn parse_separate_files(composer_dir: &Path, vendor_dir: &Path, base_dir: &Path)
 
 fn parse_top_level_array(path: &Path) -> Option<Expr> {
     let stmts = parse_generated_file(path)?;
-    stmts.into_iter().find_map(|s| match s.kind {
+    stmts.into_iter().find_map(|s| match s.into_kind() {
         StmtKind::Return(Some(e)) if matches!(e.kind, ExprKind::ArrayLiteral(_)) => Some(e),
         _ => None,
     })
@@ -254,28 +254,34 @@ fn eval_concat(
     base_dir: &Path,
     generated_dir: &Path,
 ) -> Option<String> {
-    match &expr.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
-        // The directory containing the generated file itself, i.e.
-        // `vendor/composer/` - `autoload_static.php` concatenates `/..`
-        // or `/../..` onto this to reach `vendor/` or the project root.
-        ExprKind::Name(n) if n == "__DIR__" => Some(generated_dir.to_string_lossy().into_owned()),
-        // Only appears in the separate, non-static autoload_*.php files.
-        ExprKind::Variable(n) if **n == *"vendorDir" => {
-            Some(vendor_dir.to_string_lossy().into_owned())
+    syntax::stack::guard(|| {
+        match &expr.kind {
+            ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
+            // The directory containing the generated file itself, i.e.
+            // `vendor/composer/` - `autoload_static.php` concatenates `/..`
+            // or `/../..` onto this to reach `vendor/` or the project root.
+            ExprKind::Name(n) if n == "__DIR__" => {
+                Some(generated_dir.to_string_lossy().into_owned())
+            }
+            // Only appears in the separate, non-static autoload_*.php files.
+            ExprKind::Variable(n) if **n == *"vendorDir" => {
+                Some(vendor_dir.to_string_lossy().into_owned())
+            }
+            ExprKind::Variable(n) if **n == *"baseDir" => {
+                Some(base_dir.to_string_lossy().into_owned())
+            }
+            ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
+                let mut left = eval_concat(lhs, vendor_dir, base_dir, generated_dir)?;
+                let right = eval_concat(rhs, vendor_dir, base_dir, generated_dir)?;
+                left.push_str(&right);
+                Some(left)
+            }
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                eval_concat(inner, vendor_dir, base_dir, generated_dir)
+            }
+            _ => None,
         }
-        ExprKind::Variable(n) if **n == *"baseDir" => Some(base_dir.to_string_lossy().into_owned()),
-        ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
-            let mut left = eval_concat(lhs, vendor_dir, base_dir, generated_dir)?;
-            let right = eval_concat(rhs, vendor_dir, base_dir, generated_dir)?;
-            left.push_str(&right);
-            Some(left)
-        }
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            eval_concat(inner, vendor_dir, base_dir, generated_dir)
-        }
-        _ => None,
-    }
+    })
 }
 
 fn dedup(ctx: &mut VendorContext) {

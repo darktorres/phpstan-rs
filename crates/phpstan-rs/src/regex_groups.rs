@@ -93,13 +93,10 @@ pub(crate) enum RegexGroupFallback {
     NonEmptyString,
 }
 
-/// A deeply-nested pattern is a real stack-overflow risk via this
-/// scanner's recursive descent, not just a slowness one - the same class
-/// of concern `src/parser.rs`'s `MAX_EXPR_DEPTH` guards against for the
-/// main expression parser. This scanner already returns `Option`
-/// everywhere, so exceeding this just bails like any other unsupported
-/// construct, no panic needed.
-const MAX_GROUP_DEPTH: usize = 200;
+/// PCRE's limit on nested parentheses: a pattern nested deeper doesn't
+/// compile, so `preg_match` returns `false` and there are no groups to
+/// read.
+const MAX_GROUP_DEPTH: usize = 250;
 
 /// Caps every literal-value cross-product step (concatenation, bounded-
 /// quantifier repetition, alternation union) - smaller than real
@@ -1142,7 +1139,7 @@ impl Scanner {
         let result = if self.depth > MAX_GROUP_DEPTH {
             None
         } else {
-            self.scan_group_inner()
+            syntax::stack::guard(|| self.scan_group_inner())
         };
         self.depth -= 1;
         result

@@ -7,6 +7,10 @@ impl Parser {
     // ---- statements ----
 
     pub(crate) fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        crate::stack::guard(|| self.parse_statement_unguarded())
+    }
+
+    fn parse_statement_unguarded(&mut self) -> Result<Stmt, ParseError> {
         // Captured before any leading `#[Attr]` group(s) are consumed, so
         // a declaration's own span includes them - matches how `start`
         // already includes a class's own `abstract`/`final` modifiers.
@@ -360,10 +364,7 @@ impl Parser {
                 }
                 self.expect(&Token::RParen)?;
                 let body = if self.check(&Token::LBrace) {
-                    match self.parse_block()?.kind {
-                        StmtKind::Block(stmts) => Some(stmts),
-                        _ => unreachable!(),
-                    }
+                    Some(self.parse_stmt_list_block()?)
                 } else if self.eat(&Token::Colon) {
                     let mut stmts = Vec::new();
                     while !matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("enddeclare"))
@@ -469,10 +470,10 @@ impl Parser {
 /// `parse_optional_level`'s own constant-folder - see that function's
 /// doc comment for why only these three shapes matter.
 fn const_fold_level(e: &Expr) -> Option<i64> {
-    match &e.kind {
+    crate::stack::guard(|| match &e.kind {
         ExprKind::Literal(Literal::Int(n)) => Some(*n),
         ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => const_fold_level(inner),
         ExprKind::Unary(UnaryOp::Neg, inner) => const_fold_level(inner).map(|n| -n),
         _ => None,
-    }
+    })
 }

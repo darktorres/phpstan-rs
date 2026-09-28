@@ -27,21 +27,23 @@ fn collect_classes<'a>(
     ctx: &mut NameContext,
     out: &mut Vec<(String, &'a ClassDecl)>,
 ) {
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            // An enum is final and has no properties or subclasses.
-            StmtKind::ClassDecl(c) if c.kind != ClassKind::Enum => {
-                out.push((ctx.declared_name(class_decl_name(c)), c))
+    syntax::stack::guard(|| {
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                // An enum is final and has no properties or subclasses.
+                StmtKind::ClassDecl(c) if c.kind != ClassKind::Enum => {
+                    out.push((ctx.declared_name(class_decl_name(c)), c))
+                }
+                StmtKind::Block(body)
+                | StmtKind::Declare {
+                    body: Some(body), ..
+                } => collect_classes(body, ctx, out),
+                _ => {}
             }
-            StmtKind::Block(body)
-            | StmtKind::Declare {
-                body: Some(body), ..
-            } => collect_classes(body, ctx, out),
-            _ => {}
         }
-    }
+    })
 }
 
 fn is_doctrine_mapped(c: &ClassDecl, ctx_names: &[String]) -> bool {

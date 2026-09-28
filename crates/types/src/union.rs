@@ -24,208 +24,215 @@ impl Type {
 }
 
 fn union_types_impl(a: Type, b: Type) -> Type {
-    // `never` has no values to add.
-    if a == Type::never() {
-        return normalize_generic_args(b);
-    }
-    if b == Type::never() {
-        return normalize_generic_args(a);
-    }
-    let (a, b) = (normalize_generic_args(a), normalize_generic_args(b));
-    if a == b {
-        return a;
-    }
-    // An error absorbs everything, as a `mixed` does.
-    if matches!(a, Type(Repr::Error)) || matches!(b, Type(Repr::Error)) {
-        return Type::error();
-    }
-    // A `mixed` absorbs everything, and stays explicit when either side
-    // wrote it.
-    if let Some(explicit) = mixed_explicitness(&[&a, &b]) {
-        return Type::mixed_with(explicit);
-    }
-    if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
-        return merged;
-    }
-    let mut members = Vec::new();
-    match a {
-        Type(Repr::Union(m)) => members.extend(m),
-        other => members.push(other),
-    }
-    match b {
-        Type(Repr::Union(m)) => {
-            for x in m {
-                if !members.contains(&x) {
-                    members.push(x);
+    syntax::stack::guard(|| {
+        // `never` has no values to add.
+        if a == Type::never() {
+            return normalize_generic_args(b);
+        }
+        if b == Type::never() {
+            return normalize_generic_args(a);
+        }
+        let (a, b) = (normalize_generic_args(a), normalize_generic_args(b));
+        if a == b {
+            return a;
+        }
+        // An error absorbs everything, as a `mixed` does.
+        if matches!(a, Type(Repr::Error)) || matches!(b, Type(Repr::Error)) {
+            return Type::error();
+        }
+        // A `mixed` absorbs everything, and stays explicit when either side
+        // wrote it.
+        if let Some(explicit) = mixed_explicitness(&[&a, &b]) {
+            return Type::mixed_with(explicit);
+        }
+        if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
+            return merged;
+        }
+        let mut members = Vec::new();
+        match a.into_repr() {
+            Repr::Union(m) => members.extend(m),
+            other => members.push(Type(other)),
+        }
+        match b.into_repr() {
+            Repr::Union(m) => {
+                for x in m {
+                    if !members.contains(&x) {
+                        members.push(x);
+                    }
+                }
+            }
+            other => {
+                let other = Type(other);
+                if !members.contains(&other) {
+                    members.push(other);
                 }
             }
         }
-        other => {
-            if !members.contains(&other) {
-                members.push(other);
-            }
+        // Same `Mixed`-absorption the fast-path check above already gives a
+        // *bare* `Mixed` operand - here for a `Mixed` that only surfaces
+        // once flattened out of a multi-member `Union` operand (real shape:
+        // `?mixed`'s own union-with-`Null` construction, `types/parse.rs`'s
+        // `parse_type_string`, before its own analogous fix), which the
+        // fast-path's `a == Repr::Mixed(false)`/`b == Repr::Mixed(false)`
+        // checks never see since neither whole operand is bare `Mixed` -
+        // only one of its now-flattened members is. Without this, a
+        // `Mixed`-containing union merged with anything else keeps
+        // accumulating distinct members (`null|string|mixed`) instead of
+        // collapsing to the `mixed` it's vacuously equal to, both visibly
+        // (an unsimplified union in a diagnostic message) and functionally
+        // (`nullsafe.neverNull` false-firing on a `T|mixed` receiver, since
+        // `mixed` already includes `null` but a raw member scan for `Null`
+        // specifically wouldn't find it).
+        if members.contains(&Type::error()) {
+            return Type::error();
         }
-    }
-    // Same `Mixed`-absorption the fast-path check above already gives a
-    // *bare* `Mixed` operand - here for a `Mixed` that only surfaces
-    // once flattened out of a multi-member `Union` operand (real shape:
-    // `?mixed`'s own union-with-`Null` construction, `types/parse.rs`'s
-    // `parse_type_string`, before its own analogous fix), which the
-    // fast-path's `a == Repr::Mixed(false)`/`b == Repr::Mixed(false)`
-    // checks never see since neither whole operand is bare `Mixed` -
-    // only one of its now-flattened members is. Without this, a
-    // `Mixed`-containing union merged with anything else keeps
-    // accumulating distinct members (`null|string|mixed`) instead of
-    // collapsing to the `mixed` it's vacuously equal to, both visibly
-    // (an unsimplified union in a diagnostic message) and functionally
-    // (`nullsafe.neverNull` false-firing on a `T|mixed` receiver, since
-    // `mixed` already includes `null` but a raw member scan for `Null`
-    // specifically wouldn't find it).
-    if members.contains(&Type::error()) {
-        return Type::error();
-    }
-    if let Some(explicit) = mixed_explicitness(&members.iter().collect::<Vec<_>>()) {
-        return Type::mixed_with(explicit);
-    }
-    members.retain(|m| *m != Type::never());
-    // `true|false` is `bool`, and `bool` holds both.
-    if members.contains(&Type::bool_literal(true)) && members.contains(&Type::bool_literal(false)) {
-        let at = members
+        if let Some(explicit) = mixed_explicitness(&members.iter().collect::<Vec<_>>()) {
+            return Type::mixed_with(explicit);
+        }
+        members.retain(|m| *m != Type::never());
+        // `true|false` is `bool`, and `bool` holds both.
+        if members.contains(&Type::bool_literal(true))
+            && members.contains(&Type::bool_literal(false))
+        {
+            let at = members
+                .iter()
+                .position(|m| matches!(m, Type(Repr::True) | Type(Repr::False)))
+                .expect("checked above");
+            members[at] = Type::bool();
+        }
+        if members.contains(&Type::bool()) {
+            members.retain(|m| !matches!(m, Type(Repr::True) | Type(Repr::False)));
+        }
+        // An extension payload whose widened form is already a member adds
+        // nothing - the union cap's widening stays put once it happened.
+        let widened: Vec<Type> = members
             .iter()
-            .position(|m| matches!(m, Type(Repr::True) | Type(Repr::False)))
-            .expect("checked above");
-        members[at] = Type::bool();
-    }
-    if members.contains(&Type::bool()) {
-        members.retain(|m| !matches!(m, Type(Repr::True) | Type(Repr::False)));
-    }
-    // An extension payload whose widened form is already a member adds
-    // nothing - the union cap's widening stays put once it happened.
-    let widened: Vec<Type> = members
-        .iter()
-        .filter_map(|m| match m {
-            Type(Repr::Extension(data)) => data.widen(),
-            _ => None,
-        })
-        .filter(|w| members.contains(w))
-        .collect();
-    if !widened.is_empty() {
-        members.retain(|m| match m {
-            Type(Repr::Extension(data)) => !data.widen().is_some_and(|w| widened.contains(&w)),
-            _ => true,
-        });
-    }
-    // `void` joined with `null` is just `null`, as in real PHPStan's
-    // `TypeCombinator::union` (a nullsafe call to a `void` method reads
-    // as `null`).
-    if members.contains(&Type::null()) {
-        members.retain(|m| *m != Type::void());
-    }
-    // Drop a literal member whenever its exact base type is also present
-    // in the same union - a ternary's two branches
-    // (`is_string($x) ? $x : ''`) build exactly this shape,
-    // `Type::union(String, StringLiteral(""))`, and keeping both would
-    // stop later code from matching `== Repr::String`. Snapshotting
-    // which base types are present first, rather than checking `members`
-    // from inside its own `retain` closure (which the borrow checker
-    // won't allow). Covers `Array`/`Float` alongside `Int`/`String`/
-    // `Bool` since `literal_base_type` can also produce an `Array(_)`
-    // base (an accessory-refined `list<T>`/`non-empty-array<T>`) or
-    // `Float` (a `FloatLiteral`).
-    let present_bases: Vec<Type> = members
-        .iter()
-        .filter(|m| {
-            matches!(
-                m,
-                Type(Repr::Int)
-                    | Type(Repr::String)
-                    | Type(Repr::Bool)
-                    | Type(Repr::Array(_, _))
-                    | Type(Repr::Float)
-            )
-        })
-        .cloned()
-        .collect();
-    members.retain(|m| match literal_base_type(m) {
-        Some(base) if matches!(m, Type(Repr::Intersection(_))) => !present_bases.iter().any(|b| {
-            crate::Relation::structural()
-                .is_super_type_of(b, &base)
-                .yes()
-        }),
-        Some(base) => !present_bases.contains(&base),
-        None => true,
-    });
-    // A genuinely-empty `ArrayShape` (`array{}`) is a subtype of *any*
-    // `Array(key, val)` - vacuously, since an empty array satisfies
-    // "every key is `key`-typed, every value is `val`-typed" for every
-    // possible `key`/`val` - so keeping both as separate union members is
-    // the same kind of redundant-literal-not-absorbed-into-its-own-base
-    // shape `literal_base_type` above fixes for `Int`/`String`/`Bool`/
-    // `Float`, for a variant `literal_base_type` can't express (its
-    // absorbing base depends on *which* `Array(_, _)` member is already
-    // present, not a fixed mapping). Concretely:
-    // `$counter = []; foreach ($keys as $k) { $counter[$k] = 1; }` merges
-    // the loop's zero-iteration entry state (`array{}`) with the body's
-    // accumulated `array<string, 1>`; the correct post-loop type is the
-    // unqualified `array<string, 1>`, with no `array{}` alternative
-    // surviving. Without this, `index_result_type`'s separately-correct
-    // "an empty shape plus a dynamic key reads `null`" rule fires on the
-    // still-surviving empty-shape member, unioning a bogus `null` into an
-    // otherwise-precise `$counter[$key]` read. Scoped to an *empty* shape
-    // only - a non-empty `ArrayShape` needs real field-by-field subtype
-    // checking against the specific `Array(key, val)` co-member to be
-    // absorbed safely. Does not affect a whole-variable reassignment
-    // merge like `$file_path = null; foreach (...) { $file_path = $row; }`
-    // - `Repr::Null` is not a subtype of `Repr::String`, so `string|null`
-    // is correctly still kept apart.
-    merge_int_ranges(&mut members);
-    reduce_array_members(&mut members);
-    // Two structurally different `Array(key, val)` members merge into
-    // one precise `Array(key1|key2, val1|val2)` instead of staying
-    // separate union members - `array_element_type`'s `Union` arm, and
-    // every other consumer wanting "the" element type of a plain array,
-    // would otherwise silently only see the first matching member.
-    // Scoped to a bare `Repr::Array` only, not an accessory-refined
-    // `list<T>`/`non-empty-array<T>` (a real `Intersection`) - a mix of
-    // the two is left as a narrower residual.
-    if members
-        .iter()
-        .filter(|m| matches!(m, Type(Repr::Array(_, _))))
-        .count()
-        > 1
-    {
-        let mut merged_key: Option<Type> = None;
-        let mut merged_val: Option<Type> = None;
-        members.retain(|m| {
-            let Type(Repr::Array(k, v)) = m else {
-                return true;
-            };
-            merged_key = Some(match merged_key.take() {
-                None => (**k).clone(),
-                Some(acc) => Type::union(acc, (**k).clone()),
+            .filter_map(|m| match m {
+                Type(Repr::Extension(data)) => data.widen(),
+                _ => None,
+            })
+            .filter(|w| members.contains(w))
+            .collect();
+        if !widened.is_empty() {
+            members.retain(|m| match m {
+                Type(Repr::Extension(data)) => !data.widen().is_some_and(|w| widened.contains(&w)),
+                _ => true,
             });
-            merged_val = Some(match merged_val.take() {
-                None => (**v).clone(),
-                Some(acc) => Type::union(acc, (**v).clone()),
-            });
-            false
+        }
+        // `void` joined with `null` is just `null`, as in real PHPStan's
+        // `TypeCombinator::union` (a nullsafe call to a `void` method reads
+        // as `null`).
+        if members.contains(&Type::null()) {
+            members.retain(|m| *m != Type::void());
+        }
+        // Drop a literal member whenever its exact base type is also present
+        // in the same union - a ternary's two branches
+        // (`is_string($x) ? $x : ''`) build exactly this shape,
+        // `Type::union(String, StringLiteral(""))`, and keeping both would
+        // stop later code from matching `== Repr::String`. Snapshotting
+        // which base types are present first, rather than checking `members`
+        // from inside its own `retain` closure (which the borrow checker
+        // won't allow). Covers `Array`/`Float` alongside `Int`/`String`/
+        // `Bool` since `literal_base_type` can also produce an `Array(_)`
+        // base (an accessory-refined `list<T>`/`non-empty-array<T>`) or
+        // `Float` (a `FloatLiteral`).
+        let present_bases: Vec<Type> = members
+            .iter()
+            .filter(|m| {
+                matches!(
+                    m,
+                    Type(Repr::Int)
+                        | Type(Repr::String)
+                        | Type(Repr::Bool)
+                        | Type(Repr::Array(_, _))
+                        | Type(Repr::Float)
+                )
+            })
+            .cloned()
+            .collect();
+        members.retain(|m| match literal_base_type(m) {
+            Some(base) if matches!(m, Type(Repr::Intersection(_))) => {
+                !present_bases.iter().any(|b| {
+                    crate::Relation::structural()
+                        .is_super_type_of(b, &base)
+                        .yes()
+                })
+            }
+            Some(base) => !present_bases.contains(&base),
+            None => true,
         });
-        members.push(Type::array(merged_key.unwrap(), merged_val.unwrap()));
-    }
-    if members.len() > MAX_UNION_MEMBERS {
-        members = generalize_by_key_set(members);
-    }
-    if members.len() > MAX_UNION_MEMBERS {
-        members = widen_extension_types(members);
-    }
-    if members.len() > MAX_UNION_MEMBERS {
-        return Type::mixed();
-    }
-    if members.len() == 1 {
-        members.into_iter().next().unwrap()
-    } else {
-        Type(Repr::Union(members))
-    }
+        // A genuinely-empty `ArrayShape` (`array{}`) is a subtype of *any*
+        // `Array(key, val)` - vacuously, since an empty array satisfies
+        // "every key is `key`-typed, every value is `val`-typed" for every
+        // possible `key`/`val` - so keeping both as separate union members is
+        // the same kind of redundant-literal-not-absorbed-into-its-own-base
+        // shape `literal_base_type` above fixes for `Int`/`String`/`Bool`/
+        // `Float`, for a variant `literal_base_type` can't express (its
+        // absorbing base depends on *which* `Array(_, _)` member is already
+        // present, not a fixed mapping). Concretely:
+        // `$counter = []; foreach ($keys as $k) { $counter[$k] = 1; }` merges
+        // the loop's zero-iteration entry state (`array{}`) with the body's
+        // accumulated `array<string, 1>`; the correct post-loop type is the
+        // unqualified `array<string, 1>`, with no `array{}` alternative
+        // surviving. Without this, `index_result_type`'s separately-correct
+        // "an empty shape plus a dynamic key reads `null`" rule fires on the
+        // still-surviving empty-shape member, unioning a bogus `null` into an
+        // otherwise-precise `$counter[$key]` read. Scoped to an *empty* shape
+        // only - a non-empty `ArrayShape` needs real field-by-field subtype
+        // checking against the specific `Array(key, val)` co-member to be
+        // absorbed safely. Does not affect a whole-variable reassignment
+        // merge like `$file_path = null; foreach (...) { $file_path = $row; }`
+        // - `Repr::Null` is not a subtype of `Repr::String`, so `string|null`
+        // is correctly still kept apart.
+        merge_int_ranges(&mut members);
+        reduce_array_members(&mut members);
+        // Two structurally different `Array(key, val)` members merge into
+        // one precise `Array(key1|key2, val1|val2)` instead of staying
+        // separate union members - `array_element_type`'s `Union` arm, and
+        // every other consumer wanting "the" element type of a plain array,
+        // would otherwise silently only see the first matching member.
+        // Scoped to a bare `Repr::Array` only, not an accessory-refined
+        // `list<T>`/`non-empty-array<T>` (a real `Intersection`) - a mix of
+        // the two is left as a narrower residual.
+        if members
+            .iter()
+            .filter(|m| matches!(m, Type(Repr::Array(_, _))))
+            .count()
+            > 1
+        {
+            let mut merged_key: Option<Type> = None;
+            let mut merged_val: Option<Type> = None;
+            members.retain(|m| {
+                let Type(Repr::Array(k, v)) = m else {
+                    return true;
+                };
+                merged_key = Some(match merged_key.take() {
+                    None => (**k).clone(),
+                    Some(acc) => Type::union(acc, (**k).clone()),
+                });
+                merged_val = Some(match merged_val.take() {
+                    None => (**v).clone(),
+                    Some(acc) => Type::union(acc, (**v).clone()),
+                });
+                false
+            });
+            members.push(Type::array(merged_key.unwrap(), merged_val.unwrap()));
+        }
+        if members.len() > MAX_UNION_MEMBERS {
+            members = generalize_by_key_set(members);
+        }
+        if members.len() > MAX_UNION_MEMBERS {
+            members = widen_extension_types(members);
+        }
+        if members.len() > MAX_UNION_MEMBERS {
+            return Type::mixed();
+        }
+        if members.len() == 1 {
+            members.into_iter().next().unwrap()
+        } else {
+            Type(Repr::Union(members))
+        }
+    })
 }
 
 /// PHPStan's `IntegerRangeType::tryUnion`: a range and every integer
@@ -332,8 +339,8 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     let mut groups: Vec<(KeySet, Vec<Shape>)> = Vec::new();
     let mut passthrough: Vec<Type> = Vec::new();
     for m in members {
-        match m {
-            Type(Repr::ArrayShape(shape)) => {
+        match m.into_repr() {
+            Repr::ArrayShape(shape) => {
                 let mut keys: Vec<ShapeKey> = shape.fields.iter().map(|f| f.key.clone()).collect();
                 keys.sort();
                 let key_set = (keys, shape.is_sealed());
@@ -342,7 +349,7 @@ pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
                     None => groups.push((key_set, vec![shape])),
                 }
             }
-            other => passthrough.push(other),
+            other => passthrough.push(Type(other)),
         }
     }
     for (_, variants) in groups {
@@ -487,14 +494,12 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
     if pairs_a.is_empty() && pairs_b.is_empty() {
         return None;
     }
-    let merged_base = match (base_a, base_b) {
-        (Type(Repr::Array(ka, va)), Type(Repr::Array(kb, vb))) => {
+    let merged_base = match (base_a.into_repr(), base_b.into_repr()) {
+        (Repr::Array(ka, va), Repr::Array(kb, vb)) => {
             Type::array(Type::union(*ka, *kb), Type::union(*va, *vb))
         }
-        // Unreachable given `has_offset_value_parts`'s own contract
-        // (its `base` is always a `Repr::Array`), kept as a safe
-        // fallback rather than an `unreachable!()`.
-        (base_a, _) => base_a,
+        // `has_offset_value_parts`' base is always an array.
+        (base_a, _) => Type(base_a),
     };
     let mut merged_pairs: Vec<(ShapeKey, Type)> = Vec::new();
     for (k, va) in &pairs_a {
@@ -750,23 +755,21 @@ fn merge_shapes(sa: &Shape, sb: &Shape, sb_first: bool) -> Shape {
 /// `ty` with each generic argument's union members deduplicated
 /// (`Collection<Dog|Dog>` is `Collection<Dog>`).
 fn normalize_generic_args(ty: Type) -> Type {
-    match ty {
-        Type(Repr::Object(name, args))
-            if args.iter().any(|a| matches!(a, Type(Repr::Union(_)))) =>
-        {
+    match ty.into_repr() {
+        Repr::Object(name, args) if args.iter().any(|a| matches!(a, Type(Repr::Union(_)))) => {
             let args = args
                 .into_iter()
-                .map(|arg| match arg {
-                    Type(Repr::Union(members)) => members
+                .map(|arg| match arg.into_repr() {
+                    Repr::Union(members) => members
                         .into_iter()
                         .reduce(Type::union)
                         .unwrap_or(Type::never()),
-                    other => other,
+                    other => Type(other),
                 })
                 .collect();
             Type::object(name, args)
         }
-        other => other,
+        other => Type(other),
     }
 }
 

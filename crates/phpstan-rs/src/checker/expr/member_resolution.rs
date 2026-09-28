@@ -23,24 +23,26 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         prop: &str,
     ) -> Option<(std::sync::Arc<str>, &'a PropertyReflection)> {
-        let members = base_ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .find_map(|m| self.find_property_owner(m, prop));
-        }
-        // `Relation::narrow_to_instance` puts the narrower, just-`instanceof`-
-        // checked type last in an intersection: reversed, so its own
-        // declaration is preferred over the broader original type's.
-        let parts = base_ty.intersection_members();
-        if parts.len() > 1 {
-            return parts
-                .iter()
-                .rev()
-                .find_map(|m| self.find_property_owner(m, prop));
-        }
-        let (class, _) = base_ty.as_object()?;
-        self.registry.lookup_property_with_owner(class, prop)
+        syntax::stack::guard(|| {
+            let members = base_ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .find_map(|m| self.find_property_owner(m, prop));
+            }
+            // `Relation::narrow_to_instance` puts the narrower, just-`instanceof`-
+            // checked type last in an intersection: reversed, so its own
+            // declaration is preferred over the broader original type's.
+            let parts = base_ty.intersection_members();
+            if parts.len() > 1 {
+                return parts
+                    .iter()
+                    .rev()
+                    .find_map(|m| self.find_property_owner(m, prop));
+            }
+            let (class, _) = base_ty.as_object()?;
+            self.registry.lookup_property_with_owner(class, prop)
+        })
     }
 
     /// `find_property_owner`'s own method counterpart, used by
@@ -55,22 +57,24 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         method: &str,
     ) -> Option<(std::sync::Arc<str>, &'a FunctionReflection)> {
-        let members = base_ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .find_map(|m| self.find_method_owner(m, method));
-        }
-        // Reversed as in `find_property_owner`.
-        let parts = base_ty.intersection_members();
-        if parts.len() > 1 {
-            return parts
-                .iter()
-                .rev()
-                .find_map(|m| self.find_method_owner(m, method));
-        }
-        let (class, _) = base_ty.as_object()?;
-        self.registry.lookup_method_with_owner(class, method)
+        syntax::stack::guard(|| {
+            let members = base_ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .find_map(|m| self.find_method_owner(m, method));
+            }
+            // Reversed as in `find_property_owner`.
+            let parts = base_ty.intersection_members();
+            if parts.len() > 1 {
+                return parts
+                    .iter()
+                    .rev()
+                    .find_map(|m| self.find_method_owner(m, method));
+            }
+            let (class, _) = base_ty.as_object()?;
+            self.registry.lookup_method_with_owner(class, method)
+        })
     }
 
     /// `find_method_owner`'s own sibling, used by `ExprKind::
@@ -88,34 +92,36 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         method: &str,
     ) -> (Option<&'a FunctionReflection>, Option<String>) {
-        let members = base_ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .map(|m| self.find_method_receiver_class(m, method))
-                .find(|(sig, _)| sig.is_some())
-                .unwrap_or((None, None));
-        }
-        // An instance of every member has the most visible of their
-        // declarations: a subclass implementing a public interface
-        // method is public, whatever a parent keeps private.
-        let parts = base_ty.intersection_members();
-        if parts.len() > 1 {
-            return parts
-                .iter()
-                .rev()
-                .map(|m| self.find_method_receiver_class(m, method))
-                .filter(|(sig, _)| sig.is_some())
-                .min_by_key(|(sig, _)| sig.map(|s| visibility_rank(&s.visibility())))
-                .unwrap_or((None, None));
-        }
-        match base_ty.as_object() {
-            Some((class, _)) => (
-                self.registry.lookup_method(class, method),
-                Some(class.to_string()),
-            ),
-            None => (None, None),
-        }
+        syntax::stack::guard(|| {
+            let members = base_ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .map(|m| self.find_method_receiver_class(m, method))
+                    .find(|(sig, _)| sig.is_some())
+                    .unwrap_or((None, None));
+            }
+            // An instance of every member has the most visible of their
+            // declarations: a subclass implementing a public interface
+            // method is public, whatever a parent keeps private.
+            let parts = base_ty.intersection_members();
+            if parts.len() > 1 {
+                return parts
+                    .iter()
+                    .rev()
+                    .map(|m| self.find_method_receiver_class(m, method))
+                    .filter(|(sig, _)| sig.is_some())
+                    .min_by_key(|(sig, _)| sig.map(|s| visibility_rank(&s.visibility())))
+                    .unwrap_or((None, None));
+            }
+            match base_ty.as_object() {
+                Some((class, _)) => (
+                    self.registry.lookup_method(class, method),
+                    Some(class.to_string()),
+                ),
+                None => (None, None),
+            }
+        })
     }
 
     /// Whether `ty` (a thrown value's own type) fails real PHP's
@@ -148,23 +154,26 @@ impl<'a> Checker<'a> {
     /// `Throwable`, even though the real, unprefixed interface genuinely
     /// does.
     pub(crate) fn thrown_value_not_throwable(&self, ty: &Type) -> Option<String> {
-        let members = ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .find_map(|m| self.thrown_value_not_throwable(m));
-        }
-        let parts = ty.intersection_members();
-        if parts.len() > 1 {
-            let failures: Vec<String> = parts
-                .iter()
-                .filter_map(|m| self.thrown_value_not_throwable(m))
-                .collect();
-            return (failures.len() == parts.len()).then(|| failures.into_iter().next().unwrap());
-        }
-        let (class, _) = ty.as_object()?;
-        (self.class_name_exists(class) && !self.registry.is_subclass_of(class, "Throwable"))
-            .then(|| class.to_string())
+        syntax::stack::guard(|| {
+            let members = ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .find_map(|m| self.thrown_value_not_throwable(m));
+            }
+            let parts = ty.intersection_members();
+            if parts.len() > 1 {
+                let failures: Vec<String> = parts
+                    .iter()
+                    .filter_map(|m| self.thrown_value_not_throwable(m))
+                    .collect();
+                return (failures.len() == parts.len())
+                    .then(|| failures.into_iter().next().unwrap());
+            }
+            let (class, _) = ty.as_object()?;
+            (self.class_name_exists(class) && !self.registry.is_subclass_of(class, "Throwable"))
+                .then(|| class.to_string())
+        })
     }
 
     /// `find_property_owner`'s own richer sibling, used by `checker::
@@ -184,24 +193,26 @@ impl<'a> Checker<'a> {
         base_ty: &Type,
         prop: &str,
     ) -> Option<(String, Vec<Type>, std::sync::Arc<str>, PropertyReflection)> {
-        let members = base_ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .find_map(|m| self.find_property_receiver(m, prop));
-        }
-        // Reversed as in `find_property_owner`.
-        let parts = base_ty.intersection_members();
-        if parts.len() > 1 {
-            return parts
-                .iter()
-                .rev()
-                .find_map(|m| self.find_property_receiver(m, prop));
-        }
-        let (class, type_args) = base_ty.as_object()?;
-        self.registry
-            .lookup_property_with_owner(class, prop)
-            .map(|(owner, sig)| (class.to_string(), type_args.to_vec(), owner, sig.clone()))
+        syntax::stack::guard(|| {
+            let members = base_ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .find_map(|m| self.find_property_receiver(m, prop));
+            }
+            // Reversed as in `find_property_owner`.
+            let parts = base_ty.intersection_members();
+            if parts.len() > 1 {
+                return parts
+                    .iter()
+                    .rev()
+                    .find_map(|m| self.find_property_receiver(m, prop));
+            }
+            let (class, type_args) = base_ty.as_object()?;
+            self.registry
+                .lookup_property_with_owner(class, prop)
+                .map(|(owner, sig)| (class.to_string(), type_args.to_vec(), owner, sig.clone()))
+        })
     }
 
     /// `find_property_receiver`'s own method counterpart, used by
@@ -242,29 +253,31 @@ impl<'a> Checker<'a> {
         std::sync::Arc<str>,
         std::borrow::Cow<'a, FunctionReflection>,
     )> {
-        let members = base_ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .find_map(|m| self.find_method_receiver(m, method));
-        }
-        // See `find_method_receiver_class`: the most visible declaration
-        // among the members.
-        let parts = base_ty.intersection_members();
-        if parts.len() > 1 {
-            return parts
-                .iter()
-                .rev()
-                .filter_map(|m| self.find_method_receiver(m, method))
-                .min_by_key(|(_, _, _, sig)| visibility_rank(&sig.visibility()));
-        }
-        let (class, type_args) = base_ty.as_object()?;
-        self.registry
-            .lookup_method_with_owner(class, method)
-            .map(|(owner, sig)| {
-                let sig = self.substitute_class_templates(sig, class, type_args, &owner);
-                (class.to_string(), type_args.to_vec(), owner, sig)
-            })
+        syntax::stack::guard(|| {
+            let members = base_ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .find_map(|m| self.find_method_receiver(m, method));
+            }
+            // See `find_method_receiver_class`: the most visible declaration
+            // among the members.
+            let parts = base_ty.intersection_members();
+            if parts.len() > 1 {
+                return parts
+                    .iter()
+                    .rev()
+                    .filter_map(|m| self.find_method_receiver(m, method))
+                    .min_by_key(|(_, _, _, sig)| visibility_rank(&sig.visibility()));
+            }
+            let (class, type_args) = base_ty.as_object()?;
+            self.registry
+                .lookup_method_with_owner(class, method)
+                .map(|(owner, sig)| {
+                    let sig = self.substitute_class_templates(sig, class, type_args, &owner);
+                    (class.to_string(), type_args.to_vec(), owner, sig)
+                })
+        })
     }
 
     /// Both `check_expr`'s and `infer_expr`'s own `PropertyAccess` arms
@@ -283,76 +296,78 @@ impl<'a> Checker<'a> {
     /// more precision" bias elsewhere). See the `Union`/`Intersection`
     /// arms below for the real distinction between them.
     pub(crate) fn property_access_type(&self, base_ty: &Type, prop: &str) -> Type {
-        // An intersection value is every member at once, so the first
-        // member whose declaration resolves the property names its type -
-        // searched in reverse, since `Relation::narrow_to_instance` puts the
-        // narrower, just-`instanceof`-checked type last. A union value is
-        // one member at a time: the union of whichever members resolve.
-        let parts = base_ty.intersection_members();
-        if parts.len() > 1 {
-            return parts
-                .iter()
-                .rev()
-                .find_map(|m| {
-                    let ty = self.property_access_type(m, prop);
-                    (!ty.is_mixed()).then_some(ty)
-                })
-                .unwrap_or(Type::mixed());
-        }
-        let members = base_ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .map(|m| self.property_access_type(m, prop))
-                .filter(|ty| !ty.is_mixed())
-                .reduce(Type::union)
-                .unwrap_or(Type::mixed());
-        }
-        if let Some((fqn, case)) = base_ty.as_enum_case() {
-            return match prop {
-                "name" => Type::string_literal(case.to_string().into()),
-                "value" => self
-                    .registry
-                    .enum_case_value(fqn, case)
-                    .cloned()
-                    .or_else(|| {
-                        self.registry
-                            .lookup_property(fqn, "value")
-                            .map(|p| p.ty().clone())
+        syntax::stack::guard(|| {
+            // An intersection value is every member at once, so the first
+            // member whose declaration resolves the property names its type -
+            // searched in reverse, since `Relation::narrow_to_instance` puts the
+            // narrower, just-`instanceof`-checked type last. A union value is
+            // one member at a time: the union of whichever members resolve.
+            let parts = base_ty.intersection_members();
+            if parts.len() > 1 {
+                return parts
+                    .iter()
+                    .rev()
+                    .find_map(|m| {
+                        let ty = self.property_access_type(m, prop);
+                        (!ty.is_mixed()).then_some(ty)
                     })
-                    .unwrap_or(Type::mixed()),
-                _ => self
+                    .unwrap_or(Type::mixed());
+            }
+            let members = base_ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .map(|m| self.property_access_type(m, prop))
+                    .filter(|ty| !ty.is_mixed())
+                    .reduce(Type::union)
+                    .unwrap_or(Type::mixed());
+            }
+            if let Some((fqn, case)) = base_ty.as_enum_case() {
+                return match prop {
+                    "name" => Type::string_literal(case.to_string().into()),
+                    "value" => self
+                        .registry
+                        .enum_case_value(fqn, case)
+                        .cloned()
+                        .or_else(|| {
+                            self.registry
+                                .lookup_property(fqn, "value")
+                                .map(|p| p.ty().clone())
+                        })
+                        .unwrap_or(Type::mixed()),
+                    _ => self
+                        .registry
+                        .lookup_property_with_owner(fqn, prop)
+                        .map(|(owner, p)| self.resolve_pseudo(p.ty(), &owner))
+                        .unwrap_or(Type::mixed()),
+                };
+            }
+            if let Some((class, type_args)) = base_ty.as_object() {
+                return self
                     .registry
-                    .lookup_property_with_owner(fqn, prop)
-                    .map(|(owner, p)| self.resolve_pseudo(p.ty(), &owner))
-                    .unwrap_or(Type::mixed()),
-            };
-        }
-        if let Some((class, type_args)) = base_ty.as_object() {
-            return self
-                .registry
-                .lookup_property_with_owner(class, prop)
-                .map(|(owner, p)| {
-                    let bindings = self.class_template_bindings(class, type_args, &owner);
-                    let resolved = p.ty().substitute_templates(&bindings);
-                    self.resolve_pseudo_at(&resolved, &owner, class)
-                })
-                .unwrap_or_else(|| {
-                    // Every undeclared property of a `SimpleXMLElement` is
-                    // readable through `__get`, as the queried class or
-                    // `null`.
-                    if self.registry.is_subclass_of(class, "SimpleXMLElement") {
-                        Type::union(Type::object(class.clone(), Vec::new()), Type::null())
-                    } else {
-                        Type::mixed()
-                    }
-                });
-        }
-        base_ty
-            .as_object_shape()
-            .and_then(|shape| shape.field(&ShapeKey::from_name(prop)))
-            .map(|f| f.ty.clone())
-            .unwrap_or(Type::mixed())
+                    .lookup_property_with_owner(class, prop)
+                    .map(|(owner, p)| {
+                        let bindings = self.class_template_bindings(class, type_args, &owner);
+                        let resolved = p.ty().substitute_templates(&bindings);
+                        self.resolve_pseudo_at(&resolved, &owner, class)
+                    })
+                    .unwrap_or_else(|| {
+                        // Every undeclared property of a `SimpleXMLElement` is
+                        // readable through `__get`, as the queried class or
+                        // `null`.
+                        if self.registry.is_subclass_of(class, "SimpleXMLElement") {
+                            Type::union(Type::object(class.clone(), Vec::new()), Type::null())
+                        } else {
+                            Type::mixed()
+                        }
+                    });
+            }
+            base_ty
+                .as_object_shape()
+                .and_then(|shape| shape.field(&ShapeKey::from_name(prop)))
+                .map(|f| f.ty.clone())
+                .unwrap_or(Type::mixed())
+        })
     }
 
     /// `infer_expr`'s own `ExprKind::MethodCall` return-type resolution -
@@ -418,77 +433,80 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
-        if let Some((class, type_args)) = recv_ty.as_object() {
-            return match self.class_argument_return(class, method, args, locals) {
-                Some(ty) => ty,
-                None => self
-                    .object_method_call_return_type(recv, class, type_args, method, args, locals),
-            };
-        }
-        // The consuming half of the feature just above -
-        // `ReflectionProperty::getValue($obj)`/`ReflectionMethod::
-        // invoke($obj, ...$args)` resolve the real member's own
-        // declared type on the owner this reflector was bound to,
-        // substituting the owner's own `@template` bindings the same
-        // way an ordinary generic method call already does.
-        // `invoke()`'s own extra arguments (after the leading
-        // `$object`) map onto the target method's own parameters
-        // positionally, so they're forwarded from index 1, matching
-        // real PHP's own `invoke($object, ...$args)` signature. An
-        // owner that isn't itself a plain resolved object
-        // (an unresolved template, a union, ...) can't be looked up
-        // at all - stays `Mixed`, not a guess.
-        if let Some((owner_ty, name)) = recv_ty.as_reflected_member() {
-            return match (method, owner_ty.as_object()) {
-                ("getValue", Some((class, type_args))) => {
-                    self.generic_object_property_type(class, type_args, name)
-                }
-                ("invoke", Some((class, type_args))) => {
-                    let forwarded = args.get(1..).unwrap_or(&[]);
-                    self.generic_object_method_return_type(
-                        class, type_args, name, forwarded, locals,
-                    )
-                }
-                _ => Type::mixed(),
-            };
-        }
-        // An enum case is an instance of its enum for method calls, with
-        // no template arguments.
-        if let Some((fqn, _)) = recv_ty.as_enum_case() {
-            return self
-                .registry
-                .lookup_method_with_owner(fqn, method)
-                .map(|(owner, sig)| {
-                    let resolved_args = resolve_call_args(args, sig.params());
-                    let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
-                    self.resolve_pseudo(&resolved, &owner)
-                })
-                .unwrap_or(Type::mixed());
-        }
-        // The narrower, just-`instanceof`-checked type is the last member
-        // `Relation::narrow_to_instance` puts into an intersection: searched
-        // first, so its own (possibly overriding) signature wins.
-        let parts = recv_ty.intersection_members();
-        if parts.len() > 1 {
-            return parts
-                .iter()
-                .rev()
-                .find_map(|m| {
-                    let ty = self.method_call_return_type(recv, m, method, args, locals);
-                    (!ty.is_mixed()).then_some(ty)
-                })
-                .unwrap_or(Type::mixed());
-        }
-        let members = recv_ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .map(|m| self.method_call_return_type(recv, m, method, args, locals))
-                .filter(|ty| !ty.is_mixed())
-                .reduce(Type::union)
-                .unwrap_or(Type::mixed());
-        }
-        Type::mixed()
+        syntax::stack::guard(|| {
+            if let Some((class, type_args)) = recv_ty.as_object() {
+                return match self.class_argument_return(class, method, args, locals) {
+                    Some(ty) => ty,
+                    None => self.object_method_call_return_type(
+                        recv, class, type_args, method, args, locals,
+                    ),
+                };
+            }
+            // The consuming half of the feature just above -
+            // `ReflectionProperty::getValue($obj)`/`ReflectionMethod::
+            // invoke($obj, ...$args)` resolve the real member's own
+            // declared type on the owner this reflector was bound to,
+            // substituting the owner's own `@template` bindings the same
+            // way an ordinary generic method call already does.
+            // `invoke()`'s own extra arguments (after the leading
+            // `$object`) map onto the target method's own parameters
+            // positionally, so they're forwarded from index 1, matching
+            // real PHP's own `invoke($object, ...$args)` signature. An
+            // owner that isn't itself a plain resolved object
+            // (an unresolved template, a union, ...) can't be looked up
+            // at all - stays `Mixed`, not a guess.
+            if let Some((owner_ty, name)) = recv_ty.as_reflected_member() {
+                return match (method, owner_ty.as_object()) {
+                    ("getValue", Some((class, type_args))) => {
+                        self.generic_object_property_type(class, type_args, name)
+                    }
+                    ("invoke", Some((class, type_args))) => {
+                        let forwarded = args.get(1..).unwrap_or(&[]);
+                        self.generic_object_method_return_type(
+                            class, type_args, name, forwarded, locals,
+                        )
+                    }
+                    _ => Type::mixed(),
+                };
+            }
+            // An enum case is an instance of its enum for method calls, with
+            // no template arguments.
+            if let Some((fqn, _)) = recv_ty.as_enum_case() {
+                return self
+                    .registry
+                    .lookup_method_with_owner(fqn, method)
+                    .map(|(owner, sig)| {
+                        let resolved_args = resolve_call_args(args, sig.params());
+                        let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
+                        self.resolve_pseudo(&resolved, &owner)
+                    })
+                    .unwrap_or(Type::mixed());
+            }
+            // The narrower, just-`instanceof`-checked type is the last member
+            // `Relation::narrow_to_instance` puts into an intersection: searched
+            // first, so its own (possibly overriding) signature wins.
+            let parts = recv_ty.intersection_members();
+            if parts.len() > 1 {
+                return parts
+                    .iter()
+                    .rev()
+                    .find_map(|m| {
+                        let ty = self.method_call_return_type(recv, m, method, args, locals);
+                        (!ty.is_mixed()).then_some(ty)
+                    })
+                    .unwrap_or(Type::mixed());
+            }
+            let members = recv_ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .map(|m| self.method_call_return_type(recv, m, method, args, locals))
+                    .filter(|ty| !ty.is_mixed())
+                    .reduce(Type::union)
+                    .unwrap_or(Type::mixed());
+            }
+            Type::mixed()
+        })
     }
 
     /// `method_call_return_type` for an instance of `class<type_args>`:

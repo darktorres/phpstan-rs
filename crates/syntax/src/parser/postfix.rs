@@ -99,8 +99,8 @@ impl Parser {
                 Token::DoubleColon => {
                     self.skip();
                     let receiver_expr = expr;
-                    let target = match receiver_expr.kind {
-                        ExprKind::Name(n) => StaticTarget::Name(n, receiver_expr.span),
+                    let target = match &receiver_expr.kind {
+                        ExprKind::Name(n) => StaticTarget::Name(n.clone(), receiver_expr.span),
                         _ => StaticTarget::Expr(Box::new(receiver_expr)),
                     };
                     // `class` (`Foo::class`) already worked as a special

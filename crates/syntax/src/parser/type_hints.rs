@@ -42,41 +42,43 @@ impl Parser {
     // parens here (no `((A&B)|C)&D`), so this doesn't need to recurse into
     // a further union inside the parens - just a run of `&`-joined atoms.
     pub(crate) fn parse_type_atom(&mut self) -> Result<TypeHint, ParseError> {
-        let start = self.current_pos();
-        if self.eat(&Token::LParen) {
-            let mut members = vec![self.parse_type_atom()?];
-            while self.eat(&Token::Amp) {
-                members.push(self.parse_type_atom()?);
+        crate::stack::guard(|| {
+            let start = self.current_pos();
+            if self.eat(&Token::LParen) {
+                let mut members = vec![self.parse_type_atom()?];
+                while self.eat(&Token::Amp) {
+                    members.push(self.parse_type_atom()?);
+                }
+                self.expect(&Token::RParen)?;
+                return Ok(self.type_hint(TypeHintKind::Intersection(members), start));
             }
-            self.expect(&Token::RParen)?;
-            return Ok(self.type_hint(TypeHintKind::Intersection(members), start));
-        }
-        // These are single keyword tokens - namespaced forms like
-        // `array\Foo` don't exist, so each just consumes itself and stops,
-        // rather than looping on to swallow whatever bare identifier
-        // happens to follow (e.g. `array $items`'s `$items`, or
-        // `const array NAME`'s own `NAME`).
-        let keyword = match self.peek() {
-            Token::Keyword(Keyword::Array) => Some("array"),
-            Token::Keyword(Keyword::Static) => Some("static"),
-            Token::Keyword(Keyword::Null) => Some("null"),
-            // PHP 8.2+ stand-alone `true`/`false` types, e.g.
-            // `function f(): string|false {}`.
-            Token::Keyword(Keyword::True) => Some("true"),
-            Token::Keyword(Keyword::False) => Some("false"),
-            _ => None,
-        };
-        let name = match keyword {
-            Some(keyword) => {
-                self.skip();
-                keyword.to_string()
-            }
-            // Otherwise it's a (possibly namespaced) identifier: `int`,
-            // `Foo`, `\App\Foo`, `App\Foo\Bar` - never two unrelated
-            // identifiers glued together with no backslash between them.
-            None => self.parse_qualified_name(),
-        };
-        Ok(self.type_hint(TypeHintKind::Name(self.qualified_name(&name)), start))
+            // These are single keyword tokens - namespaced forms like
+            // `array\Foo` don't exist, so each just consumes itself and stops,
+            // rather than looping on to swallow whatever bare identifier
+            // happens to follow (e.g. `array $items`'s `$items`, or
+            // `const array NAME`'s own `NAME`).
+            let keyword = match self.peek() {
+                Token::Keyword(Keyword::Array) => Some("array"),
+                Token::Keyword(Keyword::Static) => Some("static"),
+                Token::Keyword(Keyword::Null) => Some("null"),
+                // PHP 8.2+ stand-alone `true`/`false` types, e.g.
+                // `function f(): string|false {}`.
+                Token::Keyword(Keyword::True) => Some("true"),
+                Token::Keyword(Keyword::False) => Some("false"),
+                _ => None,
+            };
+            let name = match keyword {
+                Some(keyword) => {
+                    self.skip();
+                    keyword.to_string()
+                }
+                // Otherwise it's a (possibly namespaced) identifier: `int`,
+                // `Foo`, `\App\Foo`, `App\Foo\Bar` - never two unrelated
+                // identifiers glued together with no backslash between them.
+                None => self.parse_qualified_name(),
+            };
+            Ok(self.type_hint(TypeHintKind::Name(self.qualified_name(&name)), start))
+        })
     }
 
     pub fn parse_type_hint(&mut self) -> Result<Option<TypeHint>, ParseError> {

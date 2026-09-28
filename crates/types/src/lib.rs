@@ -71,6 +71,22 @@ pub use union::generalize_by_key_set;
 #[derive(Clone)]
 pub struct Type(pub(crate) Repr);
 
+impl Type {
+    /// The representation, taken out of the type.
+    pub(crate) fn into_repr(mut self) -> Repr {
+        std::mem::replace(&mut self.0, Repr::Never)
+    }
+}
+
+/// Dropping a type goes one level at a time on a guarded stack, so a
+/// deeply nested type drops without overflowing it.
+impl Drop for Type {
+    fn drop(&mut self) {
+        let repr = std::mem::replace(&mut self.0, Repr::Never);
+        syntax::stack::guard(|| drop(repr));
+    }
+}
+
 impl std::fmt::Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
@@ -275,7 +291,7 @@ pub(crate) enum Repr {
 /// `Hash` below agrees with it.
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
+        syntax::stack::guard(|| match (self, other) {
             (Type(Repr::Mixed(_)), Type(Repr::Mixed(_))) => true,
             (Type(Repr::Error), Type(Repr::Error)) => true,
             (Type(Repr::Never), Type(Repr::Never)) => true,
@@ -418,7 +434,7 @@ impl PartialEq for Type {
                 | Type(Repr::Conditional { .. }),
                 _,
             ) => false,
-        }
+        })
     }
 }
 
@@ -426,104 +442,106 @@ impl Eq for Type {}
 
 impl Hash for Type {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(&self.0).hash(state);
-        match self {
-            Type(Repr::Mixed(_))
-            | Type(Repr::Error)
-            | Type(Repr::Never)
-            | Type(Repr::Void)
-            | Type(Repr::Null)
-            | Type(Repr::Bool)
-            | Type(Repr::True)
-            | Type(Repr::False)
-            | Type(Repr::Int)
-            | Type(Repr::Float)
-            | Type(Repr::String)
-            | Type(Repr::ObjectWithoutClass)
-            | Type(Repr::ParentRef)
-            | Type(Repr::This) => {}
-            Type(Repr::IntLiteral(n)) => n.hash(state),
-            Type(Repr::StringLiteral(s)) => s.hash(state),
-            Type(Repr::Array(k, v)) | Type(Repr::OffsetAccess(k, v)) => {
-                k.hash(state);
-                v.hash(state);
+        syntax::stack::guard(|| {
+            std::mem::discriminant(&self.0).hash(state);
+            match self {
+                Type(Repr::Mixed(_))
+                | Type(Repr::Error)
+                | Type(Repr::Never)
+                | Type(Repr::Void)
+                | Type(Repr::Null)
+                | Type(Repr::Bool)
+                | Type(Repr::True)
+                | Type(Repr::False)
+                | Type(Repr::Int)
+                | Type(Repr::Float)
+                | Type(Repr::String)
+                | Type(Repr::ObjectWithoutClass)
+                | Type(Repr::ParentRef)
+                | Type(Repr::This) => {}
+                Type(Repr::IntLiteral(n)) => n.hash(state),
+                Type(Repr::StringLiteral(s)) => s.hash(state),
+                Type(Repr::Array(k, v)) | Type(Repr::OffsetAccess(k, v)) => {
+                    k.hash(state);
+                    v.hash(state);
+                }
+                Type(Repr::ClassString(inner))
+                | Type(Repr::ValueOf(inner))
+                | Type(Repr::KeyOf(inner)) => inner.hash(state),
+                Type(Repr::ClassKindString(kind)) => kind.hash(state),
+                Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => shape.hash(state),
+                Type(Repr::Object(name, args)) => {
+                    name.lower().hash(state);
+                    args.hash(state);
+                }
+                Type(Repr::Resource { closed }) => closed.hash(state),
+                Type(Repr::EnumCase(class, case)) => {
+                    class.lower().hash(state);
+                    case.hash(state);
+                }
+                Type(Repr::Callable(sig)) => sig.hash(state),
+                Type(Repr::SelfRef(args))
+                | Type(Repr::StaticRef(args))
+                | Type(Repr::Union(args))
+                | Type(Repr::BenevolentUnion(args))
+                | Type(Repr::Intersection(args)) => args.hash(state),
+                Type(Repr::TemplateParam(tp)) => tp.hash(state),
+                Type(Repr::VarianceArg(variance, inner)) => {
+                    variance.hash(state);
+                    inner.hash(state);
+                }
+                Type(Repr::IntRange(min, max)) => {
+                    min.hash(state);
+                    max.hash(state);
+                }
+                // Equal floats hash alike: both zeros, and every NaN.
+                Type(Repr::FloatLiteral(f)) => {
+                    let bits = if *f == 0.0 {
+                        0
+                    } else if f.is_nan() {
+                        f64::NAN.to_bits()
+                    } else {
+                        f.to_bits()
+                    };
+                    bits.hash(state)
+                }
+                Type(Repr::Accessory(kind)) => kind.hash(state),
+                Type(Repr::HasOffsetValue(key, value)) => {
+                    key.hash(state);
+                    value.hash(state);
+                }
+                Type(Repr::HasOffset(key)) => key.hash(state),
+                Type(Repr::HasMethod(name)) => name.lower().hash(state),
+                Type(Repr::HasProperty(name)) => name.hash(state),
+                Type(Repr::ReflectedMember(owner, member)) => {
+                    owner.hash(state);
+                    member.hash(state);
+                }
+                Type(Repr::ClassConstant { class, pattern }) => {
+                    class.hash(state);
+                    pattern.hash(state);
+                }
+                Type(Repr::Extension(data)) => {
+                    let state: &mut dyn Hasher = state;
+                    data.hash_data(state);
+                }
+                Type(Repr::Conditional {
+                    subject,
+                    target,
+                    if_true,
+                    if_false,
+                    negated,
+                    template_subject,
+                }) => {
+                    subject.hash(state);
+                    target.hash(state);
+                    if_true.hash(state);
+                    if_false.hash(state);
+                    negated.hash(state);
+                    template_subject.hash(state);
+                }
             }
-            Type(Repr::ClassString(inner))
-            | Type(Repr::ValueOf(inner))
-            | Type(Repr::KeyOf(inner)) => inner.hash(state),
-            Type(Repr::ClassKindString(kind)) => kind.hash(state),
-            Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => shape.hash(state),
-            Type(Repr::Object(name, args)) => {
-                name.lower().hash(state);
-                args.hash(state);
-            }
-            Type(Repr::Resource { closed }) => closed.hash(state),
-            Type(Repr::EnumCase(class, case)) => {
-                class.lower().hash(state);
-                case.hash(state);
-            }
-            Type(Repr::Callable(sig)) => sig.hash(state),
-            Type(Repr::SelfRef(args))
-            | Type(Repr::StaticRef(args))
-            | Type(Repr::Union(args))
-            | Type(Repr::BenevolentUnion(args))
-            | Type(Repr::Intersection(args)) => args.hash(state),
-            Type(Repr::TemplateParam(tp)) => tp.hash(state),
-            Type(Repr::VarianceArg(variance, inner)) => {
-                variance.hash(state);
-                inner.hash(state);
-            }
-            Type(Repr::IntRange(min, max)) => {
-                min.hash(state);
-                max.hash(state);
-            }
-            // Equal floats hash alike: both zeros, and every NaN.
-            Type(Repr::FloatLiteral(f)) => {
-                let bits = if *f == 0.0 {
-                    0
-                } else if f.is_nan() {
-                    f64::NAN.to_bits()
-                } else {
-                    f.to_bits()
-                };
-                bits.hash(state)
-            }
-            Type(Repr::Accessory(kind)) => kind.hash(state),
-            Type(Repr::HasOffsetValue(key, value)) => {
-                key.hash(state);
-                value.hash(state);
-            }
-            Type(Repr::HasOffset(key)) => key.hash(state),
-            Type(Repr::HasMethod(name)) => name.lower().hash(state),
-            Type(Repr::HasProperty(name)) => name.hash(state),
-            Type(Repr::ReflectedMember(owner, member)) => {
-                owner.hash(state);
-                member.hash(state);
-            }
-            Type(Repr::ClassConstant { class, pattern }) => {
-                class.hash(state);
-                pattern.hash(state);
-            }
-            Type(Repr::Extension(data)) => {
-                let state: &mut dyn Hasher = state;
-                data.hash_data(state);
-            }
-            Type(Repr::Conditional {
-                subject,
-                target,
-                if_true,
-                if_false,
-                negated,
-                template_subject,
-            }) => {
-                subject.hash(state);
-                target.hash(state);
-                if_true.hash(state);
-                if_false.hash(state);
-                negated.hash(state);
-                template_subject.hash(state);
-            }
-        }
+        })
     }
 }
 

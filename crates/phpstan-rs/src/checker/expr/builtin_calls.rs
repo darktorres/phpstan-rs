@@ -2010,20 +2010,22 @@ fn is_var_named(e: &Expr, name: &str) -> bool {
 /// either, since real `compact()` combines every argument into one flat
 /// result.
 fn compact_argument_names(e: &Expr) -> Option<Vec<String>> {
-    if let Some(name) = literal_string_value(e) {
-        return Some(vec![name.into_owned()]);
-    }
-    if let ExprKind::ArrayLiteral(items) = &e.kind {
-        let mut names = Vec::new();
-        for item in items {
-            if item.spread {
-                return None;
-            }
-            names.extend(compact_argument_names(&item.value)?);
+    syntax::stack::guard(|| {
+        if let Some(name) = literal_string_value(e) {
+            return Some(vec![name.into_owned()]);
         }
-        return Some(names);
-    }
-    None
+        if let ExprKind::ArrayLiteral(items) = &e.kind {
+            let mut names = Vec::new();
+            for item in items {
+                if item.spread {
+                    return None;
+                }
+                names.extend(compact_argument_names(&item.value)?);
+            }
+            return Some(names);
+        }
+        None
+    })
 }
 
 /// Marks `shape` unsealed (other, unknown entries may exist), unless it
@@ -2283,7 +2285,7 @@ fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
 /// what this is used for, so it just answers "is `target` definitely one
 /// of them" for whatever it does recognize.
 pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == target,
         ExprKind::Binary(BinOp::BitOr, l, r) => {
             contains_flag_name(l, target) || contains_flag_name(r, target)
@@ -2292,7 +2294,7 @@ pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
             contains_flag_name(inner, target)
         }
         _ => false,
-    }
+    })
 }
 
 /// `contains_flag_name`, additionally looking inside an options-array
@@ -2302,22 +2304,24 @@ pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
 /// `contains_flag_name` itself, which stays a narrow bitwise-or-chain
 /// scan for its unrelated call sites.
 fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
-    if contains_flag_name(e, target) {
-        return true;
-    }
-    if let ExprKind::ArrayLiteral(items) = &e.kind {
-        for item in items {
-            if item
-                .key
-                .as_ref()
-                .is_some_and(|k| literal_string_value(k).as_deref() == Some("flags"))
-                && contains_flag_name_with_options(&item.value, target)
-            {
-                return true;
+    syntax::stack::guard(|| {
+        if contains_flag_name(e, target) {
+            return true;
+        }
+        if let ExprKind::ArrayLiteral(items) = &e.kind {
+            for item in items {
+                if item
+                    .key
+                    .as_ref()
+                    .is_some_and(|k| literal_string_value(k).as_deref() == Some("flags"))
+                    && contains_flag_name_with_options(&item.value, target)
+                {
+                    return true;
+                }
             }
         }
-    }
-    false
+        false
+    })
 }
 
 /// `array_filter`'s `instanceof`-filter callback (recognized by
@@ -2339,7 +2343,7 @@ fn narrow_array_element_type_to(relation: &Relation, ty: Type, target: &Type) ->
 /// (`JSON_HEX_TAG | JSON_HEX_AMP | ... | JSON_THROW_ON_ERROR`). Tolerates
 /// a leading-backslash global name (`\JSON_THROW_ON_ERROR`) too.
 fn contains_json_throw_on_error(e: &Expr) -> bool {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == "JSON_THROW_ON_ERROR",
         ExprKind::Binary(BinOp::BitOr, l, r) => {
             contains_json_throw_on_error(l) || contains_json_throw_on_error(r)
@@ -2348,7 +2352,7 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
             contains_json_throw_on_error(inner)
         }
         _ => false,
-    }
+    })
 }
 
 /// `curl_getinfo($ch, CONSTANT)`'s per-option return type, transcribed

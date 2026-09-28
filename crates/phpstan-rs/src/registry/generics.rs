@@ -85,50 +85,55 @@ impl Registry {
         target: &str,
         seen: &mut FxHashSet<String>,
     ) -> Option<FxHashMap<String, Type>> {
-        if !seen.insert(class.to_string()) {
-            return None;
-        }
-        let info = self.classes.get(class)?;
-        let own_bindings: FxHashMap<String, Type> = info
-            .templates
-            .iter()
-            .map(|s| s.to_string())
-            .zip(type_args.iter().cloned())
-            .collect();
-
-        if class == target {
-            return Some(own_bindings);
-        }
-
-        if let Some(parent) = info.extends.first() {
-            let parent_args: Vec<Type> = info
-                .extends_args
+        syntax::stack::guard(|| {
+            if !seen.insert(class.to_string()) {
+                return None;
+            }
+            let info = self.classes.get(class)?;
+            let own_bindings: FxHashMap<String, Type> = info
+                .templates
                 .iter()
-                .map(|t| t.substitute_templates(&own_bindings))
+                .map(|s| s.to_string())
+                .zip(type_args.iter().cloned())
                 .collect();
-            if let Some(found) =
-                self.class_template_bindings_rec(parent, &parent_args, target, &mut seen.clone())
-            {
-                return Some(found);
+
+            if class == target {
+                return Some(own_bindings);
             }
-        }
-        for iface in &info.implements {
-            let iface_args: Vec<Type> = info
-                .implements_args
-                .get(iface)
-                .map(|args| {
-                    args.iter()
-                        .map(|t| t.substitute_templates(&own_bindings))
-                        .collect()
-                })
-                .unwrap_or_default();
-            if let Some(found) =
-                self.class_template_bindings_rec(iface, &iface_args, target, &mut seen.clone())
-            {
-                return Some(found);
+
+            if let Some(parent) = info.extends.first() {
+                let parent_args: Vec<Type> = info
+                    .extends_args
+                    .iter()
+                    .map(|t| t.substitute_templates(&own_bindings))
+                    .collect();
+                if let Some(found) = self.class_template_bindings_rec(
+                    parent,
+                    &parent_args,
+                    target,
+                    &mut seen.clone(),
+                ) {
+                    return Some(found);
+                }
             }
-        }
-        None
+            for iface in &info.implements {
+                let iface_args: Vec<Type> = info
+                    .implements_args
+                    .get(iface)
+                    .map(|args| {
+                        args.iter()
+                            .map(|t| t.substitute_templates(&own_bindings))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(found) =
+                    self.class_template_bindings_rec(iface, &iface_args, target, &mut seen.clone())
+                {
+                    return Some(found);
+                }
+            }
+            None
+        })
     }
 
     /// Substitutes only the `TemplateParam`s in `ty` whose own `scope` is

@@ -18,90 +18,96 @@ impl Relation<'_> {
     /// an offset or accessory a shape can hold is applied to it, and
     /// members sharing no value make `never`.
     pub fn intersect(&self, members: Vec<Type>) -> Type {
-        let mut flat: Vec<Type> = Vec::new();
-        for member in members {
-            match member {
-                Type(Repr::Intersection(inner)) => flat.extend(inner),
-                other => flat.push(other),
-            }
-        }
-        if flat.contains(&Type::never()) {
-            return Type::never();
-        }
-        let mut array: Option<(Type, Type)> = None;
-        let mut shape: Option<Shape> = None;
-        let mut rest: Vec<Type> = Vec::new();
-        for member in flat {
-            match member {
-                Type(Repr::Array(key, value)) => {
-                    array = Some(match array {
-                        None => (*key, *value),
-                        Some((k, v)) => (self.narrower(k, *key), self.narrower(v, *value)),
-                    });
+        syntax::stack::guard(|| {
+            let mut flat: Vec<Type> = Vec::new();
+            for member in members {
+                match member.into_repr() {
+                    Repr::Intersection(inner) => flat.extend(inner),
+                    other => flat.push(Type(other)),
                 }
-                Type(Repr::ArrayShape(s)) => {
-                    shape = match shape {
-                        None => Some(s),
-                        Some(acc) => match self.intersect_shapes(&acc, &s) {
-                            Some(merged) => Some(merged),
-                            None => return Type::never(),
-                        },
-                    };
-                }
-                other if !rest.contains(&other) => rest.push(other),
-                _ => {}
             }
-        }
-        let mut out: Vec<Type> = Vec::new();
-        match (shape, array) {
-            (Some(s), array) => {
-                let s = match array {
-                    Some((key, value)) => match self.shape_within_array(&s, &key, &value) {
-                        Some(s) => s,
-                        None => return Type::never(),
-                    },
-                    None => s,
-                };
-                let Some(s) = self.apply_offsets(s, &mut rest) else {
-                    return Type::never();
-                };
-                out.push(Type::array_shape(s));
-            }
-            // A list keys on `int<0, max>`, whatever key its array member
-            // was given.
-            (None, Some((key, value))) => {
-                let key = if rest.contains(&Type::accessory(AccessoryKind::ArrayList)) {
-                    self.narrower(key, Type::int_range(Some(0), None))
-                } else {
-                    key
-                };
-                out.push(Type::array(key, value));
-            }
-            (None, None) => {}
-        }
-        out.extend(rest);
-        let mut kept: Vec<Type> = Vec::new();
-        for (i, member) in out.iter().enumerate() {
-            let within_another = out.iter().enumerate().any(|(j, other)| {
-                i != j
-                    && !is_refinement(other)
-                    && self.is_super_type_of(member, other).yes()
-                    && (j < i || !self.is_super_type_of(other, member).yes())
-            });
-            if !within_another {
-                kept.push(member.clone());
-            }
-        }
-        for (i, a) in kept.iter().enumerate() {
-            if kept[i + 1..].iter().any(|b| self.disjoint(a, b)) {
+            if flat.contains(&Type::never()) {
                 return Type::never();
             }
-        }
-        match kept.len() {
-            0 => Type::mixed(),
-            1 => kept.pop().expect("one member"),
-            _ => Type(Repr::Intersection(kept)),
-        }
+            let mut array: Option<(Type, Type)> = None;
+            let mut shape: Option<Shape> = None;
+            let mut rest: Vec<Type> = Vec::new();
+            for member in flat {
+                match member.into_repr() {
+                    Repr::Array(key, value) => {
+                        array = Some(match array {
+                            None => (*key, *value),
+                            Some((k, v)) => (self.narrower(k, *key), self.narrower(v, *value)),
+                        });
+                    }
+                    Repr::ArrayShape(s) => {
+                        shape = match shape {
+                            None => Some(s),
+                            Some(acc) => match self.intersect_shapes(&acc, &s) {
+                                Some(merged) => Some(merged),
+                                None => return Type::never(),
+                            },
+                        };
+                    }
+                    other => {
+                        let other = Type(other);
+                        if !rest.contains(&other) {
+                            rest.push(other);
+                        }
+                    }
+                }
+            }
+            let mut out: Vec<Type> = Vec::new();
+            match (shape, array) {
+                (Some(s), array) => {
+                    let s = match array {
+                        Some((key, value)) => match self.shape_within_array(&s, &key, &value) {
+                            Some(s) => s,
+                            None => return Type::never(),
+                        },
+                        None => s,
+                    };
+                    let Some(s) = self.apply_offsets(s, &mut rest) else {
+                        return Type::never();
+                    };
+                    out.push(Type::array_shape(s));
+                }
+                // A list keys on `int<0, max>`, whatever key its array member
+                // was given.
+                (None, Some((key, value))) => {
+                    let key = if rest.contains(&Type::accessory(AccessoryKind::ArrayList)) {
+                        self.narrower(key, Type::int_range(Some(0), None))
+                    } else {
+                        key
+                    };
+                    out.push(Type::array(key, value));
+                }
+                (None, None) => {}
+            }
+            out.extend(rest);
+            let mut kept: Vec<Type> = Vec::new();
+            for (i, member) in out.iter().enumerate() {
+                let within_another = out.iter().enumerate().any(|(j, other)| {
+                    i != j
+                        && !is_refinement(other)
+                        && self.is_super_type_of(member, other).yes()
+                        && (j < i || !self.is_super_type_of(other, member).yes())
+                });
+                if !within_another {
+                    kept.push(member.clone());
+                }
+            }
+            for (i, a) in kept.iter().enumerate() {
+                if kept[i + 1..].iter().any(|b| self.disjoint(a, b)) {
+                    return Type::never();
+                }
+            }
+            match kept.len() {
+                0 => Type::mixed(),
+                1 => kept.pop().expect("one member"),
+                _ => Type(Repr::Intersection(kept)),
+            }
+        })
     }
 
     /// Real PHPStan's `MutatingScope::intersectButNotNever`: a hinted
@@ -115,9 +121,9 @@ impl Relation<'_> {
             Type(Repr::Union(ms)) => ms.iter().collect(),
             other => vec![other],
         };
-        let inferred_members = match inferred {
-            Type(Repr::Union(ms)) => ms,
-            other => vec![other],
+        let inferred_members = match inferred.into_repr() {
+            Repr::Union(ms) => ms,
+            other => vec![Type(other)],
         };
         let mut kept: Vec<Type> = Vec::new();
         for m in inferred_members {

@@ -36,30 +36,35 @@ enum StubAttribute {
 type Aliases = Vec<(syntax::name::Name, StubAttribute)>;
 
 fn aliases(stmts: &[Stmt]) -> Aliases {
-    let mut out = Vec::new();
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Use(imports) => {
-                for import in imports {
-                    let Some(alias) = &import.alias else {
-                        continue;
-                    };
-                    let kind = match import.path.trim_start_matches('\\').strip_prefix(NAMESPACE) {
-                        Some("PhpStormStubsElementAvailable") => StubAttribute::Availability,
-                        Some("LanguageLevelTypeAware") => StubAttribute::TypeAware,
-                        _ => continue,
-                    };
-                    out.push((alias.name.clone(), kind));
+    syntax::stack::guard(|| {
+        let mut out = Vec::new();
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Use(imports) => {
+                    for import in imports {
+                        let Some(alias) = &import.alias else {
+                            continue;
+                        };
+                        let kind =
+                            match import.path.trim_start_matches('\\').strip_prefix(NAMESPACE) {
+                                Some("PhpStormStubsElementAvailable") => {
+                                    StubAttribute::Availability
+                                }
+                                Some("LanguageLevelTypeAware") => StubAttribute::TypeAware,
+                                _ => continue,
+                            };
+                        out.push((alias.name.clone(), kind));
+                    }
                 }
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => out.extend(aliases(inner)),
+                _ => {}
             }
-            StmtKind::Block(inner)
-            | StmtKind::Declare {
-                body: Some(inner), ..
-            } => out.extend(aliases(inner)),
-            _ => {}
         }
-    }
-    out
+        out
+    })
 }
 
 fn stub_attribute(attr: &Attribute, aliases: &Aliases) -> Option<StubAttribute> {
@@ -166,16 +171,18 @@ fn parse_native_type(text: &str, at: Span) -> Option<TypeHint> {
 }
 
 fn set_spans(hint: &mut TypeHint, at: Span) {
-    hint.span = at;
-    match &mut hint.kind {
-        TypeHintKind::Name(_) => {}
-        TypeHintKind::Nullable(inner) => set_spans(inner, at),
-        TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
-            for m in members {
-                set_spans(m, at);
+    syntax::stack::guard(|| {
+        hint.span = at;
+        match &mut hint.kind {
+            TypeHintKind::Name(_) => {}
+            TypeHintKind::Nullable(inner) => set_spans(inner, at),
+            TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
+                for m in members {
+                    set_spans(m, at);
+                }
             }
         }
-    }
+    })
 }
 
 /// The `@return` overrides a declaration's type-aware attributes give, to

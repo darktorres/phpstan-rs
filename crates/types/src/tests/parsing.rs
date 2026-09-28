@@ -563,7 +563,7 @@ fn top_level_union_around_a_generic_still_splits_correctly() {
 #[test]
 fn dnf_type_group_resolves_to_a_real_intersection_inside_the_union() {
     let ty = parse_type_string("(Countable&Iterator)|null");
-    let Type(Repr::Union(members)) = ty else {
+    let Type(Repr::Union(members)) = &ty else {
         panic!("expected a top-level union");
     };
     assert_eq!(members.len(), 2);
@@ -589,15 +589,15 @@ fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
         if_false,
         negated,
         template_subject,
-    }) = ty
+    }) = &ty
     else {
         panic!("expected a real Conditional type, got {ty:?}");
     };
     assert!(!template_subject);
     assert_eq!(subject, "action");
-    assert_eq!(*target, Type::string_literal("send".into()));
-    assert_eq!(*if_true, parse_type_string("list<string>"));
-    assert_eq!(*if_false, parse_type_string("list<int>"));
+    assert_eq!(**target, Type::string_literal("send".into()));
+    assert_eq!(**if_true, parse_type_string("list<string>"));
+    assert_eq!(**if_false, parse_type_string("list<int>"));
     assert!(!negated);
 }
 
@@ -606,12 +606,12 @@ fn conditional_return_type_syntax_with_is_not_sets_negated() {
     let ty = parse_type_string("($action is not 'send' ? list<string> : list<int>)");
     let Type(Repr::Conditional {
         subject, negated, ..
-    }) = ty
+    }) = &ty
     else {
         panic!("expected a real Conditional type, got {ty:?}");
     };
     assert_eq!(subject, "action");
-    assert!(negated);
+    assert!(*negated);
 }
 
 // PHPStan also allows a non-parameter type-expression subject (e.g. a
@@ -625,12 +625,12 @@ fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() 
         subject,
         template_subject,
         ..
-    }) = ty
+    }) = &ty
     else {
         panic!("expected a template-subject conditional, got {ty:?}");
     };
     assert_eq!(subject, "T");
-    assert!(template_subject);
+    assert!(*template_subject);
 }
 
 // A docblock-parsed `list<int>` and one built at runtime are the same
@@ -694,7 +694,7 @@ fn closure_shape_syntax_parses_into_a_real_shape() {
 #[test]
 fn closure_shape_syntax_still_works_inside_a_union() {
     let ty = parse_type_string("Closure(self):T|null");
-    let Type(Repr::Union(members)) = ty else {
+    let Type(Repr::Union(members)) = &ty else {
         panic!("expected a top-level union, got {ty:?}");
     };
     assert_eq!(members.len(), 2);

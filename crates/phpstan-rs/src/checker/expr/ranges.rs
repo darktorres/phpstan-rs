@@ -22,7 +22,7 @@ use types::{self, Type};
 /// means this guard occasionally under-protects, never over-flags,
 /// matching this project's own "favor false negatives" precedent.
 pub(crate) fn expr_reads_a_property(e: &Expr) -> bool {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..)
         | ExprKind::DynamicPropertyAccess(..)
         | ExprKind::ClassConstFetch(..)
@@ -43,7 +43,7 @@ pub(crate) fn expr_reads_a_property(e: &Expr) -> bool {
             expr_reads_a_property(base) || idx.as_deref().is_some_and(expr_reads_a_property)
         }
         _ => false,
-    }
+    })
 }
 
 /// `null_probe_verdict`/`empty_probe_verdict`'s own shared shape - a

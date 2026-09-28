@@ -645,13 +645,15 @@ impl<'a> Checker<'a> {
 
 /// Every conditional type inside `ty`, outermost first.
 fn collect_conditionals(ty: &Type, out: &mut Vec<Type>) {
-    if ty.as_conditional().is_some() {
-        out.push(ty.clone());
-    }
-    let _ = ty.map_children(&mut |child| {
-        collect_conditionals(child, out);
-        child.clone()
-    });
+    syntax::stack::guard(|| {
+        if ty.as_conditional().is_some() {
+            out.push(ty.clone());
+        }
+        let _ = ty.map_children(&mut |child| {
+            collect_conditionals(child, out);
+            child.clone()
+        });
+    })
 }
 
 /// The `TemplateParam` named `name` somewhere in `sig`, with its bound.

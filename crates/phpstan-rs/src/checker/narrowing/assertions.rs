@@ -258,23 +258,25 @@ impl<'a> Checker<'a> {
         ty: &Type,
         has_member: impl Fn(&str) -> bool + Copy,
     ) -> bool {
-        let members = ty.union_members();
-        if members.len() > 1 {
-            return members
-                .iter()
-                .any(|m| self.member_confirmed_missing(m, has_member));
-        }
-        let parts = ty.intersection_members();
-        if parts.len() > 1 {
-            return parts
-                .iter()
-                .all(|m| self.member_confirmed_missing(m, has_member));
-        }
-        // An enum case is an instance of its enum for member lookup.
-        match ty.object_class_names()[..] {
-            [class] => self.registry.classes.contains_key(class.as_str()) && !has_member(class),
-            _ => false,
-        }
+        syntax::stack::guard(|| {
+            let members = ty.union_members();
+            if members.len() > 1 {
+                return members
+                    .iter()
+                    .any(|m| self.member_confirmed_missing(m, has_member));
+            }
+            let parts = ty.intersection_members();
+            if parts.len() > 1 {
+                return parts
+                    .iter()
+                    .all(|m| self.member_confirmed_missing(m, has_member));
+            }
+            // An enum case is an instance of its enum for member lookup.
+            match ty.object_class_names()[..] {
+                [class] => self.registry.classes.contains_key(class.as_str()) && !has_member(class),
+                _ => false,
+            }
+        })
     }
 
     /// PHPUnit's own narrowing-relevant assertions (`self::assertIsString

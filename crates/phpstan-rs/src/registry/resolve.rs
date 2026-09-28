@@ -1436,24 +1436,26 @@ fn bind_class_const_self_at(
     own_consts: &IndexMap<Arc<str>, ConstantReflection>,
     depth: usize,
 ) -> Type {
-    const MAX_DEPTH: usize = 16;
-    ty.map_class_constants(&mut |owner, pattern| {
-        let names_self = owner.is_self_reference()
-            || owner
-                .as_object()
-                .is_some_and(|(fqn, _)| fqn.trim_start_matches('\\') == class);
-        if !names_self {
-            return None;
-        }
-        Some(if depth >= MAX_DEPTH {
-            Type::mixed()
-        } else {
-            bind_class_const_self_at(
-                matching_class_const_type(own_consts, pattern),
-                class,
-                own_consts,
-                depth + 1,
-            )
+    syntax::stack::guard(|| {
+        const MAX_DEPTH: usize = 16;
+        ty.map_class_constants(&mut |owner, pattern| {
+            let names_self = owner.is_self_reference()
+                || owner
+                    .as_object()
+                    .is_some_and(|(fqn, _)| fqn.trim_start_matches('\\') == class);
+            if !names_self {
+                return None;
+            }
+            Some(if depth >= MAX_DEPTH {
+                Type::mixed()
+            } else {
+                bind_class_const_self_at(
+                    matching_class_const_type(own_consts, pattern),
+                    class,
+                    own_consts,
+                    depth + 1,
+                )
+            })
         })
     })
 }
@@ -1813,14 +1815,16 @@ fn resolve_constant_names(ty: &Type, registry: &Registry) -> Option<Type> {
 }
 
 fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool) -> Type {
-    if let Some((name, args)) = ty.as_object()
-        && args.is_empty()
-        && let Some(value) = constant_named_type(name, registry)
-    {
-        *changed = true;
-        return value;
-    }
-    ty.map_children(&mut |t| resolve_constant_names_rec(t, registry, changed))
+    syntax::stack::guard(|| {
+        if let Some((name, args)) = ty.as_object()
+            && args.is_empty()
+            && let Some(value) = constant_named_type(name, registry)
+        {
+            *changed = true;
+            return value;
+        }
+        ty.map_children(&mut |t| resolve_constant_names_rec(t, registry, changed))
+    })
 }
 
 fn constant_named_type(name: &str, registry: &Registry) -> Option<Type> {

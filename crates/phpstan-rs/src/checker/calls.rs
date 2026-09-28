@@ -905,11 +905,13 @@ pub(crate) fn call_arg_param_name_hints(
 /// literal). `None` when the leaf isn't a literal at all (a variable, a
 /// function call) - don't guess.
 fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
-    let e = unwrap_grouping(e);
-    if let ExprKind::Binary(BinOp::Concat, l, _) = &e.kind {
-        return concat_leftmost_delimiter(l);
-    }
-    literal_string_value(e)?.trim_start().chars().next()
+    syntax::stack::guard(|| {
+        let e = unwrap_grouping(e);
+        if let ExprKind::Binary(BinOp::Concat, l, _) = &e.kind {
+            return concat_leftmost_delimiter(l);
+        }
+        literal_string_value(e)?.trim_start().chars().next()
+    })
 }
 
 /// Recursive walk of every operand of a concat tree (both `.left` and
@@ -917,24 +919,26 @@ fn concat_leftmost_delimiter(e: &Expr) -> Option<char> {
 /// left-only descent) collecting each `preg_quote(...)` call's own
 /// argument list found anywhere in it.
 fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
-    let e = unwrap_grouping(e);
-    match &e.kind {
-        ExprKind::Binary(BinOp::Concat, l, r) => {
-            find_preg_quote_calls(l, out);
-            find_preg_quote_calls(r, out);
-        }
-        ExprKind::Call(callee, args) => {
-            if let ExprKind::Name(n) = &unwrap_grouping(callee).kind
-                && n.rsplit('\\')
-                    .next()
-                    .unwrap_or(n)
-                    .eq_ignore_ascii_case("preg_quote")
-            {
-                out.push(args);
+    syntax::stack::guard(|| {
+        let e = unwrap_grouping(e);
+        match &e.kind {
+            ExprKind::Binary(BinOp::Concat, l, r) => {
+                find_preg_quote_calls(l, out);
+                find_preg_quote_calls(r, out);
             }
+            ExprKind::Call(callee, args) => {
+                if let ExprKind::Name(n) = &unwrap_grouping(callee).kind
+                    && n.rsplit('\\')
+                        .next()
+                        .unwrap_or(n)
+                        .eq_ignore_ascii_case("preg_quote")
+                {
+                    out.push(args);
+                }
+            }
+            _ => {}
         }
-        _ => {}
-    }
+    })
 }
 
 /// Whether `expr`'s access chain passes through a nullsafe operator
@@ -946,7 +950,7 @@ fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
 /// location, which is exactly what passing an argument by reference
 /// needs.
 pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
-    match &unwrap_grouping(expr).kind {
+    syntax::stack::guard(|| match &unwrap_grouping(expr).kind {
         ExprKind::PropertyAccess(base, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
         ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
         ExprKind::DynamicPropertyAccess(base, _) => contains_nullsafe_access(base),
@@ -957,7 +961,7 @@ pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
         }
         ExprKind::Index(base, _) => contains_nullsafe_access(base),
         _ => false,
-    }
+    })
 }
 
 /// Whether `expr` is one of the narrow expression shapes real PHP itself

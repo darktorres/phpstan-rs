@@ -106,7 +106,7 @@ impl Parser {
             // practice.
             Token::Dollar => {
                 self.skip();
-                let name_expr = self.parse_primary()?;
+                let name_expr = crate::stack::guard(|| self.parse_primary())?;
                 self.expr(ExprKind::DynamicVariable(Box::new(name_expr)), start)
             }
             Token::LParen => {

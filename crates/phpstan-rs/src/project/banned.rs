@@ -230,181 +230,189 @@ impl<'a> Walker<'a> {
     }
 
     fn expr(&mut self, e: &Expr) {
-        match &e.kind {
-            ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(name) = &callee.kind {
-                    let lower = name.trim_start_matches('\\').to_ascii_lowercase();
-                    let construct = match lower.as_str() {
-                        "compact" => Some(BannedConstruct::Compact),
-                        "extract" => Some(BannedConstruct::Extract),
-                        _ => None,
+        syntax::stack::guard(|| {
+            match &e.kind {
+                ExprKind::Call(callee, args) => {
+                    if let ExprKind::Name(name) = &callee.kind {
+                        let lower = name.trim_start_matches('\\').to_ascii_lowercase();
+                        let construct = match lower.as_str() {
+                            "compact" => Some(BannedConstruct::Compact),
+                            "extract" => Some(BannedConstruct::Extract),
+                            _ => None,
+                        };
+                        if let Some(construct) = construct {
+                            self.ban(construct, e.span, format!("{lower}()"));
+                        }
+                    }
+                    self.arguments(args, e.span);
+                }
+                ExprKind::Eval(_) => self.ban(BannedConstruct::Eval, e.span, "eval()".to_string()),
+                // Reported at the `@` itself.
+                ExprKind::ErrorSuppress(_) => {
+                    let at = Span {
+                        start: e.span.start,
+                        end: syntax::token::Position {
+                            line: e.span.start.line,
+                            col: e.span.start.col + 1,
+                        },
                     };
-                    if let Some(construct) = construct {
-                        self.ban(construct, e.span, format!("{lower}()"));
+                    self.ban(
+                        BannedConstruct::ErrorSuppression,
+                        at,
+                        "The @ error-suppression operator".to_string(),
+                    );
+                }
+                ExprKind::Isset(_) => {
+                    self.ban(BannedConstruct::Isset, e.span, "isset()".to_string())
+                }
+                ExprKind::Empty(_) => {
+                    self.ban(BannedConstruct::Empty, e.span, "empty()".to_string())
+                }
+                ExprKind::Exit(kind, arg) => {
+                    // A bare `exit;` spans just the keyword, and is reported as
+                    // written.
+                    let keyword = kind.as_str();
+                    let bare = arg.is_none()
+                        && e.span.start.line == e.span.end.line
+                        && (e.span.end.col - e.span.start.col) as usize == keyword.len();
+                    let shown = if bare {
+                        keyword.to_string()
+                    } else {
+                        format!("{keyword}()")
+                    };
+                    self.ban(BannedConstruct::Exit, e.span, shown);
+                }
+                ExprKind::New(_, args)
+                | ExprKind::MethodCall(_, _, args, _)
+                | ExprKind::StaticCall(_, _, args)
+                | ExprKind::DynamicMethodCall(_, _, args)
+                | ExprKind::DynamicStaticCall(_, _, args) => {
+                    self.arguments(args, e.span);
+                }
+                ExprKind::AssignRef(target, _) => {
+                    self.ban(
+                        BannedConstruct::AssignByReference,
+                        e.span,
+                        "Assignment by reference".to_string(),
+                    );
+                    if matches!(target.kind, ExprKind::Index(_, None)) {
+                        self.ban(
+                            BannedConstruct::ArrayAppend,
+                            target.span,
+                            "Appending with []".to_string(),
+                        );
                     }
                 }
-                self.arguments(args, e.span);
-            }
-            ExprKind::Eval(_) => self.ban(BannedConstruct::Eval, e.span, "eval()".to_string()),
-            // Reported at the `@` itself.
-            ExprKind::ErrorSuppress(_) => {
-                let at = Span {
-                    start: e.span.start,
-                    end: syntax::token::Position {
-                        line: e.span.start.line,
-                        col: e.span.start.col + 1,
-                    },
-                };
-                self.ban(
-                    BannedConstruct::ErrorSuppression,
-                    at,
-                    "The @ error-suppression operator".to_string(),
-                );
-            }
-            ExprKind::Isset(_) => self.ban(BannedConstruct::Isset, e.span, "isset()".to_string()),
-            ExprKind::Empty(_) => self.ban(BannedConstruct::Empty, e.span, "empty()".to_string()),
-            ExprKind::Exit(kind, arg) => {
-                // A bare `exit;` spans just the keyword, and is reported as
-                // written.
-                let keyword = kind.as_str();
-                let bare = arg.is_none()
-                    && e.span.start.line == e.span.end.line
-                    && (e.span.end.col - e.span.start.col) as usize == keyword.len();
-                let shown = if bare {
-                    keyword.to_string()
-                } else {
-                    format!("{keyword}()")
-                };
-                self.ban(BannedConstruct::Exit, e.span, shown);
-            }
-            ExprKind::New(_, args)
-            | ExprKind::MethodCall(_, _, args, _)
-            | ExprKind::StaticCall(_, _, args)
-            | ExprKind::DynamicMethodCall(_, _, args)
-            | ExprKind::DynamicStaticCall(_, _, args) => {
-                self.arguments(args, e.span);
-            }
-            ExprKind::AssignRef(target, _) => {
-                self.ban(
-                    BannedConstruct::AssignByReference,
-                    e.span,
-                    "Assignment by reference".to_string(),
-                );
-                if matches!(target.kind, ExprKind::Index(_, None)) {
+                ExprKind::Assign(target, _) | ExprKind::CompoundAssign(_, target, _)
+                    if matches!(target.kind, ExprKind::Index(_, None)) =>
+                {
                     self.ban(
                         BannedConstruct::ArrayAppend,
                         target.span,
                         "Appending with []".to_string(),
                     );
                 }
-            }
-            ExprKind::Assign(target, _) | ExprKind::CompoundAssign(_, target, _)
-                if matches!(target.kind, ExprKind::Index(_, None)) =>
-            {
-                self.ban(
-                    BannedConstruct::ArrayAppend,
-                    target.span,
-                    "Appending with []".to_string(),
-                );
-            }
-            ExprKind::Ternary(_, None, _) => self.ban(
-                BannedConstruct::ShortTernary,
-                e.span,
-                "The short ternary ?:".to_string(),
-            ),
-            ExprKind::Binary(op @ (BinOp::Eq | BinOp::NotEq), _, _) => {
-                let symbol = if matches!(op, BinOp::Eq) { "==" } else { "!=" };
-                self.ban(
-                    BannedConstruct::LooseComparison,
+                ExprKind::Ternary(_, None, _) => self.ban(
+                    BannedConstruct::ShortTernary,
                     e.span,
-                    format!("Loose comparison {symbol}"),
-                );
-            }
-            ExprKind::ShellExec(_) => self.ban(
-                BannedConstruct::Backticks,
-                e.span,
-                "A backtick shell command".to_string(),
-            ),
-            ExprKind::Variable(name) if SUPERGLOBALS.contains(&name.as_ref()) => {
-                self.ban(BannedConstruct::Superglobals, e.span, format!("${name}"));
-            }
-            ExprKind::DynamicVariable(_) => self.ban(
-                BannedConstruct::VariableVariables,
-                e.span,
-                "A variable variable".to_string(),
-            ),
-            ExprKind::DynamicPropertyAccess(..)
-            | ExprKind::DynamicClassConstFetch(..)
-            | ExprKind::DynamicStaticPropertyFetch(..) => self.ban(
-                BannedConstruct::DynamicMemberAccess,
-                e.span,
-                "A dynamic member name".to_string(),
-            ),
-            ExprKind::Literal(Literal::Float(f)) if self.float_banned() => {
-                self.out.push(
-                    DiagnosticBuilder::new(
-                        format!("Float literal {f} uses banned type float."),
+                    "The short ternary ?:".to_string(),
+                ),
+                ExprKind::Binary(op @ (BinOp::Eq | BinOp::NotEq), _, _) => {
+                    let symbol = if matches!(op, BinOp::Eq) { "==" } else { "!=" };
+                    self.ban(
+                        BannedConstruct::LooseComparison,
                         e.span,
-                        0,
-                        "banned.type",
-                    )
-                    .build(),
-                );
-            }
-            ExprKind::Cast(cast, _) if cast.kind() == CastKind::Float && self.float_banned() => {
-                self.out.push(
-                    DiagnosticBuilder::new(
-                        "A (float) cast uses banned type float.".to_string(),
-                        e.span,
-                        0,
-                        "banned.type",
-                    )
-                    .build(),
-                );
-            }
-            ExprKind::Closure {
-                params,
-                body,
-                by_ref,
-                ..
-            } => {
-                self.function_like(params, *by_ref, e.span, "a closure");
-                self.stmts(body);
-            }
-            ExprKind::ArrowFn {
-                params,
-                body,
-                by_ref,
-                ..
-            } => {
-                self.function_like(params, *by_ref, e.span, "an arrow function");
-                self.expr(body);
-            }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                self.arguments(args, e.span);
-                for a in args {
-                    self.expr(&a.value);
+                        format!("Loose comparison {symbol}"),
+                    );
                 }
-                self.class_like(
-                    class_decl_name(decl),
-                    &decl.methods,
-                    &decl.properties,
-                    &decl.consts,
+                ExprKind::ShellExec(_) => self.ban(
+                    BannedConstruct::Backticks,
+                    e.span,
+                    "A backtick shell command".to_string(),
+                ),
+                ExprKind::Variable(name) if SUPERGLOBALS.contains(&name.as_ref()) => {
+                    self.ban(BannedConstruct::Superglobals, e.span, format!("${name}"));
+                }
+                ExprKind::DynamicVariable(_) => self.ban(
+                    BannedConstruct::VariableVariables,
+                    e.span,
+                    "A variable variable".to_string(),
+                ),
+                ExprKind::DynamicPropertyAccess(..)
+                | ExprKind::DynamicClassConstFetch(..)
+                | ExprKind::DynamicStaticPropertyFetch(..) => self.ban(
+                    BannedConstruct::DynamicMemberAccess,
+                    e.span,
+                    "A dynamic member name".to_string(),
+                ),
+                ExprKind::Literal(Literal::Float(f)) if self.float_banned() => {
+                    self.out.push(
+                        DiagnosticBuilder::new(
+                            format!("Float literal {f} uses banned type float."),
+                            e.span,
+                            0,
+                            "banned.type",
+                        )
+                        .build(),
+                    );
+                }
+                ExprKind::Cast(cast, _)
+                    if cast.kind() == CastKind::Float && self.float_banned() =>
+                {
+                    self.out.push(
+                        DiagnosticBuilder::new(
+                            "A (float) cast uses banned type float.".to_string(),
+                            e.span,
+                            0,
+                            "banned.type",
+                        )
+                        .build(),
+                    );
+                }
+                ExprKind::Closure {
+                    params,
+                    body,
+                    by_ref,
+                    ..
+                } => {
+                    self.function_like(params, *by_ref, e.span, "a closure");
+                    self.stmts(body);
+                }
+                ExprKind::ArrowFn {
+                    params,
+                    body,
+                    by_ref,
+                    ..
+                } => {
+                    self.function_like(params, *by_ref, e.span, "an arrow function");
+                    self.expr(body);
+                }
+                ExprKind::NewAnonymousClass(decl, args) => {
+                    self.arguments(args, e.span);
+                    for a in args {
+                        self.expr(&a.value);
+                    }
+                    self.class_like(
+                        class_decl_name(decl),
+                        &decl.methods,
+                        &decl.properties,
+                        &decl.consts,
+                    );
+                }
+                _ => {}
+            }
+            if let ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) = &e.kind {
+                self.ban(
+                    BannedConstruct::DynamicMemberAccess,
+                    e.span,
+                    "A dynamic member name".to_string(),
                 );
             }
-            _ => {}
-        }
-        if let ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) = &e.kind {
-            self.ban(
-                BannedConstruct::DynamicMemberAccess,
-                e.span,
-                "A dynamic member name".to_string(),
-            );
-        }
-        any_child_expr(e, |child| {
-            self.expr(child);
-            false
-        });
+            any_child_expr(e, |child| {
+                self.expr(child);
+                false
+            });
+        })
     }
 }
 

@@ -412,99 +412,101 @@ fn infer_const_type_with(
     value: &syntax::ast::Expr,
     class_const_ref: &dyn Fn(&str, &str) -> Option<Type>,
 ) -> Type {
-    use syntax::ast::Literal;
-    match &value.kind {
-        ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
-        ExprKind::Literal(Literal::Float(_)) => Type::float(),
-        ExprKind::Literal(Literal::String(s)) => Type::string_literal(s.to_string().into()),
-        ExprKind::Literal(Literal::Bool(true)) => Type::bool_literal(true),
-        ExprKind::Literal(Literal::Bool(false)) => Type::bool_literal(false),
-        ExprKind::Literal(Literal::Null) => Type::null(),
-        // `const int OFF = -1;` parses as a literal `1` wrapped
-        // in a unary negation, not a single negative-literal token - a
-        // negative-valued typed constant (real shape: `Piwigo\Core\
-        // Logger::OFF`, the one negative severity level alongside seven
-        // non-negative ones) would otherwise silently fall to `Mixed`
-        // below.
-        ExprKind::Unary(syntax::ast::UnaryOp::Neg, inner) => match &inner.kind {
-            ExprKind::Literal(Literal::Int(n)) => Type::int_literal(-n),
+    syntax::stack::guard(|| {
+        use syntax::ast::Literal;
+        match &value.kind {
+            ExprKind::Literal(Literal::Int(n)) => Type::int_literal(*n),
             ExprKind::Literal(Literal::Float(_)) => Type::float(),
-            _ => Type::mixed(),
-        },
-        // A real, common shape (`AppInfo::URL = 'https://' . self::DOMAIN;`)
-        // - a const's own value referencing *another* const via `self::`
-        // can't be resolved here at all (this function has no class
-        // context, and no registry to look the other const up in even
-        // if it did), but real PHP string concatenation always
-        // produces a `string` regardless of either operand's own type,
-        // so this is sound information even without resolving anything
-        // - unlike falling back to `Mixed` below, which would silently
-        // widen every array literal/argument this const then feeds
-        // into.
-        ExprKind::Binary(syntax::ast::BinOp::Concat, ..) => Type::string(),
-        ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
-            infer_const_type_with(inner, class_const_ref)
-        }
-        ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
-            class_const_ref(class, name).unwrap_or(Type::mixed())
-        }
-        // A constant array literal is a real, exact array shape in
-        // real PHPStan (`ConstantArrayType`): keys as written, or the
-        // next auto-index; PHP canonicalizes a decimal-integer string
-        // key to an int. A spread, or a key that isn't a literal, can't
-        // be laid out as a shape, so the value degrades to a plain
-        // `array` of the values' union.
-        ExprKind::ArrayLiteral(items) => {
-            let mut fields: Vec<(String, Type, bool)> = Vec::new();
-            let mut next_index: i64 = 0;
-            let mut exact = true;
-            for item in items {
-                let value_ty = infer_const_type_with(&item.value, class_const_ref);
-                let key = if item.spread {
-                    None
+            ExprKind::Literal(Literal::String(s)) => Type::string_literal(s.to_string().into()),
+            ExprKind::Literal(Literal::Bool(true)) => Type::bool_literal(true),
+            ExprKind::Literal(Literal::Bool(false)) => Type::bool_literal(false),
+            ExprKind::Literal(Literal::Null) => Type::null(),
+            // `const int OFF = -1;` parses as a literal `1` wrapped
+            // in a unary negation, not a single negative-literal token - a
+            // negative-valued typed constant (real shape: `Piwigo\Core\
+            // Logger::OFF`, the one negative severity level alongside seven
+            // non-negative ones) would otherwise silently fall to `Mixed`
+            // below.
+            ExprKind::Unary(syntax::ast::UnaryOp::Neg, inner) => match &inner.kind {
+                ExprKind::Literal(Literal::Int(n)) => Type::int_literal(-n),
+                ExprKind::Literal(Literal::Float(_)) => Type::float(),
+                _ => Type::mixed(),
+            },
+            // A real, common shape (`AppInfo::URL = 'https://' . self::DOMAIN;`)
+            // - a const's own value referencing *another* const via `self::`
+            // can't be resolved here at all (this function has no class
+            // context, and no registry to look the other const up in even
+            // if it did), but real PHP string concatenation always
+            // produces a `string` regardless of either operand's own type,
+            // so this is sound information even without resolving anything
+            // - unlike falling back to `Mixed` below, which would silently
+            // widen every array literal/argument this const then feeds
+            // into.
+            ExprKind::Binary(syntax::ast::BinOp::Concat, ..) => Type::string(),
+            ExprKind::Grouping(inner) | ExprKind::ErrorSuppress(inner) => {
+                infer_const_type_with(inner, class_const_ref)
+            }
+            ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
+                class_const_ref(class, name).unwrap_or(Type::mixed())
+            }
+            // A constant array literal is a real, exact array shape in
+            // real PHPStan (`ConstantArrayType`): keys as written, or the
+            // next auto-index; PHP canonicalizes a decimal-integer string
+            // key to an int. A spread, or a key that isn't a literal, can't
+            // be laid out as a shape, so the value degrades to a plain
+            // `array` of the values' union.
+            ExprKind::ArrayLiteral(items) => {
+                let mut fields: Vec<(String, Type, bool)> = Vec::new();
+                let mut next_index: i64 = 0;
+                let mut exact = true;
+                for item in items {
+                    let value_ty = infer_const_type_with(&item.value, class_const_ref);
+                    let key = if item.spread {
+                        None
+                    } else {
+                        match item.key.as_ref().map(|k| &k.kind) {
+                            None => Some(next_index.to_string()),
+                            Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
+                            Some(ExprKind::Literal(Literal::String(s))) => Some(
+                                types::canonical_int_key(&s.to_str_lossy())
+                                    .map_or_else(|| s.to_string(), |n| n.to_string()),
+                            ),
+                            _ => None,
+                        }
+                    };
+                    let Some(key) = key else {
+                        exact = false;
+                        fields.push((String::new(), value_ty, false));
+                        continue;
+                    };
+                    if let Some(n) = types::canonical_int_key(&key) {
+                        next_index = next_index.max(n.saturating_add(1));
+                    }
+                    match fields.iter_mut().find(|(k, _, _)| *k == key) {
+                        Some(existing) => existing.1 = value_ty,
+                        None => fields.push((key, value_ty, false)),
+                    }
+                }
+                if exact {
+                    Type::array_shape(Shape::from_named(fields))
                 } else {
-                    match item.key.as_ref().map(|k| &k.kind) {
-                        None => Some(next_index.to_string()),
-                        Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
-                        Some(ExprKind::Literal(Literal::String(s))) => Some(
-                            types::canonical_int_key(&s.to_str_lossy())
-                                .map_or_else(|| s.to_string(), |n| n.to_string()),
-                        ),
-                        _ => None,
+                    let mut values: Vec<Type> = Vec::new();
+                    for (_, t, _) in fields {
+                        if !values.contains(&t) {
+                            values.push(t);
+                        }
                     }
-                };
-                let Some(key) = key else {
-                    exact = false;
-                    fields.push((String::new(), value_ty, false));
-                    continue;
-                };
-                if let Some(n) = types::canonical_int_key(&key) {
-                    next_index = next_index.max(n.saturating_add(1));
-                }
-                match fields.iter_mut().find(|(k, _, _)| *k == key) {
-                    Some(existing) => existing.1 = value_ty,
-                    None => fields.push((key, value_ty, false)),
+                    let value = match values.len() {
+                        0 => Type::mixed(),
+                        1 => values.pop().expect("len checked"),
+                        _ => Type::union_of(values),
+                    };
+                    Type::array(Type::unknown_array_key(), value)
                 }
             }
-            if exact {
-                Type::array_shape(Shape::from_named(fields))
-            } else {
-                let mut values: Vec<Type> = Vec::new();
-                for (_, t, _) in fields {
-                    if !values.contains(&t) {
-                        values.push(t);
-                    }
-                }
-                let value = match values.len() {
-                    0 => Type::mixed(),
-                    1 => values.pop().expect("len checked"),
-                    _ => Type::union_of(values),
-                };
-                Type::array(Type::unknown_array_key(), value)
-            }
+            _ => Type::mixed(),
         }
-        _ => Type::mixed(),
-    }
+    })
 }
 
 /// Whether an `Attribute`'s own raw (possibly namespaced) name

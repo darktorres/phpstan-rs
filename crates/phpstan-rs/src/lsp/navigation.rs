@@ -379,7 +379,7 @@ impl<'a> Walker<'a> {
         current_class: Option<&str>,
         out: &mut Vec<(Span, Resolved)>,
     ) {
-        match &e.kind {
+        syntax::stack::guard(|| match &e.kind {
             ExprKind::Variable(name) => self.record_var_self(out, e.span, current_class, name),
             ExprKind::ArrayLiteral(items) | ExprKind::List(items) => {
                 for item in items {
@@ -390,7 +390,7 @@ impl<'a> Walker<'a> {
                 }
             }
             _ => self.expr(e, ctx, current_class, out),
-        }
+        })
     }
 
     /// Resolves a compound type-hint (`?Foo`, `Foo|Bar`) to whichever
@@ -434,116 +434,120 @@ impl<'a> Walker<'a> {
         current_class: Option<&str>,
         out: &mut Vec<(Span, Resolved)>,
     ) {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, ctx, current_class, out),
-            StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, out),
-            StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-                for e in exprs {
-                    self.expr(e, ctx, current_class, out);
+        syntax::stack::guard(|| {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::Expression(e) | StmtKind::Throw(e) => {
+                    self.expr(e, ctx, current_class, out)
                 }
-            }
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => {
-                self.expr(cond, ctx, current_class, out);
-            }
-            StmtKind::For {
-                init, cond, step, ..
-            } => {
-                for e in init.iter().chain(cond).chain(step) {
-                    self.expr(e, ctx, current_class, out);
-                }
-            }
-            StmtKind::Foreach {
-                subject,
-                key,
-                value,
-                ..
-            } => {
-                self.expr(subject, ctx, current_class, out);
-                if let Some(k) = key {
-                    self.bind_var(k, ctx, current_class, out);
-                }
-                self.bind_var(value, ctx, current_class, out);
-            }
-            StmtKind::FunctionDecl(f) => {
-                self.record(
-                    out,
-                    f.name_span,
-                    Resolved::Function(ctx.declared_name(&f.name)),
-                );
-                self.function(f, &mut ctx.clone(), current_class, false, out);
-            }
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, ctx, out),
-            StmtKind::ClassDecl(c) => self.class(c, ctx, out),
-            StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    self.expr(&c.value, ctx, current_class, out);
-                }
-            }
-            // `global $x;`/`static $x = ...;` have no per-name span of
-            // their own (only the whole statement's) - the same
-            // imprecision `Checker::declare`'s own instrumentation for
-            // these two shapes accepts (`checker/stmt.rs`).
-            StmtKind::Global(vars) => {
-                for var in vars {
-                    match var {
-                        GlobalVar::Name(name) => {
-                            self.record_var_self(
-                                out,
-                                name.span,
-                                current_class,
-                                &syntax::intern::intern(name),
-                            );
-                        }
-                        GlobalVar::Dynamic(e) => self.expr(e, ctx, current_class, out),
-                    }
-                }
-            }
-            StmtKind::StaticVar(vars) => {
-                for (name, d) in vars {
-                    if let Some(e) = d {
+                StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, out),
+                StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
+                    for e in exprs {
                         self.expr(e, ctx, current_class, out);
                     }
-                    self.record_var_self(
-                        out,
-                        name.span,
-                        current_class,
-                        &syntax::intern::intern(name),
-                    );
                 }
-            }
-            StmtKind::Switch { subject, cases } => {
-                self.expr(subject, ctx, current_class, out);
-                for case in cases {
-                    if let Some(t) = &case.test {
-                        self.expr(t, ctx, current_class, out);
+                StmtKind::If { cond, .. }
+                | StmtKind::While { cond, .. }
+                | StmtKind::DoWhile { cond, .. } => {
+                    self.expr(cond, ctx, current_class, out);
+                }
+                StmtKind::For {
+                    init, cond, step, ..
+                } => {
+                    for e in init.iter().chain(cond).chain(step) {
+                        self.expr(e, ctx, current_class, out);
                     }
                 }
-            }
-            StmtKind::Try { catches, .. } => {
-                for c in catches {
-                    for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
-                        if self.anchor.matches(*span)
-                            && let Some(fqn) =
-                                resolve_class_ref(name, current_class, ctx, self.registry)
-                        {
-                            out.push((*span, Resolved::Class(fqn)));
+                StmtKind::Foreach {
+                    subject,
+                    key,
+                    value,
+                    ..
+                } => {
+                    self.expr(subject, ctx, current_class, out);
+                    if let Some(k) = key {
+                        self.bind_var(k, ctx, current_class, out);
+                    }
+                    self.bind_var(value, ctx, current_class, out);
+                }
+                StmtKind::FunctionDecl(f) => {
+                    self.record(
+                        out,
+                        f.name_span,
+                        Resolved::Function(ctx.declared_name(&f.name)),
+                    );
+                    self.function(f, &mut ctx.clone(), current_class, false, out);
+                }
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, ctx, out),
+                StmtKind::ClassDecl(c) => self.class(c, ctx, out),
+                StmtKind::GlobalConst(consts) => {
+                    for c in consts {
+                        self.expr(&c.value, ctx, current_class, out);
+                    }
+                }
+                // `global $x;`/`static $x = ...;` have no per-name span of
+                // their own (only the whole statement's) - the same
+                // imprecision `Checker::declare`'s own instrumentation for
+                // these two shapes accepts (`checker/stmt.rs`).
+                StmtKind::Global(vars) => {
+                    for var in vars {
+                        match var {
+                            GlobalVar::Name(name) => {
+                                self.record_var_self(
+                                    out,
+                                    name.span,
+                                    current_class,
+                                    &syntax::intern::intern(name),
+                                );
+                            }
+                            GlobalVar::Dynamic(e) => self.expr(e, ctx, current_class, out),
                         }
                     }
-                    if let (Some(name), Some(span)) = (&c.var, c.var_span) {
-                        self.record_var_self(out, span, current_class, name);
+                }
+                StmtKind::StaticVar(vars) => {
+                    for (name, d) in vars {
+                        if let Some(e) = d {
+                            self.expr(e, ctx, current_class, out);
+                        }
+                        self.record_var_self(
+                            out,
+                            name.span,
+                            current_class,
+                            &syntax::intern::intern(name),
+                        );
                     }
                 }
+                StmtKind::Switch { subject, cases } => {
+                    self.expr(subject, ctx, current_class, out);
+                    for case in cases {
+                        if let Some(t) = &case.test {
+                            self.expr(t, ctx, current_class, out);
+                        }
+                    }
+                }
+                StmtKind::Try { catches, .. } => {
+                    for c in catches {
+                        for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
+                            if self.anchor.matches(*span)
+                                && let Some(fqn) =
+                                    resolve_class_ref(name, current_class, ctx, self.registry)
+                            {
+                                out.push((*span, Resolved::Class(fqn)));
+                            }
+                        }
+                        if let (Some(name), Some(span)) = (&c.var, c.var_span) {
+                            self.record_var_self(out, span, current_class, name);
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        any_child_stmt(stmt, |child| {
-            self.stmt(child, ctx, current_class, out);
-            false
-        });
+            any_child_stmt(stmt, |child| {
+                self.stmt(child, ctx, current_class, out);
+                false
+            });
+        })
     }
 
     fn expr(
@@ -553,116 +557,201 @@ impl<'a> Walker<'a> {
         current_class: Option<&str>,
         out: &mut Vec<(Span, Resolved)>,
     ) {
-        match &expr.kind {
-            // `foo()`'s callee - a bare `Name` here is always a function
-            // reference (never a class), unlike a bare `Name` reached
-            // some other way (see the plain `ExprKind::Name` arm below).
-            // Handled here, before generic recursion, specifically so
-            // that arm never has to guess which one a given `Name` node
-            // means.
-            ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(n) = &callee.kind
-                    && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
-                {
-                    self.record(out, callee.span, Resolved::Function(fqn));
-                } else {
-                    self.expr(callee, ctx, current_class, out);
-                }
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, out);
-                }
-                return;
-            }
-            // `new Foo(...)`'s callee - always a class reference, the
-            // mirror image of `Call` just above.
-            ExprKind::New(callee, args) => {
-                if let ExprKind::Name(n) = &callee.kind
-                    && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
-                {
-                    self.record(out, callee.span, Resolved::Class(fqn));
-                } else {
-                    self.expr(callee, ctx, current_class, out);
-                }
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, out);
-                }
-                return;
-            }
-            // A bare `Name` reached any *other* way (a first-class
-            // callable target `foo(...)`, ...) - neither `Call` nor
-            // `New` disambiguated it, so ask the registry which one
-            // actually exists, preferring a function (the far more
-            // common shape for a standalone name reference).
-            ExprKind::Name(n) => {
-                if let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry) {
-                    let resolved = if self.registry.lookup_function(&fqn).is_some() {
-                        Resolved::Function(fqn)
+        syntax::stack::guard(|| {
+            match &expr.kind {
+                // `foo()`'s callee - a bare `Name` here is always a function
+                // reference (never a class), unlike a bare `Name` reached
+                // some other way (see the plain `ExprKind::Name` arm below).
+                // Handled here, before generic recursion, specifically so
+                // that arm never has to guess which one a given `Name` node
+                // means.
+                ExprKind::Call(callee, args) => {
+                    if let ExprKind::Name(n) = &callee.kind
+                        && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
+                    {
+                        self.record(out, callee.span, Resolved::Function(fqn));
                     } else {
-                        Resolved::Class(fqn)
-                    };
-                    self.record(out, expr.span, resolved);
-                }
-            }
-            ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), member) => {
-                if self.anchor.matches(expr.span)
-                    && let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
-                {
-                    let spans = [*class_span, member.span];
-                    // Two independent `if`s, not `if`/`else if`: under
-                    // `Anchor::All` a single expression can contain both
-                    // a class-name occurrence AND a member-name
-                    // occurrence, and both need their own entry.
-                    // `resolve_at`'s own behavior is unaffected - a
-                    // single `Position` can still only ever match one of
-                    // these two disjoint sub-spans.
-                    if self.anchor.matches(spans[0]) {
-                        out.push((spans[0], Resolved::Class(fqn.clone())));
+                        self.expr(callee, ctx, current_class, out);
                     }
-                    if self.anchor.matches(spans[1]) {
-                        out.push((spans[1], Resolved::Member(fqn, member.to_string())));
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, out);
+                    }
+                    return;
+                }
+                // `new Foo(...)`'s callee - always a class reference, the
+                // mirror image of `Call` just above.
+                ExprKind::New(callee, args) => {
+                    if let ExprKind::Name(n) = &callee.kind
+                        && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
+                    {
+                        self.record(out, callee.span, Resolved::Class(fqn));
+                    } else {
+                        self.expr(callee, ctx, current_class, out);
+                    }
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, out);
+                    }
+                    return;
+                }
+                // A bare `Name` reached any *other* way (a first-class
+                // callable target `foo(...)`, ...) - neither `Call` nor
+                // `New` disambiguated it, so ask the registry which one
+                // actually exists, preferring a function (the far more
+                // common shape for a standalone name reference).
+                ExprKind::Name(n) => {
+                    if let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry) {
+                        let resolved = if self.registry.lookup_function(&fqn).is_some() {
+                            Resolved::Function(fqn)
+                        } else {
+                            Resolved::Class(fqn)
+                        };
+                        self.record(out, expr.span, resolved);
                     }
                 }
-            }
-            ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span)) => {
-                if self.anchor.matches(*class_span)
-                    && let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
-                {
-                    out.push((*class_span, Resolved::Class(fqn)));
+                ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), member) => {
+                    if self.anchor.matches(expr.span)
+                        && let Some(fqn) =
+                            resolve_class_ref(class, current_class, ctx, self.registry)
+                    {
+                        let spans = [*class_span, member.span];
+                        // Two independent `if`s, not `if`/`else if`: under
+                        // `Anchor::All` a single expression can contain both
+                        // a class-name occurrence AND a member-name
+                        // occurrence, and both need their own entry.
+                        // `resolve_at`'s own behavior is unaffected - a
+                        // single `Position` can still only ever match one of
+                        // these two disjoint sub-spans.
+                        if self.anchor.matches(spans[0]) {
+                            out.push((spans[0], Resolved::Class(fqn.clone())));
+                        }
+                        if self.anchor.matches(spans[1]) {
+                            out.push((spans[1], Resolved::Member(fqn, member.to_string())));
+                        }
+                    }
                 }
-            }
-            // `Foo::method()` mirrors `ClassConstFetch`/`StaticPropertyFetch` above exactly (a
-            // literal class name, resolved by plain name lookup). A
-            // genuinely dynamic receiver (`$obj::method()`) has no
-            // class-name text to resolve here at all - it needs the
-            // exact same Stage B type-inference probe `MethodCall`'s own
-            // "any other receiver" branch below already uses, `Resolved::
-            // Instance` being agnostic to `->` vs `::` call syntax (a
-            // real PHP static method is still just a method looked up
-            // on the receiver's own resolved class either way).
-            ExprKind::StaticCall(target, member, args) => {
-                match target {
-                    StaticTarget::Name(class, class_span) => {
-                        if self.anchor.matches(expr.span)
-                            && let Some(fqn) =
-                                resolve_class_ref(class, current_class, ctx, self.registry)
-                        {
-                            let spans = [*class_span, member.span];
-                            if self.anchor.matches(spans[0]) {
-                                out.push((spans[0], Resolved::Class(fqn.clone())));
+                ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span)) => {
+                    if self.anchor.matches(*class_span)
+                        && let Some(fqn) =
+                            resolve_class_ref(class, current_class, ctx, self.registry)
+                    {
+                        out.push((*class_span, Resolved::Class(fqn)));
+                    }
+                }
+                // `Foo::method()` mirrors `ClassConstFetch`/`StaticPropertyFetch` above exactly (a
+                // literal class name, resolved by plain name lookup). A
+                // genuinely dynamic receiver (`$obj::method()`) has no
+                // class-name text to resolve here at all - it needs the
+                // exact same Stage B type-inference probe `MethodCall`'s own
+                // "any other receiver" branch below already uses, `Resolved::
+                // Instance` being agnostic to `->` vs `::` call syntax (a
+                // real PHP static method is still just a method looked up
+                // on the receiver's own resolved class either way).
+                ExprKind::StaticCall(target, member, args) => {
+                    match target {
+                        StaticTarget::Name(class, class_span) => {
+                            if self.anchor.matches(expr.span)
+                                && let Some(fqn) =
+                                    resolve_class_ref(class, current_class, ctx, self.registry)
+                            {
+                                let spans = [*class_span, member.span];
+                                if self.anchor.matches(spans[0]) {
+                                    out.push((spans[0], Resolved::Class(fqn.clone())));
+                                }
+                                if self.anchor.matches(spans[1]) {
+                                    out.push((spans[1], Resolved::Member(fqn, member.to_string())));
+                                }
                             }
-                            if self.anchor.matches(spans[1]) {
-                                out.push((spans[1], Resolved::Member(fqn, member.to_string())));
+                        }
+                        StaticTarget::Expr(receiver) => {
+                            self.expr(receiver, ctx, current_class, out);
+                            if self.anchor.matches(member.span) {
+                                out.push((
+                                    member.span,
+                                    Resolved::Instance {
+                                        receiver_span: receiver.span,
+                                        member: member.to_string(),
+                                        scope: self.probe_scope(),
+                                        is_static: self.current_is_static,
+                                        class: current_class.map(str::to_string),
+                                    },
+                                ));
                             }
                         }
                     }
-                    StaticTarget::Expr(receiver) => {
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, out);
+                    }
+                    return;
+                }
+                ExprKind::DynamicStaticCall(target, name, args) => {
+                    if let StaticTarget::Expr(receiver) = target {
                         self.expr(receiver, ctx, current_class, out);
-                        if self.anchor.matches(member.span) {
+                    }
+                    self.expr(name, ctx, current_class, out);
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, out);
+                    }
+                    return;
+                }
+                ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
+                    if self.anchor.matches(*span)
+                        && let Some(fqn) =
+                            resolve_class_ref(name, current_class, ctx, self.registry)
+                    {
+                        out.push((*span, Resolved::Class(fqn)));
+                    }
+                }
+                // A plain variable read (`$this` excluded - it's never a
+                // locally-declared variable, and is resolved separately via
+                // `current_class` wherever it appears as a receiver). Needs
+                // a real checker probe to resolve (see `Resolved::
+                // VariableRead`'s own doc comment) - this only records enough
+                // for `lsp.rs`'s own orchestration to run it, at either scope
+                // `probe_scope` covers (a named function/method, or top-level
+                // script scope).
+                ExprKind::Variable(name) if **name != *"this" => {
+                    if self.anchor.matches(expr.span) {
+                        out.push((
+                            expr.span,
+                            Resolved::VariableRead {
+                                span: expr.span,
+                                scope: self.probe_scope(),
+                                is_static: self.current_is_static,
+                                class: current_class.map(str::to_string),
+                                name: name.clone(),
+                                var_scope: self.resolve_var_scope(name),
+                            },
+                        ));
+                    }
+                }
+                // `$this->method()`/`$this->prop` resolve directly (only
+                // `current_class` is needed, already in hand); any *other*
+                // receiver needs Stage B's own type-inference probe - this
+                // records enough (the receiver's own span, the member name,
+                // and the enclosing scope to re-check) for `lsp.rs`'s own
+                // orchestration to run that probe. The recorded span is the
+                // member NAME's own sub-span (`spans[0]`), not `expr.span` -
+                // the latter covers the whole `$x->method(...)` call
+                // including its arguments, which would make every
+                // `document_highlight` range for this arm too wide.
+                ExprKind::MethodCall(recv, method, _, _)
+                | ExprKind::PropertyAccess(recv, method, _) => {
+                    self.expr(recv, ctx, current_class, out);
+                    if self.anchor.matches(method.span) {
+                        let spans = [method.span];
+                        if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
+                            && let Some(owner) = current_class
+                        {
                             out.push((
-                                member.span,
+                                spans[0],
+                                Resolved::Member(owner.to_string(), method.to_string()),
+                            ));
+                        } else {
+                            out.push((
+                                spans[0],
                                 Resolved::Instance {
-                                    receiver_span: receiver.span,
-                                    member: member.to_string(),
+                                    receiver_span: recv.span,
+                                    member: method.to_string(),
                                     scope: self.probe_scope(),
                                     is_static: self.current_is_static,
                                     class: current_class.map(str::to_string),
@@ -670,163 +759,83 @@ impl<'a> Walker<'a> {
                             ));
                         }
                     }
+                    any_child_expr(expr, |a| {
+                        if !std::ptr::eq(a, recv.as_ref()) {
+                            self.expr(a, ctx, current_class, out);
+                        }
+                        false
+                    });
+                    return;
                 }
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, out);
+                ExprKind::NewAnonymousClass(decl, args) => {
+                    self.class(decl, &mut ctx.clone(), out);
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, out);
+                    }
+                    return;
                 }
-                return;
-            }
-            ExprKind::DynamicStaticCall(target, name, args) => {
-                if let StaticTarget::Expr(receiver) = target {
-                    self.expr(receiver, ctx, current_class, out);
-                }
-                self.expr(name, ctx, current_class, out);
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, out);
-                }
-                return;
-            }
-            ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
-                if self.anchor.matches(*span)
-                    && let Some(fqn) = resolve_class_ref(name, current_class, ctx, self.registry)
-                {
-                    out.push((*span, Resolved::Class(fqn)));
-                }
-            }
-            // A plain variable read (`$this` excluded - it's never a
-            // locally-declared variable, and is resolved separately via
-            // `current_class` wherever it appears as a receiver). Needs
-            // a real checker probe to resolve (see `Resolved::
-            // VariableRead`'s own doc comment) - this only records enough
-            // for `lsp.rs`'s own orchestration to run it, at either scope
-            // `probe_scope` covers (a named function/method, or top-level
-            // script scope).
-            ExprKind::Variable(name) if **name != *"this" => {
-                if self.anchor.matches(expr.span) {
-                    out.push((
-                        expr.span,
-                        Resolved::VariableRead {
-                            span: expr.span,
-                            scope: self.probe_scope(),
-                            is_static: self.current_is_static,
-                            class: current_class.map(str::to_string),
-                            name: name.clone(),
-                            var_scope: self.resolve_var_scope(name),
-                        },
-                    ));
-                }
-            }
-            // `$this->method()`/`$this->prop` resolve directly (only
-            // `current_class` is needed, already in hand); any *other*
-            // receiver needs Stage B's own type-inference probe - this
-            // records enough (the receiver's own span, the member name,
-            // and the enclosing scope to re-check) for `lsp.rs`'s own
-            // orchestration to run that probe. The recorded span is the
-            // member NAME's own sub-span (`spans[0]`), not `expr.span` -
-            // the latter covers the whole `$x->method(...)` call
-            // including its arguments, which would make every
-            // `document_highlight` range for this arm too wide.
-            ExprKind::MethodCall(recv, method, _, _)
-            | ExprKind::PropertyAccess(recv, method, _) => {
-                self.expr(recv, ctx, current_class, out);
-                if self.anchor.matches(method.span) {
-                    let spans = [method.span];
-                    if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
-                        && let Some(owner) = current_class
-                    {
-                        out.push((
-                            spans[0],
-                            Resolved::Member(owner.to_string(), method.to_string()),
-                        ));
-                    } else {
-                        out.push((
-                            spans[0],
-                            Resolved::Instance {
-                                receiver_span: recv.span,
-                                member: method.to_string(),
+                ExprKind::Closure {
+                    params, uses, body, ..
+                } => {
+                    for p in params {
+                        self.param(p, ctx, current_class, out);
+                    }
+                    // A `use (&$x)`/`use ($x)` capture is itself a real,
+                    // navigable reference to the outer scope's `$x` -
+                    // resolved the same way an ordinary variable read is
+                    // (`probe_scope()` called *before* recursing into `body`,
+                    // since `current_function` is deliberately never updated
+                    // for a closure literal - see this file's own module doc -
+                    // so it still correctly points at the enclosing named
+                    // function/top-level scope, not the closure itself).
+                    // Each capture's own `var_scope` is resolved BEFORE this
+                    // closure's own frame is pushed below, since a `use`
+                    // clause names an OUTER variable, not one of the
+                    // closure's own locals.
+                    for u in uses {
+                        let var_scope = self.resolve_var_scope(&u.name);
+                        self.record(
+                            out,
+                            u.span,
+                            Resolved::VariableRead {
+                                span: u.span,
                                 scope: self.probe_scope(),
                                 is_static: self.current_is_static,
                                 class: current_class.map(str::to_string),
+                                name: u.name.clone(),
+                                var_scope,
                             },
-                        ));
+                        );
                     }
+                    let id = self.next_id();
+                    self.scope_frames.push(ScopeFrame::Closure {
+                        id,
+                        transparent: uses.iter().map(|u| u.name.clone()).collect(),
+                    });
+                    self.stmts(body, &mut ctx.clone(), current_class, out);
+                    self.scope_frames.pop();
+                    return;
                 }
-                any_child_expr(expr, |a| {
-                    if !std::ptr::eq(a, recv.as_ref()) {
-                        self.expr(a, ctx, current_class, out);
+                ExprKind::ArrowFn { params, body, .. } => {
+                    for p in params {
+                        self.param(p, ctx, current_class, out);
                     }
-                    false
-                });
-                return;
-            }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                self.class(decl, &mut ctx.clone(), out);
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, out);
+                    let id = self.next_id();
+                    self.scope_frames.push(ScopeFrame::ArrowFn {
+                        id,
+                        owns: params.iter().map(|p| p.name.clone()).collect(),
+                    });
+                    self.expr(body, &mut ctx.clone(), current_class, out);
+                    self.scope_frames.pop();
+                    return;
                 }
-                return;
+                _ => {}
             }
-            ExprKind::Closure {
-                params, uses, body, ..
-            } => {
-                for p in params {
-                    self.param(p, ctx, current_class, out);
-                }
-                // A `use (&$x)`/`use ($x)` capture is itself a real,
-                // navigable reference to the outer scope's `$x` -
-                // resolved the same way an ordinary variable read is
-                // (`probe_scope()` called *before* recursing into `body`,
-                // since `current_function` is deliberately never updated
-                // for a closure literal - see this file's own module doc -
-                // so it still correctly points at the enclosing named
-                // function/top-level scope, not the closure itself).
-                // Each capture's own `var_scope` is resolved BEFORE this
-                // closure's own frame is pushed below, since a `use`
-                // clause names an OUTER variable, not one of the
-                // closure's own locals.
-                for u in uses {
-                    let var_scope = self.resolve_var_scope(&u.name);
-                    self.record(
-                        out,
-                        u.span,
-                        Resolved::VariableRead {
-                            span: u.span,
-                            scope: self.probe_scope(),
-                            is_static: self.current_is_static,
-                            class: current_class.map(str::to_string),
-                            name: u.name.clone(),
-                            var_scope,
-                        },
-                    );
-                }
-                let id = self.next_id();
-                self.scope_frames.push(ScopeFrame::Closure {
-                    id,
-                    transparent: uses.iter().map(|u| u.name.clone()).collect(),
-                });
-                self.stmts(body, &mut ctx.clone(), current_class, out);
-                self.scope_frames.pop();
-                return;
-            }
-            ExprKind::ArrowFn { params, body, .. } => {
-                for p in params {
-                    self.param(p, ctx, current_class, out);
-                }
-                let id = self.next_id();
-                self.scope_frames.push(ScopeFrame::ArrowFn {
-                    id,
-                    owns: params.iter().map(|p| p.name.clone()).collect(),
-                });
-                self.expr(body, &mut ctx.clone(), current_class, out);
-                self.scope_frames.pop();
-                return;
-            }
-            _ => {}
-        }
-        any_child_expr(expr, |child| {
-            self.expr(child, ctx, current_class, out);
-            false
-        });
+            any_child_expr(expr, |child| {
+                self.expr(child, ctx, current_class, out);
+                false
+            });
+        })
     }
 
     fn param(

@@ -230,71 +230,75 @@ impl<'a> ClassFnRefWalker<'a> {
         current_class: Option<&str>,
         out: &mut Vec<(Span, RefTarget)>,
     ) {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, ctx, current_class, out),
-            StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, out),
-            StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-                for e in exprs {
-                    self.expr(e, ctx, current_class, out);
+        syntax::stack::guard(|| {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::Expression(e) | StmtKind::Throw(e) => {
+                    self.expr(e, ctx, current_class, out)
                 }
-            }
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => {
-                self.expr(cond, ctx, current_class, out);
-            }
-            StmtKind::For {
-                init, cond, step, ..
-            } => {
-                for e in init.iter().chain(cond).chain(step) {
-                    self.expr(e, ctx, current_class, out);
-                }
-            }
-            StmtKind::Foreach { subject, .. } => {
-                self.expr(subject, ctx, current_class, out);
-            }
-            StmtKind::FunctionDecl(f) => {
-                self.function(f, &mut ctx.clone(), current_class, out);
-            }
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, ctx, out),
-            StmtKind::ClassDecl(c) => self.class(c, ctx, out),
-            StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    self.expr(&c.value, ctx, current_class, out);
-                }
-            }
-            StmtKind::StaticVar(vars) => {
-                for (_, d) in vars {
-                    if let Some(e) = d {
+                StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, out),
+                StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
+                    for e in exprs {
                         self.expr(e, ctx, current_class, out);
                     }
                 }
-            }
-            StmtKind::Switch { subject, cases } => {
-                self.expr(subject, ctx, current_class, out);
-                for case in cases {
-                    if let Some(t) = &case.test {
-                        self.expr(t, ctx, current_class, out);
+                StmtKind::If { cond, .. }
+                | StmtKind::While { cond, .. }
+                | StmtKind::DoWhile { cond, .. } => {
+                    self.expr(cond, ctx, current_class, out);
+                }
+                StmtKind::For {
+                    init, cond, step, ..
+                } => {
+                    for e in init.iter().chain(cond).chain(step) {
+                        self.expr(e, ctx, current_class, out);
                     }
                 }
-            }
-            StmtKind::Try { catches, .. } => {
-                for c in catches {
-                    for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
-                        if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
-                            out.push((*span, RefTarget::Class(fqn)));
+                StmtKind::Foreach { subject, .. } => {
+                    self.expr(subject, ctx, current_class, out);
+                }
+                StmtKind::FunctionDecl(f) => {
+                    self.function(f, &mut ctx.clone(), current_class, out);
+                }
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => self.enum_decl(e, ctx, out),
+                StmtKind::ClassDecl(c) => self.class(c, ctx, out),
+                StmtKind::GlobalConst(consts) => {
+                    for c in consts {
+                        self.expr(&c.value, ctx, current_class, out);
+                    }
+                }
+                StmtKind::StaticVar(vars) => {
+                    for (_, d) in vars {
+                        if let Some(e) = d {
+                            self.expr(e, ctx, current_class, out);
                         }
                     }
                 }
+                StmtKind::Switch { subject, cases } => {
+                    self.expr(subject, ctx, current_class, out);
+                    for case in cases {
+                        if let Some(t) = &case.test {
+                            self.expr(t, ctx, current_class, out);
+                        }
+                    }
+                }
+                StmtKind::Try { catches, .. } => {
+                    for c in catches {
+                        for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
+                            if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+                                out.push((*span, RefTarget::Class(fqn)));
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        any_child_stmt(stmt, |child| {
-            self.stmt(child, ctx, current_class, out);
-            false
-        });
+            any_child_stmt(stmt, |child| {
+                self.stmt(child, ctx, current_class, out);
+                false
+            });
+        })
     }
 
     fn expr(
@@ -304,102 +308,104 @@ impl<'a> ClassFnRefWalker<'a> {
         current_class: Option<&str>,
         out: &mut Vec<(Span, RefTarget)>,
     ) {
-        match &expr.kind {
-            ExprKind::Call(callee, args) => {
-                if let ExprKind::Name(n) = &callee.kind {
-                    if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
-                        out.push((callee.span, RefTarget::Function(fqn)));
-                    }
-                } else {
-                    self.expr(callee, ctx, current_class, out);
-                }
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, out);
-                }
-                return;
-            }
-            ExprKind::New(callee, args) => {
-                if let ExprKind::Name(n) = &callee.kind {
-                    if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
-                        out.push((callee.span, RefTarget::Class(fqn)));
-                    }
-                } else {
-                    self.expr(callee, ctx, current_class, out);
-                }
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, out);
-                }
-                return;
-            }
-            ExprKind::Name(n) => {
-                if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
-                    // Same function-preferred disambiguation as
-                    // `navigation.rs`'s identical arm - a bare `Name` node
-                    // reached any other way than a `Call`/`New` callee
-                    // (e.g. a first-class-callable target `foo(...)`).
-                    out.push((expr.span, RefTarget::Function(fqn)));
-                }
-            }
-            ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), _)
-            | ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span))
-            | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, class_span), _)
-            | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, class_span), _) => {
-                if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
-                    let span = if self.source.is_some() {
-                        *class_span
+        syntax::stack::guard(|| {
+            match &expr.kind {
+                ExprKind::Call(callee, args) => {
+                    if let ExprKind::Name(n) = &callee.kind {
+                        if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
+                            out.push((callee.span, RefTarget::Function(fqn)));
+                        }
                     } else {
-                        expr.span
-                    };
-                    out.push((span, RefTarget::Class(fqn)));
+                        self.expr(callee, ctx, current_class, out);
+                    }
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, out);
+                    }
+                    return;
                 }
-            }
-            // A genuinely dynamic receiver has no class-name text to
-            // record a reference for here at all - any name reference
-            // buried inside it is still picked up by the generic
-            // `any_child_expr` walk below (it's a real child of this
-            // node now, not a discarded `"?"` sentinel).
-            ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
-                if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
-                    let span = if self.source.is_some() {
-                        *class_span
+                ExprKind::New(callee, args) => {
+                    if let ExprKind::Name(n) = &callee.kind {
+                        if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
+                            out.push((callee.span, RefTarget::Class(fqn)));
+                        }
                     } else {
-                        expr.span
-                    };
-                    out.push((span, RefTarget::Class(fqn)));
+                        self.expr(callee, ctx, current_class, out);
+                    }
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, out);
+                    }
+                    return;
                 }
-            }
-            ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
-                if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
-                    out.push((*span, RefTarget::Class(fqn)));
+                ExprKind::Name(n) => {
+                    if let Some(fqn) = resolve_class_ref(n, current_class, ctx) {
+                        // Same function-preferred disambiguation as
+                        // `navigation.rs`'s identical arm - a bare `Name` node
+                        // reached any other way than a `Call`/`New` callee
+                        // (e.g. a first-class-callable target `foo(...)`).
+                        out.push((expr.span, RefTarget::Function(fqn)));
+                    }
                 }
-            }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                self.class(decl, &mut ctx.clone(), out);
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, out);
+                ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), _)
+                | ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span))
+                | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, class_span), _)
+                | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, class_span), _) => {
+                    if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
+                        let span = if self.source.is_some() {
+                            *class_span
+                        } else {
+                            expr.span
+                        };
+                        out.push((span, RefTarget::Class(fqn)));
+                    }
                 }
-                return;
-            }
-            ExprKind::Closure { params, body, .. } => {
-                for p in params {
-                    self.param(p, ctx, current_class, out);
+                // A genuinely dynamic receiver has no class-name text to
+                // record a reference for here at all - any name reference
+                // buried inside it is still picked up by the generic
+                // `any_child_expr` walk below (it's a real child of this
+                // node now, not a discarded `"?"` sentinel).
+                ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
+                    if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
+                        let span = if self.source.is_some() {
+                            *class_span
+                        } else {
+                            expr.span
+                        };
+                        out.push((span, RefTarget::Class(fqn)));
+                    }
                 }
-                self.stmts(body, &mut ctx.clone(), current_class, out);
-                return;
-            }
-            ExprKind::ArrowFn { params, body, .. } => {
-                for p in params {
-                    self.param(p, ctx, current_class, out);
+                ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
+                    if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+                        out.push((*span, RefTarget::Class(fqn)));
+                    }
                 }
-                self.expr(body, &mut ctx.clone(), current_class, out);
-                return;
+                ExprKind::NewAnonymousClass(decl, args) => {
+                    self.class(decl, &mut ctx.clone(), out);
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, out);
+                    }
+                    return;
+                }
+                ExprKind::Closure { params, body, .. } => {
+                    for p in params {
+                        self.param(p, ctx, current_class, out);
+                    }
+                    self.stmts(body, &mut ctx.clone(), current_class, out);
+                    return;
+                }
+                ExprKind::ArrowFn { params, body, .. } => {
+                    for p in params {
+                        self.param(p, ctx, current_class, out);
+                    }
+                    self.expr(body, &mut ctx.clone(), current_class, out);
+                    return;
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        any_child_expr(expr, |child| {
-            self.expr(child, ctx, current_class, out);
-            false
-        });
+            any_child_expr(expr, |child| {
+                self.expr(child, ctx, current_class, out);
+                false
+            });
+        })
     }
 
     fn function(

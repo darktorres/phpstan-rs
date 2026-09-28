@@ -34,7 +34,7 @@ enum Effects {
 }
 
 fn is_local_assign_target(target: &Expr) -> bool {
-    match &target.kind {
+    syntax::stack::guard(|| match &target.kind {
         ExprKind::Variable(name) => name.as_ref() != "this",
         ExprKind::ArrayLiteral(items) | ExprKind::List(items) => items.iter().all(|item| {
             item.key
@@ -43,7 +43,7 @@ fn is_local_assign_target(target: &Expr) -> bool {
                 && is_local_assign_target(&item.value)
         }),
         _ => false,
-    }
+    })
 }
 
 /// The strongest effect anywhere in `e`'s subtree. A nested closure or

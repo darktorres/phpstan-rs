@@ -210,22 +210,24 @@ fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut 
 }
 
 fn is_new_self_instance(e: &Expr, class_name: &str) -> bool {
-    match &e.kind {
-        ExprKind::New(callee, _) => {
-            let ExprKind::Name(name) = &callee.kind else {
-                return false;
-            };
-            let name = name.trim_start_matches('\\');
-            name.eq_ignore_ascii_case("self")
-                || name.eq_ignore_ascii_case("static")
-                || name == class_name
-                || name.ends_with(&format!("\\{class_name}"))
+    syntax::stack::guard(|| {
+        match &e.kind {
+            ExprKind::New(callee, _) => {
+                let ExprKind::Name(name) = &callee.kind else {
+                    return false;
+                };
+                let name = name.trim_start_matches('\\');
+                name.eq_ignore_ascii_case("self")
+                    || name.eq_ignore_ascii_case("static")
+                    || name == class_name
+                    || name.ends_with(&format!("\\{class_name}"))
+            }
+            // A chained assignment (`$node = $tag->node = new static;`)
+            // whose right-hand side is itself another `Assign`, not a bare
+            // `New` - unwrapped recursively until the actual `new` expression
+            // at the tail is reached.
+            ExprKind::Assign(_, rhs) => is_new_self_instance(rhs, class_name),
+            _ => false,
         }
-        // A chained assignment (`$node = $tag->node = new static;`)
-        // whose right-hand side is itself another `Assign`, not a bare
-        // `New` - unwrapped recursively until the actual `new` expression
-        // at the tail is reached.
-        ExprKind::Assign(_, rhs) => is_new_self_instance(rhs, class_name),
-        _ => false,
-    }
+    })
 }

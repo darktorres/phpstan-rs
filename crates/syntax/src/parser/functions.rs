@@ -151,12 +151,10 @@ impl Parser {
         let body_open = has_body
             .then(|| self.spans.get(self.pos).copied())
             .flatten();
-        let body = if !has_body {
-            Vec::new()
-        } else if let StmtKind::Block(stmts) = self.parse_block()?.kind {
-            stmts
+        let body = if has_body {
+            self.parse_stmt_list_block()?
         } else {
-            unreachable!()
+            Vec::new()
         };
         Ok(FunctionDecl {
             namespaced_name: None,

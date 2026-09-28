@@ -1345,25 +1345,33 @@ fn demo_with_a_file_argument_parses_and_checks_that_file() {
 }
 
 #[test]
-fn check_does_not_crash_on_realistically_deep_nested_expressions() {
-    // `run_check`'s worker threads must spawn with a stack large enough
-    // for the parser's own MAX_EXPR_DEPTH=1000 guard to safely trip
-    // before physically exhausting the stack (Rust's default ~2MiB is
-    // not enough). ~500 levels of nested parentheses (a realistic depth
-    // for generated/minified code, not an extreme adversarial input)
-    // would otherwise hard-crash the process with an uncatchable
-    // SIGABRT well short of that guard. Checking for the absence of a
-    // signal specifically (not just a non-zero exit code) - a graceful
-    // "expression nested too deeply" parse failure is still a real,
-    // intentional, non-zero-exit-free success from the process's own
-    // perspective; a SIGABRT is the actual regression this guards
-    // against.
+fn check_does_not_crash_on_deep_nesting_or_long_chains() {
+    // Nesting and flat chains alike build deep trees; every walk over them
+    // grows its stack on demand, so none may abort the process.
     use std::os::unix::process::ExitStatusExt;
 
     let dir = TempDir::new("deep_nesting");
-    let depth = 500;
-    let nested = format!("<?php $x = {}1{};", "(".repeat(depth), ")".repeat(depth));
-    dir.write("deep.php", &nested);
+    let depth = 3_000;
+    dir.write(
+        "parens.php",
+        &format!("<?php $x = {}1{};", "(".repeat(depth), ")".repeat(depth)),
+    );
+    dir.write(
+        "concat.php",
+        &format!(
+            "<?php function f(string $s): string {{ return $s{}; }}",
+            " . $s".repeat(depth)
+        ),
+    );
+    dir.write(
+        "elseif.php",
+        &format!(
+            "<?php function f(int $x): int {{ if ($x === 0) {{ return 0; }} {} return -1; }}",
+            (1..depth)
+                .map(|i| format!("elseif ($x === {i}) {{ return {i}; }}"))
+                .collect::<String>()
+        ),
+    );
 
     let output = bin().arg("check").arg(dir.path()).output().unwrap();
     assert_eq!(

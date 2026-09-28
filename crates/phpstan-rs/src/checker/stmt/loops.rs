@@ -486,57 +486,61 @@ impl<'a> Checker<'a> {
     /// since the interface's declared generics are still a likely-correct
     /// answer in that case.
     pub(crate) fn iterable_element_type(&self, ty: &Type) -> Option<(Type, Type)> {
-        let members = ty.union_members();
-        if members.len() > 1 {
-            let mut keys = Vec::new();
-            let mut values = Vec::new();
-            for m in members {
-                let (k, v) = self.iterable_element_type(m)?;
-                keys.push(k);
-                values.push(v);
-            }
-            return Some((
-                keys.into_iter()
-                    .reduce(Type::union)
-                    .unwrap_or(Type::mixed()),
-                values
-                    .into_iter()
-                    .reduce(Type::union)
-                    .unwrap_or(Type::mixed()),
-            ));
-        }
-        let (name, args) = ty.as_object()?;
-        if self.registry.is_subclass_of(name, "IteratorAggregate") {
-            let agg_bindings =
-                self.registry
-                    .class_template_bindings(name, args, "IteratorAggregate");
-            if let Some(sig) = self.registry.lookup_method(name, "getIterator") {
-                let declared = self.resolve_pseudo(sig.return_type(), name);
-                // Avoid infinite recursion on a `getIterator(): static`
-                // that resolved right back to this same class.
-                let recurses_into_self =
-                    declared.as_object().is_some_and(|(inner, _)| inner == name);
-                if !recurses_into_self && let Some(result) = self.iterable_element_type(&declared) {
-                    return Some(result);
+        syntax::stack::guard(|| {
+            let members = ty.union_members();
+            if members.len() > 1 {
+                let mut keys = Vec::new();
+                let mut values = Vec::new();
+                for m in members {
+                    let (k, v) = self.iterable_element_type(m)?;
+                    keys.push(k);
+                    values.push(v);
                 }
-            }
-            if !agg_bindings.is_empty() {
                 return Some((
-                    agg_bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
-                    agg_bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
+                    keys.into_iter()
+                        .reduce(Type::union)
+                        .unwrap_or(Type::mixed()),
+                    values
+                        .into_iter()
+                        .reduce(Type::union)
+                        .unwrap_or(Type::mixed()),
                 ));
             }
-        }
-        let bindings = self
-            .registry
-            .class_template_bindings(name, args, "Iterator");
-        if bindings.is_empty() {
-            return None;
-        }
-        Some((
-            bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
-            bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
-        ))
+            let (name, args) = ty.as_object()?;
+            if self.registry.is_subclass_of(name, "IteratorAggregate") {
+                let agg_bindings =
+                    self.registry
+                        .class_template_bindings(name, args, "IteratorAggregate");
+                if let Some(sig) = self.registry.lookup_method(name, "getIterator") {
+                    let declared = self.resolve_pseudo(sig.return_type(), name);
+                    // Avoid infinite recursion on a `getIterator(): static`
+                    // that resolved right back to this same class.
+                    let recurses_into_self =
+                        declared.as_object().is_some_and(|(inner, _)| inner == name);
+                    if !recurses_into_self
+                        && let Some(result) = self.iterable_element_type(&declared)
+                    {
+                        return Some(result);
+                    }
+                }
+                if !agg_bindings.is_empty() {
+                    return Some((
+                        agg_bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
+                        agg_bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
+                    ));
+                }
+            }
+            let bindings = self
+                .registry
+                .class_template_bindings(name, args, "Iterator");
+            if bindings.is_empty() {
+                return None;
+            }
+            Some((
+                bindings.get("TKey").cloned().unwrap_or(Type::mixed()),
+                bindings.get("TValue").cloned().unwrap_or(Type::mixed()),
+            ))
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

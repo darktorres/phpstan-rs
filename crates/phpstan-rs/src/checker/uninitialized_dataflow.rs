@@ -171,7 +171,7 @@ fn is_this(e: &Expr) -> bool {
 /// caller, just never treated as a further `$this`-rooted absorption
 /// target beyond that point.
 fn resolves_to_this(e: &Expr, ctx: &PropertyInitCtx) -> bool {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::Variable(v) => **v == *"this",
         ExprKind::MethodCall(recv, name, _, _) if resolves_to_this(recv, ctx) => ctx
             .checker
@@ -179,7 +179,7 @@ fn resolves_to_this(e: &Expr, ctx: &PropertyInitCtx) -> bool {
             .lookup_method(&ctx.checked_class, name)
             .is_some_and(|sig| sig.return_type_native().is_self_reference()),
         _ => false,
-    }
+    })
 }
 
 fn intersect(a: PropertyInitState, b: &PropertyInitState) -> PropertyInitState {
@@ -201,7 +201,7 @@ fn walk_quiet_probe(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(base, _, _) => walk_quiet_probe(base, state, ctx, declaring_class),
         ExprKind::DynamicPropertyAccess(base, name_expr) => {
             state = walk_quiet_probe(base, state, ctx, declaring_class);
@@ -215,7 +215,7 @@ fn walk_quiet_probe(
             }
         }
         _ => walk_expr(e, state, ctx, declaring_class),
-    }
+    })
 }
 
 fn walk_stmts(
@@ -244,7 +244,7 @@ fn walk_stmts(
 /// safe (could only miss a real finding downstream, never invent a false
 /// one).
 fn stmt_definitely_terminates(stmt: &Stmt) -> bool {
-    match &stmt.kind {
+    syntax::stack::guard(|| match &stmt.kind {
         StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break(_) | StmtKind::Continue(_) => {
             true
         }
@@ -258,7 +258,7 @@ fn stmt_definitely_terminates(stmt: &Stmt) -> bool {
             ..
         } => stmt_definitely_terminates(then_branch) && stmt_definitely_terminates(else_branch),
         _ => false,
-    }
+    })
 }
 
 fn walk_stmt(
@@ -267,157 +267,162 @@ fn walk_stmt(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    match &stmt.kind {
-        StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr(e, state, ctx, declaring_class),
-        StmtKind::Return(Some(e)) => walk_expr(e, state, ctx, declaring_class),
-        StmtKind::Echo(exprs) => {
-            for e in exprs {
-                state = walk_expr(e, state, ctx, declaring_class);
+    syntax::stack::guard(|| {
+        match &stmt.kind {
+            StmtKind::Expression(e) | StmtKind::Throw(e) => {
+                walk_expr(e, state, ctx, declaring_class)
             }
-            state
-        }
-        StmtKind::StaticVar(vars) => {
-            for (_, init) in vars {
-                if let Some(e) = init {
+            StmtKind::Return(Some(e)) => walk_expr(e, state, ctx, declaring_class),
+            StmtKind::Echo(exprs) => {
+                for e in exprs {
                     state = walk_expr(e, state, ctx, declaring_class);
                 }
+                state
             }
-            state
-        }
-        StmtKind::Block(stmts)
-        | StmtKind::Declare {
-            body: Some(stmts), ..
-        } => walk_stmts(stmts, state, ctx, declaring_class),
-        // `unset($this->prop)` is neither a read nor an initializer: it
-        // never throws whatever the property's state, and leaves a typed
-        // property uninitialized again.
-        StmtKind::Unset(targets) => {
-            for target in targets {
-                if let ExprKind::PropertyAccess(base, name, _) = &target.kind
-                    && is_this(base)
-                {
-                    state = state.without(&*name.name);
-                    continue;
-                }
-                state = walk_expr(target, state, ctx, declaring_class);
-            }
-            state
-        }
-        StmtKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            // A branch that unconditionally exits the method (an
-            // `if (...) { return ...; }` guard-clause with no `else`)
-            // doesn't get to vote on what's true afterward - otherwise
-            // code placed after such a guard would be wrongly analyzed as
-            // if it could also run on the path the guard already ruled
-            // out.
-            let state_after_cond = walk_expr(cond, state, ctx, declaring_class);
-            let then_terminates = stmt_definitely_terminates(then_branch);
-            let then_state = walk_stmt(then_branch, state_after_cond.clone(), ctx, declaring_class);
-            match else_branch {
-                Some(else_stmt) => {
-                    let else_terminates = stmt_definitely_terminates(else_stmt);
-                    let else_state =
-                        walk_stmt(else_stmt, state_after_cond.clone(), ctx, declaring_class);
-                    match (then_terminates, else_terminates) {
-                        (true, true) => state_after_cond, // unreachable past here either way
-                        (true, false) => else_state,
-                        (false, true) => then_state,
-                        (false, false) => intersect(then_state, &else_state),
+            StmtKind::StaticVar(vars) => {
+                for (_, init) in vars {
+                    if let Some(e) = init {
+                        state = walk_expr(e, state, ctx, declaring_class);
                     }
                 }
-                None if then_terminates => state_after_cond,
-                None => intersect(then_state, &state_after_cond),
+                state
             }
-        }
-        // `while`/`for`/`foreach` may run their own body zero times - see
-        // the module doc comment for why intersecting the zero-iteration
-        // state with the one-iteration state is the exact, sound answer.
-        StmtKind::While { cond, body } => {
-            let state_after_cond = walk_expr(cond, state, ctx, declaring_class);
-            let one_pass = walk_stmt(body, state_after_cond.clone(), ctx, declaring_class);
-            intersect(state_after_cond, &one_pass)
-        }
-        StmtKind::For {
-            init,
-            cond,
-            step,
-            body,
-        } => {
-            for e in init {
-                state = walk_expr(e, state, ctx, declaring_class);
-            }
-            for e in cond {
-                state = walk_expr(e, state, ctx, declaring_class);
-            }
-            // `body`/`step` may never run at all (`cond` false on the
-            // very first check).
-            let mut body_state = walk_stmt(body, state.clone(), ctx, declaring_class);
-            for e in step {
-                body_state = walk_expr(e, body_state, ctx, declaring_class);
-            }
-            intersect(state, &body_state)
-        }
-        StmtKind::Foreach { subject, body, .. } => {
-            let state_after_subject = walk_expr(subject, state, ctx, declaring_class);
-            let one_pass = walk_stmt(body, state_after_subject.clone(), ctx, declaring_class);
-            intersect(state_after_subject, &one_pass)
-        }
-        // `do ... while` runs its own body at least once - unlike the
-        // three loop kinds above, the state after walking it exactly
-        // once is the exact answer, not a lower bound.
-        StmtKind::DoWhile { body, cond } => {
-            state = walk_stmt(body, state, ctx, declaring_class);
-            walk_expr(cond, state, ctx, declaring_class)
-        }
-        StmtKind::Switch { subject, cases } => {
-            let base = walk_expr(subject, state, ctx, declaring_class);
-            let mut merged: Option<PropertyInitState> = None;
-            for case in cases {
-                let mut case_state = base.clone();
-                if let Some(test) = &case.test {
-                    case_state = walk_expr(test, case_state, ctx, declaring_class);
+            StmtKind::Block(stmts)
+            | StmtKind::Declare {
+                body: Some(stmts), ..
+            } => walk_stmts(stmts, state, ctx, declaring_class),
+            // `unset($this->prop)` is neither a read nor an initializer: it
+            // never throws whatever the property's state, and leaves a typed
+            // property uninitialized again.
+            StmtKind::Unset(targets) => {
+                for target in targets {
+                    if let ExprKind::PropertyAccess(base, name, _) = &target.kind
+                        && is_this(base)
+                    {
+                        state = state.without(&*name.name);
+                        continue;
+                    }
+                    state = walk_expr(target, state, ctx, declaring_class);
                 }
-                let case_end = walk_stmts(&case.body, case_state, ctx, declaring_class);
-                merged = Some(match merged {
-                    Some(acc) => intersect(acc, &case_end),
-                    None => case_end,
-                });
+                state
             }
-            merged.unwrap_or(base)
+            StmtKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                // A branch that unconditionally exits the method (an
+                // `if (...) { return ...; }` guard-clause with no `else`)
+                // doesn't get to vote on what's true afterward - otherwise
+                // code placed after such a guard would be wrongly analyzed as
+                // if it could also run on the path the guard already ruled
+                // out.
+                let state_after_cond = walk_expr(cond, state, ctx, declaring_class);
+                let then_terminates = stmt_definitely_terminates(then_branch);
+                let then_state =
+                    walk_stmt(then_branch, state_after_cond.clone(), ctx, declaring_class);
+                match else_branch {
+                    Some(else_stmt) => {
+                        let else_terminates = stmt_definitely_terminates(else_stmt);
+                        let else_state =
+                            walk_stmt(else_stmt, state_after_cond.clone(), ctx, declaring_class);
+                        match (then_terminates, else_terminates) {
+                            (true, true) => state_after_cond, // unreachable past here either way
+                            (true, false) => else_state,
+                            (false, true) => then_state,
+                            (false, false) => intersect(then_state, &else_state),
+                        }
+                    }
+                    None if then_terminates => state_after_cond,
+                    None => intersect(then_state, &state_after_cond),
+                }
+            }
+            // `while`/`for`/`foreach` may run their own body zero times - see
+            // the module doc comment for why intersecting the zero-iteration
+            // state with the one-iteration state is the exact, sound answer.
+            StmtKind::While { cond, body } => {
+                let state_after_cond = walk_expr(cond, state, ctx, declaring_class);
+                let one_pass = walk_stmt(body, state_after_cond.clone(), ctx, declaring_class);
+                intersect(state_after_cond, &one_pass)
+            }
+            StmtKind::For {
+                init,
+                cond,
+                step,
+                body,
+            } => {
+                for e in init {
+                    state = walk_expr(e, state, ctx, declaring_class);
+                }
+                for e in cond {
+                    state = walk_expr(e, state, ctx, declaring_class);
+                }
+                // `body`/`step` may never run at all (`cond` false on the
+                // very first check).
+                let mut body_state = walk_stmt(body, state.clone(), ctx, declaring_class);
+                for e in step {
+                    body_state = walk_expr(e, body_state, ctx, declaring_class);
+                }
+                intersect(state, &body_state)
+            }
+            StmtKind::Foreach { subject, body, .. } => {
+                let state_after_subject = walk_expr(subject, state, ctx, declaring_class);
+                let one_pass = walk_stmt(body, state_after_subject.clone(), ctx, declaring_class);
+                intersect(state_after_subject, &one_pass)
+            }
+            // `do ... while` runs its own body at least once - unlike the
+            // three loop kinds above, the state after walking it exactly
+            // once is the exact answer, not a lower bound.
+            StmtKind::DoWhile { body, cond } => {
+                state = walk_stmt(body, state, ctx, declaring_class);
+                walk_expr(cond, state, ctx, declaring_class)
+            }
+            StmtKind::Switch { subject, cases } => {
+                let base = walk_expr(subject, state, ctx, declaring_class);
+                let mut merged: Option<PropertyInitState> = None;
+                for case in cases {
+                    let mut case_state = base.clone();
+                    if let Some(test) = &case.test {
+                        case_state = walk_expr(test, case_state, ctx, declaring_class);
+                    }
+                    let case_end = walk_stmts(&case.body, case_state, ctx, declaring_class);
+                    merged = Some(match merged {
+                        Some(acc) => intersect(acc, &case_end),
+                        None => case_end,
+                    });
+                }
+                merged.unwrap_or(base)
+            }
+            StmtKind::Try {
+                body,
+                catches,
+                finally,
+            } => {
+                // Matches `checker/stmt.rs`'s existing `StmtKind::Try`
+                // handling: each catch clause starts from a clone of the try
+                // body's completed end state, not a conservative "could have
+                // thrown before any statement" entry.
+                let try_end = walk_stmts(body, state, ctx, declaring_class);
+                let mut branch_states = vec![try_end.clone()];
+                for c in catches {
+                    branch_states.push(walk_stmts(&c.body, try_end.clone(), ctx, declaring_class));
+                }
+                let mut merged = branch_states
+                    .into_iter()
+                    .reduce(|acc, s| intersect(acc, &s))
+                    .unwrap_or_default();
+                if let Some(finally_body) = finally {
+                    merged = walk_stmts(finally_body, merged, ctx, declaring_class);
+                }
+                merged
+            }
+            // Every other statement kind either carries no expression this
+            // module cares about (`Break`/`Continue`/`Global`/`Goto`/`Label`/
+            // `InlineHtml`/`Return(None)`) or is a nested declaration this
+            // module deliberately doesn't descend into.
+            _ => state,
         }
-        StmtKind::Try {
-            body,
-            catches,
-            finally,
-        } => {
-            // Matches `checker/stmt.rs`'s existing `StmtKind::Try`
-            // handling: each catch clause starts from a clone of the try
-            // body's completed end state, not a conservative "could have
-            // thrown before any statement" entry.
-            let try_end = walk_stmts(body, state, ctx, declaring_class);
-            let mut branch_states = vec![try_end.clone()];
-            for c in catches {
-                branch_states.push(walk_stmts(&c.body, try_end.clone(), ctx, declaring_class));
-            }
-            let mut merged = branch_states
-                .into_iter()
-                .reduce(|acc, s| intersect(acc, &s))
-                .unwrap_or_default();
-            if let Some(finally_body) = finally {
-                merged = walk_stmts(finally_body, merged, ctx, declaring_class);
-            }
-            merged
-        }
-        // Every other statement kind either carries no expression this
-        // module cares about (`Break`/`Continue`/`Global`/`Goto`/`Label`/
-        // `InlineHtml`/`Return(None)`) or is a nested declaration this
-        // module deliberately doesn't descend into.
-        _ => state,
-    }
+    })
 }
 
 fn walk_expr(
@@ -426,126 +431,130 @@ fn walk_expr(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    match &e.kind {
-        ExprKind::PropertyAccess(base, name, _) => {
-            state = walk_expr(base, state, ctx, declaring_class);
-            if is_this(base) && ctx.candidates.contains(&*name.name) && !state.contains(&*name.name)
-            {
-                ctx.premature_reads.push((name.to_string(), e.span));
+    syntax::stack::guard(|| {
+        match &e.kind {
+            ExprKind::PropertyAccess(base, name, _) => {
+                state = walk_expr(base, state, ctx, declaring_class);
+                if is_this(base)
+                    && ctx.candidates.contains(&*name.name)
+                    && !state.contains(&*name.name)
+                {
+                    ctx.premature_reads.push((name.to_string(), e.span));
+                }
+                state
             }
-            state
-        }
-        ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
-            state = walk_expr(rhs, state, ctx, declaring_class);
-            assign_target(lhs, state, ctx, declaring_class)
-        }
-        // `??=`'s isset-based left check never throws even when genuinely
-        // uninitialized - never a premature-read site (quiet-probed,
-        // exactly like bare `??`/`isset()` below), and always leaves the
-        // property initialized afterward, exactly like a plain
-        // assignment.
-        ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
-            state = walk_quiet_probe(lhs, state, ctx, declaring_class);
-            state = walk_expr(rhs, state, ctx, declaring_class);
-            assign_target(lhs, state, ctx, declaring_class)
-        }
-        // Any other compound operator (`.=`, `+=`, ...) reads its own
-        // left side first, exactly like a bare read - real PHP throws for
-        // these the same way it would for a plain read.
-        ExprKind::CompoundAssign(_, lhs, rhs) => {
-            state = walk_expr(lhs, state, ctx, declaring_class);
-            walk_expr(rhs, state, ctx, declaring_class)
-        }
-        // Bare `??` (not `??=`): its left side is exactly as quiet as
-        // `isset()`'s argument (real PHP: `??`'s left-hand check is
-        // defined in terms of `isset()`), for the whole probed chain, not
-        // just a bare top-level property.
-        ExprKind::Binary(BinOp::Coalesce, lhs, rhs) => {
-            state = walk_quiet_probe(lhs, state, ctx, declaring_class);
-            walk_expr(rhs, state, ctx, declaring_class)
-        }
-        // `isset($this->prop)`/`empty($this->prop)` - same quiet-probe
-        // exemption as `??`'s left side, and neither one ever initializes
-        // anything.
-        ExprKind::Isset(operands) => {
-            for operand in operands {
-                state = walk_quiet_probe(operand, state, ctx, declaring_class);
+            ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
+                state = walk_expr(rhs, state, ctx, declaring_class);
+                assign_target(lhs, state, ctx, declaring_class)
             }
-            state
-        }
-        ExprKind::Empty(operand) => walk_quiet_probe(operand, state, ctx, declaring_class),
-        ExprKind::MethodCall(recv, name, args, _) => {
-            state = walk_expr(recv, state, ctx, declaring_class);
-            for a in args {
-                state = walk_expr(&a.value, state, ctx, declaring_class);
+            // `??=`'s isset-based left check never throws even when genuinely
+            // uninitialized - never a premature-read site (quiet-probed,
+            // exactly like bare `??`/`isset()` below), and always leaves the
+            // property initialized afterward, exactly like a plain
+            // assignment.
+            ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {
+                state = walk_quiet_probe(lhs, state, ctx, declaring_class);
+                state = walk_expr(rhs, state, ctx, declaring_class);
+                assign_target(lhs, state, ctx, declaring_class)
             }
-            // `resolves_to_this`, not a bare `is_this` receiver check: a
-            // fluent setter chain (`$this->setChannel(...)
-            // ->setUsername(...)->includeContextAndExtra(...)`) has a
-            // `MethodCall` as the receiver for every call after the
-            // first, not literally `$this`, even though it evaluates to
-            // the same object (a `: self`/`: static`-returning setter).
-            if resolves_to_this(recv, ctx) {
-                // Virtual dispatch: always against `checked_class` (the
-                // original, most-derived class), never `declaring_class`
-                // (whatever class the currently-recursed-into method body
-                // happens to live on).
-                let checked_class = ctx.checked_class.clone();
-                state = absorb(&checked_class, name, state, ctx);
+            // Any other compound operator (`.=`, `+=`, ...) reads its own
+            // left side first, exactly like a bare read - real PHP throws for
+            // these the same way it would for a plain read.
+            ExprKind::CompoundAssign(_, lhs, rhs) => {
+                state = walk_expr(lhs, state, ctx, declaring_class);
+                walk_expr(rhs, state, ctx, declaring_class)
             }
-            state
-        }
-        ExprKind::StaticCall(receiver, name, args) => {
-            for a in args {
-                state = walk_expr(&a.value, state, ctx, declaring_class);
+            // Bare `??` (not `??=`): its left side is exactly as quiet as
+            // `isset()`'s argument (real PHP: `??`'s left-hand check is
+            // defined in terms of `isset()`), for the whole probed chain, not
+            // just a bare top-level property.
+            ExprKind::Binary(BinOp::Coalesce, lhs, rhs) => {
+                state = walk_quiet_probe(lhs, state, ctx, declaring_class);
+                walk_expr(rhs, state, ctx, declaring_class)
             }
-            // Only the three pseudo-keywords are resolved - a literal
-            // class name (`Foo::bar()`) is out of scope, since this
-            // walker only resolves to a real method on the same class -
-            // same for a genuinely dynamic receiver, which has no name
-            // to compare against these keywords at all.
-            let is_receiver = |kw: &str| {
-                receiver
-                    .as_name()
-                    .is_some_and(|n| n.eq_ignore_ascii_case(kw))
-            };
-            let target = if is_receiver("parent") {
-                // `parent::` is lexical, not virtual: it always means
-                // "the immediate parent of whichever class the *current*
-                // code is written in" - `declaring_class`'s own parent,
-                // never `checked_class`'s.
-                ctx.checker
-                    .registry
-                    .lookup_ancestor_method_with_owner(declaring_class, name)
-            } else if is_receiver("self") {
-                // `self::` is also lexical (no late static binding),
-                // unlike `static::` below - real PHP resolves it against
-                // the class the code is written in, walking that class's
-                // own ancestors from there, not `checked_class`'s. Doesn't
-                // distinguish an actual subclass override further down
-                // `checked_class`'s own chain.
-                ctx.checker
-                    .registry
-                    .lookup_method_with_owner(declaring_class, name)
-            } else if is_receiver("static") {
-                // Late static binding: virtual, exactly like `$this->`.
-                let checked_class = ctx.checked_class.clone();
-                ctx.checker
-                    .registry
-                    .lookup_method_with_owner(&checked_class, name)
-            } else {
-                None
-            };
-            absorb_resolved(target, name, state, ctx)
+            // `isset($this->prop)`/`empty($this->prop)` - same quiet-probe
+            // exemption as `??`'s left side, and neither one ever initializes
+            // anything.
+            ExprKind::Isset(operands) => {
+                for operand in operands {
+                    state = walk_quiet_probe(operand, state, ctx, declaring_class);
+                }
+                state
+            }
+            ExprKind::Empty(operand) => walk_quiet_probe(operand, state, ctx, declaring_class),
+            ExprKind::MethodCall(recv, name, args, _) => {
+                state = walk_expr(recv, state, ctx, declaring_class);
+                for a in args {
+                    state = walk_expr(&a.value, state, ctx, declaring_class);
+                }
+                // `resolves_to_this`, not a bare `is_this` receiver check: a
+                // fluent setter chain (`$this->setChannel(...)
+                // ->setUsername(...)->includeContextAndExtra(...)`) has a
+                // `MethodCall` as the receiver for every call after the
+                // first, not literally `$this`, even though it evaluates to
+                // the same object (a `: self`/`: static`-returning setter).
+                if resolves_to_this(recv, ctx) {
+                    // Virtual dispatch: always against `checked_class` (the
+                    // original, most-derived class), never `declaring_class`
+                    // (whatever class the currently-recursed-into method body
+                    // happens to live on).
+                    let checked_class = ctx.checked_class.clone();
+                    state = absorb(&checked_class, name, state, ctx);
+                }
+                state
+            }
+            ExprKind::StaticCall(receiver, name, args) => {
+                for a in args {
+                    state = walk_expr(&a.value, state, ctx, declaring_class);
+                }
+                // Only the three pseudo-keywords are resolved - a literal
+                // class name (`Foo::bar()`) is out of scope, since this
+                // walker only resolves to a real method on the same class -
+                // same for a genuinely dynamic receiver, which has no name
+                // to compare against these keywords at all.
+                let is_receiver = |kw: &str| {
+                    receiver
+                        .as_name()
+                        .is_some_and(|n| n.eq_ignore_ascii_case(kw))
+                };
+                let target = if is_receiver("parent") {
+                    // `parent::` is lexical, not virtual: it always means
+                    // "the immediate parent of whichever class the *current*
+                    // code is written in" - `declaring_class`'s own parent,
+                    // never `checked_class`'s.
+                    ctx.checker
+                        .registry
+                        .lookup_ancestor_method_with_owner(declaring_class, name)
+                } else if is_receiver("self") {
+                    // `self::` is also lexical (no late static binding),
+                    // unlike `static::` below - real PHP resolves it against
+                    // the class the code is written in, walking that class's
+                    // own ancestors from there, not `checked_class`'s. Doesn't
+                    // distinguish an actual subclass override further down
+                    // `checked_class`'s own chain.
+                    ctx.checker
+                        .registry
+                        .lookup_method_with_owner(declaring_class, name)
+                } else if is_receiver("static") {
+                    // Late static binding: virtual, exactly like `$this->`.
+                    let checked_class = ctx.checked_class.clone();
+                    ctx.checker
+                        .registry
+                        .lookup_method_with_owner(&checked_class, name)
+                } else {
+                    None
+                };
+                absorb_resolved(target, name, state, ctx)
+            }
+            _ => {
+                any_child_expr(e, |child| {
+                    state = walk_expr(child, std::mem::take(&mut state), ctx, declaring_class);
+                    false
+                });
+                state
+            }
         }
-        _ => {
-            any_child_expr(e, |child| {
-                state = walk_expr(child, std::mem::take(&mut state), ctx, declaring_class);
-                false
-            });
-            state
-        }
-    }
+    })
 }
 
 /// A `$this->prop = ...`-shaped assignment target marks `prop` as
@@ -567,19 +576,21 @@ fn assign_target(
     ctx: &mut PropertyInitCtx,
     declaring_class: &str,
 ) -> PropertyInitState {
-    if let ExprKind::PropertyAccess(base, name, _) = &lhs.kind
-        && is_this(base)
-    {
-        state.insert(name.to_string());
-        return state;
-    }
-    if let ExprKind::ArrayLiteral(items) | ExprKind::List(items) = &lhs.kind {
-        for item in items {
-            state = assign_target(&item.value, state, ctx, declaring_class);
+    syntax::stack::guard(|| {
+        if let ExprKind::PropertyAccess(base, name, _) = &lhs.kind
+            && is_this(base)
+        {
+            state.insert(name.to_string());
+            return state;
         }
-        return state;
-    }
-    walk_expr(lhs, state, ctx, declaring_class)
+        if let ExprKind::ArrayLiteral(items) | ExprKind::List(items) = &lhs.kind {
+            for item in items {
+                state = assign_target(&item.value, state, ctx, declaring_class);
+            }
+            return state;
+        }
+        walk_expr(lhs, state, ctx, declaring_class)
+    })
 }
 
 fn absorb(

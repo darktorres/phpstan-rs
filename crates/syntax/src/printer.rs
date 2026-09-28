@@ -201,6 +201,10 @@ fn write_static_target(out: &mut String, target: &StaticTarget) {
 }
 
 fn write_expr(out: &mut String, e: &Expr) {
+    crate::stack::guard(|| write_expr_unguarded(out, e));
+}
+
+fn write_expr_unguarded(out: &mut String, e: &Expr) {
     match &e.kind {
         ExprKind::Literal(lit) => match lit {
             Literal::Int(n) => out.push_str(&n.to_string()),

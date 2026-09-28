@@ -458,91 +458,93 @@ pub(crate) fn div_int_range(
     r_min: Option<i64>,
     r_max: Option<i64>,
 ) -> Type {
-    // "Avoid division by zero when looking for the min and the max by
-    // using the closest int" - the real source's own comment, verbatim.
-    // Only these two local values are adjusted; the "invert on negative
-    // constant" check below deliberately still consults the real,
-    // un-adjusted `r_min`/`r_max`.
-    let operand_min = if r_min == Some(0) { Some(1) } else { r_min };
-    let operand_max = if r_max == Some(0) { Some(-1) } else { r_max };
+    syntax::stack::guard(|| {
+        // "Avoid division by zero when looking for the min and the max by
+        // using the closest int" - the real source's own comment, verbatim.
+        // Only these two local values are adjusted; the "invert on negative
+        // constant" check below deliberately still consults the real,
+        // un-adjusted `r_min`/`r_max`.
+        let operand_min = if r_min == Some(0) { Some(1) } else { r_min };
+        let operand_max = if r_max == Some(0) { Some(-1) } else { r_max };
 
-    if operand_min.is_none_or(|v| v < 0) && operand_max.is_none_or(|v| v > 0) {
-        let negative = div_int_range(l_min, l_max, operand_min, Some(0));
-        let positive = div_int_range(l_min, l_max, Some(0), operand_max);
-        return Type::union(negative, positive);
-    }
-    if l_min.is_none_or(|v| v < 0) && l_max.is_none_or(|v| v > 0) {
-        let negative = div_int_range(l_min, Some(0), r_min, r_max);
-        let positive = div_int_range(Some(0), l_max, r_min, r_max);
-        return Type::union(negative, positive);
-    }
+        if operand_min.is_none_or(|v| v < 0) && operand_max.is_none_or(|v| v > 0) {
+            let negative = div_int_range(l_min, l_max, operand_min, Some(0));
+            let positive = div_int_range(l_min, l_max, Some(0), operand_max);
+            return Type::union(negative, positive);
+        }
+        if l_min.is_none_or(|v| v < 0) && l_max.is_none_or(|v| v > 0) {
+            let negative = div_int_range(l_min, Some(0), r_min, r_max);
+            let positive = div_int_range(Some(0), l_max, r_min, r_max);
+            return Type::union(negative, positive);
+        }
 
-    let range_min_sign = div_sign(bound_or_inf(l_min, f64::NEG_INFINITY));
-    let range_max_sign = div_sign(bound_or_inf(l_max, f64::INFINITY));
+        let range_min_sign = div_sign(bound_or_inf(l_min, f64::NEG_INFINITY));
+        let range_max_sign = div_sign(bound_or_inf(l_max, f64::INFINITY));
 
-    let min1 = operand_min
-        .map(|o| bound_or_inf(l_min, f64::NEG_INFINITY) / o as f64)
-        .unwrap_or(range_min_sign * -0.1);
-    let min2 = operand_max
-        .map(|o| bound_or_inf(l_min, f64::NEG_INFINITY) / o as f64)
-        .unwrap_or(range_min_sign * 0.1);
-    let max1 = operand_min
-        .map(|o| bound_or_inf(l_max, f64::INFINITY) / o as f64)
-        .unwrap_or(range_max_sign * -0.1);
-    let max2 = operand_max
-        .map(|o| bound_or_inf(l_max, f64::INFINITY) / o as f64)
-        .unwrap_or(range_max_sign * 0.1);
+        let min1 = operand_min
+            .map(|o| bound_or_inf(l_min, f64::NEG_INFINITY) / o as f64)
+            .unwrap_or(range_min_sign * -0.1);
+        let min2 = operand_max
+            .map(|o| bound_or_inf(l_min, f64::NEG_INFINITY) / o as f64)
+            .unwrap_or(range_min_sign * 0.1);
+        let max1 = operand_min
+            .map(|o| bound_or_inf(l_max, f64::INFINITY) / o as f64)
+            .unwrap_or(range_max_sign * -0.1);
+        let max2 = operand_max
+            .map(|o| bound_or_inf(l_max, f64::INFINITY) / o as f64)
+            .unwrap_or(range_max_sign * 0.1);
 
-    let fmin = min1.min(min2).min(max1).min(max2);
-    let fmax = min1.max(min2).max(max1).max(max2);
-    let mut min = if fmin == f64::NEG_INFINITY {
-        None
-    } else {
-        Some(fmin)
-    };
-    let mut max = if fmax == f64::INFINITY {
-        None
-    } else {
-        Some(fmax)
-    };
+        let fmin = min1.min(min2).min(max1).min(max2);
+        let fmax = min1.max(min2).max(max1).max(max2);
+        let mut min = if fmin == f64::NEG_INFINITY {
+            None
+        } else {
+            Some(fmin)
+        };
+        let mut max = if fmax == f64::INFINITY {
+            None
+        } else {
+            Some(fmax)
+        };
 
-    if let (Some(mn), Some(mx)) = (min, max)
-        && mn > mx
-    {
-        std::mem::swap(&mut min, &mut max);
-    }
-    let mut min_i = min.map(|v| v.ceil() as i64);
-    let mut max_i = max.map(|v| v.floor() as i64);
+        if let (Some(mn), Some(mx)) = (min, max)
+            && mn > mx
+        {
+            std::mem::swap(&mut min, &mut max);
+        }
+        let mut min_i = min.map(|v| v.ceil() as i64);
+        let mut max_i = max.map(|v| v.floor() as i64);
 
-    // "invert maximas on division with negative constants" - real
-    // PHPStan's own tail-adjustment, using the *original*,
-    // pre-zero-avoidance `l_min`/`l_max`/`r_min`/`r_max` (a literal
-    // degenerates to `min == max`, matching its own `ConstantIntegerType`
-    // check).
-    let range_is_negative_const = l_min == l_max && l_min.is_some_and(|v| v < 0);
-    let operand_is_negative_const = r_min == r_max && r_min.is_some_and(|v| v < 0);
-    if (range_is_negative_const || operand_is_negative_const)
-        && (min_i.is_none() || max_i.is_none())
-    {
-        std::mem::swap(&mut min_i, &mut max_i);
-    }
+        // "invert maximas on division with negative constants" - real
+        // PHPStan's own tail-adjustment, using the *original*,
+        // pre-zero-avoidance `l_min`/`l_max`/`r_min`/`r_max` (a literal
+        // degenerates to `min == max`, matching its own `ConstantIntegerType`
+        // check).
+        let range_is_negative_const = l_min == l_max && l_min.is_some_and(|v| v < 0);
+        let operand_is_negative_const = r_min == r_max && r_min.is_some_and(|v| v < 0);
+        if (range_is_negative_const || operand_is_negative_const)
+            && (min_i.is_none() || max_i.is_none())
+        {
+            std::mem::swap(&mut min_i, &mut max_i);
+        }
 
-    if min_i.is_none() && max_i.is_none() {
-        return Type(Repr::Union(vec![Type::int(), Type::float()]));
-    }
-    match Type::int_interval(min_i, max_i) {
-        // The rounding step (`ceil`ing the min, `floor`ing the max
-        // independently) can invert an otherwise-valid range into one
-        // with no real int members at all - `normalize_int_range`'s own
-        // doc comment has an example (`10 / 4`, always
-        // `2.5`, never any int). `Type::union` has no general `Never`-
-        // absorption rule of its own (nothing elsewhere in this project
-        // ever produces a `Never` member to union away), so this handles
-        // it explicitly rather than teach that absorption to every other
-        // `Type::union` caller for the sake of this one.
-        Type(Repr::Never) => Type::float(),
-        int_half => Type::union(int_half, Type::float()),
-    }
+        if min_i.is_none() && max_i.is_none() {
+            return Type(Repr::Union(vec![Type::int(), Type::float()]));
+        }
+        match Type::int_interval(min_i, max_i) {
+            // The rounding step (`ceil`ing the min, `floor`ing the max
+            // independently) can invert an otherwise-valid range into one
+            // with no real int members at all - `normalize_int_range`'s own
+            // doc comment has an example (`10 / 4`, always
+            // `2.5`, never any int). `Type::union` has no general `Never`-
+            // absorption rule of its own (nothing elsewhere in this project
+            // ever produces a `Never` member to union away), so this handles
+            // it explicitly rather than teach that absorption to every other
+            // `Type::union` caller for the sake of this one.
+            Type(Repr::Never) => Type::float(),
+            int_half => Type::union(int_half, Type::float()),
+        }
+    })
 }
 
 /// A numeric string literal's value, `None` for any other string.

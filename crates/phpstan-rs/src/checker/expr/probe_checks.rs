@@ -43,60 +43,62 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
     ) -> Type {
-        // Every arm here is consumed only for its side effects - neither
-        // `??` nor `??=` (its only two call sites) depend on the
-        // quiet-checked left side's own type, so the exact value
-        // returned doesn't matter beyond satisfying the type system
-        // post-unification.
-        match &e.kind {
-            ExprKind::Variable(_) => {
-                // Deliberately not `check_expr` - a bare variable here is
-                // exactly the "might not be defined" case `??` exists to
-                // handle safely.
-                Type::mixed()
-            }
-            ExprKind::Index(base, idx) => {
-                self.check_expr_quiet_root(base, locals, label);
-                if let Some(i) = idx {
-                    self.check_expr(i, locals, label);
+        syntax::stack::guard(|| {
+            // Every arm here is consumed only for its side effects - neither
+            // `??` nor `??=` (its only two call sites) depend on the
+            // quiet-checked left side's own type, so the exact value
+            // returned doesn't matter beyond satisfying the type system
+            // post-unification.
+            match &e.kind {
+                ExprKind::Variable(_) => {
+                    // Deliberately not `check_expr` - a bare variable here is
+                    // exactly the "might not be defined" case `??` exists to
+                    // handle safely.
+                    Type::mixed()
                 }
-                Type::mixed()
-            }
-            ExprKind::PropertyAccess(base, prop, _) => {
-                self.check_expr_quiet_root(base, locals, label);
-                // Opt-in `checkDynamicProperties` strict mode
-                // (ROADMAP Phase 102's W1) - real PHPStan's
-                // lenient default silently allows `isset($x->undefined)`
-                // (the whole point of `isset`/`??` is to probe for
-                // exactly that), but the stricter mode still flags it as
-                // a likely typo. Deliberately skips the ordinary path's
-                // `guarded_properties`/Pest-hook/visibility exemptions -
-                // this is a narrower, opt-in-only re-check, not a full
-                // duplicate of the real property-access rule.
-                if self.settings.rules.check_dynamic_properties {
-                    let base_ty = self.infer_expr(base, locals);
-                    if self.member_confirmed_missing(&base_ty, |c| {
-                        c == "stdClass"
-                            || self.registry.lookup_property(c, prop).is_some()
-                            || self.registry.lookup_method(c, "__get").is_some()
-                    }) {
-                        self.report(
-                            format!("access to undefined property {base_ty}::${prop}"),
-                            e.span,
-                            2,
-                            "property.notFound",
-                        );
+                ExprKind::Index(base, idx) => {
+                    self.check_expr_quiet_root(base, locals, label);
+                    if let Some(i) = idx {
+                        self.check_expr(i, locals, label);
                     }
+                    Type::mixed()
                 }
-                Type::mixed()
+                ExprKind::PropertyAccess(base, prop, _) => {
+                    self.check_expr_quiet_root(base, locals, label);
+                    // Opt-in `checkDynamicProperties` strict mode
+                    // (ROADMAP Phase 102's W1) - real PHPStan's
+                    // lenient default silently allows `isset($x->undefined)`
+                    // (the whole point of `isset`/`??` is to probe for
+                    // exactly that), but the stricter mode still flags it as
+                    // a likely typo. Deliberately skips the ordinary path's
+                    // `guarded_properties`/Pest-hook/visibility exemptions -
+                    // this is a narrower, opt-in-only re-check, not a full
+                    // duplicate of the real property-access rule.
+                    if self.settings.rules.check_dynamic_properties {
+                        let base_ty = self.infer_expr(base, locals);
+                        if self.member_confirmed_missing(&base_ty, |c| {
+                            c == "stdClass"
+                                || self.registry.lookup_property(c, prop).is_some()
+                                || self.registry.lookup_method(c, "__get").is_some()
+                        }) {
+                            self.report(
+                                format!("access to undefined property {base_ty}::${prop}"),
+                                e.span,
+                                2,
+                                "property.notFound",
+                            );
+                        }
+                    }
+                    Type::mixed()
+                }
+                ExprKind::DynamicPropertyAccess(base, name_expr) => {
+                    self.check_expr_quiet_root(base, locals, label);
+                    self.check_expr(name_expr, locals, label);
+                    Type::mixed()
+                }
+                _ => self.check_expr(e, locals, label),
             }
-            ExprKind::DynamicPropertyAccess(base, name_expr) => {
-                self.check_expr_quiet_root(base, locals, label);
-                self.check_expr(name_expr, locals, label);
-                Type::mixed()
-            }
-            _ => self.check_expr(e, locals, label),
-        }
+        })
     }
 
     /// `isset($x)`/`empty($x)`/`$x ?? ...`/`$x ??= ...` where
@@ -181,72 +183,74 @@ impl<'a> Checker<'a> {
         identifier_prefix: &str,
         operator_description: &str,
     ) -> Option<Type> {
-        match &e.kind {
-            ExprKind::Variable(name) => {
-                if is_superglobal(name)
-                    || self.loop_depth > 0
-                    || self.static_var_names.contains(name.as_ref())
-                {
-                    return None;
+        syntax::stack::guard(|| {
+            match &e.kind {
+                ExprKind::Variable(name) => {
+                    if is_superglobal(name)
+                        || self.loop_depth > 0
+                        || self.static_var_names.contains(name.as_ref())
+                    {
+                        return None;
+                    }
+                    locals.get(name).cloned()
                 }
-                locals.get(name).cloned()
+                ExprKind::Index(base, Some(idx)) => {
+                    let key = literal_string_key(idx)?;
+                    let base_ty = self.resolve_always_exists(
+                        base,
+                        locals,
+                        identifier_prefix,
+                        operator_description,
+                    )?;
+                    // See this function's own doc comment for why these two
+                    // calls, not a bespoke tri-state helper: assuming
+                    // "present" is impossible means the key can never be
+                    // there; assuming "absent" is impossible means it's
+                    // unconditionally there - `Type::with_key_presence`
+                    // already answers both questions correctly (including
+                    // through a `Union`, recursively), this just asks it
+                    // twice rather than duplicating its own logic.
+                    if base_ty.with_key_presence(&key, true).is_never() {
+                        self.report(
+                            format!(
+                                "Offset '{key}' on {base_ty} {operator_description} does not exist."
+                            ),
+                            e.span,
+                            0,
+                            format!("{identifier_prefix}.offset"),
+                        );
+                        return None;
+                    }
+                    if base_ty.with_key_presence(&key, false).is_never() {
+                        return base_ty.offset_value_type(Some(&types::ShapeKey::from_name(&key)));
+                    }
+                    None
+                }
+                ExprKind::PropertyAccess(base, prop, _) => {
+                    let base_ty = self.resolve_always_exists(
+                        base,
+                        locals,
+                        identifier_prefix,
+                        operator_description,
+                    )?;
+                    let (_, sig) = self.find_property_owner(&base_ty, prop)?;
+                    // A hooked property's own getter can compute anything,
+                    // unrelated to its own init-state - matches every other
+                    // `is_virtual`-gated check in this codebase. `!has_default`
+                    // is Design ##2's own deliberately safe-direction
+                    // exemption (see `PropertyReflection::has_default`'s own doc
+                    // comment): a property with no default *might* genuinely
+                    // still be uninitialized, so `isset()`/`??` checking it is
+                    // never treated as redundant here, even when its own
+                    // declared type is non-nullable.
+                    if sig.is_virtual() || !sig.has_default() {
+                        return None;
+                    }
+                    Some(sig.ty().clone())
+                }
+                _ => None,
             }
-            ExprKind::Index(base, Some(idx)) => {
-                let key = literal_string_key(idx)?;
-                let base_ty = self.resolve_always_exists(
-                    base,
-                    locals,
-                    identifier_prefix,
-                    operator_description,
-                )?;
-                // See this function's own doc comment for why these two
-                // calls, not a bespoke tri-state helper: assuming
-                // "present" is impossible means the key can never be
-                // there; assuming "absent" is impossible means it's
-                // unconditionally there - `Type::with_key_presence`
-                // already answers both questions correctly (including
-                // through a `Union`, recursively), this just asks it
-                // twice rather than duplicating its own logic.
-                if base_ty.with_key_presence(&key, true).is_never() {
-                    self.report(
-                        format!(
-                            "Offset '{key}' on {base_ty} {operator_description} does not exist."
-                        ),
-                        e.span,
-                        0,
-                        format!("{identifier_prefix}.offset"),
-                    );
-                    return None;
-                }
-                if base_ty.with_key_presence(&key, false).is_never() {
-                    return base_ty.offset_value_type(Some(&types::ShapeKey::from_name(&key)));
-                }
-                None
-            }
-            ExprKind::PropertyAccess(base, prop, _) => {
-                let base_ty = self.resolve_always_exists(
-                    base,
-                    locals,
-                    identifier_prefix,
-                    operator_description,
-                )?;
-                let (_, sig) = self.find_property_owner(&base_ty, prop)?;
-                // A hooked property's own getter can compute anything,
-                // unrelated to its own init-state - matches every other
-                // `is_virtual`-gated check in this codebase. `!has_default`
-                // is Design ##2's own deliberately safe-direction
-                // exemption (see `PropertyReflection::has_default`'s own doc
-                // comment): a property with no default *might* genuinely
-                // still be uninitialized, so `isset()`/`??` checking it is
-                // never treated as redundant here, even when its own
-                // declared type is non-nullable.
-                if sig.is_virtual() || !sig.has_default() {
-                    return None;
-                }
-                Some(sig.ty().clone())
-            }
-            _ => None,
-        }
+        })
     }
 
     /// `isset($x->prop)`/`isset($x['key'])`/`$x->prop ?? ...`/
@@ -640,7 +644,7 @@ impl<'a> Checker<'a> {
 /// caught by this check's own manual verification pass, not a test
 /// written in advance of knowing this gap existed.
 fn expr_reads_a_mutable_property(e: &Expr) -> bool {
-    match &e.kind {
+    syntax::stack::guard(|| match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
         ExprKind::StaticPropertyFetch(..) => true,
         ExprKind::Call(callee, args) => {
@@ -662,5 +666,5 @@ fn expr_reads_a_mutable_property(e: &Expr) -> bool {
                 || idx.as_deref().is_some_and(expr_reads_a_mutable_property)
         }
         _ => false,
-    }
+    })
 }

@@ -204,92 +204,98 @@ impl Type {
     /// elsewhere) is unaffected either way, since no other `Type` variant is
     /// ever a subtype of `Null`.
     pub fn without(&self, excluded: &Type) -> Type {
-        match self {
-            // Recurses into `Type::without` for each kept member,
-            // rather than just cloning it, so a `String`/`Array` member
-            // found inside a `Union` gets the same accessory upgrade a
-            // bare one does below - a member that doesn't hit a new arm
-            // still falls through to the same `other.clone()` it reached
-            // directly before.
-            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
-                let kept: Vec<Type> = members
-                    .iter()
-                    .filter(|m| {
-                        !crate::Relation::structural()
-                            .is_super_type_of(excluded, m)
-                            .yes()
-                    })
-                    .map(|m| m.without(excluded))
-                    .collect();
-                match kept.len() {
-                    0 => Type::never(),
-                    1 => kept.into_iter().next().unwrap(),
-                    _ => self.with_members(kept),
+        syntax::stack::guard(|| {
+            match self {
+                // Recurses into `Type::without` for each kept member,
+                // rather than just cloning it, so a `String`/`Array` member
+                // found inside a `Union` gets the same accessory upgrade a
+                // bare one does below - a member that doesn't hit a new arm
+                // still falls through to the same `other.clone()` it reached
+                // directly before.
+                Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
+                    let kept: Vec<Type> = members
+                        .iter()
+                        .filter(|m| {
+                            !crate::Relation::structural()
+                                .is_super_type_of(excluded, m)
+                                .yes()
+                        })
+                        .map(|m| m.without(excluded))
+                        .collect();
+                    match kept.len() {
+                        0 => Type::never(),
+                        1 => kept.into_iter().next().unwrap(),
+                        _ => self.with_members(kept),
+                    }
                 }
+                // `$x !== ''` on a plain `string`. Deliberately not extended to an
+                // already-Intersection-refined value (e.g. upgrading an existing
+                // `non-empty-string` to `non-falsy-string` inside a nested
+                // `!empty($x)` check) - a real gap, but a rare, redundant
+                // double-guard pattern this project doesn't attempt yet.
+                Type(Repr::String) if *excluded == Type::string_literal(PhpString::default()) => {
+                    Type(Repr::Intersection(vec![
+                        Type::string(),
+                        Type::accessory(AccessoryKind::NonEmptyString),
+                    ]))
+                }
+                // `$x !== []` on a plain `array`/`list` - the same idiom as the
+                // `String` arm above: both a plain `array<T>` and an already-
+                // `list<T>` upgrade to their own non-empty form. Shares
+                // `Type::to_non_empty_array` with `!empty($x)`/`count($x) > 0`
+                // so the three
+                // "prove this array is non-empty" paths can't drift apart.
+                Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) | Type(Repr::Intersection(_))
+                    if excluded.is_empty_array().yes() =>
+                {
+                    self.to_non_empty_array()
+                }
+                // Real PHP's own `Traversable` is a marker interface userland
+                // code can never implement directly (`class Foo implements
+                // Traversable {}` is a real fatal error, confirmed via `php -r`)
+                // - only through one of its exactly two direct subinterfaces,
+                // `Iterator` and `IteratorAggregate`. Excluding one therefore
+                // structurally proves the other, unlike the general "we can't
+                // disprove anything more precise than the type itself" fallback
+                // below - real PHPStan special-cases this identical relationship.
+                // Without it, e.g. `while ($x instanceof IteratorAggregate) {
+                // $x = $x->getIterator(); }`'s loop-exit type stays bare
+                // `Traversable` (missing `rewind()`/`valid()`/`current()`)
+                // instead of narrowing to the only other structurally possible
+                // answer, `Iterator`.
+                Type(Repr::Object(name, _))
+                    if name == "Traversable"
+                        && matches!(excluded, Type(Repr::Object(excl, _)) if excl == "IteratorAggregate") =>
+                {
+                    Type::object("Iterator".into(), Vec::new())
+                }
+                Type(Repr::Object(name, _))
+                    if name == "Traversable"
+                        && matches!(excluded, Type(Repr::Object(excl, _)) if excl == "Iterator") =>
+                {
+                    Type::object("IteratorAggregate".into(), Vec::new())
+                }
+                // Plain `bool` is exactly the two-element set `{true, false}` -
+                // unlike the general "a type covering multiple distinct values
+                // proves nothing when excluded" caution this function's own
+                // callers already apply (`apply_equality_narrowing`'s doc
+                // comment), excluding *from* `Bool` is always sound: `True`/
+                // `False` are each single values, so knowing
+                // one is ruled out leaves exactly the other, unconditionally -
+                // no case this could ever get wrong. Without this, `match ($b)
+                // { true => ..., false => ... }` (or a bare `if ($b !== true)`)
+                // never narrows `$b` down to `false` at all, since `Repr::Bool`
+                // isn't itself represented as `Union([True, False])`.
+                Type(Repr::Bool) if *excluded == Type::bool_literal(true) => {
+                    Type::bool_literal(false)
+                }
+                Type(Repr::Bool) if *excluded == Type::bool_literal(false) => {
+                    Type::bool_literal(true)
+                }
+                other if other == excluded => Type::never(),
+                other => other.clone(),
             }
-            // `$x !== ''` on a plain `string`. Deliberately not extended to an
-            // already-Intersection-refined value (e.g. upgrading an existing
-            // `non-empty-string` to `non-falsy-string` inside a nested
-            // `!empty($x)` check) - a real gap, but a rare, redundant
-            // double-guard pattern this project doesn't attempt yet.
-            Type(Repr::String) if *excluded == Type::string_literal(PhpString::default()) => {
-                Type(Repr::Intersection(vec![
-                    Type::string(),
-                    Type::accessory(AccessoryKind::NonEmptyString),
-                ]))
-            }
-            // `$x !== []` on a plain `array`/`list` - the same idiom as the
-            // `String` arm above: both a plain `array<T>` and an already-
-            // `list<T>` upgrade to their own non-empty form. Shares
-            // `Type::to_non_empty_array` with `!empty($x)`/`count($x) > 0`
-            // so the three
-            // "prove this array is non-empty" paths can't drift apart.
-            Type(Repr::Array(..)) | Type(Repr::ArrayShape(_)) | Type(Repr::Intersection(_))
-                if excluded.is_empty_array().yes() =>
-            {
-                self.to_non_empty_array()
-            }
-            // Real PHP's own `Traversable` is a marker interface userland
-            // code can never implement directly (`class Foo implements
-            // Traversable {}` is a real fatal error, confirmed via `php -r`)
-            // - only through one of its exactly two direct subinterfaces,
-            // `Iterator` and `IteratorAggregate`. Excluding one therefore
-            // structurally proves the other, unlike the general "we can't
-            // disprove anything more precise than the type itself" fallback
-            // below - real PHPStan special-cases this identical relationship.
-            // Without it, e.g. `while ($x instanceof IteratorAggregate) {
-            // $x = $x->getIterator(); }`'s loop-exit type stays bare
-            // `Traversable` (missing `rewind()`/`valid()`/`current()`)
-            // instead of narrowing to the only other structurally possible
-            // answer, `Iterator`.
-            Type(Repr::Object(name, _))
-                if name == "Traversable"
-                    && matches!(excluded, Type(Repr::Object(excl, _)) if excl == "IteratorAggregate") =>
-            {
-                Type::object("Iterator".into(), Vec::new())
-            }
-            Type(Repr::Object(name, _))
-                if name == "Traversable"
-                    && matches!(excluded, Type(Repr::Object(excl, _)) if excl == "Iterator") =>
-            {
-                Type::object("IteratorAggregate".into(), Vec::new())
-            }
-            // Plain `bool` is exactly the two-element set `{true, false}` -
-            // unlike the general "a type covering multiple distinct values
-            // proves nothing when excluded" caution this function's own
-            // callers already apply (`apply_equality_narrowing`'s doc
-            // comment), excluding *from* `Bool` is always sound: `True`/
-            // `False` are each single values, so knowing
-            // one is ruled out leaves exactly the other, unconditionally -
-            // no case this could ever get wrong. Without this, `match ($b)
-            // { true => ..., false => ... }` (or a bare `if ($b !== true)`)
-            // never narrows `$b` down to `false` at all, since `Repr::Bool`
-            // isn't itself represented as `Union([True, False])`.
-            Type(Repr::Bool) if *excluded == Type::bool_literal(true) => Type::bool_literal(false),
-            Type(Repr::Bool) if *excluded == Type::bool_literal(false) => Type::bool_literal(true),
-            other if other == excluded => Type::never(),
-            other => other.clone(),
-        }
+        })
     }
 }
 
@@ -458,69 +464,71 @@ impl Type {
     /// has it when present. Recurses through `Union`; anything else is left
     /// untouched.
     pub fn with_key_presence(&self, key: &str, present: bool) -> Type {
-        match self {
-            Type(Repr::ArrayShape(shape)) => match shape.field(&ShapeKey::from_name(key)) {
-                Some(field) if !field.optional => {
-                    if present {
-                        self.clone()
-                    } else {
-                        Type::never()
+        syntax::stack::guard(|| {
+            match self {
+                Type(Repr::ArrayShape(shape)) => match shape.field(&ShapeKey::from_name(key)) {
+                    Some(field) if !field.optional => {
+                        if present {
+                            self.clone()
+                        } else {
+                            Type::never()
+                        }
                     }
-                }
-                Some(field) => {
-                    let mut shape = shape.clone();
-                    if present {
-                        shape.set(ShapeField::new(field.key.clone(), field.ty.clone(), false));
-                    } else {
-                        shape.fields.retain(|f| f.key != field.key);
+                    Some(field) => {
+                        let mut shape = shape.clone();
+                        if present {
+                            shape.set(ShapeField::new(field.key.clone(), field.ty.clone(), false));
+                        } else {
+                            shape.fields.retain(|f| f.key != field.key);
+                        }
+                        Type::array_shape(shape)
                     }
-                    Type::array_shape(shape)
-                }
-                // An *unsealed* shape (`array{a: int, ...}`) can carry keys
-                // beyond the ones it lists - `key` simply not
-                // being one of the declared fields is never proof it's
-                // absent, unlike a sealed shape's identical situation just
-                // below. Only the `present` direction is affected: "is `key`
-                // known to be *present*" still correctly stays unprovable
-                // either way (an unsealed shape doesn't promise anything
-                // about a specific unlisted key being there, only that it
-                // *could* be).
-                None if !shape.is_sealed() => self.clone(),
-                None => {
-                    if present {
-                        Type::never()
-                    } else {
-                        self.clone()
+                    // An *unsealed* shape (`array{a: int, ...}`) can carry keys
+                    // beyond the ones it lists - `key` simply not
+                    // being one of the declared fields is never proof it's
+                    // absent, unlike a sealed shape's identical situation just
+                    // below. Only the `present` direction is affected: "is `key`
+                    // known to be *present*" still correctly stays unprovable
+                    // either way (an unsealed shape doesn't promise anything
+                    // about a specific unlisted key being there, only that it
+                    // *could* be).
+                    None if !shape.is_sealed() => self.clone(),
+                    None => {
+                        if present {
+                            Type::never()
+                        } else {
+                            self.clone()
+                        }
                     }
-                }
-            },
-            // A general array now has that key.
-            Type(Repr::Array(..)) if present => crate::intersect_types(vec![
-                self.clone(),
-                Type::has_offset(ShapeKey::from_name(key)),
-            ]),
-            Type(Repr::Intersection(members))
-                if present && members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
-            {
-                crate::intersect_types(vec![
+                },
+                // A general array now has that key.
+                Type(Repr::Array(..)) if present => crate::intersect_types(vec![
                     self.clone(),
                     Type::has_offset(ShapeKey::from_name(key)),
-                ])
-            }
-            Type(Repr::Union(members)) => {
-                let kept: Vec<Type> = members
-                    .iter()
-                    .map(|m| m.with_key_presence(key, present))
-                    .filter(|m| *m != Type::never())
-                    .collect();
-                match kept.len() {
-                    0 => Type::never(),
-                    1 => kept.into_iter().next().unwrap(),
-                    _ => Type(Repr::Union(kept)),
+                ]),
+                Type(Repr::Intersection(members))
+                    if present && members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
+                {
+                    crate::intersect_types(vec![
+                        self.clone(),
+                        Type::has_offset(ShapeKey::from_name(key)),
+                    ])
                 }
+                Type(Repr::Union(members)) => {
+                    let kept: Vec<Type> = members
+                        .iter()
+                        .map(|m| m.with_key_presence(key, present))
+                        .filter(|m| *m != Type::never())
+                        .collect();
+                    match kept.len() {
+                        0 => Type::never(),
+                        1 => kept.into_iter().next().unwrap(),
+                        _ => Type(Repr::Union(kept)),
+                    }
+                }
+                _ => self.clone(),
             }
-            _ => self.clone(),
-        }
+        })
     }
 }
 
@@ -531,81 +539,86 @@ impl Type {
     /// has it present and non-null. `key` is `None` for a non-literal
     /// subscript.
     pub fn to_isset_container(&self, key: Option<&str>) -> Type {
-        match self {
-            Type(Repr::Null)
-            | Type(Repr::Void)
-            | Type(Repr::Bool)
-            | Type(Repr::True)
-            | Type(Repr::False)
-            | Type(Repr::Int)
-            | Type(Repr::IntLiteral(_))
-            | Type(Repr::IntRange(..))
-            | Type(Repr::Float)
-            | Type(Repr::FloatLiteral(_)) => Type::never(),
-            Type(Repr::ArrayShape(_)) => {
-                let Some(key) = key else {
-                    return self.clone();
-                };
-                match self.with_key_presence(key, true) {
-                    Type(Repr::ArrayShape(mut shape)) => {
-                        let key = ShapeKey::from_name(key);
-                        // An unsealed shape's tail held it when it isn't
-                        // listed.
-                        let held = match shape.field(&key) {
-                            Some(field) => field.ty.clone(),
-                            None => shape
-                                .unsealed
-                                .as_deref()
-                                .map(|tail| tail.1.clone())
-                                .unwrap_or(Type::mixed()),
-                        };
-                        let value = held.without(&Type::null());
-                        shape.set(ShapeField::new(key, value, false));
-                        Type::array_shape(shape)
+        syntax::stack::guard(|| {
+            match self {
+                Type(Repr::Null)
+                | Type(Repr::Void)
+                | Type(Repr::Bool)
+                | Type(Repr::True)
+                | Type(Repr::False)
+                | Type(Repr::Int)
+                | Type(Repr::IntLiteral(_))
+                | Type(Repr::IntRange(..))
+                | Type(Repr::Float)
+                | Type(Repr::FloatLiteral(_)) => Type::never(),
+                Type(Repr::ArrayShape(_)) => {
+                    let Some(key) = key else {
+                        return self.clone();
+                    };
+                    match self.with_key_presence(key, true).into_repr() {
+                        Repr::ArrayShape(mut shape) => {
+                            let key = ShapeKey::from_name(key);
+                            // An unsealed shape's tail held it when it isn't
+                            // listed.
+                            let held = match shape.field(&key) {
+                                Some(field) => field.ty.clone(),
+                                None => shape
+                                    .unsealed
+                                    .as_deref()
+                                    .map(|tail| tail.1.clone())
+                                    .unwrap_or(Type::mixed()),
+                            };
+                            let value = held.without(&Type::null());
+                            shape.set(ShapeField::new(key, value, false));
+                            Type::array_shape(shape)
+                        }
+                        other => Type(other),
                     }
-                    other => other,
                 }
-            }
-            // A general array now has that key, with a non-null value.
-            Type(Repr::Array(_, value)) => match key {
-                Some(key) => Type(Repr::Intersection(vec![
-                    self.clone(),
-                    Type::has_offset_value(ShapeKey::from_name(key), value.without(&Type::null())),
-                ])),
-                None => self.clone(),
-            },
-            // `list<T>`/`non-empty-array<T>` - an accessory-marked array.
-            Type(Repr::Intersection(members)) => {
-                let element = members.iter().find_map(|m| match m {
-                    Type(Repr::Array(_, value)) => Some(value),
-                    _ => None,
-                });
-                match (key, element) {
-                    (Some(key), Some(value)) => {
-                        let mut members = members.clone();
-                        members.push(Type::has_offset_value(
+                // A general array now has that key, with a non-null value.
+                Type(Repr::Array(_, value)) => match key {
+                    Some(key) => Type(Repr::Intersection(vec![
+                        self.clone(),
+                        Type::has_offset_value(
                             ShapeKey::from_name(key),
                             value.without(&Type::null()),
-                        ));
-                        Type(Repr::Intersection(members))
+                        ),
+                    ])),
+                    None => self.clone(),
+                },
+                // `list<T>`/`non-empty-array<T>` - an accessory-marked array.
+                Type(Repr::Intersection(members)) => {
+                    let element = members.iter().find_map(|m| match m {
+                        Type(Repr::Array(_, value)) => Some(value),
+                        _ => None,
+                    });
+                    match (key, element) {
+                        (Some(key), Some(value)) => {
+                            let mut members = members.clone();
+                            members.push(Type::has_offset_value(
+                                ShapeKey::from_name(key),
+                                value.without(&Type::null()),
+                            ));
+                            Type(Repr::Intersection(members))
+                        }
+                        _ => self.clone(),
                     }
-                    _ => self.clone(),
                 }
-            }
-            Type(Repr::Union(members)) => {
-                let kept: Vec<Type> = members
-                    .iter()
-                    .map(|m| m.to_isset_container(key))
-                    .filter(|m| *m != Type::never())
-                    .collect();
-                match kept.len() {
-                    0 => Type::never(),
-                    1 => kept.into_iter().next().unwrap(),
-                    _ => Type(Repr::Union(kept)),
+                Type(Repr::Union(members)) => {
+                    let kept: Vec<Type> = members
+                        .iter()
+                        .map(|m| m.to_isset_container(key))
+                        .filter(|m| *m != Type::never())
+                        .collect();
+                    match kept.len() {
+                        0 => Type::never(),
+                        1 => kept.into_iter().next().unwrap(),
+                        _ => Type(Repr::Union(kept)),
+                    }
                 }
+                _ => self.clone(),
             }
-            _ => self.clone(),
-        }
+        })
     }
 }
 

@@ -47,11 +47,7 @@ impl Parser {
             None
         };
 
-        let body = if let StmtKind::Block(stmts) = self.parse_block()?.kind {
-            stmts
-        } else {
-            unreachable!()
-        };
+        let body = self.parse_stmt_list_block()?;
 
         Ok(self.expr(
             ExprKind::Closure {

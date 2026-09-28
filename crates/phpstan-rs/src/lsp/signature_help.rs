@@ -147,73 +147,77 @@ impl<'a> Walker<'a> {
         current_class: Option<&str>,
         best: &mut Option<SigHelp>,
     ) {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, ctx, current_class, best),
-            StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, best),
-            StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
-                for e in exprs {
-                    self.expr(e, ctx, current_class, best);
+        syntax::stack::guard(|| {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::Expression(e) | StmtKind::Throw(e) => {
+                    self.expr(e, ctx, current_class, best)
                 }
-            }
-            StmtKind::If { cond, .. }
-            | StmtKind::While { cond, .. }
-            | StmtKind::DoWhile { cond, .. } => {
-                self.expr(cond, ctx, current_class, best);
-            }
-            StmtKind::For {
-                init, cond, step, ..
-            } => {
-                for e in init.iter().chain(cond).chain(step) {
-                    self.expr(e, ctx, current_class, best);
-                }
-            }
-            StmtKind::Foreach {
-                subject,
-                key,
-                value,
-                ..
-            } => {
-                self.expr(subject, ctx, current_class, best);
-                if let Some(k) = key {
-                    self.expr(k, ctx, current_class, best);
-                }
-                self.expr(value, ctx, current_class, best);
-            }
-            StmtKind::FunctionDecl(f) => {
-                self.function(f, &mut ctx.clone(), current_class, false, best);
-            }
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                self.enum_decl(e, &mut ctx.clone(), best)
-            }
-            StmtKind::ClassDecl(c) => self.class(c, &mut ctx.clone(), best),
-            StmtKind::GlobalConst(consts) => {
-                for c in consts {
-                    self.expr(&c.value, ctx, current_class, best);
-                }
-            }
-            StmtKind::Switch { subject, cases } => {
-                self.expr(subject, ctx, current_class, best);
-                for case in cases {
-                    if let Some(t) = &case.test {
-                        self.expr(t, ctx, current_class, best);
-                    }
-                }
-            }
-            StmtKind::StaticVar(vars) => {
-                for (_, d) in vars {
-                    if let Some(e) = d {
+                StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, best),
+                StmtKind::Echo(exprs) | StmtKind::Unset(exprs) => {
+                    for e in exprs {
                         self.expr(e, ctx, current_class, best);
                     }
                 }
+                StmtKind::If { cond, .. }
+                | StmtKind::While { cond, .. }
+                | StmtKind::DoWhile { cond, .. } => {
+                    self.expr(cond, ctx, current_class, best);
+                }
+                StmtKind::For {
+                    init, cond, step, ..
+                } => {
+                    for e in init.iter().chain(cond).chain(step) {
+                        self.expr(e, ctx, current_class, best);
+                    }
+                }
+                StmtKind::Foreach {
+                    subject,
+                    key,
+                    value,
+                    ..
+                } => {
+                    self.expr(subject, ctx, current_class, best);
+                    if let Some(k) = key {
+                        self.expr(k, ctx, current_class, best);
+                    }
+                    self.expr(value, ctx, current_class, best);
+                }
+                StmtKind::FunctionDecl(f) => {
+                    self.function(f, &mut ctx.clone(), current_class, false, best);
+                }
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                    self.enum_decl(e, &mut ctx.clone(), best)
+                }
+                StmtKind::ClassDecl(c) => self.class(c, &mut ctx.clone(), best),
+                StmtKind::GlobalConst(consts) => {
+                    for c in consts {
+                        self.expr(&c.value, ctx, current_class, best);
+                    }
+                }
+                StmtKind::Switch { subject, cases } => {
+                    self.expr(subject, ctx, current_class, best);
+                    for case in cases {
+                        if let Some(t) = &case.test {
+                            self.expr(t, ctx, current_class, best);
+                        }
+                    }
+                }
+                StmtKind::StaticVar(vars) => {
+                    for (_, d) in vars {
+                        if let Some(e) = d {
+                            self.expr(e, ctx, current_class, best);
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        any_child_stmt(stmt, |child| {
-            self.stmt(child, ctx, current_class, best);
-            false
-        });
+            any_child_stmt(stmt, |child| {
+                self.stmt(child, ctx, current_class, best);
+                false
+            });
+        })
     }
 
     fn param(
@@ -290,179 +294,183 @@ impl<'a> Walker<'a> {
         current_class: Option<&str>,
         best: &mut Option<SigHelp>,
     ) {
-        match &expr.kind {
-            ExprKind::Call(callee, args) => {
-                if contains(expr.span, self.pos) {
-                    *best = None;
-                    if self.pos_past(callee.span.end)
-                        && let ExprKind::Name(n) = &callee.kind
-                        && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
-                        && self.registry.lookup_function(&fqn).is_some()
-                    {
-                        *best = Some(SigHelp {
-                            target: Target::Function(fqn),
-                            active_parameter: active_parameter(args, self.pos),
-                        });
-                    }
-                }
-                self.expr(callee, ctx, current_class, best);
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
-                }
-                return;
-            }
-            ExprKind::New(callee, args) => {
-                if contains(expr.span, self.pos) {
-                    *best = None;
-                    if self.pos_past(callee.span.end)
-                        && let ExprKind::Name(n) = &callee.kind
-                        && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
-                        && self
-                            .registry
-                            .lookup_method_with_owner(&fqn, "__construct")
-                            .is_some()
-                    {
-                        *best = Some(SigHelp {
-                            target: Target::Constructor(fqn),
-                            active_parameter: active_parameter(args, self.pos),
-                        });
-                    }
-                }
-                self.expr(callee, ctx, current_class, best);
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
-                }
-                return;
-            }
-            ExprKind::MethodCall(recv, method, args, _) => {
-                if contains(expr.span, self.pos) {
-                    *best = None;
-                    if self.pos_past(method.span.end) {
-                        if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
-                            && let Some(owner) = current_class
+        syntax::stack::guard(|| {
+            match &expr.kind {
+                ExprKind::Call(callee, args) => {
+                    if contains(expr.span, self.pos) {
+                        *best = None;
+                        if self.pos_past(callee.span.end)
+                            && let ExprKind::Name(n) = &callee.kind
+                            && let Some(fqn) =
+                                resolve_class_ref(n, current_class, ctx, self.registry)
+                            && self.registry.lookup_function(&fqn).is_some()
                         {
                             *best = Some(SigHelp {
-                                target: Target::Member(owner.to_string(), method.to_string()),
-                                active_parameter: active_parameter(args, self.pos),
-                            });
-                        } else {
-                            *best = Some(SigHelp {
-                                target: Target::Instance {
-                                    receiver_span: recv.span,
-                                    member: method.to_string(),
-                                    scope: self.probe_scope(),
-                                    is_static: self.current_is_static,
-                                    class: current_class.map(str::to_string),
-                                },
+                                target: Target::Function(fqn),
                                 active_parameter: active_parameter(args, self.pos),
                             });
                         }
                     }
-                }
-                self.expr(recv, ctx, current_class, best);
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
-                }
-                return;
-            }
-            ExprKind::DynamicStaticCall(target, name_expr, args) => {
-                // Unresolvable statically - clear only, never set.
-                if contains(expr.span, self.pos) {
-                    *best = None;
-                }
-                if let StaticTarget::Expr(receiver) = target {
-                    self.expr(receiver, ctx, current_class, best);
-                }
-                self.expr(name_expr, ctx, current_class, best);
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
-                }
-                return;
-            }
-            ExprKind::DynamicMethodCall(recv, name_expr, args) => {
-                // Unresolvable statically - clear only (Fix 1), never
-                // set. `name_expr.span.end` isn't consulted for a gate
-                // since there's nothing to gate toward setting.
-                if contains(expr.span, self.pos) {
-                    *best = None;
-                }
-                self.expr(recv, ctx, current_class, best);
-                self.expr(name_expr, ctx, current_class, best);
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
-                }
-                return;
-            }
-            ExprKind::StaticCall(target, member, args) => {
-                if contains(expr.span, self.pos) {
-                    *best = None;
-                    // A dynamic receiver has no class-name text to resolve
-                    // here (this pass doesn't run a type probe the way
-                    // `navigation.rs`'s own equivalent does).
-                    if let Some(class) = target.as_name()
-                        && let Some(fqn) =
-                            resolve_class_ref(class, current_class, ctx, self.registry)
-                        && self.pos_past(member.span.end)
-                    {
-                        *best = Some(SigHelp {
-                            target: Target::Member(fqn, member.to_string()),
-                            active_parameter: active_parameter(args, self.pos),
-                        });
+                    self.expr(callee, ctx, current_class, best);
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, best);
                     }
+                    return;
                 }
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
+                ExprKind::New(callee, args) => {
+                    if contains(expr.span, self.pos) {
+                        *best = None;
+                        if self.pos_past(callee.span.end)
+                            && let ExprKind::Name(n) = &callee.kind
+                            && let Some(fqn) =
+                                resolve_class_ref(n, current_class, ctx, self.registry)
+                            && self
+                                .registry
+                                .lookup_method_with_owner(&fqn, "__construct")
+                                .is_some()
+                        {
+                            *best = Some(SigHelp {
+                                target: Target::Constructor(fqn),
+                                active_parameter: active_parameter(args, self.pos),
+                            });
+                        }
+                    }
+                    self.expr(callee, ctx, current_class, best);
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, best);
+                    }
+                    return;
                 }
-                return;
+                ExprKind::MethodCall(recv, method, args, _) => {
+                    if contains(expr.span, self.pos) {
+                        *best = None;
+                        if self.pos_past(method.span.end) {
+                            if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
+                                && let Some(owner) = current_class
+                            {
+                                *best = Some(SigHelp {
+                                    target: Target::Member(owner.to_string(), method.to_string()),
+                                    active_parameter: active_parameter(args, self.pos),
+                                });
+                            } else {
+                                *best = Some(SigHelp {
+                                    target: Target::Instance {
+                                        receiver_span: recv.span,
+                                        member: method.to_string(),
+                                        scope: self.probe_scope(),
+                                        is_static: self.current_is_static,
+                                        class: current_class.map(str::to_string),
+                                    },
+                                    active_parameter: active_parameter(args, self.pos),
+                                });
+                            }
+                        }
+                    }
+                    self.expr(recv, ctx, current_class, best);
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, best);
+                    }
+                    return;
+                }
+                ExprKind::DynamicStaticCall(target, name_expr, args) => {
+                    // Unresolvable statically - clear only, never set.
+                    if contains(expr.span, self.pos) {
+                        *best = None;
+                    }
+                    if let StaticTarget::Expr(receiver) = target {
+                        self.expr(receiver, ctx, current_class, best);
+                    }
+                    self.expr(name_expr, ctx, current_class, best);
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, best);
+                    }
+                    return;
+                }
+                ExprKind::DynamicMethodCall(recv, name_expr, args) => {
+                    // Unresolvable statically - clear only (Fix 1), never
+                    // set. `name_expr.span.end` isn't consulted for a gate
+                    // since there's nothing to gate toward setting.
+                    if contains(expr.span, self.pos) {
+                        *best = None;
+                    }
+                    self.expr(recv, ctx, current_class, best);
+                    self.expr(name_expr, ctx, current_class, best);
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, best);
+                    }
+                    return;
+                }
+                ExprKind::StaticCall(target, member, args) => {
+                    if contains(expr.span, self.pos) {
+                        *best = None;
+                        // A dynamic receiver has no class-name text to resolve
+                        // here (this pass doesn't run a type probe the way
+                        // `navigation.rs`'s own equivalent does).
+                        if let Some(class) = target.as_name()
+                            && let Some(fqn) =
+                                resolve_class_ref(class, current_class, ctx, self.registry)
+                            && self.pos_past(member.span.end)
+                        {
+                            *best = Some(SigHelp {
+                                target: Target::Member(fqn, member.to_string()),
+                                active_parameter: active_parameter(args, self.pos),
+                            });
+                        }
+                    }
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, best);
+                    }
+                    return;
+                }
+                ExprKind::NewAnonymousClass(decl, args) => {
+                    // Out of scope for v1 (no signature to offer for the
+                    // anonymous class's own constructor) - clear only, so a
+                    // cursor in its arg-gap/trailing-comma region doesn't
+                    // leak an enclosing resolvable call's signature.
+                    if contains(expr.span, self.pos) {
+                        *best = None;
+                    }
+                    // The class's own body (methods/consts/property
+                    // defaults) resolves everything against its own fresh
+                    // synthetic FQN - `class` takes no `current_class` of
+                    // its own, matching `navigation::Walker::class`'s
+                    // identical precedent.
+                    self.class(decl, &mut ctx.clone(), best);
+                    // The constructor ARGUMENTS execute in the *enclosing*
+                    // scope, not the anonymous class's own - passed through
+                    // unmodified, the mirror image of the line above.
+                    for a in args {
+                        self.expr(&a.value, ctx, current_class, best);
+                    }
+                    return;
+                }
+                ExprKind::FirstClassCallable(_) => return,
+                ExprKind::Closure {
+                    params,
+                    uses: _,
+                    body,
+                    ..
+                } => {
+                    for p in params {
+                        self.param(p, ctx, current_class, best);
+                    }
+                    self.stmts(body, &mut ctx.clone(), current_class, best);
+                    return;
+                }
+                ExprKind::ArrowFn { params, body, .. } => {
+                    for p in params {
+                        self.param(p, ctx, current_class, best);
+                    }
+                    self.expr(body, &mut ctx.clone(), current_class, best);
+                    return;
+                }
+                _ => {}
             }
-            ExprKind::NewAnonymousClass(decl, args) => {
-                // Out of scope for v1 (no signature to offer for the
-                // anonymous class's own constructor) - clear only, so a
-                // cursor in its arg-gap/trailing-comma region doesn't
-                // leak an enclosing resolvable call's signature.
-                if contains(expr.span, self.pos) {
-                    *best = None;
-                }
-                // The class's own body (methods/consts/property
-                // defaults) resolves everything against its own fresh
-                // synthetic FQN - `class` takes no `current_class` of
-                // its own, matching `navigation::Walker::class`'s
-                // identical precedent.
-                self.class(decl, &mut ctx.clone(), best);
-                // The constructor ARGUMENTS execute in the *enclosing*
-                // scope, not the anonymous class's own - passed through
-                // unmodified, the mirror image of the line above.
-                for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
-                }
-                return;
-            }
-            ExprKind::FirstClassCallable(_) => return,
-            ExprKind::Closure {
-                params,
-                uses: _,
-                body,
-                ..
-            } => {
-                for p in params {
-                    self.param(p, ctx, current_class, best);
-                }
-                self.stmts(body, &mut ctx.clone(), current_class, best);
-                return;
-            }
-            ExprKind::ArrowFn { params, body, .. } => {
-                for p in params {
-                    self.param(p, ctx, current_class, best);
-                }
-                self.expr(body, &mut ctx.clone(), current_class, best);
-                return;
-            }
-            _ => {}
-        }
-        any_child_expr(expr, |child| {
-            self.expr(child, ctx, current_class, best);
-            false
-        });
+            any_child_expr(expr, |child| {
+                self.expr(child, ctx, current_class, best);
+                false
+            });
+        })
     }
 
     /// The args-region gate (see this module's own doc comment) -

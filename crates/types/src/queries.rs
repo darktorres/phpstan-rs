@@ -80,7 +80,7 @@ impl Type {
     }
 
     fn walk_class_positions<'a>(&'a self, f: &mut impl FnMut(&'a Type)) {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Array(key, value)) => {
                 key.walk_class_positions(f);
                 value.walk_class_positions(f);
@@ -99,7 +99,7 @@ impl Type {
                 }
             }
             other => f(other),
-        }
+        })
     }
 
     /// Whether this type, or one nested in it, is of the kind the keyword
@@ -321,32 +321,34 @@ impl Type {
     /// PHPStan's `getFiniteTypes()`: the values this type can only be, one
     /// type each, when there are few enough to list; none otherwise.
     pub fn finite_types(&self) -> Vec<Type> {
-        const LIMIT: i64 = 256;
-        match self {
-            Type(Repr::IntLiteral(_))
-            | Type(Repr::StringLiteral(_))
-            | Type(Repr::FloatLiteral(_))
-            | Type(Repr::True)
-            | Type(Repr::False)
-            | Type(Repr::Null)
-            | Type(Repr::EnumCase(..)) => vec![self.clone()],
-            Type(Repr::Bool) => vec![Type::bool_literal(true), Type::bool_literal(false)],
-            Type(Repr::IntRange(Some(min), Some(max))) if max - min < LIMIT => {
-                (*min..=*max).map(Type::int_literal).collect()
-            }
-            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
-                let mut all = Vec::new();
-                for member in members {
-                    let finite = member.finite_types();
-                    if finite.is_empty() {
-                        return Vec::new();
-                    }
-                    all.extend(finite);
+        syntax::stack::guard(|| {
+            const LIMIT: i64 = 256;
+            match self {
+                Type(Repr::IntLiteral(_))
+                | Type(Repr::StringLiteral(_))
+                | Type(Repr::FloatLiteral(_))
+                | Type(Repr::True)
+                | Type(Repr::False)
+                | Type(Repr::Null)
+                | Type(Repr::EnumCase(..)) => vec![self.clone()],
+                Type(Repr::Bool) => vec![Type::bool_literal(true), Type::bool_literal(false)],
+                Type(Repr::IntRange(Some(min), Some(max))) if max - min < LIMIT => {
+                    (*min..=*max).map(Type::int_literal).collect()
                 }
-                all
+                Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => {
+                    let mut all = Vec::new();
+                    for member in members {
+                        let finite = member.finite_types();
+                        if finite.is_empty() {
+                            return Vec::new();
+                        }
+                        all.extend(finite);
+                    }
+                    all
+                }
+                _ => Vec::new(),
             }
-            _ => Vec::new(),
-        }
+        })
     }
 
     /// PHPStan's `generalize(lessSpecific)`: literals and ranges widen to
@@ -354,7 +356,7 @@ impl Type {
     /// of its generalized keys and values (still a list, still non-empty,
     /// when it was), and a union's members each.
     pub fn generalize(&self) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::IntLiteral(_)) | Type(Repr::IntRange(..)) => Type::int(),
             Type(Repr::StringLiteral(_)) => Type::string(),
             Type(Repr::FloatLiteral(_)) => Type::float(),
@@ -408,7 +410,7 @@ impl Type {
                     .collect(),
             ),
             other => other.clone(),
-        }
+        })
     }
 
     /// Whether this is `never`.
@@ -529,7 +531,7 @@ impl Type {
     /// already refined, gains it, in a union too; other members are left
     /// as they are.
     pub fn with_string_accessory(&self, kind: AccessoryKind) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::String) => Type(Repr::Intersection(vec![
                 Type::string(),
                 Type::accessory(kind),
@@ -549,7 +551,7 @@ impl Type {
                     .collect(),
             )),
             other => other.clone(),
-        }
+        })
     }
 
     /// The `(min, max)` of an integer type, `None` bounds unbounded
@@ -607,7 +609,7 @@ impl Type {
     /// PHPStan's `getIterableValueType()` for a type every value of which
     /// is an array; `None` otherwise. `array{}` holds no value (`never`).
     pub fn array_value_type(&self) -> Option<Type> {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Array(_, value)) => Some((**value).clone()),
             Type(Repr::ArrayShape(shape)) => Some(
                 shape
@@ -627,42 +629,44 @@ impl Type {
                 .reduce(Type::union),
             Type(Repr::TemplateParam(param)) => param.bound.array_value_type(),
             _ => None,
-        }
+        })
     }
 
     /// PHPStan's `getIterableKeyType()` for a type every value of which
     /// is an array; `None` otherwise. `array{}` holds no key (`never`).
     pub fn array_key_type(&self) -> Option<Type> {
-        match self {
-            Type(Repr::Array(key, _)) => Some((**key).clone()),
-            Type(Repr::ArrayShape(shape)) => {
-                let keys = shape.key_type();
-                Some(match shape.unsealed.as_deref() {
-                    Some(tail) => Type::union(keys, tail.0.clone()),
-                    None => keys,
-                })
-            }
-            // A list keys on `int<0, max>` whatever its array member says.
-            Type(Repr::Intersection(members)) => {
-                let key = members.iter().find_map(Type::array_key_type)?;
-                if members.contains(&Type::accessory(AccessoryKind::ArrayList)) {
-                    Some(crate::intersect_types(vec![
-                        key,
-                        Type::int_range(Some(0), None),
-                    ]))
-                } else {
-                    Some(key)
+        syntax::stack::guard(|| {
+            match self {
+                Type(Repr::Array(key, _)) => Some((**key).clone()),
+                Type(Repr::ArrayShape(shape)) => {
+                    let keys = shape.key_type();
+                    Some(match shape.unsealed.as_deref() {
+                        Some(tail) => Type::union(keys, tail.0.clone()),
+                        None => keys,
+                    })
                 }
+                // A list keys on `int<0, max>` whatever its array member says.
+                Type(Repr::Intersection(members)) => {
+                    let key = members.iter().find_map(Type::array_key_type)?;
+                    if members.contains(&Type::accessory(AccessoryKind::ArrayList)) {
+                        Some(crate::intersect_types(vec![
+                            key,
+                            Type::int_range(Some(0), None),
+                        ]))
+                    } else {
+                        Some(key)
+                    }
+                }
+                Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
+                    .iter()
+                    .map(Type::array_key_type)
+                    .collect::<Option<Vec<_>>>()?
+                    .into_iter()
+                    .reduce(Type::union),
+                Type(Repr::TemplateParam(param)) => param.bound.array_key_type(),
+                _ => None,
             }
-            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
-                .iter()
-                .map(Type::array_key_type)
-                .collect::<Option<Vec<_>>>()?
-                .into_iter()
-                .reduce(Type::union),
-            Type(Repr::TemplateParam(param)) => param.bound.array_key_type(),
-            _ => None,
-        }
+        })
     }
 
     /// PHPStan's `getArrays()`: the members that are arrays.
@@ -726,7 +730,7 @@ impl Type {
     /// PHPStan's `toBoolean()`: `true` when every value is truthy, `false`
     /// when every value is falsy, `bool` otherwise.
     pub fn to_boolean(&self) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::True) => Type::bool_literal(true),
             Type(Repr::False) | Type(Repr::Null) | Type(Repr::Void) => Type::bool_literal(false),
             Type(Repr::IntLiteral(n)) => Type::bool_literal(*n != 0),
@@ -779,7 +783,7 @@ impl Type {
             Type(Repr::TemplateParam(param)) => param.bound.to_boolean(),
             Type(Repr::Never) => Type::never(),
             _ => Type::bool(),
-        }
+        })
     }
 }
 

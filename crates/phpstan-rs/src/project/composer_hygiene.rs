@@ -766,21 +766,23 @@ fn check_platform_php(manifest: &ComposerManifest, diagnostics: &mut Vec<Diagnos
 
 /// Every class-like `stmts` declares, with its name's span.
 fn collect_declared_classes(stmts: &[Stmt], ctx: &mut NameContext, out: &mut Vec<(String, Span)>) {
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                out.push((ctx.declared_name(class_decl_name(e)), e.name_span))
+    syntax::stack::guard(|| {
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                    out.push((ctx.declared_name(class_decl_name(e)), e.name_span))
+                }
+                StmtKind::ClassDecl(c) => {
+                    out.push((ctx.declared_name(class_decl_name(c)), c.name_span))
+                }
+                StmtKind::Block(body)
+                | StmtKind::Declare {
+                    body: Some(body), ..
+                } => collect_declared_classes(body, ctx, out),
+                _ => {}
             }
-            StmtKind::ClassDecl(c) => {
-                out.push((ctx.declared_name(class_decl_name(c)), c.name_span))
-            }
-            StmtKind::Block(body)
-            | StmtKind::Declare {
-                body: Some(body), ..
-            } => collect_declared_classes(body, ctx, out),
-            _ => {}
         }
-    }
+    })
 }

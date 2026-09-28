@@ -207,14 +207,13 @@ pub struct Project {
     escaped_member_classes: FxHashSet<String>,
 }
 
-/// The stack each checking thread gets: the checker's recursive walk, and
-/// in a debug build the parser's precedence-climbing chain, need far more
-/// than a default thread's ~2 MiB.
+/// The stack each checking thread starts with. Deep walks grow their stack
+/// on demand (`syntax::stack`), so this only spares ordinary code those
+/// growths.
 pub const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
 
 /// A pool of one `WORKER_STACK_SIZE` thread per core. A process builds one
-/// and runs every parallel parse and check on it: the global rayon pool's
-/// threads have too little stack for the checker.
+/// and runs every parallel parse and check on it.
 pub fn worker_pool() -> Arc<rayon::ThreadPool> {
     Arc::new(
         rayon::ThreadPoolBuilder::new()
@@ -2209,55 +2208,57 @@ fn declared_names_with_context(
     stmts: &[Stmt],
     ctx: &mut NameContext,
 ) -> (Vec<String>, Vec<String>) {
-    let mut functions = Vec::new();
-    let mut classes = Vec::new();
-    for stmt in stmts {
-        match &stmt.kind {
-            StmtKind::Namespace(name) => ctx.set_namespace(name),
-            StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::FunctionDecl(f) => functions.push(ctx.declared_name(&f.name)),
-            StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-                classes.push(ctx.declared_name(class_decl_name(e)))
-            }
-            StmtKind::ClassDecl(c) => classes.push(ctx.declared_name(class_decl_name(c))),
-            // Must mirror Registry::index's recursion into `if`/block
-            // bodies (the `if (!function_exists(...)) { function foo()
-            // {} }` polyfill idiom) - otherwise an incremental update
-            // wouldn't know to remove a conditionally-declared symbol
-            // that index() itself did pick up, leaving a stale entry
-            // behind after the declaring file changes or is removed.
-            StmtKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                let (f, c) = declared_names_with_context(
-                    std::slice::from_ref(then_branch),
-                    &mut ctx.clone(),
-                );
-                functions.extend(f);
-                classes.extend(c);
-                if let Some(else_branch) = else_branch {
+    syntax::stack::guard(|| {
+        let mut functions = Vec::new();
+        let mut classes = Vec::new();
+        for stmt in stmts {
+            match &stmt.kind {
+                StmtKind::Namespace(name) => ctx.set_namespace(name),
+                StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::FunctionDecl(f) => functions.push(ctx.declared_name(&f.name)),
+                StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
+                    classes.push(ctx.declared_name(class_decl_name(e)))
+                }
+                StmtKind::ClassDecl(c) => classes.push(ctx.declared_name(class_decl_name(c))),
+                // Must mirror Registry::index's recursion into `if`/block
+                // bodies (the `if (!function_exists(...)) { function foo()
+                // {} }` polyfill idiom) - otherwise an incremental update
+                // wouldn't know to remove a conditionally-declared symbol
+                // that index() itself did pick up, leaving a stale entry
+                // behind after the declaring file changes or is removed.
+                StmtKind::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
                     let (f, c) = declared_names_with_context(
-                        std::slice::from_ref(else_branch),
+                        std::slice::from_ref(then_branch),
                         &mut ctx.clone(),
                     );
                     functions.extend(f);
                     classes.extend(c);
+                    if let Some(else_branch) = else_branch {
+                        let (f, c) = declared_names_with_context(
+                            std::slice::from_ref(else_branch),
+                            &mut ctx.clone(),
+                        );
+                        functions.extend(f);
+                        classes.extend(c);
+                    }
                 }
+                StmtKind::Block(inner)
+                | StmtKind::Declare {
+                    body: Some(inner), ..
+                } => {
+                    let (f, c) = declared_names_with_context(inner, ctx);
+                    functions.extend(f);
+                    classes.extend(c);
+                }
+                _ => {}
             }
-            StmtKind::Block(inner)
-            | StmtKind::Declare {
-                body: Some(inner), ..
-            } => {
-                let (f, c) = declared_names_with_context(inner, ctx);
-                functions.extend(f);
-                classes.extend(c);
-            }
-            _ => {}
         }
-    }
-    (functions, classes)
+        (functions, classes)
+    })
 }
 
 fn register_references(

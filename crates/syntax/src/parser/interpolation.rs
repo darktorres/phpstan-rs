@@ -127,11 +127,14 @@ impl Parser {
         }
         // A string with no interpolation is one literal spanning the whole
         // string, quotes included.
-        if exprs.len() == 1
-            && let Some(ExprKind::Literal(Literal::String(_))) = exprs.first().map(|e| &e.kind)
+        if let [only] = exprs.as_mut_slice()
+            && let ExprKind::Literal(Literal::String(_)) = only.kind
         {
-            let kind = exprs.into_iter().next().unwrap().kind;
-            return Ok(self.expr(kind, base));
+            only.span = Span {
+                start: base,
+                end: self.previous_end(),
+            };
+            return Ok(exprs.pop().expect("one part"));
         }
         Ok(self.expr(ExprKind::Interpolated(exprs), base))
     }

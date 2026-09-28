@@ -4,18 +4,7 @@ use crate::ast::*;
 use crate::name::Interner;
 use crate::token::{Keyword, Position, Span, Token};
 
-// Real PHP's own engine imposes a call-stack-depth guard specifically so
-// pathologically nested input (`~~~~~~...~~~~~1`, deeply chained `??`,
-// deeply nested parens/arrays) produces a normal fatal error instead of
-// crashing the process - php-src's own Zend/tests/stack_limit/*.phpt exist
-// to test exactly that. This parser's few genuinely self-recursive (not
-// while-loop) productions need the same guard: a stack overflow is a hard
-// fault, not a panic, so it can't be caught by anything upstream (a batch
-// checker's catch_unwind included) and takes the whole process down.
-const MAX_EXPR_DEPTH: usize = 1000;
-
-/// A parse failure: malformed syntax, or an expression nested past
-/// `MAX_EXPR_DEPTH`.
+/// A parse failure: malformed syntax.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
     pub message: String,
@@ -65,10 +54,6 @@ pub struct Parser {
     pub(crate) doc_comments_all: rustc_hash::FxHashMap<usize, Arc<str>>,
     // Where the (first) doc comment in `doc_comments` starts, same keys.
     pub(crate) doc_comment_starts: rustc_hash::FxHashMap<usize, crate::token::Position>,
-    // Incremented/decremented around the parser's self-recursive
-    // expression productions (parse_unary, parse_assignment,
-    // parse_coalesce) - see MAX_EXPR_DEPTH.
-    pub(crate) expr_depth: usize,
     // The id the next node built gets - see `NodeId`.
     pub(crate) next_node_id: std::cell::Cell<u32>,
     // What names in the tree are interned into.
@@ -145,7 +130,6 @@ impl Parser {
             doc_comment_lines,
             doc_comments_all,
             doc_comment_starts,
-            expr_depth: 0,
             next_node_id: std::cell::Cell::new(0),
             interner: Arc::clone(Interner::global()),
         }
@@ -283,27 +267,6 @@ impl Parser {
     /// call this before advancing past the first token of a declaration.
     pub(crate) fn take_doc_comment(&mut self) -> Option<Arc<str>> {
         self.doc_comments.remove(&self.pos)
-    }
-
-    /// Bumps the expression-recursion depth counter, failing once it
-    /// passes MAX_EXPR_DEPTH instead of letting the recursion keep going
-    /// until it overflows the stack. Callers pair this with `leave_expr`
-    /// once their own recursive call returns.
-    pub(crate) fn enter_expr(&mut self) -> Result<(), ParseError> {
-        self.expr_depth += 1;
-        if self.expr_depth > MAX_EXPR_DEPTH {
-            return Err(ParseError {
-                message: format!(
-                    "parse error: expression nested too deeply (over {MAX_EXPR_DEPTH} levels)"
-                ),
-                span: self.spans.get(self.pos).copied().unwrap_or_default(),
-            });
-        }
-        Ok(())
-    }
-
-    pub(crate) fn leave_expr(&mut self) {
-        self.expr_depth -= 1;
     }
 
     #[hotpath::measure]

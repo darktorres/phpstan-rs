@@ -20,7 +20,7 @@ impl Type {
     /// reference answered by `consts`, and each late type over them
     /// settled.
     pub fn resolve_class_references(&self, consts: &dyn ClassConstants) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::ValueOf(target)) => match target.as_ref() {
                 Type(Repr::ClassConstant { .. }) => {
                     value_of(&target.resolve_class_references(consts)).unwrap_or(Type::mixed())
@@ -33,18 +33,18 @@ impl Type {
                 settle(self.map_children(&mut |t| t.resolve_class_references(consts)))
             }
             _ => self.map_children(&mut |t| t.resolve_class_references(consts)),
-        }
+        })
     }
 
     /// This type with each class constant reference replaced by `f`'s
     /// answer for its class and name pattern, kept where `f` gives none.
     pub fn map_class_constants(&self, f: &mut dyn FnMut(&Type, &str) -> Option<Type>) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::ClassConstant { class, pattern }) => {
                 f(class, pattern).unwrap_or_else(|| self.clone())
             }
             _ => self.map_children(&mut |t| t.map_class_constants(&mut *f)),
-        }
+        })
     }
 }
 
@@ -86,7 +86,7 @@ pub(crate) fn value_of(ty: &Type) -> Option<Type> {
 /// type `base` holds at `key`. A shape without the key, or a non-array
 /// `base`, gives `Mixed`; `None` when `base` isn't known yet.
 pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
-    match base {
+    syntax::stack::guard(|| match base {
         Type(Repr::ArrayShape(shape)) | Type(Repr::ObjectShape(shape)) => Some(
             ShapeKey::from_type(key)
                 .and_then(|key| shape.field(&key))
@@ -102,7 +102,7 @@ pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
             .map(join),
         Type(Repr::TemplateParam(_)) | Type(Repr::Object(_, _)) => None,
         _ => Some(Type::mixed()),
-    }
+    })
 }
 
 /// A late-resolvable node answered now that its operand may be known -
@@ -166,10 +166,10 @@ impl Type {
 
 /// A template's bound, recursively (`T of U`, `U of array`).
 fn upper_bound(ty: &Type) -> Type {
-    match ty {
+    syntax::stack::guard(|| match ty {
         Type(Repr::TemplateParam(tp)) => upper_bound(&tp.bound),
         other => other.clone(),
-    }
+    })
 }
 
 /// One late-resolvable node's answer, reading its operand through

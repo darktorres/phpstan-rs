@@ -10,7 +10,7 @@ impl Type {
     /// members, callable parameters and return, conditional branches);
     /// a leaf is returned unchanged. `f` decides whether to recurse.
     pub fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Array(k, v)) => Type::array(f(k), f(v)),
             Type(Repr::ClassString(inner)) => Type::class_string(f(inner)),
             Type(Repr::ArrayShape(shape)) => Type::array_shape(shape.map_types(f)),
@@ -67,13 +67,13 @@ impl Type {
                 template_subject: *template_subject,
             }),
             leaf => leaf.clone(),
-        }
+        })
     }
 
     /// Calls `f` on each directly nested type - the children
     /// `map_children` rebuilds, in the same order.
     pub fn for_each_child<'t>(&'t self, f: &mut impl FnMut(&'t Type)) {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Array(k, v)) => {
                 f(k);
                 f(v);
@@ -115,7 +115,7 @@ impl Type {
                 f(if_false);
             }
             _ => {}
-        }
+        })
     }
 
     /// Whether `f` holds for some directly nested type.

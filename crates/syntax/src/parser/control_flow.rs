@@ -5,12 +5,7 @@ use crate::token::{Keyword, Position, Span, Token};
 impl Parser {
     pub(crate) fn parse_block(&mut self) -> Result<Stmt, ParseError> {
         let start = self.current_pos();
-        self.expect(&Token::LBrace)?;
-        let mut stmts = Vec::new();
-        while !self.check(&Token::RBrace) && !self.at_eof() {
-            stmts.push(self.parse_statement()?);
-        }
-        self.expect(&Token::RBrace)?;
+        let stmts = self.parse_stmt_list_block()?;
         Ok(self.stmt(StmtKind::Block(stmts), start))
     }
 
@@ -62,7 +57,7 @@ impl Parser {
         let else_branch = if self.eat(&Token::Keyword(Keyword::ElseIf)) {
             self.pos -= 1; // put back; re-dispatch as a nested `if`
             self.tokens[self.pos] = Token::Keyword(Keyword::If);
-            Some(Box::new(self.parse_if()?))
+            Some(Box::new(crate::stack::guard(|| self.parse_if())?))
         } else if self.eat(&Token::Keyword(Keyword::Else)) {
             Some(Box::new(self.parse_braced_or_single()?))
         } else {
@@ -322,12 +317,15 @@ impl Parser {
         ))
     }
 
+    /// A `{ ... }` block's statements.
     pub(crate) fn parse_stmt_list_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
-        if let StmtKind::Block(stmts) = self.parse_block()?.kind {
-            Ok(stmts)
-        } else {
-            unreachable!()
+        self.expect(&Token::LBrace)?;
+        let mut stmts = Vec::new();
+        while !self.check(&Token::RBrace) && !self.at_eof() {
+            stmts.push(self.parse_statement()?);
         }
+        self.expect(&Token::RBrace)?;
+        Ok(stmts)
     }
 
     pub(crate) fn parse_switch(&mut self) -> Result<Stmt, ParseError> {

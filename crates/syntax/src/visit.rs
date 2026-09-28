@@ -93,7 +93,7 @@ pub fn walk_stmts<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmts: &'ast [Stmt
 }
 
 pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
-    match &stmt.kind {
+    crate::stack::guard(|| match &stmt.kind {
         StmtKind::InlineHtml(_)
         | StmtKind::Break(_)
         | StmtKind::Continue(_)
@@ -210,7 +210,7 @@ pub fn walk_stmt<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, stmt: &'ast Stmt) {
                 walk_stmts(v, finally);
             }
         }
-    }
+    })
 }
 
 fn walk_static_target<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, target: &'ast StaticTarget) {
@@ -227,7 +227,7 @@ fn walk_args<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, args: &'ast [Arg]) {
 }
 
 pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
-    match &expr.kind {
+    crate::stack::guard(|| match &expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) => {}
         ExprKind::Name(name) => v.visit_name(name),
         ExprKind::Isset(operands) => {
@@ -392,7 +392,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
                 v.visit_expr(&arm.body);
             }
         }
-    }
+    })
 }
 
 pub fn walk_function_decl<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, f: &'ast FunctionDecl) {
@@ -783,7 +783,7 @@ pub fn walk_stmts_mut<V: VisitorMut + ?Sized>(v: &mut V, stmts: &mut [Stmt]) {
 }
 
 pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
-    match &mut stmt.kind {
+    crate::stack::guard(|| match &mut stmt.kind {
         StmtKind::InlineHtml(_)
         | StmtKind::Break(_)
         | StmtKind::Continue(_)
@@ -904,7 +904,7 @@ pub fn walk_stmt_mut<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut Stmt) {
                 walk_stmts_mut(v, finally);
             }
         }
-    }
+    })
 }
 
 fn walk_static_target_mut<V: VisitorMut + ?Sized>(v: &mut V, target: &mut StaticTarget) {
@@ -920,7 +920,7 @@ fn walk_args_mut<V: VisitorMut + ?Sized>(v: &mut V, args: &mut [Arg]) {
 }
 
 pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
-    match &mut expr.kind {
+    crate::stack::guard(|| match &mut expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => {}
         ExprKind::Isset(operands) => {
             for operand in operands {
@@ -1079,7 +1079,7 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
                 v.visit_expr(&mut arm.body);
             }
         }
-    }
+    })
 }
 
 pub fn walk_function_decl_mut<V: VisitorMut + ?Sized>(v: &mut V, f: &mut FunctionDecl) {

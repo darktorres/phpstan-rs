@@ -34,7 +34,7 @@ impl<'a> Checker<'a> {
     }
 
     fn numeric_literal_value(&self, e: &Expr) -> Option<f64> {
-        match &e.kind {
+        syntax::stack::guard(|| match &e.kind {
             ExprKind::Literal(Literal::Int(i)) => Some(*i as f64),
             ExprKind::Literal(Literal::Float(f)) => Some(*f),
             ExprKind::Literal(Literal::String(s))
@@ -51,7 +51,7 @@ impl<'a> Checker<'a> {
                 self.numeric_literal_value(inner)
             }
             _ => None,
-        }
+        })
     }
 
     fn report_magic_number(&mut self, span: Span, id: &str, place: &str) {

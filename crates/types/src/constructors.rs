@@ -178,9 +178,9 @@ impl Type {
     /// The union of `members`, benevolent: a value checked against it
     /// passes when it passes against any member.
     pub fn benevolent_union_of(members: Vec<Type>) -> Type {
-        match Type::union_of(members) {
-            Type(Repr::Union(members)) => Type(Repr::BenevolentUnion(members)),
-            other => other,
+        match Type::union_of(members).into_repr() {
+            Repr::Union(members) => Type(Repr::BenevolentUnion(members)),
+            other => Type(other),
         }
     }
 

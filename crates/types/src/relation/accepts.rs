@@ -31,470 +31,481 @@ impl Relation<'_> {
     /// class hierarchy for `Object` types; every other case defers to
     /// `Relation::is_super_type_of`, which has no notion of class context.
     pub(crate) fn accepts_type(&self, sub: &Type, sup: &Type) -> bool {
-        match (sub, sup) {
-            (Type(Repr::Error), _) | (_, Type(Repr::Error)) => true,
-            // A `key-of<T>`/`T[K]` still over a template is what `T`'s
-            // bound makes it.
-            (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
-                self.accepts_type(&sub.resolve_late_to_bounds(), sup)
-            }
-            (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
-                self.accepts_type(sub, &sup.resolve_late_to_bounds())
-            }
-            // Two payloads ask the extension; anything else reads a
-            // payload as its base type.
-            (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => {
-                match b.is_super_type_of(&**a, self.hierarchy) {
-                    Some(result) => result.yes(),
-                    None => self.accepts_type(&a.base(), &b.base()),
+        syntax::stack::guard(|| {
+            match (sub, sup) {
+                (Type(Repr::Error), _) | (_, Type(Repr::Error)) => true,
+                // A `key-of<T>`/`T[K]` still over a template is what `T`'s
+                // bound makes it.
+                (Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..)), _) => {
+                    self.accepts_type(&sub.resolve_late_to_bounds(), sup)
                 }
-            }
-            (Type(Repr::Extension(a)), _) => self.accepts_type(&a.base(), sup),
-            (_, Type(Repr::Extension(b))) => self.accepts_type(sub, &b.base()),
-            // The native `object` type hint is satisfied by *any* class
-            // instance - an extremely common pattern, e.g. Doctrine's
-            // `EntityRepository<T of object>` - and satisfies no
-            // particular class.
-            (Type(Repr::Object(_, _)), Type(Repr::ObjectWithoutClass)) => true,
-            (Type(Repr::ObjectWithoutClass), Type(Repr::Object(_, _))) => false,
-            // Real PHP recognizes (at least) four distinct shapes as a
-            // valid `callable`: an actual `Closure` (already handled by
-            // the ordinary class-hierarchy arm just below, since
-            // `Closure` is now its own real `Object` type rather than
-            // being conflated with `Repr::Callable` itself), an object
-            // whose class declares `__invoke()`, a plain string naming a
-            // real function, and a two-element array naming an instance-
-            // or static-method callable. The latter two can't be
-            // statically verified further without evaluating the string/
-            // array's own literal content - accepting them outright
-            // matches this project's existing "don't guess, don't
-            // false-positive" leniency elsewhere (e.g. the `Array(Mixed)`
-            // leniency just below).
-            (Type(Repr::Object(class, _)), Type(Repr::Callable(_))) => {
-                self.hierarchy.has_method(class, "__invoke")
-            }
-            (Type(Repr::String) | Type(Repr::StringLiteral(_)), Type(Repr::Callable(_))) => true,
-            (Type(Repr::Array(_, _)) | Type(Repr::ArrayShape(_)), Type(Repr::Callable(_))) => true,
-            // Type arguments are compared with real variance
-            // (`Repr::TemplateParam::variance`, `@template-covariant`/
-            // `-contravariant`, and call-site `covariant`/`contravariant`/
-            // `*` annotations, `crate::parse_generic_arg`), not just
-            // skipped (`Collection<Cat>` and `Collection<Dog>` are not
-            // mutually assignable). If `sup`'s own class isn't registered
-            // at all (an uninstalled dependency, or a PHAR-bundled one
-            // like `phpstan/phpstan` itself with no loose source to
-            // parse), falls back to a plain name/hierarchy-only
-            // comparison - the one deliberate leniency left in this
-            // design.
-            (Type(Repr::Object(a, args_a)), Type(Repr::Object(b, args_b))) => {
-                if !a.eq_ignore_case(b) && !self.hierarchy.is_subclass_of(a, b) {
-                    return false;
+                (_, Type(Repr::KeyOf(_)) | Type(Repr::OffsetAccess(..))) => {
+                    self.accepts_type(sub, &sup.resolve_late_to_bounds())
                 }
-                let Some(info_b) = self.hierarchy.find_class(b) else {
-                    return true;
-                };
-                // `b` isn't generic at all, so the whole template-binding
-                // walk below (`class_template_bindings`'s ancestor-chain
-                // recursion, allocating a `HashSet`/`HashMap` per call) is
-                // guaranteed to produce nothing the loop below would ever
-                // read - `info_b.templates` being empty makes that loop a
-                // no-op regardless of `effective_args_a`'s value.
-                if info_b.templates.is_empty() {
-                    return true;
-                }
-                // A missing trailing slot (an "erased"/under-supplied
-                // generic reference - a bare `Collection` with no `<T>`
-                // at all is the overwhelmingly common real shape) resolves
-                // to plain `Mixed`, not that template's own declared
-                // bound. Deliberately verified, not assumed: padding with
-                // the *bound* instead would make a bare reference to any
-                // class with a real (non-`Mixed`) bound - a very common
-                // shape, `@template T of SomeInterface` - fail the
-                // Invariant comparison below against *any* concrete
-                // argument, since `bound != concrete-subtype` invariantly
-                // (`accepts(bound, concrete)` fails whenever
-                // `concrete` is a strict subtype of `bound`) - a real,
-                // dangerous new false-positive class this project doesn't
-                // have data to avoid anyway: `ClassReflection` only persists
-                // `template_bounds`, never a class-level `@template T =
-                // Default` map the way `TemplateParam.default` carries
-                // one for a function/method's own templates (`crate::
-                // Type::substitute_templates`'s own real, shipped behavior pads
-                // with `.default`, falling back to `Mixed` - never the
-                // bound). Plain `Mixed` is both what's actually available
-                // and what already skips this slot's comparison entirely
-                // via the "either side Mixed" rule below - correctly
-                // lenient for the common case without guessing wrong.
-                // `args_a` is in `a`'s own frame - map it into `b`'s own
-                // template names via the same ancestor-substitution walk
-                // `extends_args`/`implements_args` already use elsewhere,
-                // unless `a == b` and it's already in the right frame.
-                let effective_args_a: Vec<Type> = if a == b {
-                    args_a.clone()
-                } else {
-                    let bindings = self.hierarchy.ancestor_template_bindings(a, args_a, b);
-                    info_b
-                        .templates
-                        .iter()
-                        .map(|name| {
-                            bindings
-                                .get(name.as_ref())
-                                .cloned()
-                                .unwrap_or(Type::mixed())
-                        })
-                        .collect()
-                };
-                for (i, _name) in info_b.templates.iter().enumerate() {
-                    let a_i = effective_args_a.get(i).cloned().unwrap_or(Type::mixed());
-                    let b_i = args_b.get(i).cloned().unwrap_or(Type::mixed());
-                    // A call-site variance marker on `sup`'s own argument
-                    // (`Collection<covariant Foo>`) overrides `b`'s own
-                    // declared slot variance for this one comparison,
-                    // exactly matching `GenericObjectType::isSuperTypeOf`/
-                    // `getReferencedTemplateTypes` read directly from
-                    // `vendor/phpstan-src` - `None` here means a `*`
-                    // annotation, real PHPStan's own "don't check this
-                    // argument at all."
-                    let Some(variance) = crate::effective_slot_variance(self.hierarchy, b, i, &b_i)
-                    else {
-                        continue;
-                    };
-                    let a_i = a_i
-                        .without_call_site_variance()
-                        .cloned()
-                        .unwrap_or(Type::mixed());
-                    let b_i = b_i
-                        .without_call_site_variance()
-                        .cloned()
-                        .unwrap_or(Type::mixed());
-                    // Either side unresolved/erased - don't know, don't
-                    // guess, matches this project's leniency everywhere
-                    // else a generic argument can't be verified. A raw,
-                    // still-unbound `TemplateParam` (a method/function's
-                    // own `@template`, e.g. `E` in `EntityRepository<E>
-                    // $repository`) is included here too, not just
-                    // `Mixed`: `checker::calls`'s own call-argument
-                    // template binding only ever binds a template used
-                    // as a bare param type (`T $value`), never one
-                    // nested inside another class's own generic argument
-                    // list, so `E` reaches this comparison exactly as
-                    // unbound as it was declared - comparing it
-                    // structurally against the real, concrete argument
-                    // is exactly as wrong as comparing `Mixed` would be.
-                    // Skipping this slot entirely for an unbound template
-                    // - rather than falling back to the bound - is what's
-                    // actually correct: an arbitrary object is not
-                    // guaranteed to be a specific concrete class, so
-                    // comparing against a weak bound like `object` would
-                    // wrongly reject a legitimately sound assignment; the
-                    // real answer is "not yet known, ask again once `E`
-                    // is bound," which this project's own call-argument
-                    // binding is simply never invoked for at this nested
-                    // position.
-                    if a_i == Type::mixed()
-                        || b_i == Type::mixed()
-                        || matches!(a_i, Type(Repr::TemplateParam(_)))
-                        || matches!(b_i, Type(Repr::TemplateParam(_)))
-                    {
-                        continue;
+                // Two payloads ask the extension; anything else reads a
+                // payload as its base type.
+                (Type(Repr::Extension(a)), Type(Repr::Extension(b))) => {
+                    match b.is_super_type_of(&**a, self.hierarchy) {
+                        Some(result) => result.yes(),
+                        None => self.accepts_type(&a.base(), &b.base()),
                     }
-                    let ok = match variance {
-                        Variance::Covariant => self.accepts_type(&a_i, &b_i),
-                        Variance::Contravariant => self.accepts_type(&b_i, &a_i),
-                        // Mutual assignability approximates real
-                        // PHPStan's exact `equals()` here - deliberately
-                        // chosen over raw structural `==`, since this
-                        // codebase's own `Union`/`Intersection` values
-                        // have no canonical member order
-                        // (`checker::expr::union_types` dedupes but never
-                        // sorts), making `==` order-sensitive and *more*
-                        // likely to falsely reject two independently
-                        // built but semantically identical unions than
-                        // mutual `accepts` is to miss a genuine
-                        // mismatch.
-                        Variance::Invariant => {
-                            self.accepts_type(&a_i, &b_i) && self.accepts_type(&b_i, &a_i)
-                        }
-                    };
-                    if !ok {
+                }
+                (Type(Repr::Extension(a)), _) => self.accepts_type(&a.base(), sup),
+                (_, Type(Repr::Extension(b))) => self.accepts_type(sub, &b.base()),
+                // The native `object` type hint is satisfied by *any* class
+                // instance - an extremely common pattern, e.g. Doctrine's
+                // `EntityRepository<T of object>` - and satisfies no
+                // particular class.
+                (Type(Repr::Object(_, _)), Type(Repr::ObjectWithoutClass)) => true,
+                (Type(Repr::ObjectWithoutClass), Type(Repr::Object(_, _))) => false,
+                // Real PHP recognizes (at least) four distinct shapes as a
+                // valid `callable`: an actual `Closure` (already handled by
+                // the ordinary class-hierarchy arm just below, since
+                // `Closure` is now its own real `Object` type rather than
+                // being conflated with `Repr::Callable` itself), an object
+                // whose class declares `__invoke()`, a plain string naming a
+                // real function, and a two-element array naming an instance-
+                // or static-method callable. The latter two can't be
+                // statically verified further without evaluating the string/
+                // array's own literal content - accepting them outright
+                // matches this project's existing "don't guess, don't
+                // false-positive" leniency elsewhere (e.g. the `Array(Mixed)`
+                // leniency just below).
+                (Type(Repr::Object(class, _)), Type(Repr::Callable(_))) => {
+                    self.hierarchy.has_method(class, "__invoke")
+                }
+                (Type(Repr::String) | Type(Repr::StringLiteral(_)), Type(Repr::Callable(_))) => {
+                    true
+                }
+                (Type(Repr::Array(_, _)) | Type(Repr::ArrayShape(_)), Type(Repr::Callable(_))) => {
+                    true
+                }
+                // Type arguments are compared with real variance
+                // (`Repr::TemplateParam::variance`, `@template-covariant`/
+                // `-contravariant`, and call-site `covariant`/`contravariant`/
+                // `*` annotations, `crate::parse_generic_arg`), not just
+                // skipped (`Collection<Cat>` and `Collection<Dog>` are not
+                // mutually assignable). If `sup`'s own class isn't registered
+                // at all (an uninstalled dependency, or a PHAR-bundled one
+                // like `phpstan/phpstan` itself with no loose source to
+                // parse), falls back to a plain name/hierarchy-only
+                // comparison - the one deliberate leniency left in this
+                // design.
+                (Type(Repr::Object(a, args_a)), Type(Repr::Object(b, args_b))) => {
+                    if !a.eq_ignore_case(b) && !self.hierarchy.is_subclass_of(a, b) {
                         return false;
                     }
-                }
-                true
-            }
-            // Hierarchy-aware version of `Relation::is_super_type_of`'s own bare
-            // `EnumCase -> Object` name-equality rule - a case
-            // is assignable not just to its own enum's bare type but to
-            // `UnitEnum`/`BackedEnum` (both synthesized `implements`
-            // entries every enum gets, see `ClassReflection::from_enum_decl`)
-            // and any interface the enum itself declares.
-            (Type(Repr::EnumCase(fqn, _)), Type(Repr::Object(b, _))) => {
-                fqn == b || self.hierarchy.is_subclass_of(fqn, b)
-            }
-            // A case is only ever itself; no hierarchy to widen through.
-            (Type(Repr::EnumCase(class_a, case_a)), Type(Repr::EnumCase(class_b, case_b))) => {
-                class_a == class_b && case_a == case_b
-            }
-            // Same hierarchy-aware override as the plain Object-vs-Object
-            // arm just above, one level up: `Relation::is_super_type_of`'s own
-            // `ClassString` arm inherits its non-hierarchy-aware Object
-            // comparison (name equality only), so without this a
-            // `class-string<Derived>` value would incorrectly fail to
-            // satisfy a `class-string<Base>`-typed parameter even when
-            // `Derived extends Base`.
-            // `interface-string`/`trait-string`: real PHPStan draws no
-            // distinction from bare `class-string` here, but this project
-            // is allowed to check more strictly - `ClassReflection::kind`
-            // already tracks exactly this.
-            (Type(Repr::ClassString(a)), Type(Repr::ClassKindString(kind))) => {
-                let Type(Repr::Object(name, _)) = &**a else {
-                    return false;
-                };
-                self.hierarchy
-                    .find_class(name)
-                    .is_some_and(|class| class.kind == *kind)
-            }
-            (Type(Repr::ClassString(a)), Type(Repr::ClassString(b))) => self.accepts_type(a, b),
-            // Mirrors `Relation::is_super_type_of`'s own bound-aware `TemplateParam`
-            // arm (see its doc comment for the full reasoning and why
-            // this needs to run *before* the `Union` arms just below),
-            // but recurses through `self.accepts` rather than the
-            // plain, hierarchy-*unaware* `Relation::is_super_type_of`: delegating
-            // straight to `Relation::is_super_type_of(sub, sup)` would silently
-            // drop the class-hierarchy-walking half of this whole method
-            // for any bound check involving a `TemplateParam`, wrongly
-            // flagging code where a template's own bound is a union of
-            // concrete classes needing a real ancestor walk to match a
-            // single-class target (e.g. `@phpstan-template TNodeType of
-            // PreInc|PreDec|PostInc|PostDec` satisfying `Rule<TNodeType>`'s
-            // own `TNodeType of Node` bound - each of those four classes
-            // extends `Node` only via `Expr`, a multi-level ancestor
-            // chain plain name-equality can't see).
-            (Type(Repr::TemplateParam(tp)), _) => {
-                matches!(*tp.bound, Type(Repr::Mixed(_))) || self.accepts_type(&tp.bound, sup)
-            }
-            // Mirrors `Relation::is_super_type_of`'s own identically-placed
-            // `Repr::Conditional` arm exactly (see that arm's own doc
-            // comment) - a real, independent gap this project's own
-            // `Repr::Conditional`-returning-function corpus checks were
-            // silently missing: without this, a `sub` that's itself an
-            // `Intersection` (any `list<T>`/`non-empty-array<T>`-typed
-            // value - an extremely common real return type) hits this
-            // function's own generic `(Intersection, _) => any(...)` rule
-            // below *first*, decomposing `sub`'s own members (`Array`,
-            // a bare `Accessory(ArrayList)`, a bare `Accessory(
-            // NonEmptyArray)`) and checking each *in isolation* against
-            // the still-unflattened `Conditional` - none of which,
-            // stripped from its own `Intersection` wrapper, actually
-            // represents "a real list" any more, so a value that
-            // genuinely satisfies one of the two conditional arms was
-            // wrongly rejected. Placed before every arm that could
-            // decompose `sub` first, exactly like `is_super_type_of`'s own
-            // arm, so `sup`'s real shape is always resolved before
-            // `sub`'s is.
-            (
-                Type(Repr::Conditional {
-                    if_true, if_false, ..
-                }),
-                _,
-            ) => self.accepts_type(
-                &Type(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
-                sup,
-            ),
-            (
-                _,
-                Type(Repr::Conditional {
-                    if_true, if_false, ..
-                }),
-            ) => self.accepts_type(
-                sub,
-                &Type(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
-            ),
-            (Type(Repr::Union(members)), _) => members.iter().all(|m| self.accepts_type(m, sup)),
-            (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
-                members.iter().any(|m| self.accepts_type(sub, m))
-            }
-            // Mirrors `Relation::is_super_type_of`'s own dedicated
-            // Intersection-vs-Intersection rule, and for the same reason
-            // - without it, this function's own generic `(Intersection,
-            // _) => any(...)` rule below intercepts a same-shaped pair
-            // (e.g. `list<string>` checked against a `list<string>`-
-            // typed parameter) first and gets it wrong, since it only
-            // asks whether one bare member of `sub` alone satisfies the
-            // whole `sup` intersection, never whether `sub`'s own
-            // combination does.
-            (Type(Repr::Intersection(_)), Type(Repr::Intersection(sup_members))) => {
-                sup_members.iter().all(|m| self.accepts_type(sub, m))
-            }
-            // A benevolent union given (`RuleLevelHelper::accepts()`) is
-            // accepted if *any* member matches `sup`, not only when *all*
-            // do - the behavioral difference a benevolent union exists
-            // for.
-            (Type(Repr::BenevolentUnion(members)), _) => {
-                members.iter().any(|m| self.accepts_type(m, sup))
-            }
-            // Each parameter/return comparison consults the class
-            // hierarchy: `Closure(Animal): Dog` fits `callable(Dog):
-            // Animal`, and `Event` fits a `T of object` template's bound.
-            (Type(Repr::Callable(Some(a))), Type(Repr::Callable(Some(b)))) => {
-                crate::callable_sig_is_subtype(a, b, &|x, y| self.accepts_type(x, y))
-            }
-            // A closure literal (`Type::closure_literal`) checked against a
-            // shaped `callable(...)`/`Closure(...)`: only its own
-            // signature decides. The generic "any member satisfies" rule
-            // just below would otherwise accept it through the `Closure`
-            // object member alone (`Closure` declares `__invoke`, which
-            // satisfies every callable shape), skipping the structural
-            // comparison entirely.
-            (Type(Repr::Intersection(members)), Type(Repr::Callable(Some(_))))
-                if members
-                    .iter()
-                    .any(|m| matches!(m, Type(Repr::Callable(Some(_))))) =>
-            {
-                members
-                    .iter()
-                    .filter(|m| matches!(m, Type(Repr::Callable(Some(_)))))
-                    .any(|m| self.accepts_type(m, sup))
-            }
-            (Type(Repr::Intersection(members)), _) => {
-                members.iter().any(|m| self.accepts_type(m, sup))
-            }
-            (_, Type(Repr::Intersection(members))) => {
-                members.iter().all(|m| self.accepts_type(sub, m))
-            }
-            // Deliberately more lenient here than Relation::is_super_type_of's pure
-            // structural relation (which correctly treats Array(Mixed) as
-            // NOT a subtype of Array(Int)): an array literal's element type
-            // is never inferred precisely by this checker, so it always
-            // shows up as Array(Mixed) meaning "unknown", not "really can
-            // hold anything" - without this, e.g. a PHPDoc `int[]` param
-            // would false-positive against every `[1, 2, 3]` literal.
-            // `strict_mixed_arrays` opts out of this leniency, matching
-            // real PHPStan's own level-9-style "be strict about values
-            // with mixed type" philosophy.
-            (Type(Repr::Array(_, a)), Type(Repr::Array(_, b))) => {
-                (!self.strict_mixed_arrays && matches!(**a, Type(Repr::Mixed(_))))
-                    || self.accepts_type(a, b)
-            }
-            // Same leniency, same reason, for an array of unknown structure
-            // (an array literal, most commonly) checked against a specific
-            // expected shape: e.g. `return ["count" => ..., "first" => ...]`
-            // against `@return array{count: int, first: string}` shouldn't
-            // false-positive just because literal keys/values aren't
-            // inferred. A genuinely known, homogeneous Array(V) still
-            // correctly fails to satisfy an arbitrary shape.
-            // The `Array(Mixed)` leniency also requires the array's own
-            // key type to actually accept the shape's real aggregate key
-            // type - without this, `array<
-            // string, mixed>` leniently satisfied `array{0: X}` (an
-            // int-keyed shape) purely because its *value* type was
-            // Mixed, ignoring a genuine key-type mismatch the leniency
-            // was never meant to paper over. `unknown_array_key()`
-            // itself (the "no more precise key type available" default
-            // essentially every `Array(_, Mixed)` construction site
-            // uses, `types.rs`'s own doc comment) stays unconditionally
-            // lenient here too, the exact same "don't know" spirit as
-            // the value-side `Mixed` check right next to it - only a
-            // *genuinely narrower, known* key type (a real `Repr::Int`/
-            // `Repr::String`) is held to the real subtyping check.
-            (Type(Repr::Array(key, a)), Type(Repr::ArrayShape(shape))) => {
-                !self.strict_mixed_arrays
-                    && matches!(**a, Type(Repr::Mixed(_)))
-                    && (**key == Type::unknown_array_key()
-                        || self.accepts_type(key, &shape.key_type()))
-            }
-            // Now that an array literal carries a real per-position/
-            // per-key shape instead of always reading as `Array(Mixed)`,
-            // it needs a real rule saying such a shape satisfies an
-            // ordinary `array`/`array<T>` hint - without this, `[1, 2,
-            // 3]` would stop being assignable to `int[]`/`array<int>`
-            // the moment its own type became precise. An individual
-            // shape field with no inferred type of its own (an
-            // unresolved global constant, most commonly) reads as
-            // `Mixed`, not "really can hold anything", so confidently
-            // failing it against `b` (e.g. `array<int|string>`) is
-            // exactly the false positive the `Array(Mixed)` leniency
-            // already exists to prevent - a shape literal deserves the
-            // identical treatment per field. Also requires the shape's
-            // own real aggregate key type to be assignable to the
-            // array's own declared key type - without this,
-            // `array{name: string}` (an all-string-keyed shape) would be
-            // silently accepted as satisfying `array<int, string>`,
-            // checking only whether every field's value type matched.
-            (Type(Repr::ArrayShape(shape)), Type(Repr::Array(key, b))) => {
-                self.accepts_type(&shape.key_type(), key)
-                    && shape.fields.iter().all(|f| {
-                        (!self.strict_mixed_arrays && matches!(f.ty, Type(Repr::Mixed(_))))
-                            || self.accepts_type(&f.ty, b)
-                    })
-            }
-            // Same completion for shape-to-shape: a literal's own shape
-            // satisfies a declared shape when every field the declared
-            // shape actually requires is present (an optional field may
-            // be missing) with an assignable type - extra fields the
-            // literal has beyond what's required are ignored, the same
-            // "structural, not exact" spirit `Array(Mixed)`'s own
-            // leniency already uses elsewhere in this match. Either
-            // side's unsealed tail takes no part.
-            (Type(Repr::ArrayShape(sub)), Type(Repr::ArrayShape(sup))) => {
-                sup.fields.iter().all(|f| match sub.field(&f.key) {
-                    Some(sub_field) => self.accepts_type(&sub_field.ty, &f.ty),
-                    None => f.optional,
-                })
-            }
-            // The `object{...}`-flavored sibling of the two `ArrayShape`
-            // rules just above - a real class instance
-            // satisfies a declared object shape when it has every
-            // property the shape actually requires (an optional field
-            // may be missing) with an assignable type, checked via
-            // `lookup_property` rather than an array field lookup;
-            // extra properties the class has beyond what's required are
-            // ignored, the same "structural, not exact" spirit. `object`/
-            // `stdClass` (dynamic-property bags this project doesn't
-            // track the real fields of) are accepted unconditionally,
-            // matching `Array(Mixed)`'s own established leniency for the
-            // identical "can't verify, don't guess wrong" situation.
-            (Type(Repr::ObjectWithoutClass), Type(Repr::ObjectShape(_))) => true,
-            // A class the registry never saw can't be checked either way.
-            (Type(Repr::Object(class, _)), Type(Repr::HasMethod(method))) => {
-                self.hierarchy.find_class(class).is_none()
-                    || self.hierarchy.has_method(class, method)
-            }
-            (Type(Repr::Object(class, _)), Type(Repr::HasProperty(property))) => {
-                self.hierarchy.find_class(class).is_none()
-                    || self.hierarchy.property_type(class, property).is_some()
-            }
-            (Type(Repr::ObjectShape(shape)), Type(Repr::HasProperty(property))) => shape
-                .field(&ShapeKey::from_name(property))
-                .is_some_and(|f| !f.optional),
-            (Type(Repr::Object(class, _)), Type(Repr::ObjectShape(shape))) => {
-                class == "stdClass"
-                    || shape.fields.iter().all(|f| {
-                        match self.hierarchy.property_type(class, &f.key.to_string()) {
-                            Some(property_ty) => self.accepts_type(&property_ty, &f.ty),
-                            None => f.optional,
+                    let Some(info_b) = self.hierarchy.find_class(b) else {
+                        return true;
+                    };
+                    // `b` isn't generic at all, so the whole template-binding
+                    // walk below (`class_template_bindings`'s ancestor-chain
+                    // recursion, allocating a `HashSet`/`HashMap` per call) is
+                    // guaranteed to produce nothing the loop below would ever
+                    // read - `info_b.templates` being empty makes that loop a
+                    // no-op regardless of `effective_args_a`'s value.
+                    if info_b.templates.is_empty() {
+                        return true;
+                    }
+                    // A missing trailing slot (an "erased"/under-supplied
+                    // generic reference - a bare `Collection` with no `<T>`
+                    // at all is the overwhelmingly common real shape) resolves
+                    // to plain `Mixed`, not that template's own declared
+                    // bound. Deliberately verified, not assumed: padding with
+                    // the *bound* instead would make a bare reference to any
+                    // class with a real (non-`Mixed`) bound - a very common
+                    // shape, `@template T of SomeInterface` - fail the
+                    // Invariant comparison below against *any* concrete
+                    // argument, since `bound != concrete-subtype` invariantly
+                    // (`accepts(bound, concrete)` fails whenever
+                    // `concrete` is a strict subtype of `bound`) - a real,
+                    // dangerous new false-positive class this project doesn't
+                    // have data to avoid anyway: `ClassReflection` only persists
+                    // `template_bounds`, never a class-level `@template T =
+                    // Default` map the way `TemplateParam.default` carries
+                    // one for a function/method's own templates (`crate::
+                    // Type::substitute_templates`'s own real, shipped behavior pads
+                    // with `.default`, falling back to `Mixed` - never the
+                    // bound). Plain `Mixed` is both what's actually available
+                    // and what already skips this slot's comparison entirely
+                    // via the "either side Mixed" rule below - correctly
+                    // lenient for the common case without guessing wrong.
+                    // `args_a` is in `a`'s own frame - map it into `b`'s own
+                    // template names via the same ancestor-substitution walk
+                    // `extends_args`/`implements_args` already use elsewhere,
+                    // unless `a == b` and it's already in the right frame.
+                    let effective_args_a: Vec<Type> = if a == b {
+                        args_a.clone()
+                    } else {
+                        let bindings = self.hierarchy.ancestor_template_bindings(a, args_a, b);
+                        info_b
+                            .templates
+                            .iter()
+                            .map(|name| {
+                                bindings
+                                    .get(name.as_ref())
+                                    .cloned()
+                                    .unwrap_or(Type::mixed())
+                            })
+                            .collect()
+                    };
+                    for (i, _name) in info_b.templates.iter().enumerate() {
+                        let a_i = effective_args_a.get(i).cloned().unwrap_or(Type::mixed());
+                        let b_i = args_b.get(i).cloned().unwrap_or(Type::mixed());
+                        // A call-site variance marker on `sup`'s own argument
+                        // (`Collection<covariant Foo>`) overrides `b`'s own
+                        // declared slot variance for this one comparison,
+                        // exactly matching `GenericObjectType::isSuperTypeOf`/
+                        // `getReferencedTemplateTypes` read directly from
+                        // `vendor/phpstan-src` - `None` here means a `*`
+                        // annotation, real PHPStan's own "don't check this
+                        // argument at all."
+                        let Some(variance) =
+                            crate::effective_slot_variance(self.hierarchy, b, i, &b_i)
+                        else {
+                            continue;
+                        };
+                        let a_i = a_i
+                            .without_call_site_variance()
+                            .cloned()
+                            .unwrap_or(Type::mixed());
+                        let b_i = b_i
+                            .without_call_site_variance()
+                            .cloned()
+                            .unwrap_or(Type::mixed());
+                        // Either side unresolved/erased - don't know, don't
+                        // guess, matches this project's leniency everywhere
+                        // else a generic argument can't be verified. A raw,
+                        // still-unbound `TemplateParam` (a method/function's
+                        // own `@template`, e.g. `E` in `EntityRepository<E>
+                        // $repository`) is included here too, not just
+                        // `Mixed`: `checker::calls`'s own call-argument
+                        // template binding only ever binds a template used
+                        // as a bare param type (`T $value`), never one
+                        // nested inside another class's own generic argument
+                        // list, so `E` reaches this comparison exactly as
+                        // unbound as it was declared - comparing it
+                        // structurally against the real, concrete argument
+                        // is exactly as wrong as comparing `Mixed` would be.
+                        // Skipping this slot entirely for an unbound template
+                        // - rather than falling back to the bound - is what's
+                        // actually correct: an arbitrary object is not
+                        // guaranteed to be a specific concrete class, so
+                        // comparing against a weak bound like `object` would
+                        // wrongly reject a legitimately sound assignment; the
+                        // real answer is "not yet known, ask again once `E`
+                        // is bound," which this project's own call-argument
+                        // binding is simply never invoked for at this nested
+                        // position.
+                        if a_i == Type::mixed()
+                            || b_i == Type::mixed()
+                            || matches!(a_i, Type(Repr::TemplateParam(_)))
+                            || matches!(b_i, Type(Repr::TemplateParam(_)))
+                        {
+                            continue;
                         }
+                        let ok = match variance {
+                            Variance::Covariant => self.accepts_type(&a_i, &b_i),
+                            Variance::Contravariant => self.accepts_type(&b_i, &a_i),
+                            // Mutual assignability approximates real
+                            // PHPStan's exact `equals()` here - deliberately
+                            // chosen over raw structural `==`, since this
+                            // codebase's own `Union`/`Intersection` values
+                            // have no canonical member order
+                            // (`checker::expr::union_types` dedupes but never
+                            // sorts), making `==` order-sensitive and *more*
+                            // likely to falsely reject two independently
+                            // built but semantically identical unions than
+                            // mutual `accepts` is to miss a genuine
+                            // mismatch.
+                            Variance::Invariant => {
+                                self.accepts_type(&a_i, &b_i) && self.accepts_type(&b_i, &a_i)
+                            }
+                        };
+                        if !ok {
+                            return false;
+                        }
+                    }
+                    true
+                }
+                // Hierarchy-aware version of `Relation::is_super_type_of`'s own bare
+                // `EnumCase -> Object` name-equality rule - a case
+                // is assignable not just to its own enum's bare type but to
+                // `UnitEnum`/`BackedEnum` (both synthesized `implements`
+                // entries every enum gets, see `ClassReflection::from_enum_decl`)
+                // and any interface the enum itself declares.
+                (Type(Repr::EnumCase(fqn, _)), Type(Repr::Object(b, _))) => {
+                    fqn == b || self.hierarchy.is_subclass_of(fqn, b)
+                }
+                // A case is only ever itself; no hierarchy to widen through.
+                (Type(Repr::EnumCase(class_a, case_a)), Type(Repr::EnumCase(class_b, case_b))) => {
+                    class_a == class_b && case_a == case_b
+                }
+                // Same hierarchy-aware override as the plain Object-vs-Object
+                // arm just above, one level up: `Relation::is_super_type_of`'s own
+                // `ClassString` arm inherits its non-hierarchy-aware Object
+                // comparison (name equality only), so without this a
+                // `class-string<Derived>` value would incorrectly fail to
+                // satisfy a `class-string<Base>`-typed parameter even when
+                // `Derived extends Base`.
+                // `interface-string`/`trait-string`: real PHPStan draws no
+                // distinction from bare `class-string` here, but this project
+                // is allowed to check more strictly - `ClassReflection::kind`
+                // already tracks exactly this.
+                (Type(Repr::ClassString(a)), Type(Repr::ClassKindString(kind))) => {
+                    let Type(Repr::Object(name, _)) = &**a else {
+                        return false;
+                    };
+                    self.hierarchy
+                        .find_class(name)
+                        .is_some_and(|class| class.kind == *kind)
+                }
+                (Type(Repr::ClassString(a)), Type(Repr::ClassString(b))) => self.accepts_type(a, b),
+                // Mirrors `Relation::is_super_type_of`'s own bound-aware `TemplateParam`
+                // arm (see its doc comment for the full reasoning and why
+                // this needs to run *before* the `Union` arms just below),
+                // but recurses through `self.accepts` rather than the
+                // plain, hierarchy-*unaware* `Relation::is_super_type_of`: delegating
+                // straight to `Relation::is_super_type_of(sub, sup)` would silently
+                // drop the class-hierarchy-walking half of this whole method
+                // for any bound check involving a `TemplateParam`, wrongly
+                // flagging code where a template's own bound is a union of
+                // concrete classes needing a real ancestor walk to match a
+                // single-class target (e.g. `@phpstan-template TNodeType of
+                // PreInc|PreDec|PostInc|PostDec` satisfying `Rule<TNodeType>`'s
+                // own `TNodeType of Node` bound - each of those four classes
+                // extends `Node` only via `Expr`, a multi-level ancestor
+                // chain plain name-equality can't see).
+                (Type(Repr::TemplateParam(tp)), _) => {
+                    matches!(*tp.bound, Type(Repr::Mixed(_))) || self.accepts_type(&tp.bound, sup)
+                }
+                // Mirrors `Relation::is_super_type_of`'s own identically-placed
+                // `Repr::Conditional` arm exactly (see that arm's own doc
+                // comment) - a real, independent gap this project's own
+                // `Repr::Conditional`-returning-function corpus checks were
+                // silently missing: without this, a `sub` that's itself an
+                // `Intersection` (any `list<T>`/`non-empty-array<T>`-typed
+                // value - an extremely common real return type) hits this
+                // function's own generic `(Intersection, _) => any(...)` rule
+                // below *first*, decomposing `sub`'s own members (`Array`,
+                // a bare `Accessory(ArrayList)`, a bare `Accessory(
+                // NonEmptyArray)`) and checking each *in isolation* against
+                // the still-unflattened `Conditional` - none of which,
+                // stripped from its own `Intersection` wrapper, actually
+                // represents "a real list" any more, so a value that
+                // genuinely satisfies one of the two conditional arms was
+                // wrongly rejected. Placed before every arm that could
+                // decompose `sub` first, exactly like `is_super_type_of`'s own
+                // arm, so `sup`'s real shape is always resolved before
+                // `sub`'s is.
+                (
+                    Type(Repr::Conditional {
+                        if_true, if_false, ..
+                    }),
+                    _,
+                ) => self.accepts_type(
+                    &Type(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
+                    sup,
+                ),
+                (
+                    _,
+                    Type(Repr::Conditional {
+                        if_true, if_false, ..
+                    }),
+                ) => self.accepts_type(
+                    sub,
+                    &Type(Repr::Union(vec![(**if_true).clone(), (**if_false).clone()])),
+                ),
+                (Type(Repr::Union(members)), _) => {
+                    members.iter().all(|m| self.accepts_type(m, sup))
+                }
+                (_, Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members))) => {
+                    members.iter().any(|m| self.accepts_type(sub, m))
+                }
+                // Mirrors `Relation::is_super_type_of`'s own dedicated
+                // Intersection-vs-Intersection rule, and for the same reason
+                // - without it, this function's own generic `(Intersection,
+                // _) => any(...)` rule below intercepts a same-shaped pair
+                // (e.g. `list<string>` checked against a `list<string>`-
+                // typed parameter) first and gets it wrong, since it only
+                // asks whether one bare member of `sub` alone satisfies the
+                // whole `sup` intersection, never whether `sub`'s own
+                // combination does.
+                (Type(Repr::Intersection(_)), Type(Repr::Intersection(sup_members))) => {
+                    sup_members.iter().all(|m| self.accepts_type(sub, m))
+                }
+                // A benevolent union given (`RuleLevelHelper::accepts()`) is
+                // accepted if *any* member matches `sup`, not only when *all*
+                // do - the behavioral difference a benevolent union exists
+                // for.
+                (Type(Repr::BenevolentUnion(members)), _) => {
+                    members.iter().any(|m| self.accepts_type(m, sup))
+                }
+                // Each parameter/return comparison consults the class
+                // hierarchy: `Closure(Animal): Dog` fits `callable(Dog):
+                // Animal`, and `Event` fits a `T of object` template's bound.
+                (Type(Repr::Callable(Some(a))), Type(Repr::Callable(Some(b)))) => {
+                    crate::callable_sig_is_subtype(a, b, &|x, y| self.accepts_type(x, y))
+                }
+                // A closure literal (`Type::closure_literal`) checked against a
+                // shaped `callable(...)`/`Closure(...)`: only its own
+                // signature decides. The generic "any member satisfies" rule
+                // just below would otherwise accept it through the `Closure`
+                // object member alone (`Closure` declares `__invoke`, which
+                // satisfies every callable shape), skipping the structural
+                // comparison entirely.
+                (Type(Repr::Intersection(members)), Type(Repr::Callable(Some(_))))
+                    if members
+                        .iter()
+                        .any(|m| matches!(m, Type(Repr::Callable(Some(_))))) =>
+                {
+                    members
+                        .iter()
+                        .filter(|m| matches!(m, Type(Repr::Callable(Some(_)))))
+                        .any(|m| self.accepts_type(m, sup))
+                }
+                (Type(Repr::Intersection(members)), _) => {
+                    members.iter().any(|m| self.accepts_type(m, sup))
+                }
+                (_, Type(Repr::Intersection(members))) => {
+                    members.iter().all(|m| self.accepts_type(sub, m))
+                }
+                // Deliberately more lenient here than Relation::is_super_type_of's pure
+                // structural relation (which correctly treats Array(Mixed) as
+                // NOT a subtype of Array(Int)): an array literal's element type
+                // is never inferred precisely by this checker, so it always
+                // shows up as Array(Mixed) meaning "unknown", not "really can
+                // hold anything" - without this, e.g. a PHPDoc `int[]` param
+                // would false-positive against every `[1, 2, 3]` literal.
+                // `strict_mixed_arrays` opts out of this leniency, matching
+                // real PHPStan's own level-9-style "be strict about values
+                // with mixed type" philosophy.
+                (Type(Repr::Array(_, a)), Type(Repr::Array(_, b))) => {
+                    (!self.strict_mixed_arrays && matches!(**a, Type(Repr::Mixed(_))))
+                        || self.accepts_type(a, b)
+                }
+                // Same leniency, same reason, for an array of unknown structure
+                // (an array literal, most commonly) checked against a specific
+                // expected shape: e.g. `return ["count" => ..., "first" => ...]`
+                // against `@return array{count: int, first: string}` shouldn't
+                // false-positive just because literal keys/values aren't
+                // inferred. A genuinely known, homogeneous Array(V) still
+                // correctly fails to satisfy an arbitrary shape.
+                // The `Array(Mixed)` leniency also requires the array's own
+                // key type to actually accept the shape's real aggregate key
+                // type - without this, `array<
+                // string, mixed>` leniently satisfied `array{0: X}` (an
+                // int-keyed shape) purely because its *value* type was
+                // Mixed, ignoring a genuine key-type mismatch the leniency
+                // was never meant to paper over. `unknown_array_key()`
+                // itself (the "no more precise key type available" default
+                // essentially every `Array(_, Mixed)` construction site
+                // uses, `types.rs`'s own doc comment) stays unconditionally
+                // lenient here too, the exact same "don't know" spirit as
+                // the value-side `Mixed` check right next to it - only a
+                // *genuinely narrower, known* key type (a real `Repr::Int`/
+                // `Repr::String`) is held to the real subtyping check.
+                (Type(Repr::Array(key, a)), Type(Repr::ArrayShape(shape))) => {
+                    !self.strict_mixed_arrays
+                        && matches!(**a, Type(Repr::Mixed(_)))
+                        && (**key == Type::unknown_array_key()
+                            || self.accepts_type(key, &shape.key_type()))
+                }
+                // Now that an array literal carries a real per-position/
+                // per-key shape instead of always reading as `Array(Mixed)`,
+                // it needs a real rule saying such a shape satisfies an
+                // ordinary `array`/`array<T>` hint - without this, `[1, 2,
+                // 3]` would stop being assignable to `int[]`/`array<int>`
+                // the moment its own type became precise. An individual
+                // shape field with no inferred type of its own (an
+                // unresolved global constant, most commonly) reads as
+                // `Mixed`, not "really can hold anything", so confidently
+                // failing it against `b` (e.g. `array<int|string>`) is
+                // exactly the false positive the `Array(Mixed)` leniency
+                // already exists to prevent - a shape literal deserves the
+                // identical treatment per field. Also requires the shape's
+                // own real aggregate key type to be assignable to the
+                // array's own declared key type - without this,
+                // `array{name: string}` (an all-string-keyed shape) would be
+                // silently accepted as satisfying `array<int, string>`,
+                // checking only whether every field's value type matched.
+                (Type(Repr::ArrayShape(shape)), Type(Repr::Array(key, b))) => {
+                    self.accepts_type(&shape.key_type(), key)
+                        && shape.fields.iter().all(|f| {
+                            (!self.strict_mixed_arrays && matches!(f.ty, Type(Repr::Mixed(_))))
+                                || self.accepts_type(&f.ty, b)
+                        })
+                }
+                // Same completion for shape-to-shape: a literal's own shape
+                // satisfies a declared shape when every field the declared
+                // shape actually requires is present (an optional field may
+                // be missing) with an assignable type - extra fields the
+                // literal has beyond what's required are ignored, the same
+                // "structural, not exact" spirit `Array(Mixed)`'s own
+                // leniency already uses elsewhere in this match. Either
+                // side's unsealed tail takes no part.
+                (Type(Repr::ArrayShape(sub)), Type(Repr::ArrayShape(sup))) => {
+                    sup.fields.iter().all(|f| match sub.field(&f.key) {
+                        Some(sub_field) => self.accepts_type(&sub_field.ty, &f.ty),
+                        None => f.optional,
                     })
+                }
+                // The `object{...}`-flavored sibling of the two `ArrayShape`
+                // rules just above - a real class instance
+                // satisfies a declared object shape when it has every
+                // property the shape actually requires (an optional field
+                // may be missing) with an assignable type, checked via
+                // `lookup_property` rather than an array field lookup;
+                // extra properties the class has beyond what's required are
+                // ignored, the same "structural, not exact" spirit. `object`/
+                // `stdClass` (dynamic-property bags this project doesn't
+                // track the real fields of) are accepted unconditionally,
+                // matching `Array(Mixed)`'s own established leniency for the
+                // identical "can't verify, don't guess wrong" situation.
+                (Type(Repr::ObjectWithoutClass), Type(Repr::ObjectShape(_))) => true,
+                // A class the registry never saw can't be checked either way.
+                (Type(Repr::Object(class, _)), Type(Repr::HasMethod(method))) => {
+                    self.hierarchy.find_class(class).is_none()
+                        || self.hierarchy.has_method(class, method)
+                }
+                (Type(Repr::Object(class, _)), Type(Repr::HasProperty(property))) => {
+                    self.hierarchy.find_class(class).is_none()
+                        || self.hierarchy.property_type(class, property).is_some()
+                }
+                (Type(Repr::ObjectShape(shape)), Type(Repr::HasProperty(property))) => shape
+                    .field(&ShapeKey::from_name(property))
+                    .is_some_and(|f| !f.optional),
+                (Type(Repr::Object(class, _)), Type(Repr::ObjectShape(shape))) => {
+                    class == "stdClass"
+                        || shape.fields.iter().all(|f| {
+                            match self.hierarchy.property_type(class, &f.key.to_string()) {
+                                Some(property_ty) => self.accepts_type(&property_ty, &f.ty),
+                                None => f.optional,
+                            }
+                        })
+                }
+                (Type(Repr::ObjectShape(sub)), Type(Repr::ObjectShape(sup))) => {
+                    sup.fields.iter().all(|f| match sub.field(&f.key) {
+                        Some(sub_field) => self.accepts_type(&sub_field.ty, &f.ty),
+                        None => f.optional,
+                    })
+                }
+                // Same unresolved-`@phpstan-type`-alias leniency as the
+                // Object-vs-Object arm above, generalized to every other
+                // `sub` shape: Doctrine DBAL's own `DriverManager::
+                // getConnection(Params $params)` is called with a real array
+                // *literal* (an `ArrayShape`) at nearly every real call site,
+                // never an actual `Params`-named object - only the
+                // Object-vs-Object arm's leniency would leave those failing
+                // just the same way.
+                (_, Type(Repr::Object(name, _))) if self.hierarchy.find_class(name).is_none() => {
+                    true
+                }
+                // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
+                (_, Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. })) => true,
+                _ => self.is_super_type_of(sup, sub).yes() || accepted_though_no_subtype(sub, sup),
             }
-            (Type(Repr::ObjectShape(sub)), Type(Repr::ObjectShape(sup))) => {
-                sup.fields.iter().all(|f| match sub.field(&f.key) {
-                    Some(sub_field) => self.accepts_type(&sub_field.ty, &f.ty),
-                    None => f.optional,
-                })
-            }
-            // Same unresolved-`@phpstan-type`-alias leniency as the
-            // Object-vs-Object arm above, generalized to every other
-            // `sub` shape: Doctrine DBAL's own `DriverManager::
-            // getConnection(Params $params)` is called with a real array
-            // *literal* (an `ArrayShape`) at nearly every real call site,
-            // never an actual `Params`-named object - only the
-            // Object-vs-Object arm's leniency would leave those failing
-            // just the same way.
-            (_, Type(Repr::Object(name, _))) if self.hierarchy.find_class(name).is_none() => true,
-            // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
-            (_, Type(Repr::ValueOf(_)) | Type(Repr::ClassConstant { .. })) => true,
-            _ => self.is_super_type_of(sup, sub).yes() || accepted_though_no_subtype(sub, sup),
-        }
+        })
     }
 
     /// The level-aware counterpart to `accepts` above - real
@@ -547,110 +558,112 @@ impl Relation<'_> {
     }
 
     fn rule_level_accepts_rec(&self, sub: &Type, sup: &Type, level: u8) -> bool {
-        // Real PHPStan's own `checkBenevolentUnionTypes` (`RuleLevelHelper::
-        // transformAcceptedType`) runs first, unconditionally, independent
-        // of level - mirrored here ahead of both fast paths below, which
-        // would otherwise fall straight through to `accepts_at_level`
-        // (and from there, `accepts`'s own always-lenient Benevolent
-        // arm) without ever seeing this override. Strips the marker and
-        // demands *every* member of the wrapped `Union` satisfy `sup`,
-        // recursing back into this same method (not plain `accepts`)
-        // so the rest of this method's own level-aware behavior (`checkNullables`/
-        // `checkUnionTypes`/`checkExplicitMixed`/`checkImplicitMixed`) still
-        // applies per-member exactly as it would for an ordinary Union.
-        if self.check_benevolent_union_types
-            && let Type(Repr::BenevolentUnion(wrapped)) = sub
-        {
-            return wrapped
-                .iter()
-                .all(|m| self.rule_level_accepts_rec(m, sup, level));
-        }
+        syntax::stack::guard(|| {
+            // Real PHPStan's own `checkBenevolentUnionTypes` (`RuleLevelHelper::
+            // transformAcceptedType`) runs first, unconditionally, independent
+            // of level - mirrored here ahead of both fast paths below, which
+            // would otherwise fall straight through to `accepts_at_level`
+            // (and from there, `accepts`'s own always-lenient Benevolent
+            // arm) without ever seeing this override. Strips the marker and
+            // demands *every* member of the wrapped `Union` satisfy `sup`,
+            // recursing back into this same method (not plain `accepts`)
+            // so the rest of this method's own level-aware behavior (`checkNullables`/
+            // `checkUnionTypes`/`checkExplicitMixed`/`checkImplicitMixed`) still
+            // applies per-member exactly as it would for an ordinary Union.
+            if self.check_benevolent_union_types
+                && let Type(Repr::BenevolentUnion(wrapped)) = sub
+            {
+                return wrapped
+                    .iter()
+                    .all(|m| self.rule_level_accepts_rec(m, sup, level));
+            }
 
-        // Fast path: both real gates already at their strict threshold -
-        // byte-identical to `accepts_at_level` (which still applies
-        // `checkExplicitMixed`/`checkImplicitMixed`, real PHPStan's own
-        // level 9/10 - unlike `checkNullables`/`checkUnionTypes`, neither
-        // is subsumed by this fast path, since 9/10 sit *above* 8), the
-        // safe default for a project explicitly configured at (or above)
-        // real PHPStan's own strictest level for *this* behavior.
-        // `NULLABLES_CHECK_LEVEL` (8) is strictly above
-        // `UNION_TYPES_CHECK_LEVEL` (7), so `level >= NULLABLES_CHECK_LEVEL`
-        // alone already implies the other - both consts are still named
-        // here (rather than one bare `8`) so this reads as "both real
-        // gates," matching real PHPStan's own two separately-named flags.
-        if level >= NULLABLES_CHECK_LEVEL {
-            debug_assert!(level >= UNION_TYPES_CHECK_LEVEL);
-            return self.accepts_at_level(sub, sup, level);
-        }
-        // Fast path: neither side is a `Union` at all - nothing for
-        // either level-gated behavior to touch, so this collapses to
-        // `accepts_at_level` too (the `Union` arms below are the
-        // only ones this method ever needs to diverge from plain
-        // assignability on).
-        if !matches!(sub, Type(Repr::Union(_))) && !matches!(sup, Type(Repr::Union(_))) {
-            return self.accepts_at_level(sub, sup, level);
-        }
+            // Fast path: both real gates already at their strict threshold -
+            // byte-identical to `accepts_at_level` (which still applies
+            // `checkExplicitMixed`/`checkImplicitMixed`, real PHPStan's own
+            // level 9/10 - unlike `checkNullables`/`checkUnionTypes`, neither
+            // is subsumed by this fast path, since 9/10 sit *above* 8), the
+            // safe default for a project explicitly configured at (or above)
+            // real PHPStan's own strictest level for *this* behavior.
+            // `NULLABLES_CHECK_LEVEL` (8) is strictly above
+            // `UNION_TYPES_CHECK_LEVEL` (7), so `level >= NULLABLES_CHECK_LEVEL`
+            // alone already implies the other - both consts are still named
+            // here (rather than one bare `8`) so this reads as "both real
+            // gates," matching real PHPStan's own two separately-named flags.
+            if level >= NULLABLES_CHECK_LEVEL {
+                debug_assert!(level >= UNION_TYPES_CHECK_LEVEL);
+                return self.accepts_at_level(sub, sup, level);
+            }
+            // Fast path: neither side is a `Union` at all - nothing for
+            // either level-gated behavior to touch, so this collapses to
+            // `accepts_at_level` too (the `Union` arms below are the
+            // only ones this method ever needs to diverge from plain
+            // assignability on).
+            if !matches!(sub, Type(Repr::Union(_))) && !matches!(sup, Type(Repr::Union(_))) {
+                return self.accepts_at_level(sub, sup, level);
+            }
 
-        // `checkNullables` (real PHPStan's own `transformAcceptedType`,
-        // `RuleLevelHelper.php:130-137`): below level 8, strip `Null` out
-        // of a multi-member `sub` ("acceptedType" in real PHPStan's own
-        // naming - the *actual/given* type, e.g. a `?string`-typed
-        // argument) Union before deciding acceptance - real PHPStan's own
-        // guard, applied exactly as it is there: never when `sup`
-        // ("acceptingType" - the *declared/expected* type) is bare
-        // `Repr::Null` (a nullable value must never satisfy a definite-
-        // null-only target), and never when `sub` is bare `Repr::Null`
-        // itself (a definite null literal stays definitely rejected at
-        // every level, `sub` must be a multi-member Union that *includes*
-        // Null, not Null alone).
-        let stripped_sub = if level < NULLABLES_CHECK_LEVEL
-            && *sup != Type::null()
-            && *sub != Type::null()
-            && let Type(Repr::Union(members)) = sub
-            && members.contains(&Type::null())
-        {
-            let non_null: Vec<Type> = members
-                .iter()
-                .filter(|m| **m != Type::null())
-                .cloned()
-                .collect();
-            Some(match non_null.len() {
-                // Unreachable in practice (`sub` was excluded above
-                // whenever it's bare `Repr::Null`, so a real Union always
-                // has at least one non-Null member) - kept as a safe,
-                // total fallback rather than an `unwrap`/panic.
-                0 => Type::never(),
-                1 => non_null.into_iter().next().unwrap(),
-                _ => Type(Repr::Union(non_null)),
-            })
-        } else {
-            None
-        };
-        let sub = stripped_sub.as_ref().unwrap_or(sub);
+            // `checkNullables` (real PHPStan's own `transformAcceptedType`,
+            // `RuleLevelHelper.php:130-137`): below level 8, strip `Null` out
+            // of a multi-member `sub` ("acceptedType" in real PHPStan's own
+            // naming - the *actual/given* type, e.g. a `?string`-typed
+            // argument) Union before deciding acceptance - real PHPStan's own
+            // guard, applied exactly as it is there: never when `sup`
+            // ("acceptingType" - the *declared/expected* type) is bare
+            // `Repr::Null` (a nullable value must never satisfy a definite-
+            // null-only target), and never when `sub` is bare `Repr::Null`
+            // itself (a definite null literal stays definitely rejected at
+            // every level, `sub` must be a multi-member Union that *includes*
+            // Null, not Null alone).
+            let stripped_sub = if level < NULLABLES_CHECK_LEVEL
+                && *sup != Type::null()
+                && *sub != Type::null()
+                && let Type(Repr::Union(members)) = sub
+                && members.contains(&Type::null())
+            {
+                let non_null: Vec<Type> = members
+                    .iter()
+                    .filter(|m| **m != Type::null())
+                    .cloned()
+                    .collect();
+                Some(match non_null.len() {
+                    // Unreachable in practice (`sub` was excluded above
+                    // whenever it's bare `Repr::Null`, so a real Union always
+                    // has at least one non-Null member) - kept as a safe,
+                    // total fallback rather than an `unwrap`/panic.
+                    0 => Type::never(),
+                    1 => non_null.into_iter().next().unwrap(),
+                    _ => Type(Repr::Union(non_null)),
+                })
+            } else {
+                None
+            };
+            let sub = stripped_sub.as_ref().unwrap_or(sub);
 
-        // A naive version of this method would bail straight to plain
-        // `accepts` whenever `sup` was also a Union, on the theory
-        // that a nested Union-vs-Union pair is rare - but this project
-        // represents every nullable declared type (`?string`, `?int`,
-        // `?Foo`, the single most common PHP nullability idiom) as
-        // `Repr::Union([X, Repr::Null])` (`types/parse.rs`), so `sup` is
-        // a Union at every one of this method's real call sites checking
-        // a nullable-declared parameter/property/return type - exactly
-        // the scenario `checkNullables` exists for. Recursing into
-        // `self.rule_level_accepts` (not plain
-        // `accepts`) on both sides whenever either is a Union,
-        // symmetric to `accepts`'s own existing `282`/`283` arms,
-        // is what keeps that leniency reaching its single most common
-        // trigger.
-        match (sub, sup) {
-            (Type(Repr::Union(members)), _) => members
-                .iter()
-                .all(|m| self.rule_level_accepts_rec(m, sup, level)),
-            (_, Type(Repr::Union(members))) => members
-                .iter()
-                .any(|m| self.rule_level_accepts_rec(sub, m, level)),
-            _ => self.accepts_at_level(sub, sup, level),
-        }
+            // A naive version of this method would bail straight to plain
+            // `accepts` whenever `sup` was also a Union, on the theory
+            // that a nested Union-vs-Union pair is rare - but this project
+            // represents every nullable declared type (`?string`, `?int`,
+            // `?Foo`, the single most common PHP nullability idiom) as
+            // `Repr::Union([X, Repr::Null])` (`types/parse.rs`), so `sup` is
+            // a Union at every one of this method's real call sites checking
+            // a nullable-declared parameter/property/return type - exactly
+            // the scenario `checkNullables` exists for. Recursing into
+            // `self.rule_level_accepts` (not plain
+            // `accepts`) on both sides whenever either is a Union,
+            // symmetric to `accepts`'s own existing `282`/`283` arms,
+            // is what keeps that leniency reaching its single most common
+            // trigger.
+            match (sub, sup) {
+                (Type(Repr::Union(members)), _) => members
+                    .iter()
+                    .all(|m| self.rule_level_accepts_rec(m, sup, level)),
+                (_, Type(Repr::Union(members))) => members
+                    .iter()
+                    .any(|m| self.rule_level_accepts_rec(sub, m, level)),
+                _ => self.accepts_at_level(sub, sup, level),
+            }
+        })
     }
 
     /// `accepts`, additionally aware of real PHPStan's own level

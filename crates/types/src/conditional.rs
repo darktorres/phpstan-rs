@@ -41,7 +41,7 @@ impl Type {
     /// `target` picks one branch, a provably disjoint one the other, and
     /// anything else keeps both (see the arm's own comment).
     pub fn resolve_conditional(&self, param_bindings: &FxHashMap<String, Type>) -> Type {
-        match self {
+        syntax::stack::guard(|| match self {
             Type(Repr::Conditional {
                 subject,
                 target,
@@ -66,6 +66,6 @@ impl Type {
                 ),
             },
             _ => self.map_children(&mut |t| t.resolve_conditional(param_bindings)),
-        }
+        })
     }
 }

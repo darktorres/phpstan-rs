@@ -82,64 +82,66 @@ pub(super) fn nullsafe_receiver(e: &Expr) -> Option<&Expr> {
 /// correlation, `match`-arm correlation (the genuinely large part of
 /// real PHPStan's own mechanism this project declines to build).
 fn condition_alias_shape(rhs: &Expr) -> bool {
-    match &rhs.kind {
-        ExprKind::Instanceof(..)
-        // `Lt`/`Gt`/`LtEq`/`GtEq` alongside the equality-family
-        // operators - needed so a numeric-comparison leaf inside a
-        // larger `&&`/`||` tree (`record_if_body_flag_alias`'s own real
-        // target shape: `$x === false or $x < $y or $x < $z`) doesn't
-        // block the *whole* compound condition from being alias-
-        // eligible, even though `apply_narrowing`'s own comparison
-        // narrowing doesn't do anything false-ness-specific for this one
-        // leaf - the useful narrowing still comes from whichever other
-        // leaf actually proves it.
-        | ExprKind::Binary(
-            BinOp::Identical
-            | BinOp::NotIdentical
-            | BinOp::Eq
-            | BinOp::NotEq
-            | BinOp::Lt
-            | BinOp::Gt
-            | BinOp::LtEq
-            | BinOp::GtEq,
-            ..,
-        )
-        | ExprKind::Call(..)
-        | ExprKind::Isset(_)
-        | ExprKind::Empty(_)
-        | ExprKind::Variable(_) => true,
-        // A compound `&&`/`||` condition assigned to a flag variable,
-        // then reused later (`$flag = $a === null || $a === 0; if (!
-        // $flag) { use $a; }`, or spanning several distinct subjects
-        // entirely, `$flag = ! $isUserFound || $email === null || $email
-        // === '';`) - storing the whole compound expression needs no new
-        // replay logic at all: `apply_narrowing`'s own existing
-        // `BinOp::And if branch_true`/`BinOp::Or if !branch_true` arms
-        // already recurse into each side independently (the case with a
-        // simple sequential-apply equivalent - "every conjunct/negated-
-        // disjunct must hold"), which is exactly the branch direction a
-        // stored flag's replay needs. `condition_alias_targets` below
-        // tracks every distinct subject named anywhere in the tree (not
-        // just one shared target), so a rebind of *any* of them still
-        // correctly invalidates the whole alias.
-        ExprKind::Binary(BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr, l, r) => {
-            condition_alias_shape(l) && condition_alias_shape(r)
+    syntax::stack::guard(|| {
+        match &rhs.kind {
+            ExprKind::Instanceof(..)
+            // `Lt`/`Gt`/`LtEq`/`GtEq` alongside the equality-family
+            // operators - needed so a numeric-comparison leaf inside a
+            // larger `&&`/`||` tree (`record_if_body_flag_alias`'s own real
+            // target shape: `$x === false or $x < $y or $x < $z`) doesn't
+            // block the *whole* compound condition from being alias-
+            // eligible, even though `apply_narrowing`'s own comparison
+            // narrowing doesn't do anything false-ness-specific for this one
+            // leaf - the useful narrowing still comes from whichever other
+            // leaf actually proves it.
+            | ExprKind::Binary(
+                BinOp::Identical
+                | BinOp::NotIdentical
+                | BinOp::Eq
+                | BinOp::NotEq
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::LtEq
+                | BinOp::GtEq,
+                ..,
+            )
+            | ExprKind::Call(..)
+            | ExprKind::Isset(_)
+            | ExprKind::Empty(_)
+            | ExprKind::Variable(_) => true,
+            // A compound `&&`/`||` condition assigned to a flag variable,
+            // then reused later (`$flag = $a === null || $a === 0; if (!
+            // $flag) { use $a; }`, or spanning several distinct subjects
+            // entirely, `$flag = ! $isUserFound || $email === null || $email
+            // === '';`) - storing the whole compound expression needs no new
+            // replay logic at all: `apply_narrowing`'s own existing
+            // `BinOp::And if branch_true`/`BinOp::Or if !branch_true` arms
+            // already recurse into each side independently (the case with a
+            // simple sequential-apply equivalent - "every conjunct/negated-
+            // disjunct must hold"), which is exactly the branch direction a
+            // stored flag's replay needs. `condition_alias_targets` below
+            // tracks every distinct subject named anywhere in the tree (not
+            // just one shared target), so a rebind of *any* of them still
+            // correctly invalidates the whole alias.
+            ExprKind::Binary(BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr, l, r) => {
+                condition_alias_shape(l) && condition_alias_shape(r)
+            }
+            // `! $isUserFound` as one leaf of a larger `||`/`&&` tree (`!
+            // $isUserFound || $email === null`) - negation doesn't add or
+            // remove a subject, just flips what a `true`/`false` replay
+            // means, which `apply_narrowing`'s own `Unary(Not, ...)` arm
+            // already re-derives correctly by recursing with `!branch_true`
+            // when the stored alias expression is replayed wholesale.
+            ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_shape(inner),
+            // `$x = $a?->b();` - proving `$x` non-null later should also
+            // narrow `$a` (`nullsafe_receiver`'s own doc comment); storing
+            // the whole chain as `$x`'s alias, targeted at `$a`'s own key
+            // rather than `$x->b`'s, is what `condition_alias_targets` below
+            // does.
+            _ if nullsafe_receiver(rhs).is_some() => true,
+            _ => false,
         }
-        // `! $isUserFound` as one leaf of a larger `||`/`&&` tree (`!
-        // $isUserFound || $email === null`) - negation doesn't add or
-        // remove a subject, just flips what a `true`/`false` replay
-        // means, which `apply_narrowing`'s own `Unary(Not, ...)` arm
-        // already re-derives correctly by recursing with `!branch_true`
-        // when the stored alias expression is replayed wholesale.
-        ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_shape(inner),
-        // `$x = $a?->b();` - proving `$x` non-null later should also
-        // narrow `$a` (`nullsafe_receiver`'s own doc comment); storing
-        // the whole chain as `$x`'s alias, targeted at `$a`'s own key
-        // rather than `$x->b`'s, is what `condition_alias_targets` below
-        // does.
-        _ if nullsafe_receiver(rhs).is_some() => true,
-        _ => false,
-    }
+    })
 }
 
 /// Whether `name` (a bare variable, already `is_real_variable_key`-checked
@@ -562,48 +564,54 @@ fn record_implied_facts(
 /// positive" precedent throughout `narrowing.rs`, not a false
 /// conclusion.
 fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
-    match &rhs.kind {
-        ExprKind::Instanceof(inner, _) => Some(vec![narrowing_key(inner)?]),
-        // `condition_alias_shape`'s own identical comparison-operator
-        // extension, mirrored here so a numeric-comparison leaf inside a
-        // larger tree still contributes its own narrowable operand as a
-        // real subject (not just a shape-eligibility check).
-        ExprKind::Binary(
-            BinOp::Identical
-            | BinOp::NotIdentical
-            | BinOp::Eq
-            | BinOp::NotEq
-            | BinOp::Lt
-            | BinOp::Gt
-            | BinOp::LtEq
-            | BinOp::GtEq,
-            l,
-            r,
-        ) => Some(vec![narrowing_key(l).or_else(|| narrowing_key(r))?]),
-        ExprKind::Call(_, args) => match args.as_slice() {
-            [single_arg] => Some(vec![narrowing_key(&single_arg.value)?]),
-            _ => None,
-        },
-        ExprKind::Isset(operands) => operands.iter().map(narrowing_key).collect(),
-        ExprKind::Empty(operand) => Some(vec![narrowing_key(operand)?]),
-        ExprKind::Variable(name) => Some(vec![name.to_string()]),
-        ExprKind::Binary(BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr, l, r) => {
-            let mut targets = condition_alias_targets(l)?;
-            for key in condition_alias_targets(r)? {
-                if !targets.contains(&key) {
-                    targets.push(key);
+    syntax::stack::guard(|| {
+        match &rhs.kind {
+            ExprKind::Instanceof(inner, _) => Some(vec![narrowing_key(inner)?]),
+            // `condition_alias_shape`'s own identical comparison-operator
+            // extension, mirrored here so a numeric-comparison leaf inside a
+            // larger tree still contributes its own narrowable operand as a
+            // real subject (not just a shape-eligibility check).
+            ExprKind::Binary(
+                BinOp::Identical
+                | BinOp::NotIdentical
+                | BinOp::Eq
+                | BinOp::NotEq
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::LtEq
+                | BinOp::GtEq,
+                l,
+                r,
+            ) => Some(vec![narrowing_key(l).or_else(|| narrowing_key(r))?]),
+            ExprKind::Call(_, args) => match args.as_slice() {
+                [single_arg] => Some(vec![narrowing_key(&single_arg.value)?]),
+                _ => None,
+            },
+            ExprKind::Isset(operands) => operands.iter().map(narrowing_key).collect(),
+            ExprKind::Empty(operand) => Some(vec![narrowing_key(operand)?]),
+            ExprKind::Variable(name) => Some(vec![name.to_string()]),
+            ExprKind::Binary(
+                BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr,
+                l,
+                r,
+            ) => {
+                let mut targets = condition_alias_targets(l)?;
+                for key in condition_alias_targets(r)? {
+                    if !targets.contains(&key) {
+                        targets.push(key);
+                    }
                 }
+                Some(targets)
             }
-            Some(targets)
+            ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_targets(inner),
+            // Targets the *receiver*'s own key, not the chain's - see
+            // `nullsafe_receiver`'s own doc comment for why.
+            ExprKind::PropertyAccess(base, _, true) | ExprKind::MethodCall(base, _, _, true) => {
+                Some(vec![narrowing_key(base)?])
+            }
+            _ => None,
         }
-        ExprKind::Unary(UnaryOp::Not, inner) => condition_alias_targets(inner),
-        // Targets the *receiver*'s own key, not the chain's - see
-        // `nullsafe_receiver`'s own doc comment for why.
-        ExprKind::PropertyAccess(base, _, true) | ExprKind::MethodCall(base, _, _, true) => {
-            Some(vec![narrowing_key(base)?])
-        }
-        _ => None,
-    }
+    })
 }
 
 impl<'a> Checker<'a> {
@@ -613,6 +621,10 @@ impl<'a> Checker<'a> {
     /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
     /// anything else leaves `locals` untouched rather than guess.
     pub(crate) fn apply_narrowing(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
+        syntax::stack::guard(|| self.apply_narrowing_unguarded(cond, locals, branch_true))
+    }
+
+    fn apply_narrowing_unguarded(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
         // `preg_match(...)` (bare, or compared against a literal 0/1)
         // doesn't otherwise match any existing narrowing shape below,
         // so this doesn't shadow anything: the `Binary(op, l, r)` arm

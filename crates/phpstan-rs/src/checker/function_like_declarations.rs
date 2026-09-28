@@ -122,7 +122,7 @@ impl<'a> Checker<'a> {
     }
 
     fn walk_promoted_in_expr(&mut self, e: &Expr, label: &str) {
-        match &e.kind {
+        syntax::stack::guard(|| match &e.kind {
             ExprKind::Closure {
                 params,
                 body,
@@ -180,7 +180,7 @@ impl<'a> Checker<'a> {
                     false
                 });
             }
-        }
+        })
     }
 
     fn check_promoted_in_methods(&mut self, fqn: &str, kind: ClassKind, methods: &[MethodDecl]) {
