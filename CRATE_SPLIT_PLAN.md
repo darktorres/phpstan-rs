@@ -3895,7 +3895,12 @@ building on the previous one:
     'b', default => 'c' }` isn't reported today, nor is an arm outside the
     subject's type (`0 =>` on `int<1, max>` or `1|2|3`, a repeated enum
     case; the rules oracle's 7 PHPStan-only, `bug-11310.php`,
-    `match-enums.php`, `match-expr.php`). `default` sees the subject
+    `match-enums.php`, `match-expr.php`), and an arm the earlier ones leave
+    always true is `match.alwaysTrue` unless it is the last arm (`3 =>` on
+    `1|2|3` followed by `4 =>` or `default`; `self::FOO, self::BAR` over a
+    two-case enum before `default`; `null` against a `void` call's `null`;
+    `match-expr.php:28`, `:35`, `match-always-true-last-arm.php`,
+    `match-expr-void-used.php`), unreported today. `default` sees the subject
     with every arm excluded: in `match ($this) { self::TWO => …, default =>
     $this->requireOne($this) }` on a two-case enum, `$this` is the whole
     enum today where it is `E::ONE` (the rules oracle's
