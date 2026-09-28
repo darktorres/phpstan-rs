@@ -559,15 +559,10 @@ fn definition_on_a_read_resolves_to_its_foreach_destructuring_target() {
 // `global $x;` links back to a top-level declaration.
 
 #[test]
-fn definition_on_a_global_variable_read_resolves_to_the_global_statement_itself() {
-    // The real `Checker` deliberately never links `global $x;` back to
-    // any specific top-level assignment (`checker/stmt.rs`'s own doc
-    // comment on `StmtKind::Global`: real PHP's own global scope isn't
-    // tracked at all, `Mixed` is the honest answer) - since this
-    // follow-up's own provenance tracking rides along the real checker
-    // rather than a separate, less-principled heuristic, a read resolves
-    // to the `global $x;` statement itself, not a guess at which
-    // top-level write "really" produced the value.
+fn definition_on_a_global_variable_read_resolves_to_its_global_statement() {
+    // `global $x;` is never linked back to a top-level assignment (the
+    // global scope isn't tracked), so a read resolves to the variable in
+    // the `global` statement.
     let dir = TempDir::new("var_global");
     let src = "<?php $x = 1; function f() { global $x; return $x; }";
     let path = dir.write("a.php", src);
@@ -577,7 +572,7 @@ fn definition_on_a_global_variable_read_resolves_to_the_global_statement_itself(
     let messages = run(&dir, &[definition_request(2, &uri, pos)]);
     let result = response_result(&messages, 2);
     assert_eq!(result["uri"], uri);
-    let expected = lsp_pos(src, "global $x;");
+    let expected = lsp_pos(src, "$x; return");
     assert_eq!(result["range"]["start"]["character"], expected["character"]);
 }
 

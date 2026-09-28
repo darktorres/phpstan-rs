@@ -25,6 +25,12 @@ impl Relation<'_> {
                 TrinaryLogic::Yes
             }
             (a, b) if a == b => TrinaryLogic::Yes,
+            // `A & B` is within whatever either member is.
+            (_, Type::Intersection(members))
+                if members.iter().any(|m| self.is_super_type_of(sup, m).yes()) =>
+            {
+                TrinaryLogic::Yes
+            }
             (Type::Never, _) => TrinaryLogic::No,
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
                 self.is_super_type_of(&crate::resolve_late_to_bounds(sup), sub)
