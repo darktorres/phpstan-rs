@@ -1341,7 +1341,7 @@ Follow-ups:
   reported error doesn't cascade. Today the rule reports and the expression
   keeps a guessed type: `-'blabla'` is `int`, `$c / 0` is `int|float`,
   `$o->missing` and `[$a] = 5` give `mixed` (289 nsrt `*ERROR*`
-  expectations; Appendix H's `error-type` has 110 of them in files cited
+  expectations; Appendix H's `error-type` has 65 of them in files cited
   nowhere else: a missing member on a union or intersection, GMP operators
   with a non-numeric string, a PHPDoc for a missing parameter, `$this` in a
   static closure). D3's handlers produce it.
@@ -1398,7 +1398,7 @@ Follow-ups:
   later `$o instanceof \InvalidArgumentException` isn't
   `instanceof.alwaysFalse` (`impossible-instanceof.php:303`, `:307`,
   `:318`, `:322`, `match-expr.php:86`, `:92`; Appendix H's `subtracted`,
-  75 nsrt mismatches: `mixed~null` after `isset`, `mixed~bool` after
+  54 nsrt mismatches: `mixed~null` after `isset`, `mixed~bool` after
   `!is_bool`, `$this(Foo~(Bar|Baz))`, `mixed~object`,
   `bug-15060.php`, `mixed-subtract.php`, `this-subtractable.php`).
   - The subtraction is a field of the subtractable variants, not a
@@ -1480,7 +1480,7 @@ Follow-ups:
   `return.type` "expected V, got mixed" (the rules oracle's
   `bug-10698.php`, `bug-14638.php` among the 24). Appendix H's template
   causes are the nsrt side (272 mismatches): `new` infers the class's
-  templates from its arguments (`generic-new-infer`, 59: `new WeakMap()`,
+  templates from its arguments (`generic-new-infer`, 54: `new WeakMap()`,
   `new ArrayObject([...])`, `new ReflectionClass($this)`), a callable
   argument infers from its parameters and return
   (`callable-template-infer`, 35), bounds that are generics or unions stay
@@ -1580,7 +1580,7 @@ Follow-ups:
   escaped in double quotes: `PHP_EOL` is `' '|' '` today, with the raw
   line breaks between the quotes. A float literal keeps its decimal point:
   `@param 0|0.0|1.5 $x` displays as `0|0|1.5` today. Appendix H's
-  `type-print` (112 nsrt mismatches, 38 files) are the display forms left:
+  `type-print` (132 nsrt mismatches, 45 files) are the display forms left:
   each becomes this printer's form or a documented normalization in the
   nsrt gate.
 - **Callable parameters** carry their names, and a callable its purity.
@@ -2142,8 +2142,8 @@ Follow-ups:
     `: array` already applies; nsrt `method-phpDocs-inheritdoc.php`,
     `methodPhpDocs-implicitInheritance.php`; Appendix H's C4 causes are
     the rest: `@inheritdoc` without braces and from a trait's abstract
-    method, 21 mismatches; `iterable<T>&Collection` returns kept whole, 38;
-    a child's templates substituted into the parent's methods, 16; trait
+    method, 12 mismatches; `iterable<T>&Collection` returns kept whole, 19;
+    a child's templates substituted into the parent's methods, 21; trait
     templates through `@use`, 11). The combination reads the
     PHPDoc with its aliases resolved: `@param OwnerBackup|null` for a
     `@phpstan-type OwnerBackup array{name: string}` on `?array` is
@@ -2514,7 +2514,7 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   `int<0, max>|numeric-string` (1, `int<-1, max>` today),
   `curl_share_setopt()`'s `mixed`
   value (3) and `stream_get_contents()`'s `__benevolent<string|false>` (3);
-  the nsrt suite's are Appendix H's `stub-return` (107 mismatches, 32
+  the nsrt suite's are Appendix H's `stub-return` (111 mismatches, 33
   files: `RedisArray::keys()`, the SPL recursive iterators' generics,
   `ReflectionEnum`, `Ds\Map::get()`, `ImagickPixel::getColor()`,
   `getopt()`, SQLite3) and `stub-asserts` (39: `dir()`, `chdir()`,
@@ -2990,8 +2990,8 @@ deleted; the file-size gate.
       `DisjunctionHolderProjectionAugment`), evaluated on the scope they
       are applied to.
   - The recipes replace `branch_implied_facts` and
-    `pending_or_disjunctions`. Appendix H's `conditional-holders` (63 nsrt
-    mismatches, 29 files) is what they add: a bool holding a check narrows
+    `pending_or_disjunctions`. Appendix H's `conditional-holders` (57 nsrt
+    mismatches, 28 files) is what they add: a bool holding a check narrows
     its source when tested (`bug-14545.php`, `bug-2980.php`), a variable
     defined under a condition is certain and typed when the condition holds
     again (`bug-10090.php`, `bug-2816.php`, `bug-7948.php`), and variables
@@ -3107,7 +3107,7 @@ deleted; the file-size gate.
       rules oracle's `bug-8389.php`); an equality assertion
       (`@phpstan-assert-if-true =int $x`) narrows the true branch only, and
       today it narrows neither (`docblock-assert-equality.php`). Appendix
-      H's `assert-tags` (65 nsrt mismatches, 20 files) are the call forms
+      H's `assert-tags` (59 nsrt mismatches, 20 files) are the call forms
       that don't narrow today: a method call's `-if-true` on its argument
       (`bug-14705.php`), a first-class or string callable of an asserting
       function (`bug-14249.php`, `bug-11472.php`), a union receiver
@@ -3233,7 +3233,7 @@ deleted; the file-size gate.
       `int<-30, 30> % -9` are `never` today where PHPStan has `int<0, 8>` and
       `int<-8, 8>`, and a range divisor gives `int` (nsrt `bug-15242.php`;
       with `%` of a range divisor, bitwise `|`/`^`/`&` on ranges and
-      numeric-string arithmetic, Appendix H's `operator-ranges` is 85
+      numeric-string arithmetic, Appendix H's `operator-ranges` is 89
       mismatches: `modulo-operator.php`, `bug-14654.php`, `bug-15243.php`,
       `bug-9384.php`, `mixed-to-number.php`).
       A shift covers every operand: `int<1, 3> << 63` is
@@ -3560,7 +3560,7 @@ deleted; the file-size gate.
       that may be empty leaves the array possibly empty (`empty($a)` after
       `array_push($a, ...$b)` on `$a = []` is `empty.variable` "not
       falsy" today, `bug-6974.php`). Appendix H's `byref-array-fns` is
-      the rest of it (205 nsrt mismatches, 22 files): `array_pop` and
+      the rest of it (210 nsrt mismatches, 24 files): `array_pop` and
       `array_shift` move `hasOffset` facts down and keep non-emptiness
       (`array-pop-shift-has-offset.php`), `array_splice` keeps the list
       (`array_splice.php`, 104), the sort family and `array_pop` keep a
@@ -3568,7 +3568,7 @@ deleted; the file-size gate.
       nested `array_push($a['k'], …)` keeps the shape (`bug-11846.php`).
     - **Closure types** follow `ClosureTypeResolver`: a closure that yields
       is `Closure(): mixed` today instead of returning a `Generator`
-      (`closure-generator`, 13 nsrt mismatches). A
+      (`closure-generator`, 6 nsrt mismatches). A
       closure or arrow function whose body never returns returns `never`
       under any native return type: `fn (): null => $this->redirect('/')`
       for a `never` method is `Closure(): never|null` today, which a
@@ -3657,7 +3657,7 @@ deleted; the file-size gate.
       `!= false`) proves `$foo[$k]` exists while `== false` doesn't (the
       rules oracle's `bug-13488-loose.php`, 4); `$s != ''` makes a
       `lowercase-string` non-empty and `$s == 'one'` narrows a string or a
-      union to the literal (Appendix H's `loose-eq-narrow`, 83 nsrt
+      union to the literal (Appendix H's `loose-eq-narrow`, 78 nsrt
       mismatches: `equal-narrow.php`, `equal.php`, `bug-12312.php`,
       `bug-14047.php`);
     - a `list` offset implies the lower ones: after `isset($list[3])`,
@@ -3704,8 +3704,8 @@ deleted; the file-size gate.
         `isset($a['short'])` `isset.offset` "does not exist", the rules
         oracle's `bug-11494.php`);
       - `count($a) === count($b)` → shared non-emptiness (Appendix H's
-        `count-narrow` has these and the other `count()` narrowings: 192
-        nsrt mismatches, 19 files, `list-count.php` 87);
+        `count-narrow` has these and the other `count()` narrowings: 226
+        nsrt mismatches, 28 files, `list-count.php` 87);
       - `count($l) > 2` on a list → the offsets it proves
         (`specifyTypesForCountFuncCall`): today `$l` stays `list<int>`
         instead of `non-empty-list<int>&hasOffsetValue(1, int)&
@@ -3713,7 +3713,7 @@ deleted; the file-size gate.
         `bool` (nsrt `bug-13747.php`);
       - `strlen($s) === 0` → `''`, and `strlen($s) > 0` → non-empty
         (nsrt `non-empty-string.php`), through a stored `$len`, against a
-        range and against another `strlen()` (`strlen-narrow`, 63);
+        range and against another `strlen()` (`strlen-narrow`, 59);
       - `array_key_first($a) !== null` (and `array_key_last`,
         `array_find_key`) → non-empty;
       - `preg_match(…) === 1` → the matches shape;
@@ -3930,12 +3930,12 @@ building on the previous one:
       `non-empty-array<int, ''>`, and `$l[$i][$s] = ''` gives
       `array<int, array<string, ''>>` (the rules oracle's `bug-13538.php`).
       With the list cases above this is Appendix H's `list-write` (114 nsrt
-      mismatches, 12 files: `bug-14245.php`, `bug-12274.php`,
+      mismatches, 15 files: `bug-14245.php`, `bug-12274.php`,
       `list-type.php`, `bug-15245.php`, `bug-13857.php`); an append to
       `mixed` stays `mixed` (`bug-12447.php`). A write with a literal-union
       key builds optional keys, `$a[$k] = 256` with `$k` `'a'|'b'` on
       `array{foo: int}` giving `array{foo: int, a?: 256, b?: 256}` where it
-      is `array<string, int>` today (`literal-key-writes`, 39:
+      is `array<string, int>` today (`literal-key-writes`, 10:
       `set-constant-union-offset-on-constant-array.php`, `bug-11716.php`).
       An offset write on a property's array updates the property as one on
       a variable does: after `if (!isset($this->arr['foo'])) {
@@ -4046,7 +4046,7 @@ building on the previous one:
     `else` throws for `$number <= $compareTo`, `$compareTo` is `int<min,
     0>` after it, so a second loop's `$number > $compareTo` is
     `greater.alwaysTrue` (the rules oracle's `bug-7531.php`). Appendix H's
-    `loop-generalize` is this item's nsrt count (232 mismatches, 66
+    `loop-generalize` is this item's nsrt count (208 mismatches, 70
     files): counters (`for-loop-i-type.php`, `bug-12163.php`,
     `bug-2835.php`), conditional appends that make an optional-key list
     rather than a union of lists (`constant-array-optional-set.php`,
@@ -4271,7 +4271,7 @@ building on the previous one:
     - by-reference `use` follows `processClosureScope`: an undefined
       variable is `null` in the outer scope, and afterwards it is the
       closure's type unioned with the previous one and generalized
-      (`byref-closure-use`, 29 nsrt mismatches: the exact shape, no
+      (`byref-closure-use`, 27 nsrt mismatches: the exact shape, no
       `never`, `closure-passed-by-reference.php`, `bug-11561.php`). Inside
       the body, PHPStan gives such a variable its type where the closure is
       created, but other closures and the enclosing function may assign it
@@ -4699,8 +4699,8 @@ the rest), which the gate excludes and lists.
     type nor a `mixed` `$a` to an array (so a second `array_key_exists($b,
     $o)` is `argument.type`, the rules oracle's `bug-14312.php`; with the
     folds on constant arrays, the optional key made required and the key
-    removed in the else, Appendix H's `key-exists-fold` is 148 nsrt
-    mismatches in 23 files, `key-exists.php` and `array-key-exists.php`
+    removed in the else, Appendix H's `key-exists-fold` is 153 nsrt
+    mismatches in 29 files, `key-exists.php` and `array-key-exists.php`
     the most),
     `ctype_digit($s)` doesn't give `numeric-string`, `function_exists($s)`
     doesn't give `callable-string`, `class_exists($c)` and
@@ -4717,7 +4717,7 @@ the rest), which the gate excludes and lists.
     (!in_array($foo, [0, 1, 2])) { exit(); }` on `int<0, 100>`, `$foo` is
     `0|1|2`, `bug-9436.php`), and a true `in_array()` makes the haystack
     non-empty and a false one removes the needle from it (Appendix H's
-    `in-array-haystack`, 68 nsrt mismatches: `bug-9662.php`,
+    `in-array-haystack`, 65 nsrt mismatches: `bug-9662.php`,
     `bug-9662-enums.php`, `enum-in-array.php`, `bug-3013.php`). A strict
     `in_array()` intersects the subject
     with the haystack's value type instead of replacing it: on `int $i`
@@ -4772,12 +4772,12 @@ the rest), which the gate excludes and lists.
   `array_column` (215), `min`/`max` (217, 198 `mixed`), `count` (115),
   `array_slice` (102), `sprintf`/`vsprintf` (136), `settype`'s narrowing
   (`set-type-type-specifying.php`, 156), the preg `$matches` shapes
-  (`preg_match_shapes.php`, 218, and the 160 variable mismatches of
-  Appendix H's `preg-shapes` in 23 more files: `preg_match_all`, the `/n`
+  (`preg_match_shapes.php`, 218, and the 155 variable mismatches of
+  Appendix H's `preg-shapes` in 24 more files: `preg_match_all`, the `/n`
   flag, group 0 non-falsy when the pattern has literals, `> 0` and `=== 1`
   making groups required) and the BcMath functions and `BcMath\Number`
   operators (`bcmath-*.php`, 304). Appendix H's `ext:` entries are the
-  variables these extensions' values flow into, 666 mismatches beyond the
+  variables these extensions' values flow into, 629 mismatches beyond the
   calls themselves. Three have no counterpart in phpstan-rs today
   (`ext:PgDml`, `ext:Randomizer`, `ext:FilterInputArray`), and
   `getAttributes()` substitutes its template but returns an array, not a
@@ -6840,62 +6840,68 @@ first). The extensions not listed have no mismatches.
 ## Appendix H: the nsrt suite's uncited files by cause
 
 At `76e738b4`, 1,066 of the 1,360 files with mismatches are cited nowhere else
-in this plan. Their 5,188 mismatches that aren't on a call Appendix G covers are
-traced here to 293 causes, one per file: a file sits under the cause of most of
-its mismatches, and `gates/nsrt/owners.toml` splits it by line where its other
-lines belong elsewhere. This is that file's first draft. Each entry gives the
-cause's key, its mismatch count and files, what PHPStan infers, and the files,
-most mismatches first. Every entry is a phase item: the phase is done with it
-when its files have no mismatches, or each remaining line is an approved
-deviation that names its runtime reason. `ext:` keys are E2's extensions of the
-same name; their calls' own mismatches are in Appendix G, and these are the
-values that flow on from them.
+in this plan. Of their 5,188 mismatches that aren't on a call Appendix G covers,
+5,166 are traced here, line by line, to 303 causes; the other 22 differ only in
+`never` against PHPStan's `*NEVER*` or a nested union's order, which the gate's
+normalization covers. Each of the 741 files with more than one mismatch was read
+line by line: a line sits under its file's main cause unless it belongs to
+another, and 465 lines in 124 files do. `gates/nsrt/owners.toml` takes these
+lines as its first draft. Each entry gives the cause's key, its mismatch count
+and files, what holds, and the files, most mismatches first, with a file's count
+where the cause has only some of its lines. Every entry is a phase item: the
+phase is done with it when its lines have no mismatches, or each remaining line
+is an approved deviation that names its runtime reason. `ext:` keys are E2's
+extensions of the same name; their calls' own mismatches are in Appendix G, and
+these are the values that flow on from them.
 
 **B3** (4 mismatches, 1 file, 1 cause):
 
 - `case-insensitive-names` (4, 1 file): `PARENT::` is `parent::`;
   `case-insensitive-parent.php`.
 
-**B4** (945 mismatches, 236 files, 58 causes):
+**B4** (956 mismatches, 272 files, 58 causes):
 
-- `type-print` (112, 38 files): display forms the nsrt normalization doesn't
+- `type-print` (132, 45 files): display forms the nsrt normalization doesn't
   cover yet (`callable` as `callable(): mixed`, a template with its bound,
-  `*NEVER*`, `array<mixed, mixed>`, anonymous class names, `iterable` not split
-  into `array|Traversable`); B4's printer or the gate's normalization;
-  `callable-object.php`, `callable-string.php`, `generic-callables.php`,
+  `array<mixed, mixed>`, anonymous class names, `iterable` not split into
+  `array|Traversable`); B4's printer or the gate's normalization;
+  `bug-15060.php` (13), `callable-object.php`, `callable-type-predicate.php`
+  (7), `callable-string.php`, `generic-callables.php`,
   `more-type-strings-php8.php`, `bug-12355.php`, `bug-4803.php`, `bug-7987.php`,
-  `anonymous-class-name.php`, `bug-1233.php`, `bug-13809.php`, `bug-3266.php`,
-  `bug-empty-array.php`, `more-type-strings.php`,
-  `anonymous-class-name-same-line.php`, `benevolent-union-math.php`,
-  `bug-14630.php`, `bug-4650.php`, `bug-5961.php`, `bug-8242.php`,
-  `bug-12891.php`, `bug-13577.php`, `bug-2945.php`, `bug-3474.php`,
-  `bug-6170.php`, `bug-8268.php`, `bug2574.php`, `key-of-generic.php`,
-  `template-constant-bound.php`, `typehints.php`, `var-annotations.php`,
-  `bug-12989.php`, `bug-3312.php`, `bug-3446.php`, `bug-4205.php`,
-  `bug-4606.php`, `bug-6120.php`, `bug-8886.php`, `list-shapes.php`.
-- `error-type` (110, 19 files): an invalid expression is `*ERROR*` rather than
+  `bug-13809.php`, `bug-3266.php`, `more-type-strings.php`,
+  `anonymous-class-name-same-line.php`, `array-filter-string-callables.php` (3),
+  `benevolent-union-math.php`, `bug-14630.php`, `bug-5961.php`, `bug-8242.php`,
+  `type-aliases.php` (3), `anonymous-class-name.php` (2),
+  `array-filter-arrow-functions.php` (2), `array-filter-callables.php` (2),
+  `bug-12891.php`, `bug-13577.php`, `bug-14545.php`, `bug-3474.php`,
+  `bug-6170.php`, `bug-8268.php`, `bug2574.php`,
+  `specifiedTypesUsingIsFunctions.php` (2), `template-constant-bound.php`,
+  `typehints-anonymous-function.php` (2), `bug-1233.php` (1), `bug-12989.php`,
+  `bug-3312.php`, `bug-3446.php`, `bug-4205.php`, `bug-4606.php`,
+  `bug-6120.php`, `bug-8886.php`, `key-of-generic.php` (1), `list-shapes.php`,
+  `list-type.php` (1), `typehints.php` (1), `var-annotations.php` (1).
+- `error-type` (65, 22 files): an invalid expression is `*ERROR*` rather than
   `mixed`: a missing member, an unsupported operand, a division by zero, a
   negative shift, a PHPDoc for a missing parameter, `$this` in a static closure;
-  `array-destructuring.php`, `bug-6624.php`, `union-intersection.php`,
-  `gmp-operators.php`, `div-by-zero.php`, `string-array-access.php`,
-  `functionPhpDocs-phanPrefix.php`, `functionPhpDocs-phpstanPrefix.php`,
-  `functionPhpDocs-psalmPrefix.php`, `functionPhpDocs.php`,
-  `initializer-expr-type-resolver.php`, `bug-5223.php`, `bug-7490.php`,
-  `arrow-functions-inside.php`, `bug-10302-trait-extends.php`,
-  `bug-12447-bis.php`, `literal-arrays.php`, `property-array.php`,
-  `static-closure.php`.
-- `subtracted` (75, 8 files): subtracted types: `mixed~null`, `mixed~false`,
-  `$this(Foo~Bar)` and `Enum~Case` after negative checks; `bug-15060.php`,
-  `this-subtractable.php`, `mixed-subtract.php`, `falsy-isset.php`,
-  `bug-pr-339.php`, `negated-instanceof.php`, `subtracted.php`,
-  `allowed-subtypes-enum.php`.
-- `generic-new-infer` (59, 14 files): `new` infers the class's templates from
-  constructor arguments (`WeakMap`, `ArrayObject`, `ReflectionClass`,
-  `DatePeriod`, `SensitiveParameterValue`), `never` with none; `bug-11844.php`,
-  `bug-15032.php`, `bug-7056.php`, `date-period-return-types.php`,
-  `bug-12473-types.php`, `bug-13144.php`, `sensitive-parameter-value.php`,
-  `bug-13783.php`, `bug-6505.php`, `native-reflection-default-values.php`,
-  `bug-4725.php`, `bug-9084.php`, `bug-6993.php`, `bug-7078.php`.
+  `bug-6624.php`, `array-destructuring.php` (9), `gmp-operators.php`,
+  `div-by-zero.php`, `string-array-access.php`, `union-intersection.php` (4),
+  `bug-5223.php`, `bug-7490.php`, `static-late-binding.php` (2),
+  `anonymous-function.php` (1), `arrow-functions-inside.php`,
+  `bug-10302-trait-extends.php`, `bug-12447-bis.php`, `bug-13270a.php` (1),
+  `functionPhpDocs-phanPrefix.php` (1), `functionPhpDocs-phpstanPrefix.php` (1),
+  `functionPhpDocs-psalmPrefix.php` (1), `functionPhpDocs.php` (1),
+  `initializer-expr-type-resolver.php` (1), `literal-arrays.php`,
+  `property-array.php`, `static-closure.php`.
+- `static-type` (64, 17 files): `static` and `$this(Foo)` survive returns,
+  loops, `try` and constructors, and `get_called_class()` is
+  `class-string<static>`; `static-late-binding.php` (10),
+  `method-phpDocs-inheritdoc-without-curly-braces.php` (8),
+  `methodPhpDocs-phanPrefix.php` (8), `methodPhpDocs-phpstanPrefix.php` (8),
+  `methodPhpDocs-psalmPrefix.php` (8), `bug-14804.php`, `bug-7550.php`,
+  `bug-9341.php`, `bug-10477.php`, `bug-2231.php`, `bug-4707.php`,
+  `this-subtractable.php` (2), `bug-6308.php`, `deducted-types.php` (1),
+  `negated-instanceof.php` (1), `object-shape.php` (1), `var-annotations.php`
+  (1).
 - `conditional-return` (58, 12 files): a conditional return type resolves on the
   argument's type: arrays by emptiness, templates, nested conditions, `$this`,
   class types, and against the argument's value before a reassignment;
@@ -6903,25 +6909,48 @@ values that flow on from them.
   `bug-7279.php`, `bug-11565.php`, `bug-15296.php`, `bug-11894.php`,
   `bug-9000.php`, `conditional-type-for-parameter-template-bound.php`,
   `bug-12562.php`, `bug-3853.php`, `bug-9360.php`, `fizz-buzz.php`.
-- `shape-union` (36, 4 files): branches with different shapes stay a union of
-  shapes rather than one optional-key shape; `bug11480.php`, `bug-13561.php`,
-  `bug-9908.php`, `bug-10834.php`.
+- `generic-new-infer` (54, 14 files): `new` infers the class's templates from
+  constructor arguments (`WeakMap`, `ArrayObject`, `ReflectionClass`,
+  `DatePeriod`, `SensitiveParameterValue`), `never` with none; `bug-11844.php`,
+  `bug-15032.php`, `bug-12473-types.php`, `bug-13144.php`,
+  `date-period-return-types.php` (5), `sensitive-parameter-value.php`,
+  `bug-13783.php`, `bug-6505.php`, `native-reflection-default-values.php`,
+  `bug-4725.php`, `bug-9084.php`, `generics-do-not-generalize.php` (2),
+  `bug-6993.php`, `bug-7078.php`.
+- `subtracted` (54, 12 files): subtracted types: `mixed~null`, `mixed~false`,
+  `$this(Foo~Bar)` and `Enum~Case` after negative checks; `mixed-subtract.php`,
+  `this-subtractable.php` (11), `falsy-isset.php` (5), `bug-pr-339.php`,
+  `mixed-to-number.php` (4), `bug-15060.php` (3), `negated-instanceof.php` (3),
+  `subtracted.php`, `allowed-subtypes-enum.php`, `bug-1233.php` (2),
+  `array_values.php` (1), `bug-12107.php` (1).
+- `union-normalize` (52, 27 files): unions aren't normalized: duplicate members
+  (`Dog|Dog`, `int|int|string`), `never` members (`true|never`), and
+  `bool|int|false` for `bool|int`; `bug-15268.php`, `cast-to-numeric-string.php`
+  (5), `bug-13192.php`, `bug-14891.php`, `has-offset-type-bug.php` (3),
+  `phpunit-integration.php` (3), `bug-10871.php`, `bug-7877.php` (2),
+  `non-empty-string-str-containing-fns.php` (2), `bug-10938.php`,
+  `bug-13810.php` (1), `bug-14047.php` (1), `bug-14455.php` (1),
+  `bug-14610.php`, `bug-15151.php`, `bug-2735.php` (1), `bug-7913.php` (1),
+  `bug-8467b.php` (1), `bug-9634.php`, `closure-passed-by-reference-return.php`,
+  `closure-passed-by-reference.php` (1), `is-a.php` (1), `key-of-generic.php`
+  (1), `multi-assign.php` (1), `tagged-unions.php` (1), `throw-expr.php`,
+  `union-intersection.php` (1).
+- `shape-union` (39, 9 files): branches with different shapes stay a union of
+  shapes rather than one optional-key shape; `bug11480.php`, `bug-13561.php`
+  (6), `narrow-tagged-union.php` (3), `bug-9908.php`,
+  `array-merge-const-non-const.php` (1), `array-replace-const-non-const.php`
+  (1), `bug-10834.php`, `bug-14938.php` (1), `narrow-cast.php` (1).
 - `callable-template-infer` (35, 12 files): a callable argument (closure, arrow
   function, first-class or string callable, `uksort`'s callback) infers a
   template from its parameters and return; `bug-12691.php`, `uksort-bug.php`,
   `bug-7281.php`, `smaller-than-benevolent.php`, `closure-passed-to-type.php`,
   `bug-14203.php`, `bug-5675.php`, `bug-9086.php`, `bug-9472.php`,
   `bug-5508.php`, `bug-6196.php`, `bug-8257.php`.
-- `union-normalize` (27, 10 files): unions aren't normalized: duplicate members
-  (`Dog|Dog`, `int|int|string`), `never` members (`true|never`), and
-  `bool|int|false` for `bool|int`; `bug-15268.php`, `bug-2735.php`,
-  `bug-13192.php`, `bug-10871.php`, `bug-10938.php`, `bug-14610.php`,
-  `bug-15151.php`, `bug-9634.php`, `closure-passed-by-reference-return.php`,
-  `throw-expr.php`.
-- `variadic-list` (27, 7 files): variadics and `func_get_args()` are lists
+- `variadic-list` (27, 8 files): variadics and `func_get_args()` are lists
   before PHP 8 and named-key arrays from 8; `bug-2600-php8.php`, `bug-2600.php`,
-  `variadic-parameter-php8.php`, `anonymous-function.php`,
-  `bug-2600-php-version-scope.php`, `bug-5698-php7.php`, `bug-5698-php8.php`.
+  `variadic-parameter-php8.php`, `bug-2600-php-version-scope.php`,
+  `anonymous-function.php` (1), `bug-5698-php7.php`, `bug-5698-php8.php`,
+  `typehints.php` (1).
 - `template-bound-generic` (23, 3 files): templates bounded by generics of other
   templates unwrap; `nested-generic-types.php`,
   `nested-generic-types-unwrapping-covariant.php`,
@@ -6929,25 +6958,21 @@ values that flow on from them.
 - `template-narrow` (21, 7 files): narrowing a template-typed value keeps `T` in
   the intersection; `bug-6591.php`, `bug-10083.php`, `bug-4498.php`,
   `bug-9961.php`, `bug-14348.php`, `bug-2580.php`, `bug-7688.php`.
-- `template-generalize` (19, 7 files): inferred template arguments generalize
+- `template-generalize` (19, 8 files): inferred template arguments generalize
   (`Foo<1>` is `Foo<int>`) unless the argument is a class-string or the bound is
-  nullable; `generics-do-not-generalize.php`, `bug-3226.php`,
-  `generic-generalization.php`, `assert-class-type.php`, `bug-11430.php`,
-  `bug-7423.php`, `template-null-bound.php`.
+  nullable; `bug-3226.php`, `generic-generalization.php`,
+  `generics-do-not-generalize.php` (4), `assert-class-type.php`, `self-out.php`
+  (2), `bug-11430.php`, `bug-7423.php`, `template-null-bound.php`.
+- `class-constant` (18, 6 files): `$this::class` in a final class is the
+  literal, `$x::class` is `class-string<X>&literal-string`, and `::class` in an
+  array literal stays a literal; `class-constant-narrowing.php`, `bug-5843.php`,
+  `bug-14683.php` (2), `bug-2677.php`, `bug-4875.php`, `bug-6864.php` (1).
 - `conditional-param` (17, 3 files): a conditional parameter type (`$k is 'a' ?
   A : B`) resolves when the other parameter narrows; `bug-7915.php`,
   `bug-10055.php`, `pr-5108.php`.
-- `decimal-int-string` (16, 1 file): `decimal-int-string` and
+- `decimal-int-string` (15, 1 file): `decimal-int-string` and
   `non-decimal-int-string` types, and `[$s => 1]` keyed by them;
-  `decimal-int-string.php`.
-- `static-type` (16, 7 files): `static` and `$this(Foo)` survive returns, loops,
-  `try` and constructors, and `get_called_class()` is `class-string<static>`;
-  `bug-14804.php`, `bug-7550.php`, `bug-9341.php`, `bug-10477.php`,
-  `bug-2231.php`, `bug-4707.php`, `bug-6308.php`.
-- `class-constant` (15, 4 files): `$this::class` in a final class is the
-  literal, `$x::class` is `class-string<X>&literal-string`, and `::class` in an
-  array literal stays a literal; `class-constant-narrowing.php`, `bug-5843.php`,
-  `bug-2677.php`, `bug-4875.php`.
+  `decimal-int-string.php` (15).
 - `template-bound-union` (15, 3 files): a template bounded by a union stays `T`
   when returned; `bug-6566-types.php`, `bug-9939.php`, `bug-5000.php`.
 - `callable-array` (14, 2 files): `is_array()` on a callable is
@@ -6955,21 +6980,17 @@ values that flow on from them.
   `list&callable`; `bug-3842.php`, `bug-4510.php`.
 - `shape-intersect` (14, 2 files): intersecting two shapes, or an array with a
   shape, folds into one shape; `bug-11234.php`, `constant-array-intersect.php`.
-- `static-closure` (14, 3 files): a static closure is `static-Closure(...)`;
-  `closure-static-type.php`, `bug-9764.php`, `degrade-closures.php`.
 - `template-never` (14, 2 files): a `never` or empty-array argument infers a
   template as `never`; `never-into-union-template.php`,
   `generics-empty-array.php`.
 - `generic-static` (13, 1 file): `static(Foo<T, U>)` returned from a generic
   method keeps `static` and resolves the arguments; `generic-static.php`.
-- `object-shape` (13, 1 file): `object{…}` shapes: a missing property is
-  `*ERROR*`, `(object) []` is `object{}&stdClass`; `object-shape.php`.
+- `array-key-cast` (12, 3 files): literal and numeric-string array keys cast as
+  PHP casts them (`'1'` is `1`, a `numeric-string` key is `int|numeric-string`);
+  `literal-arrays-keys.php`, `bug-8592.php`, `list-type.php` (1).
 - `spread-string-keys` (12, 3 files): spreading string-keyed arrays keeps the
   string keys, which take no implicit index; `array-unpacking-string-keys.php`,
   `bug-15247-php81.php`, `bug-15248-string-key-unpacking.php`.
-- `array-key-cast` (11, 2 files): literal and numeric-string array keys cast as
-  PHP casts them (`'1'` is `1`, a `numeric-string` key is `int|numeric-string`);
-  `literal-arrays-keys.php`, `bug-8592.php`.
 - `generic-method-infer` (11, 6 files): a generic method's templates infer from
   arguments and resolve through returned generics; `bug-9456.php`,
   `bug-4545.php`, `bug-8127.php`, `collected-data.php`,
@@ -6981,23 +7002,28 @@ values that flow on from them.
   `bug-4209.php`, `bug-6917.php`, `bug-9123.php`.
 - `generic-this` (8, 2 files): a generic fluent method returning `$this` keeps
   `$this(Foo<T>)&static`; `bug-12575.php`, `new-in-initializers.php`.
+- `void-null` (8, 4 files): a void call used as a value is `null`; `void.php`,
+  `self-out.php` (2), `template-default.php` (2), `emptyiterator.php`.
 - `class-constant-keys` (7, 1 file): `self::class` as an array key builds a
   shape; `array-shape-class-constant-key.php`.
 - `conditional-param-out` (7, 2 files): a conditional `@param-out` type
   resolves, defaulted parameters included; `bug-10699.php`,
   `param-out-default.php`.
-- `enum-name-value` (7, 2 files): `->name` and `->value` of an enum union or
-  subtracted enum are the remaining cases' literals; `bug-14839.php`,
-  `array-key-exists-on-subtracted.php`.
 - `generic-closure-infer` (7, 1 file): a generic method's templates infer from
   closures and shapes; `bug-10254.php`.
-- `implicit-nullable` (7, 2 files): a parameter defaulting to `null` is
-  nullable; `nullable-closure-parameter.php`,
-  `typehints-anonymous-function.php`.
-- `float-literal` (6, 1 file): float literals are constant floats (`1.0`);
-  `deducted-types.php`.
+- `object-shape` (7, 1 file): `object{…}` shapes: a missing property is
+  `*ERROR*`, `(object) []` is `object{}&stdClass`; `object-shape.php` (7).
+- `static-closure` (7, 4 files): a static closure is `static-Closure(...)`;
+  `bug-15167.php` (2), `closure-static-type.php` (2), `degrade-closures.php`,
+  `bug-9764.php` (1).
+- `enum-name-value` (6, 2 files): `->name` and `->value` of an enum union or
+  subtracted enum are the remaining cases' literals; `bug-14839.php`,
+  `array-key-exists-on-subtracted.php` (1).
 - `spread-list` (6, 2 files): `[...$arr]` is `list<mixed>`; `bug-5287.php`,
   `bug-5287-php81.php`.
+- `implicit-nullable` (5, 2 files): a parameter defaulting to `null` is
+  nullable; `nullable-closure-parameter.php`, `typehints-anonymous-function.php`
+  (1).
 - `template-infer-union` (5, 3 files): a template inferred from several
   arguments unions them; `generics-reduce-types-first.php`, `bug-3321.php`,
   `bug2577.php`.
@@ -7006,8 +7032,8 @@ values that flow on from them.
 - `template-variadic` (5, 3 files): a variadic template parameter unions every
   argument; `bug-10092.php`, `bug-7068.php`, `bug-9881.php`.
 - `clone-type` (4, 1 file): `clone` of `?object` is `object`; `clone.php`.
-- `instanceof-expr` (4, 1 file): `$a instanceof $b` with an object on the right
-  is `bool`; `bug-12107.php`.
+- `float-literal` (4, 1 file): float literals are constant floats (`1.0`);
+  `deducted-types.php` (4).
 - `magic-constants` (4, 1 file): `__CLASS__` is `class-string&literal-string`;
   `bug-3019.php`.
 - `shape-dynamic-key` (4, 2 files): `[$k => $v]` is non-empty, with optional
@@ -7016,14 +7042,10 @@ values that flow on from them.
   required keys required; `bug-14708.php`, `bug-7776.php`.
 - `template-in-shape` (4, 1 file): a template-typed property inside a shape
   keeps `T`; `bug-10445.php`.
-- `void-null` (4, 2 files): a void call used as a value is `null`; `void.php`,
-  `emptyiterator.php`.
 - `new-dynamic` (3, 1 file): `new $class()` is `object`; `bug-4579.php`.
 - `range-union` (3, 1 file): adjacent integer ranges merge; `bug-14213.php`.
 - `template-bound` (3, 2 files): a template iterates and reads as its bound;
   `bug-6748.php`, `bug-7301.php`.
-- `template-class-constant` (3, 1 file): `$this->model::class` on a
-  template-typed property is `class-string<TModel>`; `bug-6864.php`.
 - `template-class-string` (3, 3 files): `class-string<T>` arguments resolve `T`,
   `static::class` included; `bug-2612.php`, `bug-4247.php`, `bug-7141.php`.
 - `template-key` (3, 2 files): a template key survives iteration and offsets;
@@ -7036,49 +7058,57 @@ values that flow on from them.
   `$this(Enum)&Enum::A`; `bug-14478.php`.
 - `enum-value-template` (2, 1 file): a static method returning `value-of` for an
   enum case argument folds to the value; `bug-13782.php`.
+- `instanceof-expr` (2, 1 file): `$a instanceof $b` with an object on the right
+  is `bool`; `bug-12107.php` (2).
 - `shape-from-array` (2, 1 file): `array<1, T>` is `array{1?: T}`;
   `array-shape-from-general-array-with-single-finite-key.php`.
+- `template-class-constant` (2, 1 file): `$this->model::class` on a
+  template-typed property is `class-string<TModel>`; `bug-6864.php` (2).
 - `template-default-param` (2, 1 file): a template parameter defaulting to
   `null` infers `null`; `bug-6584.php`.
 - `template-invoke` (2, 1 file): `__invoke()` of a generic callable object
   returns the template; `bug-12894.php`.
 
-**C4** (168 mismatches, 43 files, 19 causes):
+**C4** (144 mismatches, 49 files, 19 causes):
 
-- `iterable-intersect` (38, 5 files): `iterable<T>&Collection` PHPDoc types keep
-  the intersection and its offset type; `methodPhpDocs-phanPrefix.php`,
-  `methodPhpDocs-phpstanPrefix.php`, `methodPhpDocs-psalmPrefix.php`,
-  `bug-2676.php`, `array-accessable.php`.
-- `inheritdoc` (21, 7 files): PHPDoc is inherited without `{@inheritdoc}`
-  braces, from traits' abstract methods and with templates;
-  `method-phpDocs-inheritdoc-without-curly-braces.php`,
-  `abstract-generic-trait-method-implicit-phpdoc-inheritance.php`,
-  `bug-9045.php`, `inherit-abstract-trait-method-phpdoc.php`,
-  `inherit-phpdoc-merging-template.php`, `inheritdoc-from-trait.php`,
-  `inheritdoc-without-curly-braces-from-trait.php`.
+- `generic-parent-params` (21, 5 files): a child's templates substitute into the
+  parent's, so an inherited or overriding method's parameters take the generic
+  types; `bug-9867.php`, `bug-2735.php` (5), `bug-4423.php`,
+  `generic-parent.php`, `bug-12386.php`.
+- `iterable-intersect` (19, 9 files): `iterable<T>&Collection` PHPDoc types keep
+  the intersection and its offset type; `bug-2676.php`, `array-accessable.php`,
+  `functionPhpDocs-phanPrefix.php` (2), `functionPhpDocs-phpstanPrefix.php` (2),
+  `functionPhpDocs-psalmPrefix.php` (2), `functionPhpDocs.php` (2),
+  `methodPhpDocs-phanPrefix.php` (2), `methodPhpDocs-phpstanPrefix.php` (2),
+  `methodPhpDocs-psalmPrefix.php` (2).
 - `define-constants` (16, 4 files): constants from `define()` and `const` inside
   functions, with a cast initializer and the namespaced fallback;
   `const-in-functions-namespaced.php`, `const-in-functions.php`,
   `cast-in-initializer-define.php`, `cast-in-initializer.php`.
-- `generic-parent-params` (16, 4 files): a child's templates substitute into the
-  parent's, so an inherited or overriding method's parameters take the generic
-  types; `bug-9867.php`, `bug-4423.php`, `generic-parent.php`, `bug-12386.php`.
+- `inheritdoc` (12, 7 files): PHPDoc is inherited without `{@inheritdoc}`
+  braces, from traits' abstract methods and with templates;
+  `method-phpDocs-inheritdoc-without-curly-braces.php` (6),
+  `abstract-generic-trait-method-implicit-phpdoc-inheritance.php`,
+  `bug-9045.php`, `inherit-abstract-trait-method-phpdoc.php`,
+  `inherit-phpdoc-merging-template.php`, `inheritdoc-from-trait.php`,
+  `inheritdoc-without-curly-braces-from-trait.php`.
 - `trait-templates` (11, 1 file): trait templates resolve through `@use` and
   their bounds; `generic-traits.php`.
+- `class-constants` (10, 5 files): class constants resolve through `::class`
+  values and spreads of other constants; `bug-7391.php`,
+  `initializer-expr-type-resolver.php` (3), `bug-4950.php`, `bug-3379.php`,
+  `bug-5458.php`.
 - `generic-self-out` (10, 3 files): `@phpstan-self-out` on generic methods
   rewrites the receiver's arguments; `rule-error-builder.php`, `bug-13374.php`,
   `bug-3866.php`.
-- `self-out` (10, 1 file): `@phpstan-self-out` rewrites the receiver;
-  `self-out.php`.
 - `static-return` (8, 1 file): a `static` return stays `static(Foo)` inside the
   class; `methodPhpDocs.php`.
-- `class-constants` (7, 4 files): class constants resolve through `::class`
-  values and spreads of other constants; `bug-7391.php`, `bug-4950.php`,
-  `bug-3379.php`, `bug-5458.php`.
 - `private-property-infer` (6, 1 file): an untyped private property takes its
   constructor-assigned type; `infer-private-property-type-from-constructor.php`.
 - `promoted-phpdoc` (6, 1 file): a promoted property's PHPDoc from `@param` and
   `@var`; `promoted-properties-types.php`.
+- `self-out` (6, 1 file): `@phpstan-self-out` rewrites the receiver;
+  `self-out.php` (6).
 - `no-named-arguments` (4, 1 file): `@no-named-arguments` makes a variadic a
   list; `no-named-arguments.php`.
 - `property-tags` (4, 2 files): `@phpstan-property` overrides `@property`, and
@@ -7099,21 +7129,21 @@ values that flow on from them.
 - `trait-param-phpdoc` (1, 1 file): a trait method's `@param` applies inside the
   trait; `bug-9733.php`.
 
-**C6** (168 mismatches, 47 files, 6 causes):
+**C6** (173 mismatches, 48 files, 6 causes):
 
-- `stub-return` (107, 32 files): method and function returns from the stubs
+- `stub-return` (111, 33 files): method and function returns from the stubs
   (Redis, Ds, SPL, SQLite3, Imagick, SNMP, xdebug and others), `mixed` or wider
   today; `bug-9748.php`, `recursive-iterators.php`,
   `adapter-reflection-enum-return-types.php`, `ext-ds.php`, `bug-14736.php`,
-  `imagick-pixel.php`, `image-size.php`, `password-get-info.php`,
-  `sqlite3-result-fetch-all-php85.php`, `sqlite3-result-fetch-array.php`,
-  `bug-13365.php`, `fpm-get-status.php`, `get_headers.php`, `ibm_db2.php`,
-  `bug-11073.php`, `bug-7639.php`, `ds-copy.php`, `getopt.php`,
-  `impure-connection-fns.php`, `memcache-get.php`, `redis-mget.php`,
-  `session-get-cookie-params-php85.php`, `snmp.php`, `bug-1519.php`,
-  `bug-7341.php`, `bug-9714.php`, `die-74.php`, `error-get-last-php85.php`,
-  `fgetcsv-php7.php`, `fgetcsv-php8.php`,
-  `native-types-ftp-connect-resource.php`, `ssh2-functions.php`.
+  `bug-7056.php` (5), `imagick-pixel.php`, `image-size.php`,
+  `password-get-info.php`, `sqlite3-result-fetch-all-php85.php`,
+  `sqlite3-result-fetch-array.php`, `bug-13365.php`, `fpm-get-status.php`,
+  `get_headers.php`, `ibm_db2.php`, `bug-11073.php`, `bug-7639.php`,
+  `ds-copy.php`, `getopt.php`, `impure-connection-fns.php`, `memcache-get.php`,
+  `redis-mget.php`, `snmp.php`, `bug-1519.php`, `bug-7341.php`, `bug-9714.php`,
+  `die-74.php`, `error-get-last-php85.php`, `fgetcsv-php7.php`,
+  `fgetcsv-php8.php`, `native-types-ftp-connect-resource.php`,
+  `session-get-cookie-params-php85.php` (1), `ssh2-functions.php`.
 - `stub-asserts` (39, 2 files): stub `@phpstan-assert` tags narrow
   (`is_readable`, `dir`, `chdir`, `chroot`);
   `non-empty-string-file-functions.php`, `bug-14829.php`.
@@ -7124,17 +7154,25 @@ values that flow on from them.
 - `stub-byref` (8, 4 files): by-reference out parameters from the stubs
   (`socket_select`, `proc_open`'s pipes); `discussion-10285-php8.php`,
   `discussion-10285.php`, `bug-13197.php`, `bug-13197b.php`.
-- `generic-reflection` (5, 4 files): `ReflectionClass<T>`'s `getName()`, `$name`
+- `generic-reflection` (6, 5 files): `ReflectionClass<T>`'s `getName()`, `$name`
   and `$class` are `class-string<T>`; `bug-2927.php`, `bug-6889.php`,
-  `isset-coalesce-empty-type-post-81.php`,
+  `bug-7056.php` (1), `isset-coalesce-empty-type-post-81.php`,
   `isset-coalesce-empty-type-pre-81.php`.
 - `stub-property` (1, 1 file): `DateInterval::$days` is `int|false` after an
   impure call; `bug-14428.php`.
 
-**C7** (103 mismatches, 26 files, 15 causes):
+**C7** (106 mismatches, 36 files, 15 causes):
 
-- `generic-defaults` (17, 1 file): a generic without arguments is `Foo<mixed>`
-  and unions with `Foo<123>`; `bug-15198.php`.
+- `generic-defaults` (18, 2 files): a generic without arguments is `Foo<mixed>`
+  and unions with `Foo<123>`; `bug-15198.php`, `bug-4504.php` (1).
+- `unresolvable-phpdoc` (13, 11 files): an unresolvable PHPDoc type falls back
+  to the native type; `psalm-prefix-unresolvable.php`, `unresolvable-types.php`,
+  `count-recursive.php` (1), `functionPhpDocs-phanPrefix.php` (1),
+  `functionPhpDocs-phpstanPrefix.php` (1), `functionPhpDocs-psalmPrefix.php`
+  (1), `functionPhpDocs.php` (1),
+  `method-phpDocs-inheritdoc-without-curly-braces.php` (1),
+  `methodPhpDocs-phanPrefix.php` (1), `methodPhpDocs-phpstanPrefix.php` (1),
+  `methodPhpDocs-psalmPrefix.php` (1).
 - `phpdoc-types` (12, 5 files): PHPDoc keyword types (`pure-callable`,
   `callable-array`, `lowercase-string`/`uppercase-string` in shapes), and an
   invalid `non-empty-list` falls back to `array`; `more-types.php`,
@@ -7143,11 +7181,9 @@ values that flow on from them.
 - `phpdoc-class-override` (11, 3 files): a class named like a PHPDoc pseudo-type
   wins when imported or in its namespace; `phpdoc-pseudotype-override.php`,
   `phpdoc-pseudotype-namespace.php`, `phpdoc-pseudotype-global.php`.
-- `template-default` (11, 3 files): `@template T = X` defaults fill missing
-  arguments; `template-default.php`, `generics-default.php`,
+- `template-default` (9, 3 files): `@template T = X` defaults fill missing
+  arguments; `template-default.php` (5), `generics-default.php`,
   `template-default-referring-other.php`.
-- `type-alias-circular` (11, 1 file): circular type-alias imports are `*ERROR*`;
-  `type-aliases.php`.
 - `shape-const-keys` (8, 1 file): `array{static::KEY: T}` shape keys resolve
   class constants; `bug-6989.php`.
 - `offset-access-type` (7, 2 files): `T[K]` offset-access types and template
@@ -7158,15 +7194,21 @@ values that flow on from them.
   `array-shape-list-optional.php`.
 - `phpdoc-const-expr` (4, 1 file): PHPDoc constant expressions keep float
   literals (`1.0`); `const-expr-phpdoc-type.php`.
-- `unresolvable-phpdoc` (4, 2 files): an unresolvable PHPDoc type falls back to
-  the native type; `psalm-prefix-unresolvable.php`, `unresolvable-types.php`.
+- `type-alias-circular` (4, 1 file): circular type-alias imports are `*ERROR*`;
+  `type-aliases.php` (4).
+- `type-alias-import` (4, 2 files): `@phpstan-import-type` aliases in enums;
+  `enums-import-alias.php`, `type-aliases.php` (2).
 - `value-of` (3, 2 files): `value-of<T>` on constants and generics;
   `value-of-generic.php`, `value-of.php`.
-- `type-alias-import` (2, 1 file): `@phpstan-import-type` aliases in enums;
-  `enums-import-alias.php`.
 - `type-alias-invalid` (2, 1 file): an invalid type alias resolves to `mixed`;
   `invalid-type-aliases.php`.
 - `key-of` (1, 1 file): `key-of<…>` on a constant array; `key-of.php`.
+
+**C8** (2 mismatches, 1 file, 1 cause):
+
+- `type-alias-global` (2, 1 file): a global type alias from the `typeAliases`
+  setting resolves (`int|string`); it is `never` or a class of that name today;
+  `type-aliases.php` (2).
 
 **D2** (2 mismatches, 2 files, 1 cause):
 
@@ -7174,32 +7216,37 @@ values that flow on from them.
   without a variable name above a `foreach`;
   `foreach/type-in-comment-no-variable-2.php`, `var-above-use.php`.
 
-**D3** (1,663 mismatches, 301 files, 82 causes):
+**D3** (1,684 mismatches, 325 files, 89 causes):
 
-- `count-narrow` (192, 19 files): `count()` compared with a constant, a range or
+- `count-narrow` (226, 28 files): `count()` compared with a constant, a range or
   another `count()` narrows the array: a list to an N-element shape, a union of
   shapes to its matching members, a maybe-countable to its countable part, and
-  to non-empty; `list-count.php`, `narrow-tagged-union.php`, `bug-11488.php`,
-  `list-count2.php`, `count-maybe.php`, `bug-14301.php`, `bug-2142.php`,
-  `bug-4558.php`, `bug-4700.php`, `reset-after-non-empty-loop.php`,
-  `bug-10952.php`, `bug-11642.php`, `bug-13675.php`, `array-append-count.php`,
+  to non-empty; `list-count.php`, `bug-11488.php`, `list-count2.php`,
+  `narrow-tagged-union.php` (16), `count-maybe.php`, `count-type.php`,
+  `bug-14301.php`, `bug-13705.php` (6), `bug-14314.php` (6), `bug-2142.php`,
+  `bug-10264.php` (4), `bug-4558.php`, `bug-4700.php`, `sizeof-php8.php`,
+  `sizeof.php`, `bug-10952.php`, `bug-11642.php`, `bug-13675.php`,
+  `bug-13749.php` (2), `reset-after-non-empty-loop.php` (2),
+  `strlen-int-range.php` (2), `array-append-count.php`, `bug-11716.php` (1),
   `bug-13111.php`, `bug-1861.php`, `bug-2648.php`, `bug-4499.php`,
   `count-const-array.php`.
-- `list-write` (114, 12 files): offset writes and appends keep `list`,
+- `list-write` (114, 15 files): offset writes and appends keep `list`,
   non-emptiness and `hasOffsetValue` (`$l[count($l) - 1] = v`,
   `$g[array_key_last($g)][] = v`, nested writes), and an append to `mixed` stays
-  `mixed`; `bug-14245.php`, `bug-12274.php`, `list-type.php`, `bug-15245.php`,
-  `bug-13857.php`, `bug-4016.php`, `bug-9131.php`, `assign-nested-arrays.php`,
-  `bug-12447.php`, `bug-13789.php`, `bug-2112.php`, `bug-8087.php`.
-- `operator-ranges` (85, 11 files): arithmetic, `%` and bitwise operators on
+  `mixed`; `bug-14245.php`, `bug-12274.php`, `bug-15245.php`, `list-type.php`
+  (15), `bug-13857.php`, `array-keys-branches.php` (4), `bug-4016.php`,
+  `bug-9131.php`, `assign-nested-arrays.php`, `bug-12447.php`, `bug-13789.php`,
+  `bug-2112.php`, `bug-8087.php`, `has-offset-type-bug.php` (2),
+  `bug-13270a.php` (1).
+- `operator-ranges` (89, 13 files): arithmetic, `%` and bitwise operators on
   ranges, constants and numeric strings give PHPStan's ranges;
-  `modulo-operator.php`, `bug-14654.php`, `mixed-to-number.php`,
-  `bug-15243.php`, `bug-9384.php`, `bug-9724.php`, `bitwise-not.php`,
+  `modulo-operator.php`, `bug-14654.php`, `bug-15243.php`, `bug-8803.php` (8),
+  `bug-9384.php`, `mixed-to-number.php` (6), `bug-9724.php`, `bitwise-not.php`,
   `bug-4843.php`, `bug-5168-php7.php`, `bug-5168-php8.php`,
-  `integer-range-finite-types-php-int-max.php`.
-- `loose-eq-narrow` (83, 4 files): `==`/`!=` narrow strings and unions, keeping
-  accessories; `equal-narrow.php`, `bug-12312.php`, `equal.php`,
-  `bug-14047.php`.
+  `decimal-int-string.php` (1), `integer-range-finite-types-php-int-max.php`.
+- `loose-eq-narrow` (78, 4 files): `==`/`!=` narrow strings and unions, keeping
+  accessories; `equal-narrow.php`, `bug-12312.php`, `equal.php` (11),
+  `bug-14047.php` (7).
 - `closure-param-infer` (77, 13 files): an untyped closure parameter takes its
   type from the callable parameter it is passed to (a union of callables, a
   variadic, a named argument, a constructor, an attribute, an immediately
@@ -7209,166 +7256,193 @@ values that flow on from them.
   `arrow-function-argument-type.php`, `bug-13253.php`, `bug-10671.php`,
   `bug-10671b.php`, `callable-in-union.php`, `closure-in-attribute.php`,
   `bug-9601.php`, `closure-inferred-typehint.php`.
-- `assert-tags` (65, 20 files): `@phpstan-assert`, `-if-true` and `-if-false` on
+- `assert-tags` (59, 20 files): `@phpstan-assert`, `-if-true` and `-if-false` on
   methods, static methods, constructors, first-class and string callables,
   inherited from a parent or interface, and with conditional, template,
-  intersection, `key-of` and `empty` types; `bug-14705.php`,
-  `assert-inheritance.php`, `bug-14249.php`, `bug-12376.php`,
+  intersection, `key-of` and `empty` types; `assert-inheritance.php`,
+  `bug-14249.php`, `bug-12376.php`, `bug-14705.php` (5),
   `assert-conditional.php`, `assert-methods.php`, `assert-this.php`,
   `bug-10040.php`, `assert-empty.php`, `assert-invariant.php`,
   `assert-method.php`, `assert-constructor.php`, `assert-intersected.php`,
   `bug-10037.php`, `bug-11441.php`, `bug-11472.php`, `bug-13282.php`,
   `bug-14108.php`, `bug-14108c.php`, `bug-5785.php`.
-- `conditional-holders` (63, 29 files): a variable holding a condition's result,
+- `strlen-narrow` (59, 7 files): `strlen()`/`mb_strlen()` compared, stored or
+  matched against another `strlen()` narrow the string; `bug-13688.php`,
+  `strlen-int-range.php` (20), `bug-13749.php` (6), `bug-10952b.php`,
+  `non-falsy-string.php`, `bug-11035.php`, `bug-7949.php`.
+- `conditional-holders` (57, 28 files): a variable holding a condition's result,
   or assigned under a condition, narrows its sources when it is checked later
   (PHPStan's conditional expression holders); one is never applied outside its
   condition (`bug-14891.php`); `bug-10090.php`, `bug-4733.php`, `bug-7948.php`,
-  `conditional-expr-narrowing-through-variable.php`, `bug-14891.php`,
-  `dependent-variables-type-guard-same-as-type.php`, `bug-13054.php`,
-  `bug-14178.php`, `bug-14211.php`, `bug-14455.php`, `bug-14545.php`,
-  `bug-2816-2.php`, `bug-2816.php`, `bug-3024.php`, `bug-9519.php`,
-  `bug-9752.php`, `bug-10482.php`, `bug-10843.php`, `bug-11870.php`,
-  `bug-13591.php`, `bug-14774.php`, `bug-14878.php`, `bug-15226.php`,
-  `bug-2980.php`, `bug-4215.php`, `bug-4326.php`, `bug-7008.php`,
+  `bug-10088.php` (4), `conditional-expr-narrowing-through-variable.php` (4),
+  `bug-13054.php`, `bug-14178.php`, `bug-14211.php`, `bug-2816-2.php`,
+  `bug-2816.php`, `bug-3024.php`, `bug-9519.php`, `bug-9752.php`,
+  `dependent-variables-type-guard-same-as-type.php` (2), `bug-10482.php`,
+  `bug-10843.php`, `bug-11870.php`, `bug-13591.php`, `bug-14455.php` (1),
+  `bug-14774.php`, `bug-14878.php`, `bug-15226.php`, `bug-2980.php`,
+  `bug-4215.php`, `bug-4326.php`, `bug-7008.php`,
   `conditional-non-empty-array.php`, `disjunction-holder-projection.php`.
-- `strlen-narrow` (63, 7 files): `strlen()`/`mb_strlen()` compared, stored or
-  matched against another `strlen()` narrow the string; `strlen-int-range.php`,
-  `bug-13688.php`, `bug-13749.php`, `bug-10952b.php`, `non-falsy-string.php`,
-  `bug-11035.php`, `bug-7949.php`.
 - `string-fn-narrow` (52, 7 files): a string function's result compared with a
   constant narrows its argument (`strtolower($s) === 'x'`, `substr`, `strstr`,
   `strrchr`, `trim($s) !== ''`); `non-empty-string-strcasing-specifying.php`,
   `non-empty-string-strstr-specifying.php`,
   `non-empty-string-substr-specifying.php`, `bug-12973.php`,
   `non-empty-string-strrchr-specifying.php`, `bug-13709.php`, `bug-7607.php`.
-- `callable-predicate` (49, 4 files): calling a closure or callable variable
-  whose return is conditional on its parameter narrows the argument, and the
-  call's truthiness is remembered; `callable-type-predicate.php`,
-  `bug-12686.php`, `bug-2822.php`, `bug-3770.php`.
-- `casts` (48, 5 files): casts keep what the value is: `(object)` of an object
+- `casts` (44, 6 files): casts keep what the value is: `(object)` of an object
   keeps its class, `(string)` of an int range is a union of literals and of a
   positive int non-falsy, `(array)` of a non-empty list stays one; `casts.php`,
-  `cast-to-numeric-string.php`, `bug-14753.php`, `bug-9208.php`,
-  `range-to-string.php`.
-- `literal-key-writes` (39, 5 files): a write with a literal-union key builds a
-  shape with optional keys; `bug-11716.php`, `array-keys-branches.php`,
-  `bug-13805.php`, `set-constant-union-offset-on-constant-array.php`,
-  `set-union-offset-preserve-constant-array.php`.
-- `offset-narrow-memory` (32, 9 files): a narrowed offset is remembered
+  `cast-to-numeric-string.php` (13), `bug-14753.php`, `bug-9208.php`,
+  `range-to-string.php`, `deducted-types.php` (1).
+- `callable-predicate` (42, 4 files): calling a closure or callable variable
+  whose return is conditional on its parameter narrows the argument, and the
+  call's truthiness is remembered; `callable-type-predicate.php` (39),
+  `bug-12686.php`, `bug-2822.php`, `bug-3770.php`.
+- `offset-narrow-memory` (32, 10 files): a narrowed offset is remembered
   (`isset($a['k']) && !is_string($a['k'])` throwing, then `$a['k'] ?? ''` is
   `string`); `bug-10644.php`, `negated-boolean-and-conditional-holders.php`,
-  `boolean-and-conditional-holders-mixed-context.php`, `composer-array-bug.php`,
+  `boolean-and-conditional-holders-mixed-context.php`, `bug-15060.php` (3),
   `bug-7501.php`, `bug-10473.php`, `bug-14319.php`, `bug-6202.php`,
-  `composer-non-empty-array-after-unset.php`.
+  `composer-array-bug.php` (1), `composer-non-empty-array-after-unset.php`.
 - `concat-accessories` (30, 3 files): concatenation keeps the operands' case and
   non-falsy accessories; `bug-11129.php`, `bug-10863.php`, `bug-8568.php`.
-- `byref-closure-use` (29, 4 files): a by-reference `use` variable merges the
-  closure's writes into the outer scope, with the exact shape and without
-  `never`; `bug-11561.php`, `closure-passed-by-reference.php`, `bug-13810.php`,
-  `closure-passed-by-reference-in-call.php`.
 - `mixed-narrow` (29, 1 file): `is_string()` with `&&`/`||` narrowing of
   `mixed`; `bug-6329.php`.
-- `tagged-union-narrow` (29, 5 files): checking one offset narrows a union of
-  shapes and their sibling offsets; `tagged-unions.php`, `bug-6728.php`,
+- `byref-closure-use` (27, 4 files): a by-reference `use` variable merges the
+  closure's writes into the outer scope, with the exact shape and without
+  `never`; `bug-11561.php`, `closure-passed-by-reference.php` (8),
+  `bug-13810.php` (5), `closure-passed-by-reference-in-call.php`.
+- `isset-narrow` (26, 9 files): `isset()` makes an array non-empty, an offset
+  `mixed~null`, a key `int<0, max>`, and a maybe-defined variable certain;
+  `falsy-isset.php` (7), `has-offset-type-bug.php` (5), `bug-12933.php`,
+  `bug-13270b-php8.php`, `bug-13674b.php` (3), `bug-8467b.php` (2),
+  `bug-13270b.php`, `list-type.php` (1), `root-scope-maybe-defined.php`.
+- `tagged-union-narrow` (26, 5 files): checking one offset narrows a union of
+  shapes and their sibling offsets; `tagged-unions.php` (16), `bug-6728.php`,
   `bug-7921.php`, `bug-10544.php`, `bug-6383.php`.
-- `fcc-static` (27, 1 file): first-class callables of static methods, and static
-  calls through unions; `static-late-binding.php`.
-- `is-fns-narrow` (24, 3 files): the `is_*` functions on `mixed`, unions and
-  PHPDoc-typed strings; `specifiedTypesUsingIsFunctions.php`, `bug-3133.php`,
-  `bug-9400.php`.
-- `or-narrow` (23, 6 files): `||` narrows each side in the other's false context
-  and remembers both; `bug-12517.php`, `bug-8361.php`, `bug-7259.php`,
-  `phpunit-integration.php`, `bug-3385.php`, `bug-9995.php`.
+- `array-plus` (22, 9 files): `+` and `+=` on shapes keep the known keys, their
+  narrowed values and non-emptiness; `bug-4565.php`, `bug-10373.php`,
+  `bug-14799.php`, `bug-6936-limit.php`, `constant-array-optional-set.php` (2),
+  `bug-11912.php`, `bug-5584.php`, `bug-7492.php`, `count-recursive.php` (1).
 - `coalesce-narrow` (22, 10 files): `??` narrows its left side and the
   variable's certainty, on undefined variables, offsets, class constants and
   typed properties; `falsey-coalesce.php`, `bug-12125.php`, `bug-2420.php`,
   `bug-560.php`, `bug-7711.php`, `bug-10786.php`, `bug-11918.php`,
   `bug-13214.php`, `bug-5304.php`, `isset-property-default-value.php`.
-- `int-compare-narrow` (22, 4 files): integer comparisons narrow to ranges
-  across `||` and later branches; `bug-10088.php`, `bug-6672.php`,
+- `identical-fold` (22, 2 files): `[1] === [1]` folds;
+  `constant-array-type-identical.php`, `bug-4650.php` (2).
+- `or-narrow` (20, 6 files): `||` narrows each side in the other's false context
+  and remembers both; `bug-12517.php`, `bug-8361.php`, `bug-7259.php`,
+  `bug-3385.php`, `bug-9995.php`, `phpunit-integration.php` (1).
+- `destructure` (19, 1 file): destructuring reads each element's type: nested
+  (`[[$x]] = $a`), in a foreach, with a dynamic key and from an iterable
+  (`mixed` today), and an offset target on an object makes it `ArrayAccess&…`;
+  `array-destructuring.php` (19).
+- `int-compare-narrow` (18, 4 files): integer comparisons narrow to ranges
+  across `||` and later branches; `bug-6672.php`, `bug-10088.php` (4),
   `bug-4695.php`, `bug-1014.php`.
-- `identical-fold` (20, 1 file): `[1] === [1]` folds;
-  `constant-array-type-identical.php`.
-- `array-plus` (19, 7 files): `+` and `+=` on shapes keep the known keys, their
-  narrowed values and non-emptiness; `bug-4565.php`, `bug-10373.php`,
-  `bug-14799.php`, `bug-6936-limit.php`, `bug-11912.php`, `bug-5584.php`,
-  `bug-7492.php`.
-- `increment-types` (18, 3 files): `++`/`--` on `null`, strings and floats give
-  PHP's result types; `bug-10122.php`, `constantTypes.php`, `bug-1870.php`.
-- `arrayaccess-offset` (16, 3 files): an `ArrayAccess` offset reads
-  `offsetGet()`'s return, and `isset` on it adds `hasOffset`; `bug-15021.php`,
-  `bug-6399.php`, `bug-13204.php`.
+- `static-call-union` (17, 5 files): a static call on a union of classes or
+  class-strings merges the returns; `union-intersection.php` (11),
+  `bug-11687.php`, `method-call-return-type-fallback.php`,
+  `static-late-binding.php` (1), `union-methods.php`.
+- `unset-shape` (17, 7 files): `unset()` of a shape key removes it, a
+  conditional or non-constant one makes keys optional;
+  `filter-var-dynamic-return-type-extension-regression.php`,
+  `array-is-list-unset.php` (2), `array-offset-unset.php`, `bug-8225.php`,
+  `list-type.php` (2), `unset-conditional-expressions.php`,
+  `native-expressions.php`.
+- `isset-key-narrow` (16, 1 file): `isset($a[$k])` narrows the key: `mixed` to
+  `mixed~(array|object|resource)`, a `string` on an int-keyed array to
+  `decimal-int-string`, and against a constant array to its keys as PHP casts
+  them (`1|2|'1'|'2'|float|true`); `bug-11716.php` (16).
 - `ternary-narrow` (16, 4 files): a ternary condition narrows its arms, and a
   ternary in a condition narrows like `&&`; `ternary-specified-types.php`,
   `bug-15307.php`, `bug-987.php`, `bug-6174.php`.
-- `assign-chain-narrow` (15, 1 file): `$a = $b = $c` links the three, so
-  checking one narrows all; `multi-assign.php`.
-- `cast-narrow` (15, 3 files): `(bool)`, `(int)` and `(string)` of an expression
-  in a condition narrow the operand; `narrow-cast.php`, `bug-10528.php`,
-  `bug-7685.php`.
-- `float-narrow` (15, 1 file): `$f === 0.0` and `$f == 0` narrow a float, and
-  `(string) 0.0` is `'-0'|'0'`; `bug-12225.php`.
-- `isset-narrow` (15, 6 files): `isset()` makes an array non-empty, an offset
-  `mixed~null`, a key `int<0, max>`, and a maybe-defined variable certain;
-  `bug-13674b.php`, `bug-12933.php`, `bug-13270b-php8.php`, `bug-8467b.php`,
-  `bug-13270b.php`, `root-scope-maybe-defined.php`.
 - `string-offsets` (15, 1 file): `$s[$i]` on a constant string is the union of
   its characters; `string-offsets.php`.
+- `assign-chain-narrow` (14, 1 file): `$a = $b = $c` links the three, so
+  checking one narrows all; `multi-assign.php` (14).
+- `cast-narrow` (14, 3 files): `(bool)`, `(int)` and `(string)` of an expression
+  in a condition narrow the operand; `narrow-cast.php` (12), `bug-10528.php`,
+  `bug-7685.php`.
+- `fcc-static` (14, 1 file): first-class callables of static methods, and static
+  calls through unions; `static-late-binding.php` (14).
 - `offset-write-unknown-key` (14, 2 files): a write with a non-constant key into
   a constant array keeps the known elements; `constant-array-type-set.php`,
   `array-search-offset-argument-count.php`.
 - `array-param-narrow` (13, 1 file): `is_string()` over an array's keys narrows
   it to `array<string, mixed>`; `bug-7076.php`.
-- `closure-generator` (13, 3 files): a closure or arrow function with `yield`
-  returns `Generator<K, V, S, R>`; `closure-return-type.php`,
-  `missing-closure-native-return-typehint.php`, `bug-7031.php`.
-- `unset-shape` (13, 5 files): `unset()` of a shape key removes it, a
-  conditional or non-constant one makes keys optional;
-  `filter-var-dynamic-return-type-extension-regression.php`,
-  `array-offset-unset.php`, `bug-8225.php`, `unset-conditional-expressions.php`,
-  `native-expressions.php`.
+- `arrayaccess-offset` (12, 3 files): an `ArrayAccess` offset reads
+  `offsetGet()`'s return, and `isset` on it adds `hasOffset`; `bug-15021.php`
+  (7), `bug-6399.php`, `bug-13204.php`.
+- `closure-return-infer` (12, 5 files): a closure's return is inferred: `never`
+  when it always throws, `void` without a `return`, and its return type when a
+  variable holding it is called; `closure-return-type.php` (5), `bug-15167.php`
+  (3), `missing-closure-native-return-typehint.php` (2), `bug-10283.php`,
+  `mixed-typehint.php`.
 - `enum-this-narrow` (12, 1 file): `$this !== self::A` narrows an enum's
   `$this`, and a conditional return follows it; `bug-12244.php`.
 - `fcc-return` (12, 3 files): calling a first-class callable returns the
   method's return type and keeps its signature;
   `native-types-first-class-callables.php`, `bug-14362.php`,
   `intersection-template-mixed-method.php`.
+- `increment-types` (12, 4 files): `++`/`--` on `null`, strings and floats give
+  PHP's result types; `bug-10122.php`, `bug-1870.php`, `constantTypes.php` (1),
+  `mixed-to-number.php` (1).
+- `is-fns-narrow` (11, 5 files): the `is_*` functions on `mixed`, unions and
+  PHPDoc-typed strings; `bug-3133.php`, `specifiedTypesUsingIsFunctions.php`
+  (3), `has-offset-type-bug.php` (2), `bug-1233.php` (1), `bug-9400.php`.
+- `loose-eq-fold` (11, 3 files): PHP 8 loose comparisons between ints and
+  non-numeric strings fold to `false`; `loose-comparisons-php8.php`,
+  `bug-14793.php`, `equal.php` (2).
 - `match-back-narrow` (11, 1 file): a `match` result compared back narrows the
   subject to the arms that produce it; `bug-14772.php`.
 - `nullsafe-narrow` (11, 2 files): a truthy or compared nullsafe call makes the
   receiver non-null; `bug-4757.php`, `nullsafe-vs-scalar.php`.
 - `and-narrow` (10, 2 files): `$a && $b` narrows both operands in either order
   and later null checks in the chain; `bug-14787.php`, `bug-8366.php`.
+- `check-fold` (10, 3 files): a type check inside its own narrowing folds
+  (`is_int($x)` is `true` in `if (is_int($x))`); `bug-8249.php`, `bug-12107.php`
+  (1), `bug-2906.php`.
 - `closure-use-narrow` (10, 1 file): the narrowed properties of a `use` variable
   carry into the closure; `specified-types-closure-use.php`.
+- `float-constants` (10, 2 files): `-1 * INF` is `-INF`; `bug-12225.php` (7),
+  `bug-13097.php`.
 - `interpolation` (10, 3 files): interpolation and concatenation of constant
   unions and ranges give literal unions, `"$int"` is `decimal-int-string`;
   `constant-string-unions.php`, `bug-13378.php`, `bug-8635.php`.
-- `check-fold` (9, 2 files): a type check inside its own narrowing folds
-  (`is_int($x)` is `true` in `if (is_int($x))`); `bug-8249.php`, `bug-2906.php`.
+- `literal-key-writes` (10, 5 files): a write with a literal-union key builds a
+  shape with optional keys; `bug-11716.php` (4), `array-keys-branches.php` (2),
+  `bug-13805.php`, `set-constant-union-offset-on-constant-array.php`,
+  `set-union-offset-preserve-constant-array.php`.
 - `instanceof-intersect` (9, 2 files): `instanceof` of a subclass drops the
   redundant parent and narrows the variable an alias came from; `pr-5596.php`,
   `bug-6663.php`.
-- `loose-eq-fold` (9, 2 files): PHP 8 loose comparisons between ints and
-  non-numeric strings fold to `false`; `loose-comparisons-php8.php`,
-  `bug-14793.php`.
 - `typed-property-coerce` (9, 3 files): a value assigned to a typed property is
   coerced (`1` into `float` is `1.0`, a `BcMath\Number` into `string`);
   `bug-12393.php`, `bug-12393-php84.php`, `bug-12393b-php84.php`.
 - `unset-narrow` (9, 1 file): `unset()` or an overwrite of a key removes the old
   member from the union; `bug-14566.php`.
+- `append-shape` (8, 4 files): appends in a branch to a constant list give an
+  optional key or a union of shapes (`array{0: 'foo', 1: 'bar', 2?: 'baz'}`),
+  and to `[]` the exact shape; `array-is-list-unset.php` (3),
+  `array-keys-branches.php` (2), `constant-array-optional-set.php` (2),
+  `count-recursive.php` (1).
+- `float-narrow` (8, 1 file): `$f === 0.0` and `$f == 0` narrow a float, and
+  `(string) 0.0` is `'-0'|'0'`; `bug-12225.php` (8).
 - `match-narrow` (8, 5 files): a `match` arm narrows the subject (and an
   assigned subject variable) in its result, `match (true)` arms included;
   `bug-10084.php`, `bug-13385.php`, `bug-13385b.php`, `bug-8724.php`,
   `match-expression-inference.php`.
+- `property-fetch-dynamic-name` (8, 2 files): `$obj->{'n'}` is the same
+  expression as `$obj->n`; `bug-14847.php`, `bug-12398.php` (1).
 - `reference-alias` (8, 2 files): a write through a reference updates the
   aliased variable; `bug-14275.php`, `bug-8056.php`.
-- `closure-return-infer` (7, 3 files): a closure's return is inferred: `never`
-  when it always throws, `void` without a `return`, and its return type when a
-  variable holding it is called; `bug-15167.php`, `bug-10283.php`,
-  `mixed-typehint.php`.
-- `property-fetch-dynamic-name` (7, 1 file): `$obj->{'n'}` is the same
-  expression as `$obj->n`; `bug-14847.php`.
+- `isset-fold` (7, 4 files): `isset()` of an always-defined non-null variable is
+  `true`; `bug-13561.php` (4), `array-pop-shift-has-offset.php` (1),
+  `bug-13674b.php` (1), `isset-coalesce-empty-type-root.php` (1).
+- `closure-generator` (6, 3 files): a closure or arrow function with `yield`
+  returns `Generator<K, V, S, R>`; `closure-return-type.php` (3),
+  `bug-7031.php`, `missing-closure-native-return-typehint.php` (1).
 - `else-narrow` (6, 3 files): the else branch of a check removes the matched
   member (`?Foo` is `null`, a union of shapes loses the one with the key);
   `type-elimination.php`, `bug-12401.php`, `bug-5128.php`.
@@ -7376,19 +7450,18 @@ values that flow on from them.
   assigned type, with and without `strict_types`; `bug-5129.php`,
   `remember-nullable-property-non-strict.php`,
   `remember-non-nullable-property-non-strict.php`.
-- `self-identical` (6, 1 file): `$a !== $a` is `never` for a non-float type;
-  `identical.php`.
+- `self-identical` (6, 2 files): `$a !== $a` is `never` for a non-float type;
+  `identical.php` (4), `equal.php` (2).
+- `short-ternary` (6, 2 files): `$x ?: new A()` is the truthy part of `$x` or
+  `A`; `bug-14705.php` (5), `bug-1897.php`.
+- `coalesce-assign` (5, 2 files): `??=` on nested offsets writes the shape;
+  `bug-15021.php` (4), `bug-optionalArrayKeyInMultiDimArrayLoop.php`.
 - `dynamic-method-call` (5, 1 file): `$a->{$method}()` on a union resolves when
   every member has the method; `bug-12875.php`.
-- `falsy-narrow` (5, 3 files): a falsy check narrows to the falsy members
-  (`array{}|null`, `null`); `bug-2977.php`, `bug-3991.php`, `bug-10338.php`.
 - `identical-transitive` (5, 1 file): `$c === $a && $c === $b` narrows `$a` and
   `$b` through `$c`; `constant-types-duplicate-condition.php`.
 - `property-narrow` (5, 2 files): a property narrowed by an early return keeps
   its narrowing; `bug-6991.php`, `bug-12866.php`.
-- `static-call-union` (5, 3 files): a static call on a union of classes or
-  class-strings merges the returns; `bug-11687.php`,
-  `method-call-return-type-fallback.php`, `union-methods.php`.
 - `ternary-throw` (5, 1 file): a ternary with a `throw` arm narrows the other
   arm; `bug-6870.php`.
 - `assert-ternary` (4, 1 file): `assert($c ? $x instanceof A : $x instanceof B)`
@@ -7397,20 +7470,26 @@ values that flow on from them.
   offset's key required after it; `bug-4885.php`, `bug-5351.php`.
 - `constant-offset-fold` (4, 1 file): offsets of a class-constant array fold to
   exact shapes; `bug-7621-1.php`.
-- `identical-narrow` (4, 2 files): `===`/`!==` against a constant narrows (`'0'
-  !== $s` makes a non-empty string non-falsy); `bug-7877.php`, `bug-3106.php`.
-- `constant-empty-fold` (3, 1 file): `!empty()` of an empty constant array is
-  `never`; `bug-7913.php`.
+- `falsy-narrow` (4, 3 files): a falsy check narrows to the falsy members
+  (`array{}|null`, `null`); `bug-2977.php`, `bug-10338.php`, `bug-3991.php` (1).
+- `identical-narrow` (4, 3 files): `===`/`!==` against a constant narrows (`'0'
+  !== $s` makes a non-empty string non-falsy); `identical.php` (2),
+  `bug-3106.php`, `bug-7877.php` (1).
 - `finite-types` (3, 1 file): branches over booleans keep a union of shapes;
   `finite-types.php`.
-- `float-constants` (3, 1 file): `-1 * INF` is `-INF`; `bug-13097.php`.
 - `isset-constant-key` (3, 1 file): `assert(isset(self::KEYS[$k]))` narrows `$k`
   to the constant's keys; `bug-8559.php`.
-- `isset-fold` (3, 1 file): `isset()` of an always-defined non-null variable is
-  `true`; `isset-coalesce-empty-type-root.php`.
 - `literal-narrow` (3, 3 files): a chain of `===` on a string builds a literal
   union, and removing a literal keeps the rest; `bug-10717.php`, `pr-5379.php`,
   `pr-5445.php`.
+- `property-isset-shape` (3, 2 files): `isset($o->p)` makes an object-shape
+  property required; `object-shape.php` (2), `bug-15047.php`.
+- `anonymous-class-this` (2, 1 file): `$this` inside an anonymous class's method
+  is that class (`class@anonymous` today), so its PHPDoc-typed members resolve;
+  `anonymous-class-name.php` (2).
+- `coalesce-fold` (2, 1 file): `??` folds on a known left side (`'abc' ?? false`
+  is `'abc'`) and removes `null` from a maybe-null `mixed`;
+  `isset-coalesce-empty-type-root.php` (2).
 - `destructure-key-assign` (2, 1 file): an assignment inside a destructuring key
   is evaluated (`[($a = 'foo') => $b] = …`); `bug-14019.php`.
 - `empty-narrow` (2, 2 files): `!empty()` makes a union of shapes non-empty and
@@ -7419,40 +7498,43 @@ values that flow on from them.
   to `static`; `get-class-static-class.php`.
 - `nullsafe-static` (2, 1 file): `$a?->b::get()` is the return or `null`;
   `bug-nullsafe-prop-static-access.php`.
-- `variable-variables` (2, 1 file): `$$name` with a constant name resolves;
-  `bug-12398.php`.
 - `assert-or` (1, 1 file): `assert($s === null || $s !== '')` narrows `$s` to
   `non-empty-string|null`; `bug-6696.php`.
 - `callable-offset-call` (1, 1 file): calling a closure read from a shape offset
   returns its return type; `bug-6633.php`.
-- `coalesce-assign` (1, 1 file): `??=` on nested offsets writes the shape;
-  `bug-optionalArrayKeyInMultiDimArrayLoop.php`.
+- `callable-value-call` (1, 1 file): calling a closure variable returns its
+  declared return; `bug-9764.php` (1).
+- `constant-empty-fold` (1, 1 file): `!empty()` of an empty constant array is
+  `never`; `bug-7913.php` (1).
+- `float-const-fold` (1, 1 file): `$x = 10; $x /= 2` folds to `5`;
+  `constantTypes.php` (1).
 - `instanceof-narrow` (1, 1 file): `instanceof` on a union of interfaces removes
   the matched class in the else; `bug-13358.php`.
-- `property-isset-shape` (1, 1 file): `isset($o->p)` makes an object-shape
-  property required; `bug-15047.php`.
-- `short-ternary` (1, 1 file): `$x ?: new A()` is the truthy part of `$x` or
-  `A`; `bug-1897.php`.
+- `variable-variables` (1, 1 file): `$$name` with a constant name resolves;
+  `bug-12398.php` (1).
 
-**D5** (601 mismatches, 147 files, 23 causes):
+**D5** (585 mismatches, 152 files, 25 causes):
 
-- `loop-generalize` (232, 66 files): loop generalization: counters widen to
+- `loop-generalize` (208, 70 files): loop generalization: counters widen to
   ranges instead of unrolled constants, conditional appends make optional-key
   lists, nested writes keep non-empty optional-key shapes, and a loop's exit
-  narrows; `has-offset-type-bug.php`, `constant-array-optional-set.php`,
-  `for-loop-i-type.php`, `bug-5309.php`, `bug-5017.php`, `bug-12163.php`,
-  `for-loop-variables.php`, `bug-13705.php`, `bug-14551.php`, `bug-8924.php`,
-  `bug-14552.php`, `bug-2835.php`, `bug-9753.php`,
-  `do-while-loop-variables.php`, `while-loop-variables.php`,
+  narrows; `bug-5309.php`, `for-loop-i-type.php` (11), `bug-12163.php`,
+  `constant-array-optional-set.php` (9), `has-offset-type-bug.php` (8),
+  `bug-14551.php`, `bug-8924.php`, `array-keys-branches.php` (6),
+  `bug-14552.php`, `bug-2835.php`, `bug-9753.php`, `constantTypes.php` (6),
+  `do-while-loop-variables.php`, `for-loop-variables.php` (5),
   `prestashop-breakdowns-empty-array.php`, `weird-array_key_exists-issue.php`,
-  `bug-12078.php`, `bug-13786.php`, `bug-14297.php`, `bug-7115.php`,
-  `bug-7978.php`, `bug-7996.php`, `bug-8015.php`,
-  `issue-bot-array-regression.php`, `shopware-connection-profiler.php`,
+  `bug-10089.php` (3), `bug-12078.php`, `bug-13786.php`, `bug-14297.php`,
+  `bug-5017.php` (3), `bug-7115.php`, `bug-7978.php`, `bug-7996.php`,
+  `bug-8015.php`, `issue-bot-array-regression.php`,
+  `shopware-connection-profiler.php`, `while-loop-variables.php` (3),
   `bug-10025.php`, `bug-1021.php`, `bug-10438.php`, `bug-10650.php`,
   `bug-12665.php`, `bug-13637.php`, `bug-13647.php`, `bug-14084.php`,
   `bug-1516.php`, `bug-3558.php`, `bug-6173.php`, `bug-8520.php`,
-  `bug-8827.php`, `bug-9784.php`, `myers-diff-loop-widening.php`, `pr-4390.php`,
-  `bug-10640.php`, `bug-11854.php`, `bug-13039.php`, `bug-13509.php`,
+  `bug-8827.php`, `bug-9784.php`,
+  `dependent-variables-type-guard-same-as-type.php` (2),
+  `myers-diff-loop-widening.php`, `pr-4390.php`, `bug-10640.php`,
+  `bug-11854.php`, `bug-13039.php`, `bug-13509.php`, `bug-13705.php` (1),
   `bug-13730.php`, `bug-14083.php`, `bug-14553.php`, `bug-14814.php`,
   `bug-14980.php`, `bug-3269.php`, `bug-3915.php`, `bug-4907.php`,
   `bug-6070.php`, `bug-7000.php`, `bug-7153.php`, `bug-9004.php`,
@@ -7502,18 +7584,19 @@ values that flow on from them.
   like `if`, with fallthrough, exits and unreachable cases; `bug-13211.php`,
   `bug-11064.php`, `switch-instanceof-truthy.php`, `switch-instanceof.php`,
   `switch-instanceof-fallthrough.php`, `switch-instanceof-not.php`.
-- `iterator-key` (16, 8 files): foreach over an `Iterator`, `iterable<K, V>` or
+- `iterator-key` (16, 9 files): foreach over an `Iterator`, `iterable<K, V>` or
   `SplObjectStorage` takes the key and value types; `bug-13985.php`,
-  `foreach/object-type.php`, `bug-4504.php`,
-  `foreach/foreach-iterable-with-specified-key-type.php`, `bug-4789.php`,
-  `bug-6576.php`, `class-reflection-interfaces.php`,
+  `foreach/object-type.php`,
+  `foreach/foreach-iterable-with-specified-key-type.php`, `bug-4504.php` (1),
+  `bug-4789.php`, `bug-6576.php`, `class-reflection-interfaces.php`,
+  `date-period-return-types.php` (1),
   `foreach/foreach-iterable-with-complex-value-type.php`.
-- `loop-body-narrow` (16, 5 files): inside `foreach`/`for` over an array, the
-  array is non-empty; `bug-13312.php`, `bug-13270a.php`, `bug-5058.php`,
-  `composer-treatPhpDocTypesAsCertainBug.php`,
-  `foreach/foreach-with-specified-key-type.php`.
 - `superglobals` (16, 2 files): `$argc`, `$argv` and `$GLOBALS` types;
   `cli-globals.php`, `superglobals.php`.
+- `loop-body-narrow` (15, 6 files): inside `foreach`/`for` over an array, the
+  array is non-empty; `bug-13312.php`, `bug-13270a.php` (3), `bug-5017.php` (1),
+  `bug-5058.php`, `composer-treatPhpDocTypesAsCertainBug.php`,
+  `foreach/foreach-with-specified-key-type.php`.
 - `catch-scope` (10, 3 files): a `catch` block merges the scopes of every throw
   point in the `try`, a caught variable after the `try` is the union of the
   caught types, and a catch without a variable defines none;
@@ -7522,6 +7605,10 @@ values that flow on from them.
   invalidates property narrowing where it is called; `bug-10566.php`.
 - `foreach-narrow-all` (7, 1 file): returning on `!is_string($x)` for every
   element narrows the list to `list<string>`; `bug-5755.php`.
+- `for-cond-entry` (6, 2 files): a `for` condition is evaluated on the initial
+  values: false there makes the body unreachable, true there runs it at least
+  once, so what it assigns is defined after the loop; `for-loop-i-type.php` (3),
+  `for-loop-variables.php` (3).
 - `foreach-key-value-link` (6, 2 files): narrowing a foreach key over a shape
   narrows the value, and the reverse; `foreach-dependent-key-value.php`,
   `bug-6108.php`.
@@ -7530,6 +7617,9 @@ values that flow on from them.
   `foreach-partially-non-iterable.php`.
 - `oversized-array` (3, 2 files): appends keep exact shapes up to the size
   limit; `oversized-array-stages.php`, `bug-yield-oversized-self-rejection.php`.
+- `short-circuit-increment` (3, 1 file): `$i++ < 10` on the right of `&&` in a
+  `while` condition counts, so `$i` is `int<1, 10>` in the body (`0` today);
+  `while-loop-variables.php` (3).
 - `foreach-cast-shape` (2, 1 file): `foreach` over `(array)` of a shape offset,
   narrowed by `isset` and `===`; `bug-13061.php`.
 - `switch-get-class` (2, 1 file): `switch (get_class($x))` cases narrow `$x`;
@@ -7539,81 +7629,89 @@ values that flow on from them.
 - `switch-narrow` (1, 1 file): `switch` cases on a call narrow the value in
   later cases; `switch-type-elimination.php`.
 
-**E2** (1,534 mismatches, 263 files, 88 causes):
+**E2** (1,506 mismatches, 274 files, 87 causes):
 
-- `byref-array-fns` (205, 22 files): the by-reference array functions
+- `byref-array-fns` (210, 24 files): the by-reference array functions
   (`array_pop`, `array_shift`, `array_push`, `array_unshift`, `array_splice`,
   the sort family, `usort`) rewrite their argument's type, keeping `list`,
   non-emptiness, `hasOffsetValue` facts, exact shapes and a template's `T&`
-  bound; `array_splice.php`, `array-pop-shift-has-offset.php`, `array-push.php`,
-  `array-unshift.php`, `bug-14633.php`, `bug-14631.php`, `bug-13510.php`,
-  `bug-11846.php`, `bug-14472.php`, `scope-generalization.php`, `bug-10627.php`,
-  `bug-14037.php`, `bug-4743.php`, `discussion-13395.php`, `bug-11322.php`,
-  `bug-11917.php`, `bug-12954.php`, `bug-3548.php`, `bug-3875.php`,
-  `bug-5783.php`, `constant-array-union-unshift.php`, `count-const-array-2.php`.
-- `preg-shapes` (160, 23 files): the preg `$matches` shapes: `preg_match_all`,
+  bound; `array_splice.php`, `array-pop-shift-has-offset.php` (16),
+  `array-push.php`, `array-unshift.php`, `bug-14633.php`, `bug-14631.php`,
+  `bug-13510.php`, `bug-11846.php`, `bug-5017.php` (6), `bug-14472.php`,
+  `scope-generalization.php`, `bug-14037.php`, `bug-4743.php`,
+  `discussion-13395.php`, `bug-10627.php` (1), `bug-11322.php`, `bug-11917.php`,
+  `bug-12954.php`, `bug-3548.php`, `bug-3875.php`, `bug-5783.php`,
+  `constant-array-optional-set.php` (1), `constant-array-union-unshift.php`,
+  `count-const-array-2.php`.
+- `preg-shapes` (155, 24 files): the preg `$matches` shapes: `preg_match_all`,
   flags (`/n`, offset capture, unmatched as null), group 0 non-falsy when the
   pattern has literals, `> 0`/`=== 1` making groups required, patterns from
   constants, named and optional groups; `preg_match_all_shapes.php`,
-  `bug-11311.php`, `bug-14314.php`, `preg_match_shapes_php82.php`,
+  `bug-11311.php`, `bug-14314.php` (12), `preg_match_shapes_php82.php`,
   `bug-11293.php`, `bug-14820.php`, `bug-14575.php`,
   `preg_replace_callback_shapes.php`, `bug-11580.php`, `bug-12210.php`,
   `bug-14809.php`, `preg_match_shapes_php80.php`, `bug-12126.php`,
   `bug-11699.php`, `bug-13088.php`, `by-ref-writeback-native-type.php`,
   `bug-11820.php`, `bug-12211.php`, `bug-12242.php`, `bug-14605.php`,
-  `bug-14791.php`, `bug11384.php`, `preg_replace_callback_shapes-php72.php`.
-- `key-exists-fold` (148, 23 files): `array_key_exists()`/`key_exists()` fold on
+  `bug-14791.php`, `bug11384.php`,
+  `conditional-expr-narrowing-through-variable.php` (1),
+  `preg_replace_callback_shapes-php72.php`.
+- `key-exists-fold` (153, 29 files): `array_key_exists()`/`key_exists()` fold on
   constant arrays, narrow `mixed` to an array, make an optional key required,
   remove a key from the key type in the else, and make the array non-empty;
   `array-key-exists.php`, `key-exists.php`, `bug-13301-php8.php`,
   `bug-9461.php`, `bug-11276.php`, `bug-12620.php`, `conditional-vars-php8.php`,
   `conditional-vars.php`, `bug-2001-php8.php`, `bug-2001.php`, `bug-7805.php`,
   `bug-3009.php`, `bug-11518-types-php7.php`, `bug-11518-types.php`,
-  `bug-4099-php8.php`, `bug-4099.php`, `bug-11276b.php`, `bug-11724.php`,
-  `bug-13301.php`, `bug-14874.php`, `bug13674a.php`, `bug-2869.php`,
-  `conditional-array-key-exists.php`.
-- `in-array-haystack` (68, 10 files): `in_array()` narrows the haystack
+  `composer-array-bug.php` (3), `bug-11276b.php`, `bug-11724.php`,
+  `bug-13301.php`, `bug-14874.php`, `bug-8917.php` (2), `bug13674a.php`,
+  `array-key-exists-on-subtracted.php` (1), `bug-14705.php` (1), `bug-2869.php`,
+  `bug-4099-php8.php` (1), `bug-4099.php` (1),
+  `conditional-array-key-exists.php`, `list-type.php` (1),
+  `session-get-cookie-params-php85.php` (1).
+- `in-array-haystack` (65, 11 files): `in_array()` narrows the haystack
   (non-empty, a subtracted value, enum cases removed) and, loose, the needle to
-  the haystack's values; `bug-9662.php`, `bug-9662-enums.php`,
-  `enum-in-array.php`, `bug-3013.php`, `in_array_loose.php`, `bug-8864.php`,
-  `enum-vs-in-array.php`, `in-array-non-empty.php`, `bug-10201.php`,
-  `bug-14407.php`.
+  the haystack's values; `bug-9662.php`, `bug-9662-enums.php`, `bug-3013.php`,
+  `enum-in-array.php` (7), `in_array_loose.php`, `in-array-enum.php` (3),
+  `bug-8864.php`, `enum-vs-in-array.php`, `in-array-non-empty.php`,
+  `bug-10201.php`, `bug-14407.php`.
 - `ext:FilterVarArray` (60, 2 files): `filter_var_array()` and
   `filter_input_array()` with a definition give a shape, never `null` on PHP
   8.6; `filter-var-array.php`, `filter-var-array-dynamic-php86.php`.
-- `ext:ArrayMap` (48, 14 files): `array_map()` gives the callback each element
+- `ext:ArrayMap` (42, 14 files): `array_map()` gives the callback each element
   type (several arrays, enum cases, `[class, method]` callables) and keeps the
-  keys, list and shape; `bug-14649.php`, `bug-10264.php`, `closure-types.php`,
-  `arrow-function-types.php`, `bug-4587.php`, `array-map.php`,
-  `array_map_multiple.php`, `bug-11281.php`, `bug-11861.php`, `bug-4213.php`,
-  `bug-10442.php`, `bug-11656.php`, `bug-14844.php`, `bug-5293.php`.
+  keys, list and shape; `bug-14649.php`, `arrow-function-types.php`,
+  `bug-4587.php`, `closure-types.php` (5), `array-map.php`,
+  `array_map_multiple.php`, `bug-10264.php` (3), `bug-11281.php`,
+  `bug-11861.php`, `bug-4213.php`, `bug-10442.php`, `bug-11656.php`,
+  `bug-14844.php`, `bug-5293.php`.
 - `ext:Randomizer` (40, 3 files): `Random\Randomizer`'s methods keep
   non-emptiness and element types; `bug-15256.php`, `bug-15256-83.php`,
   `bug-15256-shadowed-functions.php`.
-- `ext:ArrayFilter` (38, 12 files): `array_filter()` with a function-name,
-  closure or arrow-function predicate narrows the values, makes keys optional or
-  the result `array{}`, and without a callback removes falsy values;
-  `array-filter-string-callables.php`, `array-filter-arrow-functions.php`,
-  `array-filter-callables.php`, `array-filter-php7.php`,
-  `array-filter-php8.php`, `bug-3132.php`, `bug-10189.php`, `bug-13421.php`,
-  `bug-2273.php`, `bug-6006.php`, `bug-7909.php`, `bug-8373.php`.
-- `array-is-list` (36, 5 files): `array_is_list()` narrows `mixed` and arrays to
-  `list`, folds on constant arrays, and is `false` on a shape with a required
-  string key; `array-is-list-unset.php`, `bug-9734.php`,
-  `array-is-list-type-specifying.php`, `bug-14938.php`,
-  `array-is-list-offset.php`.
 - `ext:PgDml` (35, 2 files): `pg_insert()`, `pg_update()`, `pg_delete()` and
   `pg_select()` return types (no extension today); `pg-dml-resource.php`,
   `pg-dml.php`.
+- `ext:ArrayFilter` (31, 12 files): `array_filter()` with a function-name,
+  closure or arrow-function predicate narrows the values, makes keys optional or
+  the result `array{}`, and without a callback removes falsy values;
+  `array-filter-arrow-functions.php` (5), `array-filter-callables.php` (5),
+  `array-filter-string-callables.php` (5), `array-filter-php7.php`,
+  `array-filter-php8.php`, `bug-3132.php`, `bug-10189.php`, `bug-13421.php`,
+  `bug-2273.php`, `bug-6006.php`, `bug-7909.php`, `bug-8373.php`.
 - `ext:VarExport` (30, 2 files): `var_export()`, `print_r()` and `highlight_*()`
   without `return: true` are `null`/`true`; `pr-1244-php-84.php`, `pr-1244.php`.
-- `str-contains` (29, 1 file): `str_contains()`/`str_starts_with()` with a
-  non-empty needle narrow the haystack;
-  `non-empty-string-str-containing-fns.php`.
+- `array-is-list` (29, 6 files): `array_is_list()` narrows `mixed` and arrays to
+  `list`, folds on constant arrays, and is `false` on a shape with a required
+  string key; `bug-9734.php` (10), `array-is-list-unset.php` (6),
+  `array-is-list-type-specifying.php` (5), `bug-14938.php` (5),
+  `array-is-list-offset.php`, `bug-10627.php` (1).
 - `ext:CallUserFunc` (28, 4 files): `call_user_func()` and
   `call_user_func_array()` resolve the callee's return, generic and with named
   arguments; `call-user-func-php8.php`, `call-user-func-array-php8.php`,
   `call-user-func_array.php`, `call-user-func-php7.php`.
+- `str-contains` (27, 1 file): `str_contains()`/`str_starts_with()` with a
+  non-empty needle narrow the haystack;
+  `non-empty-string-str-containing-fns.php` (27).
 - `ctype-narrow` (26, 4 files): `ctype_*()` narrows a string to non-falsy and
   `ctype_digit()` to `numeric-string` (not `decimal-int-string`), an int to its
   ranges, and the operand of a `(string)` cast; `ctype.php`,
@@ -7630,6 +7728,10 @@ values that flow on from them.
   `bug-5782b-php7.php`, `bug-5782b-php8.php`.
 - `callback-params` (24, 1 file): `array_udiff()`/`array_uintersect()` callbacks
   get the arrays' value types; `array_diff_intersect_callbacks.php`.
+- `ext:ClosureBind` (22, 4 files): `Closure::bind()` and `bindTo()` keep the
+  closure's signature, and a `null` scope makes `$this` `*ERROR*`;
+  `bug-5009.php`, `closure-static-type.php` (8), `closure-types.php` (2),
+  `closure-bind-nullable-this.php`.
 - `ext:ReflectionGetAttributes` (22, 2 files): `getAttributes()` is a
   `list<ReflectionAttribute<T>>`; `reflectionclass-issue-5511-php8.php`,
   `bug-14466.php`.
@@ -7637,53 +7739,47 @@ values that flow on from them.
   and case accessories and a list subject; `bug-9870.php`,
   `non-empty-string-replace-functions.php`, `lowercase-string-replace.php`,
   `uppercase-string-replace.php`.
-- `ext:Count` (21, 2 files): `count()` and `sizeof()` of non-empty arrays and
-  with `COUNT_RECURSIVE`; `count-recursive.php`, `count-type.php`.
-- `in-array-fold` (21, 4 files): `in_array()` folds to `true` or `false` on
-  constant needles and haystacks of other types; `bug-14873.php`,
-  `in-array-enum.php`, `in-array.php`, `bug-5668.php`.
+- `is-subclass-narrow` (20, 5 files): `is_subclass_of()` narrows to
+  `class-string<T>` and is `never` on a final class;
+  `specifiedTypesUsingIsFunctions.php` (14), `bug-6687.php`, `bug-6305.php`,
+  `bug-6698.php`, `is-subclass-of.php`.
 - `ext:ArrayKeys` (19, 5 files): `array_keys()` of a constant array is a shape,
   with a search value keeps literals, and after `array_key_exists()` is
   non-empty; `bug-11928.php`, `bug-13377.php`, `array_keys-php7.php`,
   `array_keys.php`, `bug-6859.php`.
 - `preg-narrow` (19, 2 files): a truthy `preg_match()` narrows the subject to
   non-empty or non-falsy; `bug-14710.php`, `bug-14784.php`.
+- `in-array-fold` (18, 4 files): `in_array()` folds to `true` or `false` on
+  constant needles and haystacks of other types; `bug-14873.php`,
+  `in-array-enum.php` (4), `in-array.php`, `bug-5668.php`.
 - `array-search-narrow` (17, 5 files): `array_search() !== false` and
   `array_find_key() !== null` make the haystack non-empty, a truthy result makes
   `mixed` an array, and the else branch subtracts it;
   `array-search-type-specifying.php`, `array-search-existing.php`,
   `array-find-key-existing.php`, `array-search-php7.php`,
   `array-search-php8.php`.
-- `ext:ArrayMerge` (15, 4 files): `array_merge()` of shapes and arrays keeps the
-  known keys, non-empty-string keys and spread shapes; `bug-14526.php`,
-  `bug-6927.php`, `array-merge-const-non-const.php`, `array-merge.php`.
 - `key-first-last-fold` (15, 3 files): `array_key_first()`/`array_key_last()`
   `!== null` narrow emptiness, and a write at the last key keeps the list;
   `bug-13546.php`, `array-key-last-existing.php`, `bug-7905.php`.
+- `ext:ArrayMerge` (14, 4 files): `array_merge()` of shapes and arrays keeps the
+  known keys, non-empty-string keys and spread shapes; `bug-14526.php`,
+  `bug-6927.php`, `array-merge-const-non-const.php` (3), `array-merge.php`.
 - `ext:DateFunctionReturn` (14, 2 files): `date()` with a constant format is
   `''`, non-falsy or `numeric-string`; `date-format.php`, `bug-6613.php`.
 - `ext:FilterInputArray` (13, 1 file): `filter_input_array()` with a definition
   array returns a shape; `filter-input-array.php`.
-- `ext:ClosureBind` (12, 2 files): `Closure::bind()` and `bindTo()` keep the
-  closure's signature, and a `null` scope makes `$this` `*ERROR*`;
-  `bug-5009.php`, `closure-bind-nullable-this.php`.
-- `ext:MinMax` (12, 3 files): `min()`/`max()` of a range and a constant, and
-  after `count() <= 0`; `bug-10089.php`, `sizeof-php8.php`, `sizeof.php`.
 - `ext:BackedEnumFrom` (11, 1 file): `from()`/`tryFrom()` with a constant
   resolve to the case or `null`; `enum-from.php`.
-- `ext:DateFormat` (11, 2 files): `DateTime::format()` with a constant format
-  gives literal unions and numeric accessories; `bug-8803.php`, `bug-10893.php`.
 - `ext:MbFunctions` (10, 2 files): `mb_detect_order()`'s return by its
   arguments; `bug-8922-php74.php`, `bug-8922.php`.
 - `ext:OpensslEncryptParameterOut` (10, 1 file): `openssl_encrypt()`'s tag
   out-parameter depends on the cipher; `openssl-encrypt.php`.
 - `ext:StrCaseFunctions` (10, 1 file): `str_replace()` and `preg_replace()` keep
   the subject's case and non-empty accessories; `replaceFunctions.php`.
-- `is-a-narrow` (10, 3 files): `is_a()` with `allow_string` narrows a string to
-  `class-string<A>` (an object today) and removes it in the else; `is-a.php`,
-  `bug-6404.php`, `bug-6704.php`.
 - `byref-callback` (9, 1 file): `array_walk()`'s by-reference callback rewrites
   the element types; `bug-14525.php`.
+- `ext:Count` (9, 1 file): `count()` and `sizeof()` of non-empty arrays and with
+  `COUNT_RECURSIVE`; `count-recursive.php` (9).
 - `ext:DateIntervalFormat` (9, 1 file): `DateInterval::format()` takes its
   accessories from the format; `date-interval-format.php`.
 - `ext:Getenv` (9, 3 files): `getenv(null)` is `array<string, string>`,
@@ -7691,6 +7787,11 @@ values that flow on from them.
   `bug-4538.php`.
 - `ext:JsonLastError` (9, 1 file): `json_last_error()` is a literal range, `0`
   after a successful decode; `bug-2863.php`.
+- `is-a-narrow` (9, 3 files): `is_a()` with `allow_string` narrows a string to
+  `class-string<A>` (an object today) and removes it in the else; `is-a.php`
+  (5), `bug-6404.php`, `bug-6704.php`.
+- `simplexml` (9, 3 files): `SimpleXMLElement` iteration and offset access;
+  `simplexml.php`, `has-offset-type-bug.php` (2), `bug-9575.php`.
 - `ext:DateIntervalCreateFromDateString` (8, 2 files):
   `DateInterval::createFromDateString()` of a constant folds, and an invalid one
   is `never` on PHP 8.3; `bug-8442.php`, `bug-8442-83.php`.
@@ -7699,50 +7800,53 @@ values that flow on from them.
   `DateTimeModifyReturnTypes.php`, `DateTimeModifyReturnTypes83.php`.
 - `get-parent-class-narrow` (8, 1 file): `get_parent_class($x) === A::class`
   narrows `$x` to `A|class-string<A>`; `bug-5552.php`.
-- `ext:ArrayColumn` (7, 4 files): `array_column()` of objects is a list, of a
-  missing key `array{}`, and with a `null` value keeps the rows; `bug-8917.php`,
-  `bug-6497.php`, `bug-6682.php`, `bug-9204.php`.
-- `ext:ArrayValues` (7, 3 files): `array_values()` keeps element types, shapes
-  and non-emptiness; `bug-14489.php`, `array_values.php`,
-  `array_values-php7.php`.
 - `ext:DomCreateElement` (7, 1 file): `createElement()` with a valid constant
   name can't be `false`; `dom-document-create-element.php`.
+- `ext:Explode` (7, 5 files): `explode()` with constant arguments folds, and
+  with a limit gives a shape; `array-destructuring.php` (3), `bug-13629.php`,
+  `bug-14336.php`, `bug-14651.php`, `explode.php`.
 - `ext:PdoConnect` (7, 1 file): `PDO::connect()` returns the driver's subclass;
   `pdo-connect-php84.php`.
 - `ext:Sprintf` (7, 1 file): `sprintf('%s', $x)` keeps the argument's
   accessories; `bug-11201.php`.
-- `simplexml` (7, 2 files): `SimpleXMLElement` iteration and offset access;
-  `simplexml.php`, `bug-9575.php`.
 - `enum-cases` (6, 3 files): `::cases()` on an enum class-string or template is
   a list of its cases; `bug-7162.php`, `bug-11233.php`, `bug-6695.php`.
-- `is-subclass-narrow` (6, 4 files): `is_subclass_of()` narrows to
-  `class-string<T>` and is `never` on a final class; `bug-6687.php`,
-  `bug-6305.php`, `bug-6698.php`, `is-subclass-of.php`.
+- `ext:ArrayValues` (6, 3 files): `array_values()` keeps element types, shapes
+  and non-emptiness; `bug-14489.php`, `array_values-php7.php`,
+  `array_values.php` (1).
 - `settype` (6, 1 file): `settype($x, $type)` rewrites the variable's type;
   `bug-3250.php`.
-- `class-exists-fold` (5, 1 file): `class_exists()` on an interface's name is
-  `false`; `bug-14683.php`.
-- `ext:ArrayReplace` (5, 2 files): `array_replace()` of shapes keeps the known
-  keys; `array-replace-const-non-const.php`, `bug-12828.php`.
+- `ext:ArrayColumn` (5, 4 files): `array_column()` of objects is a list, of a
+  missing key `array{}`, and with a `null` value keeps the rows; `bug-8917.php`
+  (2), `bug-6497.php`, `bug-6682.php`, `bug-9204.php`.
 - `ext:ClosureFromCallable` (5, 1 file): `Closure::fromCallable()` keeps the
   callable's signature; `closure-return-type-extensions.php`.
+- `method-exists-narrow` (5, 3 files): `method_exists()` narrows a literal
+  string to `class-string&hasMethod(…)`; `this-subtractable.php` (3),
+  `bug-8752.php`, `object-shape.php` (1).
 - `enum-exists-narrow` (4, 2 files): `enum_exists()` narrows a string to
   `class-string<UnitEnum>`; `enum_exists.php`, `generic-enum-class-string.php`.
 - `ext:ArrayIntersectKey` (4, 4 files): `array_intersect_key()` keeps the first
   array's key type and, with a constant array, gives an optional-key shape;
   `array-intersect-key-constant.php`, `array-intersect-key-php7.php`,
   `array-intersect-key-php8.php`, `bug-14747.php`.
-- `ext:Explode` (4, 4 files): `explode()` with constant arguments folds, and
-  with a limit gives a shape; `bug-13629.php`, `bug-14336.php`, `bug-14651.php`,
-  `explode.php`.
+- `ext:ArrayReplace` (4, 2 files): `array_replace()` of shapes keeps the known
+  keys; `array-replace-const-non-const.php` (3), `bug-12828.php`.
 - `ext:MysqliFetchObject` (4, 1 file): `fetch_object()` without a class is
   `stdClass`; `mysqli_fetch_object.php`.
 - `ext:PregMatch` (4, 2 files): `preg_match()` returns `0|1|false`;
   `preg_match_php7.php`, `preg_match_php8.php`.
 - `ext:Strtotime` (4, 1 file): `strtotime()` of a constant folds;
   `strtotime-return-type-extensions.php`.
+- `class-exists-fold` (3, 1 file): `class_exists()` on an interface's name is
+  `false`; `bug-14683.php` (3).
+- `ext:DateFormat` (3, 2 files): `DateTime::format()` with a constant format
+  gives literal unions and numeric accessories; `bug-10893.php`, `bug-8803.php`
+  (1).
 - `ext:PregReplace` (3, 1 file): `preg_replace()` on a shape keeps its keys;
   `bug-11547.php`.
+- `property-exists-narrow` (3, 2 files): `property_exists()` narrows to
+  `object&hasProperty(…)`; `object-shape.php` (2), `bug-13304.php`.
 - `closure-get-current` (2, 1 file): `Closure::getCurrent()` outside a closure
   is `never`; `closure-get-current.php`.
 - `constant-string-fold` (2, 1 file): a method returning a template string from
@@ -7755,12 +7859,12 @@ values that flow on from them.
   `array-flip-php7.php`, `array-flip-php8.php`.
 - `ext:GetClass` (2, 2 files): `get_class()` is `class-string`, `|false` on
   `mixed`; `bug-3158.php`, `bug-4741.php`.
-- `ext:Implode` (2, 1 file): `implode()` of a non-empty array of non-falsy
-  strings is non-falsy; `bug-14558.php`.
 - `ext:ParseUrl` (2, 1 file): `parse_url()` with a non-constant component;
   `bug-4754.php`.
 - `ext:PdoFetchObject` (2, 1 file): `fetchObject(Bar::class)` returns
   `Bar|false`; `PDOStatement.php`.
+- `ext:Reset` (2, 2 files): `reset()` on a possibly empty array can be `false`;
+  `bug-7928.php`, `reset-after-non-empty-loop.php` (1).
 - `ext:StrIncrement` (2, 1 file): `str_increment()` of an invalid constant is
   `never`; `bug-13481.php`.
 - `is-a-fold` (2, 1 file): `is_a()` between class-strings that can't relate is
@@ -7781,18 +7885,21 @@ values that flow on from them.
   `ini-get.php`.
 - `ext:IteratorToArray` (1, 1 file): `iterator_to_array()` keeps the value type;
   `bug-7185.php`.
-- `ext:Reset` (1, 1 file): `reset()` on a possibly empty array can be `false`;
-  `bug-7928.php`.
+- `ext:MinMax` (1, 1 file): `min()`/`max()` of a range and a constant, and after
+  `count() <= 0`; `bug-10089.php` (1).
 - `ext:TriggerError` (1, 1 file): `trigger_error()` with `E_USER_ERROR` is
   `never`; `bug-5992.php`.
 - `http-response-header` (1, 1 file): `file_get_contents()` on a URL defines
   `$http_response_header`; `http-response-header.php`.
 - `json-validate` (1, 1 file): `json_validate()` narrows its argument to
   `non-empty-string`; `json-validate.php`.
-- `method-exists-narrow` (1, 1 file): `method_exists()` narrows a literal string
-  to `class-string&hasMethod(…)`; `bug-8752.php`.
-- `property-exists-narrow` (1, 1 file): `property_exists()` narrows to
-  `object&hasProperty(…)`; `bug-13304.php`.
+
+**Right at runtime** (4 mismatches, 2 files, 1 cause):
+
+- `array-union-merge` (4, 2 files): phpstan-rs keeps a union of arrays unmerged
+  (`array{a: int, b: string}|array{a: string, b: string}`,
+  `array{}|non-empty-list<…>`), the same values as PHPStan's merged type; an
+  approved deviation; `bug-14558.php`, `tagged-unions.php` (2).
 
 ## Appendix I: the rules oracle's unexplained phpstan-rs-only findings by cause
 
