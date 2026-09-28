@@ -305,6 +305,13 @@ impl<'a> Lexer<'a> {
         self.src[self.pos..].starts_with(s.as_bytes())
     }
 
+    /// `starts_with` ignoring ASCII case, as PHP reads `<?PHP` and keywords.
+    fn starts_with_ignore_case(&self, s: &str) -> bool {
+        self.src[self.pos..]
+            .get(..s.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(s.as_bytes()))
+    }
+
     fn next_token(&mut self) -> Token {
         if !self.in_php {
             self.last_token_start = self.pos;
@@ -428,12 +435,15 @@ impl<'a> Lexer<'a> {
 
     fn lex_inline_html(&mut self) -> Token {
         let start = self.pos;
-        while self.pos < self.src.len() && !self.starts_with("<?php") && !self.starts_with("<?=") {
+        while self.pos < self.src.len()
+            && !self.starts_with_ignore_case("<?php")
+            && !self.starts_with("<?=")
+        {
             self.pos += 1;
         }
         let html = String::from_utf8_lossy(&self.src[start..self.pos]);
 
-        if self.starts_with("<?php") {
+        if self.starts_with_ignore_case("<?php") {
             self.pos += 5;
             self.in_php = true;
         } else if self.starts_with("<?=") {

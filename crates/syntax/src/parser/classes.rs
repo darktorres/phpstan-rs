@@ -290,7 +290,7 @@ impl Parser {
                     // equivalent to `public $x;`. `var` isn't a reserved
                     // word (unlike every other modifier here), so it only
                     // arrives as a plain Identifier.
-                    Token::Identifier(s) if **s == *"var" => {
+                    Token::Identifier(s) if s.eq_ignore_ascii_case("var") => {
                         visibility = Visibility::Public;
                         self.skip();
                     }
@@ -495,7 +495,7 @@ impl Parser {
                 } else {
                     (None, self.interner.str(&first))
                 };
-            if matches!(self.peek(), Token::Identifier(s) if **s == *"insteadof") {
+            if matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("insteadof")) {
                 self.skip();
                 self.parse_qualified_name();
                 while self.eat(&Token::Comma) {

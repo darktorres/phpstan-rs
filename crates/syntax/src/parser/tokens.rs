@@ -55,7 +55,7 @@ impl Parser {
     /// that also happens to start with `(`.
     pub(crate) fn peek_is_set_visibility_marker(&self) -> bool {
         matches!(self.peek_at(1), Token::LParen)
-            && matches!(self.peek_at(2), Token::Identifier(s) if **s == *"set")
+            && matches!(self.peek_at(2), Token::Identifier(s) if s.eq_ignore_ascii_case("set"))
             && matches!(self.peek_at(3), Token::RParen)
     }
 

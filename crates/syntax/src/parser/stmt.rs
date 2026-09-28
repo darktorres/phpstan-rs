@@ -330,7 +330,8 @@ impl Parser {
             // `namespace { ... }`, since declare directives don't carry
             // any declarations that a registry needs to see spliced out.
             Token::Identifier(s)
-                if **s == *"declare" && matches!(self.peek_at(1), Token::LParen) =>
+                if s.eq_ignore_ascii_case("declare")
+                    && matches!(self.peek_at(1), Token::LParen) =>
             {
                 self.skip();
                 self.expect(&Token::LParen)?;
