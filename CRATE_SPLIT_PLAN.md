@@ -1059,8 +1059,10 @@ commit); the unsorted corpus comparison starts here.
   `enum-sanity.php`, `bug-15056.php`), and their returns are checked
   against those types: `__isset()` returning `42`, `__sleep()` returning
   `[new stdClass()]`, `__serialize()` or `__debugInfo()` returning `''`
-  (a `TypeError` and a fatal error) and `__set_state()` returning an array
-  are unreported
+  (a `TypeError` and a fatal error) and `__set_state()` returning an array,
+  and `return 1;` in an implicitly `void` one (`__construct`, `__clone`,
+  `__set`, `__unset`, `__wakeup`, `__destruct`, `__unserialize`;
+  `return.void`, 12) are unreported
   today (8 of the rules oracle's PHPStan-only `return.type`);
 - a failing `array_is_list()` proves a non-empty non-list array;
 - a boolean flag set in a branch implies that branch's narrowing, unioned
@@ -4737,6 +4739,15 @@ fixture:
     `appended-array-item.php`, `appended-array-key.php`, `bug-9213.php`,
     `bug-7119.php`, `uksort.php`, `property-type-after-unset.php`,
     `properties-assigned-types.php`);
+  - a property that can't be written is `assign.propertyReadOnly` for
+    every kind: an enum's `name` and `value` (`$this->name = 'ONE'`, an
+    `Error`), an object shape's property (`$o->foo = 1` on `object{foo:
+    int}`), a `@property-read` tag reached from another class, and a
+    readonly property in PHP 8.5's `clone($f, ['i' => …])` from outside;
+    unreported today (the rules oracle's 11 PHPStan-only,
+    `readonly-assign.php`, `properties-object-shapes.php`,
+    `writing-to-read-only-properties.php`, `bug-11241.php`,
+    `writing-to-readonly-properties-clone-with.php`);
   - a readonly property assigned twice is `assign.readOnlyProperty`
     "already assigned" ("Cannot modify readonly property" at runtime): two
     assignments in the constructor, a child's promoted redeclaration
@@ -4783,7 +4794,9 @@ fixture:
   - an offset write into an `ArrayAccess` object checks the key against
     `offsetSet`'s key type: `$w['str'] = 1` on `WeakMap<stdClass, int>`
     and `$s[5] = 1` on `SplObjectStorage` are unreported today
-    (`offsetAssign.dimType`), as is `'a'` on an `ArrayAccess<int, int>`;
+    (`offsetAssign.dimType`), as are `'a'` on an `ArrayAccess<int, int>`,
+    an array key on `SplObjectStorage`, and `$a[] = 5` after the key
+    `PHP_INT_MAX` (no next key; `offset-access-assignment-php-int-max.php`);
     and the value against its value type (`offsetAssign.valueType`):
     `$aa[] = 'foo'` and `$aa[1] += 2.5` on `ArrayAccess<int, int>`, `$c[]
     = 1` on a class declaring `@implements \ArrayAccess<int, string>`,
@@ -5001,6 +5014,12 @@ fixture:
     unreported today (all 25 of the rules oracle's PHPStan-only,
     `required-parameter-after-optional-closures.php`,
     `required-parameter-after-optional-arrow.php`, `callables.php:151`);
+  - a trait's private constant is checked for use in each host, as a
+    trait's private method and property are: unused in `Bar`, it is
+    `classConstant.unused` for `Bar::PRIVATE_CONSTANT` (the rules oracle's
+    `conflicting-trait-constants.php`, 10, `bug-12011.php`), and a dynamic
+    fetch `static::{$name}` counts only for the names `$name` can be
+    (`unused-private-constant-dynamic-fetch.php`); both unreported today;
   - a template no parameter references is
     `method.templateTypeNotInParameter` wherever else it appears: today it
     is reported only when the return type uses it, so a template used
