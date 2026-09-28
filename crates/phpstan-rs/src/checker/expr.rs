@@ -5135,7 +5135,15 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Every declaration in `stmt`'s body, nested ones included.
     fn collect_member_ref_defaults_stmt(&mut self, stmt: &Stmt) {
+        syntax::visit::any_stmt_in_body(stmt, |s| {
+            self.collect_member_ref_defaults_decl(s);
+            false
+        });
+    }
+
+    fn collect_member_ref_defaults_decl(&mut self, stmt: &Stmt) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => self.collect_member_ref_defaults_function(f),
             StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
@@ -5160,9 +5168,6 @@ impl<'a> Checker<'a> {
                 }
             }
             _ => {}
-        }
-        for child in syntax::visit::child_stmts(stmt) {
-            self.collect_member_ref_defaults_stmt(child);
         }
     }
 
@@ -6085,22 +6090,29 @@ impl<'a> Checker<'a> {
             };
             scope.insert(p.name.to_string(), ty);
         }
+        // Every `return` in the body, last first.
+        struct Returns<'ast>(Vec<&'ast Stmt>);
+        impl<'ast> syntax::visit::Visitor<'ast> for Returns<'ast> {
+            fn visit_expr(&mut self, _: &'ast Expr) {}
+            fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+            fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
+            fn visit_stmt(&mut self, s: &'ast Stmt) {
+                syntax::visit::walk_stmt(self, s);
+                if matches!(s.kind, StmtKind::Return(_)) {
+                    self.0.push(s);
+                }
+            }
+        }
+        let mut returns = Returns(Vec::new());
+        syntax::visit::walk_stmts(&mut returns, body);
         let mut points = Vec::new();
         let mut saw_explicit_return = false;
-        let mut stack: Vec<&Stmt> = body.iter().collect();
-        while let Some(s) = stack.pop() {
-            match &s.kind {
-                StmtKind::Return(Some(value)) => {
-                    saw_explicit_return = true;
-                    points.push(self.infer_expr(value, &scope));
-                }
-                StmtKind::Return(None) => {
-                    saw_explicit_return = true;
-                    points.push(Type::Void);
-                }
-                _ => {}
-            }
-            stack.extend(syntax::visit::child_stmts(s));
+        for s in returns.0.into_iter().rev() {
+            saw_explicit_return = true;
+            points.push(match &s.kind {
+                StmtKind::Return(Some(value)) => self.infer_expr(value, &scope),
+                _ => Type::Void,
+            });
         }
         let falls_off_end = !body
             .last()

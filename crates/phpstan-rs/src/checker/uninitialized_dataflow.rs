@@ -60,7 +60,7 @@ use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::child_exprs;
+use syntax::visit::any_child_expr;
 use types::Type;
 
 /// Bare property names known-initialized on every path reaching a given
@@ -545,9 +545,10 @@ fn walk_expr(
             absorb_resolved(target, name, state, ctx)
         }
         _ => {
-            for child in child_exprs(e) {
-                state = walk_expr(child, state, ctx, declaring_class);
-            }
+            any_child_expr(e, |child| {
+                state = walk_expr(child, std::mem::take(&mut state), ctx, declaring_class);
+                false
+            });
             state
         }
     }

@@ -20,13 +20,13 @@ use diagnostics::DiagnosticBuilder;
 use phpdoc::docblock;
 use syntax::ast::TypeHint;
 use syntax::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
-use syntax::visit::child_exprs;
+use syntax::visit::{Visitor, any_expr_in_scope, opens_scope, walk_expr};
 use types::Type;
 
 const PRECEDENCE_TIP: &str =
     "This operator has unexpected precedence, try disambiguating the logic with parentheses ().";
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Effects {
     None,
     LocalAssignOnly,
@@ -50,7 +50,26 @@ fn is_local_assign_target(target: &Expr) -> bool {
 /// anonymous class's body doesn't run by being constructed, so it
 /// doesn't count.
 fn expr_side_effects(e: &Expr) -> Effects {
-    let own = match &e.kind {
+    struct Strongest(Effects);
+    impl<'ast> Visitor<'ast> for Strongest {
+        fn visit_expr(&mut self, e: &'ast Expr) {
+            if self.0 == Effects::Some {
+                return;
+            }
+            self.0 = std::cmp::max(self.0, own_side_effects(e));
+            if !opens_scope(e) {
+                walk_expr(self, e);
+            }
+        }
+    }
+    let mut strongest = Strongest(Effects::None);
+    strongest.visit_expr(e);
+    strongest.0
+}
+
+/// `e`'s own effects, not its operands'.
+fn own_side_effects(e: &Expr) -> Effects {
+    match &e.kind {
         ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _)
             if is_local_assign_target(target) =>
         {
@@ -88,14 +107,7 @@ fn expr_side_effects(e: &Expr) -> Effects {
             _,
         ) => Effects::Some,
         _ => Effects::None,
-    };
-    if own == Effects::Some {
-        return own;
     }
-    child_exprs(e)
-        .into_iter()
-        .map(expr_side_effects)
-        .fold(own, std::cmp::max)
 }
 
 impl<'a> Checker<'a> {
@@ -103,7 +115,12 @@ impl<'a> Checker<'a> {
     /// a property read, `offsetGet` on an object offset read, and
     /// `__toString` on a stringified object.
     fn expr_has_hidden_effects(&self, e: &Expr, locals: &Locals) -> bool {
-        let own = match &e.kind {
+        any_expr_in_scope(e, |e| self.own_hidden_effects(e, locals))
+    }
+
+    /// `expr_has_hidden_effects` for `e` itself, not its operands.
+    fn own_hidden_effects(&self, e: &Expr, locals: &Locals) -> bool {
+        match &e.kind {
             ExprKind::PropertyAccess(object, name, _) => {
                 !self.property_read_is_plain(&self.infer_expr(object, locals), name)
             }
@@ -119,10 +136,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .any(|part| self.may_be_stringable_object(&self.infer_expr(part, locals))),
             _ => false,
-        };
-        own || child_exprs(e)
-            .into_iter()
-            .any(|child| self.expr_has_hidden_effects(child, locals))
+        }
     }
 
     fn property_read_is_plain(&self, receiver: &Type, name: &str) -> bool {

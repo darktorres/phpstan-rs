@@ -14,7 +14,7 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::name::Name;
 use syntax::token::Span;
-use syntax::visit::child_stmts;
+use syntax::visit::{Visitor, walk_stmt, walk_stmts};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FrameKind {
@@ -52,14 +52,16 @@ impl Scope {
         self.next_id += 1;
         self.next_id
     }
+}
 
-    fn walk(&mut self, stmts: &[Stmt]) {
-        for stmt in stmts {
-            self.walk_stmt(stmt);
-        }
-    }
+/// Walks one function-like body: expressions and nested declarations are
+/// not entered.
+impl<'ast> Visitor<'ast> for Scope {
+    fn visit_expr(&mut self, _: &'ast Expr) {}
+    fn visit_function_decl(&mut self, _: &'ast FunctionDecl) {}
+    fn visit_class_decl(&mut self, _: &'ast ClassDecl) {}
 
-    fn walk_stmt(&mut self, stmt: &Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match &stmt.kind {
             StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) => {}
             StmtKind::While { body, .. }
@@ -68,14 +70,14 @@ impl Scope {
             | StmtKind::Foreach { body, .. } => {
                 let id = self.fresh_id();
                 self.frames.push((FrameKind::Loop, id));
-                self.walk_stmt(body);
+                self.visit_stmt(body);
                 self.frames.pop();
             }
             StmtKind::Switch { cases, .. } => {
                 let id = self.fresh_id();
                 self.frames.push((FrameKind::Switch, id));
                 for case in cases {
-                    self.walk(&case.body);
+                    walk_stmts(self, &case.body);
                 }
                 self.frames.pop();
             }
@@ -84,14 +86,14 @@ impl Scope {
                 catches,
                 finally,
             } => {
-                self.walk(body);
+                walk_stmts(self, body);
                 for catch in catches {
-                    self.walk(&catch.body);
+                    walk_stmts(self, &catch.body);
                 }
                 if let Some(finally) = finally {
                     let id = self.fresh_id();
                     self.finallies.push(id);
-                    self.walk(finally);
+                    walk_stmts(self, finally);
                     self.finallies.pop();
                 }
             }
@@ -136,11 +138,7 @@ impl Scope {
                 let placement = self.placement(stmt.span);
                 self.gotos.push((name.name.clone(), placement));
             }
-            _ => {
-                for child in child_stmts(stmt) {
-                    self.walk_stmt(child);
-                }
-            }
+            _ => walk_stmt(self, stmt),
         }
     }
 }
@@ -153,7 +151,7 @@ impl<'a> Checker<'a> {
     /// One function-like body, or the file's top-level statements.
     pub(crate) fn check_statement_keywords(&mut self, body: &[Stmt]) {
         let mut scope = Scope::default();
-        scope.walk(body);
+        walk_stmts(&mut scope, body);
         for (kind, span, message) in std::mem::take(&mut scope.jumps) {
             let keyword = if message.contains("continue") {
                 "continue"
@@ -225,9 +223,7 @@ impl<'a> Checker<'a> {
     /// mode; `ticks` needs an int and `encoding` a string; any other
     /// directive is unsupported.
     pub(crate) fn check_declare_directives(&mut self, program: &[Stmt]) {
-        let mut declares: Vec<(&Stmt, bool)> = Vec::new();
-        collect_declares(program, true, &mut declares);
-        for (stmt, is_first) in declares {
+        for (stmt, is_first) in collect_declares(program) {
             let StmtKind::Declare { directives, body } = &stmt.kind else {
                 continue;
             };
@@ -298,35 +294,44 @@ impl<'a> Checker<'a> {
 
 /// Every `declare` statement, with whether it's the file's first
 /// statement.
-fn collect_declares<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Stmt, bool)>) {
-    for (i, stmt) in stmts.iter().enumerate() {
-        match &stmt.kind {
-            StmtKind::Declare { body, .. } => {
-                out.push((stmt, top && i == 0));
-                if let Some(body) = body {
-                    collect_declares(body, false, out);
+fn collect_declares(program: &[Stmt]) -> Vec<(&Stmt, bool)> {
+    struct Declares<'s> {
+        out: Vec<(&'s Stmt, bool)>,
+        // The next statement visited is the file's first, looking through
+        // leading blocks.
+        next_is_first: bool,
+    }
+    impl<'s> Visitor<'s> for Declares<'s> {
+        fn visit_expr(&mut self, _: &'s Expr) {}
+        fn visit_stmt(&mut self, stmt: &'s Stmt) {
+            let is_first = std::mem::replace(&mut self.next_is_first, false);
+            match &stmt.kind {
+                StmtKind::Declare { body, .. } => {
+                    self.out.push((stmt, is_first));
+                    if let Some(body) = body {
+                        walk_stmts(self, body);
+                    }
                 }
-            }
-            StmtKind::FunctionDecl(f) => collect_declares(&f.body, false, out),
-            StmtKind::ClassDecl(c) => {
-                for m in &c.methods {
-                    collect_declares(&m.function.body, false, out);
+                StmtKind::Block(body) => {
+                    self.next_is_first = is_first;
+                    walk_stmts(self, body);
                 }
-            }
-            _ => {
-                let first_child_is_file_start = top && i == 0;
-                for (j, child) in child_stmts(stmt).into_iter().enumerate() {
-                    collect_declares(
-                        std::slice::from_ref(child),
-                        first_child_is_file_start
-                            && j == 0
-                            && matches!(stmt.kind, StmtKind::Block(_)),
-                        out,
-                    );
+                StmtKind::FunctionDecl(f) => walk_stmts(self, &f.body),
+                StmtKind::ClassDecl(c) => {
+                    for m in &c.methods {
+                        walk_stmts(self, &m.function.body);
+                    }
                 }
+                _ => walk_stmt(self, stmt),
             }
         }
     }
+    let mut declares = Declares {
+        out: Vec::new(),
+        next_is_first: true,
+    };
+    walk_stmts(&mut declares, program);
+    declares.out
 }
 
 fn describe_literal(value: &Expr) -> String {

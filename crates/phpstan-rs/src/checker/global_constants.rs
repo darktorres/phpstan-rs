@@ -12,7 +12,7 @@ use crate::checker::Checker;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
+use syntax::visit::{Visitor, walk_expr, walk_stmt, walk_stmts};
 
 const MAGIC_CONSTANTS: [&str; 10] = [
     "__LINE__",
@@ -36,74 +36,68 @@ pub(crate) struct ConstantFacts {
 }
 
 pub(crate) fn constant_facts(program: &[Stmt]) -> ConstantFacts {
-    let mut out = ConstantFacts::default();
-    for stmt in program {
-        collect_in_stmt(stmt, false, &mut out);
-    }
-    out
+    let mut collector = Collector {
+        out: ConstantFacts::default(),
+        in_closure: false,
+    };
+    walk_stmts(&mut collector, program);
+    collector.out
 }
 
-fn collect_in_stmt(stmt: &Stmt, in_closure: bool, out: &mut ConstantFacts) {
-    match &stmt.kind {
-        StmtKind::FunctionDecl(f) => collect_in_body(&f.body, false, out),
-        StmtKind::ClassDecl(e) if e.kind == ClassKind::Enum => {
-            for m in &e.methods {
-                collect_in_body(&m.function.body, false, out);
-            }
-        }
-        StmtKind::ClassDecl(c) => {
-            for m in &c.methods {
-                collect_in_body(&m.function.body, false, out);
-            }
-        }
-        _ => {
-            for e in stmt_exprs(stmt) {
-                collect_in_expr(e, in_closure, out);
-            }
-            for child in child_stmts(stmt) {
-                collect_in_stmt(child, in_closure, out);
-            }
-        }
+/// Walks a file noting where it is inside a closure or arrow function. A
+/// declaration's body is outside any closure; its parameter defaults,
+/// property defaults and constants are not visited.
+struct Collector {
+    out: ConstantFacts,
+    in_closure: bool,
+}
+
+impl Collector {
+    fn body(&mut self, body: &[Stmt], in_closure: bool) {
+        let outer = std::mem::replace(&mut self.in_closure, in_closure);
+        walk_stmts(self, body);
+        self.in_closure = outer;
     }
 }
 
-fn collect_in_body(body: &[Stmt], in_closure: bool, out: &mut ConstantFacts) {
-    for stmt in body {
-        collect_in_stmt(stmt, in_closure, out);
+impl<'ast> Visitor<'ast> for Collector {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match &stmt.kind {
+            StmtKind::FunctionDecl(f) => self.body(&f.body, false),
+            StmtKind::ClassDecl(c) => {
+                for m in &c.methods {
+                    self.body(&m.function.body, false);
+                }
+            }
+            _ => walk_stmt(self, stmt),
+        }
     }
-}
 
-fn collect_in_expr(e: &Expr, in_closure: bool, out: &mut ConstantFacts) {
-    match &e.kind {
-        ExprKind::Name(name)
-            if in_closure
-                && ["__FUNCTION__", "__METHOD__"]
-                    .iter()
-                    .any(|m| name.eq_ignore_ascii_case(m)) =>
-        {
-            out.magic_in_closure.insert(e.span);
-        }
-        ExprKind::Call(callee, args) => {
-            collect_in_expr(callee, in_closure, out);
-            for a in args {
-                collect_in_expr(&a.value, in_closure, out);
+    fn visit_expr(&mut self, e: &'ast Expr) {
+        match &e.kind {
+            ExprKind::Name(name)
+                if self.in_closure
+                    && ["__FUNCTION__", "__METHOD__"]
+                        .iter()
+                        .any(|m| name.eq_ignore_ascii_case(m)) =>
+            {
+                self.out.magic_in_closure.insert(e.span);
             }
-        }
-        ExprKind::Closure { body, .. } => collect_in_body(body, true, out),
-        ExprKind::ArrowFn { body, .. } => collect_in_expr(body, true, out),
-        ExprKind::NewAnonymousClass(decl, args) => {
-            for a in args {
-                collect_in_expr(&a.value, in_closure, out);
+            ExprKind::Closure { body, .. } => self.body(body, true),
+            ExprKind::ArrowFn { body, .. } => {
+                let outer = std::mem::replace(&mut self.in_closure, true);
+                self.visit_expr(body);
+                self.in_closure = outer;
             }
-            for m in &decl.methods {
-                collect_in_body(&m.function.body, false, out);
+            ExprKind::NewAnonymousClass(decl, args) => {
+                for a in args {
+                    self.visit_expr(&a.value);
+                }
+                for m in &decl.methods {
+                    self.body(&m.function.body, false);
+                }
             }
-        }
-        _ => {
-            any_child_expr(e, &mut |child| {
-                collect_in_expr(child, in_closure, out);
-                false
-            });
+            _ => walk_expr(self, e),
         }
     }
 }

@@ -172,20 +172,18 @@ pub(super) fn discriminant_canonical_key(subject_key: &str, value: &Type) -> Str
 /// by the one caller) appears anywhere inside `e` as an `ExprKind::
 /// Variable` - `record_branch_implied_facts`'s own guard against recording
 /// a variable whose narrowing this exact branch's own condition already
-/// explains (see its call site's doc comment). A generic recursive walk
-/// via `child_exprs` rather than a hand-enumerated set of `ExprKind`
-/// arms - `cond` can be arbitrarily shaped (a call, a chained method,
+/// explains (see its call site's doc comment). A generic search rather
+/// than a hand-enumerated set of `ExprKind` arms - `cond` can be
+/// arbitrarily shaped (a call, a chained method,
 /// `instanceof`, a compound `&&`/`||`), and this only needs to answer
 /// "is this name referenced anywhere in it," not narrow/instanceof-specific
 /// shape recognition the way `narrowing_key`/`truthiness_discriminant_subject`
 /// do elsewhere in this module.
 fn cond_references_variable(e: &Expr, name: &str) -> bool {
-    if matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name) {
-        return true;
-    }
-    syntax::visit::child_exprs(e)
-        .into_iter()
-        .any(|child| cond_references_variable(child, name))
+    syntax::visit::any_expr_in_scope(
+        e,
+        |e| matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name),
+    )
 }
 
 /// The "is this the same propositional atom" identity disjunctive-

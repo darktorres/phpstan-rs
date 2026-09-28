@@ -1986,15 +1986,15 @@ impl Default for Project {
 /// First and last line of every trait declared in `ast`.
 fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
     let mut ranges = Vec::new();
-    let mut stack: Vec<&Stmt> = ast.iter().collect();
-    while let Some(stmt) = stack.pop() {
-        match &stmt.kind {
-            StmtKind::ClassDecl(c) if c.kind == syntax::ast::ClassKind::Trait => {
-                ranges.push((stmt.span.start.line, stmt.span.end.line));
+    for stmt in ast {
+        syntax::visit::any_stmt_in_body(stmt, |s| {
+            if let StmtKind::ClassDecl(c) = &s.kind
+                && c.kind == syntax::ast::ClassKind::Trait
+            {
+                ranges.push((s.span.start.line, s.span.end.line));
             }
-            StmtKind::ClassDecl(_) | StmtKind::FunctionDecl(_) => {}
-            _ => stack.extend(syntax::visit::child_stmts(stmt)),
-        }
+            false
+        });
     }
     ranges
 }
