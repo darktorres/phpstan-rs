@@ -4871,7 +4871,18 @@ fixture:
   - an override may put optional parameters before the variadic one:
     `translate($message, $lang = 'cs', string ...$parameters)` over
     `translate($message, ...$parameters)` is `parameter.notVariadic`
-    today (`overriding-variadics.php`);
+    today (`overriding-variadics.php`), and a variadic may absorb the
+    parent's parameters: `doFoo(int ...$everything)` over `doFoo(int $a,
+    int $b)` is `parameter.missing` today, a false positive
+    (`less-parameters-variadics.php`, where its `int` against the parent's
+    untyped parameters is `method.childParameterType`);
+  - a parameter is checked for contravariance against a trait's abstract
+    method (private ones included), a built-in parent's native signature
+    (`offsetExists(int $index)` in an `SplFixedArray` subclass, a compile
+    error) and an abstract constructor (`overriding-method.php:110`),
+    unreported today; with the PHPDoc-only conflicts of the level table
+    these are the rules oracle's 12 PHPStan-only
+    `method.childParameterType`;
   - `new static(…)` is safe under a final constructor (`final private
     function __construct`) as under a final class or
     `@phpstan-consistent-constructor`; `new.static` today (`bug-4396.php`,
