@@ -2831,7 +2831,11 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
     - Reproduced `return.missing` today: a `break` in a nested loop inside
       `while (true)`; `while (FOREVER)` with a `true` constant;
       `do { … } while (true)`; and a switch covering every case of an enum
-      with `return`s and no `default`.
+      with `return`s and no `default`, or over every value of a constant
+      or PHPDoc union, where a variable each case assigns is also
+      `variable.undefined` after it (Appendix I's `switch-exhaustive`, 13
+      findings in 7 files: `bug-12722.php`, `bug-8719.php`,
+      `bug-1016b.php`, `defined-variables-enum.php`).
     - The oracle reports 28 of snapshot 0a8fe69's 68 checked
       `return.missing`; the other 40 are these shapes, among them
       `while (\true)` with a qualified constant (four in php-cs-fixer's
@@ -3100,7 +3104,12 @@ deleted; the file-size gate.
       every defined variable passed to a non-array by-reference parameter
       (`openssl_public_encrypt($d, $encrypted, …)`, `pam_auth`, `getmxrr`
       in the rules oracle's `bug-4004.php`, `bug-10499.php`,
-      `bug-10704.php`); the widening moves after the check and after the
+      `bug-10704.php`), and an undefined variable passed to an out
+      parameter is checked as `mixed` before the call defines it:
+      `preg_match($p, $s, $m)` is `argument.type` "expects
+      null|array<(int|string), string>, mixed given" (Appendix I's
+      `byref-out-undefined`, 60 findings in 19 files, and
+      `byref-arg-type`); the widening moves after the check and after the
       call's return type, which reads the widened argument today where the
       assigned value is a separate path: `$this->p = array_pop($objs)` on a
       `non-empty-list<O>` is `O|null` and `assign.propertyType` (the rules
@@ -3240,7 +3249,10 @@ deleted; the file-size gate.
       with a non-literal key uses the key's type. Today `$t = [10, 20];
       $j = 1; $t[$j]` is `mixed` where PHPStan has `20`, `$t[$i]` for an
       `int` is `mixed` where it has `10|20`, and on `array{a: int, b: string}`
-      both `$s[$v]` with `$v = 'a'` and `$s[$u]` with `'a'|'b'` are `mixed`.
+      both `$s[$v]` with `$v = 'a'` and `$s[$u]` with `'a'|'b'` are `mixed`
+      (Appendix I's `const-offset-nonliteral`, 18 findings in 9 files:
+      class constants read by a method's result, `array_rand()` keys,
+      `'a_' . $d`).
       `array_key_first()` of that shape is `string` instead of `'a'`.
       String offsets are typed: `$s[$i]` on a `string` and even `'hello'[0]`
       are `mixed` today, where PHPStan has `string` and `'h'` (and the union
@@ -3486,7 +3498,10 @@ deleted; the file-size gate.
       name is `K::X`'s type; it is `mixed` today.
     - **`new $c()`** for a `class-string<T> $c` is `T` (`NewHandler`); it is
       `mixed` today, so `function make(string $c) { return new $c(); }`
-      with `@return T` is `return.type` "expected T, got mixed".
+      with `@return T` is `return.type` "expected T, got mixed"; so is
+      `new $class` for `$class = static::class`, which is `static`, and
+      after `is_subclass_of($c, A::class)`, which is `A` (Appendix I's
+      `new-class-string`, 13 findings in 9 files).
     - **`new C()` is exactly `C`** (`ClassReflection::asFinal()`, dropped
       again where a template is inferred from it): after `$foo = new
       Foo()`, `$foo instanceof Sub` is `instanceof.alwaysFalse` and a
@@ -4054,7 +4069,10 @@ building on the previous one:
     `$b instanceof Pay`, `is_string($b)`, `$b === null` over
     `Pay|string|null` report `match.unhandled` "remaining value: true"
     today; the oracle finds nine in snapshot 0a8fe69, e.g.
-    `amphp/http-client/src/Response.php:218`. Each arm's condition is
+    `amphp/http-client/src/Response.php:218`, and the rules oracle 12 in
+    7 files (Appendix I's `match-exhaustive`: `instanceof` arms over a
+    union, `===` arms over literals or enum cases, every combination of
+    two bools). Each arm's condition is
     evaluated on the scope the earlier arms' falsey narrowing leaves, so a
     repeated condition is `match.alwaysFalse`: `match ($i) { 1 => 'a', 1 =>
     'b', default => 'c' }` isn't reported today, nor is an arm outside the
@@ -4134,7 +4152,10 @@ building on the previous one:
       scope class (`enterClosureCall`, `enterClosureBind`, `restoreThis`),
       and `->call()` passes its other arguments to the closure:
       `$predicate->call($newThis)` for a one-parameter closure is
-      `arguments.count`, unreported today (`closure-call.php`, 3);
+      `arguments.count`, unreported today (`closure-call.php`, 3); today
+      the bound closure keeps its old `$this` and scope, so its private
+      access is `method.private` and `$this->m()` is `method.nonObject`
+      (Appendix I's `closure-bind-scope`, 11 findings in 4 files);
     - an immediately invoked closure's body runs definitely: after
       `(function () use (&$x) { $x = 'a'; })()`, `$x` is `0|'a'` today;
     - by-reference `use` follows `processClosureScope`: an undefined
@@ -5200,7 +5221,8 @@ fixture:
     read" today (the rules oracle's 64 `property.onlyRead`, among them
     `appended-array-item.php`, `appended-array-key.php`, `bug-9213.php`,
     `bug-7119.php`, `uksort.php`, `property-type-after-unset.php`,
-    `properties-assigned-types.php`);
+    `properties-assigned-types.php`; Appendix I's `property-write-forms`
+    has 24 more in 13 files, `unused-private-property.php` 6);
   - a property that can't be written is `assign.propertyReadOnly` for
     every kind: an enum's `name` and `value` (`$this->name = 'ONE'`, an
     `Error`), an object shape's property (`$o->foo = 1` on `object{foo:
