@@ -5090,6 +5090,12 @@ fixture:
     `class.missingImplements` (`incompatible-require-implements.php:52`);
   - `@phpstan-consistent-constructor` on a class with a private
     constructor is `consistentConstructor.private`, unreported today;
+  - an overriding property's PHPDoc type is covariant with the
+    overridden one's (contravariant for a set-only hooked property):
+    `@var int` over `@var string`, `@var 4` over `@var 1|2|3`, `array`
+    over `array<class-string>` are `property.phpDocType`, unreported today
+    (the rules oracle's 5 PHPStan-only, `overriding-property*.php`,
+    `bug-12466.php`);
   - an override's return type is checked in every form (PHPStan's
     `MethodSignatureRule`), where today only a native type against a
     native type is: a child without a return type under a parent's native
