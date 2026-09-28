@@ -6457,14 +6457,16 @@ stdio.
   its client used, which diagnostics are published under (a workspace opened
   through a symlink sees its own paths). The walk and the LSP's file watchers
   follow C1's `file_extensions`, where both hard-code `.php` today
-  (`collect_php_files`, the `**/*.php` registration). A deleted directory
-  removes every file under it: a client may report a folder's deletion as one
-  event for the folder, and `handle_watched_files_changed` passes that path to
-  `remove_file`, which removes nothing, so the folder's files stay analysed and
-  published. Contents are read when needed and kept only for overlays and the
-  files a request is working on, with each file's line index; today
-  `retain_source` keeps every loaded file's text for the whole LSP session,
-  vendor context included.
+  (`collect_php_files`, the `**/*.php` registration), and scan and stub paths
+  outside every workspace folder get watchers of their own (a relative pattern
+  on each base directory), since a change there changes what analysed files
+  resolve. A deleted directory removes every file under it: a client may report
+  a folder's deletion as one event for the folder, and
+  `handle_watched_files_changed` passes that path to `remove_file`, which
+  removes nothing, so the folder's files stay analysed and published. Contents
+  are read when needed and kept only for overlays and the files a request is
+  working on, with each file's line index; today `retain_source` keeps every
+  loaded file's text for the whole LSP session, vendor context included.
 - **Panic isolation, on the pool.** Every parse and check runs on the process's
   worker pool (`project::worker_pool`, 64 MiB stacks) under `catch_unwind`, and
   a panic becomes that file's internal error. That covers the batch run and, in
@@ -6522,7 +6524,10 @@ stdio.
   loaded files (`Project` has no unload), so a changed `scan_paths`,
   `stub_paths` or `no_composer` only logs "reload the window". Changes to
   `composer.json`, `composer.lock` and `vendor/composer/installed.json`,
-  unwatched today (the watcher registers `**/*.php` only), reconfigure too.
+  unwatched today (the watcher registers `**/*.php` only), reconfigure too, and
+  the baseline and the files it includes are watched and reloaded, so
+  regenerating it updates the editor (the LSP reads it once per configuration
+  today).
 - **One Session per root.** Each workspace folder has its own Session and
   config, and a file belongs to the innermost root containing it; the Sessions
   share the worker pool and C5's version-keyed stub layer, so a second root
@@ -6556,9 +6561,10 @@ stdio.
     checked file's;
   - composer roots and path-repository promotion (the LSP loads one
     `PackageContext`, at the workspace root);
-  - config errors surface as a diagnostic on the config file and a
-    `window/showMessage` (today an `eprintln!` to the server's stderr and an
-    empty config);
+    - config errors surface as diagnostics on the config file, each at the
+      offending key's or value's position (the loader keeps the TOML spans
+      beside C1's dotted key path), and a `window/showMessage` (today an
+      `eprintln!` to the server's stderr and an empty config);
   - paths resolve against the config file's directory: the LSP resolves
     `paths`, `scan_paths`, `stub_paths`, the baseline and the SQL schema against
     the workspace root, which differs when `phpstan-rs.configPath` names a file
@@ -6615,6 +6621,12 @@ Behaviour commits, one each with its fixture:
   a generated baseline, and `baseline::filter` suppresses them (it has no
   `non_ignorable` check; `ignore_errors::filter` has one). Generation reports
   how many it left out.
+- **Generating a baseline from part of the project keeps the rest.**
+  `--generate-baseline` over fewer files than the config's paths replaces only
+  the analysed files' entries, and a baseline split into included files keeps
+  its `includes`. Today `write_entries` rewrites the file from the run's entries
+  alone, so `check-project --generate-baseline bl.json src/a.php` erases every
+  other file's entries, and the `includes` list goes with them.
 - **Only an analysed file's baseline entries can be stale.** `baseline::filter`
   reports every entry left unmatched, so checking one file of a baselined
   project calls every other file's entries stale: after a baseline of `src`,
@@ -6814,10 +6826,12 @@ the whole registry (§1), which C4's memo already removes.
   file's analysis can read from it: its declarations with native and PHPDoc
   signatures, constant and enum case initializers and attributes; its traits'
   method bodies; the summaries C9 computes from its bodies (purity,
-  global-variable writes); and the collected data other files' rules consume. An
-  edit that keeps the fingerprint rechecks that file only; one that changes it
-  rechecks the files depending on the changed names, whose own fingerprints
-  decide whether it goes further.
+  global-variable writes); and the collected data other files' rules consume.
+  Fingerprints are kept per exported name, as dependency edges are: an edit that
+  keeps every one rechecks that file only, and one that changes a class's
+  signature rechecks that class's readers, not every reader of the file's other
+  declarations; each rechecked file's own fingerprints decide whether it goes
+  further.
 - **The persistent cache.** Per analysed file it stores the content hash
   (BLAKE3), the raw errors (before the finalizer), the inline-ignore records,
   collected data, dependencies, the fingerprint and the summaries. A run
