@@ -439,7 +439,7 @@ through `check-project`.
   reported unreachable. Extra arguments (`exit(1, 2)`) are dropped silently,
   and the status (`string|int` since 8.4, a `TypeError` otherwise) is never
   checked. (`f9757b0a`)
-- [ ] **F2. `isset($x)` declares `$x` for the rest of the function.**
+- [x] **F2. `isset($x)` declares `$x` for the rest of the function.** (`43349c1a`)
   `check_existence_probe` (`checker/expr.rs`) declares a probed bare
   variable in the enclosing scope, so `if (isset($maybe)) {} echo $maybe;`
   reports nothing. Define it in the true branch only. (`6bdce4ce`)
