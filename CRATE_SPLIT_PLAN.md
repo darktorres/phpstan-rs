@@ -4551,6 +4551,19 @@ fixture:
     unreported today;
   - `@phpstan-consistent-constructor` on a class with a private
     constructor is `consistentConstructor.private`, unreported today;
+  - an anonymous class is a declaration like any other: the class, member
+    and constructor rules run on it and calls see its members' signatures.
+    Today `new class() implements F {}` missing `doFoo()`, an untyped or
+    unused property, a method missing its `return`, `new class(1, 2, 3)`
+    against a one-parameter constructor, `new class(1) {}` with no
+    constructor, a `@phpstan-require-extends` trait it uses, `ArrayAccess`
+    methods without tentative return types, an uninitialized readonly
+    property and `echo $o->v()` of a `void` method are all unreported (41
+    of the rules oracle's PHPStan-only findings name a `class@anonymous`);
+  - `abstract` on an interface method is a compile error ("Interface
+    method Baz::doBar() must not be abstract", `method.abstract` in
+    `abstract-method.php` and `abstract-private-method.php`), unreported
+    today;
   - `missingType.iterableValue` walks every type `MissingTypehintCheck`
     walks (about 75 of the rules oracle's 118 PHPStan-only): `@var` above
     an assignment, named or not, a by-reference one and a closure's
