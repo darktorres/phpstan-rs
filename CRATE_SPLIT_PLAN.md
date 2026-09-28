@@ -3741,6 +3741,21 @@ point PHPStan names `impure.*` is `possiblyImpure.*` in phpstan-rs until
 C5's `functionMetadata.php` says which built-ins have side effects (42
 rules-oracle findings).
 
+The oracle's other side is the false-positive measure: phpstan-rs reports
+2,652 findings PHPStan doesn't, and every one was traced to its cause.
+Each cause is a plan item where it lives (the items cite the rules
+oracle's file), and the phase that fixes it re-runs the oracle and removes
+its findings; what stays is approved: stricter checks that are right at
+runtime (`array_sum()` of arrays, printf placeholders that cast objects,
+`new self()` statements with no effects, `static::$p;` statements, a
+`private(set)` property never written, `5 / 0` ending reachability), the
+bleeding-edge `featureToggles` C1 turns on by default, 246
+`phpstanRs.assertType` mismatches in rule-test data that the D and E2
+items name, and 145 findings in 13 files that use php-parser and PHPStan
+classes the phar loads and phpstan-rs doesn't (`self-contradiction.php`,
+`TestMethodTypeSpecifyingExtensions.php`, `rule-error-signature.php` and
+the rest), which the gate excludes and lists.
+
 **E1. Collectors and project-level rules**, one commit each:
 
 - the reference-site collector (a built-in collector, consumed by the dead
@@ -4299,6 +4314,9 @@ fixture:
     `varTag.differentVariable` (`bug-3515.php`, 4 findings);
   - `static` in `@phpstan-assert static $object` resolves to the called
     class; `assert.unresolvableType` today (`bug-12548.php`);
+  - `@param-closure-this` is `paramClosureThis.nonClosure` only where the
+    native type can't be a `Closure` (`IncompatiblePhpDocTypeCheck`): on a
+    `callable $cb` it is reported today (15 rules-oracle findings);
   - a template bound is supported when `TemplateTypeCheck` lists its type:
     `self` (an object type) and `key-of<…>` are, and are
     `generics.notSupportedBound` today (15 rules-oracle findings,
