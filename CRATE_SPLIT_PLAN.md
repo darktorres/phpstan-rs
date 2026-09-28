@@ -4393,6 +4393,22 @@ fixture:
     (383 oracle findings). A read inside `isset()`/`??`/`empty()` can't
     fail and stays unreported (341 PHPStan reports on `mixed`).
 - (e) declarations, generics checks and PHPDoc:
+  - class existence is checked everywhere PHPStan checks it (the rules
+    oracle's 173 PHPStan-only `class.notFound`): at use sites through
+    `find_type_to_check`'s unknown-class errors ("Call to method doFoo()
+    on an unknown class", "Throwing object of an unknown class",
+    "Access to property/offset/constant on an unknown class", "Iterating
+    over", "Cloning", "Invoking callable on", "Creating callable from" an
+    unknown class: about 90, the declaration being reported today but no
+    use); `Unk::class`; `new $a()` for a constant-string `$a`; a template's
+    bound and default (`@template T of Zazzzu`, on classes, interfaces,
+    traits, functions, methods, `@method` tags and callable types);
+    `@param-out`, `@phpstan-self-out`, a conditional return type's
+    branches, generic arguments of a property type (`Foo<Barrrr>` and
+    `WeakMap<stdClass, …>` in a namespace), property hooks' types, every
+    `@var` of a doc block above a statement and above `$this`, and both
+    the parameter and the property of a promoted parameter; each is
+    unreported today;
   - `by-ref parameter's declared type is never narrower than 'foo'`
     (`parameterByRef.tooWide`) becomes PHPStan's
     `TooWideParameterOutTypeCheck`: a union member the function never
