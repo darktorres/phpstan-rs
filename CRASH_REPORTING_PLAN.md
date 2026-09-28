@@ -322,13 +322,11 @@ process with a DSN and no role is a supervisor. The supervisor has no Sentry
 client and no network code: it writes pending reports to disk and runs
 finishers, which do the sending.
 
-**The worker and the supervisor talk over the minidump socket.** The
-supervisor creates `minidumper::Server::with_name` on a fresh socket name
-(abstract on Linux, a path in the cache directory elsewhere) and runs it on
-a thread with our `ServerHandler`, then starts the worker with the name in
-`_PHPSTAN_RS_CRASH_SOCKET`. The worker connects a `minidumper::Client` and
-calls `crash_sys::attach(client)`. Messages the worker sends, each under
-4 KiB (§3):
+**The worker and the supervisor talk over the minidump socket.** The supervisor
+creates `minidumper::Server::with_name` on a fresh socket and runs it on a
+thread with our `ServerHandler`, then starts the worker with the name in
+`_PHPSTAN_RS_CRASH_SOCKET`. The worker connects a `minidumper::Client` and calls
+`crash_sys::attach(client)`. Messages the worker sends, each under 4 KiB (§3):
 
 - `FOCUS` and `FOCUS_CLEAR` with a thread name and a unit's path (§4.7);
 - `BREADCRUMB` and `TAG`, mirrored so a native crash carries them;
@@ -338,7 +336,18 @@ calls `crash_sys::attach(client)`. Messages the worker sends, each under
 Anything larger (the crash state, editor buffers, a pending event) goes
 through the run's crash-state directory on disk (§4.9).
 
-**`crates/crash-sys`** is the one crate with `unsafe`, allowed on its two
+**Only the user can reach the socket.** It is a path socket inside a `0700`
+directory, never a Linux abstract one: an abstract socket has no permissions,
+so any local process could connect, send messages and ask the supervisor to
+dump a process. The directory is `$XDG_RUNTIME_DIR/phpstan-rs` when set (a
+per-user `tmpfs`), otherwise the run's crash-state directory; when that path
+is longer than a socket address holds (108 bytes on Linux and Windows, 104 on
+macOS), `std::env::temp_dir()/phpstan-rs-<uid>`, created `0700` and refused if
+someone else owns it. The name is `<run id>.sock`, and the supervisor removes
+it when it exits. Linux also restricts who may read the worker's memory to the
+supervisor (`set_ptracer`, below).
+
+**`crates/crash-sys`** is the one crate with `unsafe`, allowed on its three
 functions only (`#[allow(unsafe_code)]`; the workspace lint is `deny`, not
 `forbid`):
 
@@ -354,6 +363,14 @@ functions only (`#[allow(unsafe_code)]`; the workspace lint is `deny`, not
   `SetStdHandle` to null) after the worker has inherited them (§4.11). On Unix
   the same is safe through `nix::unistd::dup2_stdin`/`dup2_stdout` onto
   `/dev/null`, and lives in the supervisor.
+- `enter_background()` makes the calling process background work: on Unix
+  `setpriority(PRIO_PROCESS, 0, 19)` (`nix` has no wrapper), on Linux also
+  `ioprio_set` to the idle I/O class, on macOS also `setiopolicy_np` with
+  `IOPOL_THROTTLE`, on Windows `SetPriorityClass` with
+  `PROCESS_MODE_BACKGROUND_BEGIN`, which lowers CPU, I/O and memory priority
+  together. A finisher calls it first (§4.10), so building a bundle beside a
+  live language server, or at the end of a CI job, never competes with
+  analysis for the machine.
 
 **Children's stdio.** The worker inherits the supervisor's stdin, stdout and
 stderr. A finisher gets null stdin and stdout, and its stderr goes to
@@ -599,7 +616,12 @@ is finished the same way (§4.10). A pending report is a directory,
 worker knows: the unit, message, location, focus, the resolved stack frames,
 the worker's module list, tags, context and breadcrumbs, the binary's
 identity) or, for a native crash, the dump (§4.9), and `state/`, a snapshot
-of the run's crash state, which the supervisor adds.
+of the run's crash state. For a panic the worker writes `state/` itself,
+before it sends `PENDING`: it is alive and knows the state the panic happened
+in (`state.json` and every open buffer's text as it was then), where a copy
+made by the supervisor after the message could already hold a later edit.
+For a native crash the supervisor copies the crash-state directory, which the
+dead worker can no longer change.
 
 - **Isolated panics:** `isolated` hands each internal error to the
   `Reporter` as well as returning it, and the worker writes its pending
@@ -609,8 +631,7 @@ of the run's crash state, which the supervisor adds.
 - **Unisolated panics:** the same, from the hook or `entry` (§4.3).
 - **Native crashes:** the supervisor writes the report around the dump
   (§4.9).
-- **The supervisor** snapshots the crash state into each report's `state/` as
-  its `PENDING` arrives, and starts finishers: for a CLI command one finisher
+- **The supervisor** starts finishers: for a CLI command one finisher
   for all of the run's reports once the worker has ended, so the project is
   loaded once however many locations crashed; for `lsp`, a finisher per
   report as it arrives, at most one at a time, since the session goes on.
@@ -745,10 +766,9 @@ external/<n>/<name>      files outside the root, mapped in the manifest
   files loaded into a fresh project with its config, its crashing unit run
   under `isolated`, and the result compared with the crash (the same panic
   location; for a native crash, the child running it dying of the same
-  signal). A panic's replay runs in-process, where the bundle was built; a
-  native crash's, and any finisher's, runs in a child
-  (`phpstan-rs __crash-replay <bundle>`, hidden like `__crash-finish`) so a
-  second abort can't take the report with it. A bundle that doesn't
+  signal). The finisher replays in a child
+  (`phpstan-rs __crash-replay <bundle>`, hidden like `__crash-finish`), so a
+  replay that aborts can't take the report with it. A bundle that doesn't
   reproduce is rebuilt with its walk widened (the next reference distance;
   for a pass or load unit, every analysed file) and replayed again, at most
   three times within the cap. The event is tagged `reproduces` = `yes`, `no`
@@ -801,8 +821,9 @@ external/<n>/<name>      files outside the root, mapped in the manifest
 `phpstan-rs __crash-finish <pending entry>`, a subcommand hidden from
 `--help` (`#[command(hide = true)]`), always a supervisor's child:
 
-1. takes the entry's `entry.lock` with `File::try_lock`, and exits if another
-   finisher holds it;
+1. calls `crash_sys::enter_background()` (§4.1), then takes the entry's
+   `entry.lock` with `File::try_lock`, and exits if another finisher holds
+   it;
 2. increments the entry's attempt count on disk before anything that could
    crash;
 3. builds the event: the worker's `event.json` for a panic, or for a native
@@ -877,6 +898,16 @@ signal, a worker thread waits on a kqueue `EVFILT_PROC`/`NOTE_EXIT` event for
 the supervisor's pid (`nix::sys::event`) after the same `getppid` check. On
 Windows the worker is started in a job object with kill-on-close
 (`win32job`), so ending the supervisor ends the worker.
+
+**The supervisor's own failures never end the worker.** Everything it does
+besides waiting (the minidump server thread and its handler callbacks,
+writing entries, starting finishers) runs under `catch_unwind`, and a failure
+there costs reporting, not the run: a server thread that dies leaves the
+worker's crash handler unable to request a dump, so a later native crash ends
+the worker as it would without reporting, and the supervisor reports it
+through the no-dump path (step 6 above). Only the waiting, the signal
+forwarding and relaying the exit status are essential, and they use no
+reporting code.
 
 ### 4.12 Outbox
 
@@ -1146,7 +1177,15 @@ so the user's binary doesn't carry it:
   arrives, from the temporary-directory fallback; with that unwritable too,
   sent directly.
 - **Degraded starts:** a supervisor whose worker can't start runs the command
-  itself and exits with its result.
+  itself and exits with its result; a supervisor whose minidump server thread
+  panics (injected) still relays the worker's exit status, and reports a later
+  crash through the no-dump path.
+- **Socket:** the socket is a path in a `0700` directory on every OS, never
+  a Linux abstract name.
+- **Background:** a running finisher's niceness is 19 on Unix and its
+  priority class is background on Windows.
+- **Snapshot race:** an overlay edited right after an isolated panic doesn't
+  reach that panic's bundle, which holds the text the panic saw.
 - **SQL cache:** a panic injected while the cache lock is held leaves later
   files' SQL reflection working.
 - **Formats and exit code:** an injected check panic appears in the JSON's
@@ -1270,7 +1309,7 @@ Each goes in with the step that causes it (§6):
 - **§3 crate list:** `crash-context`, below `reflection` and `project`, with
   `backtrace` its only dependency; the engine crates depend on it for
   `isolated` and `focus`. `crash-sys`, used by the app crate only, the one
-  crate allowed `unsafe` (two functions).
+  crate allowed `unsafe` (three functions).
 
 ## 6. Order
 
@@ -1338,7 +1377,7 @@ tests; the end-to-end tests run from step 6 on and again at the end.
 - An internal error makes every output format say so and the run exit 2.
 - A report made while the server is down reaches it on the next run.
 - With a DSN, every command runs as a supervisor and a worker, the only
-  `unsafe` in the workspace is `crash-sys`'s two functions, and nothing a run
+  `unsafe` in the workspace is `crash-sys`'s three functions, and nothing a run
   starts outlives its supervisor.
 - A release built by the workflow produces events whose frames Sentry shows
   with function, file and line, and source context from the uploaded
