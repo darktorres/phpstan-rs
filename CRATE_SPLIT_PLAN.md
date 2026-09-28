@@ -206,9 +206,16 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
     need real PCRE2 are `#[cfg(feature = "pcre-validate")]`, with complements
     for the disabled path.
   - `fuzzing` lives in `syntax`.
-  - `hotpath`/`hotpath-alloc` are declared only by the bin. Other crates
-    take a plain `hotpath` dependency; macro behaviour follows the hotpath
-    crate's own features. hotpath measure labels change with module paths,
+  - `hotpath`/`hotpath-alloc` are the bin's. Other crates take a plain
+    `hotpath` dependency, and hotpath's own macros follow the hotpath crate's
+    features. A crate whose own code tests the feature declares it too, and
+    the bin's forwards to it: `analyser`'s `measure_outermost!` expands a
+    `#[cfg(feature = "hotpath")]` in the crate that calls it, which without
+    the feature compiles the measurement out.
+  - `crash-injection` (`CRASH_REPORTING_PLAN.md`'s test hook, today
+    `project/tests/panic_injection.rs` under `#[cfg(test)]`) lives in
+    `project`, and `app` and the bin forward it, so the bin's end-to-end tests
+    reach the hook in the library. hotpath measure labels change with module paths,
     and the timing re-measurement maps old labels to new ones. hotpath
     counts a function measured at every level of a recursion once per level
     and holds at most 64 measured frames, so a recursive function is
@@ -878,6 +885,17 @@ corpus, type, baseline, performance and build-time gates run locally
    not depend on, except edges listed in `gates/module-graph.txt`, each with
    the phase that removes it. The list only shrinks: an entry that no
    longer matches an edge fails the gate, and none outlives its phase.
+   The same list covers where an `impl` sits, which an edge doesn't show (a
+   `rules` module reaching `analyser` is an allowed edge, yet its
+   `impl Checker { … }` can't compile once the two are crates): an inherent
+   `impl` must be in the module assignment of its type's crate, and a trait
+   `impl` in that of its trait's crate or its type's (the orphan rule, a
+   generic type's own parameters counting as neither). The inventory lands
+   before C4, each entry with the phase that moves its module; on today's
+   package, 84 inherent `impl` blocks of seven core types alone sit in
+   another crate's modules (52 of `Checker` in modules assigned to `rules`, 7
+   in `builtins`, 17 in the `ext-*` modules, one in `lsp`; 5 of `Project`; 2
+   of `Registry` in `analyser`'s `global_vars`).
 3. **Tests.** The set of test names (`cargo test --workspace --all-targets
    -- --list` plus the fixture lists) must be a superset of the previous
    commit's set mapped through a committed rename/removal manifest (old →
@@ -7341,16 +7359,17 @@ held to the previous commit's:
 Stage G starts when F is done. The lower layers are crates already: `syntax`,
 `types`, `phpdoc`, `stub-sources`, `sql`, `diagnostics`, `composer`, `config`
 and `reflection` (B, C10), with the sibling plans' `crash-context`, `pcre` and
-`crash-sys` and Phase 183's `neon`. Everything from `analyser` up is still
-modules of the one `phpstan-rs` package (`crates/phpstan-rs/src`), each assigned
-its crate by Appendix A and held to it by the module-graph gate, whose `allow`
-list is empty: every edge it listed (235 today) named a phase up to F, and each
-phase removed its own. The package's library is used by its binary, its
-integration tests (`tests/cli.rs`, `version.rs`, `lsp_exit_code.rs`, the fixture
-harness `tests/fixtures.rs` over 8,347 fixture files in
-`tests/fixtures/{checker,project}`), its bench (`benches/vendored_corpus.rs`),
-`tools/gate-runner` and `tools/crash-repro` (`CRASH_REPORTING_PLAN.md` §5), and
-the fuzz package's `structured_php` target, all through `phpstan_rs::…` paths.
+`crash-sys`, and `neon` once Phase 183 lands. Everything from `analyser` up is
+still modules of the one `phpstan-rs` package (`crates/phpstan-rs/src`), each
+assigned its crate by Appendix A and held to it by the module-graph gate, whose
+`allow` list is empty: every edge and misplaced `impl` it listed (235 edges
+today) named a phase up to F, and each phase removed its own. The package's
+library is used by its binary, its integration tests (`tests/cli.rs`,
+`version.rs`, `lsp_exit_code.rs`, the fixture harness `tests/fixtures.rs` over
+8,347 fixture files in `tests/fixtures/{checker,project}`), its bench
+(`benches/vendored_corpus.rs`), `tools/gate-runner` and `tools/crash-repro`
+(`CRASH_REPORTING_PLAN.md` §5), and the fuzz package's `structured_php` target,
+all through `phpstan_rs::…` paths.
 
 G makes a crate of each remaining layer, moves the tests, benches and fuzz
 targets to the crates they test, retargets the gates from the package's paths
@@ -7378,9 +7397,11 @@ Each extraction is two commits (gate 11):
    the package's manifest by Appendix E (`cargo machete` fails on one left
    behind); `crate::` paths rewritten to `<name>::` on both sides of the new
    boundary; the module-graph spec's `module` rows for the crate replaced by an
-   `extern` line; `gates/test-renames` entries for every test whose path
-   changed (`phpstan_rs::checker::…` becoming `analyser::…`); the hotpath label
-   map for the timing re-measurement (§2); the commit's hash in
+   `extern` line; `gates/test-renames` entries for every test whose path changed
+   (`phpstan_rs::checker::…` becoming `analyser::…`); intra-doc links rewritten
+   like paths (gate 1's `cargo doc` denies a broken one); the crate added to
+   gate 9's scenarios, its rebuilds recorded from then on; the hotpath label map
+   for the timing re-measurement (§2); the commit's hash in
    `.git-blame-ignore-revs`.
 
 What an extraction checks:
@@ -7390,6 +7411,14 @@ What an extraction checks:
   uses is a design gap, closed before the extraction (the user moves, or §3
   gains the API, in a commit of its own), never by widening. `unreachable_pub`
   then denies any `pub` item the crate doesn't export.
+- **`impl` placement.** No entry of gate 2's list names the crate's modules,
+  so every `impl` it holds or that others hold of its types compiles where it
+  is.
+- **Features.** A feature the crate's code tests is declared by the crate and
+  forwarded by the bin (§2: `hotpath` for `analyser`'s `measure_outermost!`,
+  `crash-injection` for `project`'s hook, `pcre-validate` for `builtins`); a
+  `cfg(feature)` naming a feature its crate lacks is an `unexpected_cfgs` error
+  under clippy's `-D warnings`.
 - **The public API** is snapshotted from the rewrite commit on (gate 14), and
   the commit lists its difference from §3's design: an item the design names
   that the crate lacks, or one it exports that the design doesn't name.
@@ -7472,14 +7501,16 @@ crates, in one commit:
 
 **G2. Tests, benches and fuzz targets to their owners.**
 
-- **Fixtures.** Each fixture moves to the crate owning what it tests, by one
-  mechanical map from its expected identifiers to the crate declaring each
-  rule: a rule's fixtures to `rules` or its `ext-*`; type-inference fixtures
-  (asserts only) to `analyser`, whose fixtures target dev-depends on `testing`
-  and `builtins`; an extension's to its crate; Integration fixtures (every rule
-  at a level) and fixtures expecting several extensions' identifiers to `app`,
-  the one crate that registers everything, so no separate test crate is
-  needed. The directory layout under each crate's
+- **Fixtures.** Each fixture moves, by one mechanical map, to the lowest crate
+  whose fixtures target registers everything it needs: the crate declaring each
+  expected identifier's rule, or the rules its header scopes it to when it
+  expects none. Type-inference fixtures (asserts only) go to `analyser`, whose
+  fixtures target dev-depends on `testing` and `builtins`; fixtures of core
+  rules to `rules`; fixtures of one extension, with or without core rules, to
+  that `ext-*`, whose target registers `builtins`, `rules` and itself;
+  Integration fixtures (every rule at a level) and fixtures expecting several
+  extensions' identifiers to `app`, the one crate that registers everything, so
+  no separate test crate is needed. The directory layout under each crate's
   `tests/fixtures` keeps the file's path below its old family directory.
 - **Fixture targets.** Each owning crate has `[[test]] name = "fixtures"`,
   `harness = false`, a `tests/fixtures.rs` of a few lines calling
@@ -7490,14 +7521,19 @@ crates, in one commit:
   expectations don't change.
 - **Fixtures in plain `cargo test`.** The package's fixtures target is
   `test = false` today and runs in the `gate` profile, because each fixture
-  builds a whole `Project`, stubs included, and a debug run takes about 26
-  minutes. With C5's process-wide stub layer a fixture's setup no longer
-  builds the stubs, so the owning crates' targets drop `test = false`, and
-  `cargo test --workspace` runs every fixture in the debug profile. The commit
-  records each crate's debug wall time. CI's two fixture steps
-  (`cargo test --profile gate --test fixtures`, with and without default
-  features) fold into its workspace test steps, and `GATE_SPEED_PLAN.md`'s
-  fixture command follows.
+  builds a whole `Project`, stubs included (about 210 ms of its setup clones the
+  stubs and reruns the registry passes over them): a debug run takes about 26
+  minutes, the gate profile 483 s (`GATE_SPEED_PLAN.md` §2). With C5's
+  process-wide stub layer a fixture's setup no longer builds the stubs, so the
+  owning crates' targets drop `test = false` and `cargo test --workspace` runs
+  every fixture in the debug profile, once that run takes no longer than the
+  gate profile's suite does at the time; the commit records each crate's debug
+  wall time, and until the bar is met the targets stay in the gate profile.
+  `default-members` keeps the bin, so a bare `cargo test` runs only the binary's
+  tests, and the documented command is `cargo test --workspace`. CI's two
+  fixture steps (`cargo test --profile gate --test fixtures`, with and without
+  default features) fold into its workspace test steps, and
+  `GATE_SPEED_PLAN.md`'s fixture command follows.
 - **The binary's own tests** stay in the bin package: `tests/cli.rs`,
   `version.rs`, `lsp_exit_code.rs` and their `common` helper, which run the
   built binary (`CARGO_BIN_EXE_phpstan-rs`).
