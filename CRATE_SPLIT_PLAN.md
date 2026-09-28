@@ -6973,9 +6973,7 @@ fixes, the text summary, the format dispatch), and its error paths call
 `process::exit`, skipping the dhat and hotpath flushes `main`'s comments rely
 on.
 
-- Global flags (`--config`, `--set`, `--level`, `--php-version`,
-  `--no-composer`, `--scan-dir`, `--stub-path`, `--format`, `--baseline`,
-  `--baseline-match-identifier`, `--baseline-per-identifier`,
+- Global flags (`--config`, `--set`, `--level`, `--format`,
   `--generate-baseline`, `--fix`, `--no-result-cache`, `--no-progress`, and the
   hidden `--emission-order`, which the determinism check runs on the shipped
   binary) are parsed in the bin and passed to `app::run(args, extra)`, which
@@ -6983,6 +6981,13 @@ on.
   `process::exit` outside the crash reporter's own roles
   (`CRASH_REPORTING_PLAN.md` §4.1: the reporter and the finisher exit through
   `crash_report::exit`, which flushes first).
+- A flag only ever sets a run's shape; a config key is set through `--set`, as
+  §3.6 has for the per-rule flags. So today's `--php-version`, `--no-composer`,
+  `--scan-dir`, `--stub-path`, `--baseline`, `--baseline-match-identifier` and
+  `--baseline-per-identifier` go for `--set php_version=8.4`,
+  `--set no_composer=true`, `--set 'scan_paths=["lib"]'` and the rest (nothing
+  is released), and xtask, the gate runner and the tests that pass them move in
+  the same commit. `--level` stays, being PHPStan's `-l`.
 - A progress line (files analysed of total) goes to stderr when it's a
   terminal, off with `--no-progress` and when stderr isn't one; today a run
   prints nothing until it finishes.
@@ -7002,13 +7007,14 @@ on.
 - PHPStan's command line works as is, so a CI script or tool that runs
   `vendor/bin/phpstan analyse` can run phpstan-rs instead: `analyse`/`analyze`
   is the command itself (above); `-c`/`--configuration`, `-l`/`--level`,
-  `-b`/`--generate-baseline` (its value optional, `phpstan-rs-baseline.json` by
-  default), `--error-format` and `--autoload-file` (scanned as context) take
-  PHPStan's meaning; `--ansi`/`--no-ansi` set colour (F3); `-v` adds the run's
-  statistics, elapsed time and peak memory, and internal errors' backtraces
-  without `RUST_BACKTRACE`, `-vv` each phase's timing, `-vvv` each file's;
-  `--debug` analyses one file at a time on one worker, printing each path before
-  it starts, so a crash no isolation can catch (a stack overflow aborts the
+  `-b`/`--generate-baseline` (its value optional: the config's `baseline` path
+  when set, else `phpstan-rs-baseline.json`), `--error-format` and
+  `--autoload-file` (scanned as context) take PHPStan's meaning;
+  `--ansi`/`--no-ansi` set colour (F3); `-v` adds the run's statistics, elapsed
+  time and peak memory, and internal errors' backtraces without
+  `RUST_BACKTRACE`, `-vv` each phase's timing, `-vvv` each file's; `--debug`
+  analyses one file at a time on one worker, printing each path before it
+  starts, so a crash no isolation can catch (a stack overflow aborts the
   process) names its file; `--memory-limit` and `--xdebug` are accepted and
   reported once as ignored. `-c` naming a `.neon` file fails, pointing at `init`
   (ROADMAP Phase 183).
@@ -7019,7 +7025,7 @@ on.
   runner, not the binary.
 - Flags that contradict each other are rejected: `--fix` with
   `--generate-baseline` (today the baseline is written and `--fix` silently does
-  nothing), and `--generate-baseline` with `--baseline`.
+  nothing).
 - Ctrl-C cancels the run's token: analysis stops at the next statement
   boundary, the files finished so far are cached, and the process exits 130.
   Today an interrupted run loses everything.
