@@ -3412,6 +3412,30 @@ building on the previous one:
       at level 1 as "Variable $x might not be defined."
     - A merge keeps a Maybe holder only for variables, function calls and
       virtual keys, and drops superglobals.
+    - What may not run defines only Maybe: the right side of `&&`/`||`
+      and a nullsafe call's arguments. In the `else` of `if ($a &&
+      preg_match($p, $s, $m))`, under `if (rand(0, 1) || f($str))`, and
+      after `$d?->format($f = 'Y')`, the variable is Maybe (undefined when
+      `$d` is always `null`), and a loop condition first runs on the
+      scope before the loop (`while ($w && $w = 1)` reads `$w` undefined);
+      all unreported today (`boolean-op-truthy-falsey.php`,
+      `bug-10729.php`, 5; `defined-variables.php:356`, `:360`, `:428`).
+    - A by-reference argument defines the variable only where the
+      parameter creates it (`PassedByReference::createsNewVariable()`):
+      `reset($u)`, `array_shift($argv)` in a function and the first,
+      by-value argument of `parse_str($ps, $ps)` read an undefined
+      variable, and an undefined variable passed to a by-reference `int`
+      parameter arrives as `null`, a `TypeError`
+      (`pass-by-reference-into-not-nullable.php`); all unreported today.
+    - The other reads count too: a variable variable with a constant name
+      (`$foo = 'bar'; echo $$foo;`, a union of names read each;
+      `dynamic-access.php`, 3), a name in `compact()`, nested arrays of
+      names included (`compact-variables.php`, 3), a destructuring key
+      (`[$f?->foo => $b] = …`), `$this` in a closure `Closure::bind()`
+      binds to no object (`defined-variables.php:96`, `:99`), and a
+      variable a correlated condition `unset()` (`if ($k === 1) {
+      unset($v); } if ($k === 1) { echo $v; }`, `bug-14117.php`); all
+      unreported today.
     - `isset()`/`empty()` in a condition don't define the variable: after
       `if (empty($foo)) {…} else {…}` or `if (isset($bar)) {…}` on a
       variable never assigned, `echo $foo` is unreported today where PHP
@@ -4603,8 +4627,10 @@ fixture:
     $this->getValues()`), `assert.unknownExpr` today
     (`incompatible-assert-type-with-method-return-type.php`); a `@var`
     naming a variable the assignment's right side reads types that
-    variable (`/** @var int $foo */ $bar = $foo + 1;`), not
-    `varTag.differentVariable` (`bug-3515.php`, 4 findings);
+    variable (`/** @var int $foo */ $bar = $foo + 1;`) at a file's top
+    level, not `varTag.differentVariable` (`bug-3515.php`, 4 findings);
+    inside a function it is `varTag.differentVariable` and the read is
+    `variable.undefined`, unreported today (`bug-3515.php:19`, `:20`);
   - `static` in `@phpstan-assert static $object` resolves to the called
     class; `assert.unresolvableType` today (`bug-12548.php`);
   - `@param-closure-this` is `paramClosureThis.nonClosure` only where the
