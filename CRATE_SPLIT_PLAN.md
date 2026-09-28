@@ -4851,8 +4851,13 @@ fixture:
   - a concrete function with an empty body still checks its `@throws`:
     `/** @throws \Exception */ function ex(): void {}` isn't
     `throws.unusedType` today (the empty-body exemption is for abstract and
-    interface methods), while a call to a method without `@throws` is an
-    implicit throw point that satisfies it (`exceptions.implicitThrows`,
+    interface methods; all 44 of the rules oracle's PHPStan-only
+    `throws.unusedType`, each member of a union, intersection, conditional
+    or template tag reported, `incompatible-throws.php`,
+    `throws-with-require.php`, `too-wide-throws-*.php`,
+    `unthrown-exception-multi.php`), while a call to a method without
+    `@throws` is an implicit throw point that satisfies it
+    (`exceptions.implicitThrows`,
     on by default): `@throws \Exception` over `$this->doBar();` is
     `throws.unusedType` today, as is one over an immediately called arrow
     function that throws (5 rules-oracle findings,
