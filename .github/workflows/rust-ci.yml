@@ -1,6 +1,8 @@
 name: Rust CI
 
-# The build and test half of `cargo xtask gates --full`. The corpus,
+# The build and test half of `cargo xtask gates --full`. Every runner
+# image, action, tool and toolchain is pinned to an exact version (actions
+# by commit), so a run changes only with the repository. The corpus,
 # type-snapshot, baseline, performance and build-time gates need the
 # frozen Piwigo checkout and a stable machine, so they run locally
 # through `cargo xtask gates`.
@@ -13,10 +15,10 @@ env:
 
 jobs:
   gates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # The test-name manifest searches the whole history for its base.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       # build.rs embeds vendor/phpstan-src/src; the other submodules are
@@ -30,12 +32,19 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
 
       # .cargo/config.toml links x86_64 Linux artifacts with mold.
-      - uses: rui314/setup-mold@v1
-
-      - uses: taiki-e/install-action@v2
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
         with:
-          tool: cargo-hack,cargo-machete,cargo-deny
+          mold-version: 2.42.1
 
+      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: cargo-hack@0.6.45,cargo-machete@0.9.2,cargo-deny@0.20.2
+
+      # Every later cargo command builds exactly what the lockfiles say.
+      - name: Lockfiles match the manifests
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null
+          cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
@@ -49,7 +58,7 @@ jobs:
       - name: Architecture rules
         run: cargo xtask arch
       # The last run's manifest is the base when that run was an ancestor.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .corpus-runs/gate/tests
           key: test-manifest-${{ github.sha }}
@@ -60,7 +69,7 @@ jobs:
         run: >
           find .corpus-runs/gate/tests -name '*.txt'
           ! -name '${{ github.sha }}.txt' -delete
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .corpus-runs/gate/tests
           key: test-manifest-${{ github.sha }}

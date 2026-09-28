@@ -44,18 +44,18 @@ jobs:
           # reason the two Linux legs need their own C cross-toolchain
           # setup below - it vendors and compiles real PCRE2 C source via
           # `cc-rs` whenever no system libpcre2/pkg-config match exists.
-          - os: macos-latest
+          - os: macos-26
             target: aarch64-apple-darwin
             native: true
-          - os: macos-latest
+          - os: macos-26
             target: x86_64-apple-darwin
             native: false
-          - os: windows-latest
+          - os: windows-2025-vs2026
             target: x86_64-pc-windows-msvc
             native: true
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # build.rs embeds vendor/phpstan-src/src; the other submodules are
       # test corpora the build never reads.
       - name: Fetch the phpstan-src submodule
@@ -63,8 +63,10 @@ jobs:
 
       # .cargo/config.toml links x86_64 Linux artifacts (including the
       # cross leg's own host-side build scripts) with mold.
-      - uses: rui314/setup-mold@v1
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # main, 2026-09-12
         if: ${{ runner.os == 'Linux' }}
+        with:
+          mold-version: 2.42.1
 
       # Runner images ship rustup already - this only adds the
       # non-native target; the native one and the pinned nightly toolchain
@@ -77,8 +79,17 @@ jobs:
       - name: Install an aarch64 cross C toolchain (Linux only)
         if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
         run: |
+          # Release-pocket versions, which the archive keeps for the
+          # series' lifetime.
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu=4:13.2.0-7ubuntu1 \
+            cpp-aarch64-linux-gnu=4:13.2.0-7ubuntu1 \
+            gcc-13-aarch64-linux-gnu=13.2.0-23ubuntu4cross1 \
+            cpp-13-aarch64-linux-gnu=13.2.0-23ubuntu4cross1 \
+            gcc-13-aarch64-linux-gnu-base=13.2.0-23ubuntu4cross1 \
+            libgcc-13-dev-arm64-cross=13.2.0-23ubuntu4cross1 \
+            binutils-aarch64-linux-gnu=2.42-4ubuntu2
 
       - name: Point pcre2-sys's C build and the linker at the cross toolchain
         if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
@@ -87,7 +98,7 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
         # If the aarch64 cross C toolchain above ever proves flaky/
         # unavailable on the pinned runner image, `--no-default-features`
         # is a documented fallback HERE ONLY (dropping just the
