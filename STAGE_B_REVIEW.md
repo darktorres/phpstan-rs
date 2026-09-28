@@ -140,7 +140,10 @@ Each fix needs a fixture.
   appended key is known: the next index (`NextArrayIndex`), so the result
   is `array{x: 1, 0: 2}`. `set_offset_value_type`'s shape branch
   (`offsets.rs`) handles a missing offset like a dynamic one. An unsealed
-  shape's next key isn't known, and stays the widened form.
+  shape's next key isn't known, and stays the widened form. The next key
+  isn't a function of the fields alone: after `$b = [1, 2, 3];
+  unset($b[2]);` it is 3, not 2, so the shape has to carry its next
+  index (PHPStan's `nextAutoIndexes`) for the append to be exact.
 
 - [ ] **P4. Removing an enum case doesn't enumerate the rest.** After
   `if ($x === Suit::Hearts) { return; }`, `$x: Suit` stays `Suit` where it
@@ -456,12 +459,12 @@ through `check-project`.
   `check_existence_probe` (`checker/expr.rs`) declares a probed bare
   variable in the enclosing scope, so `if (isset($maybe)) {} echo $maybe;`
   reports nothing. Define it in the true branch only. (`6bdce4ce`)
-- [ ] **F3. `unset($a['k'])` doesn't remove the offset.** The `Unset`
+- [x] **F3. `unset($a['k'])` doesn't remove the offset.** The `Unset`
   statement (`checker/stmt.rs`) only checks non-variable targets as
   expressions: `array{x: 1, y: 2}` stays `array{x: 1, y: 2}` after
   `unset($b['x'])`. The offset goes (a list stops being a list, an array
   may become empty), and an unset property is uninitialized again.
-  (`6bdce4ce`)
+  (`6bdce4ce`) Done in `6e274bf3`.
 - [ ] **F4. Method names are compared case-sensitively for unused private
   members.** `$this->HELPER()` calling `private function helper()` reports
   `helper()` unused (`checker/unused.rs`, `usage.methods`). PHP method names
