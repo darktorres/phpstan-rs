@@ -759,12 +759,23 @@ Visitor-based walk.
   - uses the same rule and collector set (incrementally), the same
     discovery, config-file-relative paths, validation surfaced as
     diagnostics / showMessage, and the same default level;
-  - `ResolvedWorkspaceConfig` is deleted;
-  - hover is `Scope::type_of` at the node, and definition probes use
-    provenance metadata.
+    - `ResolvedWorkspaceConfig` is deleted;
+  - one Session per workspace root, sharing the pool and the stub layer; an
+    edit's text applies at once and its recheck runs on the pool, publishing the
+    edited file first; requests run on the pool against the last published
+    snapshot, answered in any order (F1);
+  - positions in the negotiated encoding through each file's line index over
+    `Span`'s byte offsets (F1);
+  - every language feature finds what is at a position through one
+    node-at-position query and reads the analyser's resolved names and types:
+    hover is `Scope::type_of` at the node, definition reads provenance,
+    references read the reference-site collector (F5).
 - **bin:**
   - global flags plus `--set`;
-  - exit code nonzero on remaining diagnostics, its own commit;
+    - exit code 0 when nothing remains, 1 on remaining errors, 2 when the
+      result can't be trusted (an invalid config, no files, an internal error),
+      141 on a closed output pipe, 130 on an interrupt, its own commit (F1, F3,
+      F4);
   - the parse-only `check` subcommand and `demo` are deleted: their roles
     move to the syntax bench, the fixtures and a project example;
   - `incremental-bench` becomes a `project` example (arbitrary directory)
@@ -6383,8 +6394,9 @@ level-header fixtures, and LevelsTestCase fixtures are added. Gate: for
 every level in 0..=10 plus unset, before == after, except the approved
 deltas E3's table names.
 
-**E6. Observers.** LSP-only presentation (semantic tokens, inlay hints,
-hover, definition probes) on observer events.
+**E6. Observers.** LSP-only presentation (semantic tokens, inlay hints, hover,
+definition probes) on observer events, the mechanism F5's language features are
+built on.
 
 **E7. Checker decomposition.** Gate: the exact enumerated field sets for
 engine context, file state, function frame and traversal context
@@ -7181,7 +7193,11 @@ moves in the phase named.
 | rule, reflection_rule | analyser (Rule API; ported) | D6 |
 | project, project/* | project; architecture / banned / class_shape / composer_hygiene / mock_hygiene → rules / ext-mockstan | E1/F1 |
 | project/use_sites | built from the reference-site collector (`decl_locations` is gone; the doc comments in `registry.rs`, `dead_members.rs`, `dead_enum_cases.rs` and `use_site_index.rs` that name it are corrected) | E1 |
-| lsp, lsp/* | lsp | G1 |
+| lsp (the `Server`, dispatch, `workspace_config`, `settings`, `debounce`) | lsp over the Session: settings assembly deleted, per-root Sessions, the debounce queue folded into the Session's update | F1 |
+| lsp/protocol | lsp (positions through the line index, conformance) | F1 |
+| lsp/navigation, lsp/signature_help, completion's token scan | replaced by the node-at-position query | F5 |
+| lsp/{completion, signature_help, document_symbol, workspace_symbol, inlay_hints, semantic_tokens} and the request handlers | lsp features over the query, the reference-site collector and observers | E6/F5 |
+| lsp, lsp/* (what remains) | lsp crate | G1 |
 | main, main/* | bin (check_project → project::Session; check / demo deleted; incremental_bench → project example) | F4 |
 | checker.rs (Checker, Locals) | analyser (decomposed) | D1–E7 |
 | assignment | analyser; the invalid-assignment reports → rules | E3d |
@@ -7462,6 +7478,20 @@ its owner. Non-Registry keys follow the table.
   Stages D–F is tracked by the build-time gate.
 - **Publishing.** Crates stay `publish = false`. Third parties consume them
   via git against `app`. Publishing to crates.io is out of scope.
+- **PHPStan's files.** A PHPStan baseline is neither read nor written:
+  baselines are phpstan-rs's own JSON, which `--generate-baseline` makes. A
+  PHPStan config is converted once into `phpstan-rs.toml` by `init` (ROADMAP
+  Phase 183), never read as a live source; the `neon` crate exists for that
+  conversion.
+- **Exit codes.** 0 when nothing remains after the finalizer, 1 when errors
+  remain, 2 when the result can't be trusted (a run that couldn't start, or one
+  with an internal error), 130 on an interrupt, 141 on a closed output pipe. A
+  formatter never decides the code.
+- **Language features after the Session.** The LSP's features (navigation,
+  references and rename, completion, signature help, tokens, inlay hints, code
+  actions, hierarchy) are F5, after F1–F4: they read F1's snapshots through one
+  node-at-position query, F2's dependency graph, E1's reference-site collector
+  and E6's observers, so building them earlier would build each twice.
 - **Scope API exclusions.** Excluded PHPStan `Scope` methods are listed with
   reasons in the D6 commit.
 - **`Type` as a closed enum.** Kept. Every PHPStan type concept has its own
