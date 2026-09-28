@@ -908,8 +908,10 @@ corpus, type, baseline, performance and build-time gates run locally
       phpstan-rs over PHPStan's own rule-test data
       (`vendor/phpstan-src/tests/PHPStan/Rules/**/data`, 2,936 files, the
       five PHPStan can't parse excluded), level 10, PHP 8.5, and matches
-      findings by file and identifier within three lines (the two tools
-      attribute some findings to different lines of one declaration). It
+      findings by file and identifier within three lines, or within one
+      declaration for the signature-level identifiers (`missingType.*`,
+      which PHPStan puts on the declaration's line and phpstan-rs on the
+      parameter's; about 40 unmatched pairs today). It
       lists, per identifier, the PHPStan-only, matched and phpstan-rs-only
       counts (phpstan-rs takes 2 s).
 
@@ -1010,7 +1012,16 @@ commit); the unsorted corpus comparison starts here.
 - a child property inherits the hooks it does not redeclare;
   `parent::$prop::get()`/`set()` resolve; a set hook without a parameter
   list takes the property's type;
-- `__set()` needs no return type;
+- `__set()` needs no return type, and neither does any magic method PHP
+  fixes (`PhpMethodFromParserNodeReflection`): `__destruct`, `__unset`,
+  `__wakeup`, `__clone`, `__unserialize` and constructors are `void`,
+  `__toString` `string`, `__isset` `bool`, `__sleep` `array<int,
+  string>`, `__serialize` `array`, `__set_state` an object and
+  `__debugInfo` `array|null`; `__unserialize()` without a return type and
+  `__sleep(): array` are `missingType.return`/`missingType.iterableValue`
+  today (the rules oracle's `magic-signatures.php`,
+  `magic-serialization.php`, `missing-serialization.php`,
+  `enum-sanity.php`, `bug-15056.php`);
 - a failing `array_is_list()` proves a non-empty non-list array;
 - a boolean flag set in a branch implies that branch's narrowing, unioned
   over every path that sets it;
@@ -1243,7 +1254,11 @@ Follow-ups:
 - **Intersections reduce** by the class hierarchy (`TypeCombinator::intersect`):
   an intersection of a class and its subclass is the subclass. In
   `while ($foo instanceof Dim) { …; $foo = $bar; }` with `Dim extends Expr`,
-  the second pass sees `$foo` as `Expr&Dim` today. An array with
+  the second pass sees `$foo` as `Expr&Dim` today. A shape intersected
+  with `non-empty-array` stays a shape that can't be empty: `array{foo?:
+  string, bar?: string}&non-empty-array` is plain `non-empty-array` today,
+  its keys lost, and `missingType.iterableValue` (the rules oracle's
+  `bug-7143.php`). An array with
   `HasOffset`/`HasOffsetValue` is non-empty: after `isset($array['def'])`
   on `array<mixed>`, `$array` is `array&hasOffsetValue('def', mixed)`
   today, so passing it to a `non-empty-array` parameter is `argument.type`
@@ -1587,7 +1602,19 @@ Follow-ups, one commit each, each with its test:
   `reportAnyTypeWideningInVarTag` (E3e), `reportNonIntStringArrayKey`,
   `reportUnsafeArrayStringKeyCasting` and
   `reportPossiblyNonexistent{Constant,General}ArrayOffset` (E3b),
-  `editorUrl`/`editorUrlTitle` (F3). phpstan-strict-rules turns several of
+  `editorUrl`/`editorUrlTitle` (F3), and the `featureToggles`: each
+  bleeding-edge check phpstan-rs already runs unconditionally becomes a
+  setting that defaults on (`unusedLabel`, `newOnNonObject`,
+  `checkDateIntervalConstructor`, `newStaticInAbstractClassStaticMethod`,
+  `checkPrintfParameterTypes`, `checkParameterCastableToNumberFunctions`,
+  `internalTag`, `unnecessaryNullCoalesce`, `sortWithoutEffect` and the
+  rest, checked one by one; about 70 of the rules oracle's phpstan-rs-only
+  findings are these), and `skipCheckGenericClasses` (`DOMNamedNodeMap`,
+  `ParentIterator`, `RecursiveCachingIterator`, `RecursiveFilterIterator`,
+  `RecursiveRegexIterator`, `ReflectionObject`) exempts those classes from
+  `missingType.generics`, reported for them today (11 findings,
+  `bug-9615.php` and the `internal-classes-overload-offset-access*.php`
+  files). phpstan-strict-rules turns several of
   these on (`polluteScopeWithBlock: false` among them), so E4's
   ext-strict-rules reads them. PHPStan's runtime parameters (`tmpDir`,
   `resultCache*`, `productionMode`, `bootstrapFiles`, the playground and
@@ -1877,8 +1904,14 @@ Follow-ups:
     `r(): Bar` returns `Bar` today, and a parent's `@param Baz $o` leaves
     `$o` as `Bar` in the child's body (an inherited `@return array<int>` on
     `: array` already applies; nsrt `method-phpDocs-inheritdoc.php`,
-    `methodPhpDocs-implicitInheritance.php`). On a variadic parameter with no
-    native type, an array PHPDoc type is the element type
+    `methodPhpDocs-implicitInheritance.php`). The combination reads the
+    PHPDoc with its aliases resolved: `@param OwnerBackup|null` for a
+    `@phpstan-type OwnerBackup array{name: string}` on `?array` is
+    `array{name: string}|null|array` today, the native `array` added back
+    beside the alias, so it is `missingType.iterableValue` (a written
+    `array{name: string}|null` already works; the rules oracle's
+    `bug-8190.php`, `bug-13654.php`, `bug-7954.php`). On a variadic
+    parameter with no native type, an array PHPDoc type is the element type
     (`decideTypeFromReflection`): `@param array ...$args` takes any
     argument and `@param string[] ...$args` takes strings, where today
     `variadicMethod(1, 2, 3)` is three `argument.type` "expects array"
@@ -3960,7 +3993,10 @@ fixture:
   - a PHPDoc type resolving to `never` (`int&string`, a template whose
     bound makes it empty) is `return.unresolvableType`/
     `parameter.unresolvableType`/`assert.unresolvableType`, unreported
-    today (32 oracle findings);
+    today (32 oracle findings); a parameter whose PHPDoc type doesn't
+    resolve still has one, so `@param value-of<T> $v` on an untyped `$v`
+    is not also `missingType.parameter` (the rules oracle's
+    `unresolvable-parameter.php`);
   - the type-alias checks: a cycle (`@phpstan-type A = B`, `B = A`) is
     `typeAlias.circular`, and `class.notFound` today; an alias resolving
     to `never` (`int&string`) is `typeAlias.unresolvableType`; an invalid
