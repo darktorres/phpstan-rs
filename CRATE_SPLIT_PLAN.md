@@ -3097,7 +3097,11 @@ identifiers have no PHPStan-only findings left, or each remaining one is an
 approved deviation (an identifier named differently, such as
 `class.abstractMethodNotImplemented` for `method.abstract`, or a
 PHPStan-specific check: `void.pure`, `phpstan.*`, `phpParser.*`,
-`phpstanApi.*` outside a PHPStan extension's package).
+`phpstanApi.*` outside a PHPStan extension's package, `function.inner`,
+PHPStan's "inner named functions are not supported"). A certain impure
+point PHPStan names `impure.*` is `possiblyImpure.*` in phpstan-rs until
+C5's `functionMetadata.php` says which built-ins have side effects (42
+rules-oracle findings).
 
 **E1. Collectors and project-level rules**, one commit each:
 
@@ -3408,6 +3412,17 @@ fixture:
     alias name (`123bad`) and an `@phpstan-import-type` of an alias the
     class doesn't define are reported; all unreported today;
   - `@mixin int` is `mixin.nonObject`, unreported today;
+  - a PHPDoc tag a trait can't carry is reported: `@phpstan-self-out`,
+    `@phpstan-sealed`, `@mixin`, `@method`, `@property` and
+    `@phpstan-type` on a trait (`selfOut.trait`, `sealed.onTrait`,
+    `mixin.trait`, `methodTag.trait`, `propertyTag.trait`,
+    `typeAlias.trait`), unreported today, and a type resolving to `never`
+    in `@mixin`, `@method`, `@property` or a class constant's `@var` is
+    `*.unresolvableType` as in parameters and returns;
+  - the purity checks cover property hooks (`impure.propertyHookCall`,
+    `purePropertyHook.void`, `impurePropertyHook.pure`) and a pure
+    function's callable-only redundancy
+    (`pureFunction.redundantUnlessCallable`), unreported today;
   - an enum's duplicate case value is found through constant expressions:
     `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
     literal duplicate already is);
@@ -3425,7 +3440,11 @@ fixture:
   - an empty body is checked like any other: a function or method with a
     non-`void` return type and an empty body (or only a comment) throws a
     `TypeError` ("none returned") and isn't `return.missing` today; 500 of
-    the rules oracle's 553 PHPStan-only `return.missing` are this;
+    the rules oracle's 553 PHPStan-only `return.missing` are this. The
+    same exemption skips the `@param-out` end-of-execution check: `/**
+    @param-out positive-int $i */ function a(int &$i): void {}` isn't
+    reported, while a non-empty body that never assigns `$i` is
+    (`parameterByRef.executionEnd`, PHPStan's `paramOut.type`);
   - a finally block that changes a value returned by reference is
     `return.byRefFinally` (13 rules-oracle findings), and every exit point
     a finally block overrides is `finally.exitPoint` (25 of 42 missed);
