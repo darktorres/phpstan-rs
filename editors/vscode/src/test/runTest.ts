@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import { runTests } from "@vscode/test-electron";
 
@@ -5,14 +6,21 @@ import { runTests } from "@vscode/test-electron";
  * Launches a real VS Code instance (downloaded/cached by
  * `@vscode/test-electron`) with this extension installed, running the
  * Mocha suite in `./suite/index.js` inside it. Extension CI runs it; run
- * it by hand with `bun run test:smoke` inside `editors/vscode/`. Requires a built `phpstan-rs` binary; point
- * `PHPSTAN_RS_TEST_BIN` at one (see `suite/activation.smoke.test.ts`).
+ * it by hand with `bun run test:smoke` inside `editors/vscode/`. Requires a
+ * built `phpstan-rs` binary; point `PHPSTAN_RS_TEST_BIN` at one (see
+ * `suite/activation.smoke.test.ts`). It runs the oldest VS Code
+ * `engines.vscode` accepts, so the download is the same every run.
  */
 async function main(): Promise<void> {
   const extensionDevelopmentPath = path.resolve(__dirname, "../../");
   const extensionTestsPath = path.resolve(__dirname, "./suite/index");
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(extensionDevelopmentPath, "package.json"), "utf8"),
+  ) as { engines: { vscode: string } };
+  const version = manifest.engines.vscode.replace(/^[\^~>=]+/, "");
 
   await runTests({
+    version,
     extensionDevelopmentPath,
     extensionTestsPath,
     launchArgs: [
