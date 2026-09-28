@@ -7415,7 +7415,14 @@ targets to the crates they test, retargets the gates from the package's paths
 to the crates', rewrites the docs, and asserts the build-time targets. G
 changes no behaviour: the corpus, type-snapshot and baseline gates (4–6) and
 every fixture's expectations are byte-identical through every G commit, and a
-fixture's or test's name changes only through gate 3's rename manifest. The
+fixture's or test's name changes only through gate 3's rename manifest. Nothing
+reads a path-dependent intrinsic (`type_name`, `module_path!`, `TypeId`) into
+output. The one output a move does change is an internal error's location in
+phpstan-rs's source (`file:line:col`, `CRASH_REPORTING_PLAN.md` §6.1.2), which no
+gate holds, since the corpus and fixtures have none: every moved file's panics
+print a new path, and the crash reporter, fingerprinting an event as
+`["panic", <location>]`, groups them as new issues from the first release after
+G. The
 performance gate (8) holds each extraction to the previous commit; a function
 it shows losing its inlining across the new boundary gets `#[inline]` in the
 extraction's commit (the thin-LTO profile, decided in A0, covers the rest).
