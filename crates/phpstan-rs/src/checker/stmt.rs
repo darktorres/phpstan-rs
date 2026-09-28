@@ -3,6 +3,7 @@ use crate::checker::{
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
     purge_stale_narrowing_for, union_types,
 };
+use crate::registry::class_decl_name;
 use syntax::ast::*;
 use types::Type;
 
@@ -862,7 +863,7 @@ impl<'a> Checker<'a> {
             // included.
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
             StmtKind::ClassDecl(c) => {
-                let fqn = self.name_ctx.declared_name(&c.name);
+                let fqn = self.name_ctx.declared_name(class_decl_name(c));
                 self.check_nested_class_declaration(&fqn, c);
                 if self.settings.sidz.check_magic_numbers {
                     self.check_magic_numbers_in_properties(&c.properties);

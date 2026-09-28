@@ -13,6 +13,7 @@
 
 use crate::checker::NamedArgumentCallFacts;
 use crate::registry::Registry;
+use crate::registry::class_decl_name;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -73,7 +74,7 @@ pub(crate) fn renamed_parameter_overrides<'p>(
                 StmtKind::Namespace(name) => name_ctx.set_namespace(name),
                 StmtKind::Use(imports) => name_ctx.add_uses(imports),
                 StmtKind::ClassDecl(c) => {
-                    let fqn = name_ctx.declared_name(&c.name);
+                    let fqn = name_ctx.declared_name(class_decl_name(c));
                     class_overrides(registry, &fqn, c, &mut overrides);
                 }
                 _ => {}

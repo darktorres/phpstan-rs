@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
+use crate::registry::class_decl_name;
 use crate::registry::function_sig::{
     FunctionReflection, ParameterReflection, apply_implicit_nullable_default,
     build_template_params, build_type_aliases, infer_class_const_type, mark_template_params,
@@ -958,7 +959,7 @@ impl ClassReflection {
         // (properties, consts, `@extends`/`@implements` args, and every
         // method's params/return type below) carries the real metadata
         // from here instead of a bare name.
-        let class_scope = ctx.declared_name(&c.name);
+        let class_scope = ctx.declared_name(class_decl_name(c));
         let template_params: FxHashMap<String, TemplateParam> = class_doc
             .as_ref()
             .map(|d| build_template_params(d, &class_scope, ctx))

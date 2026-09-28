@@ -25,6 +25,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
+use crate::registry::class_decl_name;
 use crate::registry::stubs;
 use composer::PackageOwner;
 use composer::constraint;
@@ -803,7 +804,9 @@ fn collect_declared_classes(stmts: &[Stmt], ctx: &mut NameContext, out: &mut Vec
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::ClassDecl(c) => out.push((ctx.declared_name(&c.name), c.name_span)),
+            StmtKind::ClassDecl(c) => {
+                out.push((ctx.declared_name(class_decl_name(c)), c.name_span))
+            }
             StmtKind::EnumDecl(e) => out.push((ctx.declared_name(&e.name), e.name_span)),
             StmtKind::Block(body) => collect_declared_classes(body, ctx, out),
             _ => {}

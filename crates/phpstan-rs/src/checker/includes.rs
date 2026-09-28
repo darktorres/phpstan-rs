@@ -13,6 +13,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::checker::{Checker, Locals};
+use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
@@ -62,7 +63,7 @@ pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, 
             }
             StmtKind::ClassDecl(c) => {
                 for k in &c.consts {
-                    add(class_constant_key(&c.name, &k.name), &k.value);
+                    add(class_constant_key(class_decl_name(c), &k.name), &k.value);
                 }
             }
             StmtKind::EnumDecl(e) => {

@@ -11,6 +11,7 @@ use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::ignore_comments;
 use crate::pest_config::PestConfig;
+use crate::registry::class_decl_name;
 use crate::registry::stubs;
 use crate::registry::{BodySource, FileBodies, Origin, Provenance, Registry};
 use diagnostics::{self, Diagnostic, DiagnosticBuilder};
@@ -2225,7 +2226,7 @@ fn declared_names_with_context(
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
             StmtKind::FunctionDecl(f) => functions.push(ctx.declared_name(&f.name)),
-            StmtKind::ClassDecl(c) => classes.push(ctx.declared_name(&c.name)),
+            StmtKind::ClassDecl(c) => classes.push(ctx.declared_name(class_decl_name(c))),
             StmtKind::EnumDecl(e) => classes.push(ctx.declared_name(&e.name)),
             // Must mirror Registry::index's recursion into `if`/block
             // bodies (the `if (!function_exists(...)) { function foo()

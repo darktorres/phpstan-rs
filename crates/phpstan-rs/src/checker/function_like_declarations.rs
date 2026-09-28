@@ -13,6 +13,7 @@
 use crate::checker::calls::contains_nullsafe_access;
 use crate::checker::type_declarations::TypePosition;
 use crate::checker::{Checker, Locals};
+use crate::registry::class_decl_name;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -74,7 +75,7 @@ impl<'a> Checker<'a> {
                 self.walk_promoted_in_body(&f.body, &f.name);
             }
             StmtKind::ClassDecl(c) => {
-                let fqn = self.name_ctx.declared_name(&c.name);
+                let fqn = self.name_ctx.declared_name(class_decl_name(c));
                 let previous_class = self.current_class.replace(fqn.clone());
                 self.check_promoted_in_methods(&fqn, c.kind, &c.methods);
                 self.walk_promoted_in_property_hooks(&fqn, &c.properties);
@@ -152,8 +153,8 @@ impl<'a> Checker<'a> {
                 let registry_name = self.anonymous_class_names.get(&e.span).cloned();
                 let previous_class =
                     std::mem::replace(&mut self.current_class, registry_name.clone());
-                self.check_promoted_in_methods(&decl.name, decl.kind, &decl.methods);
-                self.walk_promoted_in_property_hooks(&decl.name, &decl.properties);
+                self.check_promoted_in_methods(class_decl_name(decl), decl.kind, &decl.methods);
+                self.walk_promoted_in_property_hooks(class_decl_name(decl), &decl.properties);
                 self.current_class = previous_class;
             }
             _ => {

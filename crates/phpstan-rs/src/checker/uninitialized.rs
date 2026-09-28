@@ -23,6 +23,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::checker::Checker;
+use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::visit::child_stmts;
 
@@ -81,7 +82,7 @@ pub(super) fn class_ever_assigns_property(c: &ClassDecl, prop: &str) -> bool {
         // fresh instance, not `$this`. Collected once per method (not
         // globally) since the same variable name in a different method
         // could hold anything.
-        let self_vars = collect_self_instance_vars(&m.function.body, &c.name);
+        let self_vars = collect_self_instance_vars(&m.function.body, class_decl_name(c));
         body_ever_assigns_property(&m.function.body, prop, &self_vars)
     })
 }

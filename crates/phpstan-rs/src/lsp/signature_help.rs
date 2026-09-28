@@ -41,6 +41,7 @@ use std::path::Path;
 
 use crate::project::Project;
 use crate::registry::Registry;
+use crate::registry::class_decl_name;
 use syntax::ast::{
     Arg, ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
 };
@@ -250,7 +251,7 @@ impl<'a> Walker<'a> {
     /// class's own body) see, and it deliberately does NOT pass one in
     /// here.
     fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, best: &mut Option<SigHelp>) {
-        let fqn = ctx.declared_name(&c.name);
+        let fqn = ctx.declared_name(class_decl_name(c));
         for p in &c.properties {
             if let Some(d) = &p.default {
                 self.expr(d, &mut ctx.clone(), Some(&fqn), best);

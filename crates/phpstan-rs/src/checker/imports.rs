@@ -1,6 +1,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::{Checker, class_kind_identifier};
+use crate::registry::class_decl_name;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 
@@ -248,11 +249,11 @@ impl<'a> Checker<'a> {
                     let scope = used_names
                         .entry(current_namespace_lower.clone())
                         .or_default();
-                    if !scope.insert(c.name.to_ascii_lowercase()) {
+                    if !scope.insert(class_decl_name(c).to_ascii_lowercase()) {
                         let qualified = if current_namespace.is_empty() {
-                            c.name.to_string()
+                            class_decl_name(c).to_string()
                         } else {
-                            format!("{current_namespace}\\{}", c.name)
+                            format!("{current_namespace}\\{}", class_decl_name(c))
                         };
                         self.report_builder(
                             DiagnosticBuilder::new(format!(

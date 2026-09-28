@@ -268,7 +268,7 @@ fn find_function_by_name<'a>(
 ) -> Option<(&'a FunctionDecl, bool)> {
     match class_name {
         Some(class_name) => stmts.iter().find_map(|stmt| match &stmt.kind {
-            StmtKind::ClassDecl(c) if c.name.as_ref() == class_name => c
+            StmtKind::ClassDecl(c) if c.name.as_deref() == Some(class_name) => c
                 .methods
                 .iter()
                 .find(|m| m.function.name.as_ref() == function_name)

@@ -44,7 +44,6 @@ pub(crate) fn generate(corpora: &[Corpus]) -> String {
             let mut walk = Walk {
                 file: &file,
                 extension: *extension,
-                namespace: String::new(),
                 entries: &mut entries,
             };
             walk.stmts(&stmts);
@@ -75,10 +74,17 @@ pub(crate) fn generate(corpora: &[Corpus]) -> String {
     out
 }
 
+/// A declaration's name with its namespace, which name resolution filled in.
+fn declared(namespaced_name: &Option<std::sync::Arc<str>>) -> String {
+    namespaced_name
+        .as_deref()
+        .expect("name resolution names every declaration statement")
+        .to_string()
+}
+
 struct Walk<'a, 'e> {
     file: &'a str,
     extension: Option<&'a str>,
-    namespace: String,
     entries: &'e mut BTreeMap<(&'static str, String), Entry>,
 }
 
@@ -86,7 +92,6 @@ impl Walk<'_, '_> {
     fn stmts(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             match &stmt.kind {
-                StmtKind::Namespace(name) => self.namespace = name.trim_matches('\\').to_string(),
                 StmtKind::Block(inner) => self.stmts(inner),
                 StmtKind::If {
                     then_branch,
@@ -105,7 +110,7 @@ impl Walk<'_, '_> {
                         ClassKind::Enum => "enum",
                         ClassKind::Class => "class",
                     };
-                    let name = self.qualify(&c.name);
+                    let name = declared(&c.namespaced_name);
                     let parent = (c.kind == ClassKind::Class)
                         .then(|| c.extends.first().map(resolved))
                         .flatten();
@@ -121,7 +126,7 @@ impl Walk<'_, '_> {
                     }
                 }
                 StmtKind::EnumDecl(en) => {
-                    let name = self.qualify(&en.name);
+                    let name = declared(&en.namespaced_name);
                     let interfaces = en.implements.iter().map(resolved).collect();
                     let e = self.entry("enum", name.to_ascii_lowercase(), &name, &[]);
                     if e.declarations.len() == 1 {
@@ -129,12 +134,12 @@ impl Walk<'_, '_> {
                     }
                 }
                 StmtKind::FunctionDecl(f) => {
-                    let name = self.qualify(&f.name);
+                    let name = declared(&f.namespaced_name);
                     self.entry("function", name.to_ascii_lowercase(), &name, &f.attrs);
                 }
                 StmtKind::GlobalConst(consts) => {
                     for c in consts {
-                        let name = self.qualify(&c.name);
+                        let name = declared(&c.namespaced_name);
                         let key = constant_key(&name);
                         let value = syntax::printer::print_expr(&c.value);
                         let e = self.entry("constant", key, &name, &c.attrs);
@@ -183,14 +188,6 @@ impl Walk<'_, '_> {
         let e = self.entry("constant", key, &name, &[]);
         e.case_insensitive |= case_insensitive;
         e.values.push(value);
-    }
-
-    fn qualify(&self, name: &str) -> String {
-        if self.namespace.is_empty() {
-            name.to_string()
-        } else {
-            format!("{}\\{name}", self.namespace)
-        }
     }
 
     fn entry(

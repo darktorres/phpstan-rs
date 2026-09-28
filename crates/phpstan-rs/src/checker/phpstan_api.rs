@@ -67,6 +67,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::checker::Checker;
+use crate::registry::class_decl_name;
 use crate::registry::{FunctionReflection, Registry, is_phpstan_namespace};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
@@ -854,7 +855,7 @@ impl<'a> Walker<'a> {
     }
 
     fn check_class(&mut self, c: &ClassDecl, ctx: &NameContext) {
-        let fqn = ctx.declared_name(&c.name);
+        let fqn = ctx.declared_name(class_decl_name(c));
         for parent in &c.extends {
             if let Some(pfqn) = self.resolve_if_phpstan(parent, ctx) {
                 // Real `ApiClassExtendsRule`'s own narrow

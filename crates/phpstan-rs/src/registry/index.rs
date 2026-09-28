@@ -2,6 +2,7 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::registry::Registry;
+use crate::registry::class_decl_name;
 use crate::registry::class_info::MemberSpans;
 use crate::registry::provenance::{Origin, Provenance};
 use crate::registry::{
@@ -605,7 +606,7 @@ fn build_declarations_with_context(
                 for m in &c.methods {
                     collect_nested_defines(&m.function.body, out);
                 }
-                let name = intern(&ctx.declared_name(&c.name));
+                let name = intern(&ctx.declared_name(class_decl_name(c)));
                 let mut info = ClassReflection::from_decl(c, ctx);
                 info.record_provenance(origin, &name, c.name_span, &MemberSpans::of_class(c));
                 out.push(BuiltDecl::Class {

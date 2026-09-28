@@ -1,3 +1,4 @@
+use crate::registry::class_decl_name;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
@@ -64,7 +65,7 @@ impl DuplicateClassSites {
                         continue;
                     }
                     self.record(
-                        ctx.declared_name(&c.name),
+                        ctx.declared_name(class_decl_name(c)),
                         path,
                         c.name_span,
                         c.kind,

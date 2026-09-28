@@ -33,6 +33,12 @@ use syntax::name_resolution::{NameContext, for_each_in_context};
 use syntax::token::Span;
 use syntax::visit::{child_exprs, child_stmts};
 
+/// A class declaration's name, or `class@anonymous` for an anonymous
+/// class.
+pub(crate) fn class_decl_name(c: &ClassDecl) -> &str {
+    c.name.as_deref().unwrap_or("class@anonymous")
+}
+
 pub(crate) fn synthetic_name(
     relative_file: &str,
     start_line: u32,

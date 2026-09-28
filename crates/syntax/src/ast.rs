@@ -450,8 +450,8 @@ pub enum ClassKind {
 
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
-    // `"class@anonymous"` for an anonymous class.
-    pub name: Name,
+    // `None` for an anonymous class.
+    pub name: Option<Name>,
     // The name with the file's namespace; `None` for an anonymous class.
     // Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,

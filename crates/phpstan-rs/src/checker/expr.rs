@@ -13,6 +13,7 @@ use crate::checker::{
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::FunctionReflection;
+use crate::registry::class_decl_name;
 use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -2481,7 +2482,7 @@ impl<'a> Checker<'a> {
                 let registry_name = self
                     .current_anonymous_class
                     .clone()
-                    .unwrap_or_else(|| decl.name.to_string());
+                    .unwrap_or_else(|| class_decl_name(decl).to_string());
                 self.check_property_declarations(
                     &registry_name,
                     "class@anonymous",
@@ -2502,7 +2503,7 @@ impl<'a> Checker<'a> {
                             });
                     self.check_function_with_ancestor_hint(
                         &m.function,
-                        Some(&decl.name),
+                        Some(class_decl_name(decl)),
                         m.is_static,
                         true,
                         ancestor_sig,
@@ -2513,11 +2514,11 @@ impl<'a> Checker<'a> {
                 // method/param attributes are already covered inside
                 // `check_function` above.
                 for p in &decl.properties {
-                    self.check_attributes(&p.attrs, &decl.name);
+                    self.check_attributes(&p.attrs, class_decl_name(decl));
                     self.check_attribute_targets(&p.attrs, ATTRIBUTE_TARGET_PROPERTY, "property");
                 }
                 for cc in &decl.consts {
-                    self.check_attributes(&cc.attrs, &decl.name);
+                    self.check_attributes(&cc.attrs, class_decl_name(decl));
                     self.check_attribute_targets(
                         &cc.attrs,
                         ATTRIBUTE_TARGET_CLASS_CONSTANT,

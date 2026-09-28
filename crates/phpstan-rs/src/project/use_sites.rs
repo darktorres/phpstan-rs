@@ -28,6 +28,7 @@
 //! and merged into this same index by `Project::ensure_member_index_built`/
 //! `Project::reindex_tier2_for_file`.
 
+use crate::registry::class_decl_name;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
@@ -416,7 +417,7 @@ impl<'a> ClassFnRefWalker<'a> {
     }
 
     fn class(&self, c: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, RefTarget)>) {
-        let fqn = ctx.declared_name(&c.name);
+        let fqn = ctx.declared_name(class_decl_name(c));
         for (name, span) in c.extends.iter().zip(c.extends_spans.iter()) {
             if let Some(target) = resolve_class_ref(name, Some(&fqn), ctx) {
                 out.push((*span, RefTarget::Class(target)));

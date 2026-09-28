@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use crate::banned::BannedConstruct;
 use crate::registry::Registry;
+use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::{Position, Span};
 use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
@@ -201,7 +202,7 @@ impl<'a> Walker<'a> {
                 self.stmts(&f.body);
             }
             StmtKind::ClassDecl(c) => {
-                let fqn = ctx.declared_name(&c.name);
+                let fqn = ctx.declared_name(class_decl_name(c));
                 self.class_like(&fqn, &c.methods, &c.properties, &c.consts);
             }
             StmtKind::EnumDecl(e) => {
@@ -390,7 +391,12 @@ impl<'a> Walker<'a> {
                 for a in args {
                     self.expr(&a.value);
                 }
-                self.class_like(&decl.name, &decl.methods, &decl.properties, &decl.consts);
+                self.class_like(
+                    class_decl_name(decl),
+                    &decl.methods,
+                    &decl.properties,
+                    &decl.consts,
+                );
             }
             _ => {}
         }

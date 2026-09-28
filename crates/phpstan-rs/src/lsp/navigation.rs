@@ -44,6 +44,7 @@ use std::sync::Arc;
 
 use crate::project::Project;
 use crate::registry::Registry;
+use crate::registry::class_decl_name;
 use rustc_hash::FxHashSet;
 use std::path::Path;
 use syntax::ast::*;
@@ -864,7 +865,7 @@ impl<'a> Walker<'a> {
     }
 
     fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, Resolved)>) {
-        let fqn = ctx.declared_name(&c.name);
+        let fqn = ctx.declared_name(class_decl_name(c));
         self.record(out, c.name_span, Resolved::Class(fqn.clone()));
         for (name, span) in c.extends.iter().zip(c.extends_spans.iter()) {
             if self.anchor.matches(*span)

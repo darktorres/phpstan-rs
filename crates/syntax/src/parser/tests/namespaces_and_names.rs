@@ -77,7 +77,7 @@ fn braced_namespace_declarations_splice_their_body_in() {
     let class_names: Vec<&str> = program
         .iter()
         .filter_map(|s| match &s.kind {
-            StmtKind::ClassDecl(c) => Some(c.name.as_ref()),
+            StmtKind::ClassDecl(c) => c.name.as_deref(),
             _ => None,
         })
         .collect();

@@ -11,6 +11,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::parent_calls::{HasContent, Invocation, ParentCallRule};
+use crate::registry::class_decl_name;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
@@ -30,7 +31,7 @@ fn collect_classes<'a>(
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::ClassDecl(c) => out.push((ctx.declared_name(&c.name), c)),
+            StmtKind::ClassDecl(c) => out.push((ctx.declared_name(class_decl_name(c)), c)),
             StmtKind::Block(body) => collect_classes(body, ctx, out),
             _ => {}
         }

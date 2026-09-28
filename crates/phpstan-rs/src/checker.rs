@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::pest_config;
 use crate::registry::Registry;
+use crate::registry::class_decl_name;
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
@@ -1854,7 +1855,7 @@ impl<'a> Checker<'a> {
                     // self/parent/static, and the undefined-class check
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.
-                    let fqn = self.name_ctx.declared_name(&c.name);
+                    let fqn = self.name_ctx.declared_name(class_decl_name(c));
                     if !self.facts_only {
                         self.check_class_generic_bounds(&fqn, c);
                         let description = match c.kind {

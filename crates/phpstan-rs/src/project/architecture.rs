@@ -9,6 +9,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
+use crate::registry::class_decl_name;
 use crate::registry::stubs;
 use syntax::ast::*;
 use syntax::token::Span;
@@ -39,7 +40,7 @@ fn collect_declared<'a>(
             StmtKind::Use(imports) => ctx.add_uses(imports),
             StmtKind::ClassDecl(c) => {
                 out.insert(
-                    ctx.declared_name(&c.name).to_ascii_lowercase(),
+                    ctx.declared_name(class_decl_name(c)).to_ascii_lowercase(),
                     Declared {
                         name_span: c.name_span,
                         span: stmt.span,

@@ -18,6 +18,7 @@
 //!   the expected calls;
 //! - `mock.bannedClass`: mocking a class `mock_banned_classes` lists.
 
+use crate::registry::class_decl_name;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
@@ -218,7 +219,7 @@ impl<'a> Walker<'a> {
                 c.name_span,
                 format!(
                     "Test class {} has only mock properties; nothing real is under test in its fixtures.",
-                    c.name
+                    class_decl_name(c)
                 ),
                 "mock.onlyMockProperties",
             );

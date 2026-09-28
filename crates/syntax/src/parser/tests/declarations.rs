@@ -120,7 +120,7 @@ fn a_class_named_the_same_as_a_keyword_keeps_its_own_declared_case() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.name, "Enum");
+    assert_eq!(c.name.as_deref(), Some("Enum"));
 }
 
 #[test]
@@ -605,7 +605,7 @@ fn hooks_on_promoted_constructor_property_parse() {
 #[test]
 fn readonly_class_still_parses_as_a_class() {
     let program = parse(r#"<?php readonly class Foo {}"#);
-    assert!(matches!(&program[0].kind, StmtKind::ClassDecl(c) if c.name == "Foo"));
+    assert!(matches!(&program[0].kind, StmtKind::ClassDecl(c) if c.name.as_deref() == Some("Foo")));
 }
 
 // These exercise the real `Attribute { name, args }` node parsed onto

@@ -128,7 +128,7 @@ impl Parser {
             // only used structurally within this one expression. Interned
             // like any other name: every anonymous class in the corpus
             // shares this identical text, a real (if small) dedup win.
-            name: self.interner.name("class@anonymous"),
+            name: None,
             // No real name token to point at - see `ClassDecl::name_span`'s
             // own doc comment.
             name_span: decl_span,
@@ -636,7 +636,7 @@ impl Parser {
 
         Ok(ClassDecl {
             namespaced_name: None,
-            name: self.interner.name(&name),
+            name: Some(self.interner.name(&name)),
             name_span,
             kind,
             extends,

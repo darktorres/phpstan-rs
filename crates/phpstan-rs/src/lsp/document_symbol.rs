@@ -4,6 +4,7 @@
 //! needed) rather than `DeclLocations`, which is flattened project-wide
 //! by FQN and would lose the per-file nesting a document outline needs.
 
+use crate::registry::class_decl_name;
 use lsp_types::{DocumentSymbol, SymbolKind};
 
 use syntax::ast::{ClassDecl, ClassKind, EnumDecl, FunctionDecl, MethodDecl, Stmt, StmtKind};
@@ -103,7 +104,13 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
         )
     }));
     children.extend(c.methods.iter().map(method_symbol));
-    symbol(c.name.to_string(), kind, c.span, c.name_span, children)
+    symbol(
+        class_decl_name(c).to_string(),
+        kind,
+        c.span,
+        c.name_span,
+        children,
+    )
 }
 
 fn enum_symbol(e: &EnumDecl) -> DocumentSymbol {

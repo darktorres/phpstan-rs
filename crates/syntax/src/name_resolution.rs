@@ -400,7 +400,10 @@ impl VisitorMut for Resolver {
                         f.namespaced_name = Some(self.ctx.declared_name(&f.name).into());
                     }
                     StmtKind::ClassDecl(c) => {
-                        c.namespaced_name = Some(self.ctx.declared_name(&c.name).into());
+                        c.namespaced_name = c
+                            .name
+                            .as_ref()
+                            .map(|name| self.ctx.declared_name(name).into());
                     }
                     StmtKind::EnumDecl(e) => {
                         e.namespaced_name = Some(self.ctx.declared_name(&e.name).into());
