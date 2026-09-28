@@ -4502,7 +4502,9 @@ fixture:
   - a method call or property read on a plain `object` is
     `method.notFound`/`property.notFound` (it declares no members):
     `$o->getItem()` and `$o->x` on `object $o` are unreported today (the
-    oracle finds 59 "undefined method/property object::");
+    oracle finds 59 "undefined method/property object::"), and so is
+    `$p->test()` on a template bounded by `object`
+    (`php-82-dynamic-properties-allow.php`);
   - a property fetch inside `isset()`, `empty()` and `??` checks its
     receiver as the offset checks do: on a `string` it is
     `property.nonObject`, the fetch never finding anything (`isset($s->p)`,
@@ -4954,6 +4956,10 @@ fixture:
     (`set (int|array $v)` on `int`); and the native type where the PHPDoc
     doesn't apply (`@param Foo|Bar[]` on `array`, an unresolvable
     `array<int, int, int>` or `array{foo: int}&array{bar: string}`).
+    `missingType.generics` walks the same sites, `@param-closure-this`
+    included (the rules oracle's 18 PHPStan-only: class tags,
+    `@param-out`, `@phpstan-self-out`, an inline `@var`, a conditional
+    return, a set hook's parameter);
 - (f) control flow, returns, throws and generators:
   - an empty body is checked like any other: a function or method with a
     non-`void` return type and an empty body (or only a comment) throws a
