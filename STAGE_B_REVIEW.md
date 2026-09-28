@@ -244,7 +244,7 @@ through `check-project`.
 
 ### Crashes and false positives (probed)
 
-- [ ] **F23. Deep nesting crashes the process.** 200,000 nested `{ }`
+- [x] **F23. Deep nesting crashes the process.** (`041fcc46`, `288f4fda`) 200,000 nested `{ }`
   blocks overflow the parser's stack and abort the whole run ("has
   overflowed its stack", exit 134). The depth guard (`MAX_EXPR_DEPTH`)
   covers expressions only; statement nesting (blocks, control-structure
