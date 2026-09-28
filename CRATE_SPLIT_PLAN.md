@@ -4868,6 +4868,12 @@ fixture:
     unreported today;
   - `@phpstan-consistent-constructor` on a class with a private
     constructor is `consistentConstructor.private`, unreported today;
+  - `parameter.requiredAfterOptional` covers closures and arrow functions
+    as it does functions and methods, with the same per-version wording
+    (8.0, 8.1 for `?int $foo = null`, 8.3 for `int|null $foo = null`);
+    unreported today (all 25 of the rules oracle's PHPStan-only,
+    `required-parameter-after-optional-closures.php`,
+    `required-parameter-after-optional-arrow.php`, `callables.php:151`);
   - a template no parameter references is
     `method.templateTypeNotInParameter` wherever else it appears: today it
     is reported only when the return type uses it, so a template used
