@@ -70,7 +70,7 @@ use crate::checker::Checker;
 use crate::registry::{FunctionReflection, Registry, is_phpstan_namespace};
 use diagnostics::{Diagnostic, DiagnosticBuilder};
 use syntax::ast::*;
-use syntax::name_resolution::NameContext;
+use syntax::name_resolution::{NameContext, for_each_in_context};
 use syntax::token::Span;
 use syntax::visit::{child_exprs, child_stmts};
 
@@ -96,11 +96,6 @@ pub(crate) fn check_phpstan_api_usage(
     registry: &Registry,
     file_package: Option<Option<&str>>,
 ) -> Vec<Diagnostic> {
-    // Same "last `namespace` seen wins, brace-delimited multi-namespace
-    // files are rare enough not to bother" simplification
-    // `Checker::check_program` itself already makes for exactly the same
-    // reason (see its own comment there).
-    let ctx = NameContext::build(program);
     let mut walker = Walker {
         registry,
         diagnostics: Vec::new(),
@@ -110,9 +105,9 @@ pub(crate) fn check_phpstan_api_usage(
         file_package,
     };
     let empty = ParamTypes::default();
-    for stmt in program {
-        walker.check_stmt(stmt, &ctx, &empty, "<main>");
-    }
+    for_each_in_context(program, |stmt, ctx| {
+        walker.check_stmt(stmt, ctx, &empty, "<main>");
+    });
     walker.diagnostics
 }
 

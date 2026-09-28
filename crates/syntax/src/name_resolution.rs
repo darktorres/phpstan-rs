@@ -1,31 +1,14 @@
 //! Name resolution: what a class, function or constant name written in
 //! a file refers to, given the file's `namespace` and `use` statements.
 
-use std::sync::Arc;
-
 use crate::ast::*;
+use crate::token::Position;
 use crate::visit::{
     VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_decl_mut, walk_enum_decl_mut,
     walk_expr_mut, walk_stmt_mut, walk_stmts_mut,
 };
 
-/// `NameContext::use_map`'s own backing map - `imbl::HashMap` (a
-/// persistent, structurally-shared HAMT), not `std::collections::HashMap`:
-/// `NameContext` is deep-cloned once per branch of every top-level
-/// conditional-declaration idiom (`registry::index::build_declarations_
-/// with_context`'s own `StmtKind::If` arm) to keep each branch's own
-/// `use`/namespace changes from leaking, and a plain `HashMap` clone
-/// rehashes every key and deep-clones every `String` pair. `imbl::
-/// HashMap::clone` is O(1) (a pointer bump plus a refcount increment) -
-/// see `Checker`'s own `LocalsMap` (`src/checker.rs`) for the identical
-/// rationale, applied there to the checker's per-branch variable-type
-/// map instead of this registry-side use-import map.
-type UseMap = imbl::GenericHashMap<
-    (UseKind, String),
-    String,
-    rustc_hash::FxBuildHasher,
-    imbl::shared_ptr::DefaultSharedPtr,
->;
+type UseMap = rustc_hash::FxHashMap<(UseKind, String), String>;
 
 /// A single leading `\` marks "fully qualified from the global namespace"
 /// (`\Exception`) - every declaration is keyed by its own fully-qualified
@@ -71,43 +54,56 @@ fn strip_namespace_relative_prefix(name: &str) -> Option<&str> {
 /// the two halves of this registry would disagree with each other.
 #[derive(Debug, Clone, Default)]
 pub struct NameContext {
-    // `Arc<str>`, not `String`, for the same O(1)-clone reason `use_map`
-    // is `imbl`-backed rather than `std::collections::HashMap` - see
-    // `UseMap`'s own doc comment.
-    namespace: Arc<str>,
+    namespace: String,
     // (which of PHP's three `use`-namespaces, short name or `as Alias`)
     // -> the full path it was imported from. Each namespace is its own
     // key space - see `add_uses`'s own doc comment.
     use_map: UseMap,
 }
 
-impl NameContext {
-    /// Scans a file's top-level statements for `namespace`/`use`
-    /// declarations, applying whichever `namespace` statement comes
-    /// *last* in the file to every declaration, regardless of where each
-    /// one actually appears - a real, if rare, inaccuracy: real PHP
-    /// genuinely allows more than one semicolon-style `namespace Foo;` in
-    /// a single file, each one switching the active namespace for
-    /// everything that follows until the next one, not a "one per file"
-    /// rule. `registry::build_declarations`'s sibling, positional
-    /// `ctx.set_namespace` walk gets this right, and so does
-    /// `Checker::check_program`'s own main per-statement loop - this
-    /// whole-file `build` function itself is kept only for a few
-    /// genuinely position-independent, whole-file questions that
-    /// `check_program` still uses it for (see its own call sites' doc
-    /// comments), where "last namespace wins" is not a problem.
-    pub fn build(stmts: &[Stmt]) -> NameContext {
-        let mut ctx = NameContext::default();
+/// Calls `f` with each top-level statement of a file, in order, and the
+/// context in effect there. A block's statements are visited in its
+/// place, so a braced namespace body sees its `namespace` and `use`
+/// statements; a `namespace` or `use` statement is passed after it takes
+/// effect.
+pub fn for_each_in_context<'a>(stmts: &'a [Stmt], mut f: impl FnMut(&'a Stmt, &NameContext)) {
+    fn walk<'a>(
+        stmts: &'a [Stmt],
+        ctx: &mut NameContext,
+        f: &mut impl FnMut(&'a Stmt, &NameContext),
+    ) {
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::Namespace(name) => ctx.set_namespace(name),
                 StmtKind::Use(imports) => ctx.add_uses(imports),
+                StmtKind::Block(inner) => {
+                    walk(inner, ctx, f);
+                    continue;
+                }
                 _ => {}
             }
+            f(stmt, ctx);
         }
-        ctx
     }
+    walk(stmts, &mut NameContext::default(), &mut f);
+}
 
+/// The context in effect at `pos`: every `namespace` and `use` statement
+/// that starts before it has taken effect.
+pub fn context_at(stmts: &[Stmt], pos: Position) -> NameContext {
+    let mut at = NameContext::default();
+    for_each_in_context(stmts, |stmt, ctx| {
+        let start = stmt.span.start;
+        if matches!(stmt.kind, StmtKind::Namespace(_) | StmtKind::Use(_))
+            && (start.line, start.col) < (pos.line, pos.col)
+        {
+            at = ctx.clone();
+        }
+    });
+    at
+}
+
+impl NameContext {
     /// Enters a (possibly new) namespace - real `use` imports are scoped
     /// to the namespace block they appear in, so a fresh one clears
     /// whatever was collected under the previous namespace rather than
@@ -115,7 +111,7 @@ impl NameContext {
     /// `namespace { ... } namespace Pdo { ... }`-shaped files - see
     /// `Registry::index`'s doc comment on why that real shape matters).
     pub fn set_namespace(&mut self, name: &str) {
-        self.namespace = strip_leading_backslash(name).into();
+        self.namespace = strip_leading_backslash(name);
         self.use_map.clear();
     }
 
@@ -272,8 +268,7 @@ fn use_map_key(kind: UseKind, name: &str) -> String {
 
 /// Fills in [`QualifiedName::resolved`] for every name in a parsed file,
 /// tracking `namespace` and `use` statements in order: a braced namespace
-/// body shares the context of its `namespace` statement, and each branch
-/// of an `if` gets its own copy.
+/// body shares the context of its `namespace` statement.
 pub fn resolve_names(stmts: &mut [Stmt]) {
     let mut resolver = Resolver {
         ctx: NameContext::default(),
@@ -398,20 +393,6 @@ impl VisitorMut for Resolver {
         match &mut stmt.kind {
             StmtKind::Namespace(name) => self.ctx.set_namespace(name),
             StmtKind::Use(imports) => self.ctx.add_uses(imports),
-            StmtKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                self.visit_expr(cond);
-                let outer = self.ctx.clone();
-                self.visit_stmt(then_branch);
-                if let Some(else_branch) = else_branch {
-                    self.ctx = outer.clone();
-                    self.visit_stmt(else_branch);
-                }
-                self.ctx = outer;
-            }
             _ => walk_stmt_mut(self, stmt),
         }
     }

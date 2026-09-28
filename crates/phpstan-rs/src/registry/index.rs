@@ -648,9 +648,8 @@ fn build_declarations_with_context(
             // The common `if (!function_exists('foo')) { function
             // foo() {} }` polyfill idiom declares a genuinely global
             // function/class from inside a conditional - recursing here
-            // is what makes those visible at all. Cloning `ctx` for each
-            // branch means a `use`/`namespace` change inside one doesn't
-            // leak into the other or past the `if`. Both branches are
+            // is what makes those visible at all. A branch can't hold a
+            // `namespace` or `use` statement, so both share `ctx`. Both branches are
             // marked `conditional = true` regardless of the `if`'s own
             // condition text - nothing downstream has a notion of which
             // conditions are actually guards, only "was this declaration
@@ -663,7 +662,7 @@ fn build_declarations_with_context(
                 build_declarations_with_context(
                     std::slice::from_ref(then_branch),
                     origin,
-                    &mut ctx.clone(),
+                    ctx,
                     true,
                     out,
                 );
@@ -671,20 +670,17 @@ fn build_declarations_with_context(
                     build_declarations_with_context(
                         std::slice::from_ref(else_branch),
                         origin,
-                        &mut ctx.clone(),
+                        ctx,
                         true,
                         out,
                     );
                 }
             }
-            // Unlike `If`, deliberately not cloned: this is the
-            // brace-namespace body itself, so a `use` statement inside
-            // it must be visible to the declarations that follow it in
-            // the same block - it's the statement after the block ends
-            // that must not see it, which cloning at the point the next
-            // `StmtKind::Namespace` resets `ctx.use_map` already ensures
-            // (see `set_namespace`). Inherits whatever `conditional` its
-            // enclosing context already has.
+            // A braced namespace body: its `use` statements apply to the
+            // declarations after them in the block, and the next
+            // `namespace` statement clears them (see `set_namespace`).
+            // Inherits whatever `conditional` its enclosing context
+            // already has.
             StmtKind::Block(inner) => {
                 build_declarations_with_context(inner, origin, ctx, conditional, out)
             }

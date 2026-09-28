@@ -36,7 +36,6 @@ use std::path::{Path, PathBuf};
 use crate::registry::Registry;
 use syntax::ast::{Arg, Expr, ExprKind, StaticTarget, Stmt, StmtKind};
 use syntax::ast::{literal_string_value, unwrap_grouping};
-use syntax::name_resolution::NameContext;
 use types::Type;
 
 /// The seven Pest functions whose closure argument gets `$this` rebound.
@@ -48,17 +47,16 @@ pub(crate) fn is_this_binding_call(name: &str) -> bool {
 }
 
 /// Extracts class names from a `uses(...)` call's arguments - `X::class`
-/// (resolved through `ctx`, since a `Pest.php` file imports classes via
-/// an ordinary `use` statement the same as any other PHP file) or a plain
+/// (the class it resolves to, through the file's `use` imports) or a plain
 /// string literal, used as-is: a string's contents are never subject to
 /// `use`-import short-name resolution the way a bare `Name`/`ClassConstFetch`/`StaticPropertyFetch`
 /// token is. Trait arguments aren't distinguished from classes - see the
 /// module doc comment.
-pub(crate) fn class_names_from_uses_call(args: &[Arg], ctx: &NameContext) -> Vec<String> {
+pub(crate) fn class_names_from_uses_call(args: &[Arg]) -> Vec<String> {
     args.iter()
         .filter_map(|a| match &a.value.kind {
             ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
-                Some(ctx.resolve(class_name))
+                class_name.resolved_class().map(str::to_string)
             }
             _ => literal_string_value(&a.value).map(|s| s.trim_start_matches('\\').to_string()),
         })
@@ -85,7 +83,7 @@ fn this_type_from_class_names(names: Vec<String>) -> Option<Type> {
 /// A bare `uses(X::class);` written directly inside the file being
 /// checked (no chained `->in(...)`) - real Pest's own file-local binding,
 /// checked first, ahead of any directory-scoped `Pest.php` config.
-pub(crate) fn file_local_this_type(program: &[Stmt], ctx: &NameContext) -> Option<Type> {
+pub(crate) fn file_local_this_type(program: &[Stmt]) -> Option<Type> {
     program.iter().find_map(|stmt| {
         let StmtKind::Expression(e) = &stmt.kind else {
             return None;
@@ -99,7 +97,7 @@ pub(crate) fn file_local_this_type(program: &[Stmt], ctx: &NameContext) -> Optio
         if name != "uses" {
             return None;
         }
-        this_type_from_class_names(class_names_from_uses_call(args, ctx))
+        this_type_from_class_names(class_names_from_uses_call(args))
     })
 }
 
@@ -232,7 +230,6 @@ impl PestConfig {
             let Some(dir) = path.parent() else {
                 continue;
             };
-            let ctx = NameContext::build(ast);
             for stmt in ast {
                 let StmtKind::Expression(e) = &stmt.kind else {
                     continue;
@@ -248,7 +245,7 @@ impl PestConfig {
                 let Some(uses_args) = walk_uses_chain(inner, &mut chain_props) else {
                     continue;
                 };
-                let class_names = class_names_from_uses_call(uses_args, &ctx);
+                let class_names = class_names_from_uses_call(uses_args);
                 // A bare `uses()->beforeEach(...)->in(...)` (no class
                 // argument to `uses()` at all - confirmed real, not
                 // hypothetical: `tests/Pest.php`'s own `uses()->

@@ -7,6 +7,14 @@
 
 use super::*;
 
+fn resolve_import_at_end(stmts: &[Stmt], fqn: &str) -> (String, Option<TextEdit>) {
+    let end = Position {
+        line: u32::MAX,
+        col: 0,
+    };
+    resolve_import(stmts, &context_at(stmts, end), fqn)
+}
+
 fn pos_after(text: &str, needle: &str) -> Position {
     let byte_offset = text.find(needle).unwrap() + needle.len();
     let mut line = 1u32;
@@ -200,7 +208,7 @@ fn find_use_insertion_point_is_none_with_neither_namespace_nor_use() {
 #[test]
 fn resolve_import_needs_no_edit_when_already_reachable_in_the_same_namespace() {
     let stmts = parse("<?php\nnamespace App;\nclass Other {}\n");
-    let (insert_text, edit) = resolve_import(&stmts, "App\\Foo");
+    let (insert_text, edit) = resolve_import_at_end(&stmts, "App\\Foo");
     assert_eq!(insert_text, "Foo");
     assert!(edit.is_none());
 }
@@ -208,7 +216,7 @@ fn resolve_import_needs_no_edit_when_already_reachable_in_the_same_namespace() {
 #[test]
 fn resolve_import_needs_no_edit_when_already_use_imported() {
     let stmts = parse("<?php\nuse App\\Models\\User;\nclass Other {}\n");
-    let (insert_text, edit) = resolve_import(&stmts, "App\\Models\\User");
+    let (insert_text, edit) = resolve_import_at_end(&stmts, "App\\Models\\User");
     assert_eq!(insert_text, "User");
     assert!(edit.is_none());
 }
@@ -216,7 +224,7 @@ fn resolve_import_needs_no_edit_when_already_use_imported() {
 #[test]
 fn resolve_import_adds_a_use_edit_for_an_unimported_class() {
     let stmts = parse("<?php\nnamespace App;\nuse Other\\Thing;\nclass C {}\n");
-    let (insert_text, edit) = resolve_import(&stmts, "Vendor\\Widget");
+    let (insert_text, edit) = resolve_import_at_end(&stmts, "Vendor\\Widget");
     assert_eq!(insert_text, "Widget");
     let edit = edit.expect("expected an auto-import edit");
     assert!(edit.new_text.contains("use Vendor\\Widget;"));
@@ -228,7 +236,7 @@ fn resolve_import_falls_back_to_fully_qualified_on_a_short_name_collision() {
     // A second, differently-namespaced `Widget` collides with the
     // already-imported one - must not silently shadow it with a second
     // `use` of the same short name.
-    let (insert_text, edit) = resolve_import(&stmts, "Other\\Widget");
+    let (insert_text, edit) = resolve_import_at_end(&stmts, "Other\\Widget");
     assert_eq!(insert_text, "\\Other\\Widget");
     assert!(edit.is_none());
 }

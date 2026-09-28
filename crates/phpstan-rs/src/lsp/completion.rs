@@ -53,7 +53,7 @@ use types::Type;
 
 use super::navigation::ProbeScope;
 use super::protocol::to_lsp_range;
-use syntax::name_resolution::NameContext;
+use syntax::name_resolution::{NameContext, context_at};
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
 /// for - deliberately unlikely to collide with a real user variable.
@@ -542,8 +542,7 @@ fn find_use_insertion_point(stmts: &[Stmt]) -> Option<Position> {
 /// a short-name collision with something else already in scope, as a
 /// fully-qualified `\Some\Fqn` with no edit at all, rather than silently
 /// importing over an unrelated existing name.
-fn resolve_import(stmts: &[Stmt], fqn: &str) -> (String, Option<TextEdit>) {
-    let ctx = NameContext::build(stmts);
+fn resolve_import(stmts: &[Stmt], ctx: &NameContext, fqn: &str) -> (String, Option<TextEdit>) {
     let short = short_name(fqn);
     if ctx.resolve(short) == fqn {
         return (short.to_string(), None);
@@ -575,19 +574,21 @@ fn resolve_import(stmts: &[Stmt], fqn: &str) -> (String, Option<TextEdit>) {
 /// current file's own (possibly stale, if this file's own edit is what
 /// broke parsing) AST - see this module's own doc comment for why the
 /// registry alone under-reports during exactly the moment completion is
-/// most commonly triggered.
+/// most commonly triggered. Names resolve in the context at `cursor`.
 pub(super) fn enumerate_bare(
     project: &Project,
     path: &Path,
     current_stmts: &[Stmt],
+    cursor: Position,
 ) -> Vec<CompletionItem> {
+    let ctx = context_at(current_stmts, cursor);
     let registry = project.registry();
     let mut seen: FxHashSet<String> = FxHashSet::default();
     let mut items = Vec::new();
 
     for (fqn, info) in &registry.classes {
         if seen.insert(fqn.to_string()) {
-            let (insert_text, edit) = resolve_import(current_stmts, fqn);
+            let (insert_text, edit) = resolve_import(current_stmts, &ctx, fqn);
             items.push(CompletionItem {
                 label: short_name(fqn).to_string(),
                 kind: Some(class_kind_completion_kind(info.kind())),
@@ -599,7 +600,7 @@ pub(super) fn enumerate_bare(
     }
     for fqn in registry.functions.keys() {
         if seen.insert(fqn.to_string()) {
-            let (insert_text, edit) = resolve_import(current_stmts, fqn);
+            let (insert_text, edit) = resolve_import(current_stmts, &ctx, fqn);
             items.push(CompletionItem {
                 label: short_name(fqn).to_string(),
                 kind: Some(CompletionItemKind::FUNCTION),
@@ -622,7 +623,7 @@ pub(super) fn enumerate_bare(
         let (functions, classes) = project::declared_names(current_ast);
         for fqn in functions.iter().chain(&classes) {
             if seen.insert(fqn.clone()) {
-                let (insert_text, edit) = resolve_import(current_stmts, fqn);
+                let (insert_text, edit) = resolve_import(current_stmts, &ctx, fqn);
                 let kind = if classes.contains(fqn) {
                     CompletionItemKind::CLASS
                 } else {
@@ -702,7 +703,7 @@ pub(super) fn build_member_probe(
     // assign-then-read splice below (which reads back a *value*'s
     // inferred type) doesn't apply to it in the first place.
     if is_static && let ExprKind::Name(name) = &receiver.kind {
-        let ctx = NameContext::build(stmts);
+        let ctx = context_at(stmts, cursor);
         let resolved =
             super::navigation::resolve_class_ref(name, class_name.as_deref(), &ctx, registry)?;
         return Some(MemberProbe::Resolved {

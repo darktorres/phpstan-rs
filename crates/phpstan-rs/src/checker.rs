@@ -1780,14 +1780,6 @@ impl<'a> Checker<'a> {
 
     #[hotpath::measure]
     pub fn check_program(&mut self, program: &[Stmt]) {
-        // A whole-file scan (last `namespace` seen wins, same as
-        // `NameContext::build` itself does) purely for the file-wide,
-        // position-independent questions below - each already scans the
-        // entire program regardless of where something appears, so
-        // there's no one "current position" they need. Deliberately NOT
-        // reused for `self.name_ctx` below, which has to be positional
-        // instead (see that loop's own comment).
-        let whole_file_ctx = NameContext::build(program);
         self.current_function_assigned_variables =
             if self.settings.strict_rules.check_implicit_array_creation {
                 strict_rules::assigned_variables(program)
@@ -1811,7 +1803,7 @@ impl<'a> Checker<'a> {
             self.check_use_class_imports(program);
             self.check_used_names(program);
             let (rebind_targets, rebind_escape_all) =
-                unused::scan_program_for_rebind_targets(program, &whole_file_ctx);
+                unused::scan_program_for_rebind_targets(program);
             self.rebind_target_classes = rebind_targets;
             self.rebind_escape_all = rebind_escape_all;
         }
@@ -1820,7 +1812,7 @@ impl<'a> Checker<'a> {
         // `set_pest_this_type` from directory-scoped Pest.php config -
         // matches real Pest's resolution order (file-local checked
         // first).
-        if let Some(local_ty) = pest_config::file_local_this_type(program, &whole_file_ctx) {
+        if let Some(local_ty) = pest_config::file_local_this_type(program) {
             self.pest_this_type = local_ty;
         }
         // Unlike `pest_this_type` above, hook properties are unioned, not

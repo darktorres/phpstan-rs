@@ -29,7 +29,7 @@ use rustc_hash::FxHashMap;
 
 use crate::registry::{BuiltDecl, ClassReflection};
 use syntax::ast::*;
-use syntax::name_resolution::NameContext;
+use syntax::name_resolution::{NameContext, for_each_in_context};
 use syntax::token::Span;
 use syntax::visit::{child_exprs, child_stmts};
 
@@ -57,21 +57,28 @@ pub(crate) fn collect_anonymous_classes(
     relative_file: &str,
     origin: &Origin,
 ) -> (Vec<BuiltDecl>, FxHashMap<Span, String>) {
-    let ctx = NameContext::build(stmts);
-    let mut found: Vec<(&Expr, &ClassDecl)> = Vec::new();
-    for stmt in stmts {
-        walk_stmt(stmt, &mut found);
-    }
+    // Each class with the context of the statement it is in.
+    let mut contexts: Vec<NameContext> = Vec::new();
+    let mut found: Vec<(&Expr, &ClassDecl, usize)> = Vec::new();
+    let mut in_stmt = Vec::new();
+    for_each_in_context(stmts, |stmt, ctx| {
+        walk_stmt(stmt, &mut in_stmt);
+        if !in_stmt.is_empty() {
+            contexts.push(ctx.clone());
+            let at = contexts.len() - 1;
+            found.extend(in_stmt.drain(..).map(|(expr, decl)| (expr, decl, at)));
+        }
+    });
 
     let mut per_line: FxHashMap<u32, u32> = FxHashMap::default();
-    for (expr, _) in &found {
+    for (expr, _, _) in &found {
         *per_line.entry(expr.span.start.line).or_insert(0) += 1;
     }
 
     let mut seen_on_line: FxHashMap<u32, u32> = FxHashMap::default();
     let mut decls = Vec::new();
     let mut names = FxHashMap::default();
-    for (expr, decl) in found {
+    for (expr, decl, at) in found {
         let line = expr.span.start.line;
         let line_index = if per_line[&line] > 1 {
             let counter = seen_on_line.entry(line).or_insert(0);
@@ -83,7 +90,7 @@ pub(crate) fn collect_anonymous_classes(
         let name = synthetic_name(relative_file, line, line_index);
         names.insert(expr.span, name.clone());
         let name: std::sync::Arc<str> = std::sync::Arc::from(name);
-        let mut info = ClassReflection::from_decl(decl, &ctx);
+        let mut info = ClassReflection::from_decl(decl, &contexts[at]);
         info.is_anonymous = true;
         info.record_provenance(origin, &name, expr.span, &MemberSpans::of_class(decl));
         // Not `intern()`: every anonymous class in the whole corpus gets

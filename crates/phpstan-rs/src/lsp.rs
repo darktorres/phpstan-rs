@@ -1732,6 +1732,7 @@ impl Server {
                 &self.project,
                 &path,
                 stmts,
+                cursor,
             ))),
         }
     }

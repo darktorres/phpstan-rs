@@ -1616,7 +1616,6 @@ dependencies = [
  "arbitrary",
  "criterion",
  "hotpath",
- "imbl",
  "rustc-hash 2.1.3",
 ]
 

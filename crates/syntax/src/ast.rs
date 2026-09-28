@@ -796,6 +796,15 @@ impl QualifiedName {
             resolved: ResolvedName::Unresolved,
         }
     }
+
+    /// The fully-qualified class this names; `None` for `self`, `parent`
+    /// and `static`, and for a name resolution has not seen.
+    pub fn resolved_class(&self) -> Option<&str> {
+        match &self.resolved {
+            ResolvedName::Exact(name) => Some(name),
+            _ => None,
+        }
+    }
 }
 
 impl std::ops::Deref for QualifiedName {
