@@ -6455,13 +6455,17 @@ stdio.
   the session. A file's identity is its canonical path (C1's walker dedup), so
   two spellings of one file are one file, while each open document keeps the URI
   its client used, which diagnostics are published under (a workspace opened
-  through a symlink sees its own paths). The walk and the LSP's file watchers
-  follow C1's `file_extensions`, where both hard-code `.php` today
-  (`collect_php_files`, the `**/*.php` registration), and scan and stub paths
-  outside every workspace folder get watchers of their own (a relative pattern
-  on each base directory), since a change there changes what analysed files
-  resolve. A deleted directory removes every file under it: a client may report
-  a folder's deletion as one event for the folder, and
+  through a symlink sees its own paths), and a URI the server makes for a file
+  never opened follows its workspace folder's spelling (a drive letter's case,
+  an encoded `:`). A path that isn't valid UTF-8 round-trips through its URI as
+  bytes, where `path_to_uri` and `percent_decode` go through `to_string_lossy`
+  and `from_utf8_lossy` today and name a file that doesn't exist. The walk and
+  the LSP's file watchers follow C1's `file_extensions`, where both hard-code
+  `.php` today (`collect_php_files`, the `**/*.php` registration), and scan and
+  stub paths outside every workspace folder get watchers of their own (a
+  relative pattern on each base directory), since a change there changes what
+  analysed files resolve. A deleted directory removes every file under it: a
+  client may report a folder's deletion as one event for the folder, and
   `handle_watched_files_changed` passes that path to `remove_file`, which
   removes nothing, so the folder's files stay analysed and published. Contents
   are read when needed and kept only for overlays and the files a request is
@@ -6775,6 +6779,25 @@ Behaviour commits, one each with its fixture:
   from reflection's `ClassHierarchy` and E1's reference-site collector; none is
   served today. `workspace/willRenameFiles` renaming a PSR-4 class's file offers
   the class rename (above) as its edit.
+- **Inlay hints come once per site, from the final pass.**
+  `inlay_param_name_hints` and `inlay_local_type_hints` are pushed on every
+  walk: each of a loop body's convergence passes (up to six), the quiet pre-pass
+  over a `while` or `for` condition, and each host of a trait method. Nothing
+  drops the earlier walks' hints the way `converge_loop_body` truncates their
+  diagnostics, and `filter_to_range` doesn't deduplicate, so a `$x = f();`
+  inside a loop gets one type hint per pass, each with that pass's intermediate
+  type. With E6's observers they come from the kept walk's events only, a trait
+  method's merged across its hosts.
+- **Inlay hints say what the text doesn't.** No parameter-name hint on an
+  argument that is a variable of the parameter's name (`make($radius)`), and no
+  type hint where the right side is a literal or a `new Foo` (today every
+  non-`mixed` assignment gets one); names print as the file imports them
+  (`Circle`, not `App\Circle`), the full name in the tooltip and the label part
+  linking to the declaration; a by-reference parameter's hint reads `&name:`;
+  and type hints also cover `foreach` keys and values, `list()`/`[...]`
+  destructuring, `catch` variables and untyped closure and arrow-function
+  parameters, where today only an assignment statement's plain variable gets
+  one.
 - **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
   the document at once, which editors can run on save; today each quick fix is
   offered alone.
