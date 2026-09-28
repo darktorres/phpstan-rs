@@ -1408,7 +1408,12 @@ Follow-ups:
   `stdClass` or plain `object` for an object shape (`object{foo: int, bar:
   string}`; `object-shapes.php`, 7); an array whose key type isn't covered
   (`array<int>`, keys `int|string`, for `array<string, int>`,
-  `bug-3107.php`).
+  `bug-3107.php`; `array<mixed>` for `array<string, mixed>`,
+  `bug-9732.php`; `array<int<0, max>, bool>` for `array<0|1|…|17, bool>`,
+  `bug-7594.php`), or lacking an unsealed shape's required key
+  (`non-empty-array<mixed>` for `array{bar: string, ...}`,
+  `bug-2911.php`); and an invariant generic with a `mixed` argument
+  (`Inv<mixed>` for `Inv<int>`, `bug-11935.php`, `bug-3589.php`).
 - **Conditional parameter types** resolve per call: `@param ($flags is 256
   ? string : bool) $demoArg` takes a `string` only when `$flags` is `256`;
   `cond('s')` and `cond(true, 256)` are unreported today
@@ -2306,6 +2311,19 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   `int<0, max>|numeric-string` (1, `int<-1, max>` today),
   `curl_share_setopt()`'s `mixed`
   value (3) and `stream_get_contents()`'s `__benevolent<string|false>` (3);
+- the functionMap's and the overlay stubs' narrower parameters, which PHP
+  rejects at runtime or which throw, are the rules oracle's other C6
+  `argument.type` misses (about 60): `array_chunk()`/`str_split()`
+  `positive-int` lengths, `max()`/`min()` of `non-empty-array`,
+  `json_validate()` depth and flags, `explode()` with `''`, `chr(256)`,
+  `error_log()` with type `2`, `filter_input()`/`filter_input_array()`
+  types, `flock()`'s `int-mask`, `unserialize()`'s options shape,
+  `fputcsv()` fields, `strval()`/`intval()`/`floatval()` of arrays and
+  objects, `Random\Randomizer::pickArrayKeys()`, the `RecursiveIteratorIterator`
+  flags, and the `Reflection*` constructors' `class-string` (`new
+  ReflectionClass($string)`, `new ReflectionProperty($string, 'foo')`,
+  `new ReflectionEnum(stdClass::class)` against `class-string<T of
+  UnitEnum>`);
 - a function or method with several signatures (a phpstorm-stubs overload,
   a functionMap `'1` variant) keeps them all, and a call takes the variant
   its arguments fit, named ones included
@@ -3088,6 +3106,17 @@ deleted; the file-size gate.
       `new Foo(['foo' => 1])` for a parent constructor's `@param T $d`
       under `@extends P<array{foo: int, bar: int}>` is unreported today
       (a method call already binds; the rules oracle's `bug-14138.php`).
+    - **`static::C`** of a constant a subclass may override (a non-final
+      constant of a non-final class) is its declared type (`mixed` when
+      untyped), not its value: `static::KEY` is `'v'` today, so
+      `sprintf('%s', static::KEY)` and `array_key_exists(static::KEY, $a)`
+      pass where PHPStan checks `mixed` (`bug-6181.php`).
+    - **A template's bound** is checked at the call: `g(new
+      DateTimeImmutable())` for `@template T of DateTime @param T $a` is
+      unreported today (`call-generic-function.php`).
+    - **PHP 8.5's `clone($o, $withProperties)`** is checked as a function:
+      `clone($foo, 1)` and `clone($mixed, [])` at level 10 are unreported
+      today (`clone-function.php`, 4).
     - **A dynamic method name** that is a constant string resolves the
       method: `$name = 'doFoo'; $this->$name('x')` and `self::$name(…)`
       check the arguments against `doFoo()`, unreported today
@@ -3138,7 +3167,11 @@ deleted; the file-size gate.
       implicitly `?string`, as a function's already is: in the body `$t`
       is `string` today, so `$t ?? ''` is `nullCoalesce.variable` and
       `$a(null)` is `argument.type` (`bug-6701.php`), and the closure isn't
-      `parameter.implicitlyNullable`.
+      `parameter.implicitlyNullable`. A promoted constructor parameter is
+      never implicitly nullable (PHP rejects `private int $p = null` at
+      compile time): it is `parameter.defaultValue`, and `new P(null)` is
+      `argument.type`; today both are silent and the parameter reads as
+      `?int` (`instantiation-promoted-properties.php`).
     - **A call's value** has `void` as `null` (`getType`; the keep-void
       type is only for the void-result rules): `$a = a()` for `@return
       string|void` is `string|void` today, so `b($a)` into `?string` is
@@ -4260,6 +4293,9 @@ fixture:
     `sort-param-castable-to-string-functions-enum.php`, `bug-11111.php`,
     `bug-11141.php`, `bug-3946.php`); phpstan-rs checks the
     castable-to-number variant already;
+  - `random_int($min, $max)` whose ranges can't satisfy `$min <= $max` is
+    reported (`RandomIntParametersRule`; `random-int.php`, `bug-14468.php`:
+    8 findings, unreported today);
   - a template the call can't resolve is `argument.templateType`:
     `make($s)` for `@param class-string<T> $c` with a plain `string` is
     unreported today (17 oracle findings).
