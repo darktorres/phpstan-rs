@@ -902,8 +902,13 @@ corpus, type, baseline, performance and build-time gates run locally
    `Project` (in `rules`' and `ext-mockstan`'s) and 2 of `Registry` (in
    `analyser`'s `global_vars`). One trait `impl` breaks the orphan rule, and
    before G: `project.rs`'s `impl BodySource for FxHashMap<PathBuf, FileState>`
-   implements `reflection`'s trait for a foreign type, which stops compiling at
-   C10 while `project` is still in the package.
+   implements a trait of `registry::bodies`, assigned to `reflection`, for a
+   foreign type, which stops compiling at C10 while `project` is still in the
+   package. The trait is the body source Appendix C gives `AnalysisContext`, and
+   its users are the checker, the purity summaries and `project`, none in
+   `reflection`: `registry::bodies` is `analyser`'s, moving with the summaries
+   in C9, and `project` implements it on a type of its own, F1's VFS, before G
+   would make the `impl` an orphan again.
 3. **Tests.** The set of test names (`cargo test --workspace --all-targets
    -- --list` plus the fixture lists) must be a superset of the previous
    commit's set mapped through a committed rename/removal manifest (old →
@@ -2752,7 +2757,13 @@ The class-reflection data extensions take `registry::access_attributes`
 **C9. Summaries.** Purity and global-variable inference leave reflection for
 the summaries API; C9 creates `AnalysisContext` in the package's future
 `analyser` module to hold them per snapshot, and D6 completes it. The purity
-table C4 moved out of `FunctionReflection` moves to `AnalysisContext`. Stubs
+table C4 moved out of `FunctionReflection` moves to `AnalysisContext`, and so
+does the body source: `registry::bodies` (`BodySource`, `FileBodies`,
+`NoBodies`), which only the checker, the purity summaries and `project` use,
+leaves `reflection` for `analyser`, the module-graph spec assigning it there,
+so C10's extraction doesn't leave `project.rs`'s
+`impl BodySource for FxHashMap<PathBuf, FileState>` implementing a foreign
+crate's trait for a foreign type. Stubs
 get no global-variable summaries. Builtin purity comes from
 `functionMetadata`. ROADMAP mapping (§3.8): summaries H2, H3, U1–U4, U6, P1;
 reflection enumeration A5, U5; collector rules (E1) H1, V1, V2, Phase 90;
@@ -7726,7 +7737,8 @@ moves in the phase named.
 | checker/preg_pattern_validity | rules (`RegularExpressionPatternRule`, over builtins::regex) | E3c |
 | php_stubs + build.rs | stub-sources (sources, index) + reflection::stubs (layer) | B9/C5 |
 | stub_attributes | reflection::stubs (the version layer applies them per `PhpVersions` range) | C5 |
-| registry/* (index, resolve, hierarchy, generics, relation, name_context, class_info, function_sig, function_table, provenance, reflection_attribute, bodies, type_node, settings, stubs, anonymous_class; C4 adds the builder, the memo levels and the snapshot) | reflection | C3–C10 |
+| registry/* (index, resolve, hierarchy, generics, relation, name_context, class_info, function_sig, function_table, provenance, reflection_attribute, type_node, settings, stubs, anonymous_class; C4 adds the builder, the memo levels and the snapshot) | reflection | C3–C10 |
+| registry/bodies (`BodySource`) | analyser (`AnalysisContext`'s body source; project implements it on the VFS) | C9/F1 |
 | registry/assignability | types (unified relation) + analyser RuleLevelHelper | B4/C2 |
 | registry/assertion_table, assertion_tables | reflection overlays; defaults → ext-nette-tester / ext-mockery | C6 |
 | checker/predefined_constants, checker/constant_resolver | reflection ConstantResolver | C2 |
