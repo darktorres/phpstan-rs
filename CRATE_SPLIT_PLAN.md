@@ -3391,9 +3391,28 @@ for the analyser.
   1. ext-doctrine's remaining modules (its reflection data extension moved
      in C8, and E4 fixes its entity metadata: only mapped properties are
      fields, `#[MappedSuperclass]` and trait fields are included, docblock
-     `@ORM` annotations are read);
+     `@ORM` annotations are read), then phpstan-doctrine's rules, which
+     ext-doctrine has none of today (it only types results; no
+     `doctrine.*` identifier exists). Probed through the corpus's own
+     `phpstan.neon` against `UserEntity`, each is unreported today: DQL
+     syntax and semantic errors in `createQuery()` (`SELEC …`, an unknown
+     field) and in a QueryBuilder chain (`doctrine.dql`), an unknown field
+     in `findBy(['nope' => 1])` (`doctrine.*Argument`), a magic
+     `findOneByNope()` (`method.notFound`), and the entity checks
+     (`doctrine.columnType`, `associationType`, `enumType`, `finalEntity`,
+     `finalConstructor`, `mapping`, `queryBuilderDynamic`);
   2. ext-sql;
-  3. ext-phpunit, ext-codeception, ext-mockery and ext-mockstan, after E1;
+  3. ext-phpunit, ext-codeception, ext-mockery and ext-mockstan, after E1.
+     ext-phpunit gains phpstan-phpunit's rules, probed against the
+     vendored package and each unreported today: `@covers`/
+     `#[CoversClass]` naming a missing class or method
+     (`phpunit.covers*`), the assertion simplifications
+     (`assertSame(false, $x)` → `assertFalse`, `assertSame(1, count($a))`
+     → `assertCount`, and `assertTrue`/`assertNull`/`assertEquals`),
+     `->method('nope')` on a mock of a class without it
+     (`phpunit.mockMethod`), and data providers that are missing, private
+     or non-static (`phpunit.dataProvider*`). Its `test.risky` has no
+     phpstan-phpunit counterpart and stays;
   4. ext-pest (closure-this, the file-set hook, pest risky tests);
   5. ext-nette-tester;
   6. ext-strict-rules, completing phpstan-strict-rules: today's 11 toggles
@@ -3406,8 +3425,9 @@ for the analyser.
      `disallowedBacktick`, `disallowedEmpty`, `disallowedShortTernary`,
      `noVariableVariables` (with the dynamic method, property, static
      method and static property names), `closureUsesThis`,
-     `matchingInheritedMethodNames` (`method.nameCase`), plus the core
-     parameters the package sets (C1's list);
+     `matchingInheritedMethodNames` (`method.nameCase`) and
+     `booleansInLoopConditions` (bleeding edge only in the package), plus
+     the core parameters the package sets (C1's list);
   7. ext-deprecation-rules;
   8. ext-disallowed-calls;
   9. ext-shipmonk, ext-type-perfect, ext-voku, ext-sidz, ext-slam,
@@ -3790,6 +3810,9 @@ its owner. Non-Registry keys follow the table.
   dropping `$this->…` narrowing (D5) and `finally` reads of variables the
   `try` assigns (D5) and `return.missing` on a `void|…` return type (E3f),
   each a false positive on ordinary code; D2 and D5 name the interim fix.
+- **phpstan-symfony** has no counterpart crate: the ROADMAP's extension
+  config mapping marks it unsupported (its rules need the container XML or
+  a console application loader).
 - **Stage E order.** Each rule moves once, onto its final API: D6 lands
   the returned-error `Rule` with `RuleErrorBuilder` and the identifier
   families, E3's prologue lands `RuleLevelHelper::find_type_to_check`,
