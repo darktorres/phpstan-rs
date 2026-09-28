@@ -2638,7 +2638,7 @@ impl<'a> Checker<'a> {
                         // type `narrow_enum_from_call` just computed
                         // rather than threading a new span parameter
                         // through it.
-                        if let Type::EnumCase(ref case_class, ref case) = resolved_ty {
+                        if let Some((case_class, case)) = resolved_ty.enum_class_and_case() {
                             self.record_member_ref(e.span, case_class, case);
                         }
                         match self.class_argument_return(class, method, args, locals) {
@@ -4519,7 +4519,7 @@ impl<'a> Checker<'a> {
                                 // already-computed type rather than
                                 // threading a new span parameter through
                                 // `narrow_enum_from_call`.
-                                if let Type::EnumCase(ref case_class, ref case) = resolved {
+                                if let Some((case_class, case)) = resolved.enum_class_and_case() {
                                     self.record_member_ref(e.span, case_class, case);
                                 }
                                 if let Some(ty) =
@@ -5067,10 +5067,9 @@ impl<'a> Checker<'a> {
         // `list<T>`/`non-empty-array<T>`-typed left side (a real
         // `Intersection`), which would otherwise lose its type here the
         // same way a plain `Type::Array` would.
-        let l_is_array = matches!(l_ty, Type::Array(_, _))
-            || matches!(&l_ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(_, _))));
+        let l_is_array = l_ty.is_array().yes() && l_ty.shape().is_none();
         match &r_ty {
-            Type::ArrayShape(_) if l_is_array => l_ty,
+            r if l_is_array && r.shape().is_some() => l_ty,
             // The general case must not discard `l_ty` entirely, keeping
             // only `r_ty` - that's wrong for `??`'s semantics regardless
             // of precision: the result is `$expr` itself when it's not
@@ -5633,10 +5632,9 @@ impl<'a> Checker<'a> {
         expected: &Type,
         locals: &Locals,
     ) -> Option<Type> {
-        let sig = expected.callable_sig().or_else(|| match expected {
-            Type::Union(members) => members.iter().find_map(Type::callable_sig),
-            _ => None,
-        })?;
+        let sig = expected
+            .callable_sig()
+            .or_else(|| expected.union_members().iter().find_map(Type::callable_sig))?;
         let overrides: Vec<Type> = sig.params.iter().map(|p| p.ty.clone()).collect();
         match &unwrap_grouping(arg).kind {
             ExprKind::ArrowFn {
@@ -6128,42 +6126,35 @@ impl<'a> Checker<'a> {
     /// fire for that narrower shape, rather than report something
     /// unproven.
     fn expand_enum_cases(&self, ty: &Type) -> Type {
-        match ty {
-            Type::Union(members) => {
-                let mut expanded = Vec::new();
-                for m in members {
-                    match self.expand_enum_cases(m) {
-                        Type::Union(inner) => expanded.extend(inner),
-                        other => expanded.push(other),
-                    }
-                }
-                match expanded.len() {
-                    0 => Type::never(),
-                    1 => expanded.into_iter().next().unwrap(),
-                    _ => Type::union_of(expanded),
-                }
-            }
-            Type::Object(class_name, _) => {
-                let Some(info) = self.registry.classes.get(class_name.as_str()) else {
-                    return ty.clone();
-                };
-                let cases: Vec<Type> = info
-                    .consts()
-                    .values()
-                    .filter_map(|c| match c.ty() {
-                        Type::EnumCase(cls, case) if cls == class_name => {
-                            Some(Type::enum_case(cls.clone(), case.clone()))
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                match cases.len() {
-                    0 => ty.clone(),
-                    1 => cases.into_iter().next().unwrap(),
-                    _ => Type::union_of(cases),
-                }
-            }
-            other => other.clone(),
+        let members = ty.union_members();
+        if members.len() > 1 {
+            let expanded: Vec<Type> = members
+                .iter()
+                .flat_map(|m| self.expand_enum_cases(m).union_members().to_vec())
+                .collect();
+            return match expanded.len() {
+                0 => Type::never(),
+                1 => expanded.into_iter().next().unwrap(),
+                _ => ty.with_members(expanded),
+            };
+        }
+        let Some((class_name, _)) = ty.object_class_and_args() else {
+            return ty.clone();
+        };
+        let Some(info) = self.registry.classes.get(class_name.as_str()) else {
+            return ty.clone();
+        };
+        let cases: Vec<Type> = info
+            .consts()
+            .values()
+            .filter_map(|c| c.ty().enum_class_and_case())
+            .filter(|(cls, _)| *cls == class_name)
+            .map(|(cls, case)| Type::enum_case(cls.clone(), case.clone()))
+            .collect();
+        match cases.len() {
+            0 => ty.clone(),
+            1 => cases.into_iter().next().unwrap(),
+            _ => Type::union_of(cases),
         }
     }
 }

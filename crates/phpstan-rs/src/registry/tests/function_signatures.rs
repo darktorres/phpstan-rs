@@ -373,13 +373,12 @@ fn a_callable_shape_doc_member_keeps_its_own_real_signature_alongside_the_closur
             function f(null|Closure $predicate = null) {}
         "#,
     );
-    let Type::Union(members) = &r.functions["f"].params[0].ty else {
-        panic!(
-            "expected a top-level union, got {:?}",
-            r.functions["f"].params[0].ty
-        );
-    };
-    assert_eq!(members.len(), 2);
+    let members = r.functions["f"].params[0].ty.union_members();
+    assert_eq!(
+        members.len(),
+        2,
+        "expected a top-level union, got {members:?}"
+    );
     assert_eq!(members[0].to_string(), "Closure(mixed): bool");
     assert_eq!(members[1], Type::null());
 }
@@ -401,20 +400,20 @@ fn a_doc_union_refining_one_native_union_member_keeps_the_others_untouched() {
             function f(array|string $keys) {}
         "#,
     );
-    let Type::Union(members) = &r.functions["f"].params[0].ty else {
-        panic!(
-            "expected a top-level union, got {:?}",
-            r.functions["f"].params[0].ty
-        );
-    };
-    assert_eq!(members.len(), 2, "got {members:?}");
+    let members = r.functions["f"].params[0].ty.union_members();
+    assert_eq!(
+        members.len(),
+        2,
+        "expected a top-level union, got {members:?}"
+    );
     assert!(
-        members.contains(&Type::String),
+        members.contains(&Type::string()),
         "the untouched native `string` alternative must survive: {members:?}"
     );
     assert!(
-        matches!(&members[0], Type::Array(_, v) if **v == Type::String)
-            || matches!(&members[1], Type::Array(_, v) if **v == Type::String),
+        members
+            .iter()
+            .any(|m| m.is_array().yes() && m.array_value_type() == Some(Type::string())),
         "the refined `array<int, string>` alternative must also survive: {members:?}"
     );
 }
@@ -444,16 +443,24 @@ fn an_array_doc_member_with_a_template_key_is_not_discarded() {
         "#,
     );
     let sig = &r.classes["Foo"].methods["f"];
-    let Type::Array(key, value) = &sig.params[0].ty else {
-        panic!("expected Type::Array, got {:?}", sig.params[0].ty);
+    let ty = &sig.params[0].ty;
+    let names = |t: Option<Type>| {
+        t.filter(Type::is_template).map(|t| {
+            t.nested_templates()
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>()
+        })
     };
-    assert!(
-        matches!(key.as_ref(), Type::TemplateParam(p) if p.name == "TKey"),
-        "got key: {key:?}"
+    assert_eq!(
+        names(ty.array_key_type()),
+        Some(vec!["TKey".to_string()]),
+        "got {ty:?}"
     );
-    assert!(
-        matches!(value.as_ref(), Type::TemplateParam(p) if p.name == "TValue"),
-        "got value: {value:?}"
+    assert_eq!(
+        names(ty.array_value_type()),
+        Some(vec!["TValue".to_string()]),
+        "got {ty:?}"
     );
 }
 
@@ -622,7 +629,9 @@ fn an_inline_var_tag_survives_an_attribute_between_it_and_the_parameter() {
     );
     let ty = &r.lookup_property("Entity93", "details").unwrap().ty;
     assert!(
-        matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Array(_, v) if v.is_mixed()))),
+        ty.union_members()
+            .iter()
+            .any(|m| { m.is_array().yes() && m.array_value_type().is_some_and(|v| v.is_mixed()) }),
         "got: {ty:?}"
     );
 }

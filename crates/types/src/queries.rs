@@ -232,6 +232,14 @@ impl Type {
         matches!(self, Type::Void)
     }
 
+    /// An enum case's enum and case name; `None` for any other type.
+    pub fn enum_class_and_case(&self) -> Option<(&crate::Name, &crate::Name)> {
+        match self {
+            Type::EnumCase(class, case) => Some((class, case)),
+            _ => None,
+        }
+    }
+
     /// Whether this is one case of an enum.
     pub fn is_enum_case(&self) -> bool {
         matches!(self, Type::EnumCase(..))

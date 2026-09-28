@@ -97,7 +97,7 @@ impl<'a> Checker<'a> {
             | StmtKind::Throw(_)
             | StmtKind::Break(_)
             | StmtKind::Continue(_) => true,
-            StmtKind::Expression(e) => self.infer_expr(e, locals) == Type::Never,
+            StmtKind::Expression(e) => self.infer_expr(e, locals).is_never(),
             // Any statement in the block unconditionally terminating,
             // not just the last one, is sound proof the whole block
             // does - once reached, execution never falls through to
@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
             // higher) still counts as exiting.
             StmtKind::Continue(level) => matches!(level, Some(n) if *n > 1),
             StmtKind::Break(_) => false,
-            StmtKind::Expression(e) => self.infer_expr(e, locals) == Type::Never,
+            StmtKind::Expression(e) => self.infer_expr(e, locals).is_never(),
             StmtKind::Block(stmts)
             | StmtKind::Declare {
                 body: Some(stmts), ..
@@ -493,27 +493,15 @@ fn discriminant_may_hold(locals: &Locals, key: &str) -> bool {
         // An undefined variable reads as `null`.
         return value == "False" || !crate::checker::narrowing::is_real_variable_key(subject);
     };
-    let members: Vec<&Type> = match ty {
-        Type::Union(members) => members.iter().collect(),
-        other => vec![other],
-    };
+    let members = ty.union_members();
     match value {
         "True" => members
             .iter()
-            .any(|m| !(m.is_null().yes() || matches!(m, Type::False))),
-        "False" => members.iter().any(|m| !matches!(m, Type::True)),
-        literal => members.iter().any(|m| {
-            !(m.is_null().yes()
-                || matches!(
-                    m,
-                    Type::True
-                        | Type::False
-                        | Type::IntLiteral(_)
-                        | Type::StringLiteral(_)
-                        | Type::EnumCase(..)
-                ))
-                || format!("{m:?}") == literal
-        }),
+            .any(|m| !(m.is_null().yes() || m.is_false().yes())),
+        "False" => members.iter().any(|m| !m.is_true().yes()),
+        literal => members
+            .iter()
+            .any(|m| !m.is_constant_value().yes() || format!("{m:?}") == literal),
     }
 }
 

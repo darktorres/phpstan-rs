@@ -27,22 +27,19 @@ fn returns_result_set(sql: &str) -> bool {
 /// a string unless `MYSQLI_OPT_INT_AND_FLOAT_NATIVE` is set - either form
 /// is possible without knowing the connection's options.
 fn widen_for_text_protocol(ty: &Type) -> Type {
-    match ty {
-        Type::Int
-        | Type::IntLiteral(_)
-        | Type::IntRange(..)
-        | Type::Float
-        | Type::FloatLiteral(_) => union_types(ty.clone(), parse_type_string("numeric-string")),
-        Type::Bool | Type::True | Type::False => {
-            union_types(parse_type_string("0|1"), parse_type_string("'0'|'1'"))
-        }
-        Type::Union(members) => members
-            .iter()
-            .map(widen_for_text_protocol)
-            .reduce(union_types)
-            .unwrap_or(Type::never()),
-        other => other.clone(),
-    }
+    ty.union_members()
+        .iter()
+        .map(|m| {
+            if m.is_int().yes() || m.is_float().yes() {
+                union_types(m.clone(), parse_type_string("numeric-string"))
+            } else if m.is_bool().yes() {
+                union_types(parse_type_string("0|1"), parse_type_string("'0'|'1'"))
+            } else {
+                m.clone()
+            }
+        })
+        .reduce(union_types)
+        .unwrap_or(Type::never())
 }
 
 impl<'a> Checker<'a> {
@@ -65,12 +62,12 @@ impl<'a> Checker<'a> {
                     self.sql,
                     sql,
                 );
-                match row {
-                    Some(Type::ArrayShape(shape)) => {
+                match row.as_ref().and_then(Type::shape) {
+                    Some(shape) => {
                         let widened = shape.map_types(&mut widen_for_text_protocol);
                         Type::object("mysqli_result".into(), vec![Type::array_shape(widened)])
                     }
-                    _ => Type::object("mysqli_result".into(), Vec::new()),
+                    None => Type::object("mysqli_result".into(), Vec::new()),
                 }
             }
             None => Type::union_of(vec![
@@ -96,9 +93,7 @@ impl<'a> Checker<'a> {
         row: Option<&Type>,
         arg: Option<&Expr>,
     ) -> Option<Type> {
-        let Some(Type::ArrayShape(shape)) = row else {
-            return None;
-        };
+        let shape = row?.shape()?;
         let fields = &shape.fields;
         let assoc = || Type::array_shape(shape.clone());
         let numeric = || {

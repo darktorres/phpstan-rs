@@ -16,7 +16,7 @@ fn fixture_schema() -> SchemaCatalog {
 fn a_wildcard_select_resolves_every_column_in_declared_order() {
     let schema = fixture_schema();
     let ty = resolve_from_static_schema(&schema, "SELECT * FROM categories").unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -30,7 +30,7 @@ fn a_wildcard_select_resolves_every_column_in_declared_order() {
 fn an_explicit_column_list_resolves_only_those_columns() {
     let schema = fixture_schema();
     let ty = resolve_from_static_schema(&schema, "SELECT id, name FROM categories").unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -44,7 +44,7 @@ fn an_aliased_column_uses_the_alias_as_the_field_name() {
     let schema = fixture_schema();
     let ty =
         resolve_from_static_schema(&schema, "SELECT id AS category_id FROM categories").unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -55,7 +55,7 @@ fn an_aliased_column_uses_the_alias_as_the_field_name() {
 fn a_table_qualified_column_resolves_by_its_own_bare_name() {
     let schema = fixture_schema();
     let ty = resolve_from_static_schema(&schema, "SELECT categories.id FROM categories").unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -98,7 +98,7 @@ fn resolve_sql_row_type_uses_the_static_schema_when_configured_and_no_live_refle
     let context = SqlContext::new(None, Some(fixture_schema()));
     let ty =
         resolve_sql_row_type(Some(&registry), &context, "SELECT id, name FROM categories").unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -158,7 +158,7 @@ fn refine_count_columns_overwrites_only_the_count_field() {
         ("total".to_string(), Type::string(), false),
     ]));
     let refined = refine_count_columns("SELECT id, COUNT(*) AS total FROM categories", row_type);
-    let Type::ArrayShape(fields) = refined else {
+    let Some(fields) = refined.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -177,7 +177,7 @@ fn refine_count_columns_leaves_non_count_rows_untouched() {
         false,
     )]));
     let refined = refine_count_columns("SELECT SUM(id) AS total FROM categories", row_type);
-    let Type::ArrayShape(fields) = refined else {
+    let Some(fields) = refined.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -194,7 +194,7 @@ fn count_column_positions_finds_a_window_function_count_over() {
 #[test]
 fn resolve_pure_ast_resolves_integer_and_string_literals_with_no_driver_at_all() {
     let ty = resolve_pure_ast("SELECT 1, 'x'", None).unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -205,7 +205,7 @@ fn resolve_pure_ast_resolves_integer_and_string_literals_with_no_driver_at_all()
 #[test]
 fn resolve_pure_ast_resolves_null_and_a_negative_integer() {
     let ty = resolve_pure_ast("SELECT NULL, -1", None).unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -216,7 +216,7 @@ fn resolve_pure_ast_resolves_null_and_a_negative_integer() {
 #[test]
 fn resolve_pure_ast_uses_an_alias_over_the_source_text_when_present() {
     let ty = resolve_pure_ast("SELECT 1 AS one", None).unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -226,7 +226,7 @@ fn resolve_pure_ast_uses_an_alias_over_the_source_text_when_present() {
 #[test]
 fn resolve_pure_ast_resolves_a_bare_count_star_with_no_from_at_all() {
     let ty = resolve_pure_ast("SELECT COUNT(*)", None).unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -242,7 +242,7 @@ fn resolve_pure_ast_bails_on_a_decimal_literal_with_no_driver_known() {
 #[test]
 fn resolve_pure_ast_resolves_a_decimal_literal_as_string_for_mysql() {
     let ty = resolve_pure_ast("SELECT 1.5", Some(SqlDriver::Mysql)).unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -252,7 +252,7 @@ fn resolve_pure_ast_resolves_a_decimal_literal_as_string_for_mysql() {
 #[test]
 fn resolve_pure_ast_resolves_a_decimal_literal_as_float_for_sqlite() {
     let ty = resolve_pure_ast("SELECT 1.5", Some(SqlDriver::Sqlite)).unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -267,13 +267,13 @@ fn resolve_pure_ast_bails_on_a_boolean_literal_with_no_driver_known() {
 #[test]
 fn resolve_pure_ast_resolves_a_boolean_literal_as_bool_for_postgres_but_int_for_mysql() {
     let pg = resolve_pure_ast("SELECT true", Some(SqlDriver::Pgsql)).unwrap();
-    let Type::ArrayShape(pg_fields) = pg else {
+    let Some(pg_fields) = pg.shape() else {
         panic!("expected an ArrayShape");
     };
     assert_eq!(pg_fields.fields[0].ty, Type::bool());
 
     let mysql = resolve_pure_ast("SELECT true", Some(SqlDriver::Mysql)).unwrap();
-    let Type::ArrayShape(mysql_fields) = mysql else {
+    let Some(mysql_fields) = mysql.shape() else {
         panic!("expected an ArrayShape");
     };
     assert_eq!(mysql_fields.fields[0].ty, Type::int());
@@ -289,7 +289,7 @@ fn resolve_sql_row_type_answers_a_pure_literal_query_with_nothing_configured_at_
     let registry = Registry::default();
     let context = SqlContext::default();
     let ty = resolve_sql_row_type(Some(&registry), &context, "SELECT 1, 'x'").unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -334,7 +334,7 @@ fn a_derived_table_resolves_through_the_same_static_schema_lookup() {
         "SELECT t.id FROM (SELECT id, name FROM categories) AS t",
     )
     .unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
@@ -349,7 +349,7 @@ fn a_non_recursive_cte_resolves_through_the_same_static_schema_lookup() {
         "WITH t AS (SELECT id, name FROM categories) SELECT name FROM t",
     )
     .unwrap();
-    let Type::ArrayShape(fields) = ty else {
+    let Some(fields) = ty.shape() else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();

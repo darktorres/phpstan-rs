@@ -37,8 +37,8 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
         1,
         "expected every same-key-set shape to merge into one"
     );
-    match &result[0] {
-        Type::ArrayShape(fields) => {
+    match result[0].shape() {
+        Some(fields) => {
             let fields = fields.named_fields();
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].0, "x");
@@ -49,7 +49,7 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
                 "expected the alternating true and false values to fold into bool"
             );
         }
-        other => panic!("expected a single merged ArrayShape, got {other:?}"),
+        None => panic!("expected a single merged ArrayShape, got {:?}", result[0]),
     }
 }
 
@@ -81,9 +81,13 @@ fn generalize_by_key_set_only_merges_the_matching_subset() {
     // untouched.
     assert_eq!(result.len(), 6, "expected 1 merged + 5 untouched members");
     let untouched_y_shapes = result
-            .iter()
-            .filter(|m| matches!(m, Type::ArrayShape(shape) if shape.fields.len() == 1 && shape.fields[0].key.to_string().starts_with('y')))
-            .count();
+        .iter()
+        .filter(|m| {
+            m.shape().is_some_and(|shape| {
+                shape.fields.len() == 1 && shape.fields[0].key.to_string().starts_with('y')
+            })
+        })
+        .count();
     assert_eq!(
         untouched_y_shapes, 5,
         "expected all 5 y-shapes to pass through unmerged"

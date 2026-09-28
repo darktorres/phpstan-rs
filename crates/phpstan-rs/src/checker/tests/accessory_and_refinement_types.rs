@@ -194,14 +194,14 @@ fn union_types_itself_generalizes_before_collapsing_to_mixed() {
         false,
     )]));
     let result = union_types(first_twelve, thirteenth);
-    match result {
-        Type::ArrayShape(fields) => {
+    match result.shape() {
+        Some(fields) => {
             let fields = fields.named_fields();
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].0, "x");
         }
-        other => panic!(
-            "expected union_types to generalize down to one merged ArrayShape, got {other:?}"
+        None => panic!(
+            "expected union_types to generalize down to one merged ArrayShape, got {result:?}"
         ),
     }
 }

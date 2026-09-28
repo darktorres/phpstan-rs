@@ -1,6 +1,6 @@
 # Paths naming a `types::Type` variant outside crates/types, per file.
 # A count may only fall; `cargo xtask arch --bless-types` records a fall.
-# total 378: 358 in patterns, 20 in comparisons, 0 building a type
+# total 274: 264 in patterns, 10 in comparisons, 0 building a type
 4	crates/phpstan-rs/src/checker.rs
 6	crates/phpstan-rs/src/checker/access_attributes.rs
 1	crates/phpstan-rs/src/checker/by_ref_params.rs
@@ -9,14 +9,10 @@
 7	crates/phpstan-rs/src/checker/calls/format_string.rs
 2	crates/phpstan-rs/src/checker/calls/misc_rules.rs
 3	crates/phpstan-rs/src/checker/calls/parameters.rs
-10	crates/phpstan-rs/src/checker/control_flow.rs
 4	crates/phpstan-rs/src/checker/control_flow/boolean_conditions.rs
 4	crates/phpstan-rs/src/checker/current_time.rs
 1	crates/phpstan-rs/src/checker/doctrine/query_builder.rs
-12	crates/phpstan-rs/src/checker/doctrine/result_shape.rs
-11	crates/phpstan-rs/src/checker/expr.rs
 59	crates/phpstan-rs/src/checker/expr/member_resolution.rs
-11	crates/phpstan-rs/src/checker/expr/mysqli.rs
 3	crates/phpstan-rs/src/checker/expr/preg_shapes.rs
 2	crates/phpstan-rs/src/checker/expr/probe_checks.rs
 8	crates/phpstan-rs/src/checker/function_decl.rs
@@ -39,13 +35,10 @@
 2	crates/phpstan-rs/src/checker/sql_reflection/parameter_validation.rs
 6	crates/phpstan-rs/src/checker/sql_reflection/query_builder.rs
 2	crates/phpstan-rs/src/checker/sql_reflection/resolve.rs
-18	crates/phpstan-rs/src/checker/sql_reflection/resolve/tests.rs
 1	crates/phpstan-rs/src/checker/static_call_context.rs
 9	crates/phpstan-rs/src/checker/stmt/loops.rs
 1	crates/phpstan-rs/src/checker/stmt/new_exception_discarded.rs
 3	crates/phpstan-rs/src/checker/strict_rules.rs
-1	crates/phpstan-rs/src/checker/tests/accessory_and_refinement_types.rs
-2	crates/phpstan-rs/src/checker/tests/array_literals_and_shapes.rs
 3	crates/phpstan-rs/src/checker/throws.rs
 1	crates/phpstan-rs/src/checker/throws/dynamic.rs
 1	crates/phpstan-rs/src/checker/throws/missing.rs
@@ -66,7 +59,3 @@
 3	crates/phpstan-rs/src/registry/global_vars.rs
 8	crates/phpstan-rs/src/registry/name_context.rs
 2	crates/phpstan-rs/src/registry/stubs.rs
-2	crates/phpstan-rs/src/registry/tests/assignability.rs
-12	crates/phpstan-rs/src/registry/tests/function_signatures.rs
-14	crates/phpstan-rs/src/registry/tests/global_vars.rs
-11	crates/phpstan-rs/src/registry/tests/phpdoc_inheritance.rs

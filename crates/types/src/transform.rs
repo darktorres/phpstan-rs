@@ -68,6 +68,20 @@ impl Type {
         }
     }
 
+    /// This type with each array value passed through `f`: a general
+    /// array's, and each shape field's and unsealed tail's, in union and
+    /// intersection members too. Other types are left as they are.
+    pub fn map_array_values(&self, f: &mut dyn FnMut(&Type) -> Type) -> Type {
+        match self {
+            Type::Array(key, value) => Type::Array(key.clone(), Box::new(f(value))),
+            Type::ArrayShape(shape) => Type::ArrayShape(shape.map_types(&mut |t| f(t))),
+            Type::Union(_) | Type::BenevolentUnion(_) | Type::Intersection(_) => {
+                self.map_children(&mut |m| m.map_array_values(&mut *f))
+            }
+            other => other.clone(),
+        }
+    }
+
     /// This array with each value passed through `keep`: a shape field
     /// `keep` turns into `never` is dropped, and one it changes may be
     /// dropped (becomes optional). Other types are left as they are.

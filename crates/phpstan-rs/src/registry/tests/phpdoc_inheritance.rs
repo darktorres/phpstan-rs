@@ -4,26 +4,16 @@
 
 use super::super::*;
 use super::helpers::*;
-use types::AccessoryKind;
 
-/// `list<T>` parses to `Type::Intersection([Array(int, T), Accessory
-/// (ArrayList)])` - pulls `T` back out for a plain equality assertion
-/// against the expected element type.
-fn list_item_type(ty: &Type) -> &Type {
-    let Type::Intersection(members) = ty else {
-        panic!("expected Type::Intersection (a list<T>), got {ty:?}");
-    };
-    members
-        .iter()
-        .find_map(|m| match m {
-            Type::Array(_, value) => Some(value.as_ref()),
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("expected an Array member inside {ty:?}"))
+/// A `list<T>`'s `T`.
+fn list_item_type(ty: &Type) -> Type {
+    assert!(ty.is_list().yes(), "expected a list<T>, got {ty:?}");
+    ty.array_value_type()
+        .unwrap_or_else(|| panic!("expected a list<T>, got {ty:?}"))
 }
 
 fn is_list_type(ty: &Type) -> bool {
-    matches!(ty, Type::Intersection(members) if members.contains(&Type::Accessory(AccessoryKind::ArrayList)))
+    ty.is_list().yes()
 }
 
 #[test]
@@ -40,7 +30,7 @@ fn a_return_type_is_inherited_from_an_interface_when_the_implementor_has_no_own_
             "#,
     );
     let sig = &r.classes["InstallView"].methods["pageAssets"];
-    assert_eq!(*list_item_type(&sig.return_type), Type::string());
+    assert_eq!(list_item_type(&sig.return_type), Type::string());
 }
 
 #[test]
@@ -57,14 +47,16 @@ fn a_param_type_is_inherited_from_an_interface_and_ty_native_is_left_alone() {
             "#,
     );
     let sig = &r.classes["RealConsumer"].methods["consume"];
-    assert_eq!(*list_item_type(&sig.params[0].ty), Type::int());
+    assert_eq!(list_item_type(&sig.params[0].ty), Type::int());
     // The native-only field must never be touched by this pass - it
     // feeds `check_one_method_override`'s Liskov check, which must keep
     // comparing native hints only.
-    let Type::Array(_, value) = &sig.params[0].ty_native else {
-        panic!("expected Type::Array, got {:?}", sig.params[0].ty_native);
-    };
-    assert_eq!(**value, Type::mixed());
+    assert_eq!(
+        sig.params[0].ty_native.array_value_type(),
+        Some(Type::mixed()),
+        "got {:?}",
+        sig.params[0].ty_native
+    );
 }
 
 #[test]
@@ -168,7 +160,7 @@ fn a_childs_own_return_doc_is_never_overwritten() {
             "#,
     );
     let sig = &r.classes["Impl6"].methods["make"];
-    assert_eq!(*list_item_type(&sig.return_type), Type::string());
+    assert_eq!(list_item_type(&sig.return_type), Type::string());
 }
 
 #[test]
@@ -219,7 +211,11 @@ fn a_constructor_matches_ancestor_params_by_name_not_position() {
     // Position 0 ($dependencyFactory) must be untouched - still resolved
     // from its own native `?DependencyFactory8` hint, never `string|null`.
     assert!(
-        matches!(&sig.params[0].ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Object(name, _) if name == "DependencyFactory8"))),
+        sig.params[0]
+            .ty
+            .object_class_names()
+            .iter()
+            .any(|name| *name == "DependencyFactory8"),
         "got: {:?}",
         sig.params[0].ty
     );
@@ -340,29 +336,19 @@ fn a_method_scoped_template_parameterized_type_is_inherited() {
             "#,
     );
     let sig = &r.classes["ConcreteRepo13"].methods["getReference"];
-    let Type::ClassString(inner) = &sig.params[0].ty else {
-        panic!(
-            "expected the param to backfill to ClassString(TemplateParam(T)), got {:?}",
-            sig.params[0].ty
-        );
-    };
-    assert!(
-        inner.is_template(),
-        "expected a TemplateParam inside the ClassString, got {inner:?}"
+    assert_eq!(
+        sig.params[0].ty.to_string(),
+        "class-string<T>",
+        "expected the param to backfill to class-string<T>"
     );
-    let Type::Union(members) = &sig.return_type else {
-        panic!(
-            "expected the return type to backfill to a Union containing TemplateParam and Null, got {:?}",
-            sig.return_type
-        );
-    };
+    let members = sig.return_type.union_members();
     assert!(
         members.iter().any(|m| m.is_template()),
         "expected a TemplateParam member in the return union, got {:?}",
         sig.return_type
     );
     assert!(
-        members.contains(&Type::Null),
+        members.contains(&Type::null()),
         "expected Null to survive in the return union, got {:?}",
         sig.return_type
     );
@@ -487,11 +473,12 @@ fn an_inherited_return_keeps_the_implementors_own_template_in_place_of_the_inter
             "#,
     );
     let sig = &r.classes["BaseFactory"].methods["all"];
-    match list_item_type(&sig.return_type) {
-        Type::TemplateParam(tp) => {
-            assert_eq!(tp.name, "M");
-            assert_eq!(tp.scope.as_deref(), Some("BaseFactory"));
-        }
-        other => panic!("expected BaseFactory's own M, got {other:?}"),
-    }
+    let item = list_item_type(&sig.return_type);
+    assert!(
+        item.is_template(),
+        "expected BaseFactory's own M, got {item:?}"
+    );
+    let tp = item.nested_templates()[0];
+    assert_eq!(tp.name, "M");
+    assert_eq!(tp.scope.as_deref(), Some("BaseFactory"));
 }

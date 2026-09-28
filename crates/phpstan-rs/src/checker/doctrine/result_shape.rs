@@ -363,7 +363,7 @@ pub(crate) fn index_key_type(checker: &Checker, chain: &QueryBuilderChain) -> Op
     )
     .map(|(ty, _)| ty);
     Some(match raw {
-        Some(ty @ (Type::Int | Type::String | Type::IntRange(..))) => ty,
+        Some(ty) if ty.is_int().yes() || ty.is_string().yes() => ty,
         _ => Type::unknown_array_key(),
     })
 }
@@ -436,20 +436,13 @@ pub(crate) fn single_scalar_column_type(
 ) -> Option<Type> {
     let [item] = items else { return None };
     let aliases = build_alias_map(checker, chain);
-    match select_item_type(checker, &aliases, item) {
-        Type::Object(..) | Type::ObjectWithoutClass => None,
-        ty => Some(ty),
-    }
+    let ty = select_item_type(checker, &aliases, item);
+    (!ty.is_object().yes()).then_some(ty)
 }
 
-/// Whether `ty` is, or anywhere contains, an entity/value-object `Type::
-/// Object` member.
+/// Whether some member of `ty` is an object (an entity or value object).
 fn contains_object(ty: &Type) -> bool {
-    match ty {
-        Type::Object(..) | Type::ObjectWithoutClass => true,
-        Type::Union(members) | Type::Intersection(members) => members.iter().any(contains_object),
-        _ => false,
-    }
+    ty.union_members().iter().any(|m| m.is_object().yes())
 }
 
 /// `getSingleColumnResult()` - unlike `getSingleScalarResult()` above,
@@ -533,20 +526,23 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
 /// `HYDRATE_OBJECT` computation, rather than duplicating every select-
 /// item-kind match arm a second time for the array-mode case.
 fn to_array_mode(checker: &Checker, ty: Type) -> Type {
-    match ty {
-        Type::Object(ref class, _) if entity_info(checker, class).is_some() => {
-            entity_array_shape(checker, class)
-        }
-        // A polymorphic (168j, entity-inheritance) row - every mapped
-        // subclass member converts independently.
-        Type::Union(members) => Type::union_of(
-            members
-                .into_iter()
-                .map(|m| to_array_mode(checker, m))
-                .collect(),
-        ),
-        other => other,
+    if let Some((class, _)) = ty.object_class_and_args()
+        && entity_info(checker, class).is_some()
+    {
+        return entity_array_shape(checker, class);
     }
+    // A polymorphic (entity-inheritance) row: every mapped subclass
+    // member converts independently.
+    let members = ty.union_members();
+    if members.len() > 1 {
+        return ty.with_members(
+            members
+                .iter()
+                .map(|m| to_array_mode(checker, m.clone()))
+                .collect(),
+        );
+    }
+    ty
 }
 
 /// `getArrayResult()` (ROADMAP Phase 168 168f) - the identical row
@@ -562,11 +558,12 @@ pub(crate) fn build_array_result_row_type(
     chain: &QueryBuilderChain,
     items: &[SelectItem],
 ) -> Option<Type> {
-    build_result_row_type(checker, chain, items).map(|ty| match ty {
-        Type::ArrayShape(shape) => {
-            Type::array_shape(shape.map_types(&mut |v| to_array_mode(checker, v.clone())))
+    build_result_row_type(checker, chain, items).map(|ty| {
+        if ty.is_array().yes() {
+            ty.map_array_values(&mut |v| to_array_mode(checker, v.clone()))
+        } else {
+            to_array_mode(checker, ty)
         }
-        other => to_array_mode(checker, other),
     })
 }
 

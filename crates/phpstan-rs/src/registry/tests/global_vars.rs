@@ -65,14 +65,11 @@ fn multiple_distinct_classes_across_sites_resolve_to_a_union() {
             $template = new Bar();
         "#,
     )]);
-    match global_type(&registry, "template") {
-        Some(Type::Union(members)) => {
-            assert_eq!(members.len(), 2, "got: {members:?}");
-            assert!(members.contains(&Type::Object("Foo".into(), vec![])));
-            assert!(members.contains(&Type::Object("Bar".into(), vec![])));
-        }
-        other => panic!("expected a Union of Foo/Bar, got: {other:?}"),
-    }
+    let ty = global_type(&registry, "template").expect("a type");
+    let members = ty.union_members();
+    assert_eq!(members.len(), 2, "got: {ty:?}");
+    assert!(members.contains(&Type::object("Foo".into(), vec![])));
+    assert!(members.contains(&Type::object("Bar".into(), vec![])));
 }
 
 #[test]
@@ -81,14 +78,15 @@ fn an_array_literal_assigned_global_accumulates_shape_fields_across_files() {
         ("a.php", "<?php $conf = array('a' => 1);"),
         ("b.php", "<?php $conf['b'] = 'x';"),
     ]);
-    match global_type(&registry, "conf") {
-        Some(Type::ArrayShape(fields)) => {
+    let ty = global_type(&registry, "conf");
+    match ty.and_then(Type::shape) {
+        Some(fields) => {
             let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
             assert!(names.contains(&"a"), "got: {names:?}");
             assert!(names.contains(&"b"), "got: {names:?}");
         }
-        other => panic!("expected an ArrayShape with a/b fields, got: {other:?}"),
+        None => panic!("expected an ArrayShape with a/b fields, got: {ty:?}"),
     }
 }
 
@@ -204,8 +202,9 @@ fn a_shape_field_picks_up_a_helpers_registry_resolved_return_type() {
             $g['key'] = someHelper();
         "#,
     )]);
-    match global_type(&registry, "g") {
-        Some(Type::ArrayShape(fields)) => {
+    let ty = global_type(&registry, "g");
+    match ty.and_then(Type::shape) {
+        Some(fields) => {
             let fields = fields.named_fields();
             let (_, ty, _) = fields
                 .iter()
@@ -213,7 +212,7 @@ fn a_shape_field_picks_up_a_helpers_registry_resolved_return_type() {
                 .expect("key field");
             assert_eq!(ty, &Type::object("Foo".into(), vec![]));
         }
-        other => panic!("expected an ArrayShape, got: {other:?}"),
+        None => panic!("expected an ArrayShape, got: {ty:?}"),
     }
 }
 
@@ -252,14 +251,15 @@ fn array_merge_with_self_folds_the_calls_resolved_shape_fields_in() {
             $g = array_merge($g, extra());
         "#,
     )]);
-    match global_type(&registry, "g") {
-        Some(Type::ArrayShape(fields)) => {
+    let ty = global_type(&registry, "g");
+    match ty.and_then(Type::shape) {
+        Some(fields) => {
             let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
             assert!(names.contains(&"a"), "got: {names:?}");
             assert!(names.contains(&"b"), "got: {names:?}");
         }
-        other => panic!("expected an ArrayShape with a/b fields, got: {other:?}"),
+        None => panic!("expected an ArrayShape with a/b fields, got: {ty:?}"),
     }
 }
 
@@ -272,15 +272,16 @@ fn coalesce_assign_contributes_the_rhs_type_but_compound_concat_assign_is_mixed(
             $g['b'] .= 'suffix';
         "#,
     )]);
-    match global_type(&registry, "g") {
-        Some(Type::ArrayShape(fields)) => {
+    let ty = global_type(&registry, "g");
+    match ty.and_then(Type::shape) {
+        Some(fields) => {
             let fields = fields.named_fields();
             let a = &fields.iter().find(|(k, _, _)| k == "a").expect("a field").1;
             let b = &fields.iter().find(|(k, _, _)| k == "b").expect("b field").1;
             assert_eq!(a, &Type::string_literal("default".into()));
             assert_eq!(b, &Type::mixed());
         }
-        other => panic!("expected an ArrayShape, got: {other:?}"),
+        None => panic!("expected an ArrayShape, got: {ty:?}"),
     }
 }
 
@@ -294,13 +295,13 @@ fn a_genuine_object_and_array_conflict_resolves_to_a_union_not_mixed() {
             $g = array('a' => 1);
         "#,
     )]);
-    match global_type(&registry, "g") {
-        Some(Type::Union(members)) => {
-            assert!(members.contains(&Type::Object("Foo".into(), vec![])));
-            assert!(members.iter().any(|m| matches!(m, Type::ArrayShape(_))));
-        }
-        other => panic!("expected a Union of Object/ArrayShape, got: {other:?}"),
-    }
+    let ty = global_type(&registry, "g").expect("a type");
+    let members = ty.union_members();
+    assert!(
+        members.contains(&Type::object("Foo".into(), vec![])),
+        "got: {ty:?}"
+    );
+    assert!(members.iter().any(|m| m.shape().is_some()), "got: {ty:?}");
 }
 
 #[test]
@@ -310,12 +311,11 @@ fn exceeding_the_shape_field_cap_degrades_to_array_mixed_not_mixed() {
         src.push_str(&format!("$g['k{i}'] = {i};\n"));
     }
     let registry = build_with_files(&[("a.php", &src)]);
-    match global_type(&registry, "g") {
-        Some(Type::Array(_, value)) => {
-            assert_eq!(**value, Type::mixed());
-        }
-        other => panic!("expected a plain Array(Mixed) after overflow, got: {other:?}"),
-    }
+    let ty = global_type(&registry, "g").expect("a type");
+    assert!(
+        ty.shape().is_none() && ty.array_value_type() == Some(Type::mixed()),
+        "expected a plain array<mixed> after overflow, got: {ty:?}"
+    );
 }
 
 #[test]
@@ -457,13 +457,14 @@ fn a_multi_level_nested_index_write_still_records_its_outermost_key() {
             $switch_lang['language'][$dynamic]['lang_info'] = 'x';
         "#,
     )]);
-    match global_type(&registry, "switch_lang") {
-        Some(Type::ArrayShape(fields)) => {
+    let ty = global_type(&registry, "switch_lang");
+    match ty.and_then(Type::shape) {
+        Some(fields) => {
             let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
             assert_eq!(names, vec!["language"], "got: {names:?}");
         }
-        other => panic!("expected an ArrayShape with a 'language' field, got: {other:?}"),
+        None => panic!("expected an ArrayShape with a 'language' field, got: {ty:?}"),
     }
 }
 
@@ -479,13 +480,14 @@ fn a_nested_append_write_still_records_its_outermost_key() {
             $switch_lang['stack'][] = 'x';
         "#,
     )]);
-    match global_type(&registry, "switch_lang") {
-        Some(Type::ArrayShape(fields)) => {
+    let ty = global_type(&registry, "switch_lang");
+    match ty.and_then(Type::shape) {
+        Some(fields) => {
             let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
             assert_eq!(names, vec!["stack"], "got: {names:?}");
         }
-        other => panic!("expected an ArrayShape with a 'stack' field, got: {other:?}"),
+        None => panic!("expected an ArrayShape with a 'stack' field, got: {ty:?}"),
     }
 }
 
@@ -493,7 +495,8 @@ fn a_nested_append_write_still_records_its_outermost_key() {
 fn a_bare_top_level_append_contributes_nothing() {
     let registry = build_with_files(&[("a.php", "<?php $g[] = 'x';")]);
     match global_type(&registry, "g") {
-        None | Some(Type::Mixed(false)) => {}
+        None => {}
+        Some(ty) if ty.is_implicit_mixed() => {}
         other => panic!("expected no contribution from a bare append, got: {other:?}"),
     }
 }
