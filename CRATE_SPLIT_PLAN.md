@@ -3080,7 +3080,11 @@ read after B8's two context fixes land.
 - composer hygiene (package context, no I/O);
 - `property.unusedType` as a ClassPropertiesNode rule over host-class
   assigns, including trait bodies per host (`facts_only`, the pre-pass
-  and every `*_facts` field deleted);
+  and every `*_facts` field deleted). An untyped property without a
+  default starts as `null`: `/** @var string|null */ private $debug;`
+  assigned a string only under `PHP_SAPI === 'cli'` is "never assigned
+  null" today (composer/xdebug-handler's `XdebugHandler.php:57`, one of 46
+  phpstan-rs-only `property.unusedType` on the corpus oracle's files);
 - renamed named arguments;
 - the trait-host constant-condition verdict as a collector plus rule;
 - the (span, message) dedup moved to the finalizer;
