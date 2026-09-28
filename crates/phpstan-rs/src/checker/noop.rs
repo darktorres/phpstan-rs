@@ -490,7 +490,7 @@ impl<'a> Checker<'a> {
             }
         }
         if *sig.return_type() == Type::Void
-            && f.name != "__construct".into()
+            && !f.name.eq_ignore_ascii_case("__construct")
             && sig.throws().is_none()
             && sig.assert().is_empty()
             && sig.assert_if_true().is_empty()

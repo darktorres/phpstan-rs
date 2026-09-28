@@ -366,14 +366,14 @@ impl<'a> Checker<'a> {
                         .as_deref()
                         .and_then(|d| super::phpdoc_unresolvable::tag_type_nodes(d).var)
                 });
-                (p.name.clone(), p.span, "PHPDoc type", node)
+                (&*p.name, p.span, "PHPDoc type", node)
             });
         let declared = c.properties.iter().map(|p| {
             let node = p
                 .doc_comment
                 .as_deref()
                 .and_then(|d| super::phpdoc_unresolvable::tag_type_nodes(d).var);
-            (p.name.clone(), p.span, "PHPDoc tag @var", node)
+            (&*p.name, p.span, "PHPDoc tag @var", node)
         });
         let entries: Vec<_> = declared.chain(promoted).collect();
         let mut checks: Vec<(Type, Type, String, Span)> = Vec::new();
@@ -393,7 +393,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|info| info.properties().get(name.as_ref()))
+                .and_then(|info| info.properties().get(name))
             else {
                 continue;
             };

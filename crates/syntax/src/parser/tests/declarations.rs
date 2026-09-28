@@ -10,8 +10,8 @@ fn top_level_const_declaration_parses() {
         panic!("expected GlobalConst");
     };
     assert_eq!(consts.len(), 2);
-    assert_eq!(consts[0].name, "FOO".into());
-    assert_eq!(consts[1].name, "BAR".into());
+    assert_eq!(consts[0].name, "FOO");
+    assert_eq!(consts[1].name, "BAR");
 }
 
 #[test]
@@ -41,10 +41,10 @@ fn pure_enum_parses_with_unbacked_cases() {
     let StmtKind::EnumDecl(e) = &program[0].kind else {
         panic!("expected EnumDecl");
     };
-    assert_eq!(e.name, "SortDirection".into());
+    assert_eq!(e.name, "SortDirection");
     assert!(e.backing_type.is_none());
     assert_eq!(e.cases.len(), 2);
-    assert_eq!(e.cases[0].name, "Ascending".into());
+    assert_eq!(e.cases[0].name, "Ascending");
     assert!(e.cases[0].value.is_none());
 }
 
@@ -84,7 +84,7 @@ fn backed_enum_with_interface_and_method_parses() {
         })
     ));
     assert_eq!(e.methods.len(), 1);
-    assert_eq!(e.methods[0].function.name, "label".into());
+    assert_eq!(e.methods[0].function.name, "label");
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn a_class_named_the_same_as_a_keyword_keeps_its_own_declared_case() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.name, "Enum".into());
+    assert_eq!(c.name, "Enum");
 }
 
 #[test]
@@ -148,13 +148,13 @@ fn a_final_method_is_recorded_as_final_and_a_non_final_one_is_not() {
     let locked = c
         .methods
         .iter()
-        .find(|m| m.function.name == "locked".into())
+        .find(|m| m.function.name == "locked")
         .unwrap();
     assert!(locked.is_final);
     let open = c
         .methods
         .iter()
-        .find(|m| m.function.name == "open".into())
+        .find(|m| m.function.name == "open")
         .unwrap();
     assert!(!open.is_final);
 }
@@ -165,9 +165,9 @@ fn a_readonly_property_modifier_is_recorded_per_property() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let x = c.properties.iter().find(|p| p.name == "x".into()).unwrap();
+    let x = c.properties.iter().find(|p| p.name == "x").unwrap();
     assert!(x.is_readonly);
-    let y = c.properties.iter().find(|p| p.name == "y".into()).unwrap();
+    let y = c.properties.iter().find(|p| p.name == "y").unwrap();
     assert!(!y.is_readonly);
 }
 
@@ -190,7 +190,7 @@ fn a_promoted_constructor_parameter_captures_its_own_readonly_modifier() {
     let ctor = c
         .methods
         .iter()
-        .find(|m| m.function.name == "__construct".into())
+        .find(|m| m.function.name == "__construct")
         .unwrap();
     assert!(ctor.function.params[0].promoted_readonly);
 }
@@ -213,7 +213,7 @@ fn a_trait_as_alias_clause_is_captured_in_the_ast() {
     assert_eq!(c.trait_aliases.len(), 1);
     let trait_name = c.trait_aliases[0].trait_name.as_ref().unwrap();
     assert_eq!(&*trait_name.written, "B");
-    assert_eq!(c.trait_aliases[0].method, "hello".into());
+    assert_eq!(c.trait_aliases[0].method, "hello");
     assert_eq!(c.trait_aliases[0].alias, Some("helloB".into()));
 }
 
@@ -233,7 +233,7 @@ fn a_bare_as_alias_clause_with_no_trait_qualifier_is_captured() {
     };
     assert_eq!(c.trait_aliases.len(), 1);
     assert!(c.trait_aliases[0].trait_name.is_none());
-    assert_eq!(c.trait_aliases[0].method, "greet".into());
+    assert_eq!(c.trait_aliases[0].method, "greet");
     assert_eq!(c.trait_aliases[0].alias, Some("greetAlias".into()));
 }
 
@@ -257,7 +257,7 @@ fn an_as_clause_that_only_changes_visibility_captures_no_alias() {
         Some(Visibility::Protected)
     ));
     assert!(c.trait_aliases[0].alias.is_none());
-    assert_eq!(c.resolved_trait_conflicts, vec!["greet".to_string().into()]);
+    assert_eq!(c.resolved_trait_conflicts, ["greet"]);
 }
 
 #[test]
@@ -276,14 +276,14 @@ fn an_insteadof_clause_records_its_method_as_a_resolved_conflict() {
     };
     assert_eq!(c.trait_precedences.len(), 1);
     assert_eq!(&*c.trait_precedences[0].trait_name.written, "A");
-    assert_eq!(c.trait_precedences[0].method, "hello".into());
+    assert_eq!(c.trait_precedences[0].method, "hello");
     let instead_of: Vec<&str> = c.trait_precedences[0]
         .instead_of
         .iter()
         .map(|q| &*q.written)
         .collect();
     assert_eq!(instead_of, ["B"]);
-    assert_eq!(c.resolved_trait_conflicts, vec!["hello".to_string().into()]);
+    assert_eq!(c.resolved_trait_conflicts, ["hello"]);
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn an_insteadof_clause_with_a_fully_qualified_trait_name_is_still_parsed() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.resolved_trait_conflicts, vec!["hello".to_string().into()]);
+    assert_eq!(c.resolved_trait_conflicts, ["hello"]);
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn a_named_by_ref_function_declaration_is_unaffected_by_the_anonymous_statement_
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a FunctionDecl, got {:?}", program[0].kind);
     };
-    assert_eq!(f.name, "bar".into());
+    assert_eq!(f.name, "bar");
 }
 
 #[test]
@@ -402,9 +402,9 @@ fn asymmetric_visibility_property_parses() {
         panic!("expected ClassDecl");
     };
     assert_eq!(c.properties.len(), 2);
-    assert_eq!(c.properties[0].name, "name".into());
+    assert_eq!(c.properties[0].name, "name");
     assert_eq!(c.properties[0].visibility, Visibility::Public);
-    assert_eq!(c.properties[1].name, "count".into());
+    assert_eq!(c.properties[1].name, "count");
     assert_eq!(c.properties[1].visibility, Visibility::Public);
 }
 
@@ -567,7 +567,7 @@ fn legacy_var_property_declaration_parses() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.properties[0].name, "a".into());
+    assert_eq!(c.properties[0].name, "a");
     assert_eq!(c.properties[0].visibility, Visibility::Public);
     assert_eq!(
         c.properties[0]
@@ -605,7 +605,7 @@ fn hooks_on_promoted_constructor_property_parse() {
 #[test]
 fn readonly_class_still_parses_as_a_class() {
     let program = parse(r#"<?php readonly class Foo {}"#);
-    assert!(matches!(&program[0].kind, StmtKind::ClassDecl(c) if c.name == "Foo".into()));
+    assert!(matches!(&program[0].kind, StmtKind::ClassDecl(c) if c.name == "Foo"));
 }
 
 // These exercise the real `Attribute { name, args }` node parsed onto

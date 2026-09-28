@@ -173,10 +173,7 @@ pub struct CatchClause {
 
 #[derive(Debug, Clone)]
 pub struct Param {
-    // `Arc<str>`, moved straight out of the lexer's own interned
-    // `Token::Variable` - see `FunctionDecl::name`'s own doc comment for
-    // why this preserves (rather than throws away) the lexer's own
-    // interning.
+    // Moved out of the lexer's interned `Token::Variable`, without its `$`.
     pub name: Arc<str>,
     // This parameter's own `$name` token's span - populated by
     // the parser at the exact point it consumes it (`expect_variable`),
@@ -221,14 +218,7 @@ pub struct Param {
 
 #[derive(Debug, Clone)]
 pub struct FunctionDecl {
-    // `Arc<str>`, moved straight out of the lexer's own interned
-    // `Token::Identifier` (`Parser::expect_ident`/`take_name_segment`,
-    // `Parser::take_token`'s existing move-based construction) rather than
-    // re-materializing a fresh `String` at this token->AST boundary - see
-    // Fix 10 Stage 1's own design note (the "wash trap": a partial
-    // `Token`-only conversion that still re-allocates here would gain
-    // nothing).
-    pub name: Arc<str>,
+    pub name: Name,
     // The name with the file's namespace, for a function declared as a
     // statement; `None` for a method. Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
@@ -276,9 +266,8 @@ pub enum Visibility {
 
 #[derive(Debug, Clone)]
 pub struct PropertyDecl {
-    // See `FunctionDecl::name`'s own doc comment - moved straight out of
-    // the lexer's own interned `Token::Variable`.
-    pub name: Arc<str>,
+    // Without its `$`.
+    pub name: Name,
     // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     pub visibility: Visibility,
@@ -402,9 +391,7 @@ pub enum UseKind {
 
 #[derive(Debug, Clone)]
 pub struct ClassConst {
-    // See `FunctionDecl::name`'s own doc comment - always taken via
-    // `Parser::expect_ident`.
-    pub name: Arc<str>,
+    pub name: Name,
     // The name with the file's namespace, for a global `const`; `None` in
     // a class. Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
@@ -463,12 +450,8 @@ pub enum ClassKind {
 
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
-    // See `FunctionDecl::name`'s own doc comment - always taken via
-    // `Parser::expect_ident`, except an anonymous class's own synthetic
-    // placeholder (`"class@anonymous"`, interned like any other name -
-    // real corpora declare many, so it dedups the same way a repeated
-    // real class name would).
-    pub name: Arc<str>,
+    // `"class@anonymous"` for an anonymous class.
+    pub name: Name,
     // The name with the file's namespace; `None` for an anonymous class.
     // Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
@@ -509,7 +492,7 @@ pub struct ClassDecl {
     // `use A, B { B::hello insteadof A; }`: each `insteadof` clause.
     pub trait_precedences: Vec<TraitPrecedence>,
     // Every method name an adaptation clause mentions.
-    pub resolved_trait_conflicts: Vec<Arc<str>>,
+    pub resolved_trait_conflicts: Vec<Name>,
     // `case` members, which PHP parses in any class-like body but only
     // allows in an enum (`enum.caseOutsideOfEnum`).
     pub enum_cases: Vec<EnumCase>,
@@ -525,8 +508,7 @@ pub struct ClassDecl {
 
 #[derive(Debug, Clone)]
 pub struct EnumCase {
-    // See `FunctionDecl::name`'s own doc comment.
-    pub name: Arc<str>,
+    pub name: Name,
     // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
@@ -539,8 +521,7 @@ pub struct EnumCase {
 
 #[derive(Debug, Clone)]
 pub struct EnumDecl {
-    // See `FunctionDecl::name`'s own doc comment.
-    pub name: Arc<str>,
+    pub name: Name,
     // The name with the file's namespace. Filled in by name resolution.
     pub namespaced_name: Option<Arc<str>>,
     pub name_span: Span,
@@ -558,7 +539,7 @@ pub struct EnumDecl {
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
     pub trait_aliases: Vec<TraitAlias>,
     pub trait_precedences: Vec<TraitPrecedence>,
-    pub resolved_trait_conflicts: Vec<Arc<str>>,
+    pub resolved_trait_conflicts: Vec<Name>,
     // The enum's own `/** ... */` doc comment, if any - needed
     // only to reject a stray `@template` tag (enums can't be generic).
     pub doc_comment: Option<Arc<str>>,
@@ -571,9 +552,9 @@ pub struct EnumDecl {
 #[derive(Debug, Clone)]
 pub struct TraitAlias {
     pub trait_name: Option<QualifiedName>,
-    pub method: Arc<str>,
+    pub method: Name,
     pub visibility: Option<Visibility>,
-    pub alias: Option<Arc<str>>,
+    pub alias: Option<Name>,
 }
 
 /// `Trait::method insteadof Other, ...;` in a trait-use block: `trait_name`'s
@@ -581,7 +562,7 @@ pub struct TraitAlias {
 #[derive(Debug, Clone)]
 pub struct TraitPrecedence {
     pub trait_name: QualifiedName,
-    pub method: Arc<str>,
+    pub method: Name,
     pub instead_of: Vec<QualifiedName>,
 }
 
@@ -591,7 +572,7 @@ pub struct TraitAdaptations {
     pub aliases: Vec<TraitAlias>,
     pub precedences: Vec<TraitPrecedence>,
     /// Every method name a clause mentions.
-    pub mentioned: Vec<Arc<str>>,
+    pub mentioned: Vec<Name>,
 }
 
 /// One argument in a call's own argument list - `name` is
@@ -701,8 +682,7 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone)]
 pub struct ClosureUse {
-    // See `FunctionDecl::name`'s own doc comment - taken via
-    // `Parser::expect_variable`.
+    // Moved out of the lexer's interned `Token::Variable`, without its `$`.
     pub name: Arc<str>,
     pub by_ref: bool,
     // The captured variable's own name span - lets a `use (&$x)`
@@ -1089,12 +1069,8 @@ pub struct Expr {
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     Literal(Literal),
-    // `Arc<str>`, moved straight out of the lexer's own interned
-    // `Token::Variable` (or, for a string-interpolation `$var`/`$var->
-    // prop`/`$var[key]` occurrence, the identically-interned
-    // `StringPart::SimpleVar`/`PropertyAccess::var`/`Index::var`/
-    // `SimpleIndexKey::Var`) - see `FunctionDecl::name`'s own doc comment
-    // for why this preserves rather than discards that interning.
+    // Moved out of the lexer's interned `Token::Variable` or a string
+    // interpolation's variable, without its `$`.
     Variable(Arc<str>),
     // `${expr}` - the older "variable variable" syntax: the variable's own
     // name is computed at runtime by evaluating expr, so unlike Variable

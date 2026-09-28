@@ -676,7 +676,7 @@ impl<'a> Checker<'a> {
     /// unrelated to methods.
     pub(crate) fn check_reserved_class_constant_name(&mut self, consts: &[ClassConst]) {
         for c in consts {
-            if c.name == "class".into() {
+            if c.name.eq_ignore_ascii_case("class") {
                 self.report_builder(
                     DiagnosticBuilder::new("a class constant must not be called 'class'; it is reserved for class name fetching".to_string(),
                         c.span,
@@ -1574,7 +1574,7 @@ impl<'a> Checker<'a> {
             // mistake this check otherwise exists to catch.
             if m.is_final
                 && m.visibility == Visibility::Private
-                && m.function.name != "__construct".into()
+                && !m.function.name.eq_ignore_ascii_case("__construct")
             {
                 self.report(format!(
                         "private method {fqn}::{}() cannot be final as it is never overridden by other classes",
@@ -1683,7 +1683,7 @@ impl<'a> Checker<'a> {
         let Some(ctor) = c
             .methods
             .iter()
-            .find(|m| m.function.name == "__construct".into())
+            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
         else {
             return;
         };
@@ -1747,7 +1747,7 @@ impl<'a> Checker<'a> {
         let Some(ctor) = c
             .methods
             .iter()
-            .find(|m| m.function.name == "__construct".into())
+            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
         else {
             return;
         };

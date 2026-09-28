@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::*;
+use crate::name::Name;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
 
@@ -14,7 +15,7 @@ pub(crate) struct ClassBody {
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
     pub trait_aliases: Vec<TraitAlias>,
     pub trait_precedences: Vec<TraitPrecedence>,
-    pub resolved_trait_conflicts: Vec<Arc<str>>,
+    pub resolved_trait_conflicts: Vec<Name>,
     pub enum_cases: Vec<EnumCase>,
 }
 
@@ -127,7 +128,7 @@ impl Parser {
             // only used structurally within this one expression. Interned
             // like any other name: every anonymous class in the corpus
             // shares this identical text, a real (if small) dedup win.
-            name: self.interner.str("class@anonymous"),
+            name: self.interner.name("class@anonymous"),
             // No real name token to point at - see `ClassDecl::name_span`'s
             // own doc comment.
             name_span: decl_span,
@@ -329,7 +330,7 @@ impl Parser {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name: cname,
+                        name: self.interner.name(&cname),
                         name_span: cname_span,
                         value,
                         doc_comment: doc.clone(),
@@ -406,7 +407,7 @@ impl Parser {
                     let hooks = self.parse_property_hooks()?;
                     properties.push(PropertyDecl {
                         removal_span: None,
-                        name,
+                        name: self.interner.name(&name),
                         name_span,
                         visibility,
                         write_visibility,
@@ -428,7 +429,7 @@ impl Parser {
                 }
                 properties.push(PropertyDecl {
                     removal_span: None,
-                    name,
+                    name: self.interner.name(&name),
                     name_span,
                     visibility,
                     write_visibility,
@@ -485,6 +486,7 @@ impl Parser {
                 } else {
                     (None, self.interner.str(&first))
                 };
+            let method = self.interner.name(&method);
             if matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("insteadof")) {
                 self.skip();
                 let first_other = self.parse_qualified_name();
@@ -520,7 +522,7 @@ impl Parser {
                     trait_name,
                     method: method.clone(),
                     visibility,
-                    alias,
+                    alias: alias.map(|a| self.interner.name(&a)),
                 });
                 out.mentioned.push(method);
             }
@@ -634,7 +636,7 @@ impl Parser {
 
         Ok(ClassDecl {
             namespaced_name: None,
-            name,
+            name: self.interner.name(&name),
             name_span,
             kind,
             extends,

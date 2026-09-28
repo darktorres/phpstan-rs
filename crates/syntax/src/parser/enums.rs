@@ -22,7 +22,7 @@ impl Parser {
         };
         self.expect_semicolon()?;
         Ok(EnumCase {
-            name,
+            name: self.interner.name(&name),
             name_span,
             value,
             attrs,
@@ -188,7 +188,7 @@ impl Parser {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name: cname,
+                        name: self.interner.name(&cname),
                         name_span: cname_span,
                         value,
                         doc_comment: doc.clone(),
@@ -240,7 +240,7 @@ impl Parser {
 
         Ok(EnumDecl {
             namespaced_name: None,
-            name,
+            name: self.interner.name(&name),
             name_span,
             backing_type,
             implements,

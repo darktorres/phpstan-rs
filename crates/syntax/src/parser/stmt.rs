@@ -286,7 +286,7 @@ impl Parser {
                     consts.push(ClassConst {
                         namespaced_name: None,
                         removal_span: None,
-                        name,
+                        name: self.interner.name(&name),
                         name_span,
                         value,
                         doc_comment: None,

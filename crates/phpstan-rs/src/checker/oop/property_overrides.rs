@@ -39,7 +39,7 @@ impl<'a> Checker<'a> {
             self.check_one_property_override(fqn, &p.name, &own_sig, p.span);
         }
         for m in &c.methods {
-            if m.function.name != "__construct".into() {
+            if !m.function.name.eq_ignore_ascii_case("__construct") {
                 continue;
             }
             for param in &m.function.params {

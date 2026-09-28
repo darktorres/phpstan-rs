@@ -1004,7 +1004,7 @@ impl ClassReflection {
         let mut static_methods: FxHashSet<Arc<str>> = FxHashSet::default();
         let mut final_methods_by_phpdoc: FxHashSet<Arc<str>> = FxHashSet::default();
         for m in &c.methods {
-            let name = m.function.name.clone();
+            let name = intern(&m.function.name);
             if m.is_abstract {
                 abstract_methods.insert(name.clone());
             }
@@ -1055,7 +1055,7 @@ impl ClassReflection {
             .properties
             .iter()
             .filter(|p| p.is_final && p.visibility != Visibility::Private)
-            .map(|p| p.name.clone())
+            .map(|p| intern(&p.name))
             .collect();
         // `public final int $x` is real, valid PHP on a promoted
         // constructor property too, and real PHP does enforce "Cannot
@@ -1065,7 +1065,7 @@ impl ClassReflection {
         if let Some(ctor) = c
             .methods
             .iter()
-            .find(|m| m.function.name == "__construct".into())
+            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
         {
             final_properties.extend(
                 ctor.function
@@ -1091,12 +1091,12 @@ impl ClassReflection {
                         .map(docblock::parse)
                         .is_some_and(|d| d.is_final)
             })
-            .map(|p| p.name.clone())
+            .map(|p| intern(&p.name))
             .collect();
         if let Some(ctor) = c
             .methods
             .iter()
-            .find(|m| m.function.name == "__construct".into())
+            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
         {
             final_properties_by_phpdoc.extend(
                 ctor.function
@@ -1156,7 +1156,7 @@ impl ClassReflection {
                     .as_ref()
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 (
-                    p.name.clone(),
+                    intern(&p.name),
                     PropertyReflection {
                         attributes: ReflectionAttribute::all(&p.attrs, ctx),
                         provenance: Provenance::default(),
@@ -1206,7 +1206,7 @@ impl ClassReflection {
         if let Some(ctor) = c
             .methods
             .iter()
-            .find(|m| m.function.name == "__construct".into())
+            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
         {
             let ctor_doc = ctor.function.doc_comment.as_deref().map(docblock::parse);
             for p in &ctor.function.params {
@@ -1426,7 +1426,7 @@ impl ClassReflection {
                     None => resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                 };
                 (
-                    cc.name.clone(),
+                    intern(&cc.name),
                     ConstantReflection {
                         attributes: ReflectionAttribute::all(&cc.attrs, ctx),
                         provenance: Provenance::default(),
@@ -1560,8 +1560,8 @@ impl ClassReflection {
                         .trait_name
                         .as_ref()
                         .map(|t| intern(&ctx.resolve(&t.written))),
-                    method: a.method.clone(),
-                    alias: a.alias.clone()?,
+                    method: intern(&a.method),
+                    alias: intern(a.alias.as_deref()?),
                 })
             })
             .collect();
@@ -1666,7 +1666,11 @@ impl ClassReflection {
             final_methods_by_phpdoc,
             final_properties_by_phpdoc,
             trait_aliases,
-            resolved_trait_conflicts: c.resolved_trait_conflicts.iter().cloned().collect(),
+            resolved_trait_conflicts: c
+                .resolved_trait_conflicts
+                .iter()
+                .map(|n| intern(n))
+                .collect(),
             templates,
             extends_args,
             implements_args,
@@ -1752,7 +1756,7 @@ impl ClassReflection {
                 .iter()
                 .map(|m| {
                     (
-                        m.function.name.clone(),
+                        intern(&m.function.name),
                         name_site(&m.function),
                         FunctionReflection::from_decl(
                             &m.function,
@@ -1914,7 +1918,7 @@ impl ClassReflection {
             .map(|cc| {
                 let doc = cc.doc_comment.as_deref().map(docblock::parse);
                 (
-                    cc.name.clone(),
+                    intern(&cc.name),
                     ConstantReflection {
                         attributes: ReflectionAttribute::all(&cc.attrs, ctx),
                         provenance: Provenance::default(),
@@ -1939,7 +1943,7 @@ impl ClassReflection {
         // syntax in real PHP - always public.
         for case in &e.cases {
             consts.insert(
-                case.name.clone(),
+                intern(&case.name),
                 ConstantReflection {
                     attributes: ReflectionAttribute::all(&case.attrs, ctx),
                     provenance: Provenance::default(),
@@ -1961,12 +1965,12 @@ impl ClassReflection {
         let position = |name: &Arc<str>| {
             e.cases
                 .iter()
-                .find(|c| c.name == *name)
+                .find(|c| c.name == **name)
                 .map(|c| c.name_span)
                 .or_else(|| {
                     e.consts
                         .iter()
-                        .find(|k| k.name == *name)
+                        .find(|k| k.name == **name)
                         .map(|k| k.name_span)
                 })
                 .map(|span| (span.start.line, span.start.col))
@@ -1989,7 +1993,7 @@ impl ClassReflection {
                     ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
                     _ => return None,
                 };
-                Some((c.name.clone(), ty))
+                Some((intern(&c.name), ty))
             })
             .collect();
 
@@ -2133,13 +2137,13 @@ impl ClassReflection {
         let mut static_methods: FxHashSet<Arc<str>> = FxHashSet::default();
         for m in &e.methods {
             if m.is_abstract {
-                abstract_methods.insert(m.function.name.clone());
+                abstract_methods.insert(intern(&m.function.name));
             }
             if m.is_final && m.visibility != Visibility::Private {
-                final_methods.insert(m.function.name.clone());
+                final_methods.insert(intern(&m.function.name));
             }
             if m.is_static {
-                static_methods.insert(m.function.name.clone());
+                static_methods.insert(intern(&m.function.name));
             }
         }
         for builtin in ["cases", "from", "tryFrom"] {
@@ -2161,8 +2165,8 @@ impl ClassReflection {
                         .trait_name
                         .as_ref()
                         .map(|t| intern(&ctx.resolve(&t.written))),
-                    method: a.method.clone(),
-                    alias: a.alias.clone()?,
+                    method: intern(&a.method),
+                    alias: intern(a.alias.as_deref()?),
                 })
             })
             .collect();
@@ -2202,7 +2206,11 @@ impl ClassReflection {
             final_methods_by_phpdoc: FxHashSet::default(),
             final_properties_by_phpdoc: FxHashSet::default(),
             trait_aliases,
-            resolved_trait_conflicts: e.resolved_trait_conflicts.iter().cloned().collect(),
+            resolved_trait_conflicts: e
+                .resolved_trait_conflicts
+                .iter()
+                .map(|n| intern(n))
+                .collect(),
             templates: Vec::new(),
             extends_args: Vec::new(),
             implements_args,

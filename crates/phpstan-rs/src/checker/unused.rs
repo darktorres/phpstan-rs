@@ -163,7 +163,7 @@ impl<'a> Checker<'a> {
         let mut usage = MemberUsage::default();
         let ctor = methods
             .iter()
-            .find(|m| m.function.name == "__construct".into());
+            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"));
         for m in methods {
             usage.aliases.clear();
             seed_self_typed_param_aliases(&m.function.params, fqn, &self.name_ctx, &mut usage);
@@ -238,7 +238,7 @@ impl<'a> Checker<'a> {
 
         for m in methods {
             if m.visibility != Visibility::Private
-                || m.function.name == "__construct".into()
+                || m.function.name.eq_ignore_ascii_case("__construct")
                 || m.function.name.eq_ignore_ascii_case("__clone")
                 || usage.methods.contains(m.function.name.as_ref())
             {

@@ -85,7 +85,7 @@ fn braced_namespace_declarations_splice_their_body_in() {
     assert!(
         program
             .iter()
-            .any(|s| matches!(&s.kind, StmtKind::FunctionDecl(f) if f.name == "f".into()))
+            .any(|s| matches!(&s.kind, StmtKind::FunctionDecl(f) if f.name == "f"))
     );
     assert!(matches!(&program[0].kind, StmtKind::Namespace(n) if n == "Foo\\Bar"));
 }
@@ -166,7 +166,7 @@ fn readonly_abstract_final_usable_as_plain_names() {
             final();
         "#,
     );
-    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "readonly".into()));
+    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "readonly"));
     for stmt in &program[1..] {
         assert!(matches!(
             &stmt.kind,
@@ -188,8 +188,8 @@ fn enum_usable_as_plain_function_and_constant_name() {
             enum Suit { case Hearts; }
         "#,
     );
-    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "enum".into()));
-    assert!(matches!(&program[3].kind, StmtKind::EnumDecl(e) if e.name == "Suit".into()));
+    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "enum"));
+    assert!(matches!(&program[3].kind, StmtKind::EnumDecl(e) if e.name == "Suit"));
 }
 
 #[test]

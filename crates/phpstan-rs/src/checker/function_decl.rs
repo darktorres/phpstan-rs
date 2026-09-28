@@ -932,7 +932,7 @@ impl<'a> Checker<'a> {
             // covariant `T` constructor parameter doesn't actually violate
             // covariance safety.
             if let (Some(sig), Some(c)) = (sig, class_name)
-                && f.name != "__construct".into()
+                && !f.name.eq_ignore_ascii_case("__construct")
             {
                 self.check_variance(sig, c, f.span);
             }
