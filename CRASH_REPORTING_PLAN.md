@@ -247,13 +247,27 @@ returns `None` and nothing else in this plan runs. With it set:
   `phpstan-rs: sending N crash report(s) to <host>` to stderr. 2 s for `lsp`,
   whose editor is waiting for it to exit: whatever isn't sent by then stays in
   the outbox for the next start;
-- `transport`: the outbox transport. It writes each envelope to the outbox
-  (§4.12) with `Envelope::to_writer`, synchronously inside `send_envelope`, then
-  queues it for a sender thread that POSTs it with its own `reqwest` client
-  (built with the platform verifier and `PHPSTAN_RS_SENTRY_CA_FILE`), applies
-  `RateLimiter`, and deletes the file on a 2xx. A network error or a 5xx keeps
-  the file for a later run; a 429 keeps it until the limit expires; any other
-  4xx deletes it with a line on stderr, since resending can't succeed.
+- `transport`: the outbox transport. For an envelope holding an event, it
+  writes the envelope to the outbox (§4.12), synchronously inside
+  `send_envelope`, then queues it for a sender thread; SDK-internal envelopes
+  (client reports) are sent without being kept. The sender POSTs with its own
+  `reqwest` client (the platform verifier plus `PHPSTAN_RS_SENTRY_CA_FILE`,
+  `HTTPS_PROXY`/`NO_PROXY` honoured as `reqwest` does by default, a 10 s
+  connect timeout and a 120 s request timeout, enough for 10 MiB on a slow
+  link), applies `RateLimiter`, and on a 2xx deletes the entry and, when the
+  event carries a `bundle_key` extra, records that key in `sent.json` (§4.6),
+  so a bundle counts as sent only once the server has it. A network error or
+  a 5xx keeps the entry for a later run; a 429 keeps it with `not_before` set
+  from the limit; any other 4xx deletes it with a line on stderr, since
+  resending can't succeed. When the outbox can't be written (a full or
+  read-only disk), the envelope is sent directly, unkept, with one line on
+  stderr.
+- A pending event (tagged `bundle = pending`, §4.6) is stored in
+  `pending/<entry id>/`, the id taken from the event's `pending_entry` extra,
+  and the transport then starts its finisher detached (§4.10). The code that
+  tags an event pending (the hook, the reporter's `before_capture`) chooses
+  the id and writes the crash-state copy and paths into that directory first,
+  since the event id doesn't exist until the capture.
 
 The guard lives in `main` for the whole run. Every `process::exit` goes
 through `crash_report::exit(code)`, which flushes first: `main.rs:83`,
@@ -370,15 +384,16 @@ was on.
   bundle's file list and copies the overlay text it includes (lookups only),
   then hands off; reading, archiving and sending happen off the lock. Within a
   session, a location already reported is counted, not sent again.
-- **Unisolated panics and native crashes** become pending reports: the
-  event without a bundle is written to `<cache>/crash-outbox/pending/<id>/`
-  with a copy of the crash state (§4.9) and the focus or in-progress paths, and
-  a finisher is started detached (§4.10). The outbox transport recognises a
-  pending event by its `bundle = pending` tag and stores it there instead of
-  sending it.
-- **Across runs:** `<cache>/crash-reports/sent.json` records
-  `(release, panic location or crash signature, crashing file's content hash)`
-  for each bundle sent. A repeat within 30 days still sends the event, so
+- **Unisolated panics and native crashes** become pending reports: the code
+  that catches the crash creates `<cache>/crash-outbox/pending/<entry id>/`
+  with a copy of the crash state (§4.9) and the focus or in-progress paths,
+  then captures the event tagged `bundle = pending` with the id as the extra
+  `pending_entry`; the outbox transport stores it there instead of sending it
+  and starts the finisher (§4.2, §4.10).
+- **Across runs:** `<cache>/crash-reports/sent.json` records a bundle key,
+  `(release, panic location, crashing file's content hash)` for a panic and
+  `(release, signal or exception code, in-progress files' content hashes)` for
+  a native crash, for each bundle the server accepted (§4.2). A repeat within 30 days still sends the event, so
   Sentry's counts stay true, but tagged `bundle = already_sent` and without
   the bundle. The file is updated under `File::lock` (std) and replaced by
   rename, so concurrent runs don't lose entries.
@@ -502,15 +517,17 @@ external/<n>/<name>      files outside the root, mapped in the manifest
   `_PHPSTAN_RS_CRASH_REPORTER`, `process_name` `phpstan-rs crash reporter`,
   `crashes_dir` `<cache>/crashes`, and `on_process` nulling the reporter's
   stdin and stdout (under `lsp` they are the protocol pipes; stderr stays).
-- **In the reporter's `before_capture`:** it tags the event
-  `bundle = pending` and `unit = native`, copies the crash state and the
-  current `focus.*` paths into the pending entry, and so the outbox transport
-  stores the fatal event, minidump included, as a pending report instead of
-  sending it (§4.6). The reporter then starts the finisher detached and exits.
+- **In the reporter's `before_capture`:** it creates the pending entry,
+  copies the crash state and the current `focus.*` paths into it, and tags the
+  event `bundle = pending` and `unit = native` with the entry's id; the outbox
+  transport then stores the fatal event, minidump included, in that entry and
+  starts the finisher (§4.2). The reporter's own flush finds nothing left to
+  send, and it exits, releasing `reporter.lock`.
 
 ### 4.10 Finisher
 
-`phpstan-rs __crash-finish <pending entry>`, a hidden subcommand:
+`phpstan-rs __crash-finish <pending entry>`, a subcommand hidden from
+`--help` (`#[command(hide = true)]`):
 
 1. takes the entry's lock with `File::try_lock`, and exits if another
    finisher holds it;
@@ -521,9 +538,11 @@ external/<n>/<name>      files outside the root, mapped in the manifest
 4. on the first two attempts, and when the crash state's format version is
    the finisher's own, loads the project from the entry's crash state
    (parse and index only, no checking: `Session` from `state.json` for
-   `check-project`, the LSP's workspace load from its folders and settings
-   with the overlays applied, nothing for `check`, whose bundle is the file
-   alone) and builds the bundle (§4.8);
+   `check-project`; for `lsp`, `lsp::load_workspace(folders, settings,
+   overlays) -> Project`, the load `Server::add_workspace_folders` does today
+   moved into a function the server and the finisher both call, with no
+   transport; nothing for `check`, whose bundle is the file alone) and builds
+   the bundle (§4.8);
 5. on a third attempt, or when the load or build fails, attaches the crashing
    files and the effective config directly, tagged `bundle = failed`, with the
    failure as an extra;
@@ -536,9 +555,10 @@ no minidump integration and records nothing about its own crashes.
 
 ### 4.11 Supervisor
 
-Every command but `lsp` runs under a supervisor when a DSN is set. The process the user started re-executes itself as
-the worker with the same arguments, inherited stdio, and a run id in the
-environment. It waits for the worker, then:
+Every command but `lsp` runs under a supervisor when a DSN is set. The process the user started re-executes itself
+(`std::env::current_exe`) as the worker with the same arguments
+(`std::env::args_os`, so non-UTF-8 arguments pass through exactly), inherited
+stdio, and a run id in the environment. It waits for the worker, then:
 
 - on a normal exit, exits with the worker's code;
 - whatever the exit, checks for the run's reports: it waits until
@@ -567,9 +587,24 @@ editor restarts it, and its detached finishers run on the same machine.
 ### 4.12 Outbox
 
 `<cache>/crash-outbox/` holds `ready/` (envelopes waiting to be sent) and
-`pending/` (reports waiting for their finisher). Each entry records the DSN's
-hash and is sent only by a client with the same DSN, so switching servers
-never sends old reports to the new one. At start, the app and the LSP drain
+`pending/` (reports waiting for their finisher). Each entry is a directory:
+
+```
+envelope        the serialised envelope
+meta.json       DSN hash, created, attempts, not_before, run id, bundle key
+entry.lock      empty; held by whoever is writing, sending or finishing it
+state/          pending entries only: the crash state copy and paths
+finisher.log    pending entries only
+```
+
+Every lock in this plan is a dedicated empty `*.lock` file, never the data it
+guards: Windows locks are mandatory, so locking `envelope` itself would stop
+another process from reading it. A sender takes `entry.lock`
+with `try_lock` before sending and skips the entry when it can't, so two runs
+draining at once never send one report twice; the transport holds it from
+writing the entry until it is sent or left for later. An entry is sent only
+by a client with the same DSN hash, so switching servers never sends old
+reports to the new one. At start, the app and the LSP drain
 it on a background thread: `ready/` entries are sent, `pending/` entries whose
 lock is free are handed to a finisher, stale crash-state directories are
 removed, and dumps older than a day in `<cache>/crashes` (left by a reporter
@@ -627,7 +662,9 @@ the oldest go first once the outbox passes 100 MiB.
   `x86_64-unknown-linux-gnu`'s rustflags and gives
   `aarch64-unknown-linux-gnu` the same flag.
 - **Build jobs** build with `--profile dist`, `PHPSTAN_RS_DIST=1` and
-  `PHPSTAN_RS_BUILD_COMMIT=${{ github.sha }}`, then split per target:
+  `PHPSTAN_RS_BUILD_COMMIT=${{ github.sha }}`; the packaging and smoke-check
+  steps read `target/<target>/dist/` in place of `target/<target>/release/`.
+  Then they split per target:
   - Linux: `objcopy --only-keep-debug` into `phpstan-rs.debug`, then
     `objcopy --strip-debug --add-gnu-debuglink` on the binary
     (`aarch64-linux-gnu-objcopy` on the cross leg, from the binutils it
@@ -637,16 +674,21 @@ the oldest go first once the outbox passes 100 MiB.
   - Windows: MSVC writes the `.pdb` beside the executable.
 
   Each job uploads the stripped binary and its debug file as a workflow
-  artifact, and packages the stripped binary as today.
+  artifact (`actions/upload-artifact`, pinned by commit SHA like the
+  workflow's other actions), and packages the stripped binary as today.
 - **An `upload-debug-files` job** on ubuntu-24.04, after every build job,
-  downloads `sentry-cli-Linux-x86_64` 3.8.0 and checks its SHA-256 (§3), then:
+  checks out the repository with full history (`fetch-depth: 0`), downloads
+  the build jobs' artifacts (`actions/download-artifact`, pinned), downloads
+  `sentry-cli-Linux-x86_64` 3.8.0 and checks its SHA-256 (§3), then:
   - `sentry-cli debug-files check` on every binary, failing the job when one
     has no debug ID, so a missing build ID is caught at release time;
   - `sentry-cli debug-files upload --include-sources --wait` on every binary
     and debug file (the binaries carry the unwind tables the server also
     reads);
-  - on a tag, `releases new`, `releases set-commits --auto` and
-    `releases finalize` for `phpstan-rs@<version>+<sha>`.
+  - on a tag, `releases new`, `releases set-commits --local` and
+    `releases finalize` for `phpstan-rs@<version>+<sha>`. `--local` reads the
+    checked-out history; `--auto` would need a repository integration
+    configured in Sentry, which a self-hosted instance may not have.
 
   Its secrets are `SENTRY_URL`, `SENTRY_ORG`, `SENTRY_PROJECT` and
   `SENTRY_AUTH_TOKEN`, an organization auth token. A `workflow_dispatch` run
@@ -710,8 +752,10 @@ so the user's binary doesn't carry it:
   events in memory; `isolated` recording location and backtrace; the bundle
   builder (the walk's order, ancestors first, both directions for passes, the
   cap and `omitted`, the config rewrite, overlays); grouping; `sent.json`
-  under two concurrent writers; the outbox transport's status handling and
-  DSN matching; the finisher's attempt counting.
+  under two concurrent writers, and written only after a 2xx; the outbox
+  transport's status handling, DSN matching, `not_before`, and two senders
+  draining one outbox sending each entry once; the unwritable-outbox fallback;
+  the finisher's attempt counting.
 - **End to end:** a test Sentry server on `127.0.0.1` decodes envelopes,
   served over TLS with a certificate from a test CA that
   `PHPSTAN_RS_SENTRY_CA_FILE` points at, so every test also exercises rustls
