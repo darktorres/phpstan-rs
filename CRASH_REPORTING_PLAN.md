@@ -44,13 +44,13 @@ Status: design. Nothing here is implemented.
   default feature set.
 - **Opt-in by `PHPSTAN_RS_SENTRY_DSN`, never `SENTRY_DSN`.** `sentry::init`
   falls back to `SENTRY_DSN`, `SENTRY_RELEASE` and `SENTRY_ENVIRONMENT` for any
-  option left unset, and a PHP project's CI or container often sets
-  `SENTRY_DSN` for the application itself; reading it would send phpstan-rs's
-  crashes, with the project's source, to the application's Sentry. phpstan-rs
-  reads only its own variable, calls `sentry::init` only when it is set, and
-  sets `dsn`, `release` and `environment` explicitly so no fallback applies.
-  Unset means no client, no extra process, no network, and no per-file work
-  beyond one inactive-hub check. No DSN is compiled into any build.
+  option left unset, and a PHP project's CI or container often sets `SENTRY_DSN`
+  for the application itself; reading it would send phpstan-rs's crashes, with
+  the project's source, to the application's Sentry. phpstan-rs reads only its
+  own variable, and its finishers, the only processes that call `sentry::init`
+  (§4.2), set `dsn`, `release` and `environment` explicitly so no fallback
+  applies. Unset means no extra process, no network, and no per-file work beyond
+  one check that reporting is off. No DSN is compiled into any build.
 - **Only the environment can turn it on.** No `phpstan-rs.toml` key sets the
   DSN: a config file travels with a repository, and a cloned repository must
   not be able to send its reader's crashes anywhere. For the same reason the
@@ -292,8 +292,8 @@ Status: design. Nothing here is implemented.
 
 `crates/crash-context` (library name `crash_context`) holds `hook`,
 `isolated`, `focus`, `record` (panic records), `carry`, `entry`,
-`internal_error` and the `Reporter` trait. `crates/crash-sys` holds the two
-calls that need `unsafe` (§4.1). `crates/phpstan-rs/src/crash_report/` holds
+`internal_error` and the `Reporter` trait. `crates/crash-sys` holds the three
+functions that need `unsafe` (§4.1). `crates/phpstan-rs/src/crash_report/` holds
 `init`, `events`, `bundle`, `state`, `pending`, `supervisor`, `outbox`,
 `lsp`, and implements `Reporter`. The `tools/crash-repro` crate uses `bundle`
 through the library. Below, `crash_report::isolated` and the like name the
@@ -317,7 +317,7 @@ included, is two processes of the same binary:
 | Role | Started by | Does |
 | --- | --- | --- |
 | supervisor | the user, CI or the editor | hosts the minidump server, starts the worker, keeps the run's crash state, finishes reports, relays the exit status (§4.11) |
-| worker | the supervisor | the real run, with the Sentry client and the crash handler attached |
+| worker | the supervisor | the real run, with the crash handler attached; writes pending reports, never sends |
 | finisher | a supervisor, and only as its child | completes one pending report with its bundle and sends it (§4.10) |
 
 `_PHPSTAN_RS_CRASH_ROLE` (`worker` or `finisher`) tells a child its role; a
@@ -617,9 +617,9 @@ references, and the pass goes on with the rest.
 focus to the declaring file of the class they're on, so a panic on a worker
 carries it in its record through `carry`. A failed step leaves the registry
 unusable, so the run ends with that internal error rather than analysing
-against half-resolved declarations. The LSP's incremental resolution
-(`project.rs:987`, on the debounce thread) stays unisolated until Stage F
-moves it onto the pool; its panics are reported through `entry` (§4.3).
+against half-resolved declarations. The LSP's incremental resolution, the
+registry phase of an update (§4.14), stays unisolated until C4's snapshots
+make it recoverable; its panics are reported through `entry` (§4.3).
 
 ### 4.6 From crashes to pending reports to events
 
@@ -685,8 +685,9 @@ has the finisher load the project (§4.10).
 - **Tags:** `command` (`check`, `check-project`, `lsp`), `level`, `unit`
   (`parse`, `facts`, `check`, `pass:<name>`, `load:<step>`, `native`, `oom`), `pcre_validate`,
   `lsp.client` and `lsp.client_version` (from `initialize`'s `clientInfo`),
-  `bundle` (`attached`, `already_sent`, `too_large`, `no_focus`, `failed`,
-  `pending`).
+  `bundle` (`attached`, `already_sent`, `too_large`, `no_focus`, `failed`),
+  `reproduces` and `replayed_with` (§4.8, §4.10), `ci` and `ci.provider`
+  (below).
 - **Context `run`:** analysed and context file counts, the enabled optional
   rules, the PHP version range, whether ext-sql reflects a live database.
 - **Installation:** the event's `user.id` is a random installation id, made
@@ -699,9 +700,9 @@ has the finisher load the project (§4.10).
   `TF_BUILD`); only the variables' presence is read, never their values.
 - **Breadcrumbs:** each run phase (config, discovery, load, property-assign
   facts, check, each whole-program pass, report); in the LSP each request and
-  notification's method, file and position, never its text. The SDK keeps the
-  last 100; `crash_report::breadcrumb` also sends each one to the supervisor
-  (§4.2), which keeps the last 100 too.
+  notification's method, file and position, never its text. `crash_context`
+  keeps the last 100 (§4.2); `crash_report::breadcrumb` also sends each one
+  to the supervisor, which keeps the last 100 too.
 - **Focus:** `crash_report::focus(path)` sets the thread's current file. The
   per-file units set it from their path; whole-program passes as they move
   between declarations (a class's or function's declaring file, a composer
@@ -915,8 +916,10 @@ The process the user, CI or the editor started, whenever a DSN is set:
    stays, for the supervisor's own lines;
 4. starts a draining finisher when earlier runs left anything in the outbox
    (§4.12);
-5. waits for the worker, starting a finisher for each `PENDING` message as it
-   arrives;
+5. waits for the worker, receiving `PENDING` messages; for `lsp` it starts a
+   finisher for each as it arrives, one at a time, since the session goes on;
+   for a CLI command it starts one finisher for all of them once the worker
+   has ended, so the project is loaded once (§4.6);
 6. when the worker has ended: finishes the native crash's entry if a dump was
    written; after an abnormal end with no dump (on Windows a `__fastfail`
    abort, exit code `0xC0000409`; anywhere, a crash the handler missed),
@@ -994,11 +997,18 @@ reporting code.
 `pending/` (reports waiting for their finisher). Each entry is a directory:
 
 ```text
-envelope        the serialised envelope
-meta.json       format version, DSN hash, created, attempts, not_before, run id, bundle key
-entry.lock      empty; held by whoever is writing, sending or finishing it
-state/          pending entries only: the crash state copy and paths
-finisher.log    pending entries only
+ready/<id>/
+  envelope      the finished, serialised envelope
+  meta.json     format version, DSN hash, created, attempts, not_before, bundle key
+  entry.lock    empty; held by whoever is writing or sending it
+pending/<id>/
+  report.json   a panic's report (§4.6), or
+  minidump.dmp  a native crash's scrubbed dump (§4.9)
+  plan.json     a panic's bundle plan (§4.6)
+  state/        the crash state as the crash saw it, and the in-progress files
+  meta.json     format version, DSN hash, created, attempts, run id, unit
+  entry.lock    held by the worker while writing and by the finisher
+  finisher.log  the finisher's stderr
 ```
 
 Every lock in this plan is a dedicated empty `*.lock` file, never the data it
@@ -1027,8 +1037,8 @@ arrived (§3), so within 30 days a retried event keeps the time of its crash.
   got; the supervisor finishes what's on disk, tagged `bundle = failed`.
 - A finisher's own panic or crash leaves its entry for the next attempt; the
   attempt count bounds the retries (§4.10).
-- The server unreachable: the envelope stays in the outbox's `ready/`, and
-  the supervisor prints
+- The server unreachable: the envelope stays in the outbox's `ready/`; each
+  finisher exits with a status saying so, and the supervisor prints
   `phpstan-rs: N crash report(s) kept in <outbox> for the next run`.
 - A rejected envelope (4xx other than 429): deleted, with
   `phpstan-rs: the crash-report server rejected a report (<status>)` on
@@ -1182,11 +1192,11 @@ so the user's binary doesn't carry it:
   crash still happens, then drops files nothing references any more. Panics
   are checked in-process under `catch_unwind`. Native crashes are checked in a
   worker process that writes its candidate to a state file before each
-  attempt; when the worker dies of the same signal, the supervisor records
-  the candidate as reproducing and starts a new worker from the saved state.
+  attempt; when that process dies of the same signal, the reducer records the
+  candidate as reproducing and starts a new one from the saved state.
   The result is a new bundle and a fixture directory ready to commit.
-- **Development builds' symbols.** An isolated panic's backtrace is
-  resolved in-process before sending, so a development build, which keeps its
+- **Development builds' symbols.** A panic's backtrace is resolved in the
+  worker before it writes the report, so a development build, which keeps its
   debug info, sends frames with function, file and line. Its minidumps are
   symbolicated on the server, which has no debug files for a local build:
   `cargo xtask crash-debug-files [debug|release]` uploads the local binary
@@ -1272,7 +1282,8 @@ so the user's binary doesn't carry it:
   neither, on all three CI operating systems.
 - **Cache fallback:** with the cache directory unwritable, a report still
   arrives, from the temporary-directory fallback; with that unwritable too,
-  sent directly.
+  the run says once on stderr that crash reporting is off and otherwise runs
+  as without a DSN.
 - **Degraded starts:** a supervisor whose worker can't start runs the command
   itself and exits with its result; a supervisor whose minidump server thread
   panics (injected) still relays the worker's exit status, and reports a later
@@ -1434,7 +1445,7 @@ One commit per step, each checked by fmt, clippy and its touched modules'
 tests; the end-to-end tests run from step 6 on and again at the end.
 
 1. **Single panic hook, isolated units and internal errors** (§4.3 without
-   the client paths, §4.4, §4.5 with focus), pulled forward with no Sentry
+   the `Reporter`, §4.4, §4.5 with focus), pulled forward with no Sentry
    involved, in the new `crash-context` crate: the four swaps go, vendor
    discovery's with them; `entry` wraps `main` and the LSP's threads; parse,
    facts, passes, the member-index re-check and the load steps stop dropping
