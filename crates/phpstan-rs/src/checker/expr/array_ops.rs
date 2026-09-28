@@ -1,6 +1,4 @@
-use crate::checker::expr::{
-    invalid_array_key_description, is_canonical_int_key, is_confidently_array,
-};
+use crate::checker::expr::{invalid_array_key_description, is_canonical_int_key};
 use crate::checker::{Checker, Locals, TemplateBindings};
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
@@ -651,7 +649,7 @@ impl<'a> Checker<'a> {
     /// default).
     pub(crate) fn check_dim_fetch_key_type(&mut self, base: &Expr, idx: &Expr, locals: &Locals) {
         let base_ty = self.infer_expr(base, locals);
-        if !is_confidently_array(&base_ty) {
+        if !base_ty.is_array().yes() {
             return;
         }
         let idx_ty = self.infer_expr(idx, locals);

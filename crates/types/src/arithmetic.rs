@@ -557,3 +557,19 @@ fn numeric_string_value(s: &crate::PhpString) -> Option<f64> {
     }
     text.trim().parse::<f64>().ok()
 }
+
+/// Unary `-` negates a literal/range operand's actual value - `+` is a
+/// true no-op on the value (only ever coercing a numeric string), but `-`
+/// must flip it: `-32768` infers as `IntLiteral(-32768)`, not
+/// `IntLiteral(32768)`. `IntRange`'s min/max swap on negation (`-int<a,
+/// b>` is `int<-b, -a>`) mirrors real PHPStan's `IntegerRangeType`
+/// negation handling. Anything else (a bare `Type::Int`, `Type::Float`,
+/// ...) has no specific value to flip, so it's returned unchanged.
+pub fn negate_numeric_literal(ty: Type) -> Type {
+    match ty {
+        Type::IntLiteral(n) => Type::IntLiteral(-n),
+        Type::FloatLiteral(f) => Type::FloatLiteral(-f),
+        Type::IntRange(min, max) => Type::IntRange(max.map(|m| -m), min.map(|m| -m)),
+        other => other,
+    }
+}

@@ -17,7 +17,7 @@ use diagnostics::DiagnosticBuilder;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
-use types::{self, AccessoryKind, Relation, Shape, Type};
+use types::{self, AccessoryKind, Shape, Type};
 
 mod array_ops;
 mod builtin_calls;
@@ -44,22 +44,6 @@ use preg_shapes::{
     PregFlags, parse_preg_flags, preg_leaf_type, preg_match_all_pattern_order_shape,
     preg_match_matches_shape,
 };
-
-/// Unary `-` negates a literal/range operand's actual value - `+` is a
-/// true no-op on the value (only ever coercing a numeric string), but `-`
-/// must flip it: `-32768` infers as `IntLiteral(-32768)`, not
-/// `IntLiteral(32768)`. `IntRange`'s min/max swap on negation (`-int<a,
-/// b>` is `int<-b, -a>`) mirrors real PHPStan's `IntegerRangeType`
-/// negation handling. Anything else (a bare `Type::Int`, `Type::Float`,
-/// ...) has no specific value to flip, so it's returned unchanged.
-fn negate_numeric_literal(ty: Type) -> Type {
-    match ty {
-        Type::IntLiteral(n) => Type::int_literal(-n),
-        Type::FloatLiteral(f) => Type::float_literal(-f),
-        Type::IntRange(min, max) => Type::int_range(max.map(|m| -m), min.map(|m| -m)),
-        other => other,
-    }
-}
 
 /// A bare `ExprKind::Name` with no registered global constant (an
 /// unresolved name stays `Mixed`, e.g. `PHP_EOL`/`M_PI`) - except
@@ -90,7 +74,7 @@ fn bare_name_literal_type(name: &str) -> Type {
 /// elsewhere in this file): if removing `null` changes nothing, `ty`
 /// never carried it to begin with.
 pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
-    !(ty.is_mixed() || matches!(ty, Type::Never)) && narrow_type_excluding(ty, &Type::Null) == *ty
+    !ty.is_never() && ty.is_null().no()
 }
 
 impl<'a> Checker<'a> {
@@ -1587,7 +1571,7 @@ impl<'a> Checker<'a> {
                 if inner_ty.is_string().yes() {
                     Type::int()
                 } else if *op == UnaryOp::Neg {
-                    negate_numeric_literal(inner_ty)
+                    types::arithmetic::negate_numeric_literal(inner_ty)
                 } else {
                     inner_ty
                 }
@@ -4371,7 +4355,7 @@ impl<'a> Checker<'a> {
                 if inner_ty.is_string().yes() {
                     Type::int()
                 } else if *op == UnaryOp::Neg {
-                    negate_numeric_literal(inner_ty)
+                    types::arithmetic::negate_numeric_literal(inner_ty)
                 } else {
                     inner_ty
                 }
@@ -5627,20 +5611,6 @@ fn is_non_falsy_string(ty: &Type) -> bool {
     ty.is_refined_string(AccessoryKind::NonFalsyString).yes()
 }
 
-/// Whether `ty` is confidently array-shaped for
-/// `check_dim_fetch_key_type`'s purposes - a bare `Array`/`ArrayShape`,
-/// or a `Union` where every member is (recursively, so a union of unions
-/// still counts) - anything else is "don't know," matching this
-/// project's leniency elsewhere rather than real PHPStan's tri-state
-/// `isArray()` grading.
-pub(crate) fn is_confidently_array(ty: &Type) -> bool {
-    match ty {
-        Type::Array(..) | Type::ArrayShape(_) => true,
-        Type::Union(members) => members.iter().all(is_confidently_array),
-        _ => false,
-    }
-}
-
 /// Whether `ty` is a type PHP itself can never legally use as an array
 /// key (`int`/`string`/`bool`/`float`/`null` all being legal - PHP
 /// coerces the latter three at runtime) - `Some(description)` only when
@@ -5660,47 +5630,33 @@ pub(crate) fn invalid_array_key_description(
     ty: &Type,
     php_version: Option<types::php_version::PhpVersion>,
 ) -> Option<String> {
-    match ty {
-        Type::Array(..) | Type::ArrayShape(_) => Some("array".to_string()),
-        Type::Object(name, _) => Some(name.clone().to_string()),
-        Type::Float
-            if php_version.is_some_and(|v| {
-                types::php_version::PhpFeature::DeprecatesFloatArrayKey.is_available(v)
-            }) =>
+    let deprecated = |feature: types::php_version::PhpFeature| {
+        php_version.is_some_and(|v| feature.is_available(v))
+    };
+    let mut descs = Vec::new();
+    for member in ty.union_members() {
+        // A legal or ambiguous member leaves the whole key unreported.
+        let desc = if member.is_array().yes() {
+            "array".to_string()
+        } else if member.is_object().yes()
+            && !member.is_enum_case()
+            && let [class] = member.object_class_names()[..]
         {
-            Some("float".to_string())
-        }
-        Type::Null
-            if php_version.is_some_and(|v| {
-                types::php_version::PhpFeature::DeprecatesNullArrayOffset.is_available(v)
-            }) =>
+            class.to_string()
+        } else if *member == Type::float()
+            && deprecated(types::php_version::PhpFeature::DeprecatesFloatArrayKey)
         {
-            Some("null".to_string())
-        }
-        Type::Union(members) => {
-            let mut descs = Vec::new();
-            for m in members {
-                // At least one member being legal (or ambiguous) bails
-                // out entirely - real PHPStan would report "possibly
-                // invalid" here (its own tri-state `isSuperTypeOf`),
-                // which this project has no equivalent for; skipping
-                // rather than guessing matches its usual leniency.
-                descs.push(invalid_array_key_description(m, php_version)?);
-            }
-            if descs.is_empty() {
-                None
-            } else {
-                Some(descs.join("|"))
-            }
-        }
-        // An accessory-refined intersection (`non-empty-string`, `list<T>`,
-        // ...) is illegal only when its own base type is - a refined
-        // *string* is still a perfectly legal key.
-        Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
-            Some("array".to_string())
-        }
-        _ => None,
+            "float".to_string()
+        } else if member.is_null().yes()
+            && deprecated(types::php_version::PhpFeature::DeprecatesNullArrayOffset)
+        {
+            "null".to_string()
+        } else {
+            return None;
+        };
+        descs.push(desc);
     }
+    Some(descs.join("|"))
 }
 
 impl<'a> Checker<'a> {
@@ -5857,9 +5813,9 @@ impl<'a> Checker<'a> {
                 .collect(),
             return_type: Box::new(match (return_type, inferred_return) {
                 (None, Some(inferred)) => inferred,
-                (Some(hint), Some(inferred)) => {
-                    intersect_but_not_never(&self.relation(), &resolve(Some(hint)), inferred)
-                }
+                (Some(hint), Some(inferred)) => self
+                    .relation()
+                    .intersect_but_not_never(&resolve(Some(hint)), inferred),
                 (hint, None) => resolve(hint),
             }),
             templates: Vec::new(),
@@ -6553,54 +6509,6 @@ pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
         }
         _ => false,
     }
-}
-
-/// Real PHPStan's `MutatingScope::intersectButNotNever`: a hinted
-/// closure's return is its native type narrowed by what the body
-/// actually returns. An inferred type the native one can't hold at all
-/// (a fall-off-the-end `void` under `: array`) leaves the native type
-/// as-is, and a nullable native type keeps its `null`. An `int` returned
-/// under `: float` is coerced at runtime, so it reads as the `float`.
-fn intersect_but_not_never(relation: &Relation, native: &Type, inferred: Type) -> Type {
-    let native_members: Vec<&Type> = match native {
-        Type::Union(ms) => ms.iter().collect(),
-        other => vec![other],
-    };
-    let inferred_members = match inferred {
-        Type::Union(ms) => ms,
-        other => vec![other],
-    };
-    let mut kept: Vec<Type> = Vec::new();
-    for m in inferred_members {
-        if m.is_mixed() {
-            return native.clone();
-        }
-        let int_like = matches!(m, Type::Int | Type::IntLiteral(_) | Type::IntRange(..));
-        let fits = !matches!(m, Type::Void)
-            && native_members
-                .iter()
-                .any(|n| !(int_like && matches!(n, Type::Float)) && relation.accepts(n, &m).yes());
-        if fits {
-            kept.push(m);
-            continue;
-        }
-        kept.extend(
-            native_members
-                .iter()
-                .filter(|n| !matches!(n, Type::Null) && relation.accepts(&m, n).yes())
-                .map(|n| (*n).clone()),
-        );
-    }
-    if kept.is_empty() {
-        return native.clone();
-    }
-    if native_members.iter().any(|n| matches!(n, Type::Null)) {
-        kept.push(Type::null());
-    }
-    kept.sort_by_key(|m| *m == Type::Null);
-    kept.into_iter()
-        .reduce(union_types)
-        .unwrap_or_else(|| native.clone())
 }
 
 /// A non-generator closure literal's inferred return type, from the

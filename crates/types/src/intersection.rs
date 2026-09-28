@@ -2,7 +2,7 @@
 //! array member folded into one array or shape, and a member dropped when
 //! another member is within it.
 
-use crate::{AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type};
+use crate::{AccessoryKind, Relation, Shape, ShapeField, ShapeKey, Type, union_types};
 
 /// The intersection of `members`, with no class knowledge. `list<int>&
 /// non-empty-array` is one array (`int` values, `int` keys) carrying both
@@ -93,6 +93,54 @@ impl Relation<'_> {
             1 => kept.pop().expect("one member"),
             _ => Type::Intersection(kept),
         }
+    }
+
+    /// Real PHPStan's `MutatingScope::intersectButNotNever`: a hinted
+    /// closure's return is its native type narrowed by what the body
+    /// actually returns. An inferred type the native one can't hold at all
+    /// (a fall-off-the-end `void` under `: array`) leaves the native type
+    /// as-is, and a nullable native type keeps its `null`. An `int` returned
+    /// under `: float` is coerced at runtime, so it reads as the `float`.
+    pub fn intersect_but_not_never(&self, native: &Type, inferred: Type) -> Type {
+        let native_members: Vec<&Type> = match native {
+            Type::Union(ms) => ms.iter().collect(),
+            other => vec![other],
+        };
+        let inferred_members = match inferred {
+            Type::Union(ms) => ms,
+            other => vec![other],
+        };
+        let mut kept: Vec<Type> = Vec::new();
+        for m in inferred_members {
+            if m.is_mixed() {
+                return native.clone();
+            }
+            let int_like = matches!(m, Type::Int | Type::IntLiteral(_) | Type::IntRange(..));
+            let fits = !matches!(m, Type::Void)
+                && native_members
+                    .iter()
+                    .any(|n| !(int_like && matches!(n, Type::Float)) && self.accepts(n, &m).yes());
+            if fits {
+                kept.push(m);
+                continue;
+            }
+            kept.extend(
+                native_members
+                    .iter()
+                    .filter(|n| !matches!(n, Type::Null) && self.accepts(&m, n).yes())
+                    .map(|n| (*n).clone()),
+            );
+        }
+        if kept.is_empty() {
+            return native.clone();
+        }
+        if native_members.iter().any(|n| matches!(n, Type::Null)) {
+            kept.push(Type::Null);
+        }
+        kept.sort_by_key(|m| *m == Type::Null);
+        kept.into_iter()
+            .reduce(union_types)
+            .unwrap_or_else(|| native.clone())
     }
 
     /// The narrower of two types when one contains the other, `never`
