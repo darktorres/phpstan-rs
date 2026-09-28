@@ -6481,25 +6481,36 @@ stdio.
   panics is an internal error, not a skipped file (`read_and_parse_file` returns
   `None` for it today). An internal error carries the file, the panic message
   and location and, under `RUST_BACKTRACE`, the backtrace the hook captured,
-  where today it is the message alone.
+  where today it is the message alone. A request whose handler panics answers
+  `InternalError` and the server keeps serving; today a panicking hover or
+  completion unwinds through the dispatch loop and ends the process.
 - **Cancellation, last-good AST, `reconfigure`.** A `CancellationToken` is
   checked between files and at statement boundaries within one, replacing
   `update_file_cancellable`'s per-file `should_abort` closure, and it backs
-  `$/cancelRequest`, whose flags no handler reads today. Requests read the last
-  published snapshot (C4) while an update builds the next, so hover and
+  `$/cancelRequest`, whose flags no handler reads today. The loop is ROADMAP
+  Phase 187's, event-driven with no timed wakeups (the dispatch loop blocking on
+  its channel, the shutdown flag set under the debounce queue's mutex), and the
+  Session's work leaves it: requests run on the pool against the last published
+  snapshot (C4) while an update builds the next, answered in whatever order they
+  finish, while document notifications apply in arrival order. Hover and
   completion stop waiting behind a recheck that holds the `Server` lock
-  (`DebounceHandle`'s documented trade-off). A file that stops parsing keeps its
-  last good AST, as `update_file` already does by parsing before it unindexes,
-  while its parse errors are published (below); once the parser recovers
-  (below), a declaration the recovered tree still holds is read from it and one
-  the error swallowed keeps its last good version, so the file's dependents
-  don't flood with errors mid-edit. `reconfigure` rebuilds registrations and the
-  file set and reuses unchanged reflection and stub layers: today
-  `reload_configuration` applies settings but can't change the loaded files
-  (`Project` has no unload), so a changed `scan_paths`, `stub_paths` or
-  `no_composer` only logs "reload the window". Changes to `composer.json`,
-  `composer.lock` and `vendor/composer/installed.json`, unwatched today (the
-  watcher registers `**/*.php` only), reconfigure too.
+  (`DebounceHandle`'s documented trade-off), and a slow request (references'
+  first member index, a workspace symbol search) stops delaying the next. An
+  update publishes the edited file as soon as it is checked, then open
+  documents, then the rest of the affected files; today
+  `update_file_cancellable` checks the whole affected set before anything is
+  published, so the file being typed in waits for its dependents. A file that
+  stops parsing keeps its last good AST, as `update_file` already does by
+  parsing before it unindexes, while its parse errors are published (below);
+  once the parser recovers (below), a declaration the recovered tree still holds
+  is read from it and one the error swallowed keeps its last good version, so
+  the file's dependents don't flood with errors mid-edit. `reconfigure` rebuilds
+  registrations and the file set and reuses unchanged reflection and stub
+  layers: today `reload_configuration` applies settings but can't change the
+  loaded files (`Project` has no unload), so a changed `scan_paths`,
+  `stub_paths` or `no_composer` only logs "reload the window". Changes to
+  `composer.json`, `composer.lock` and `vendor/composer/installed.json`,
+  unwatched today (the watcher registers `**/*.php` only), reconfigure too.
 - **One Session per root.** Each workspace folder has its own Session and
   config, and a file belongs to the innermost root containing it; the Sessions
   share the worker pool and C5's version-keyed stub layer, so a second root
@@ -6637,6 +6648,9 @@ Behaviour commits, one each with its fixture:
   workspace's config names (ext-sql's live reflector reads the DDL schema only)
   and says so once. Today opening a repository whose `phpstan-rs.toml` names a
   database connects to it with the credentials in the file.
+- **A fix-all code action** (`source.fixAll.phpstan-rs`), applying every fix in
+  the document at once, which editors can run on save; today each quick fix is
+  offered alone.
 - **An ignore code action**: every ignorable diagnostic offers "Ignore
   `<identifier>` on this line", adding the identifier to a `@phpstan-ignore`
   comment on the line (or the line above), extending one already there;
@@ -6686,15 +6700,15 @@ the whole registry (§1), which C4's memo already removes.
   edit that keeps the fingerprint rechecks that file only; one that changes it
   rechecks the files depending on the changed names, whose own fingerprints
   decide whether it goes further.
-- **The persistent cache.** Per analysed file it stores the content hash, the
-  raw errors (before the finalizer), the inline-ignore records, collected data,
-  dependencies, the fingerprint and the summaries. A run analyses only the files
-  whose content, or whose dependencies' fingerprints, changed; context files
-  (scan and stub paths, vendor code outside the lock) are nodes of the same
-  graph, hashed and fingerprinted, so editing one rechecks its readers instead
-  of discarding the cache; the rest come from the cache, and their declarations
-  are read lazily through the locator (C5) from a cached per-file name index,
-  not parsed. The cache is keyed by a meta hash of:
+- **The persistent cache.** Per analysed file it stores the content hash
+  (BLAKE3), the raw errors (before the finalizer), the inline-ignore records,
+  collected data, dependencies, the fingerprint and the summaries. A run
+  analyses only the files whose content, or whose dependencies' fingerprints,
+  changed; context files (scan and stub paths, vendor code outside the lock) are
+  nodes of the same graph, hashed and fingerprinted, so editing one rechecks its
+  readers instead of discarding the cache; the rest come from the cache, and
+  their declarations are read lazily through the locator (C5) from a cached
+  per-file name index, not parsed. The cache is keyed by a meta hash of:
   - the binary's identity (its version, and its executable's size and
     modification time, so a rebuilt development binary never reads a stale
     cache) and a cache format version;
@@ -6713,9 +6727,11 @@ the whole registry (§1), which C4's memo already removes.
 
   It lives under `tmp_dir` (default the user cache directory,
   `$XDG_CACHE_HOME/phpstan-rs` or its platform equivalent, one cache per
-  canonical project root and config file), at `result_cache_path` when set (C1's
-  shim stops reporting PHPStan's `tmpDir` and `resultCachePath` as ignored), and
-  is written atomically (a temporary file renamed over it) under a lock, so
+  canonical project root and config file), at `result_cache_path` when set;
+  entries hold project-relative paths, so a cache restored into another checkout
+  location (a CI cache) still applies (C1's shim stops reporting PHPStan's
+  `tmpDir` and `resultCachePath` as ignored), and is written atomically (a
+  temporary file renamed over it) under a lock (`std::fs::File::lock`), so
   concurrent runs can't corrupt it; an unreadable or version-mismatched cache is
   discarded with a warning. A file with an internal error isn't cached.
   `--no-result-cache` skips it, and the `clear-result-cache` command deletes it.
@@ -6775,6 +6791,9 @@ Today's five formats (`text`, `friendly`, `json`, `checkstyle`, `junit`) live in
   (today each format prints the run's own spelling, `./b.php`).
 - Warnings, SQL schema drift among them, reach the CI formats; today they go to
   stderr only.
+- `--format` repeats, each `name[=path]`, so one analysis writes the console
+  report and a CI file (`--format table --format junit=report.xml`) instead of
+  running twice; one without a path writes to stdout, and at most one may.
 - Third parties register formatters through `app::run`'s registration closure.
 
 **F4. Binary.** Today the bin has six subcommands (`check`, `check-project`,
@@ -6795,9 +6814,9 @@ on.
   terminal, off with `--no-progress` and when stderr isn't one; today a run
   prints nothing until it finishes.
 - The subcommands are `check-project`, `lsp` (accepting `--stdio`),
-  `convert-baseline` and `clear-result-cache`; Phase 183's `init` joins them.
-  `check` and `demo` are deleted, their roles moving to the syntax bench, the fixtures
-  and a `project` example. `incremental-bench` becomes
+  `convert-baseline`, `clear-result-cache` and `completions`; Phase 183's `init`
+  joins them. `check` and `demo` are deleted, their roles moving to the syntax
+  bench, the fixtures and a `project` example. `incremental-bench` becomes
   `project/examples/incremental.rs`, over any directory, plus a criterion bench.
 - PHPStan's command line works as is, so a CI script or tool that runs
   `vendor/bin/phpstan analyse` can run phpstan-rs instead: `analyse` and
@@ -6808,6 +6827,12 @@ on.
   `--ansi`/`--no-ansi` and `-v`/`-vv`/`-vvv` are accepted, each one with no
   meaning here reported once as ignored. `-c` naming a `.neon` file fails,
   pointing at `init` (ROADMAP Phase 183).
+- Ctrl-C cancels the run's token: analysis stops at the next statement
+  boundary, the files finished so far are cached, and the process exits 130.
+  Today an interrupted run loses everything.
+- `--version` prints the version and the build's git commit (dirty or not), the
+  same identity F2's cache key records; `completions <shell>` prints shell
+  completions (`clap_complete`).
 - The `format_signature` test moves to `reflection`.
 - `tests/cli.rs` covers every format's output and exit code on a fixture tree
   holding a finding, a parse error, an internal error (the panic-injection hook)
@@ -7088,7 +7113,10 @@ its owner. Non-Registry keys follow the table.
 
 | Dependency | Crate(s) |
 | --- | --- |
-| clap | bin |
+| clap, clap_complete (new) | bin |
+| ctrlc (new) | bin (F4's interrupt handling) |
+| blake3 (new) | project (F2's content hashes and fingerprints) |
+| stacker (new) | syntax, types, analyser (F1's stack growth at recursion points) |
 | crossbeam-channel, lsp-server, lsp-types | lsp |
 | dhat | bin |
 | hotpath | every measured crate (plain dependency); features only on the bin |
