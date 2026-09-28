@@ -215,6 +215,14 @@ impl Type {
         matches!(self, Type::BenevolentUnion(_))
     }
 
+    /// An intersection's members, or this type alone.
+    pub fn intersection_members(&self) -> &[Type] {
+        match self {
+            Type::Intersection(members) => members,
+            other => std::slice::from_ref(other),
+        }
+    }
+
     /// Whether this is a `mixed` with no type information behind it.
     pub fn is_implicit_mixed(&self) -> bool {
         matches!(self, Type::Mixed(false))
