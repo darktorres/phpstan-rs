@@ -6858,7 +6858,15 @@ the whole registry (§1), which C4's memo already removes.
   lock (`std::fs::File::lock`), so concurrent runs can't corrupt it; an
   unreadable or version-mismatched cache is discarded with a warning. A file
   with an internal error isn't cached. `--no-result-cache` skips it, and the
-  `clear-result-cache` command deletes it.
+  `clear-result-cache` command deletes it. A config file travels with its
+  repository, so a cloned repository's `phpstan-rs.toml` must not choose where
+  its reader's machine writes: a `tmp_dir` or `result_cache_path` from a config
+  file resolves inside the project root or the user cache directory and is
+  refused otherwise, while the same keys from `--set` or the environment may
+  point anywhere; the cache writes only inside a directory it created, marked by
+  a `CACHEDIR.TAG`, and never replaces a file it didn't write, so
+  `result_cache_path = "~/.bashrc"` fails the run instead of overwriting the
+  file. `clear-result-cache` deletes only such a marked directory.
 - **Incremental collectors.** Collected data is cached per file; a run
   recollects the analysed files and reruns the project-level rules over the
   merged data. A fact producer → consumer edge keyed by host class (another
