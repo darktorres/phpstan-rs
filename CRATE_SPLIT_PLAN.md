@@ -4039,9 +4039,17 @@ the `mixed` those unknown classes produce feeds the phpstan-rs-only
 read after B8's two context fixes land.
 
 Gate 12's rules oracle is Stage E's measure: over PHPStan's rule-test data
-at `76e738b4`, PHPStan reports 15,563 findings across 633 identifiers and
-phpstan-rs 11,428; 8,776 match, 6,787 are PHPStan-only, and phpstan-rs
-never matches 152 of the identifiers. Each E3 sub-phase ends when its
+at `76e738b4`, PHPStan reports 15,476 findings across 633 identifiers (its
+"(in context of class …)" copies of a trait's findings stripped and
+collapsed) and phpstan-rs 11,428; 8,840 match, 6,636 are PHPStan-only,
+and phpstan-rs never matches 152 of the identifiers. A finding matches
+one of the same identifier in the same file on the same line first, then
+within three lines, and within 60 for the signature-level identifiers the
+two tools place differently (`missingType.*`, `return.missing`,
+`constructor.unusedParameter`, `parameter.phpDocType`,
+`phpDoc.parseError`), each finding used once. Every PHPStan-only finding
+of an identifier phpstan-rs matches at least once was traced to its
+cause, a plan item citing the file and count. Each E3 sub-phase ends when its
 identifiers have no PHPStan-only findings left, or each remaining one is an
 approved deviation (an identifier named differently, such as
 `class.abstractMethodNotImplemented` for `method.abstract`, or a
@@ -4057,7 +4065,7 @@ C5's `functionMetadata.php` says which built-ins have side effects (42
 rules-oracle findings).
 
 The oracle's other side is the false-positive measure: phpstan-rs reports
-2,652 findings PHPStan doesn't, and every one was traced to its cause.
+2,588 findings PHPStan doesn't, and every one was traced to its cause.
 Each cause is a plan item where it lives (the items cite the rules
 oracle's file), and the phase that fixes it re-runs the oracle and removes
 its findings; what stays is approved: stricter checks that are right at
