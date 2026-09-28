@@ -3620,16 +3620,20 @@ moves in the phase named.
 | composer, composer/* | composer | B8 |
 | deps | deleted (resolved dependencies) | F2 |
 | config | config | C1 |
+| rules_settings | rules (the `[rules]` section's settings type) | C1 |
 | php_version | types | B4 |
 | php_float_format | types | B4 |
 | php_date_parser | builtins | E2 |
 | regex_groups, pcre_validate | builtins::regex | E2 |
+| checker/preg_pattern_validity | rules (`RegularExpressionPatternRule`, over builtins::regex) | E3c |
 | php_stubs + build.rs | stub-sources (sources, index) + reflection::stubs (layer) | B9/C5 |
+| stub_attributes | reflection::stubs (the version layer applies them per `PhpVersions` range) | C5 |
 | registry/* (index, resolve, hierarchy, generics, relation, name_context, class_info, function_sig, function_table, provenance, reflection_attribute, bodies, type_node, settings, stubs, anonymous_class; C4 adds the builder, the memo levels and the snapshot) | reflection | C3–C10 |
 | registry/assignability | types (unified relation) + analyser RuleLevelHelper | B4/C2 |
 | registry/assertion_table, assertion_tables | reflection overlays; defaults → ext-nette-tester / ext-mockery | C6 |
 | checker/predefined_constants, checker/constant_resolver | reflection ConstantResolver | C2 |
 | checker/rule_level_helper | analyser RuleLevelHelper | C2/E3 |
+| checker/profiling | analyser (the `measure_outermost!` hotpath helpers) | D1 |
 | registry/purity, registry/global_vars | analyser summaries | C9 |
 | registry/access_attributes | ext-language-extensions (class-reflection data ext) | C8 |
 | registry/class_info/doctrine_entity | ext-doctrine (class-reflection data ext) | C8 |
@@ -3640,7 +3644,7 @@ moves in the phase named.
 | pest_config | ext-pest | E4 |
 | rule, reflection_rule | analyser (Rule API; ported) | D6 |
 | project, project/* | project; architecture / banned / class_shape / composer_hygiene / mock_hygiene → rules / ext-mockstan | E1/F1 |
-| project/use_sites, decl_locations | built from the reference-site collector | E1 |
+| project/use_sites | built from the reference-site collector (`decl_locations` is gone; the doc comments in `registry.rs`, `dead_members.rs`, `dead_enum_cases.rs` and `use_site_index.rs` that name it are corrected) | E1 |
 | lsp, lsp/* | lsp | G1 |
 | main, main/* | bin (check_project → project::Session; check / demo deleted; incremental_bench → project example) | F4 |
 | checker.rs (Checker, Locals) | analyser (decomposed) | D1–E7 |
