@@ -2726,7 +2726,10 @@ adapter (`registry::type_node`) and the checker's `resolve_type_node`:
     the declaration's text, so `array{a: array, b: mixed}` still reports
     `a` (F46);
   - unions, `?T` and native `A|B` are built through the normalizing
-    constructors (F47).
+    constructors (F47);
+  - a bare `class-string` is the class-string type
+    (`ClassKindString(Class)`), not `string`, so it stays non-empty and
+    a class-string array key stays a string key (F61).
 - assert targets `$param->prop`, `$param->method()` and `$this->method()` are
   kept; `@throws` and assert types get alias substitution; a written
   `Traversable` resolves like any name.

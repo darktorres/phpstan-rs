@@ -452,6 +452,12 @@ through `check-project`.
   `FloatLiteral` and folds it where it appears (casts, `to_array_key`,
   `~`); the literal needs to reach it, with float arithmetic folding
   alongside. (found fixing F31)
+- [>] **F61. A bare `class-string` is `string`.** `@param class-string $c`
+  reads as `string` (`parse.rs`), though `class-string<T>` keeps its
+  type and the types crate has `ClassKindString(Class)` for the bare
+  form. The name isn't known non-empty, and `[$c => 1]` gets the key
+  `int|string` where a class name is never an int key. Moved to C7's
+  resolver list. (found fixing F33)
 
 ### False positives (from reading)
 
