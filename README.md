@@ -70,7 +70,7 @@ Three tools, each for what it measures well:
   registry passes and per-file checking. The recursive checker is measured
   once per outermost call (`checker::check_stmt`, `checker::check_expr`),
   since hotpath counts a function measured at every level of a recursion
-  once per level. Measurement roughly doubles the run time.
+  once per level.
 
   ```sh
   cargo build --release -p phpstan-rs --features hotpath,hotpath-alloc
