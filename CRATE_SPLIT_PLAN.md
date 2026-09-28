@@ -2777,7 +2777,10 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
   - **A nameless `@var`** above `throw` applies to the thrown expression as
     it does above `return`: `/** @var \Exception */ throw $foo;` on a
     `stdClass $foo` is `throw.notThrowable` today (the rules oracle's
-    `throw-values.php`).
+    `throw-values.php`); above `foreach` it types the iteratee, so `/**
+    @var int */ foreach ($list as $val)` is `foreach.nonIterable` beside
+    `varTag.noVariable`, unreported today (`wrong-variable-name-var.php`,
+    2).
 
 **D3. One inference path.** ExprHandlers, per-`NodeId` results, `infer_expr`
 deleted; the file-size gate.
