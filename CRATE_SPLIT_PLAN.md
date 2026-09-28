@@ -3321,13 +3321,17 @@ fixture:
     SORT_NUMERIC)`, `argument.bitmaskNotAllowed`), unreported today (33
     rules-oracle findings);
   - `new DateTime('2020.11.17')` and `new DateTimeImmutable('asdfasdf')`
-    with a literal PHP rejects are `new.dateTime`/`new.dateTimeImmutable`
-    (E2's date parser decides it), unreported today;
+    with a literal PHP rejects are `new.dateTime`/`new.dateTimeImmutable`:
+    the rule exists (`date_time.rs`, E2's date parser) and misses both
+    today;
+  - a named argument for a parameter a subtype renames
+    (`argument.parameterRenamedInSubtype`) is on by default as in PHPStan;
+    the check exists behind `check_renamed_named_arguments`, which is off;
+  - named arguments inside a `PHP_VERSION_ID < 80000` branch are
+    `argument.namedNotSupported` once D5 narrows the version there;
   - a static closure passed where `@param-closure-this` needs a bindable
-    one (`argument.staticClosure`), a named argument for a parameter a
-    subtype renames (`argument.parameterRenamedInSubtype`), named arguments
-    below PHP 8.0 (`argument.namedNotSupported`), a `void` closure's result
-    used or a callable's result discarded (`callable.void`,
+    one (`argument.staticClosure`), a `void` closure's result used or a
+    callable's result discarded (`callable.void`,
     `callable.resultDiscarded`), and a call whose return or argument type
     contains an unresolvable type (`method.unresolvableReturnType`,
     `argument.unresolvableType`) are unreported today;
@@ -3367,14 +3371,18 @@ fixture:
     as a read: `$that = $this; function () use ($that) { return
     $that->p; }` leaves `$p` `property.onlyWritten` today, a false
     positive;
-  - property hooks: a property overriding a writable or readable one
-    stays so (`property.notWritable`/`notReadable`), a get hook of a
-    non-virtual property reads its value and a set hook assigns it
-    (`propertyGetHook.noRead`, `propertySetHook.noAssign`); a
-    `private(set)`/`protected(set)` static property assigned from outside
+  - property hooks: the checks that a property overriding a writable or
+    readable one stays so (`property.notWritable`/`notReadable`) and that
+    a get hook of a non-virtual property reads its value and a set hook
+    assigns it (`propertyGetHook.noRead`, `propertySetHook.noAssign`)
+    exist and miss the rules oracle's cases (an interface property
+    prototype, a hook inherited through a parent:
+    `property-prototype-from-interface.php`, `bug-14457.php`,
+    `set-non-virtual-property-hook-assign.php`);
+    a `private(set)`/`protected(set)` static property assigned from outside
     (`assign.staticPropertyPrivateSet`/`ProtectedSet`) and a `@readonly`
     property assigned twice (`assign.readOnlyPropertyByPhpDoc`) are
-    reported; all unreported today;
+    unreported today;
   - a readonly property, native or `@readonly`, read before its
     initialization is reported
     (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
@@ -3405,7 +3413,8 @@ fixture:
     literal duplicate already is);
   - a set hook's parameter type is contravariant with the property's
     (`propertySetHook.parameterType`/`nativeParameterType`), a template
-    doesn't reuse a type alias's name (`generics.existingTypeAlias`), an
+    doesn't reuse a type alias's name (`generics.existingTypeAlias`: the
+    check exists in `generics/bounds.rs` and misses a local alias), an
     alias doesn't shadow a class (`typeAlias.duplicate`), and
     `@phpstan-require-extends`/`-implements` sit only where PHPStan allows
     them (`requireExtends.onClass`, `requireImplements.onEnum`, …); all
