@@ -1449,6 +1449,17 @@ Follow-up: **PHPDoc number literals** follow phpdoc-parser: hex, octal and
 binary, `_` separators and exponents (`int<0, 0xFF>`, `int<0, 1_000>` and
 `1e3` report `phpDoc.parseError` and read as `mixed` today).
 
+Follow-up: **the rest of phpdoc-parser's type grammar**, each today a
+`phpDoc.parseError`: a by-reference callable parameter without a name
+(`callable(string &): void`, the rules oracle's `pipe-operator.php`), an
+offset access as a conditional's subject (`(T[0] is string ? … : …)`,
+`(M[K] is not null ? M[K] : D)`: `bug-8609-function.php`, `bug-7310.php`)
+and a conditional chained in the else branch without parentheses (`(T is
+positive-int ? 1 : T is negative-int ? -1 : 0)`, `bug-8609.php`); and
+`$this` as a callable parameter's type (`\Closure($this): object` reads as
+plain `callable` today, so it is `parameter.phpDocType` "callable is not
+subtype of native type Closure", `bug-9009.php`).
+
 Follow-up: **shape keys follow phpdoc-parser's identifier token**, which
 takes `-` and `\` anywhere after the first character: `array{psr-4?:
 list<string>}` and `array{x-1: int}` report `phpDoc.parseError` today (a
@@ -2628,7 +2639,10 @@ the corpus oracle's phpstan-rs-only identifiers get owners the same way.
     `continue` already excluded Predis. The condition's type is the PHPDoc type,
     or the native type when `treatPhpDocTypesAsCertain` is off. After
     `$flag = true; if ($flag) { $x = 1; }`, `echo $x` is `variable.undefined`
-    today.
+    today. A ternary's and a `&&`/`||` operand's dead side is pruned the
+    same way: in `isset($array['string']) ? $array['string'] : 0` on
+    `array{1, 2, 3}`, the read is `offsetAccess.notFound` today (the rules
+    oracle's `isset.php`).
   - **A nameless `@var`** above `throw` applies to the thrown expression as
     it does above `return`: `/** @var \Exception */ throw $foo;` on a
     `stdClass $foo` is `throw.notThrowable` today (the rules oracle's
@@ -3835,7 +3849,9 @@ rules-oracle findings).
     `is_callable([$this, 'm'])` guards `$this->m()` as `method_exists($this,
     'm')` does, and both guard a ternary's true branch and a first-class
     callable (`method_exists($this, 'm') ? $this->m(...) : null`); each is
-    `method.notFound` today (the rules oracle's `bug-13596.php`).
+    `method.notFound` today (the rules oracle's `bug-13596.php`);
+    `property_exists(static::class, 'd')` guards `static::$d` (it is
+    `staticProperty.notFound` today, `bug-2861.php`).
     `is_callable()` keeps a non-final class as `Class&callable(): mixed`:
     on `Route|callable(): Route` it leaves `callable(): Route` today (the
     rules oracle's `bug-5333.php`); on an array it gives `callable-array`,
@@ -3940,6 +3956,12 @@ fixture:
     (`unset.variable`), `unset()` of an offset on a non-array
     (`unset.offset`), and a statement with no effect for `new class {};`
     (`expr.resultUnused`) are unreported today;
+  - `new static(…);` as a statement is not `new.resultUnused`: a subclass's
+    constructor may have effects (13 of the rules oracle's 19
+    phpstan-rs-only `new.resultUnused`, in `instantiation.php` and
+    `new-static.php`; the other 6, `new self()`/`new parent()` of a
+    constructor with no side effects, stay reported, stricter than
+    PHPStan);
   - a statement that can throw or runs code is not `expr.resultUnused`
     (`NoopRule` reads the expression's throw and impure points): `$a /
     $b;`, `$a % $b;` and `99 / $v;` (`DivisionByZeroError`), a `match`
