@@ -3445,6 +3445,54 @@ for the analyser.
   8. ext-disallowed-calls;
   9. ext-shipmonk, ext-type-perfect, ext-voku, ext-sidz, ext-slam,
      ext-psr3, ext-language-extensions and ext-extras.
+
+  Each crate mirrors its package completely, as §2's table says. Compared
+  rule class by rule class against the packages' current releases
+  (downloaded for the comparison), today's coverage is:
+
+  - ext-shipmonk has comparable types, null in binary and assign
+    operations and interpolated strings, and enum match exhaustiveness
+    (`EnforceEnumMatch`, `ForbidMatchDefaultArmForEnums`); ext-extras and
+    `restricted_symbols` cover `ForbidUnusedException`,
+    `RequirePreviousExceptionPass` and `EnforceNativeReturnTypehint`
+    (partly) and `ForbidCustomFunctions`. Missing: `BackedEnumGenerics`,
+    `ClassSuffixNaming`,
+    `EnforceClosureParamNativeTypehint`,
+    `EnforceIteratorToArrayPreserveKeys`, `EnforceListReturn`,
+    `EnforceReadonlyPublicProperty`, `ForbidArithmeticOperationOnNonNumber`,
+    `ForbidCast`, `ForbidCheckedExceptionInCallable`,
+    `ForbidCheckedExceptionInYieldingMethod`, `ForbidEnumInFunctionArguments`,
+    `ForbidFetchOnMixed`, `ForbidIdenticalClassComparison`,
+    `ForbidIncrementDecrementOnNonInteger`, `ForbidMethodCallOnMixed`,
+    `ForbidNotNormalizedType`, `ForbidPhpDocNullabilityMismatchWithNativeTypehint`,
+    `ForbidProtectedEnumMethod`, `ForbidReturnInConstructor`,
+    `ForbidReturnValueInYieldingMethod`, `ForbidUnsafeArrayKey`,
+    `ForbidUnsetClassField`, `ForbidUnusedClosureParameters`,
+    `ForbidUnusedMatchResult`, `ForbidUselessNullableReturn`,
+    `ForbidVariableTypeOverwriting`, `UselessPrivatePropertyDefaultValue`;
+  - ext-type-perfect has `NoIssetOnObject` and `NoEmptyOnObject` (in
+    `strict_idioms`); missing: `NoArrayAccessOnObject`,
+    `NoMixedMethodCaller`, `NoMixedPropertyFetcher`, `NoParamTypeRemoval`,
+    `NarrowPublicClassMethodParamType`, `NarrowPrivateClassMethodParamType`,
+    `NarrowReturnObjectType`, `ReturnNullOverFalse`;
+  - ext-voku has the mixed-operand checks (`ExtendedBinaryOp`,
+    `ExtendedAssignOp`); missing: the eight `IfCondition*`/
+    `ElseIfConditionBasic` rules, `WrongCast` and
+    `DisallowedCallMethodOnNull`;
+  - ext-mockstan has eight of rector/mockstan's ten (`mock_hygiene`);
+    missing: `NoEntityMocking` and `NoDocumentMocking`;
+  - ext-disallowed-calls maps functions, methods and classes onto
+    `restricted_symbols`; missing: namespaces, constants, class
+    constants, properties, superglobals, attributes, enums, `new`, the
+    control-structure and keyword kinds (`if`, `goto`, `eval`, `echo`,
+    `print`, `exit`/`die`, `include`/`require`, …), and the entry fields
+    the ROADMAP lists (`allowInFunctions*`, parameter conditions,
+    `definedIn`, `errorIdentifier`, `errorTip`);
+  - ext-sidz (all thirteen magic-number rules), ext-psr3 (all of
+    staabm/phpstan-psr3 and sfp-phpstan-psr-log) and
+    ext-language-extensions (all eight attributes) are complete;
+    slam/phpstan-extensions and phpstan-mockery have no rules (types and
+    configuration only).
 - Extensions register parse-time visitors of their own (§3.1's
   annotations), through the registration API.
 - ext-extras' `@see` check (`phpDoc.seeTag`) reads a reference as its
