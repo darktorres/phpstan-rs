@@ -23,6 +23,7 @@ use syntax::visit::{any_child_expr, any_child_stmt};
 #[derive(Default)]
 pub(crate) struct MemberUsage {
     pub(crate) consts: FxHashSet<Arc<str>>,
+    /// Lowercased (`method_key`).
     pub(crate) methods: FxHashSet<Arc<str>>,
     pub(crate) reads: FxHashSet<Arc<str>>,
     pub(crate) writes: FxHashSet<Arc<str>>,
@@ -59,6 +60,12 @@ fn target_is_self(target: &StaticTarget, fqn: &str, ctx: &NameContext) -> bool {
     target
         .as_name()
         .is_some_and(|class_ref| class_ref_is_self(class_ref, fqn, ctx))
+}
+
+/// A method name as `MemberUsage::methods` holds it: PHP method names are
+/// case-insensitive.
+pub(crate) fn method_key(name: &str) -> Arc<str> {
+    Arc::from(name.to_ascii_lowercase())
 }
 
 fn is_this(e: &Expr) -> bool {
@@ -264,10 +271,10 @@ pub(crate) fn walk_expr_for_members(
                 _ => usage.escaped = true,
             },
             ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
-                usage.methods.insert(intern(&name.name));
+                usage.methods.insert(method_key(&name.name));
             }
             ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn, ctx) => {
-                usage.methods.insert(intern(&name.name));
+                usage.methods.insert(method_key(&name.name));
             }
             // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
             // access this walker can't attribute to any specific member.
@@ -287,10 +294,12 @@ pub(crate) fn walk_expr_for_members(
                     && b.key.is_none()
                     && !a.spread
                     && !b.spread
-                    && is_this_or_aliased(&a.value, usage)
+                    && (is_this_or_aliased(&a.value, usage)
+                        || matches!(&a.value.kind, ExprKind::ClassNameFetch(target)
+                            if target_is_self(target, fqn, ctx)))
                     && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
                 {
-                    usage.methods.insert(Arc::from(&*name.to_str_lossy()));
+                    usage.methods.insert(method_key(&name.to_str_lossy()));
                 }
             }
             // `any_child_expr` deliberately returns no children for these

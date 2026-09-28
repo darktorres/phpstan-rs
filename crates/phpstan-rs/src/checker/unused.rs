@@ -240,7 +240,9 @@ impl<'a> Checker<'a> {
             if m.visibility != Visibility::Private
                 || m.function.name.eq_ignore_ascii_case("__construct")
                 || m.function.name.eq_ignore_ascii_case("__clone")
-                || usage.methods.contains(m.function.name.as_ref())
+                || usage
+                    .methods
+                    .contains(&member_usage::method_key(&m.function.name))
             {
                 continue;
             }

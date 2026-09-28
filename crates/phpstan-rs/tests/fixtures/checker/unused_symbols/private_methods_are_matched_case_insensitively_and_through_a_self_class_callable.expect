@@ -1,0 +1,2 @@
+6:13-6:39 method.unused L4 | private method A::unused() is unused
+    fix: Remove method unused() => ""
