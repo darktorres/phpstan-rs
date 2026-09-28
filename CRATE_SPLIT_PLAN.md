@@ -7785,7 +7785,12 @@ history and these are rules every later commit runs under: §2's crate map,
 layer rules and workspace conventions and Appendix F's decisions to
 `ARCHITECTURE.md`; each crate's §3 design to its crate-level `//!` docs, which
 `missing_docs` asks of the API crates anyway; and §4's gates with the
-approved-delta rule to `gates/README.md`, beside the data they read. The plan
+approved-delta rule to `gates/README.md`, beside the approved deltas and
+manifests they read, together with the gate section of `.corpus-runs/README.md`
+(the `xtask` commands, the artifact formats, the approved-delta files), which
+cites `CRATE_SPLIT_PLAN.md` §4 today; one document then says what each gate
+checks and how it records, and `.corpus-runs/README.md` keeps its older runs
+and known snapshots with a pointer to it. The plan
 then folds into ROADMAP's Done section, its open items moved into
 ROADMAP's phases first, and its working documents go with it once each open
 item in them has a ROADMAP phase: `CRATE_SPLIT_EVIDENCE.md` (the
