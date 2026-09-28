@@ -1,0 +1,3 @@
+18:14-18:22 property.uninitialized L2 | Access to an uninitialized property P::$x.
+20:14-20:22 property.uninitialized L2 | Access to an uninitialized property P::$d.
+20:24-20:33 property.uninitialized L2 | Access to an uninitialized property P::$pp.

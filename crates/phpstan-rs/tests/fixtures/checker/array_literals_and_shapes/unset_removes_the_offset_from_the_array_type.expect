@@ -1,0 +1,1 @@
+37:9-37:22 identical.alwaysTrue L4 | Strict comparison using === between 2 and 2 will always evaluate to true.

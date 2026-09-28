@@ -209,6 +209,79 @@ impl Type {
         })
     }
 
+    /// PHPStan's `unsetOffset()`: this array after `unset($a[offset])`.
+    /// One literal key leaves the shape; one of several becomes
+    /// optional, as does every field an arbitrary key could name. A
+    /// general array keeps its key and value types, but is no longer
+    /// surely non-empty, a list (its keys stay non-negative), or sure of
+    /// the offsets the key could name. Anything else is unchanged.
+    pub fn unset_offset(&self, offset: &Type) -> Type {
+        syntax::stack::guard(|| {
+            let key = offset.to_array_key();
+            let literal_keys: Option<Vec<ShapeKey>> = {
+                let finite = key.finite_types();
+                (!finite.is_empty())
+                    .then(|| finite.iter().map(ShapeKey::from_type).collect())
+                    .flatten()
+            };
+            let may_name = |field: &ShapeKey| match &literal_keys {
+                Some(keys) => keys.contains(field),
+                None => match field {
+                    ShapeKey::Int(_) => !key.is_int().no(),
+                    ShapeKey::Str(_) => !key.is_string().no(),
+                },
+            };
+            match self {
+                Type(Repr::ArrayShape(shape)) => {
+                    let mut shape = shape.clone();
+                    match literal_keys.as_deref() {
+                        Some([only]) => shape.fields.retain(|f| f.key != *only),
+                        _ => {
+                            for field in &mut shape.fields {
+                                if may_name(&field.key) {
+                                    field.optional = true;
+                                }
+                            }
+                        }
+                    }
+                    Type::array_shape(shape)
+                }
+                Type(Repr::Intersection(members))
+                    if members.iter().any(|m| matches!(m, Type(Repr::Array(..)))) =>
+                {
+                    let was_list = members.contains(&Type::accessory(AccessoryKind::ArrayList));
+                    let kept = members
+                        .iter()
+                        .filter_map(|m| match m {
+                            Type(Repr::Array(_, v)) if was_list => {
+                                Some(Type::array(Type::int_range(Some(0), None), Type::clone(v)))
+                            }
+                            Type(Repr::Accessory(
+                                AccessoryKind::ArrayList | AccessoryKind::NonEmptyArray,
+                            )) => None,
+                            Type(Repr::HasOffset(k)) | Type(Repr::HasOffsetValue(k, _))
+                                if may_name(k) =>
+                            {
+                                None
+                            }
+                            other => Some(other.clone()),
+                        })
+                        .collect();
+                    crate::intersect_types(kept)
+                }
+                Type(Repr::Union(members)) => members
+                    .iter()
+                    .map(|m| m.unset_offset(offset))
+                    .reduce(Type::union)
+                    .unwrap_or_else(|| self.clone()),
+                Type(Repr::BenevolentUnion(members)) => Type::benevolent_union_of(
+                    members.iter().map(|m| m.unset_offset(offset)).collect(),
+                ),
+                _ => self.clone(),
+            }
+        })
+    }
+
     /// The key a write at an offset of this type lands on: `int` or
     /// `string` when the offset surely is one, otherwise the benevolent
     /// `int|string` (PHPStan's `MixedType::toArrayKey()`), which a later

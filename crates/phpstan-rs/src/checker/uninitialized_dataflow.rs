@@ -60,7 +60,7 @@ use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
 use crate::registry::FunctionReflection;
 use syntax::ast::*;
 use syntax::token::Span;
-use syntax::visit::any_child_expr;
+use syntax::visit::{Visitor, any_child_expr};
 
 /// Bare property names known-initialized on every path reaching a given
 /// point. Mirrors `checker.rs`'s `ProvenanceSet` type alias (same
@@ -84,6 +84,9 @@ struct PropertyInitCtx<'a, 'b> {
     /// heuristic already confirms are genuinely assigned somewhere in this
     /// class's own body - the only names this walker ever reports on.
     candidates: FxHashSet<String>,
+    /// Whether the class has `__get()`, which a read of an unset
+    /// property goes to instead of throwing.
+    unset_reads_via_get: bool,
     /// `(declaring class FQN, lowercase method name)` pairs currently
     /// being recursed into, for the whole top-level walk - a re-entrant
     /// call while already visiting contributes nothing further rather
@@ -101,51 +104,108 @@ impl<'a> Checker<'a> {
     /// Additive to `check_uninitialized_properties`: only ever reports on
     /// a property that check already confirms is genuinely assigned
     /// somewhere, never a property that check itself already flagged as
-    /// globally uninitialized.
+    /// globally uninitialized. The constructor is walked from an empty
+    /// state (defaults and promoted parameters aside); every other method
+    /// starts with everything initialized, so only its own `unset()`s
+    /// can make a read premature.
     pub(crate) fn check_premature_property_access(&mut self, fqn: &str, c: &ClassDecl) {
-        if !self.settings.rules.check_uninitialized_properties {
+        if !self.settings.rules.check_uninitialized_properties || c.kind != ClassKind::Class {
             return;
         }
-        if c.kind != ClassKind::Class || c.is_abstract {
-            return;
-        }
-        let Some(constructor) = c
+        let constructor = c
             .methods
             .iter()
-            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
-        else {
-            return;
-        };
-        let candidates: FxHashSet<String> = c
+            .find(|m| m.function.name.eq_ignore_ascii_case("__construct"));
+        // A property with a default or promoted from the constructor is
+        // initialized before any code runs; one without either needs an
+        // assignment somewhere for a premature read to mean anything.
+        let mut initialized_up_front: Vec<String> = c
+            .properties
+            .iter()
+            .filter(|p| trackable(c, p) && p.default.is_some())
+            .map(|p| p.name.to_string())
+            .collect();
+        initialized_up_front.extend(
+            constructor
+                .into_iter()
+                .flat_map(|m| m.function.params.iter())
+                .filter(|p| {
+                    p.promoted_visibility.is_some()
+                        && !p.promoted_readonly
+                        && !c.is_readonly
+                        && p.type_hint.is_some()
+                })
+                .map(|p| p.name.to_string()),
+        );
+        let assigned_later: Vec<String> = c
             .properties
             .iter()
             .filter(|p| {
-                !p.is_static
-                    && !p.is_readonly
+                trackable(c, p)
                     && p.default.is_none()
-                    && p.hooks.is_none()
-                    && p.type_hint.is_some()
                     && property_assigned_anywhere_in_hierarchy(self, c, fqn, &p.name)
             })
             .map(|p| p.name.to_string())
             .collect();
+        let candidates: FxHashSet<String> = initialized_up_front
+            .iter()
+            .chain(&assigned_later)
+            .cloned()
+            .collect();
         if candidates.is_empty() {
             return;
         }
-        let mut ctx = PropertyInitCtx {
-            checker: &*self,
-            checked_class: fqn.to_string(),
-            candidates,
-            visiting: FxHashSet::from_iter([(fqn.to_ascii_lowercase(), "__construct".to_string())]),
-            premature_reads: Vec::new(),
-        };
-        walk_stmts(
-            &constructor.function.body,
-            PropertyInitState::default(),
-            &mut ctx,
-            fqn,
-        );
-        let premature_reads = ctx.premature_reads;
+        // After `unset()`, a read of a typed property goes to `__get()`
+        // instead of throwing.
+        let unset_reads_via_get = self.registry.lookup_method(fqn, "__get").is_some();
+        let mut premature_reads: Vec<(String, Span)> = Vec::new();
+        let mut walk =
+            |checker: &Checker, method: &str, body: &[Stmt], entry: PropertyInitState| {
+                let mut ctx = PropertyInitCtx {
+                    checker,
+                    checked_class: fqn.to_string(),
+                    candidates: candidates.clone(),
+                    unset_reads_via_get,
+                    visiting: FxHashSet::from_iter([(
+                        fqn.to_ascii_lowercase(),
+                        method.to_ascii_lowercase(),
+                    )]),
+                    premature_reads: Vec::new(),
+                };
+                walk_stmts(body, entry, &mut ctx, fqn);
+                for read in ctx.premature_reads {
+                    if !premature_reads.contains(&read) {
+                        premature_reads.push(read);
+                    }
+                }
+            };
+        // An abstract class's constructor may rely on a subclass having
+        // initialized a property first.
+        if let Some(constructor) = constructor
+            && !c.is_abstract
+        {
+            walk(
+                &*self,
+                "__construct",
+                &constructor.function.body,
+                initialized_up_front.iter().cloned().collect(),
+            );
+        }
+        for method in &c.methods {
+            if method.is_static
+                || method.is_abstract
+                || method.function.name.eq_ignore_ascii_case("__construct")
+                || !unsets_this_property(&method.function.body)
+            {
+                continue;
+            }
+            walk(
+                &*self,
+                &method.function.name,
+                &method.function.body,
+                candidates.iter().cloned().collect(),
+            );
+        }
         for (prop, span) in premature_reads {
             self.report(
                 format!("Access to an uninitialized property {fqn}::${prop}."),
@@ -155,6 +215,38 @@ impl<'a> Checker<'a> {
             );
         }
     }
+}
+
+/// A property whose initialization state is tracked: typed (an untyped
+/// one is `null` until assigned), per-instance, not readonly (unsetting
+/// an initialized one throws) and without hooks (it has no backing store
+/// to leave uninitialized, or its hooks decide what a read does).
+fn trackable(c: &ClassDecl, p: &PropertyDecl) -> bool {
+    !p.is_static && !p.is_readonly && !c.is_readonly && p.hooks.is_none() && p.type_hint.is_some()
+}
+
+/// Whether `body` contains `unset($this->prop)` anywhere.
+fn unsets_this_property(body: &[Stmt]) -> bool {
+    struct Finder(bool);
+    impl<'ast> Visitor<'ast> for Finder {
+        fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+            if let StmtKind::Unset(targets) = &stmt.kind
+                && targets.iter().any(
+                    |t| matches!(&t.kind, ExprKind::PropertyAccess(base, _, _) if is_this(base)),
+                )
+            {
+                self.0 = true;
+            }
+            if !self.0 {
+                syntax::visit::walk_stmt(self, stmt);
+            }
+        }
+    }
+    let mut finder = Finder(false);
+    for stmt in body {
+        finder.visit_stmt(stmt);
+    }
+    finder.0
 }
 
 fn is_this(e: &Expr) -> bool {
@@ -345,7 +437,9 @@ fn walk_stmt(
                     if let ExprKind::PropertyAccess(base, name, _) = &target.kind
                         && is_this(base)
                     {
-                        state = state.without(&*name.name);
+                        if !ctx.unset_reads_via_get {
+                            state = state.without(&*name.name);
+                        }
                         continue;
                     }
                     state = walk_expr(target, state, ctx, declaring_class);

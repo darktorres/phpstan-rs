@@ -772,15 +772,9 @@ impl<'a> Checker<'a> {
                 finally,
             } => self.check_try(body, catches, finally, locals, declared_return, label),
             StmtKind::Throw(e) => self.check_throw(e, locals, label),
-            // `unset($x)` removes `$x` from scope; any other target (an
-            // offset, a property) is checked as an expression.
             StmtKind::Unset(targets) => {
                 for target in targets {
-                    if let ExprKind::Variable(name) = &target.kind {
-                        locals.remove(name);
-                    } else {
-                        self.check_expr(target, locals, label);
-                    }
+                    self.check_unset_target(target, locals, label);
                 }
             }
             // `global $x;` binds $x to whatever the global scope holds,

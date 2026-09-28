@@ -550,6 +550,46 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// `unset(target)`: a variable leaves scope, an offset leaves its
+    /// array, and a property's narrowed value is forgotten. The target is
+    /// read as quietly as `isset()` reads it - unsetting what doesn't
+    /// exist is no error.
+    pub(crate) fn check_unset_target(&mut self, target: &Expr, locals: &mut Locals, label: &str) {
+        self.check_expr_quiet_root(target, locals, label);
+        if let Some(key) = narrowing_key(target) {
+            purge_stale_narrowing_for(locals, &key);
+            locals.remove(&key);
+        }
+        purge_aliased_index_entries(target, locals);
+        let ExprKind::Index(base, Some(idx)) = &target.kind else {
+            return;
+        };
+        if let ExprKind::Variable(name) = &base.kind
+            && !locals.contains_key(name)
+        {
+            return;
+        }
+        let idx_ty = self.infer_expr(idx, locals);
+        let base_ty = self.infer_expr(base, locals);
+        let after = base_ty.unset_offset(&idx_ty);
+        if after == base_ty {
+            return;
+        }
+        match &base.kind {
+            // Narrowed siblings (`$a['y']`) and every-element facts still
+            // hold with one element gone; facts about the whole array
+            // don't.
+            ExprKind::Variable(name) => {
+                locals.purge_branch_implied_facts_depending_on(name);
+                locals
+                    .discriminant_array_facts
+                    .retain(|(container, _, _), _| container != name.as_ref());
+                locals.insert(name.to_string(), after);
+            }
+            _ => self.bind_assignment_target(base, after, locals),
+        }
+    }
+
     /// The current type of a nested write's intermediate container
     /// (`$x['a']` in `$x['a']['b'] = 1`). An offset provably absent from
     /// its own container - an append, a literal key the shape doesn't
