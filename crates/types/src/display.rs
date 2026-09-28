@@ -199,6 +199,17 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
 /// in place.
 fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
     let has = |k: AccessoryKind| members.contains(&Type::Accessory(k));
+    if let [
+        shape @ Type::ArrayShape(_),
+        Type::Accessory(AccessoryKind::NonEmptyArray),
+    ] = members
+    {
+        let shape = shape.to_string();
+        return Some(match shape.strip_prefix("array") {
+            Some(fields) => format!("non-empty-array{fields}"),
+            None => shape,
+        });
+    }
     if let Some((key, elem)) = members.iter().find_map(|m| match m {
         Type::Array(k, e) => Some((k.as_ref(), e.as_ref())),
         _ => None,

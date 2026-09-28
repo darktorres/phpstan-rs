@@ -1173,7 +1173,10 @@ impl<'a> Checker<'a> {
                         let resolved = self.resolve_name_expr(&class_name);
                         let current = self.current_narrowed_type(&obj_arg.value, &key, locals);
                         if branch_true {
-                            locals.insert(key, narrow_instanceof_true(&current, &resolved));
+                            locals.insert(
+                                key,
+                                narrow_instanceof_true(&self.relation(), &current, &resolved),
+                            );
                         } else {
                             locals.insert(key, narrow_type_excluding(&current, &resolved));
                         }
@@ -1253,7 +1256,10 @@ impl<'a> Checker<'a> {
                     if branch_true {
                         self.replay_object_discriminant_facts(&key, &resolved, locals);
                         let current = self.current_narrowed_type(inner, &key, locals);
-                        locals.insert(key, narrow_instanceof_true(&current, &resolved));
+                        locals.insert(
+                            key,
+                            narrow_instanceof_true(&self.relation(), &current, &resolved),
+                        );
                     } else {
                         let current = self.current_narrowed_type(inner, &key, locals);
                         locals.insert(key, narrow_type_excluding(&current, &resolved));

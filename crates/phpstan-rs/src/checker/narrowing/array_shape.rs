@@ -9,10 +9,9 @@ use types::{AccessoryKind, ShapeField, ShapeKey, Type};
 /// `array_key_exists($key, $ty)`'s own true/false branches. A member
 /// declaring `key` required can't make the call `false`, and a sealed
 /// member omitting it can't make it `true`; an optional `key` becomes
-/// required when present and is dropped when absent. Recurses through `Union`
-/// the same way `narrow_type_to`/`narrow_type_excluding` do; anything
-/// that isn't an `ArrayShape` (or a `Union` of them) is left untouched,
-/// this project's usual "don't guess" precedent.
+/// required when present and is dropped when absent, and a general array
+/// has it when present. Recurses through `Union`; anything else is left
+/// untouched.
 pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: bool) -> Type {
     match ty {
         Type::ArrayShape(shape) => match shape.field(&ShapeKey::from_name(key)) {
@@ -50,6 +49,15 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
                 }
             }
         },
+        // A general array now has that key.
+        Type::Array(..) if present => {
+            types::intersect_types(vec![ty.clone(), Type::HasOffset(ShapeKey::from_name(key))])
+        }
+        Type::Intersection(members)
+            if present && members.iter().any(|m| matches!(m, Type::Array(..))) =>
+        {
+            types::intersect_types(vec![ty.clone(), Type::HasOffset(ShapeKey::from_name(key))])
+        }
         Type::Union(members) => {
             let kept: Vec<Type> = members
                 .iter()

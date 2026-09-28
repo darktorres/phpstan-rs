@@ -35,17 +35,11 @@ use types::{AccessoryKind, Relation, Type};
 /// (`Base` narrowed to a known `Child`) and nullable-narrowing
 /// (`?Foo` narrowed to `Foo`) cases both still resolve to a single
 /// class/interface exactly as before.
-pub(crate) fn narrow_instanceof_true(current: &Type, target: &Type) -> Type {
-    if types::Relation::structural()
-        .is_super_type_of(current, target)
-        .yes()
-    {
+pub(crate) fn narrow_instanceof_true(relation: &Relation, current: &Type, target: &Type) -> Type {
+    if relation.is_super_type_of(current, target).yes() {
         return target.clone();
     }
-    if types::Relation::structural()
-        .is_super_type_of(target, current)
-        .yes()
-    {
+    if relation.is_super_type_of(target, current).yes() {
         return current.clone();
     }
     // A nullable `current` (`?Socket`, i.e. `Union([Object("Socket"),
@@ -74,7 +68,7 @@ pub(crate) fn narrow_instanceof_true(current: &Type, target: &Type) -> Type {
     // correctly once the first check's own merge has already turned
     // `current` into a real union of object-like branches.
     if is_object_like(&non_null) {
-        Type::Intersection(vec![non_null, target.clone()])
+        relation.intersect(vec![non_null, target.clone()])
     } else {
         target.clone()
     }

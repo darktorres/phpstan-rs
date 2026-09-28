@@ -1,5 +1,6 @@
 mod accessory_and_refinement_types;
 mod display_and_misc;
+mod intersections;
 mod parsing;
 mod subtyping;
 mod subtyping_properties;

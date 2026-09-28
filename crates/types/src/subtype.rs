@@ -193,8 +193,13 @@ impl Relation<'_> {
                 shape.field(key).is_some_and(|f| !f.optional)
             }
             (Type::ArrayShape(shape), Type::Accessory(AccessoryKind::NonEmptyArray)) => {
-                !shape.fields.is_empty()
+                shape.fields.iter().any(|f| !f.optional)
             }
+            // An array with a known offset isn't empty.
+            (
+                Type::HasOffset(_) | Type::HasOffsetValue(..),
+                Type::Accessory(AccessoryKind::NonEmptyArray),
+            ) => true,
             (Type::ArrayShape(shape), Type::Accessory(AccessoryKind::ArrayList)) => {
                 shape_fields_are_list_like(shape)
             }
