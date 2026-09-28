@@ -79,8 +79,7 @@ L1  phpdoc        the single PHPDoc grammar -> TypeNode AST; DocBlock  (syntax)
                   Identifier (+ families)                         (syntax)
     composer      composer.json / installed.json model, package context
                                                                   (syntax)
-    neon          NEON decoder, read by `migrate-config` to convert a
-                  PHPStan config                                  (no deps)
+    neon          NEON decoder (ROADMAP Phase 183)                (no deps)
 L2  config        loader and section-owner registry with schema
                   validation; each settings type lives with its owner
                   module                                          (diagnostics)
@@ -1908,48 +1907,10 @@ Follow-ups, one commit each with its test:
   one exists, settled before the shim is removed. PHP versions and extension
   activation read every discovered composer root's manifest, as
   `phpstan_api_check_enabled` does.
-- **`migrate-config`** converts a PHPStan config into a `phpstan-rs.toml`,
-  once, through the `neon` crate; phpstan-rs reads only its own config
-  afterwards. It takes the file given or the first of PHPStan's config names in
-  the working directory, and:
-  - follows `includes` relative to the including file, merged as PHPStan merges
-    them (a later file overriding, lists appended, a `key!` replacing), and
-    expands `%currentWorkingDirectory%`, `%rootDir%`, `%env.NAME%` and
-    references to other parameters;
-  - maps an included extension's rules file (`phpstan-strict-rules`'
-    `rules.neon`, `phpstan-doctrine`'s `extension.neon`, `phpstan-phpunit`,
-    `phpstan-deprecation-rules`, shipmonk's and the other ext crates' packages)
-    to that extension's activation instead of merging it, and
-    `bleedingEdge.neon` to the `featureToggles` it turns on;
-  - maps each parameter to the key the schema records for it (every key names
-    its PHPStan parameter where one exists, the keys follow-up's rule): `level`,
-    `paths`, both `excludePaths` forms, `scanFiles`/`scanDirectories` to
-    `scan_paths`, `stubFiles` to `stub_paths`, every `ignoreErrors` shape,
-    `phpVersion` in its integer and range forms, `strictRules.*`, `doctrine.*`,
-    `featureToggles` and the rest of the missing-settings list;
-  - leaves out, and lists with the reason in a comment block at the top of the
-    written file, what phpstan-rs can't honour: `bootstrapFiles` and loaders
-    that run PHP (`doctrine.objectManagerLoader`), `services`, `rules` and
-    `conditionalTags` naming PHP classes, an included baseline (regenerate it
-    with `--generate-baseline`), the runtime parameters, and any parameter the
-    schema doesn't know;
-  - refuses to overwrite an existing `phpstan-rs.toml` without `--force`, and
-    prints to stdout with `--dry-run`.
-
-  Its gate: fixture pairs of PHPStan configs and the expected `phpstan-rs.toml`,
-  and every migrated file loading through the schema without an error. The LSP
-  offers the migration (`window/showMessageRequest`) when a workspace has a
-  PHPStan config and no `phpstan-rs.toml`.
-- **The `neon` crate** (L1, no dependencies) decodes NEON whole: block and
-  inline mappings and sequences, bare, single- and double-quoted strings with
-  their escapes, `'''` and `"""` multi-line strings, integers in every base,
-  floats, the `true`/`false`/`yes`/`no`/`on`/`off`/`null` literals in their case
-  forms, dates, entities (`Name(args)`) and entity chains, `key!` merge markers,
-  comments, and errors with positions for mixed tab and space indentation and
-  duplicate keys. Its gate is a differential test against nette/neon's
-  `Neon::decode`, run through `php` over phpstan-src's `conf/*.neon`, the
-  `.neon` files under its `tests/`, the installed extensions' `.neon` files and
-  generated documents, plus a fuzz target.
+- **PHPStan configs** are ROADMAP Phase 183's (the `neon` crate,
+  `phpstan-rs init`), built on this schema: every key records the PHPStan
+  parameter it stands for (the keys follow-up), which its parameter table maps
+  by.
 - **Tests and docs**: `config/src/tests.rs` and `app/tests.rs` cover nested
   keys, `--set` of an unknown key and error key paths, and
   `loads_every_ignore_error_field_combination` drops its `path`-only entry; a
@@ -6834,8 +6795,8 @@ on.
   terminal, off with `--no-progress` and when stderr isn't one; today a run
   prints nothing until it finishes.
 - The subcommands are `check-project`, `lsp` (accepting `--stdio`),
-  `convert-baseline`, `clear-result-cache` and `migrate-config` (C1). `check`
-  and `demo` are deleted, their roles moving to the syntax bench, the fixtures
+  `convert-baseline` and `clear-result-cache`; Phase 183's `init` joins them.
+  `check` and `demo` are deleted, their roles moving to the syntax bench, the fixtures
   and a `project` example. `incremental-bench` becomes
   `project/examples/incremental.rs`, over any directory, plus a criterion bench.
 - PHPStan's command line works as is, so a CI script or tool that runs
@@ -6846,7 +6807,7 @@ on.
   PHPStan's meaning; `--memory-limit`, `--xdebug`, `--debug`,
   `--ansi`/`--no-ansi` and `-v`/`-vv`/`-vvv` are accepted, each one with no
   meaning here reported once as ignored. `-c` naming a `.neon` file fails,
-  pointing at `migrate-config`.
+  pointing at `init` (ROADMAP Phase 183).
 - The `format_signature` test moves to `reflection`.
 - `tests/cli.rs` covers every format's output and exit code on a fixture tree
   holding a finding, a parse error, an internal error (the panic-injection hook)
