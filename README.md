@@ -60,6 +60,44 @@ own C source via `cc-rs` when no system libpcre2/pkg-config is found, so
 a working C toolchain for your target is required unless you build with
 `--no-default-features`.
 
+## Profiling
+
+Three tools, each for what it measures well:
+
+- **Phase timings and allocation totals: hotpath.** Build with
+  `--features hotpath` (add `hotpath-alloc` for allocations); the report
+  prints when the process exits. It times lexing, parsing, indexing, the
+  registry passes and per-file checking. The recursive checker is measured
+  once per outermost call (`checker::check_stmt`, `checker::check_expr`),
+  since hotpath counts a function measured at every level of a recursion
+  once per level. Measurement roughly doubles the run time.
+
+  ```sh
+  cargo build --release -p phpstan-rs --features hotpath,hotpath-alloc
+  ./target/release/phpstan-rs check-project --config phpstan-rs.toml
+  ```
+
+- **Where the time goes inside the recursion: a sampling profiler.** Build
+  the `dhat` profile (release with debug info) without the hotpath
+  features, and record call stacks with `perf` or `samply`; recursion folds
+  into one path in the flame graph.
+
+  ```sh
+  cargo build -p phpstan-rs --profile dhat
+  perf record -g --call-graph dwarf ./target/dhat/phpstan-rs check-project --config phpstan-rs.toml
+  perf report
+  # or: samply record ./target/dhat/phpstan-rs check-project --config phpstan-rs.toml
+  ```
+
+- **Which call sites allocate: dhat.** The `dhat-heap` feature swaps in
+  dhat's allocator and writes `dhat-heap.json` on exit, for
+  [dh_view](https://nnethercote.github.io/dh_view/dh_view.html).
+
+  ```sh
+  cargo build -p phpstan-rs --profile dhat --features dhat-heap
+  ./target/dhat/phpstan-rs check-project --config phpstan-rs.toml
+  ```
+
 ## VS Code extension
 
 See [`editors/vscode/README.md`](editors/vscode/README.md).
