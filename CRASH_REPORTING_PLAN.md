@@ -22,6 +22,9 @@ Status: design. Nothing here is implemented.
   closure runs inside the signal handler); it lives in a crate of its own,
   `crates/crash-sys`, behind a safe function, so every other crate keeps
   `unsafe_code = "deny"` (§4.1).
+- **Only finisher processes talk to Sentry** (§4.2). The worker doing the
+  analysis writes every crash to disk as a pending report and never opens a
+  connection, builds a bundle or starts an async runtime.
 - **Transport: our own outbox transport over `reqwest` + `rustls`** (§4.2).
   Features are additive, so dropping the default `native-tls` (OpenSSL on
   Linux) takes `default-features = false`. `rustls` 0.23 and its `aws-lc-rs`
@@ -842,7 +845,8 @@ The process the user, CI or the editor started, whenever a DSN is set:
    reader of its stdout (an editor's language client, a pipe) sees the end of
    the stream at once, not when the supervisor finishes its reports. Stderr
    stays, for the supervisor's own lines;
-4. starts a finisher for leftover pending entries of earlier runs (§4.12);
+4. starts a draining finisher when earlier runs left anything in the outbox
+   (§4.12);
 5. waits for the worker, starting a finisher for each `PENDING` message as it
    arrives;
 6. when the worker has ended: finishes the native crash's entry if a dump was
@@ -896,9 +900,11 @@ it is sent or left for later. An entry is sent only by a client with the same
 DSN hash, so switching servers never sends old reports to the new one. An entry
 whose `meta.json` format version is newer than the running binary's is left
 alone (a downgrade); an older one is read by the version's own rules, which each
-format change keeps. At start, the worker sends `ready/` entries on a background
-thread, and the supervisor hands `pending/` entries whose lock is free to a
-finisher and removes crash-state directories whose `supervisor.lock` is free.
+format change keeps. At start, the supervisor removes crash-state
+directories whose `supervisor.lock` is free and, when `ready/` or `pending/`
+holds anything, starts one finisher (`__crash-finish --drain`) that sends the
+`ready/` entries and finishes the `pending/` ones whose lock is free, while
+the worker runs.
 Entries older than 30 days are deleted, and the oldest go first once the outbox
 passes 100 MiB. Relay rejects no event for its age: one older than the project's
 event retention (90 days by default) has its timestamp replaced by the time it
