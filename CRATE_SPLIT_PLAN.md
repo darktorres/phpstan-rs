@@ -7424,6 +7424,13 @@ library is used by its binary, its integration tests (`tests/cli.rs`,
 (`CRASH_REPORTING_PLAN.md` §5), and the fuzz package's `structured_php` target,
 all through `phpstan_rs::…` paths.
 
+ROADMAP Phase 184 renames the project between two crate-split phases, and
+every `Cargo.toml` changes in it. When the name is chosen before G, the rename
+lands before G1, so G's new packages are created under the final prefix rather
+than renamed after (26 `phpstan-rs-<name>` packages); when it isn't, the
+rename follows G5, and the `phpstan_rs` library it lists (24 importing sites)
+no longer exists by then.
+
 G makes a crate of each remaining layer, moves the tests, benches and fuzz
 targets to the crates they test, retargets the gates from the package's paths
 to the crates', rewrites the docs, and asserts the build-time targets. It
