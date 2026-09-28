@@ -120,6 +120,8 @@ fn condition_alias_shape(rhs: &Expr) -> bool {
             ..,
         )
         | ExprKind::Call(..)
+        | ExprKind::Isset(_)
+        | ExprKind::Empty(_)
         | ExprKind::Variable(_) => true,
         // A compound `&&`/`||` condition assigned to a flag variable,
         // then reused later (`$flag = $a === null || $a === 0; if (!
@@ -598,6 +600,8 @@ fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
             [single_arg] => Some(vec![narrowing_key(&single_arg.value)?]),
             _ => None,
         },
+        ExprKind::Isset(operands) => operands.iter().map(narrowing_key).collect(),
+        ExprKind::Empty(operand) => Some(vec![narrowing_key(operand)?]),
         ExprKind::Variable(name) => Some(vec![name.to_string()]),
         ExprKind::Binary(BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr, l, r) => {
             let mut targets = condition_alias_targets(l)?;
