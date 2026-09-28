@@ -53,6 +53,17 @@ impl Relation<'_> {
             (_, Type::Mixed(_)) | (Type::TemplateParam(_), _) => TrinaryLogic::Maybe,
             (Type::Void, Type::Void) => TrinaryLogic::Yes,
             (Type::Void, _) | (_, Type::Void) => TrinaryLogic::No,
+            // An object whose class declares `__invoke()` is callable
+            // (`ObjectType::isCallable()`); its signature is not compared
+            // with a callable's.
+            (Type::Callable(sig), Type::Object(class, _))
+                if self.hierarchy.has_method(class, "__invoke") =>
+            {
+                match sig {
+                    None => TrinaryLogic::Yes,
+                    Some(_) => TrinaryLogic::Maybe,
+                }
+            }
             (Type::Intersection(members), _) => {
                 let results: Vec<TrinaryLogic> = members
                     .iter()

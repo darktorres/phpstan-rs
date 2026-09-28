@@ -1,0 +1,1 @@
+10:21-10:25 parameter.phpDocType L2 | PHPDoc tag @param for parameter $callback with type NotInvokable is not subtype of native type callable.
