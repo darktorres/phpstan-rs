@@ -3059,7 +3059,12 @@ phpstan-rs doesn't are a rule that doesn't treat an implicit `mixed`
 operand as reportable (listed under E3b). Findings phpstan-rs reports
 that PHPStan doesn't are mostly the corpus's own strict-rules-style
 extensions (`*.condNotBoolean`, `staticMethod.dynamicCall`,
-`possiblyImpure.*`), which the extension-free oracle doesn't load.
+`possiblyImpure.*`), which the extension-free oracle doesn't load, and
+B8's context gaps: 1,748 of the 1,855 phpstan-rs-only `class.notFound`
+name a class of the root package or of a package's bundled `vendor/`, and
+the `mixed` those unknown classes produce feeds the phpstan-rs-only
+`argument.type`/`return.type` "mixed given" findings. E's comparisons are
+read after B8's two context fixes land.
 
 **E1. Collectors and project-level rules**, one commit each:
 
@@ -3375,6 +3380,13 @@ for the analyser.
      ext-psr3, ext-language-extensions and ext-extras.
 - Extensions register parse-time visitors of their own (§3.1's
   annotations), through the registration API.
+- ext-extras' `@see` check (`phpDoc.seeTag`) reads a reference as its
+  author means it: `@see Assert::assertSame` without parentheses names the
+  method when the class has one (phpDocumentor's strict reading is a
+  constant), and free text (`@see RFC 7541 Appendix A` on a class
+  constant) isn't a reference. Today both are "unknown reference/class":
+  241 phpstan-rs-only findings on the corpus oracle's files, 176 of them
+  PHPUnit's `@see Assert::…` in `Framework/Assert/Functions.php`.
 - ext-sql resolves static-schema SQL (SELECT/CTE/derived-table columns
   against the catalog) and validates parameters through an `sql` API;
   `sqlparser` leaves the package.
