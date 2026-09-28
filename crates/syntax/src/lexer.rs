@@ -434,6 +434,13 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_inline_html(&mut self) -> Token {
+        // A leading `#!` line is skipped, as the CLI does, not inline HTML.
+        if self.pos == 0 && self.starts_with("#!") {
+            while self.pos < self.src.len() && self.peek() != b'\n' {
+                self.pos += 1;
+            }
+            self.pos = (self.pos + 1).min(self.src.len());
+        }
         let start = self.pos;
         while self.pos < self.src.len()
             && !self.starts_with_ignore_case("<?php")
