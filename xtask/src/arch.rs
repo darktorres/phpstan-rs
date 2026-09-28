@@ -9,6 +9,8 @@
 //!   `std::env::current_dir`, `fs::canonicalize` or `std::path::absolute`
 //!   in the package outside the session, the binary and the language
 //!   server (which set the project's absolute root) and tests.
+//! - No file names more `types::Type` variants than
+//!   `gates/type-access.txt` allows (`type_access`).
 
 use std::path::{Path, PathBuf};
 
@@ -60,6 +62,7 @@ pub(crate) fn arch(root: &Path) -> Result<(), String> {
             violations.push(format!("crates/{krate}/src/lib.rs: missing `{PRINT_DENY}`"));
         }
     }
+    violations.extend(crate::type_access::check(root)?);
     if violations.is_empty() {
         Ok(())
     } else {
