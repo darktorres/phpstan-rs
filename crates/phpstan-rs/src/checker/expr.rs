@@ -1639,9 +1639,26 @@ impl<'a> Checker<'a> {
                 self.check_implicit_tostring_usage(&ty, inner.span);
                 Type::int_literal(1)
             }
-            ExprKind::Exit(_, arg) => {
-                if let Some(arg) = arg {
-                    self.check_expr(arg, locals, label);
+            // Checked as the call to the `exit`/`die` function it is since
+            // PHP 8.4 (`string|int $status = 0`), where the stubs have it.
+            ExprKind::Exit(kind, args) => {
+                if let Some(args) = args {
+                    for arg in args {
+                        self.check_expr(&arg.value, locals, label);
+                    }
+                    let name = kind.as_str();
+                    if let Some(sig) = self.registry.lookup_function(name) {
+                        self.check_args(CheckArgsCall {
+                            callee_label: name,
+                            callee: Callee::Function(name),
+                            sig,
+                            args,
+                            locals,
+                            defining_class: None,
+                            is_builtin: true,
+                            span: e.span,
+                        });
+                    }
                 }
                 Type::never()
             }

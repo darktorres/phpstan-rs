@@ -1253,8 +1253,9 @@ pub enum ExprKind {
     Empty(Box<Expr>),
     // `print expr`, which evaluates to `1`.
     Print(Box<Expr>),
-    // `exit`/`die`, with its status or message when one is given.
-    Exit(ExitKind, Option<Box<Expr>>),
+    // `exit`/`die`: `None` written bare, `Some` with its parenthesized
+    // arguments (PHP 8.4 makes both functions of `string|int $status`).
+    Exit(ExitKind, Option<Vec<Arg>>),
     // `eval(code)`.
     Eval(Box<Expr>),
     // `include`/`include_once`/`require`/`require_once path`.

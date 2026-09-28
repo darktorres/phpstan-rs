@@ -239,9 +239,9 @@ pub fn walk_expr<'ast, V: Visitor<'ast> + ?Sized>(v: &mut V, expr: &'ast Expr) {
                 v.visit_expr(operand);
             }
         }
-        ExprKind::Exit(_, arg) => {
-            if let Some(arg) = arg {
-                v.visit_expr(arg);
+        ExprKind::Exit(_, args) => {
+            if let Some(args) = args {
+                walk_args(v, args);
             }
         }
         ExprKind::DynamicVariable(inner)
@@ -935,9 +935,9 @@ pub fn walk_expr_mut<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
                 v.visit_expr(operand);
             }
         }
-        ExprKind::Exit(_, arg) => {
-            if let Some(arg) = arg {
-                v.visit_expr(arg);
+        ExprKind::Exit(_, args) => {
+            if let Some(args) = args {
+                walk_args_mut(v, args);
             }
         }
         ExprKind::DynamicVariable(inner)

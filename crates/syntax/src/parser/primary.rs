@@ -485,14 +485,22 @@ impl Parser {
                     None
                 };
                 if let Some(kind) = exit_kind {
-                    // `exit`, `exit()` and `exit($status)`.
-                    let arg = if self.check(&Token::LParen) {
-                        let (args, _) = self.parse_args()?;
-                        args.into_iter().next().map(|a| Box::new(a.value))
+                    // `exit`, `exit()`, `exit($status)`, and PHP 8.4's
+                    // first-class callable `exit(...)`, a reference to the
+                    // function.
+                    if self.check(&Token::LParen) {
+                        let (args, is_first_class_callable) = self.parse_args()?;
+                        if is_first_class_callable {
+                            let callee =
+                                self.expr(ExprKind::Name(self.qualified_name(&name)), start);
+                            let call = self.expr(ExprKind::Call(Box::new(callee), args), start);
+                            self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
+                        } else {
+                            self.expr(ExprKind::Exit(kind, Some(args)), start)
+                        }
                     } else {
-                        None
-                    };
-                    self.expr(ExprKind::Exit(kind, arg), start)
+                        self.expr(ExprKind::Exit(kind, None), start)
+                    }
                 } else if name.eq_ignore_ascii_case("isset") && self.check(&Token::LParen) {
                     let (args, _) = self.parse_args()?;
                     let operands = args.into_iter().map(|a| a.value).collect();

@@ -268,14 +268,10 @@ impl<'a> Walker<'a> {
                 ExprKind::Empty(_) => {
                     self.ban(BannedConstruct::Empty, e.span, "empty()".to_string())
                 }
-                ExprKind::Exit(kind, arg) => {
-                    // A bare `exit;` spans just the keyword, and is reported as
-                    // written.
+                ExprKind::Exit(kind, args) => {
+                    // Reported as written: bare `exit` or `exit()`.
                     let keyword = kind.as_str();
-                    let bare = arg.is_none()
-                        && e.span.start.line == e.span.end.line
-                        && (e.span.end.col - e.span.start.col) as usize == keyword.len();
-                    let shown = if bare {
+                    let shown = if args.is_none() {
                         keyword.to_string()
                     } else {
                         format!("{keyword}()")

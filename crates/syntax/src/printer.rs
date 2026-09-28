@@ -317,12 +317,10 @@ fn write_expr_unguarded(out: &mut String, e: &Expr) {
             out.push(' ');
             write_expr(out, path);
         }
-        ExprKind::Exit(kind, arg) => {
+        ExprKind::Exit(kind, args) => {
             out.push_str(kind.as_str());
-            if let Some(arg) = arg {
-                out.push('(');
-                write_expr(out, arg);
-                out.push(')');
+            if let Some(args) = args {
+                write_args(out, args);
             }
         }
         ExprKind::Eval(code) => {
