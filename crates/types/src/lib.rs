@@ -52,7 +52,7 @@ pub use templates::{
 };
 pub use trinary::TrinaryLogic;
 pub use union::generalize_by_key_set;
-pub use union::{has_offset_value_parts, union_types, union_types_keep_shapes_distinct};
+pub use union::{has_offset_value_parts, union_types};
 
 // A slice of PHPStan's type system covering what the parser captures as
 // type-hint strings, plus self/parent/static and `@template` generics.

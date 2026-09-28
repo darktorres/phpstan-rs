@@ -17,7 +17,16 @@
 pub(crate) struct RegexCaptureGroup {
     pub number: usize,
     pub name: Option<String>,
+    /// Whether the group can go unmatched: its own `own_optional`, or its
+    /// enclosing capturing group's `optional`.
     pub optional: bool,
+    /// Whether the group can go unmatched while its enclosing capturing
+    /// group matches - a zero-min quantifier or a multi-branch
+    /// alternation between the two.
+    pub own_optional: bool,
+    /// The index in the scanned groups of the nearest enclosing capturing
+    /// group, `None` for a top-level group.
+    pub parent: Option<usize>,
     /// `Some(values)` only when this group's own body is provably a
     /// finite, enumerable set of exact strings (e.g. `(cat|dog)` ->
     /// `Some(["cat", "dog"])`); `None` for anything not statically
@@ -409,12 +418,9 @@ struct Scanner {
     /// preferred over the complexity of exact scoping for such a rarely
     /// used construct.
     literal_globally_suppressed: bool,
-    /// Incremented only in `finish_capturing_group`, around its own body
-    /// scan - a group's own `top_level` is set from `self.capturing_depth
-    /// == 0` at creation, before that increment (so it reflects whether
-    /// *this* group sits inside another capturing group, not whether
-    /// anything inside *it* does).
-    capturing_depth: usize,
+    /// The indices of the capturing groups whose bodies are being scanned,
+    /// innermost last.
+    enclosing_groups: Vec<usize>,
     next_alternation_id: u32,
     alternation_branch_counts: Vec<(u32, usize)>,
     alternation_wrapped_in_optional_quantifier: Vec<u32>,
@@ -439,7 +445,7 @@ impl Scanner {
             groups: Vec::new(),
             next_number: 1,
             literal_globally_suppressed: case_insensitive,
-            capturing_depth: 0,
+            enclosing_groups: Vec::new(),
             next_alternation_id: 0,
             alternation_branch_counts: Vec::new(),
             alternation_wrapped_in_optional_quantifier: Vec::new(),
@@ -578,6 +584,12 @@ impl Scanner {
             if multi_branch {
                 for &idx in &branch.handles {
                     self.groups[idx].optional = true;
+                    if !self.groups[idx]
+                        .parent
+                        .is_some_and(|p| branch.handles.contains(&p))
+                    {
+                        self.groups[idx].own_optional = true;
+                    }
                     // Only claim a group not already claimed by a *more
                     // inner* real alternation - an inner `scan_alternation`
                     // call's own retroactive marking always finishes
@@ -645,6 +657,12 @@ impl Scanner {
             {
                 for &idx in &atom.handles {
                     self.groups[idx].optional = true;
+                    if !self.groups[idx]
+                        .parent
+                        .is_some_and(|p| atom.handles.contains(&p))
+                    {
+                        self.groups[idx].own_optional = true;
+                    }
                     // Broad, deliberately using `atom.handles` (not
                     // `atom.direct_group`) - real PHPStan's own
                     // `inOptionalAlternation()`, confirmed to do real
@@ -1245,26 +1263,23 @@ impl Scanner {
         let number = self.next_number;
         self.next_number += 1;
         let idx = self.groups.len();
-        // `top_level` reflects whether *this* group sits inside another
-        // capturing group - read before incrementing `capturing_depth`
-        // for its own body scan below, so a group nested inside *this*
-        // one sees the incremented depth, while this group itself
-        // correctly sees whatever depth was active before it.
-        let top_level = self.capturing_depth == 0;
+        let parent = self.enclosing_groups.last().copied();
         self.groups.push(RegexCaptureGroup {
             number,
             name,
             optional: false,
+            own_optional: false,
+            parent,
             literal_values: None,
-            top_level,
+            top_level: parent.is_none(),
             in_optional_quantification: false,
             alternation: None,
             forced_empty: false,
             fallback: RegexGroupFallback::Unknown,
         });
-        self.capturing_depth += 1;
+        self.enclosing_groups.push(idx);
         let body = self.scan_alternation();
-        self.capturing_depth -= 1;
+        self.enclosing_groups.pop();
         let body = body?;
         if !self.eat(')') {
             return None;

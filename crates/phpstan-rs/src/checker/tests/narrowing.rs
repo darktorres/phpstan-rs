@@ -8,15 +8,15 @@ use types::Shape;
 // `StrContainingTypeSpecifyingExtension`.
 
 #[test]
-fn array_key_exists_on_a_merely_optional_key_narrows_neither_branch() {
+fn array_key_exists_makes_an_optional_key_required_or_drops_it() {
     let shape = Type::ArrayShape(Shape::from_named(vec![("a".to_string(), Type::Int, true)]));
     assert_eq!(
         narrowing::narrow_array_shape_by_key_presence(&shape, "a", true),
-        shape
+        Type::ArrayShape(Shape::from_named(vec![("a".to_string(), Type::Int, false)]))
     );
     assert_eq!(
         narrowing::narrow_array_shape_by_key_presence(&shape, "a", false),
-        shape
+        Type::ArrayShape(Shape::sealed(Vec::new()))
     );
 }
 

@@ -6,25 +6,31 @@ use types::{AccessoryKind, ShapeField, ShapeKey, Type};
 
 /// Narrows `ty` by whether `key` is (`present = true`) or isn't
 /// (`present = false`) provably a real offset of it -
-/// `array_key_exists($key, $ty)`'s own true/false branches. An
-/// `ArrayShape` member declaring `key` (required or optional) can always
-/// make the call `true`; only a member declaring it *required* can be
-/// proven to make the call `false` (an optional field's absence is
-/// exactly what "optional" means, so its being false there is not
-/// impossible for that member specifically). A member omitting `key`
-/// altogether can never make the call `true`. Recurses through `Union`
+/// `array_key_exists($key, $ty)`'s own true/false branches. A member
+/// declaring `key` required can't make the call `false`, and a sealed
+/// member omitting it can't make it `true`; an optional `key` becomes
+/// required when present and is dropped when absent. Recurses through `Union`
 /// the same way `narrow_type_to`/`narrow_type_excluding` do; anything
 /// that isn't an `ArrayShape` (or a `Union` of them) is left untouched,
 /// this project's usual "don't guess" precedent.
 pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: bool) -> Type {
     match ty {
         Type::ArrayShape(shape) => match shape.field(&ShapeKey::from_name(key)) {
-            Some(field) => {
-                if !present && !field.optional {
-                    Type::Never
-                } else {
+            Some(field) if !field.optional => {
+                if present {
                     ty.clone()
+                } else {
+                    Type::Never
                 }
+            }
+            Some(field) => {
+                let mut shape = shape.clone();
+                if present {
+                    shape.set(ShapeField::new(field.key.clone(), field.ty.clone(), false));
+                } else {
+                    shape.fields.retain(|f| f.key != field.key);
+                }
+                Type::ArrayShape(shape)
             }
             // An *unsealed* shape (`array{a: int, ...}`) can carry keys
             // beyond the ones it lists - `key` simply not

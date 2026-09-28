@@ -176,19 +176,19 @@ fn union_types_itself_generalizes_before_collapsing_to_mixed() {
     let first_twelve = Type::Union(
         (0..12)
             .map(|i| {
-                let value = if i % 2 == 0 { Type::True } else { Type::False };
-                Type::ArrayShape(Shape::from_named(vec![("x".to_string(), value, false)]))
+                Type::ArrayShape(Shape::from_named(vec![(
+                    "x".to_string(),
+                    Type::IntLiteral(i),
+                    false,
+                )]))
             })
             .collect(),
     );
-    // A genuinely new value, distinct from every one of the first 12
-    // (which only alternate True/False) - `union_types`'s own
-    // existing dedup (`!members.contains(&other)`) would otherwise
-    // silently no-op adding a 13th member that already exists,
-    // masking whether generalization ran at all.
+    // Thirteen distinct tags: no two merge without loss, so only the
+    // member cap's generalization makes them one shape.
     let thirteenth = Type::ArrayShape(Shape::from_named(vec![(
         "x".to_string(),
-        Type::Null,
+        Type::IntLiteral(12),
         false,
     )]));
     let result = union_types(first_twelve, thirteenth);

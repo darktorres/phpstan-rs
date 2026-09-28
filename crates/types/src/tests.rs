@@ -4,6 +4,7 @@ mod parsing;
 mod subtyping;
 mod subtyping_properties;
 mod templates_and_substitution;
+mod unions;
 
 /// The structural relation's subtype answer: `sub` is provably a `sup`
 /// with no class knowledge.

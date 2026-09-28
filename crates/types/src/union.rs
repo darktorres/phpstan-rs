@@ -16,27 +16,10 @@ const MAX_UNION_MEMBERS: usize = 12;
 /// unions and keeps `Mixed` "unknown" rather than let it compose into a
 /// falsely-precise-looking Union (same principle as the ternary inference).
 pub fn union_types(a: Type, b: Type) -> Type {
-    union_types_impl(a, b, true)
+    union_types_impl(a, b)
 }
 
-/// `union_types`'s own escape hatch for a caller that must keep several
-/// `Type::ArrayShape` variants discrete even when one's key set happens
-/// to be a subset of another's, skipping only `merge_array_shape_pair`'s
-/// own subset-collapse rule below (every other `union_types` behavior -
-/// the `hasOffsetValue` merge, `Mixed` absorption, the union member cap,
-/// ... - stays identical). `checker::expr::preg_shapes`'s own regex-
-/// alternation `$matches` shape construction is the one real user: each
-/// variant there represents a distinct, mutually exclusive branch meant
-/// to be told apart *later* by `array_key_exists`-based narrowing, not
-/// one variable's own value narrowed across a plain conditional (which
-/// is what `merge_array_shape_pair`'s subset rule is actually verified
-/// against - see its own doc comment) - collapsing them the same way
-/// would destroy the very discriminant that narrowing depends on.
-pub fn union_types_keep_shapes_distinct(a: Type, b: Type) -> Type {
-    union_types_impl(a, b, false)
-}
-
-fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
+fn union_types_impl(a: Type, b: Type) -> Type {
     // `never` has no values to add.
     if a == Type::Never {
         return normalize_generic_args(b);
@@ -54,9 +37,6 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
         return Type::Mixed(explicit);
     }
     if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
-        return merged;
-    }
-    if merge_shapes && let Some(merged) = merge_array_shape_pair(&a, &b) {
         return merged;
     }
     let mut members = Vec::new();
@@ -182,10 +162,7 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     // - `Type::Null` is not a subtype of `Type::String`, so `string|null`
     // is correctly still kept apart.
     merge_int_ranges(&mut members);
-    let has_general_array = members.iter().any(|m| matches!(m, Type::Array(_, _)));
-    if has_general_array {
-        members.retain(|m| !matches!(m, Type::ArrayShape(shape) if shape.is_empty_array()));
-    }
+    reduce_array_members(&mut members);
     // Two structurally different `Array(key, val)` members merge into
     // one precise `Array(key1|key2, val1|val2)` instead of staying
     // separate union members - `array_element_type`'s `Union` arm, and
@@ -515,49 +492,188 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
     Some(Type::Intersection(members))
 }
 
-/// A pairwise `Type::ArrayShape`-vs-`Type::ArrayShape` merge at a
-/// scope-merge join point, mirroring real PHPStan's own observed
-/// behavior exactly (confirmed via `assertType()`/`dumpType()` against
-/// the vendored phar, not guessed): the two shapes only merge into one
-/// when one side's own key set is a *subset* of the
-/// other's - the common shape a branch join actually produces (an `if`
-/// without an `else` merges the pre-branch shape with a strict extension
-/// of itself; a ternary between a shape and one of its own supersets
-/// does too). A key present on both sides keeps its required-ness only
-/// if required on *both*, with its value types unioned; a key present on
-/// only one side becomes *optional* (not dropped - the value type it had
-/// on the one side that wrote it is still real, precise information)
-/// with that side's own value type - unioned with the other side's
-/// unsealed tail's value type, since the key may live
-/// there.
-///
-/// Two shapes with genuinely incomparable key sets (neither a subset of
-/// the other - e.g. two unrelated parameter shapes merged in a ternary)
-/// are deliberately left unmerged (`None`, falling back to
-/// `union_types`' own generic "stay a real `Union`" handling) - real
-/// PHPStan keeps those as a literal `array{a: int}|array{b: string}`
-/// too, confirmed the same way, rather than ever collapsing them into
-/// one over-general `array{a?: int, b?: string}`.
-///
-/// Without this, promoting a `hasOffsetValue`-tracked argument's own
-/// keys into real merged-shape fields (`array_merge`'s own shape-merge
-/// path, `checker::expr::builtin_calls`) made a variable become a real
-/// `ArrayShape` earlier and more often than before - and without this
-/// merge rule, that shape then written across several independent,
-/// non-mutually-exclusive branches reproduced the exact same
-/// `MAX_UNION_MEMBERS`-overflow-to-`Mixed` collapse
-/// `merge_has_offset_value_pair` above already fixed once for
-/// `hasOffsetValue`, just one layer up on bare `ArrayShape` unions
-/// instead - a real, measured regression (confirmed via a dedicated
-/// probe test before this fix was written), not a hypothetical one.
-fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
-    let (Type::ArrayShape(sa), Type::ArrayShape(sb)) = (a, b) else {
-        return None;
-    };
-    let is_subset = |xs: &Shape, ys: &Shape| xs.fields.iter().all(|f| ys.field(&f.key).is_some());
-    if !(is_subset(sa, sb) || is_subset(sb, sa)) {
-        return None;
+/// The array members of a union, as PHPStan's `processArrayTypes` and
+/// `reduceArrays` combine them. With a general `array<K, V>` among them,
+/// every shape folds into one general array. Otherwise shapes merge only
+/// where nothing is lost: two single-key shapes whose values union into one
+/// type, and a shape whose keys another's cover (`is_keys_superset`), so a
+/// tagged union (`array{t: 'a', v: int}|array{t: 'b', v: string}`) stays
+/// two members and `array{}` stays its own unless an all-optional shape
+/// absorbs it.
+fn reduce_array_members(members: &mut Vec<Type>) {
+    let shape_count = members
+        .iter()
+        .filter(|m| matches!(m, Type::ArrayShape(_)))
+        .count();
+    if shape_count == 0 {
+        return;
     }
+    if members.iter().any(|m| matches!(m, Type::Array(..))) {
+        for m in members.iter_mut() {
+            if let Type::ArrayShape(shape) = m {
+                *m = shape_as_general_array(shape);
+            }
+        }
+        members.retain(|m| m != &Type::Never);
+        return;
+    }
+    if shape_count == 1 {
+        return;
+    }
+    let mut shapes: Vec<Option<Shape>> = Vec::new();
+    members.retain(|m| match m {
+        Type::ArrayShape(shape) => {
+            shapes.push(Some(shape.clone()));
+            false
+        }
+        _ => true,
+    });
+    let relation = crate::Relation::structural();
+    // Pairs sharing a key, as `reduceArrays`' first pass takes them.
+    for i in 0..shapes.len() {
+        for j in (i + 1)..shapes.len() {
+            let (Some(a), Some(b)) = (&shapes[i], &shapes[j]) else {
+                continue;
+            };
+            let overlapping = a
+                .fields
+                .iter()
+                .filter(|f| b.field(&f.key).is_some())
+                .count();
+            if overlapping == 0 {
+                continue;
+            }
+            let single_key_same_type = overlapping == 1
+                && a.fields.len() == 1
+                && b.fields.len() == 1
+                && !matches!(
+                    union_types(a.fields[0].ty.clone(), b.fields[0].ty.clone()),
+                    Type::Union(_)
+                );
+            if single_key_same_type
+                || (overlapping == a.fields.len() && is_keys_superset(&relation, b, a))
+            {
+                shapes[j] = Some(merge_shapes(b, a, true));
+                shapes[i] = None;
+                break;
+            }
+            if overlapping == b.fields.len() && is_keys_superset(&relation, a, b) {
+                shapes[i] = Some(merge_shapes(a, b, false));
+                shapes[j] = None;
+            }
+        }
+    }
+    // Pairs the first pass can't reach: an empty shape, or one with an
+    // unsealed tail or optional keys, absorbed into a shape covering it.
+    let candidate =
+        |s: &Shape| !s.is_sealed() || s.fields.is_empty() || s.fields.iter().any(|f| f.optional);
+    for i in 0..shapes.len() {
+        for j in (i + 1)..shapes.len() {
+            let (Some(a), Some(b)) = (&shapes[i], &shapes[j]) else {
+                continue;
+            };
+            if !candidate(a) && !candidate(b) {
+                continue;
+            }
+            if is_keys_superset(&relation, b, a) {
+                shapes[j] = Some(merge_shapes(b, a, true));
+                shapes[i] = None;
+                break;
+            }
+            if is_keys_superset(&relation, a, b) {
+                shapes[i] = Some(merge_shapes(a, b, false));
+                shapes[j] = None;
+            }
+        }
+    }
+    members.extend(shapes.into_iter().flatten().map(Type::ArrayShape));
+}
+
+/// A shape as the general array it is: its keys' literal types and its
+/// values unioned, an unsealed tail's included. `never` for `array{}`.
+fn shape_as_general_array(shape: &Shape) -> Type {
+    let mut keys: Vec<Type> = shape.fields.iter().map(|f| f.key.to_type()).collect();
+    let mut values: Vec<Type> = shape.fields.iter().map(|f| f.ty.clone()).collect();
+    if let Some(tail) = shape.unsealed.as_deref() {
+        keys.push(tail.0.clone());
+        values.push(tail.1.clone());
+    }
+    match (
+        keys.into_iter().reduce(union_types),
+        values.into_iter().reduce(union_types),
+    ) {
+        (Some(key), Some(value)) => Type::Array(Box::new(key), Box::new(value)),
+        _ => Type::Never,
+    }
+}
+
+/// PHPStan's `ConstantArrayType::isKeysSupersetOf`: whether merging
+/// `other` into `this` loses nothing. `this` must have every key `other`
+/// has, at most one of them with a value disjoint from `other`'s (and only
+/// when both have the same two or more keys - the tag of a tagged union),
+/// and at most one required key `other` lacks. An empty `other` fits a
+/// shape whose keys are all optional; an unsealed tail absorbs the other
+/// side's required keys when it can hold them.
+fn is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> bool {
+    if other.fields.is_empty() && other.is_sealed() {
+        return this.fields.iter().all(|f| f.optional);
+    }
+    if !this.is_sealed() && !other.is_sealed() {
+        return true;
+    }
+    let tail_absorbs = |tail_owner: &Shape, fields: &Shape| {
+        let Some(tail) = tail_owner.unsealed.as_deref() else {
+            return false;
+        };
+        fields.fields.iter().filter(|f| !f.optional).all(|f| {
+            !relation.is_super_type_of(&tail.0, &f.key.to_type()).no()
+                && !relation.is_super_type_of(&tail.1, &f.ty).no()
+        })
+    };
+    if !this.is_sealed() {
+        return legacy_is_keys_superset(relation, this, other) || tail_absorbs(this, other);
+    }
+    if !other.is_sealed() {
+        return legacy_is_keys_superset(relation, this, other) || tail_absorbs(other, this);
+    }
+    legacy_is_keys_superset(relation, this, other)
+}
+
+fn legacy_is_keys_superset(relation: &crate::Relation, this: &Shape, other: &Shape) -> bool {
+    if this.fields.len() < other.fields.len() {
+        return false;
+    }
+    if other.fields.is_empty() {
+        return this.fields.is_empty();
+    }
+    let mut fail_on_different_value =
+        this.fields.len() != other.fields.len() || this.fields.len() < 2;
+    for other_field in &other.fields {
+        let Some(this_field) = this.field(&other_field.key) else {
+            return false;
+        };
+        if !relation
+            .is_super_type_of(&other_field.ty, &this_field.ty)
+            .no()
+        {
+            continue;
+        }
+        if fail_on_different_value {
+            return false;
+        }
+        fail_on_different_value = true;
+    }
+    this.fields
+        .iter()
+        .filter(|f| !f.optional && other.field(&f.key).is_none())
+        .count()
+        <= 1
+}
+
+/// `sa` and `sb` as one shape, in `sa`'s key order: a key both have takes
+/// both values (`sb`'s first when `sb_first`, as when `sb` came earlier in
+/// the source), a key only one has is optional.
+fn merge_shapes(sa: &Shape, sb: &Shape, sb_first: bool) -> Shape {
     // An unsealed side's tail can hold any key it doesn't name, so a key
     // named only by the other side may exist there too, with the tail's
     // value type.
@@ -572,11 +688,14 @@ fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
     let mut merged = Shape::sealed(Vec::new());
     for key in keys {
         let field = match (sa.field(key), sb.field(key)) {
-            (Some(fa), Some(fb)) => ShapeField::new(
-                key.clone(),
-                union_types(fa.ty.clone(), fb.ty.clone()),
-                fa.optional || fb.optional,
-            ),
+            (Some(fa), Some(fb)) => {
+                let ty = if sb_first {
+                    union_types(fb.ty.clone(), fa.ty.clone())
+                } else {
+                    union_types(fa.ty.clone(), fb.ty.clone())
+                };
+                ShapeField::new(key.clone(), ty, fa.optional || fb.optional)
+            }
             (Some(fa), None) => {
                 let ty = match &rest_b {
                     Some(rest) => union_types(fa.ty.clone(), rest.clone()),
@@ -603,7 +722,7 @@ fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
         (Some(tail), None) | (None, Some(tail)) => Some(Box::new(tail.clone())),
         (None, None) => None,
     };
-    Some(Type::ArrayShape(merged))
+    merged
 }
 
 /// `ty` with each generic argument's union members deduplicated

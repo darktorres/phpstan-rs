@@ -17,7 +17,7 @@
                 }
 
                 foreach ($rows as $t2 => $prow) {
-                    assertType('true|false', $prow['flag_a']);
+                    assertType('bool', $prow['flag_a']);
                     assertType('true', $prow['flag_b']);
                     assertType('1|2', $prow['flag_c']);
                 }
