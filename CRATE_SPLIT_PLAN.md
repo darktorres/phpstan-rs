@@ -7420,11 +7420,24 @@ Each extraction is one commit that builds and passes every gate: the modules
 move with `git mv` to `crates/<name>/src/` and are rewritten in place, and
 `git diff -M --summary` shows every moved file as a rename, since rewriting
 paths leaves a file far above git's similarity threshold. A file that falls
-below it moves first in a pure rename commit, content unchanged (gate 11),
-which doesn't build and which a bisect skips. Each module's path in the crate
-is Appendix A's module path without the package prefix that named the layer
+below it moves first in a pure rename commit, content unchanged (gate 11), which
+doesn't build and which a bisect skips. Each module's path in the crate is
+Appendix A's module path without the package prefix that named the layer
 (`checker::unused` is `rules::unused`), unless §3 names another, and a new
-`lib.rs` declares them. The commit holds:
+`lib.rs` declares them. Where two modules land on one path they are one module
+in the crate, which the extraction's commit writes: seven do on today's package.
+An extension's `ext::<name>` (its settings and registration) is its crate's
+`lib.rs`, so `ext::doctrine`, `ext::psr3` and `ext::strict_rules` don't meet
+`checker::doctrine`, `checker::psr3` and `checker::strict_rules`; a settings
+module joins the rule it configures, as C1 has each settings type live with its
+owner (`architecture` and `banned` with `project::architecture` and
+`project::banned` in `rules`); `checker::access_attributes` and
+`registry::access_attributes` are one module of `ext-language-extensions`; and
+`checker::semantic_tokens`, E6's observer, joins `lsp::semantic_tokens`. Gate 2
+computes each module's path in its crate from the inventory on (before C4) and
+fails on two landing on one unless the spec marks them as merging, so a
+collision a later phase creates is decided when it appears, not at G. The commit
+holds:
 
 - the crate's manifest (package `phpstan-rs-<name>`, inheriting
   `[workspace.package]`, with `[lints] workspace = true`), its
