@@ -3205,6 +3205,13 @@ fixture:
   - `uninitialized` and `uninitialized_dataflow` are rewritten over the
     ClassPropertiesNode initialization state, with the dataflow walker
     deleted;
+  - a write to an undeclared property is `property.notFound` as a read
+    is: `$r->missing = 1` is unreported today on any class, though PHP 8.2
+    deprecates creating a dynamic property and a readonly class throws;
+  - a typed static property checks its assigned value: `R::$s = 'q'` on a
+    `static int` is unreported today (PHP throws a `TypeError`);
+  - `unset()` of a readonly property is `unset.readOnlyProperty` (PHP
+    throws an `Error`), unreported today;
   - a readonly property read before its initialization is reported
     (`property.uninitializedReadonly`; PHP throws an `Error`): `echo
     $this->x; $this->x = 1;` in a constructor isn't reported today (12
