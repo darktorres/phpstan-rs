@@ -3,6 +3,7 @@
 //! `ClassHierarchy`.
 
 mod accepts;
+mod kinds;
 mod super_type;
 
 use crate::{ClassHierarchy, TrinaryLogic};

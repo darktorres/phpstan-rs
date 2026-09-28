@@ -616,15 +616,12 @@ impl<'a> Checker<'a> {
                 Some(pair) => pair,
                 None => {
                     // `foreach.nonIterable` - a subject confirmed to
-                    // never be iterable at all (a scalar, a plain
-                    // non-`Traversable` class - see
-                    // `type_confirmed_not_iterable`'s own doc comment for
-                    // why a plain object is closed here, unlike real
-                    // PHP's own runtime leniency). Reported and the body
-                    // is still checked against `Mixed`/`Mixed`, matching
-                    // `check_dim_fetch_key_type`'s "report and continue"
-                    // precedent.
-                    if self.type_confirmed_not_iterable(&subject_ty) {
+                    // never be iterable at all (a scalar, a registered
+                    // class that isn't `Traversable`). Reported and the
+                    // body is still checked against `Mixed`/`Mixed`,
+                    // matching `check_dim_fetch_key_type`'s "report and
+                    // continue" precedent.
+                    if self.relation().is_iterable(&subject_ty).no() {
                         self.report(format!(
                                 "Argument of an invalid type {subject_ty} supplied for foreach, only iterables are supported."
                             ),

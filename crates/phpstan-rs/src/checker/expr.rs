@@ -590,7 +590,7 @@ impl<'a> Checker<'a> {
                     // shapes, none of which uniformly produce one.
                     if a.spread {
                         let spread_ty = self.infer_expr(&a.value, locals);
-                        if self.type_confirmed_not_iterable(&spread_ty) {
+                        if self.relation().is_iterable(&spread_ty).no() {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
@@ -895,7 +895,7 @@ impl<'a> Checker<'a> {
                     // reference, before the `if let` below consumes
                     // `callee_ty` by value) for every dynamic-callee
                     // shape this branch covers.
-                    if self.type_confirmed_not_callable(&callee_ty) {
+                    if self.relation().is_callable(&callee_ty).no() {
                         self.report(
                             format!("Trying to invoke {callee_ty} but it's not a callable."),
                             callee.span,
@@ -1242,7 +1242,7 @@ impl<'a> Checker<'a> {
                     // identical check above.
                     if a.spread {
                         let spread_ty = self.infer_expr(&a.value, locals);
-                        if self.type_confirmed_not_iterable(&spread_ty) {
+                        if self.relation().is_iterable(&spread_ty).no() {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
@@ -1933,13 +1933,13 @@ impl<'a> Checker<'a> {
                 // `list($a, $b) = $x;` destructuring a value confirmed to
                 // never be array-like at all.
                 if let ExprKind::ArrayLiteral(items) | ExprKind::List(items) = &lhs.kind
-                    && !self.type_confirmed_not_destructurable(&rhs_ty)
+                    && !self.relation().is_destructurable(&rhs_ty).no()
                 {
                     self.check_destructuring_offsets(items, &rhs_ty, locals);
                 }
                 self.check_offset_assignment(lhs, &rhs_ty, false, locals);
                 if matches!(&lhs.kind, ExprKind::ArrayLiteral(_) | ExprKind::List(_))
-                    && self.type_confirmed_not_destructurable(&rhs_ty)
+                    && self.relation().is_destructurable(&rhs_ty).no()
                 {
                     self.report(
                         format!("Cannot use array destructuring on {rhs_ty}."),
@@ -2167,7 +2167,7 @@ impl<'a> Checker<'a> {
                     // `arrayUnpacking.nonIterable` - `[...$x]` where
                     // `$x` is confirmed to never be iterable at all.
                     // Shares `foreach.nonIterable`'s own classifier.
-                    if item.spread && self.type_confirmed_not_iterable(&value_ty) {
+                    if item.spread && self.relation().is_iterable(&value_ty).no() {
                         self.report(
                             format!("Only iterables can be unpacked, {value_ty} given."),
                             item.value.span,
@@ -2278,7 +2278,7 @@ impl<'a> Checker<'a> {
                     // identical check above.
                     if a.spread {
                         let spread_ty = self.infer_expr(&a.value, locals);
-                        if self.type_confirmed_not_iterable(&spread_ty) {
+                        if self.relation().is_iterable(&spread_ty).no() {
                             self.report(
                                 format!("Only iterables can be unpacked, {spread_ty} given."),
                                 a.value.span,
@@ -2584,7 +2584,7 @@ impl<'a> Checker<'a> {
                         // `ExprKind::Call`'s identical check above.
                         if a.spread {
                             let spread_ty = self.infer_expr(&a.value, locals);
-                            if self.type_confirmed_not_iterable(&spread_ty) {
+                            if self.relation().is_iterable(&spread_ty).no() {
                                 self.report(
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
                                     a.value.span,
@@ -2600,7 +2600,7 @@ impl<'a> Checker<'a> {
                         // `ExprKind::Call`'s identical check above.
                         if a.spread {
                             let spread_ty = self.infer_expr(&a.value, locals);
-                            if self.type_confirmed_not_iterable(&spread_ty) {
+                            if self.relation().is_iterable(&spread_ty).no() {
                                 self.report(
                                     format!("Only iterables can be unpacked, {spread_ty} given."),
                                     a.value.span,
