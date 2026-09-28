@@ -7462,7 +7462,15 @@ What an extraction checks:
   §3's design names it as the crate's API. Anything else the other side still
   uses is a design gap, closed before the extraction (the user moves, or §3
   gains the API, in a commit of its own), never by widening. `unreachable_pub`
-  then denies any `pub` item the crate doesn't export.
+  then denies any `pub` item the crate doesn't export. The scale is known: of
+  764 uniquely named `pub(crate)` items in today's package, 497 are used from
+  another crate's modules (186 of `rules`' items, 103 of `analyser`'s, 73 of
+  `reflection`'s, 29 of `builtins`', 21 of `project`'s, the rest the `ext-*`
+  modules', `lsp`'s and the bin's), most of them the upward uses gate 2 lists
+  and D–F remove. Each extraction's commit lists the crossings left for its
+  crate, each with the §3 item it serves. No test-only item crosses: the one
+  `#[cfg(test)]` helper outside a test module (`ignore_comments::scan`) serves
+  its own module's tests.
 - **`impl` placement.** No entry of gate 2's list names the crate's modules,
   so every `impl` it holds or that others hold of its types compiles where it
   is.
@@ -7547,8 +7555,12 @@ Per crate:
   registrations and the extensions its composer files activate, C1, so each
   root of F1's per-root Sessions gets its own) and the server info the bin
   passes (§2):
-  `serverInfo.version` is the binary's version and build identity (F4), where
-  today it is the package's `CARGO_PKG_VERSION`.
+  `serverInfo.version` stays the binary's, as today (`main.rs` passes its
+  `env!("CARGO_PKG_VERSION")` to `lsp::run`, and the `lsp` tests pass theirs,
+  which after the split is `lsp`'s own and the same workspace version), with
+  F4's build identity added. Nothing else in the package reads a Cargo
+  variable at compile time, so no other value changes meaning when a module
+  compiles in another crate.
 - **The bin** keeps `main.rs` alone, with `clap`, `clap_complete`, `ctrlc` and
   `dhat`, and the `hotpath`, `hotpath-alloc` and `dhat-heap` features; the
   package has no library target. Every `phpstan_rs::` user is repointed:
