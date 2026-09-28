@@ -81,11 +81,6 @@ impl<'a> Checker<'a> {
         label: &str,
         (identifier_prefix, operator_description, verdict_fn): (&str, &str, NullProbeVerdictFn),
     ) {
-        if let ExprKind::Variable(name) = &operand.kind
-            && !locals.contains_key(name)
-        {
-            locals.declare(name.to_string(), Type::mixed(), operand.span);
-        }
         self.check_expr_quiet_root(operand, locals, label);
         self.check_pointless_null_probe(
             operand,
