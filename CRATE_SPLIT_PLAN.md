@@ -6702,6 +6702,25 @@ Behaviour commits, one each with its fixture:
   an unanalysed change runs that document's recheck first (the edited file is
   checked first anyway, above) or answers from the snapshot with positions
   mapped through the pending edits.
+- **One position query.** Hover, definition, highlight, signature help and
+  completion find what is at a position through one node-at-position query over
+  the `Visitor` (the innermost node with its ancestor chain) on the recovered
+  tree, answered from the analyser's resolved names and types. It replaces the
+  hand-written per-statement walkers each keeps today (`navigation::Walker`,
+  whose `collect_all` also serves highlights, `signature_help`'s own walker and
+  completion's token scan), which the module docs say are "Structured after (not
+  sharing code with)" `deps.rs` and each other, so a node one of them doesn't
+  descend into is invisible to that feature alone. The use-site index is E1's
+  reference-site collector (Appendix A).
+- **References are complete; rename touches only what it may rewrite.** Targets
+  are keyed by C4's folded names, so `new foo()` is a reference to `App\Foo`:
+  today the index keys each site by the name as written, and a differently cased
+  spelling is neither found by references nor rewritten by rename. `self::`,
+  `static::` and `parent::` sites are references to their class, listed by
+  references and highlights but marked read-only for rename, which keeps them as
+  written; today `use_sites::resolve_class_ref` drops them from the index
+  altogether, so references to `Foo` miss every `self::` in its body and every
+  `parent::` in its subclasses.
 - **Navigation resolves the member kind the syntax names.** `Foo::X` is a
   constant, `Foo::x()` a method and `Foo::$x` a property, separate namespaces in
   PHP; today `Resolved::Member` carries no kind and the caller tries a method,
