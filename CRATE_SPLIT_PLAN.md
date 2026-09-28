@@ -4823,7 +4823,8 @@ fixture:
     oracle's 16 PHPStan-only, `readonly-assign.php`, `bug-6773.php`,
     `bug-7198.php`, `readonly-property-hooks.php`,
     `readonly-property-passed-by-reference.php`,
-    `unset-hooked-property.php`), and a `@readonly` one alike
+    `unset-hooked-property.php`; `ksort($this->a)` on a `@readonly` one
+    is `argument.byRef` too, `bug-12676.php`), and a `@readonly` one alike
     (`property.readOnlyByPhpDocAssignNotInConstructor`, 7,
     `readonly-assign-phpdoc.php`);
   - property hooks: the checks that a property overriding a writable or
@@ -5034,7 +5035,9 @@ fixture:
     `(string)` cast) is a call there, `possiblyImpure.methodCall` when
     that method isn't known pure, as is a call to a method with no purity
     marker (`$this->returningMethod();`), unreported today
-    (`pure-method.php`, 8);
+    (`pure-method.php`, 8); and `array_map()` given an opaque, maybe-null
+    or maybe-non-callable callback is `possiblyImpure.functionCall`, as is
+    the callable itself (`pure-unless-callable-is-impure*.php`, 7);
   - an enum's duplicate case value is found through constant expressions:
     `case A = 42; case B = 40 + 2;` isn't `enum.duplicateValue` today (a
     literal duplicate already is);
@@ -5227,6 +5230,11 @@ fixture:
     function that throws (5 rules-oracle findings,
     `too-wide-throws-explicit.php`, `too-wide-throws-method.php`,
     `immediately-called-arrow-function.php`);
+  - `throw` checks its operand: `throw 123;` ("Can only throw objects"),
+    `throw $nullableException`, `$foo ?? throw 1` and, at level 10, `throw`
+    of `mixed` are `throw.notThrowable`, unreported today (the rules
+    oracle's 6 PHPStan-only, `throw-values*.php`,
+    `wrong-variable-name-var.php:156`);
   - a conditional `@throws ($x is 0 ? Exception : void)` resolves at each
     call: `inverse(0)` under `@throws void` is `throws.void`, through
     function, method, static and constructor calls, nested and inherited
