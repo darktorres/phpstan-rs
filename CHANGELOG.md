@@ -85,6 +85,19 @@ User-visible changes: output, formats, flags, configuration and exit codes.
 - Inside a generic class its own templates stay templates: `$this` carries
   them, and `parent::__construct()` binds the parent's templates through
   `@extends` instead of their defaults (`40e45bdc`).
+- An `@extends`/`@implements` argument naming an enum case or a class
+  constant (`Builtin<Id::A>`, `Lexer<Doc::T_*>`) is resolved before its
+  bound check (`520cd439`).
+- A `foreach` over anything but an array is a throw point: a catch around
+  it sees the state between iterations (`9193f6a9`).
+- An object whose class declares `__invoke()` is a subtype of `callable`
+  (`48dc04b3`).
+- `null === $x || $x === 'a'` narrows `$x` to `'a'|null` instead of `null`;
+  a union narrowed to a target keeps the target's members inside each
+  member it doesn't cover (`06ca4c48`).
+- A method or static call with a dynamic name may throw anything, so a
+  `@throws` tag over it is not reported unused (`2348279e`).
+- Type aliases expand the aliases they use at any depth (`672e927a`).
 
 ### Project
 - Licensed under MIT.
