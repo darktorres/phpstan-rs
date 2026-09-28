@@ -4459,6 +4459,15 @@ The prologue, one commit each, before any rule moves:
   7 / 3; a maybe-missing constant-array offset 7 / never; a PHPDoc-only child
   parameter type conflict 3 / never; `@var array` without a value type
   6 / never. The approved deltas are these rows.
+- a trait method is analysed once per host (PHPStan's "in context of
+  class …"), and the constant-condition and type-check rules report its
+  findings once, only when they hold in every host
+  (`ConstantConditionInTraitRule`'s collector): `is_int($this->g())` in a
+  trait used by hosts whose `g()` returns `int` and `?int` is
+  `function.alreadyNarrowedType` today, a false positive
+  (`impossible-function-call-in-trait.php`), and a condition true in every
+  host is unreported (the rules oracle's `*-in-trait.php`, 16 beside their
+  empty-body `return.missing`);
 - the rest of the diagnostic model (§3.7): AST-node fixes beside text
   fixes, rendered to diffs through `syntax::printer`, which gains
   statements and declarations, keeps the surrounding formatting
