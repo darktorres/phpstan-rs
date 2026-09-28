@@ -4184,7 +4184,18 @@ fixture:
     exists (`noop.rs`) but reads purity, and a built-in has none until C5
     embeds `functionMetadata.php`, so `strlen($s);` and `E::tryFrom($v);`
     on their own line are unreported today (a `@phpstan-pure` user method
-    already is);
+    already is). User functions are read by their resolved name through
+    the project-wide purity summaries (C9): a function in a namespace, or
+    declared in another file, is never reported today, even one marked
+    `@phpstan-pure` (`N\g();` for `function g(): int { return 1; }` is
+    silent where the global-namespace `g();` in the same file is
+    reported); a first-class callable made as a statement (`foo(...);`,
+    `strlen(...);`) is reported too. The rules oracle's 518 PHPStan-only
+    `function.resultUnused` are these three shapes: 409 built-ins, 109
+    namespaced or cross-file user functions (`missing-return.php`,
+    `function-with-variadic-parameters.php`, `bug-15168.php`,
+    `first-class-callable-function-without-side-effect.php` and the
+    rest);
   - a template the call can't resolve is `argument.templateType`:
     `make($s)` for `@param class-string<T> $c` with a plain `string` is
     unreported today (17 oracle findings).
