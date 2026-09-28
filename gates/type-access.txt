@@ -1,6 +1,6 @@
 # Paths naming a `types::Type` variant outside crates/types, per file.
 # A count may only fall; `cargo xtask arch --bless-types` records a fall.
-# total 1068: 1002 in patterns, 66 in comparisons, 0 building a type
+# total 1016: 950 in patterns, 66 in comparisons, 0 building a type
 4	crates/phpstan-rs/src/checker.rs
 6	crates/phpstan-rs/src/checker/access_attributes.rs
 1	crates/phpstan-rs/src/checker/by_ref_params.rs
@@ -16,7 +16,7 @@
 4	crates/phpstan-rs/src/checker/current_time.rs
 1	crates/phpstan-rs/src/checker/doctrine/query_builder.rs
 12	crates/phpstan-rs/src/checker/doctrine/result_shape.rs
-135	crates/phpstan-rs/src/checker/expr.rs
+107	crates/phpstan-rs/src/checker/expr.rs
 104	crates/phpstan-rs/src/checker/expr/builtin_calls.rs
 61	crates/phpstan-rs/src/checker/expr/member_resolution.rs
 11	crates/phpstan-rs/src/checker/expr/mysqli.rs
@@ -33,7 +33,7 @@
 9	crates/phpstan-rs/src/checker/impossible_instanceof.rs
 3	crates/phpstan-rs/src/checker/includes.rs
 2	crates/phpstan-rs/src/checker/ini_directives.rs
-20	crates/phpstan-rs/src/checker/instantiation.rs
+2	crates/phpstan-rs/src/checker/instantiation.rs
 3	crates/phpstan-rs/src/checker/internal_usage.rs
 31	crates/phpstan-rs/src/checker/missing_typehint.rs
 17	crates/phpstan-rs/src/checker/narrowing.rs
@@ -57,7 +57,7 @@
 6	crates/phpstan-rs/src/checker/sql_reflection/query_builder.rs
 2	crates/phpstan-rs/src/checker/sql_reflection/resolve.rs
 18	crates/phpstan-rs/src/checker/sql_reflection/resolve/tests.rs
-8	crates/phpstan-rs/src/checker/static_call_context.rs
+2	crates/phpstan-rs/src/checker/static_call_context.rs
 17	crates/phpstan-rs/src/checker/stmt.rs
 9	crates/phpstan-rs/src/checker/stmt/loops.rs
 1	crates/phpstan-rs/src/checker/stmt/new_exception_discarded.rs

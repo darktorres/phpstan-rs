@@ -10,50 +10,19 @@ use syntax::ast::{ClassKind, Visibility};
 use syntax::token::Span;
 use types::Type;
 
-/// Whether `ty` can never be a `string` or an object, so `new` on it
-/// always fails. A `Union` answers for its non-`null` members, the
-/// same leniency `type_can_never_be_object` applies.
-pub(crate) fn type_can_never_name_a_class(ty: &Type) -> bool {
-    match ty {
-        Type::Null
-        | Type::Void
-        | Type::Bool
-        | Type::True
-        | Type::False
-        | Type::Int
-        | Type::IntLiteral(_)
-        | Type::IntRange(..)
-        | Type::Float
-        | Type::FloatLiteral(_)
-        | Type::Array(..)
-        | Type::ArrayShape(_)
-        | Type::HasOffsetValue(..) => true,
-        Type::Union(members) => members
-            .iter()
-            .filter(|m| !matches!(m, Type::Null))
-            .any(type_can_never_name_a_class),
-        Type::Intersection(members) => members.iter().all(type_can_never_name_a_class),
-        Type::TemplateParam(param) => type_can_never_name_a_class(&param.bound),
-        Type::Conditional {
-            if_true, if_false, ..
-        } => type_can_never_name_a_class(if_true) || type_can_never_name_a_class(if_false),
-        _ => false,
-    }
-}
-
 impl<'a> Checker<'a> {
     /// `new $expr()` where `$expr`'s type can never be a class name or
     /// an object (`new.nonObject`). Level 0 when every member is
     /// unusable, level 7 when only some members of a union are.
     pub(crate) fn check_new_on_non_class_name(&mut self, ty: &Type, span: Span) {
-        if !type_can_never_name_a_class(ty) {
+        if !self.relation().can_name_a_class(ty).no() {
             return;
         }
         let every_member = match ty {
             Type::Union(members) => members
                 .iter()
                 .filter(|m| !matches!(m, Type::Null))
-                .all(type_can_never_name_a_class),
+                .all(|m| self.relation().can_name_a_class(m).no()),
             _ => true,
         };
         self.report(

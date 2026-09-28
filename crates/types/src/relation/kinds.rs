@@ -107,6 +107,39 @@ impl Relation<'_> {
         })
     }
 
+    /// PHPStan's `canAccessProperties()`: objects can, booleans,
+    /// numbers, strings, `null` and arrays can't.
+    pub fn can_access_properties(&self, ty: &Type) -> TrinaryLogic {
+        self.answer(ty, &mut |leaf| object_like(leaf))
+    }
+
+    /// PHPStan's `canCallMethods()`: as `can_access_properties`, except
+    /// that a `stdClass` has no methods to call.
+    pub fn can_call_methods(&self, ty: &Type) -> TrinaryLogic {
+        self.answer(ty, &mut |leaf| match leaf {
+            Type::Object(class, _) if class.as_str() == "stdClass" => TrinaryLogic::No,
+            _ => object_like(leaf),
+        })
+    }
+
+    /// Whether a value of `ty` can name a class for `new $x` or `$x::m()`:
+    /// an object or a string can, a boolean, number, `null`, `void` or
+    /// array can't.
+    pub fn can_name_a_class(&self, ty: &Type) -> TrinaryLogic {
+        self.answer(ty, &mut |leaf| {
+            if leaf.is_object().yes() || leaf.is_string().yes() {
+                TrinaryLogic::Yes
+            } else if is_scalar_or_null(leaf)
+                || leaf.is_array().yes()
+                || matches!(leaf, Type::HasOffsetValue(..))
+            {
+                TrinaryLogic::No
+            } else {
+                TrinaryLogic::Maybe
+            }
+        })
+    }
+
     /// Whether `class` is `of` for these questions: `Yes` when it is or
     /// extends it, `No` when it's a registered class that isn't an
     /// interface, `Maybe` otherwise.
@@ -159,4 +192,16 @@ impl Relation<'_> {
 /// A boolean, number, string, `null` or `void`.
 fn is_scalar_or_null(ty: &Type) -> bool {
     ty.is_scalar().yes() || ty.is_null().yes() || matches!(ty, Type::Void)
+}
+
+/// `Yes` for an object, `No` for a value that is never one.
+fn object_like(ty: &Type) -> TrinaryLogic {
+    if ty.is_object().yes() {
+        TrinaryLogic::Yes
+    } else if is_scalar_or_null(ty) || ty.is_array().yes() || matches!(ty, Type::HasOffsetValue(..))
+    {
+        TrinaryLogic::No
+    } else {
+        TrinaryLogic::Maybe
+    }
 }

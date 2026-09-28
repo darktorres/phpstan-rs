@@ -3,8 +3,6 @@
 //! `instanceof.alwaysTrue`/`.alwaysFalse`, and `instanceof.invalidExprType`
 //! for a dynamic class-name operand that can't be a string or an object.
 
-use crate::checker::expr::type_can_never_be_object;
-use crate::checker::instantiation::type_can_never_name_a_class;
 use crate::checker::{Checker, Locals};
 use syntax::ast::{ClassKind, Expr, InstanceofTarget};
 use syntax::token::Span;
@@ -29,7 +27,7 @@ impl<'a> Checker<'a> {
         let (class, only_subclass_known) = match target {
             InstanceofTarget::Expr(target_expr) => {
                 let target_ty = self.infer_expr(target_expr, locals);
-                if type_can_never_name_a_class(&target_ty) {
+                if self.relation().can_name_a_class(&target_ty).no() {
                     self.report(
                         format!(
                             "Instanceof between {expr_ty} and {target_ty} results in an error."
@@ -116,7 +114,7 @@ impl<'a> Checker<'a> {
             }
             Type::TemplateParam(param) => self.instanceof_verdict(&param.bound, target),
             Type::Never => None,
-            other if type_can_never_be_object(other) => Some(false),
+            other if self.relation().can_access_properties(other).no() => Some(false),
             _ => None,
         }
     }

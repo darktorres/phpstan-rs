@@ -11,22 +11,6 @@ use syntax::ast::StaticTarget;
 use syntax::token::Span;
 use types::Type;
 
-/// Whether `ty` can never be a class name or an object a static call
-/// could dispatch on. `null` members are skipped, and string members
-/// (a class-name string) are always acceptable.
-fn type_can_never_call_static_methods(ty: &Type) -> bool {
-    match ty {
-        Type::String | Type::StringLiteral(_) | Type::ClassString(_) | Type::ClassKindString(_) => {
-            false
-        }
-        Type::Union(members) => members
-            .iter()
-            .filter(|m| !matches!(m, Type::Null))
-            .any(type_can_never_call_static_methods),
-        other => super::instantiation::type_can_never_name_a_class(other),
-    }
-}
-
 impl<'a> Checker<'a> {
     /// For a static call whose target resolved to no class: the
     /// pseudo-name checks, or `staticMethod.nonObject` for a dynamic
@@ -71,14 +55,14 @@ impl<'a> Checker<'a> {
             }
             StaticTarget::Expr(receiver) => {
                 let ty = self.infer_expr(receiver, locals);
-                if !type_can_never_call_static_methods(&ty) {
+                if !self.relation().can_name_a_class(&ty).no() {
                     return;
                 }
                 let every_member = match &ty {
                     Type::Union(members) => members
                         .iter()
                         .filter(|m| !matches!(m, Type::Null))
-                        .all(type_can_never_call_static_methods),
+                        .all(|m| self.relation().can_name_a_class(m).no()),
                     _ => true,
                 };
                 self.report(
