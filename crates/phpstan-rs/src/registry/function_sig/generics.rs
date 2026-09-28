@@ -48,22 +48,14 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Arc<str>, Ty
 /// generic class's own alias body may reference its `@template`s, e.g.
 /// `@phpstan-type Result array{value: T, error: string|null}`).
 ///
-/// A second pass resolves exactly one level of alias-to-alias nesting
-/// (`ErrorList` referencing `Error`, `json-schema`'s own real shape) by
-/// substituting the freshly-built map into each of its own entries -
-/// deeper chains (three or more aliases referencing each other in turn)
-/// aren't attempted; the innermost reference in such a chain would stay
-/// an unresolved `Object` reference to the next alias's own resolved
-/// name, the same "don't know, don't guess further" leniency this
-/// project already accepts elsewhere rather than a full fixed-point
-/// solve for a shape not yet confirmed to occur in practice.
+/// Aliases used inside an alias expand at any depth (`expand_type_alias`).
 /// Also returns `type_alias_case_refs`,
 /// keyed the same way the returned alias map itself is (the alias's own
 /// resolved local name) - `(raw, resolved)` pairs for every class-name
 /// reference the alias's *own* RHS carries, collected during the same
 /// `mark_template_params` → `resolve_names_in_type` step every other
 /// PHPDoc-typed position uses. Collected from `raw`'s own construction,
-/// before `substitute_type_aliases`'s second pass folds in *other*
+/// before `expand_type_alias` folds in *other*
 /// aliases' own values - a sibling alias reference inside this one's RHS
 /// isn't itself a class-name reference to case-check (it's resolved
 /// separately, when *that* alias's own entry is built).
@@ -92,11 +84,52 @@ pub(crate) fn build_type_aliases(
             (resolved_name, ty)
         })
         .collect();
-    let aliases = raw
-        .iter()
-        .map(|(name, ty)| (name.clone(), substitute_type_aliases(ty.clone(), &raw)))
-        .collect();
+    let mut aliases = FxHashMap::default();
+    let mut visiting = Vec::new();
+    for name in raw.keys() {
+        expand_type_alias(name, &raw, &mut aliases, &mut visiting);
+    }
     (aliases, case_refs)
+}
+
+/// `name`'s value with every alias it uses expanded, at any depth. An alias
+/// reached again while it is being expanded is a cycle and reads as
+/// `mixed` there.
+fn expand_type_alias(
+    name: &Arc<str>,
+    raw: &FxHashMap<Arc<str>, Type>,
+    done: &mut FxHashMap<Arc<str>, Type>,
+    visiting: &mut Vec<Arc<str>>,
+) -> Type {
+    if let Some(ty) = done.get(name) {
+        return ty.clone();
+    }
+    if visiting.contains(name) {
+        return Type::Mixed(false);
+    }
+    visiting.push(name.clone());
+    let expanded = expand_alias_uses(raw[name].clone(), raw, done, visiting);
+    visiting.pop();
+    done.insert(name.clone(), expanded.clone());
+    expanded
+}
+
+fn expand_alias_uses(
+    ty: Type,
+    raw: &FxHashMap<Arc<str>, Type>,
+    done: &mut FxHashMap<Arc<str>, Type>,
+    visiting: &mut Vec<Arc<str>>,
+) -> Type {
+    match ty {
+        Type::Object(name, _) if raw.contains_key(name.as_str()) => {
+            let key = raw
+                .get_key_value(name.as_str())
+                .map(|(k, _)| k.clone())
+                .expect("contained");
+            expand_type_alias(&key, raw, done, visiting)
+        }
+        other => other.map_children(&mut |t| expand_alias_uses(t.clone(), raw, done, visiting)),
+    }
 }
 
 /// Rewrites every `Object(name)` in a type tree whose name is one of this
