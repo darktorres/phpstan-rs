@@ -7038,13 +7038,16 @@ on.
   `.corpus-runs/README.md`'s commands, `tests/cli.rs`, the README and the VS
   Code docs move in the same commit. Beside it: `lsp` (accepting `--stdio`),
   `clear-result-cache` and `completions <shell>` (`clap_complete`), plus the
-  crash reporter's hidden `__crash-finish` and its supervisor and worker roles
-  (`CRASH_REPORTING_PLAN.md` §4.1, §4.10); Phase 183's `init` joins them.
-  `convert-baseline` goes with the old baseline format (F1). `check` and `demo`
-  are deleted, their roles moving to the syntax bench, the fixtures and a
-  `project` example. `incremental-bench` becomes
-  `project/examples/incremental.rs`, over any directory, plus a criterion
-  bench.
+  crash reporter's hidden `__crash-finish` and `__crash-replay` and its
+  supervisor and worker roles (`CRASH_REPORTING_PLAN.md` §4.1, §4.10, §6.5);
+  Phase 183's `init` joins them. `convert-baseline` goes with the old baseline
+  format (F1). `check` and `demo` are deleted, their roles moving to the syntax
+  bench, the fixtures and a `project` example; the tests that run `check` move
+  onto `syntax::parse` in the same commit (`tests/cli.rs`'s every-file-parses
+  case, and `tests/scaling.rs`'s long-line case, which times the parse of 20,000
+  and 80,000 statements on one line and becomes a `syntax` test).
+  `incremental-bench` becomes `project/examples/incremental.rs`, over any
+  directory, plus a criterion bench.
 - **A flag sets a run's shape; a config key goes through `--set`**, as §3.6 has
   for the per-rule flags. The flags are `--config`, `--set`, `--level`,
   `--format`, `--generate-baseline`, `--fix`, `--no-result-cache`,
@@ -7092,11 +7095,14 @@ on.
 - **Ctrl-C** cancels the run's token: analysis stops at the next statement
   boundary, the files finished so far are cached, and the process exits 130.
   Today an interrupted run loses everything.
-- **`--version`** prints the version and, for a release build, its commit
+- **`--version`**, `-V` as PHPStan's console spells it, prints the version
+  and, for a release build, its commit
   (`PHPSTAN_RS_BUILD_COMMIT`), else `+dev` with the build ID; no build script
   reads `git rev-parse`, whose output changing on every commit would recompile
   the crate and everything above it (`CRASH_REPORTING_PLAN.md` §4.2). It is the
-  identity F2's cache key records.
+    identity F2's cache key records. `-v` is verbosity (above), so today's `-v`
+  alias of `--version` goes, and `tests/version.rs`'s
+  `dash_v_behaves_identically_to_dash_dash_version` becomes the `-V` case.
 - The `format_signature` test moves to `reflection`.
 - `tests/cli.rs` covers every format's output and exit code on a fixture tree
   holding a finding, a parse error, an internal error (the panic-injection
