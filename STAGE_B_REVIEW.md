@@ -477,13 +477,14 @@ through `check-project`.
   members.** `$this->HELPER()` calling `private function helper()` reports
   `helper()` unused (`checker/unused.rs`, `usage.methods`). PHP method names
   are case-insensitive. (`481b224b` area) Done in `8e4ef41e`.
-- [ ] **F24. Property-hook bodies are skipped by "all code" walks.** A
+- [x] **F24. Property-hook bodies are skipped by "all code" walks.** A
   banned `eval()` in a `get { }` hook isn't reported, while the same call
   in a function is (`project/banned.rs`). `composer_hygiene.rs`'s `Facts`
   skips hooks and parameter defaults on purpose, so `extension_loaded()`
   and `function_exists()` probes in a hook are missed. Hook bodies are
   code; audit every walker that claims to see all code (see F27).
-  (`0e294c5b`)
+  (`0e294c5b`) Done in `8a5ece52`; no other Visitor skips hooks, parameters
+  or attributes, and the hand-rolled walkers stay with F27.
 - [ ] **F30. A modulo by a negative divisor is `never`.**
   `int<0, max> % -3` infers `never`; PHP gives a value in `[0, 2]`.
   `mod_int_range`'s range fallback uses the divisor's signed maximum
