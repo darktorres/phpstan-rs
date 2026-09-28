@@ -1511,8 +1511,13 @@ impl<'a> Checker<'a> {
                 };
                 // `$x++`/`$x--` is real, visible rebinding syntax, the
                 // same category as `$x += 1`.
-                self.bind_assignment_target(inner, updated, locals);
-                self.infer_expr(inner, locals)
+                self.bind_assignment_target(inner, updated.clone(), locals);
+                // `++$x` is the value after the step, `$x++` the one before.
+                if matches!(op, UnaryOp::PreInc | UnaryOp::PreDec) {
+                    updated
+                } else {
+                    inner_ty
+                }
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
@@ -4365,6 +4370,12 @@ impl<'a> Checker<'a> {
             ExprKind::Unary(UnaryOp::BitNot, inner) => {
                 let inner_ty = self.infer_expr(inner, locals);
                 self.bitwise_not_type(&inner_ty)
+            }
+            ExprKind::Unary(UnaryOp::PreInc, inner) => {
+                self.infer_expr(inner, locals).increment_type()
+            }
+            ExprKind::Unary(UnaryOp::PreDec, inner) => {
+                self.infer_expr(inner, locals).decrement_type()
             }
             ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
             ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),

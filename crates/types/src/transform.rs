@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use crate::{
-    AccessoryKind, CallableParam, CallableSig, Name, Repr, Shape, ShapeField, TemplateParam, Type,
+    AccessoryKind, CallableParam, CallableSig, Name, PhpString, Repr, Shape, ShapeField,
+    TemplateParam, Type,
 };
 
 impl Type {
@@ -119,21 +120,23 @@ impl Type {
         }
     }
 
-    /// The type after `++`: `null` becomes `1` (an `int`), a literal or
-    /// range moves up by one.
+    /// The type after `++`: `null` becomes `1`, a number or numeric
+    /// string moves up by one, `''` becomes `'1'` and any other string
+    /// counts up alphanumerically (`'a'` to `'b'`, `'Az'` to `'Ba'`).
     pub fn increment_type(&self) -> Type {
         self.step(1)
     }
 
-    /// The type after `--`: a literal or range moves down by one; `null`
-    /// stays `null`.
+    /// The type after `--`: a number or numeric string moves down by one
+    /// and `''` becomes `-1`; `null` and any other string stay as they
+    /// are.
     pub fn decrement_type(&self) -> Type {
         self.step(-1)
     }
 
     fn step(&self, by: i64) -> Type {
         syntax::stack::guard(|| match self {
-            Type(Repr::Null) if by > 0 => Type::int(),
+            Type(Repr::Null) if by > 0 => Type::int_literal(1),
             // Stepping past `PHP_INT_MAX` or `PHP_INT_MIN` gives a float.
             Type(Repr::IntLiteral(n)) => match n.checked_add(by) {
                 Some(v) => Type::int_literal(v),
@@ -152,11 +155,42 @@ impl Type {
                     stepped
                 }
             }
-            Type(Repr::Union(members)) => members
+            Type(Repr::StringLiteral(s)) => match crate::numeric_value(s.as_bytes()) {
+                Some(crate::PhpNumber::Int(n)) => Type::int_literal(n).step(by),
+                Some(crate::PhpNumber::Float(f)) => Type::float_literal(f).step(by),
+                None if s.as_bytes().is_empty() => {
+                    if by > 0 {
+                        Type::string_literal(PhpString::from(b"1".to_vec()))
+                    } else {
+                        Type::int_literal(-1)
+                    }
+                }
+                None if by > 0 => Type::string_literal(PhpString::from(
+                    crate::numeric::increment_string(s.as_bytes()),
+                )),
+                None => self.clone(),
+            },
+            Type(Repr::Union(members)) | Type(Repr::BenevolentUnion(members)) => members
                 .iter()
                 .map(|m| m.step(by))
                 .reduce(Type::union)
                 .unwrap_or(Type::mixed()),
+            // A numeric string steps as the number it is; any other string
+            // stays a string - non-empty after `++`, unchanged by `--`
+            // (bar `''`, which `--` makes `-1`).
+            _ if self.is_string().yes() => {
+                let number = Type::union(Type::int(), Type::float());
+                if self.is_numeric_string().yes() {
+                    number
+                } else if by > 0 {
+                    Type::union(
+                        number,
+                        Type::string().with_string_accessory(AccessoryKind::NonEmptyString),
+                    )
+                } else {
+                    Type::union(number, self.clone())
+                }
+            }
             other => other.clone(),
         })
     }
