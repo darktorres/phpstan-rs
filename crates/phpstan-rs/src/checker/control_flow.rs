@@ -1,4 +1,4 @@
-use crate::checker::{Checker, Locals};
+use crate::checker::{Checker, Discriminant, Locals};
 use syntax::ast::*;
 use syntax::visit::any_stmt_in_body;
 use types::{self, Type};
@@ -466,7 +466,7 @@ fn merge_implied_facts(
 /// by what `other` holds for its variable.
 fn widen_implied_facts(
     facts: &std::rc::Rc<Vec<(String, Type)>>,
-    key: &str,
+    key: &Discriminant,
     other: &Locals,
 ) -> Option<std::rc::Rc<Vec<(String, Type)>>> {
     if !discriminant_may_hold(other, key) {
@@ -483,25 +483,24 @@ fn widen_implied_facts(
 }
 
 /// Whether `locals` allows the discriminant `key` (`subject==value`, see
-/// `discriminant_canonical_key`) to hold. A subject that isn't a local, or a
+/// `Discriminant`) to hold. A subject that isn't a local, or a
 /// value this can't compare, may.
-fn discriminant_may_hold(locals: &Locals, key: &str) -> bool {
-    let Some((subject, value)) = key.split_once("==") else {
-        return true;
-    };
-    let Some(ty) = locals.get(subject) else {
+fn discriminant_may_hold(locals: &Locals, key: &Discriminant) -> bool {
+    let value = &key.value;
+    let Some(ty) = locals.get(&key.subject) else {
         // An undefined variable reads as `null`.
-        return value == "False" || !crate::checker::narrowing::is_real_variable_key(subject);
+        return value.is_false().yes()
+            || !crate::checker::narrowing::is_real_variable_key(&key.subject);
     };
     let members = ty.union_members();
-    match value {
-        "True" => members
+    if value.is_true().yes() {
+        members
             .iter()
-            .any(|m| !(m.is_null().yes() || m.is_false().yes())),
-        "False" => members.iter().any(|m| !m.is_true().yes()),
-        literal => members
-            .iter()
-            .any(|m| !m.is_constant_value().yes() || format!("{m:?}") == literal),
+            .any(|m| !(m.is_null().yes() || m.is_false().yes()))
+    } else if value.is_false().yes() {
+        members.iter().any(|m| !m.is_true().yes())
+    } else {
+        members.iter().any(|m| !m.is_single_value() || m == value)
     }
 }
 

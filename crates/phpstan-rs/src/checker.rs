@@ -90,7 +90,7 @@ type ConditionAliasMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
-// `discriminant_canonical_key(subject_key, value) -> [(implied_var, implied_type), ...]`
+// `Discriminant::new(subject_key, value) -> [(implied_var, implied_type), ...]`
 // - a same-branch discriminant-variable correlation: whenever an
 // `if`'s own condition matches the *same* subject/value pair a prior
 // branch already recorded a fact under, every `(var, type)` pair here
@@ -109,8 +109,25 @@ type ConditionAliasMap = imbl::GenericHashMap<
 // iteration rebinding its `foreach` variable is the common case.
 type BranchImpliedFacts = std::rc::Rc<Vec<(String, Type)>>;
 
+/// A narrowing subject (its `narrowing_key`) compared against one value:
+/// what branch-implied facts are recorded under.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Discriminant {
+    pub(crate) subject: String,
+    pub(crate) value: Type,
+}
+
+impl Discriminant {
+    pub(crate) fn new(subject: &str, value: &Type) -> Discriminant {
+        Discriminant {
+            subject: subject.to_string(),
+            value: value.clone(),
+        }
+    }
+}
+
 type BranchImpliedFactsMap = imbl::GenericHashMap<
-    String,
+    Discriminant,
     BranchImpliedFacts,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
@@ -385,12 +402,9 @@ impl Locals {
             return;
         }
         let depends = |k: &str| narrowing::key_depends_on(k, key);
-        let mut changed: Vec<(String, Option<BranchImpliedFacts>)> = Vec::new();
+        let mut changed: Vec<(Discriminant, Option<BranchImpliedFacts>)> = Vec::new();
         for (fact_key, implied) in self.branch_implied_facts.iter() {
-            let subject = fact_key
-                .split_once("==")
-                .map_or(fact_key.as_str(), |(s, _)| s);
-            if depends(subject) {
+            if depends(&fact_key.subject) {
                 changed.push((fact_key.clone(), None));
                 continue;
             }

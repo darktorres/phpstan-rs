@@ -1,4 +1,4 @@
-use crate::checker::narrowing::discriminant_canonical_key;
+use crate::checker::Discriminant;
 use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_key};
 use crate::checker::{Checker, Locals};
 use syntax::ast::*;
@@ -211,7 +211,7 @@ impl<'a> Checker<'a> {
         if matches_when_true
             && let Some(implied) = locals
                 .branch_implied_facts
-                .get(&discriminant_canonical_key(&key, &target_ty))
+                .get(&Discriminant::new(&key, &target_ty))
                 .cloned()
         {
             for (implied_key, implied_ty) in implied.iter() {

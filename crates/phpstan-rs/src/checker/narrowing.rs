@@ -1,5 +1,5 @@
 use crate::checker::expr::type_definitely_excludes_null;
-use crate::checker::{Checker, Locals, build_matched_shape, literal_string_key};
+use crate::checker::{Checker, Discriminant, Locals, build_matched_shape, literal_string_key};
 use crate::regex_groups;
 use crate::registry::{AssertTarget, FunctionReflection};
 use syntax::ast::*;
@@ -140,19 +140,6 @@ fn condition_alias_shape(rhs: &Expr) -> bool {
         _ if nullsafe_receiver(rhs).is_some() => true,
         _ => false,
     }
-}
-
-/// The canonical key `record_branch_implied_facts`/`apply_equality_
-/// narrowing`'s own replay hook both key `Locals::branch_implied_facts`
-/// by - a discriminant subject (already reduced to its own
-/// `narrowing_key` string) paired with the literal/enum-case-like value
-/// it's compared against. `Type`'s own `Debug` output is used rather
-/// than a hand-rolled canonicalization: every value shape this applies
-/// to (an enum case, a literal) already has a stable, span-free `Debug`
-/// representation, and two independently-parsed occurrences of the
-/// identical comparison always resolve to `Type`-equal values here.
-pub(super) fn discriminant_canonical_key(subject_key: &str, value: &Type) -> String {
-    format!("{subject_key}=={value:?}")
 }
 
 /// Whether `name` (a bare variable, already `is_real_variable_key`-checked
@@ -320,7 +307,7 @@ impl<'a> Checker<'a> {
         };
         if let Some(implied) = locals
             .branch_implied_facts
-            .get(&discriminant_canonical_key(subject, &marker))
+            .get(&Discriminant::new(subject, &marker))
             .cloned()
         {
             for (implied_key, implied_ty) in implied.iter() {
@@ -346,7 +333,7 @@ impl<'a> Checker<'a> {
     ) {
         if let Some(implied) = locals
             .branch_implied_facts
-            .get(&discriminant_canonical_key(subject, resolved_class))
+            .get(&Discriminant::new(subject, resolved_class))
             .cloned()
         {
             for (implied_key, implied_ty) in implied.iter() {
@@ -370,7 +357,7 @@ impl<'a> Checker<'a> {
     /// enough to make "the identical comparison" reproducible (an enum
     /// case, a literal); a bare truthiness discriminant
     /// (`truthiness_discriminant_subject`), keyed by `Type::True`/
-    /// `Type::False` as `discriminant_canonical_key`'s own "value" half;
+    /// `Type::False` as `Discriminant`'s own "value" half;
     /// and any *other* local variable that itself became a literal
     /// `true`/`false` specifically within this branch (`AlbumsPageRenderer
     /// ::render`'s own `$order_by_date = true;` inside `if (str_starts_with
@@ -426,9 +413,9 @@ impl<'a> Checker<'a> {
         cond: &Expr,
         before: &Locals,
         branch_true: bool,
-    ) -> Option<String> {
+    ) -> Option<Discriminant> {
         self.primary_discriminant(cond, before, branch_true)
-            .map(|(subject, value)| discriminant_canonical_key(&subject, &value))
+            .map(|(subject, value)| Discriminant::new(&subject, &value))
     }
 
     pub(crate) fn record_branch_implied_facts(
@@ -543,7 +530,7 @@ fn record_implied_facts(
         return;
     }
     for (subject_key, value_ty) in subjects {
-        let key = discriminant_canonical_key(subject_key, value_ty);
+        let key = Discriminant::new(subject_key, value_ty);
         let mut combined = after
             .branch_implied_facts
             .get(&key)
