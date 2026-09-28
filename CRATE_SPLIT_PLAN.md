@@ -4111,7 +4111,11 @@ The prologue, one commit each, before any rule moves:
   closure without its body); `accepts` reasons, `Relation::accepts`
   filling `AcceptsResult.reasons` for the argument, return and property
   rules to show as tips; PHPStan's standard tip helpers (§3.7:
-  discovering symbols, `treatPhpDocTypesAsCertain`, and the rest).
+  discovering symbols, `treatPhpDocTypesAsCertain`, and the rest);
+  messages name a namespaced function by its namespaced name, as they
+  already name methods: 576 of the rules oracle's phpstan-rs rows print
+  `Function as_array2()` for `Bug13247\as_array2()` (`missingType.*` 522,
+  `return.unusedType` 18, `throws.*` 15, the purity rules 4).
 
 Then the sub-phases, grouped by derived node, each listing its Appendix A
 rows, and each rule's behaviour commits after its move, each with its
@@ -4546,7 +4550,21 @@ fixture:
     them (`requireExtends.onClass`, `requireImplements.onEnum`, …); all
     unreported today;
   - `@phpstan-consistent-constructor` on a class with a private
-    constructor is `consistentConstructor.private`, unreported today.
+    constructor is `consistentConstructor.private`, unreported today;
+  - `missingType.iterableValue` walks every type `MissingTypehintCheck`
+    walks (about 75 of the rules oracle's 118 PHPStan-only): `@var` above
+    an assignment, named or not, a by-reference one and a closure's
+    `\Closure(array): array` included (22); each branch of a conditional
+    return (`($i is positive-int ? non-empty-array : array)`, 23 in
+    `function-`/`method-conditional-return-type.php`); a bare
+    `Traversable` and intersections with it (`\Throwable&\Traversable`),
+    as `iterable` already is (13); class `@method`, `@property` and
+    `@phpstan-type` tags; `@param-out`; generic arguments (`static<array>`,
+    `@phpstan-self-out self<array>`, `@mixin Dolor<array>`); a callable's
+    parameters (`callable(array): int`); a set hook's own wider parameter
+    (`set (int|array $v)` on `int`); and the native type where the PHPDoc
+    doesn't apply (`@param Foo|Bar[]` on `array`, an unresolvable
+    `array<int, int, int>` or `array{foo: int}&array{bar: string}`).
 - (f) control flow, returns, throws and generators:
   - an empty body is checked like any other: a function or method with a
     non-`void` return type and an empty body (or only a comment) throws a
