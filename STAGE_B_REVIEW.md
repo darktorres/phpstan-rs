@@ -513,7 +513,7 @@ through `check-project`.
   applying PHP's string increment (alphanumeric carry; a numeric string
   steps as a number). `null++` gives `int`; PHP gives exactly `1`.
   (`fd5c800e`) Done in `b5ffd642`; `++$x` also gave the old value in `infer_expr`.
-- [ ] **F33. A string written as an array key is taken as a string key.**
+- [x] **F33. A string written as an array key is taken as a string key.**
   `$b = []; $b[$s] = 1;` with `$s: string` infers `array<string, 1>`, but
   PHP turns a numeric string into an int key (`["5" => 1]` has key `5`).
   The literal form `[$s => 1]` gets `int|string`, so the write path
@@ -524,7 +524,7 @@ through `check-project`.
   all: `-1` parses as a negation, so the literal degrades to `array<mixed>`
   (and fits `array<int<0, max>, int>`). The literal, the duplicate-key
   check and the spread paths resolve keys three ways; one resolver over
-  `to_array_key`. (`323eeb36`, `e024c0bc`)
+  `to_array_key`. (`323eeb36`, `e024c0bc`) Done in `8febbd1e`; C2 (non-emptiness) stays open.
 - [ ] **F34. Unknown classes in generic arguments and callable signatures
   go unreported.** `@param Box<NoSuchA>` and `@param callable(NoSuchB):
   void` give no `class.notFound` (`array<NoSuchC>` and `NoSuchD` do).
