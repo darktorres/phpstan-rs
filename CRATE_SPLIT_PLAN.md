@@ -2361,7 +2361,11 @@ the phpdoc grammar (TypeNode), never `parse_type_string`:
   from: 'a', to: 'b')`, `new DatePeriod(start: …, interval: …, end: …)`,
   `setcookie(expires_or_options: …)`, `stream_context_set_option(context:
   …)` and `session_set_save_handler(open: …)` are `argument.unknown` today
-  (24 rules-oracle findings);
+  (24 rules-oracle findings); a call that fits no variant is
+  `arguments.count`: `rand(3)` and `mt_rand(1)` (zero or two arguments),
+  `implode()` and `stream_context_set_option()` with three are
+  unreported today (`arguments-count-accepted-by-no-variant.php`,
+  `call-to-weird-functions.php`, 6);
 - `resources/functionMetadata.php` embedded as the builtin purity source
   (C9 reads it);
 - user `stub_paths` with PHPStan `stubFiles` semantics (approved delta):
@@ -2483,7 +2487,12 @@ structural one, each fixtured:
 - `@mixin Box<int>` binds `Box`'s templates, and `@mixin T` for a class
   template mixes in the bound argument: `@mixin T` under `@template T of
   object` is `class.notFound` "unknown class T" today (the rules oracle's
-  `mixin.php` in Classes, Methods and Properties);
+  `mixin.php` in Classes, Methods and Properties). The stubs' `@mixin T`
+  on `RecursiveIteratorIterator` (and `@mixin TIterator` on
+  `IteratorIterator`) forwards to the inner iterator:
+  `$it->getSubPathname()` over a `RecursiveDirectoryIterator` is
+  `method.notFound` today (`recursive-iterator-iterator.php`, 2), where it
+  resolves and counts its arguments;
 - a mixin method is static on a class with a native `__callStatic`
   (`method.staticCall` today);
 - `mixin_exclude_classes` (`ReflectionSettings`) skips mixin types naming
@@ -3023,7 +3032,11 @@ deleted; the file-size gate.
       |> doBar(...)` and `$this->doFoo(1) |> $this->doBar(...)` for
       `doBar(int $i)` are unreported today (10 rules-oracle findings,
       `func-call-pipe.php`, `method-call-pipe.php`, `static-call-pipe.php`,
-      `call-callable-pipe.php`, `pipe-operator.php`).
+      `call-callable-pipe.php`, `pipe-operator.php`), and so is its arity:
+      `1 |> doFoo(...)` for a two-parameter `doFoo()` and `5 |>
+      $foo->canDiscard(...)` for one without parameters are
+      `arguments.count` (15 findings, the same files and the
+      `*-statement-result-discarded-php85.php` ones).
     - **Magic constants** type as their values: `__DIR__`, `__FILE__`,
       `__LINE__`, `__CLASS__`, `__FUNCTION__`, `__METHOD__`,
       `__NAMESPACE__`, `__TRAIT__` and `__PROPERTY__` are all `mixed` today
@@ -3198,7 +3211,9 @@ deleted; the file-size gate.
       against the callable's parameters, named ones and array keys
       included (`call_user_func($f, 'foo')` for `function (int $i)` is
       unreported today; 8 rules-oracle findings, `call-user-func.php`,
-      `call-user-func-array.php`).
+      `call-user-func-array.php`), and count them: `call_user_func($f)`
+      and `call_user_func_array($f, [1])` for a callable needing two are
+      `arguments.count`, unreported today (10 findings).
     - **A variadic parameter** is `list<T>` in the body under
       `@no-named-arguments` and `array<int|string, T>` otherwise; it is
       `array<T>` today, so `$this->b = $b` into `list<B>` is
@@ -3818,7 +3833,10 @@ building on the previous one:
     `f()` in another method as `function.notFound`.
   - **Closures**:
     - `->call($obj)`, `Closure::bind()` and `bindTo()` bind `$this` and the
-      scope class (`enterClosureCall`, `enterClosureBind`, `restoreThis`);
+      scope class (`enterClosureCall`, `enterClosureBind`, `restoreThis`),
+      and `->call()` passes its other arguments to the closure:
+      `$predicate->call($newThis)` for a one-parameter closure is
+      `arguments.count`, unreported today (`closure-call.php`, 3);
     - an immediately invoked closure's body runs definitely: after
       `(function () use (&$x) { $x = 'a'; })()`, `$x` is `0|'a'` today;
     - by-reference `use` follows `processClosureScope`: an undefined
